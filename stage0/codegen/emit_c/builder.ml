@@ -15,7 +15,7 @@ type code = {
 }
 
 type role =
-  | Own
+  | Enclosing
   | Outlined of {
       index : int;
       parent : int;
@@ -97,7 +97,7 @@ let allocate_block builder =
   Dynarray.length builder.texts - 1
 
 let start_function builder ~code =
-  Dynarray.add_last builder.functions (make_function ~code ~role:Own ~entry:0);
+  Dynarray.add_last builder.functions (make_function ~code ~role:Enclosing ~entry:0);
   builder
 
 let create env ~key =
@@ -281,7 +281,7 @@ let resolve text name =
 let render_nested_symbol (code : code) index =
   Printf.sprintf "%s_Nested_%d" (Instance.make_symbol code.key) index
 
-let write_function_texts builder ~own_symbol { parameters; result; returns } =
+let write_function_texts builder ~enclosing_symbol { parameters; result; returns } =
   let functions = Dynarray.to_array builder.functions in
   let count = Array.length functions in
   let texts = Dynarray.to_array builder.texts and owners = Dynarray.to_array builder.owners in
@@ -316,17 +316,18 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
           context.failures <- facts.failures @ context.failures
       | Some _ | None -> ())
     reached;
-  let own = functions.(0) in
-  own.mentioned <- List.fold_left (fun set local -> Locals.add local set) own.mentioned parameters;
+  let enclosing = functions.(0) in
+  enclosing.mentioned <-
+    List.fold_left (fun set local -> Locals.add local set) enclosing.mentioned parameters;
   let list_parameters number =
-    match functions.(number).role with Own -> parameters | Outlined { parts; _ } -> parts
+    match functions.(number).role with Enclosing -> parameters | Outlined { parts; _ } -> parts
   in
   let read_parent number =
-    match functions.(number).role with Own -> number | Outlined { parent; _ } -> parent
+    match functions.(number).role with Enclosing -> number | Outlined { parent; _ } -> parent
   in
   let rec compute_depth number =
     match functions.(number).role with
-    | Own -> 0
+    | Enclosing -> 0
     | Outlined { parent; _ } -> 1 + compute_depth parent
   in
   let rec compute_enclosing first second =
@@ -342,14 +343,14 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
         (fun local ->
           match function_.role with
           | Outlined { parts; _ } when List.mem local parts -> ()
-          | Own | Outlined _ ->
+          | Enclosing | Outlined _ ->
               Hashtbl.replace home local
                 (match Hashtbl.find_opt home local with
                 | Some other -> compute_enclosing number other
                 | None -> number))
         function_.mentioned)
     functions;
-  let is_own number local =
+  let is_local_to number local =
     List.mem local (list_parameters number)
     || Hashtbl.find_opt home local = Some number
     || Lowered.is_erased builder.env (lookup_local_type builder local)
@@ -359,14 +360,14 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
     (fun number (function_ : function_) ->
       Locals.iter
         (fun local ->
-          if not (is_own number local) then
+          if not (is_local_to number local) then
             let owner = Hashtbl.find home local in
             let rec reach number =
               if number <> owner then begin
                 captured.(number) <- Locals.add local captured.(number);
                 match functions.(number).role with
                 | Outlined { parent; _ } -> reach parent
-                | Own -> ()
+                | Enclosing -> ()
               end
             in
             reach number)
@@ -392,7 +393,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
                    ))
                  (list_captures number))
               context.environments
-      | Own -> ())
+      | Enclosing -> ())
     functions;
   let fills = Array.init count (fun _ -> Buffer.create 64) in
   Array.iteri
@@ -409,11 +410,11 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
                    ( { root = Local holder; projections = [ Field field ] },
                      Use (Address { place = Lowered.make_local_place local; writable = true }) )))
             (list_captures number)
-      | Own -> ())
+      | Enclosing -> ())
     functions;
   Array.mapi
     (fun number (function_ : function_) ->
-      let result = match function_.role with Own -> result | Outlined _ -> None in
+      let result = match function_.role with Enclosing -> result | Outlined _ -> None in
       List.iter
         (fun gives ->
           match (gives, result) with
@@ -424,7 +425,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
       let context = function_.code.context in
       let captures = list_captures number in
       let name local =
-        if is_own number local then
+        if is_local_to number local then
           C_values.render_local_name local (Dynarray.get builder.locals local).name
         else
           match (function_.role, List.assoc_opt local captures) with
@@ -433,7 +434,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
                 (C_values.render_local_name environment
                    (Dynarray.get builder.locals environment).name)
                 field
-          | _ -> raise_bug "local %d is neither a function's own nor in its environment" local
+          | _ -> raise_bug "local %d is neither local to the function nor in its environment" local
       in
       let body = Buffer.create 1024 in
       Buffer.add_string body " {\n";
@@ -480,7 +481,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
       let symbol =
         match function_.role with
         | Outlined { index; _ } -> render_nested_symbol function_.code index
-        | Own -> own_symbol
+        | Enclosing -> enclosing_symbol
       in
       let parameters = list_parameters number in
       let header =
@@ -490,35 +491,35 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
           {
             parameters = List.map (lookup_local_type builder) parameters;
             result;
-            returns = (match function_.role with Own -> returns | Outlined _ -> true);
+            returns = (match function_.role with Enclosing -> returns | Outlined _ -> true);
           }
       in
       (header, resolve (Buffer.contents body) name))
     functions
 
-let write_functions builder ~own_symbol prototype =
+let write_functions builder ~enclosing_symbol prototype =
   let functions = Dynarray.to_array builder.functions in
-  let texts = write_function_texts builder ~own_symbol prototype in
+  let texts = write_function_texts builder ~enclosing_symbol prototype in
   Array.iteri
     (fun number (function_ : function_) ->
       match function_.role with
       | Outlined { index; _ } ->
           function_.code.nested <- (index, texts.(number)) :: function_.code.nested
-      | Own -> ())
+      | Enclosing -> ())
     functions;
   texts.(0)
 
 let build builder prototype : instance =
-  let own = Dynarray.get builder.functions 0 in
-  let own_text =
-    write_functions builder ~own_symbol:(Instance.make_symbol own.code.key) prototype
+  let enclosing = Dynarray.get builder.functions 0 in
+  let enclosing_text =
+    write_functions builder ~enclosing_symbol:(Instance.make_symbol enclosing.code.key) prototype
   in
   {
-    key = own.code.key;
-    context = own.code.context;
-    own = own_text;
-    nested = own.code.nested;
-    weight = own.size;
+    key = enclosing.code.key;
+    context = enclosing.code.context;
+    enclosing = enclosing_text;
+    nested = enclosing.code.nested;
+    weight = enclosing.size;
   }
 
 let build_nested parent ~index ~environment build_body =
@@ -530,5 +531,5 @@ let build_nested parent ~index ~environment build_body =
   let builder = start_function (make_builder parent.env) ~code in
   let prototype = build_body builder in
   code.nested <-
-    (index, write_functions builder ~own_symbol:(render_nested_symbol code index) prototype)
+    (index, write_functions builder ~enclosing_symbol:(render_nested_symbol code index) prototype)
     :: code.nested

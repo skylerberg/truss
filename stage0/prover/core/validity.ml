@@ -101,17 +101,17 @@ let find_invariants context (ty : Types.ty) =
       Some (source, List.map (fun (invariant : Mir.requirement) -> invariant.clause) invariants)
   | _ -> None
 
-let rec make_validity (context : State.context) frame ~assuming ?(deep = true) ?(own = true)
-    ?(seen = []) ty term =
+let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
+    ?(includes_invariants = true) ?(seen = []) ty term =
   if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) context.validating then
     Logic.Boolean true
   else
     let validating = context.validating in
     context.validating <- ty :: validating;
     Fun.protect ~finally:(fun () -> context.validating <- validating) @@ fun () ->
-    let own =
+    let invariants_hold =
       match find_invariants context ty with
-      | _ when not own -> Logic.Boolean true
+      | _ when not includes_invariants -> Logic.Boolean true
       | Some _ when Facts.find_constructors context ty = None ->
           let symbol = Logic.Symbol.Valid ty in
           Facts.declare context
@@ -150,7 +150,7 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true) ?
                  shape)
         | None -> Logic.Boolean true
     in
-    Logic.( &&& ) own fields
+    Logic.( &&& ) invariants_hold fields
 
 let assume_valid context frame ty term =
   Facts.assume context frame (make_validity context frame ~assuming:true ty term)

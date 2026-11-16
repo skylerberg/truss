@@ -40,7 +40,7 @@ let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures ~inh
       yield_ensures = None;
       callbacks = [];
       counters = [];
-      own_bounds = [];
+      bounded_counters = [];
       fresh_order = Tables.Symbol_table.create 64;
       logs = [];
       powers = [];
@@ -125,8 +125,8 @@ let list_promises context (source : State.source) locals (costs : Mir.cost list)
               | Calls (Function_parameter local), Calls (Through term) ->
                   context.call_targets <- (term, local) :: context.call_targets
               | _ -> ());
-              if counter.counting = Units && not (List.mem counter context.own_bounds) then
-                context.own_bounds <- counter :: context.own_bounds;
+              if counter.counting = Units && not (List.mem counter context.bounded_counters) then
+                context.bounded_counters <- counter :: context.bounded_counters;
               Some { counter; clause = cost; written_in = source; inherited }))
     costs
 
@@ -225,7 +225,8 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
             (parameter.local, Facts.read_parameter_name parameter, callback))
           (List.nth_opt parameters position))
       contract.callbacks;
-  let own_requires = Facts.list_clauses contract.requires and own_ensures = contract.ensures in
+  let declared_requires = Facts.list_clauses contract.requires
+  and declared_ensures = contract.ensures in
   let output = match signature with Some { output = Returns ty; _ } -> Some ty | _ -> None in
   let start =
     List.fold_left
@@ -279,8 +280,8 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
         context.yielded_part <- Some part;
         context.yield_ensures <-
           Some
-            ( List.filter Amounts.mentions_result own_ensures,
-              List.filter (fun clause -> not (Amounts.mentions_result clause)) own_ensures );
+            ( List.filter Amounts.mentions_result declared_ensures,
+              List.filter (fun clause -> not (Amounts.mentions_result clause)) declared_ensures );
         { start with yielded_so_far = Some (Amounts.make_empty_parts context start part) }
     | _ -> start
   in
@@ -293,7 +294,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
       parameters
   in
   let list_paired_values (at : State.frame) = pair_up (list_values at) in
-  let own_terms = list_paired_values start in
+  let entry_terms = list_paired_values start in
   let find_trait_frame (at : State.frame) ~result =
     match inherited with
     | Some ((part : State.part), substitution) when has_trait_frame ->
@@ -309,7 +310,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
                     Locals.add (Core_local local) entry old_locals ))
             (Locals.empty, Locals.empty, None, Locals.empty)
             part.parameters
-            (List.combine own_terms (list_paired_values at))
+            (List.combine entry_terms (list_paired_values at))
         in
         Some
           ( part,
@@ -358,7 +359,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
     { start with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
   in
   if context.inherits_precondition then
-    if own_requires = [] then Facts.assume context start trait_requires
+    if declared_requires = [] then Facts.assume context start trait_requires
     else
       ignore
         (List.fold_left
@@ -376,14 +377,14 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
                term;
              frame)
            (Facts.restrict start trait_requires)
-           own_requires);
+           declared_requires);
   let start =
     List.fold_left
       (fun frame requirement ->
         let frame, term = Validity.read_specification context frame requirement in
         Facts.assume context frame term;
         frame)
-      start own_requires
+      start declared_requires
   in
   List.iter
     (fun (promise : promise) ->
@@ -462,7 +463,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
                   Text "` may not hold when the function returns.";
                 ]
                 term)
-            own_ensures);
+            declared_ensures);
       let compute_change () =
         let potential_change =
           List.fold_left
@@ -645,7 +646,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
       | Some { form = Parameter_defaults _; _ } | None -> ());
       let value_ = Facts.arrive context start "value" ty in
       Facts.assume context start
-        (Validity.make_validity context start ~assuming:true ~own:false ty value_);
+        (Validity.make_validity context start ~assuming:true ~includes_invariants:false ty value_);
       let at_value = { start with self = Some value_; old_self = Some value_ } in
       List.iter
         (fun (invariant : Mir.requirement) ->
@@ -654,7 +655,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
         invariants;
       Option.iter
         (fun (written : Mir.formula) ->
-          let _, own = Validity.read_specification context at_value written in
+          let _, potential_term = Validity.read_specification context at_value written in
           Facts.oblige context at_value Cost
             (Facts.locate context at_value.source written.origin)
             [
@@ -663,7 +664,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
                    "The potential of `%s` may be below zero for a value that meets its invariants."
                    (Types.show ty));
             ]
-            (Logic.Operation ("<=", [ Logic.int 0; own ])))
+            (Logic.Operation ("<=", [ Logic.int 0; potential_term ])))
         potential
   | None -> ());
   make_outcome context

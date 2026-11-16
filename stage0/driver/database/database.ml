@@ -42,7 +42,7 @@ module Entry = struct
     | Stale of Part.any
     | Package of Path.package
     | File of Path.file
-    | Owned of Part.t
+    | Claimed of Part.t
 end
 
 module Entry_table = Make_table (Entry)
@@ -71,8 +71,8 @@ type t = {
   lowering : Compile.Lookups.settings option;
   instance_values : binding Stored_table.t;
   references : References.t;
-  owners : Part.t list Instance_table.t;
-  owned : Instance.key list Part_table.t;
+  claimants : Part.t list Instance_table.t;
+  claimed_roots : Instance.key list Part_table.t;
   unsaved : unit Entry_table.t;
 }
 
@@ -192,8 +192,8 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       lowering = Option.map (fun system -> { Compile.Lookups.checks; system }) Libc.host;
       instance_values = Stored_table.create 2048;
       references = References.create ~tracks_blocked:false;
-      owners = Instance_table.create 64;
-      owned = Part_table.create 64;
+      claimants = Instance_table.create 64;
+      claimed_roots = Part_table.create 64;
       unsaved = Entry_table.create 4096;
     }
   in
@@ -246,8 +246,8 @@ let copy database =
     lowering = database.lowering;
     instance_values = Stored_table.copy database.instance_values;
     references = References.copy database.references;
-    owners = Instance_table.copy database.owners;
-    owned = Part_table.copy database.owned;
+    claimants = Instance_table.copy database.claimants;
+    claimed_roots = Part_table.copy database.claimed_roots;
     unsaved = Entry_table.create 64;
   }
 
@@ -382,11 +382,11 @@ let list_lowered_references = function
 let update_indexes (type a) database (part : a Part.stored) ~(before : a part option)
     ~(after : a part option) =
   match part with
-  | Call_edges (path, viewer) ->
+  | Call_edges (path, calling_package) ->
       List.iter
-        (fun node -> mark_stale database (Any (Call_edges (node, viewer))))
+        (fun node -> mark_stale database (Any (Call_edges (node, calling_package))))
         (Call_graph.change_successors
-           (obtain_call_graph database viewer)
+           (obtain_call_graph database calling_package)
            path ~before:(list_call_edges before) ~after:(list_call_edges after))
   | Lowered key ->
       List.iter (create_instance database)
@@ -786,14 +786,14 @@ let list_import_diagnostics database note (file : Path.file) =
     ~text:(Source.text (read_source database file))
     ~used:(find_used_imports database note file)
 
-let find_call_edges database note ~viewer path =
+let find_call_edges database note ~calling_package path =
   match read_mir_call_edges database note path with
   | Failed _ | Blocked -> None
   | Value mir_call_edges -> (
       match
         Mir.Call_edges.list_implementations
           (make_recording_call_edge_lookups database note)
-          ~viewer path
+          ~calling_package path
       with
       | implementations -> Some (List.sort_uniq Path.compare (mir_call_edges @ implementations))
       | exception Reads_failed_part -> None)
@@ -917,30 +917,31 @@ let rec forget database parts =
     parts;
   List.iter (discard database) parts;
   List.iter
-    (function Part.Any (Proof _) as owner -> own_roots database (Part.Stored owner) [] | _ -> ())
+    (function
+      | Part.Any (Proof _) as claimant -> claim_roots database (Part.Stored claimant) [] | _ -> ())
     parts
 
-and own_roots database owner roots =
-  let before = Option.value (Part_table.find_opt database.owned owner) ~default:[] in
+and claim_roots database claimant roots =
+  let before = Option.value (Part_table.find_opt database.claimed_roots claimant) ~default:[] in
   let roots = List.sort_uniq Instance.compare roots in
   if roots <> before then begin
-    if roots = [] then Part_table.remove database.owned owner
-    else Part_table.replace database.owned owner roots;
-    mark_unsaved database (Owned owner);
-    let list_owners root =
-      Option.value (Instance_table.find_opt database.owners root) ~default:[]
+    if roots = [] then Part_table.remove database.claimed_roots claimant
+    else Part_table.replace database.claimed_roots claimant roots;
+    mark_unsaved database (Claimed claimant);
+    let list_claimants root =
+      Option.value (Instance_table.find_opt database.claimants root) ~default:[]
     in
     List.iter
       (fun root ->
-        match List.filter (fun other -> other <> owner) (list_owners root) with
+        match List.filter (fun other -> other <> claimant) (list_claimants root) with
         | [] ->
-            Instance_table.remove database.owners root;
+            Instance_table.remove database.claimants root;
             References.remove_root database.references root
-        | others -> Instance_table.replace database.owners root others)
+        | others -> Instance_table.replace database.claimants root others)
       (subtract_sorted Instance.compare before roots);
     List.iter
       (fun root ->
-        Instance_table.replace database.owners root (owner :: list_owners root);
+        Instance_table.replace database.claimants root (claimant :: list_claimants root);
         if References.add_root database.references root then create_instance database root)
       (subtract_sorted Instance.compare roots before);
     settle_references database
@@ -967,12 +968,14 @@ let collect_ready_instances database =
       Queue.add key pending
     end
   in
-  let is_current_owner (owner : Part.t) =
-    match owner with Stored owner -> not (is_stale database owner) | Input _ | Name _ -> true
+  let is_current_claimant (claimant : Part.t) =
+    match claimant with
+    | Stored claimant -> not (is_stale database claimant)
+    | Input _ | Name _ -> true
   in
   Instance_table.iter
-    (fun root owners -> if List.exists is_current_owner owners then reach root)
-    database.owners;
+    (fun root claimants -> if List.exists is_current_claimant claimants then reach root)
+    database.claimants;
   while not (Queue.is_empty pending) do
     List.iter reach (list_current_edges database (Queue.pop pending))
   done;
@@ -1001,9 +1004,9 @@ let list_proof_template_checks : Prover.proof part -> _ = function
 let make_template_check_root ({ from_template; literals; clauses } : Prover.State.template_check) =
   Instance.Template_check { from_template; literals; clauses }
 
-let own_template_checks database (key : Resolve.Names.key) =
+let claim_template_check_roots database (key : Resolve.Names.key) =
   if Option.is_some database.lowering then
-    own_roots database (Stored (Any (Proof key)))
+    claim_roots database (Stored (Any (Proof key)))
       (List.map make_template_check_root
          (list_proof_template_checks (read_stored database (Proof key))))
 
@@ -1016,9 +1019,9 @@ let find_entry_point (names : Resolve.Names.lookups) package =
       | _ -> None)
     (names.list_declarations { package; modules = [] })
 
-let own_lowering_roots database (names : Resolve.Names.lookups) package =
+let claim_lowering_roots database (names : Resolve.Names.lookups) package =
   if Option.is_some database.lowering then
-    own_roots database (Stored (Any (Namespace package)))
+    claim_roots database (Stored (Any (Namespace package)))
       (Compile.list_roots
          ~tests:
            (List.filter_map
@@ -1058,7 +1061,7 @@ let mark_change database package (change : Resolve.Names.change) =
   | Positions _ -> mark_readers ~is_selected:(holds_position database) database (Name part)
   | _ -> mark_readers database (Name part)
 
-let is_own_namespace_part package (part : Part.t) =
+let is_package_namespace_part package (part : Part.t) =
   match part with
   | Name part -> Part.locate_name_package part = package
   | Stored (Any (Namespace namespace_package)) -> namespace_package = package
@@ -1068,13 +1071,13 @@ let compute_namespace_and_implied database (package_database : package_database)
   let package = package_database.name in
   let namespace, implied =
     compute_and_record database [ Part.Any (Namespace package) ] (fun note ->
-        let note part = if not (is_own_namespace_part package part) then note part in
-        let own_namespace = make_namespace database note package_database in
+        let note part = if not (is_package_namespace_part package part) then note part in
+        let package_namespace = make_namespace database note package_database in
         let names =
           make_name_lookups_over database ~read_namespace:(fun name ->
-              if name = package then own_namespace else read_namespace database name)
+              if name = package then package_namespace else read_namespace database name)
         in
-        (own_namespace, list_package_parts database (add_recording names note) package))
+        (package_namespace, list_package_parts database (add_recording names note) package))
   in
   Package_table.replace database.implied package implied;
   (namespace, implied)
@@ -1110,7 +1113,7 @@ let compute_namespace database (package_database : package_database) =
   List.iter (mark_change database package) (Resolve.Names.list_changes before after);
   List.iter (fun part -> if not (was_implied part) then mark_stale database part) implied;
   forget database (List.filter (fun part -> not (is_implied part)) implied_before);
-  own_lowering_roots database (make_untracked_name_lookups database) package
+  claim_lowering_roots database (make_untracked_name_lookups database) package
 
 let compute_type_facts database paths =
   let facts =
@@ -1328,11 +1331,11 @@ let compute_part database (Part.Any typed as part) =
           make_part
             (Package_checks.run (make_recording_package_checks_lookups database note) package)
             check)
-  | Call_edges (path, viewer) ->
+  | Call_edges (path, calling_package) ->
       compute_value
-        (Call_edges (path, viewer))
+        (Call_edges (path, calling_package))
         (fun note ->
-          match find_call_edges database note ~viewer path with
+          match find_call_edges database note ~calling_package path with
           | Some edges -> Value edges
           | None -> Blocked)
   | Recursion_group _ ->
@@ -1341,7 +1344,7 @@ let compute_part database (Part.Any typed as part) =
   | Proof key ->
       compute_value (Proof key) (fun note ->
           make_part (Prover.prove (make_recording_proof_lookups database note)) key);
-      own_template_checks database key
+      claim_template_check_roots database key
   | Lowered key ->
       compute_value (Lowered key) (fun note ->
           match
@@ -1410,8 +1413,8 @@ let list_test_key_components database parts =
          List.filter (Instance_table.mem in_closure) (list_instance_edges database key))
        keys)
 
-let find_call_successors database viewer node =
-  match find_stored database (Call_edges (node, viewer)) with
+let find_call_successors database calling_package node =
+  match find_stored database (Call_edges (node, calling_package)) with
   | Some (Value edges) -> Some edges
   | Some (Failed _ | Blocked) | None -> None
 
@@ -1422,10 +1425,10 @@ let update_groups database package =
       let { Call_graph.touched; removed } = Call_graph.update graph ~find_successors in
       forget database (List.map (fun node -> Part.Any (Call_edges (node, package))) removed);
       let make_group_slot node = make_value_slot database (Recursion_group node) in
-      let is_own node = Path.locate_package node = package in
+      let is_package_node node = Path.locate_package node = package in
       List.iter
         (fun node ->
-          if is_own node then begin
+          if is_package_node node then begin
             !observer
               (Computation { parts = [ Any (Recursion_group node) ]; reads = 0; distinct_reads = 0 });
             store database (Any (Recursion_group node)) (make_group_slot node)
@@ -1437,7 +1440,7 @@ let update_groups database package =
         touched;
       List.iter
         (fun node ->
-          if is_own node then
+          if is_package_node node then
             let slot = make_group_slot node in
             if Option.is_some slot.stored then store database (Any (Recursion_group node)) slot None)
         removed
@@ -1684,11 +1687,12 @@ let mark_differences database name ~(before : package_database option)
 
 let retire database (package_database : package_database) =
   let package = package_database.name in
-  own_roots database (Stored (Any (Namespace package))) [];
+  claim_roots database (Stored (Any (Namespace package))) [];
   List.iter
-    (function Part.Any (Proof _) as owner -> own_roots database (Stored owner) [] | _ -> ())
+    (function
+      | Part.Any (Proof _) as claimant -> claim_roots database (Stored claimant) [] | _ -> ())
     (list_stored_parts package_database);
-  let is_own part =
+  let is_package_part part =
     (not (Stage.is_lowering (Stage.of_part part))) && Part.locate_package part = package
   in
   mark_package_database_unsaved database package_database;
@@ -1698,11 +1702,11 @@ let retire database (package_database : package_database) =
       mark_unsaved database (Value part);
       discard database part)
     (Stored_table.fold
-       (fun part _ parts -> if is_own part then part :: parts else parts)
+       (fun part _ parts -> if is_package_part part then part :: parts else parts)
        database.reads []);
   Package_stage_table.filter_map_inplace
-    (fun (owner, stage) parts ->
-      if owner = package && not (Stage.is_lowering stage) then begin
+    (fun (stage_package, stage) parts ->
+      if stage_package = package && not (Stage.is_lowering stage) then begin
         Stored_table.iter (fun part () -> mark_unsaved database (Stale part)) parts;
         None
       end
@@ -1803,7 +1807,7 @@ let find_saved_value database (entry : Entry.t) =
               (fun source -> fingerprint (Source.text source))
               (File_table.find_opt package_database.sources file))
       else None
-  | Owned owner -> Option.map marshal (Part_table.find_opt database.owned owner)
+  | Claimed claimant -> Option.map marshal (Part_table.find_opt database.claimed_roots claimant)
 
 let list_unsaved database =
   drain database ~through:Namespaces database.project;
@@ -1854,7 +1858,8 @@ let restore_parts database entries =
       | Reads part when is_saved_part database part ->
           add_reads database part (Marshal.from_string bytes 0)
       | Stale part when is_saved_part database part -> mark_stale database part
-      | Owned owner -> Part_table.replace database.owned owner (Marshal.from_string bytes 0)
+      | Claimed claimant ->
+          Part_table.replace database.claimed_roots claimant (Marshal.from_string bytes 0)
       | Value _ | Reads _ | Stale _ | Package _ | File _ -> ())
     entries
 
@@ -1884,14 +1889,14 @@ let restore_namespaces database =
 
 let restore_references database =
   Part_table.iter
-    (fun owner roots ->
+    (fun claimant roots ->
       List.iter
         (fun root ->
-          Instance_table.replace database.owners root
-            (owner :: Option.value (Instance_table.find_opt database.owners root) ~default:[]);
+          Instance_table.replace database.claimants root
+            (claimant :: Option.value (Instance_table.find_opt database.claimants root) ~default:[]);
           ignore (References.add_root database.references root))
         roots)
-    database.owned;
+    database.claimed_roots;
   Stored_table.iter
     (fun _ -> function
       | Binding (Lowered key, value) ->
@@ -2103,7 +2108,7 @@ let prove database files =
         unmark database part;
         compute_part database part
       end
-      else own_template_checks database key)
+      else claim_template_check_roots database key)
     keys;
   { database; keys }
 
@@ -2198,12 +2203,13 @@ let make_interface_lookups database packages =
 let check_calls database interface viewers key = function
   | Ok lowered ->
       List.iter
-        (fun viewer ->
-          if Package_table.mem database.graphs viewer then
+        (fun calling_package ->
+          if Package_table.mem database.graphs calling_package then
             Compile.check_calls interface
               ~find_call_edges:(fun path ->
                 match
-                  find_part database (note_untracked_read database) (Call_edges (path, viewer))
+                  find_part database (note_untracked_read database)
+                    (Call_edges (path, calling_package))
                 with
                 | Some (Value edges) -> Some edges
                 | Some (Failed _ | Blocked) | None -> None)
@@ -2407,8 +2413,8 @@ module For_testing = struct
     }
 
   let add_root database key =
-    own_roots database (Input Packages)
-      (key :: Option.value (Part_table.find_opt database.owned (Input Packages)) ~default:[])
+    claim_roots database (Input Packages)
+      (key :: Option.value (Part_table.find_opt database.claimed_roots (Input Packages)) ~default:[])
 
   let find_proof = find_proof
 

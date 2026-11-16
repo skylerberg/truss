@@ -246,7 +246,7 @@ let list_path_edges (lookups : lookups) path =
        (list_edges lookups ~package:(Path.locate_package path) ~may_panic)
        (code @ defaults))
 
-let list_implementations (lookups : lookups) ~viewer (path : Path.t) =
+let list_implementations (lookups : lookups) ~calling_package (path : Path.t) =
   match path with
   | Method { owner; name; receiver } -> (
       match Interface.Definition.find_interface lookups.interface owner with
@@ -258,6 +258,7 @@ let list_implementations (lookups : lookups) ~viewer (path : Path.t) =
                   let method_ = Path.Method { owner = impl; name; receiver } in
                   if writes lookups impl method_ then Some method_ else None)
                 (Interface.Impls.list_impls_of_trait lookups.interface ~trait:owner package))
-            (viewer :: Resolve.Names.list_transitive_dependencies lookups.interface.names viewer)
+            (calling_package
+            :: Resolve.Names.list_transitive_dependencies lookups.interface.names calling_package)
       | _ -> [])
   | _ -> []

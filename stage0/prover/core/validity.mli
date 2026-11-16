@@ -16,7 +16,7 @@ val make_validity :
   State.frame ->
   assuming:bool ->
   ?deep:bool ->
-  ?own:bool ->
+  ?includes_invariants:bool ->
   ?seen:Types.ty list ->
   Types.ty ->
   Logic.term ->

@@ -147,14 +147,15 @@ let check_calls (interface : Interface.Lookups.t) ~find_call_edges (key : Instan
 
 module Instance_table = Hashtbl.Make (Instance)
 
-let derive_own_hash = Blake3.derive_key ~context:"truss 2026-11-12 instance own hash"
+let derive_fragment_hash = Blake3.derive_key ~context:"truss 2026-11-16 instance fragment hash"
 
-let evaluated_own_hash =
-  Blake3.derive_key ~context:"truss 2026-11-12 evaluated constant own hash" ""
+let evaluated_fragment_hash =
+  Blake3.derive_key ~context:"truss 2026-11-16 evaluated constant fragment hash" ""
 
-let hash_own = function
-  | Compiled fragment | Folded (_, fragment) -> derive_own_hash (Emit_c.render_fragment fragment)
-  | Evaluate _ -> evaluated_own_hash
+let hash_fragment = function
+  | Compiled fragment | Folded (_, fragment) ->
+      derive_fragment_hash (Emit_c.render_fragment fragment)
+  | Evaluate _ -> evaluated_fragment_hash
 
 let derive_test_key = Blake3.derive_key ~context:"truss 2026-11-12 reach key"
 let encode_test_key fields = derive_test_key (Cbor.encode (Cbor.Array fields))
@@ -167,9 +168,9 @@ let derive_cycle_member_key ~read_known_key members start =
         if Instance_table.mem visit_order key then visit visited queue
         else begin
           Instance_table.replace visit_order key (Instance_table.length visit_order);
-          let own_hash, references = Instance_table.find members key in
+          let fragment_hash, references = Instance_table.find members key in
           visit
-            ((own_hash, references) :: visited)
+            ((fragment_hash, references) :: visited)
             (queue @ List.filter (Instance_table.mem members) references)
         end
   in
@@ -178,10 +179,10 @@ let derive_cycle_member_key ~read_known_key members start =
       Text "group";
       Cbor.Array
         (List.map
-           (fun (own_hash, references) ->
+           (fun (fragment_hash, references) ->
              Cbor.Array
                [
-                 Bytes own_hash;
+                 Bytes fragment_hash;
                  Cbor.Array
                    (List.map
                       (fun reference ->
@@ -203,7 +204,7 @@ let derive_test_keys ~read_lowered ~read_known_key component =
           encode_test_key
             [
               Text "unit";
-              Bytes (hash_own code);
+              Bytes (hash_fragment code);
               Cbor.Array
                 (List.map
                    (fun reference -> Cbor.Bytes (read_known_key reference))
@@ -215,7 +216,7 @@ let derive_test_keys ~read_lowered ~read_known_key component =
       List.iter
         (fun member ->
           let code = read_lowered member in
-          Instance_table.replace members member (hash_own code, list_references code))
+          Instance_table.replace members member (hash_fragment code, list_references code))
         component;
       List.map
         (fun member -> (member, derive_cycle_member_key ~read_known_key members member))

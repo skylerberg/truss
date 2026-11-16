@@ -202,14 +202,14 @@ let load_segment path =
 
 let refresh cache =
   let directory = make_segments_directory cache in
-  let own = Option.map (fun writer -> writer.segment.path) cache.writer in
+  let written_segment = Option.map (fun writer -> writer.segment.path) cache.writer in
   let present =
     match Sys.readdir directory with
     | entries ->
         Array.to_list entries
         |> List.filter (fun entry -> Filename.check_suffix entry ".segment")
         |> List.map (Filename.concat directory)
-        |> List.filter (fun path -> Some path <> own)
+        |> List.filter (fun path -> Some path <> written_segment)
     | exception Sys_error _ -> []
   in
   let there = Hashtbl.create (List.length present) in
@@ -352,18 +352,18 @@ let read_from segment key location =
   | Some _ | None -> None
   | exception Sys_error _ -> None
 
-let read_own writer key location =
+let read_from_writer writer key location =
   let written = writer.size - Buffer.length writer.pending in
   if location.offset >= written then
     Some (Buffer.sub writer.pending (location.offset - written + record_head_width) location.length)
   else read_from writer.segment key location
 
 let lookup_once cache key =
-  let own =
+  let written_value =
     Option.bind cache.writer (fun writer ->
-        Option.bind (Hashtbl.find_opt writer.segment.table key) (read_own writer key))
+        Option.bind (Hashtbl.find_opt writer.segment.table key) (read_from_writer writer key))
   in
-  match own with
+  match written_value with
   | Some value -> Some value
   | None ->
       List.find_map

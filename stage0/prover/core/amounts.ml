@@ -143,7 +143,7 @@ let compute_callee_amount ?ends_in (context : State.context) after ~path ~(parts
     (counter : Costs.counter) =
   let is_recursive_call =
     counter.counting = Units
-    && List.mem counter context.own_bounds
+    && List.mem counter context.bounded_counters
     && Facts.is_in_recursion_group context path
   in
   let list_clauses (part : State.part) =
@@ -484,7 +484,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
           | None -> ())
       | clause, Some shape -> (
           try
-            let own =
+            let declared_potential =
               match clause with
               | Some (source, written) ->
                   snd
@@ -508,7 +508,8 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
                         (compute_parts last) earlier
                   | [] -> Costs.zero)
             in
-            Facts.add_frame_fact context frame (Logic.equal held (Costs.plus own parts))
+            Facts.add_frame_fact context frame
+              (Logic.equal held (Costs.plus declared_potential parts))
           with Facts.Unsupported _ -> ())
       | _ -> ()
     end;

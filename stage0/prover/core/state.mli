@@ -149,7 +149,7 @@ type context = {
   home : Resolve.Names.key;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   mutable counters : Costs.counter list;
-  mutable own_bounds : Costs.counter list;
+  mutable bounded_counters : Costs.counter list;
   fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;

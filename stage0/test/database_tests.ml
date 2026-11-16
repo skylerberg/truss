@@ -465,7 +465,7 @@ let () =
            ~before:[ ("app::main", stepper) ]
            ~after:[ ("app::main", stepper_that_runs) ])
         ~parts:[ "call edges app app::main::Step.step(own self)"; "proof app::main::run" ]);
-  Harness.test "only a trait method's call edges read the dependencies of the viewer's packages"
+  Harness.test "only a trait method's call edges read the dependencies of the calling package"
     (fun () ->
       let database = build [ ("app::main", stepper_that_runs) ] in
       let dependencies = [ "dependencies app"; "dependencies standard" ] in

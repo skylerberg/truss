@@ -169,8 +169,8 @@ type selection = {
   lock_fix : string option;
 }
 
-let select_packages (files : files) (own : layout) =
-  let packages = List.map snd own.packages in
+let select_packages (files : files) (project_layout : layout) =
+  let packages = List.map snd project_layout.packages in
   let is_named name =
     List.exists (fun (package : Manifest.package) -> package.name = name) packages
   in
@@ -315,12 +315,12 @@ let find_dependency_cycle (places : (Path.package * place) list) =
         (list_dependencies name)
     end
   in
-  let own, registry = List.partition (fun (_, place) -> place.root = Project) places in
+  let project_places, registry = List.partition (fun (_, place) -> place.root = Project) places in
   List.find_map
     (fun (name, place) ->
       Package_table.reset visited;
       Option.map (fun cycle -> (place, cycle)) (find_reach_path name name))
-    (own @ registry)
+    (project_places @ registry)
 
 let make_cycle_problem ((place : place), cycle) =
   {
@@ -338,8 +338,8 @@ let make_cycle_problem ((place : place), cycle) =
                (List.map (fun package -> Printf.sprintf "`%s`" (Path.show_package package)) cycle)));
   }
 
-let list_problems (own : layout) (chosen : selection) =
-  let packages = own.packages in
+let list_problems (project_layout : layout) (chosen : selection) =
+  let packages = project_layout.packages in
   let problems = ref [] in
   let report_problem directory = report_manifest_problem problems directory in
   let find_named name =
@@ -381,10 +381,10 @@ let list_problems (own : layout) (chosen : selection) =
               (Path.show_package dependency.package))
         package.dependencies)
     packages;
-  own.problems @ chosen.lock_problems @ List.rev !problems
+  project_layout.problems @ chosen.lock_problems @ List.rev !problems
 
 type t = {
-  own : layout;
+  project_layout : layout;
   selection : selection;
   places : (Path.package * place) list;
   packages : package list;
@@ -401,15 +401,15 @@ let of_files files =
         Root_table.replace layouts root computed;
         computed
   in
-  let own = lay_out_root Project in
-  let selection = select_packages files own in
+  let project_layout = lay_out_root Project in
+  let selection = select_packages files project_layout in
   let places = place_packages ~lay_out_root ~selection in
   let cycle = Option.map make_cycle_problem (find_dependency_cycle places) in
   let places = if Option.is_some cycle then [] else places in
   {
-    own;
+    project_layout;
     selection;
     places;
     packages = List.map (fun (_, place) -> make_package files ~lay_out_root place) places;
-    problems = list_problems own selection @ Option.to_list cycle;
+    problems = list_problems project_layout selection @ Option.to_list cycle;
   }
