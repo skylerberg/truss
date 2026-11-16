@@ -57,7 +57,8 @@ let integer_instances (lookups : Lookups.t) (path : Path.t) =
         List.filter_map
           (fun (generic : Types.generic) ->
             match generic.kind with
-            | Type_generic bounds -> Some (generic.generic, bounds)
+            | Type_generic bounds ->
+                Some (generic.generic, Types.find_bound_integer_implementors bounds)
             | Value_generic | Capability_generic -> None)
           signature.generics
     | None -> []
@@ -65,15 +66,12 @@ let integer_instances (lookups : Lookups.t) (path : Path.t) =
   let self =
     match path with
     | Method { owner; _ } ->
-        [
-          ( Types.make_self_parameter owner,
-            [ { Types.trait = owner; trait_arguments = []; associated = [] } ] );
-        ]
+        [ (Types.make_self_parameter owner, Types.find_integer_implementors owner) ]
     | _ -> []
   in
   List.fold_left
-    (fun instances ((parameter : Types.parameter), bounds) ->
-      match Types.find_bound_integer_implementors bounds with
+    (fun instances ((parameter : Types.parameter), implementors) ->
+      match implementors with
       | None -> instances
       | Some builtins ->
           List.concat_map

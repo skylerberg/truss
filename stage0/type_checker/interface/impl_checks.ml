@@ -91,14 +91,16 @@ let make_conformance lookups ~bounds ~(trait_span : Source.Definition_span.t)
             (function
               | Types.Projection { base; trait = projected; name }
                 when Types.equal base impl.for_type -> (
+                  let projected = Impls.find_declaring_type_trait lookups ~base projected name in
+                  let is_declared_by_impl = Path.equal projected.trait impl.implements.trait in
                   match
                     ( List.assoc_opt name impl.implements.associated,
                       List.assoc_opt name missing_associated )
                   with
-                  | Some fixed, _ -> Some fixed
-                  | None, Some missing when Path.equal projected.trait impl.implements.trait ->
+                  | Some fixed, _ when is_declared_by_impl -> Some fixed
+                  | None, Some missing when is_declared_by_impl ->
                       Some (Types.Error (Diagnostic.reported missing))
-                  | None, _ ->
+                  | _ ->
                       Impls.project_associated_type lookups ~bounds:impl_bounds impl.for_type
                         projected name)
               | _ -> None)
@@ -111,7 +113,9 @@ let make_conformance lookups ~bounds ~(trait_span : Source.Definition_span.t)
                 match capability with
                 | Types.Capability_projection { base; trait = projected; name }
                   when Types.equal base impl.for_type
-                       && Path.equal projected.trait impl.implements.trait ->
+                       && Path.equal
+                            (Impls.find_declaring_capability_trait lookups ~base projected name)
+                              .trait impl.implements.trait ->
                     Option.value ~default:Types.no_capabilities
                       (List.assoc_opt name impl.capability_sets)
                 | capability ->
@@ -286,13 +290,14 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                 uses = Types.subtract_capabilities written.uses impl.impl_uses;
               }
             in
+            let written_generics = Types.list_generic_arguments written.generics in
             let expected =
               Types.map_signature normalize
-                (Types.substitute_signature
-                   (Option.value ~default:[]
-                      (Types.make_substitution declared.generics
-                         (Types.list_generic_arguments written.generics)))
-                   declared)
+                (if List.length declared.generics = List.length written_generics then
+                   Types.substitute_signature
+                     (Types.make_substitution declared.generics written_generics)
+                     declared
+                 else declared)
             in
             let expected =
               if trait.is_capability then { expected with receiver = written.receiver }

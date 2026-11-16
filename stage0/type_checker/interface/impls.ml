@@ -1,3 +1,17 @@
+let bug format = Compiler_bug.bug ~stage:"Interface" format
+
+let find_declaring_type_trait lookups ~base (trait : Types.trait_reference) name =
+  match Properties.find_trait_declaring_type lookups ~base trait name with
+  | Some declaring -> declaring
+  | None ->
+      bug "no trait among `%s` and its requirements declares `%s`" (Types.show_trait trait) name
+
+let find_declaring_capability_trait lookups ~base (trait : Types.trait_reference) name =
+  match Properties.find_trait_declaring_capability_set lookups ~base trait name with
+  | Some declaring -> declaring
+  | None ->
+      bug "no trait among `%s` and its requirements declares `%s`" (Types.show_trait trait) name
+
 let find_head = function Types.Named { path; _ } -> Some path | _ -> None
 
 let list_impls_for_type (lookups : Lookups.t) (type_ : Path.t) package =
@@ -277,6 +291,11 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(checks_conditions =
           candidates
 
 and project_associated_type lookups ~bounds ?defining type_ (trait : Types.trait_reference) name =
+  project_declared_type lookups ~bounds ?defining type_
+    (find_declaring_type_trait lookups ~base:type_ trait name)
+    name
+
+and project_declared_type lookups ~bounds ?defining type_ (trait : Types.trait_reference) name =
   match List.assoc_opt name trait.associated with
   | Some fixed -> Some fixed
   | None -> (
@@ -291,7 +310,9 @@ and project_associated_type lookups ~bounds ?defining type_ (trait : Types.trait
       | Some From_bound -> (
           match
             List.find_map
-              (fun (bound : Types.trait_reference) -> List.assoc_opt name bound.associated)
+              (fun (bound : Types.trait_reference) ->
+                if Path.equal bound.trait trait.trait then List.assoc_opt name bound.associated
+                else None)
               (Properties.list_known_bounds lookups ~bounds type_)
           with
           | Some fixed -> Some fixed
@@ -309,6 +330,7 @@ and project_associated_type lookups ~bounds ?defining type_ (trait : Types.trait
       | None -> None)
 
 and project_capability_set lookups ~bounds ?(depth = 0) type_ (trait : Types.trait_reference) name =
+  let trait = find_declaring_capability_trait lookups ~base:type_ trait name in
   let projection =
     Types.make_capability_set [ Types.Capability_projection { base = type_; trait; name } ]
   in
@@ -348,22 +370,23 @@ and normalize_capabilities lookups ~bounds ?depth (capabilities : Types.capabili
 
 and normalize lookups ~bounds ?defining (type_ : Types.ty) : Types.ty =
   let normalize = normalize lookups ~bounds ?defining in
-  let project_associated_type = project_associated_type lookups ~bounds ?defining in
+  let project_declared_type = project_declared_type lookups ~bounds ?defining in
   Types.map
     ~capabilities:(normalize_capabilities lookups ~bounds)
     (function
       | Types.Projection { base; trait; name } -> (
           let base = normalize base in
+          let trait = find_declaring_type_trait lookups ~base trait name in
           match base with
           | Types.Variable _ | Types.Hole -> Some (Types.Projection { base; trait; name })
           | Types.Error _ -> Some base
           | Types.Parameter _ | Types.Projection _ -> (
-              match project_associated_type base trait name with
+              match project_declared_type base trait name with
               | Some (Types.Projection _ as projection) -> Some projection
               | Some fixed when not (Types.is_error fixed) -> Some (normalize fixed)
               | _ -> Some (Types.Projection { base; trait; name }))
           | _ -> (
-              match project_associated_type base trait name with
+              match project_declared_type base trait name with
               | Some fixed -> Some (normalize fixed)
               | None -> Some (Types.Projection { base; trait; name })))
       | _ -> None)

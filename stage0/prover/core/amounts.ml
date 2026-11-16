@@ -214,12 +214,11 @@ let callee_amount ?ends_in (context : State.context) after ~path ~(parts : State
 let generic_argument context frame (operation : Intrinsic.operation) type_arguments name =
   let generics = (Intrinsic_signatures.signature operation).generics in
   List.find_map
-    (fun ((generic : Types.generic), argument) ->
+    (fun ((parameter : Types.parameter), argument) ->
       match argument with
-      | Types.Value value when generic.generic.name = name ->
-          Some (Models.value_term context frame value)
+      | Types.Value value when parameter.name = name -> Some (Models.value_term context frame value)
       | _ -> None)
-    (try List.combine generics type_arguments with Invalid_argument _ -> [])
+    (Types.make_substitution generics type_arguments)
 
 let step_amount context frame (invocation : Invocation.t) (values : State.passed list)
     (counter : Costs.counter) =
@@ -326,13 +325,7 @@ let find_buffer_elements context (ty : Types.ty) =
       match Interface.Definition.read_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface { shape = Record [ field ]; type_generics; _ })
         -> (
-          let substitution =
-            try
-              List.combine
-                (List.map (fun (generic : Types.generic) -> generic.generic) type_generics)
-                arguments
-            with Invalid_argument _ -> []
-          in
+          let substitution = Types.make_substitution type_generics arguments in
           match Types.substitute substitution field.field_type with
           | Types.Named { path = field_path; arguments = [ Types.Type element ] }
             when Intrinsic.builtin_of_path field_path = Some Storage
@@ -402,15 +395,7 @@ and holds_potential_type context ~seen (ty : Types.ty) =
         ||
         match Interface.Definition.read_interface context.lookups.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
-            let substitution =
-              try
-                List.combine
-                  (List.map
-                     (fun (generic : Types.generic) -> generic.generic)
-                     interface.type_generics)
-                  arguments
-              with Invalid_argument _ -> []
-            in
+            let substitution = Types.make_substitution interface.type_generics arguments in
             let fields =
               match interface.shape with
               | Record fields -> fields
@@ -534,7 +519,7 @@ and parts_potential context frame ~seen ty term (variant, fields) =
       else total)
     Costs.zero fields
 
-let method_time_bound context (method_ : Path.t) self_type =
+let method_time_bound context (method_ : Path.t) ~trait_arguments self_type =
   let holds ty = try has_potential context ty with Facts.Foreign_unsupported _ -> true in
   match method_ with
   | Method { owner = trait; name; receiver } -> (
@@ -547,7 +532,7 @@ let method_time_bound context (method_ : Path.t) self_type =
         then Some Z.one
         else None
       else
-        let reference : Types.trait_reference = { trait; trait_arguments = []; associated = [] } in
+        let reference : Types.trait_reference = { trait; trait_arguments; associated = [] } in
         match Operations.concrete_impl context reference self_type with
         | Some (impl, arguments) -> (
             let path = Path.Method { owner = impl; name; receiver } in
@@ -581,11 +566,11 @@ let method_time_bound context (method_ : Path.t) self_type =
         | None -> None)
   | _ -> None
 
-let trait_method_time context frame (method_ : Path.t) self_type =
-  let symbol = Logic.Symbol.Method_time { method_; self_type } in
+let trait_method_time context frame (method_ : Path.t) ~trait_arguments self_type =
+  let symbol = Logic.Symbol.Method_time { method_; trait_arguments; self_type } in
   Facts.declare context (Logic.Constant (symbol, Logic.Int));
   Facts.fact context frame (Logic.Operation ("<=", [ Logic.int 1; Logic.Symbol symbol ]));
-  (match method_time_bound context method_ self_type with
+  (match method_time_bound context method_ ~trait_arguments self_type with
   | Some limit ->
       Facts.fact context frame
         (Logic.Operation ("<=", [ Logic.Symbol symbol; Logic.Integer (Z.max limit Z.one) ]))
@@ -595,7 +580,12 @@ let trait_method_time context frame (method_ : Path.t) self_type =
 let method_time context frame (callee : Invocation.callee) =
   match callee with
   | Trait_method { trait; name; receiver; self_type; _ } ->
+      let substitute_argument : Types.argument -> Types.argument = function
+        | Type type_ -> Type (Facts.substituted context frame type_)
+        | argument -> Types.substitute_argument frame.substitution argument
+      in
       trait_method_time context frame
         (Path.Method { owner = trait.trait; name; receiver })
+        ~trait_arguments:(List.map substitute_argument trait.trait_arguments)
         (Facts.substituted context frame self_type)
   | _ -> raise (Facts.Foreign_unsupported "the time of a function that is not a trait's method")

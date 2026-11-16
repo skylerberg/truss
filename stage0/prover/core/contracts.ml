@@ -17,18 +17,9 @@ let source_at (lookups : Lookups.t) (path : Path.t) =
     (lookups.mir.form_origin path)
 
 let trait_substitution (lookups : Lookups.t) (trait : Types.trait_reference) (ty : Types.ty) =
-  let generics =
-    match Interface.Definition.read_interface lookups.interface trait.trait with
-    | Some (Interface.Environment.Trait_interface interface) ->
-        List.map (fun (generic : Types.generic) -> generic.generic) interface.trait_generics
-    | _ -> []
-  in
-  let rec pair generics arguments =
-    match (generics, arguments) with
-    | generic :: generics, argument :: arguments -> (generic, argument) :: pair generics arguments
-    | _ -> []
-  in
-  (Types.make_self_parameter trait.trait, Types.Type ty) :: pair generics trait.trait_arguments
+  match Interface.Definition.read_trait_interface lookups.interface trait.trait with
+  | Some interface -> Interface.Properties.make_trait_substitution interface ~self:ty trait
+  | None -> [ (Types.make_self_parameter trait.trait, Types.Type ty) ]
 
 let part_of ?(inherited = false) (lookups : Lookups.t) path callee =
   Option.map

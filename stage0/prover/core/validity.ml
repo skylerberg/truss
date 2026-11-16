@@ -238,14 +238,8 @@ let part_frame frame (part : State.part) ~arguments ~substitution =
   }
 
 let callee_substitution (frame : State.frame) (signature : Types.signature) type_arguments =
-  let rec pair (generics : Types.generic list) arguments =
-    match (generics, arguments) with
-    | generic :: generics, argument :: arguments ->
-        (generic.generic, Types.substitute_argument frame.substitution argument)
-        :: pair generics arguments
-    | _ -> []
-  in
-  pair signature.generics type_arguments
+  Types.make_substitution signature.generics
+    (List.map (Types.substitute_argument frame.substitution) type_arguments)
 
 let callback_facts (context : State.context) frame (invocation : Invocation.t) position known
     arguments =

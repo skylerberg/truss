@@ -689,7 +689,7 @@ let copied ?literal (context : State.context) frame ty term =
                   Amounts.trait_method_time context frame
                     (Path.Method
                        { owner = Well_known.path Copyable; name = "copy"; receiver = Read })
-                    ty
+                    ~trait_arguments:[] ty
             in
             let copy_potential =
               try Amounts.potential context frame ty term
