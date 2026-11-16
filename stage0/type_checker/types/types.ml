@@ -277,6 +277,9 @@ let find_specification_only_type type_ =
 let has_capability_variable capabilities =
   List.exists (function Capability_variable _ -> true | _ -> false) capabilities
 
+let may_panic capabilities =
+  List.exists (function Capability path -> Well_known.is Panic path | _ -> false) capabilities
+
 let equal left right = left = right
 let is_error = function Error _ -> true | _ -> false
 
@@ -438,7 +441,7 @@ let make_substitution (generics : generic list) arguments : substitution =
   if List.length generics = List.length arguments then
     List.combine (List.map (fun generic -> generic.generic) generics) arguments
   else
-    Compiler_bug.bug ~stage:"Types" "a substitution of %d arguments for %d generics"
+    Compiler_bug.raise_bug ~stage:"Types" "a substitution of %d arguments for %d generics"
       (List.length arguments) (List.length generics)
 
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }

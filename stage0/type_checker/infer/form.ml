@@ -1,18 +1,18 @@
 let build_expression_by_id (state : State.state) (id : Syntax.id) : Core.expression =
   match state.form.expression_builders.(id) with
   | Some build -> build ()
-  | None -> State.bug "a call's argument has no core node"
+  | None -> State.raise_bug "a call's argument has no core node"
 
 let read_call (state : State.state) (id : Syntax.id) : Tables.call =
   match state.tables.calls.(id) with
   | Some call -> call
-  | None -> State.bug "the checker recorded no call for a call node"
+  | None -> State.raise_bug "the checker recorded no call for a call node"
 
 let convert_evidence : Tables.evidence -> Core.evidence = function
   | Impl { impl; arguments } -> Impl { impl; arguments }
   | Bound -> Bound
   | Dynamic -> Dynamic
-  | Built_in -> State.bug "a built-in method has no core evidence"
+  | Built_in -> State.raise_bug "a built-in method has no core evidence"
 
 let convert_callee (callee : Tables.callee) : Core.callee =
   match callee with
@@ -22,7 +22,7 @@ let convert_callee (callee : Tables.callee) : Core.callee =
         { trait; name; receiver; self_type; type_arguments; evidence = convert_evidence inferred }
   | Capability_method { capability; name } -> Capability_method { capability; name }
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
-  | Constructor _ | Indirect | Built_in_operator -> State.bug "this callee has no core callee"
+  | Constructor _ | Indirect | Built_in_operator -> State.raise_bug "this callee has no core callee"
 
 let build_arguments state (call : Tables.call) : Core.argument list =
   List.init
@@ -102,7 +102,7 @@ let read_constructor_fields (state : State.state) type_ variant type_arguments =
   in
   match fields with
   | Some fields -> fields
-  | None -> State.bug "`%s` is constructed but has no fields" (Path.show type_)
+  | None -> State.raise_bug "`%s` is constructed but has no fields" (Path.show type_)
 
 let build_call_kind ?lends ?function_value state (value : Syntax.expression) : Core.kind =
   let recorded = read_call state value.id in
@@ -114,7 +114,7 @@ let build_call_kind ?lends ?function_value state (value : Syntax.expression) : C
       match recorded.arguments with
       | [ receiver ] ->
           Copy (Operands.build Read (build_expression_by_id state receiver.expression))
-      | _ -> State.bug "`copy` does not have exactly one argument")
+      | _ -> State.raise_bug "`copy` does not have exactly one argument")
   | Trait_method { trait; name; self_type; _ }
     when Option.is_some (find_built_in_operation trait name self_type) ->
       Operator
@@ -126,7 +126,7 @@ let build_call_kind ?lends ?function_value state (value : Syntax.expression) : C
     when is_built_in_scalar self_type && Well_known.is Equal trait.trait -> (
       match build_argument_expressions state recorded with
       | [ left; right ] -> Compare { comparison = Equal; left; right }
-      | _ -> State.bug "`equal` does not have exactly two arguments")
+      | _ -> State.raise_bug "`equal` does not have exactly two arguments")
   | Constructor { type_; variant; type_arguments } ->
       let declared = read_constructor_fields state type_ variant type_arguments in
       let written =
@@ -144,7 +144,7 @@ let build_call_kind ?lends ?function_value state (value : Syntax.expression) : C
           declared
       in
       Construct { variant; fields = written @ defaulted }
-  | Built_in_operator -> State.bug "an operator is recorded as a call"
+  | Built_in_operator -> State.raise_bug "an operator is recorded as a call"
   | Indirect | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> (
       let function_value = Option.map (State.build_expression state) function_value in
       let call = Core.Call (build_call state ~lends ?function_value recorded) in
@@ -168,20 +168,20 @@ let build_numeric_literal (state : State.state) (id : Syntax.id) : Core.kind =
   match state.tables.literals.(id) with
   | Some (Integer_value number) -> Integer number
   | Some (Float_value number) -> Float number
-  | None -> State.bug "a literal has no value"
+  | None -> State.raise_bug "a literal has no value"
 
 let read_type (state : State.state) (value : Syntax.expression) =
   match state.tables.types.(value.id) with
   | Some type_ -> type_
   | None ->
-      State.bug "`%s` has a core node but no recorded type"
+      State.raise_bug "`%s` has a core node but no recorded type"
         (State.quote_span state (State.read_span state value.id))
 
 let build_function_value (state : State.state) (value : Syntax.expression) : Core.kind =
   match state.tables.resolutions.(value.id) with
   | Some (Global { path; type_arguments }) -> Function_value { path; type_arguments }
   | _ ->
-      State.bug "`%s` is not recorded as a function"
+      State.raise_bug "`%s` is not recorded as a function"
         (State.quote_span state (State.read_span state value.id))
 
 let build_variant_value state (value : Syntax.expression) type_path variant : Core.kind =
@@ -239,7 +239,7 @@ let build_variant_value state (value : Syntax.expression) type_path variant : Co
 let read_local_type (state : State.state) (id : Syntax.id) =
   match state.tables.local_types.(id) with
   | Some type_ -> type_
-  | None -> State.bug "a local has no recorded type"
+  | None -> State.raise_bug "a local has no recorded type"
 
 let build_named_local state ~origin (id : Syntax.id) : Core.place =
   Local { local = Named id; type_ = read_local_type state id; origin }
@@ -251,7 +251,7 @@ let build_local_use state ~origin (id : Syntax.id) : Core.kind =
 let read_self_type state (env : State.env) =
   match env.self with
   | Some type_ -> State.finalize_type state type_
-  | None -> State.bug "`self` is used outside a method"
+  | None -> State.raise_bug "`self` is used outside a method"
 
 let build_self_local state (env : State.env) ~origin : Core.place =
   Local { local = Self; type_ = read_self_type state env; origin }
@@ -259,7 +259,7 @@ let build_self_local state (env : State.env) ~origin : Core.place =
 let build_constant_place (state : State.state) ~origin (path : Path.t) : Core.place =
   match Interface.Definition.read_constant_type state.lookups.interface path with
   | Some type_ -> Constant { path; type_; origin }
-  | None -> State.bug "the constant `%s` has no type" (Path.show path)
+  | None -> State.raise_bug "the constant `%s` has no type" (Path.show path)
 
 let build_record fields : Core.kind =
   Construct
@@ -277,7 +277,7 @@ let build_range_record state (value : Syntax.expression) start stop ~inclusive :
         State.make_synthetic_expression state ~origin:value.id Types.bool (Core.Boolean inclusive)
       in
       build_record [ ("start", start); ("stop", stop); ("inclusive", inclusive) ]
-  | _ -> State.bug "a range without both bounds is valid only inside a slice"
+  | _ -> State.raise_bug "a range without both bounds is valid only inside a slice"
 
 let find_capability_impls (state : State.state) (type_ : Types.ty) =
   match type_ with
@@ -327,7 +327,7 @@ let build_text_builder_callee name receiver : Core.callee =
 let read_template (state : State.state) (literal : Syntax.string_literal) =
   match state.tables.templates.(literal.id) with
   | Some template -> template
-  | None -> State.bug "the checker recorded no template for a string literal"
+  | None -> State.raise_bug "the checker recorded no template for a string literal"
 
 let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core.kind =
   match literal.rest with
@@ -401,7 +401,7 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
                          lends = None;
                          uses = recorded.uses;
                        })))
-        | None -> State.bug "an interpolated value has no `display`"
+        | None -> State.raise_bug "an interpolated value has no `display`"
       in
       Block
         {
@@ -517,7 +517,7 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
   let from_template =
     match recorded.from_template with
     | Some call -> call
-    | None -> State.bug "a tagged string has no `from_template`"
+    | None -> State.raise_bug "a tagged string has no `from_template`"
   in
   let make = State.make_synthetic_expression state ~origin:value.id in
   let make_list element elements =
@@ -575,7 +575,7 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
 let read_pattern_type (state : State.state) (id : Syntax.id) =
   match state.tables.scrutinee_types.(id) with
   | Some type_ -> type_
-  | None -> State.bug "a pattern has no recorded type"
+  | None -> State.raise_bug "a pattern has no recorded type"
 
 let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant) :
     Core.pattern_kind =
@@ -600,13 +600,13 @@ let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant
                 };
           }
     | None ->
-        State.bug "a pattern compares values of `%s`, which does not implement `Equal`"
+        State.raise_bug "a pattern compares values of `%s`, which does not implement `Equal`"
           (Types.show type_)
 
 let read_constant_path (state : State.state) (id : Syntax.id) =
   match state.tables.patterns.(id) with
   | Some (Constant_pattern path) -> path
-  | _ -> State.bug "a pattern names a constant that was not recorded"
+  | _ -> State.raise_bug "a pattern names a constant that was not recorded"
 
 let build_named_constant state (id : Syntax.id) : Core.pattern_constant =
   Named_constant (read_constant_path state id)
@@ -618,14 +618,14 @@ let build_literal_constant (state : State.state) (id : Syntax.id) (written : Syn
   | Literal_true, _ -> Boolean_constant true
   | Literal_false, _ -> Boolean_constant false
   | Literal_string text, _ -> String_constant text.first.value
-  | Literal_integer _, _ -> State.bug "an integer pattern has no value"
+  | Literal_integer _, _ -> State.raise_bug "an integer pattern has no value"
 
 let build_range_bound (state : State.state) (bound : Syntax.range_end) : Core.range_bound =
   match bound.kind with
   | End_literal _ -> (
       match state.tables.literals.(bound.id) with
       | Some (Integer_value number) -> Integer_bound number
-      | Some (Float_value _) | None -> State.bug "a range bound has no integer value")
+      | Some (Float_value _) | None -> State.raise_bug "a range bound has no integer value")
   | End_constant _ -> Constant_bound (read_constant_path state bound.id)
 
 let build_pattern_fields state (fields : Types.field list)
@@ -814,7 +814,7 @@ let build_compound_assign state (written : Syntax.statement) (target : Syntax.ex
                   uses = recorded.uses;
                 },
               Operands.build (read_argument_mode 1) right ))
-    | Some _ -> State.bug "a compound assignment's call is not a trait method call"
+    | Some _ -> State.raise_bug "a compound assignment's call is not a trait method call"
     | None -> make_built_in (convert_to_operation operation)
   in
   Compound_assign
@@ -971,7 +971,8 @@ let build_cursor_next state (cursor : Types.ty) : Core.callee =
           evidence = convert_evidence (State.convert_evidence implementation);
         }
   | None ->
-      State.bug "a loop iterates over `%s`, which does not implement `Cursor`" (Types.show cursor)
+      State.raise_bug "a loop iterates over `%s`, which does not implement `Cursor`"
+        (Types.show cursor)
 
 let build_for_loop (state : State.state) (written : Syntax.statement) (iterable : Syntax.expression)
     ~pattern ~clauses ~body ~mode : Core.statement_kind =
@@ -1078,13 +1079,13 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
                         };
                       ];
                   })))
-  | _ -> State.bug "the checker recorded no iteration for a `for` loop"
+  | _ -> State.raise_bug "the checker recorded no iteration for a `for` loop"
 
 let convert_resource state (written : Syntax.resource) : Core.resource =
   let resolve_capability (path : Syntax.path_type) =
     match State.find_target state path.path.last with
     | Some (Definition (Capability, capability)) -> capability
-    | _ -> State.bug "`calls` names something that is not a capability"
+    | _ -> State.raise_bug "`calls` names something that is not a capability"
   in
   match written with
   | Time -> Time
@@ -1093,7 +1094,7 @@ let convert_resource state (written : Syntax.resource) : Core.resource =
   | Calls (Call_parameter name) -> (
       match State.find_target state name with
       | Some (Local id) -> Calls (Function_parameter (Named id))
-      | _ -> State.bug "`calls(%s)` names no parameter" name.text)
+      | _ -> State.raise_bug "`calls(%s)` names no parameter" name.text)
   | Calls (Call_capability path) -> Calls (Capability (resolve_capability path))
   | Calls (Call_method (path, method_)) ->
       Calls (Capability_method (resolve_capability path, method_.text))
@@ -1125,8 +1126,8 @@ let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(ou
     | Types.Named { path; arguments } -> (
         match Members.find_variants state.lookups path arguments with
         | Some [ success; failure ] -> (success, failure)
-        | _ -> State.bug "`?` on `%s`" (Types.show type_))
-    | _ -> State.bug "`?` on `%s`" (Types.show type_)
+        | _ -> State.raise_bug "`?` on `%s`" (Types.show type_))
+    | _ -> State.raise_bug "`?` on `%s`" (Types.show type_)
   in
   let success, failure = read_variants scrutinee.type_ in
   let _, returned_failure = read_variants output in
@@ -1206,7 +1207,7 @@ let build_inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
   let path, type_arguments =
     match type_ with
     | Types.Named { path; arguments } -> (path, arguments)
-    | _ -> State.bug "a set or map literal of type `%s`" (Types.show type_)
+    | _ -> State.raise_bug "a set or map literal of type `%s`" (Types.show type_)
   in
   let make = State.make_synthetic_expression state ~origin in
   let make_statement kind : Core.statement = { id = State.allocate_node_id state; origin; kind } in
@@ -1269,7 +1270,7 @@ let build_collection_literal state (value : Syntax.expression) (elements : Core.
       Collection_literal { elements; construction = Array }
   | Types.Named { path; _ } when Well_known.is Sequence path || Well_known.is Finite_set path ->
       Collection_literal { elements; construction = Specification_only }
-  | type_ -> State.bug "a collection literal of type `%s`" (Types.show type_)
+  | type_ -> State.raise_bug "a collection literal of type `%s`" (Types.show type_)
 
 let build_map_literal state (value : Syntax.expression)
     (entries : (Core.expression * Core.expression) list) : Core.kind =
@@ -1278,4 +1279,4 @@ let build_map_literal state (value : Syntax.expression)
       build_inserted_literal state ~origin:value.id type_ ~name:"map" ~insert:"insert_absent"
         (List.map (fun (key, entry) -> [ key; entry ]) entries)
   | Types.Named { path; _ } when Well_known.is Finite_map path -> Map_literal { entries }
-  | type_ -> State.bug "a map literal of type `%s`" (Types.show type_)
+  | type_ -> State.raise_bug "a map literal of type `%s`" (Types.show type_)

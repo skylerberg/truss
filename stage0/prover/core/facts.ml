@@ -3,10 +3,10 @@ let make_variable ?(numbers = []) label = Logic.Symbol.Variable { label; numbers
 exception Unsupported of State.location * string
 exception Foreign_unsupported of string
 
-let unsupported location format =
+let raise_unsupported location format =
   Printf.ksprintf (fun message -> raise (Unsupported (location, message))) format
 
-let bug format = Compiler_bug.bug ~stage:"Prover" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
 
 let is_in_recursion_group (context : State.context) path =
   List.exists (Path.equal path) (context.lookups.recursion_group context.current)
@@ -244,28 +244,8 @@ let add_requires context (frame : State.frame) (required : State.message) =
             ((State.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ State.Text ")" ])
       | None -> make_requires_fix context required)
 
-let rec oblige ?template_clause ?cited ?(fixes = []) context (frame : State.frame) code location
-    message goal =
-  match
-    make_closed_obligation ?template_clause context frame code location message
-      (add_quantifier_facts
-         ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
-         context goal)
-  with
-  | Some obligation ->
-      let fixes =
-        match fixes with
-        | [] when frame.source.key = Some context.home && frame.makes_obligations -> (
-            match truss_of_goal context goal with
-            | Some required -> add_requires context frame [ Text required ]
-            | None -> [])
-        | fixes -> fixes
-      in
-      context.obligations <- { obligation with cited; fixes } :: context.obligations;
-      assume context frame goal
-  | None -> ()
-
-and make_closed_obligation ?template_clause context frame code location message goal =
+let rec make_closed_obligation ?template_clause context (frame : State.frame) code location message
+    goal =
   if not frame.makes_obligations then None
   else if not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition) then
     Some (make_obligation ?template_clause context frame code location message goal)
@@ -284,7 +264,8 @@ and make_closed_obligation ?template_clause context frame code location message 
              code location message closed)
     | None -> None
 
-and make_obligation ?template_clause context frame code location message goal =
+and make_obligation ?template_clause (context : State.context) (frame : State.frame) code location
+    message goal : State.obligation =
   let query =
     Logic.prune
       {
@@ -316,7 +297,43 @@ and make_obligation ?template_clause context frame code location message goal =
             [ (symbol, "result") ]
         | _ -> []);
     template_clause;
+    may_stop_with_panic = false;
   }
+
+let record_obligation ?template_clause ?cited ~fixes ~may_stop_with_panic context
+    (frame : State.frame) code location message goal =
+  match
+    make_closed_obligation ?template_clause context frame code location message
+      (add_quantifier_facts
+         ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
+         context goal)
+  with
+  | Some obligation ->
+      let fixes =
+        match fixes with
+        | [] when frame.source.key = Some context.home && frame.makes_obligations -> (
+            match truss_of_goal context goal with
+            | Some required -> add_requires context frame [ Text required ]
+            | None -> [])
+        | fixes -> fixes
+      in
+      context.obligations <-
+        { obligation with cited; fixes; may_stop_with_panic } :: context.obligations;
+      assume context frame goal
+  | None -> ()
+
+let oblige ?template_clause ?cited ?(fixes = []) context frame code location message goal =
+  record_obligation ?template_clause ?cited ~fixes ~may_stop_with_panic:false context frame code
+    location message goal
+
+let oblige_safe_operation ?cited ?(fixes = []) (context : State.context) (frame : State.frame) code
+    location message goal =
+  match frame.panic with
+  | Declared when frame.source.key = Some context.home ->
+      if frame.makes_obligations then assume context frame goal
+  | Declared | Undeclared | Undeclarable ->
+      record_obligation ?cited ~fixes ~may_stop_with_panic:(frame.panic = Undeclared) context frame
+        code location message goal
 
 let quote (source : State.source) origin =
   match source.key with Some key -> State.Quote (key, origin) | None -> Text "this expression"
@@ -326,7 +343,7 @@ let quote_span text (span : Source.Definition_span.t) =
 
 let quote_origin (context : State.context) (frame : State.frame) origin =
   if frame.source.key <> Some context.home then
-    bug "a quote of %s, outside the definition being proven" frame.source.name;
+    raise_bug "a quote of %s, outside the definition being proven" frame.source.name;
   let names = context.lookups.interface.names in
   quote_span (names.text context.home)
     (Source.Definition_span.locate (names.spans context.home) origin)
@@ -551,7 +568,7 @@ let name_path_condition context (frame : State.frame) condition =
 
 let merge context ?value_type ~condition
     (paths : (Logic.term * State.frame * Logic.term option) list) =
-  let first = match paths with (_, first, _) :: _ -> first | [] -> bug "no paths meet" in
+  let first = match paths with (_, first, _) :: _ -> first | [] -> raise_bug "no paths meet" in
   let is_expression = not first.makes_obligations in
   let aliases, slices, lends =
     merge_known_on_paths (List.map (fun (on, frame, _) -> (on, frame)) paths)
@@ -561,7 +578,7 @@ let merge context ?value_type ~condition
     match List.rev values with
     | (_, _, last) :: earlier ->
         List.fold_left (fun otherwise (on, _, term) -> Logic.ite on term otherwise) last earlier
-    | [] -> bug "a value that no path gives"
+    | [] -> raise_bug "a value that no path gives"
   in
   let define prefix sort (values : (Logic.term * State.frame * Logic.term) list) =
     match values with
@@ -626,7 +643,7 @@ let merge context ?value_type ~condition
                 paths
             with
             | Some term -> term
-            | None -> bug "a local that no path binds"))
+            | None -> raise_bug "a local that no path binds"))
       keys
   in
   let types =

@@ -134,7 +134,7 @@ let apply_list_literal context frame (site : Invocation.site) values =
   let element =
     match ty with
     | Types.Named { arguments = Types.Type element :: _; _ } -> element
-    | _ -> Facts.unsupported location "a literal of `%s`" (Types.show ty)
+    | _ -> Facts.raise_unsupported location "a literal of `%s`" (Types.show ty)
   in
   let literal =
     match make_sequence context frame ty ~element values with
@@ -142,7 +142,7 @@ let apply_list_literal context frame (site : Invocation.site) values =
     | None -> (
         match make_set context frame ty ~element values with
         | Some literal -> literal
-        | None -> Facts.unsupported location "a literal of `%s`" (Types.show ty))
+        | None -> Facts.raise_unsupported location "a literal of `%s`" (Types.show ty))
   in
   (frame, literal)
 
@@ -230,15 +230,16 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
                  ~uses:[] ~values:[] ~change:None)
           in
           (frame, result)
-      | None -> Facts.unsupported location "a tagged template whose tag the prover cannot read")
+      | None ->
+          Facts.raise_unsupported location "a tagged template whose tag the prover cannot read")
   | Bound | Dynamic ->
-      Facts.unsupported location "a tagged template whose tag the prover cannot read"
+      Facts.raise_unsupported location "a tagged template whose tag the prover cannot read"
 
 let apply_map_literal context frame ~(ty : Types.ty) ~location terms =
   let key_type, value_type =
     match ty with
     | Types.Named { arguments = [ Types.Type key; Types.Type value_type ]; _ } -> (key, value_type)
-    | _ -> Facts.unsupported location "a literal of `%s`" (Types.show ty)
+    | _ -> Facts.raise_unsupported location "a literal of `%s`" (Types.show ty)
   in
   List.iteri
     (fun index (_, key_term, _) ->
@@ -267,7 +268,7 @@ let apply_map_literal context frame ~(ty : Types.ty) ~location terms =
   let model =
     match ty with
     | Types.Named { path; _ } when Path.equal path finite_map_path -> literal
-    | _ -> Facts.unsupported location "a literal of `%s`" (Types.show ty)
+    | _ -> Facts.raise_unsupported location "a literal of `%s`" (Types.show ty)
   in
   Validity.assume_valid context frame ty literal;
   let key_sort = Facts.declare_sort context key_type in
@@ -475,7 +476,7 @@ let global_value (context : State.context) frame (site : Invocation.site) path t
   match Contracts.find_function_contract context.lookups path with
   | Some contract -> named_function context frame site path type_arguments contract ~is_argument
   | None ->
-      Facts.unsupported
+      Facts.raise_unsupported
         (Facts.locate context frame.source site.origin)
         "a function the prover cannot read, used as a value"
 
@@ -530,13 +531,13 @@ let evaluate_field_default context frame (site : Invocation.site) ty variant fie
                 (Amounts.run_code context inside default.value
                    ~type_:(Facts.substitute_type context inside default.type_))
           | None ->
-              Facts.unsupported
+              Facts.raise_unsupported
                 (Facts.locate context frame.source site.origin)
                 "a field left out without a default")
       | Some { form = Parameter_defaults _; _ } | None ->
-          Facts.bug "a type with no MIR of its defaults")
+          Facts.raise_bug "a type with no MIR of its defaults")
   | _ ->
-      Facts.unsupported
+      Facts.raise_unsupported
         (Facts.locate context frame.source site.origin)
         "a default of a type with errors"
 
@@ -597,7 +598,9 @@ let apply_construct context frame (site : Invocation.site) variant
           match List.assoc_opt name field_terms with
           | Some term -> term
           | None ->
-              Facts.unsupported (Facts.locate context frame.source site.origin) "a field left out"
+              Facts.raise_unsupported
+                (Facts.locate context frame.source site.origin)
+                "a field left out"
         in
         let built =
           Logic.Apply (Facts.make_constructor_symbol ty variant, List.map field_value shaped)
@@ -618,7 +621,7 @@ let make_text_match context location ty term text =
             match Models.index_sequence context byte model (Logic.int index) with
             | Some at -> Logic.equal at (Logic.int (Char.code text.[index]))
             | None -> Logic.Boolean false))
-  | None -> Facts.unsupported location "a string pattern on `%s`" (Types.show ty)
+  | None -> Facts.raise_unsupported location "a string pattern on `%s`" (Types.show ty)
 
 let make_log_facts number ~halving =
   let log number = Logic.Apply (Logic.Symbol.Cost_log, [ number ]) in
@@ -689,7 +692,7 @@ let apply_specification_function context frame ~location (measure : Core.specifi
   | Power, [ base; exponent ], _, _ -> (frame, Operations.declare_power context frame base exponent)
   | Time, [ function_term ], _, [ function_type ] ->
       (frame, Calls.make_time_term context frame function_type function_term)
-  | _ -> Facts.unsupported location "this specification function"
+  | _ -> Facts.raise_unsupported location "this specification function"
 
 let copy_value ?literal (context : State.context) frame ty term =
   if

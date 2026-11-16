@@ -12,7 +12,7 @@ let load directory =
   | Ok (snapshot, selected) ->
       let packages = List.map snd selected in
       if packages = [] && Workspace.problems snapshot = [] then
-        Outcome.cannot_run "No package in %s or any directory below it."
+        Outcome.raise_cannot_run "No package in %s or any directory below it."
           (Shown_path.show_path directory);
       (snapshot, packages)
 
@@ -27,9 +27,9 @@ let load_worktree () = load (Workspace.locate_root (fst (load_current ())))
 
 let require_one = function
   | [ package ] -> package
-  | [] -> Outcome.cannot_run "No package here."
+  | [] -> Outcome.raise_cannot_run "No package here."
   | several ->
-      Outcome.cannot_run
+      Outcome.raise_cannot_run
         "This directory contains %d packages: %s. Run the command in one package's directory."
         (List.length several)
         (String.concat ", " (List.map Path.show_package several))
@@ -40,7 +40,7 @@ let locate_directory snapshot name =
   | Some ("", _) -> root
   | Some (relative, _) -> Filename.concat root relative
   | None ->
-      Compiler_bug.bug ~stage:"Command" "%s is not a package of the project"
+      Compiler_bug.raise_bug ~stage:"Command" "%s is not a package of the project"
         (Path.show_package name)
 
 let locate_file snapshot file =
@@ -89,7 +89,7 @@ let select_files snapshot packages paths =
         List.map
           (fun path ->
             if not (Sys.file_exists (Shown_path.normalize path)) then
-              Outcome.cannot_run "%s does not exist." (Shown_path.show_path path);
+              Outcome.raise_cannot_run "%s does not exist." (Shown_path.show_path path);
             Shown_path.resolve_real_path path)
           paths
       in

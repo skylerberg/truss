@@ -2,10 +2,10 @@ type t = { stage : string; message : string; doing : string list }
 
 exception Bug of t
 
-let bug ~stage format =
+let raise_bug ~stage format =
   Printf.ksprintf (fun message -> raise (Bug { stage; message; doing = [] })) format
 
-let while_doing ~stage doing work =
+let run_while_doing ~stage doing work =
   let broken message = raise (Bug { stage; message; doing = [ doing ] }) in
   try work () with
   | Bug bug -> raise (Bug { bug with doing = bug.doing @ [ doing ] })

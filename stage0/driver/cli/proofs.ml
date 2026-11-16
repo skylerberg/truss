@@ -10,7 +10,7 @@ let make_solver () =
       ()
   with
   | Ok solver -> solver
-  | Error message -> Outcome.cannot_run "%s" message
+  | Error message -> Outcome.raise_cannot_run "%s" message
 
 type t = { proofs : Database.proofs; verdicts : Prover.verdicts Lazy.t }
 

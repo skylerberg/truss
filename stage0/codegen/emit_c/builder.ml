@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"Builder" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Builder" format
 
 module Locals = Set.Make (Int)
 module Blocks = Set.Make (Int)
@@ -137,7 +137,7 @@ let start builder block =
   builder.current <- block;
   builder.pending <- Buffer.create 256
 
-let in_block_facts builder (context : C_types.context) print =
+let with_block_facts builder (context : C_types.context) print =
   let facts = Dynarray.get builder.facts builder.current in
   let instances = context.instances
   and called = context.called
@@ -160,7 +160,7 @@ let in_block_facts builder (context : C_types.context) print =
 let emit builder statement =
   let function_ = lookup_current_function builder in
   function_.size <- function_.size + 1;
-  in_block_facts builder function_.code.context (fun () ->
+  with_block_facts builder function_.code.context (fun () ->
       C_code.write_statement function_.code.context
         (make_block_context builder function_)
         builder.pending statement)
@@ -179,12 +179,12 @@ let finish builder (terminator : Lowered.terminator) =
   | _ -> ());
   Dynarray.set builder.successors builder.current (Lowered.list_successors terminator);
   function_.size <- function_.size + 2;
-  in_block_facts builder context (fun () ->
+  with_block_facts builder context (fun () ->
       C_code.write_terminator context fc builder.pending terminator);
   Dynarray.set builder.texts builder.current (Some (Buffer.contents builder.pending));
   builder.pending <- Buffer.create 256
 
-let in_block builder block body =
+let run_in_block builder block body =
   let current = builder.current and pending = builder.pending in
   start builder block;
   body ();
@@ -414,8 +414,8 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
       List.iter
         (fun gives ->
           match (gives, result) with
-          | false, Some _ -> bug "a return of nothing from a function with a result"
-          | true, None -> bug "a return of a value from a function with no result"
+          | false, Some _ -> raise_bug "a return of nothing from a function with a result"
+          | true, None -> raise_bug "a return of a value from a function with no result"
           | _ -> ())
         function_.returns;
       let context = function_.code.context in
@@ -430,7 +430,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
                 (C_values.render_local_name environment
                    (Dynarray.get builder.locals environment).name)
                 field
-          | _ -> bug "local %d is neither a function's own nor in its environment" local
+          | _ -> raise_bug "local %d is neither a function's own nor in its environment" local
       in
       let body = Buffer.create 1024 in
       Buffer.add_string body " {\n";
@@ -447,7 +447,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
                 | Value ty when C_types.is_struct context ty -> " = {0}"
                 | Value _ | Pointer _ | Raw _ -> " = 0"
                 | Lend | Lend_mark -> " = {0}"
-                | Environment _ | Evidence _ -> bug "a zeroed environment or evidence slot"
+                | Environment _ | Evidence _ -> raise_bug "a zeroed environment or evidence slot"
             in
             Buffer.add_string body
               (Printf.sprintf "  %s %s%s;\n"
@@ -471,7 +471,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
           if Blocks.mem block !targets then Buffer.add_string body (Printf.sprintf "b%d:;\n" block);
           match texts.(block) with
           | Some text -> Buffer.add_string body text
-          | None -> bug "block %d is never finished" block)
+          | None -> raise_bug "block %d is never finished" block)
         blocks;
       Buffer.add_string body "}\n";
       let symbol =

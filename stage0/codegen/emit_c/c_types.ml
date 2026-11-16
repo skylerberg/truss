@@ -209,7 +209,8 @@ and define_text context key =
                              (render_scalar_type context scalar)
                              variant.name,
                            [] )
-                   | _ -> C_runtime.bug "a variant's payload is a struct, a pointer, or nothing")
+                   | _ ->
+                       C_runtime.raise_bug "a variant's payload is a struct, a pointer, or nothing")
                  variants)
           in
           Struct
@@ -220,14 +221,14 @@ and define_text context key =
                   (String.concat "" members);
               holds = List.concat holds;
             }
-      | Niche_encoded _ -> C_runtime.bug "a niche-encoded payload is a struct or a pointer"
-      | Zero_size | Scalar _ -> C_runtime.bug "%s needs no definition" (Ground.to_string ty))
+      | Niche_encoded _ -> C_runtime.raise_bug "a niche-encoded payload is a struct or a pointer"
+      | Zero_size | Scalar _ -> C_runtime.raise_bug "%s needs no definition" (Ground.to_string ty))
   | Block (ty, variant) -> (
       match (Memory_layout.lay_out_block context.env ty variant).form with
       | Struct fields ->
           let body, holds = render_field_declarations context fields in
           Struct { body; holds }
-      | _ -> C_runtime.bug "the block of %s.%s has no fields" (Ground.to_string ty) variant)
+      | _ -> C_runtime.raise_bug "the block of %s.%s has no fields" (Ground.to_string ty) variant)
   | Code function_type ->
       let signature = Convention.make_function_value_signature context.env function_type in
       let result =

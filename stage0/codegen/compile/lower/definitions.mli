@@ -1,4 +1,4 @@
-val bug : ('a, unit, string, 'b) format4 -> 'a
+val raise_bug : ('a, unit, string, 'b) format4 -> 'a
 
 type context = {
   lookups : Lookups.t;

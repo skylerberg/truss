@@ -1,16 +1,18 @@
-let bug format = Compiler_bug.bug ~stage:"Interface" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Interface" format
 
 let find_declaring_type_trait lookups ~base (trait : Types.trait_reference) name =
   match Properties.find_trait_declaring_type lookups ~base trait name with
   | Some declaring -> declaring
   | None ->
-      bug "no trait among `%s` and its requirements declares `%s`" (Types.show_trait trait) name
+      raise_bug "no trait among `%s` and its requirements declares `%s`" (Types.show_trait trait)
+        name
 
 let find_declaring_capability_trait lookups ~base (trait : Types.trait_reference) name =
   match Properties.find_trait_declaring_capability_set lookups ~base trait name with
   | Some declaring -> declaring
   | None ->
-      bug "no trait among `%s` and its requirements declares `%s`" (Types.show_trait trait) name
+      raise_bug "no trait among `%s` and its requirements declares `%s`" (Types.show_trait trait)
+        name
 
 let find_head = function Types.Named { path; _ } -> Some path | _ -> None
 

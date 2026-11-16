@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"Encoding" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Encoding" format
 let variant_index : Memory_layout.integer = UInt32
 let make_signature env ty = Writing.make_signature env [ Writing.make_value_parameter ty ]
 
@@ -44,13 +44,13 @@ let encode env ty =
               (match variant with
               | None -> Lowered.project place (Field name)
               | Some variant -> Lowered.project place (Variant_field { variant; field = name }))
-        | Raw _ -> bug "a raw field in a value written out")
+        | Raw _ -> raise_bug "a raw field in a value written out")
       fields
   in
   (match Representation.classify env ty with
-  | Handle -> bug "a handle cannot be computed while compiling"
-  | Shared _ -> bug "a shared value cannot be computed while compiling"
-  | Any -> bug "an any value cannot be computed while compiling"
+  | Handle -> raise_bug "a handle cannot be computed while compiling"
+  | Shared _ -> raise_bug "a shared value cannot be computed while compiling"
+  | Any -> raise_bug "an any value cannot be computed while compiling"
   | Storage element ->
       append_bytes (Storage.project_length value) (Memory_layout.compute_integer_size UInt64);
       Emit_c.Builder.emit_loop builder
@@ -69,7 +69,7 @@ let encode env ty =
         List.mapi
           (fun index (variant_shape : Memory_layout.variant_shape) ->
             let case = Emit_c.Builder.allocate_block builder in
-            Emit_c.Builder.in_block builder case (fun () ->
+            Emit_c.Builder.run_in_block builder case (fun () ->
                 let encoded_index =
                   Emit_c.Builder.allocate_local builder (Raw (Integer variant_index))
                 in
@@ -97,7 +97,7 @@ let is_at_end reader = reader.offset = String.length reader.encoded
 
 let take reader count =
   if reader.offset + count > String.length reader.encoded then
-    bug "a value written out while compiling ends early";
+    raise_bug "a value written out while compiling ends early";
   let part = String.sub reader.encoded reader.offset count in
   reader.offset <- reader.offset + count;
   part
@@ -125,7 +125,7 @@ let decode_scalar reader (kind : Memory_layout.scalar) : Lowered.constant =
   | Float64 -> Float64 (Z.to_int64_unsigned (decode_unsigned (take reader 8)))
   | Bool -> Bool (decode_unsigned (take reader 1) <> Z.zero)
   | Character -> Character (Z.to_int (decode_unsigned (take reader 4)))
-  | Pointer _ | Nullable_pointer _ -> bug "a pointer computed while compiling"
+  | Pointer _ | Nullable_pointer _ -> raise_bug "a pointer computed while compiling"
 
 let decode env ty encoded : Lowered.static_value =
   let reader = { encoded; offset = 0 } in
@@ -133,9 +133,9 @@ let decode env ty encoded : Lowered.static_value =
     if Memory_layout.has_zero_size env ty then empty ty
     else
       match Representation.classify env ty with
-      | Handle -> bug "a handle computed while compiling"
-      | Shared _ -> bug "a shared value computed while compiling"
-      | Any -> bug "an any value computed while compiling"
+      | Handle -> raise_bug "a handle computed while compiling"
+      | Shared _ -> raise_bug "a shared value computed while compiling"
+      | Any -> raise_bug "an any value computed while compiling"
       | Storage element ->
           let count = Z.to_int (decode_integer reader UInt64) in
           Static_storage { element; elements = List.init count (fun _ -> value element) }
@@ -150,7 +150,7 @@ let decode env ty encoded : Lowered.static_value =
       (fun (name, (member : Memory_layout.member)) ->
         match member with
         | Typed field_ty -> (name, value field_ty)
-        | Raw _ -> bug "a raw field computed while compiling")
+        | Raw _ -> raise_bug "a raw field computed while compiling")
       members
   and empty ty : Lowered.static_value =
     match Memory_layout.shape env ty with
@@ -160,13 +160,13 @@ let decode env ty encoded : Lowered.static_value =
         Static_variant
           (variant.name, List.map (fun (name, member) -> (name, empty_member member)) variant.fields)
     | Array (element, count) -> Static_array (List.init count (fun _ -> empty element))
-    | _ -> bug "%s has no one value of zero size" (Ground.to_string ty)
+    | _ -> raise_bug "%s has no one value of zero size" (Ground.to_string ty)
   and empty_member : Memory_layout.member -> Lowered.static_value = function
     | Typed ty -> empty ty
-    | Raw _ -> bug "a raw field of zero size"
+    | Raw _ -> raise_bug "a raw field of zero size"
   in
   let decoded = value ty in
-  if not (is_at_end reader) then bug "a value written out while compiling has bytes left over";
+  if not (is_at_end reader) then raise_bug "a value written out while compiling has bytes left over";
   decoded
 
 let decode_booleans encoded =
@@ -176,6 +176,6 @@ let decode_booleans encoded =
     else
       match decode_scalar reader Bool with
       | Bool holds -> holds :: booleans ()
-      | _ -> bug "a Bool written out while compiling reads back as another scalar"
+      | _ -> raise_bug "a Bool written out while compiling reads back as another scalar"
   in
   booleans ()

@@ -249,7 +249,7 @@ let compute_tasks_use ?(solved = fun (_ : int) : Types.capability_set -> Types.n
         if !usage = No_tasks then usage := Through_parameter
     | Capability_variable variable -> List.iter used (solved variable :> Types.capability list)
     | Capability_error _ ->
-        Compiler_bug.bug ~stage:"Core_walk" "a core form uses a capability with an error"
+        Compiler_bug.raise_bug ~stage:"Core_walk" "a core form uses a capability with an error"
   in
   walk_block
     (make_deep_visitor

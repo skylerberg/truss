@@ -126,7 +126,9 @@ let run_lambda_body ?(entering = Fun.id) (context : State.context) (frame : Stat
   Fun.protect
     ~finally:(fun () -> context.returns <- saved_returns)
     (fun () ->
-      let inside = entering { frame with locals = remove_temporaries frame.locals } in
+      let inside =
+        entering { frame with locals = remove_temporaries frame.locals; panic = Undeclarable }
+      in
       (try context.run_body inside ~lambdas body
        with Facts.Unsupported (_, message) when is_foreign ->
          raise (Facts.Foreign_unsupported (Printf.sprintf "%s, in `%s`" message frame.source.name)));
@@ -326,10 +328,10 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let function_type =
     match ty with
     | Types.Function function_type -> function_type
-    | _ -> Facts.unsupported location "a lambda"
+    | _ -> Facts.raise_unsupported location "a lambda"
   in
   if List.length written.code.parameters <> List.length function_type.inputs then
-    Facts.unsupported location "a lambda with a different number of parameters";
+    Facts.raise_unsupported location "a lambda with a different number of parameters";
   let called = Facts.declare_fresh context frame "called" Logic.Bool in
   let inside = { (Facts.restrict frame called) with result = None } in
   let start_fresh = context.fresh
@@ -403,7 +405,9 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         context.counters <- saved_counters)
       (fun () ->
         let finished =
-          let inside = { inside with locals = remove_temporaries inside.locals } in
+          let inside =
+            { inside with locals = remove_temporaries inside.locals; panic = Undeclarable }
+          in
           let inside =
             List.fold_left2
               (fun inside parameter argument ->

@@ -91,6 +91,7 @@ val map : ?capabilities:(capability_set -> capability_set) -> (ty -> ty option) 
 val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
 val find_specification_only_type : ty -> ty option
 val has_capability_variable : capability_set -> bool
+val may_panic : capability_set -> bool
 val has_unsolved_capabilities : capability_set -> bool
 val equal : ty -> ty -> bool
 val is_error : ty -> bool

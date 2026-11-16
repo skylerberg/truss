@@ -252,7 +252,7 @@ let expect_keyword cursor keyword =
   if not (accept_keyword cursor keyword) then
     fail cursor (Printf.sprintf "`%s`" (Token.spell_keyword keyword))
 
-let nested cursor parse =
+let run_nested cursor parse =
   if cursor.nesting_depth >= nesting_limit then begin
     report cursor Nesting_too_deep (peek cursor).span
       (Printf.sprintf "This is nested more than %d levels deep." nesting_limit);

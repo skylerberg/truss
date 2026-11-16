@@ -3,8 +3,8 @@ val make_variable : ?numbers:int list -> string -> 'a Logic.Symbol.t
 exception Unsupported of State.location * string
 exception Foreign_unsupported of string
 
-val unsupported : State.location -> ('a, unit, string, 'b) format4 -> 'a
-val bug : ('a, unit, string, 'b) format4 -> 'a
+val raise_unsupported : State.location -> ('a, unit, string, 'b) format4 -> 'a
+val raise_bug : ('a, unit, string, 'b) format4 -> 'a
 val is_in_recursion_group : State.context -> Path.t -> bool
 val has_method_in_recursion_group : State.context -> Path.t -> bool
 val list_clauses : Mir.requirement list -> Mir.formula list
@@ -22,6 +22,17 @@ val truss_of_value : State.context -> Logic.term -> string option
 
 val oblige :
   ?template_clause:State.template_clause ->
+  ?cited:Resolve.Names.key * Core.origin ->
+  ?fixes:State.fix list ->
+  State.context ->
+  State.frame ->
+  Diagnostic.Code.prover ->
+  State.location ->
+  State.message ->
+  Logic.term ->
+  unit
+
+val oblige_safe_operation :
   ?cited:Resolve.Names.key * Core.origin ->
   ?fixes:State.fix list ->
   State.context ->

@@ -75,10 +75,10 @@ let lower_template_check context ~from_template ~literals ~clauses : Emit_c.Buil
       Definitions.list_interface_parameters (Definitions.read_signature context from_template)
     with
     | [ (_, template_type) ] -> template_type
-    | _ -> Definitions.bug "%s does not take one template" (Path.show from_template)
+    | _ -> Definitions.raise_bug "%s does not take one template" (Path.show from_template)
   in
   Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
-  Lowering.in_scope st (fun () ->
+  Lowering.run_in_scope st (fun () ->
       let template =
         Targets.lower_template_value st
           (Lowering.ground st template_type)
@@ -103,7 +103,7 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.instanc
   let st, _ = make_code_state context ~key function_ in
   Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
   let signature = Definitions.read_signature context function_ in
-  Lowering.in_scope st (fun () ->
+  Lowering.run_in_scope st (fun () ->
       let passed =
         List.map2
           (fun (mode, ty) value ->
@@ -113,7 +113,9 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.instanc
               match Lowering.classify_scalar st ty with
               | Integer integer -> Lowering.make_int_constant integer value
               | Bool -> Lowered.Constant (Bool (not (Z.equal value Z.zero)))
-              | _ -> Definitions.bug "an evaluated call's argument of type %s" (Ground.to_string ty)
+              | _ ->
+                  Definitions.raise_bug "an evaluated call's argument of type %s"
+                    (Ground.to_string ty)
             in
             Emit_c.Builder.emit st.builder (Assign (place, Use constant));
             (mode, ty, place))
@@ -123,7 +125,7 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.instanc
       let result_ty =
         match signature.output with
         | Returns ty -> Lowering.ground st ty
-        | _ -> Definitions.bug "an evaluated call that does not return"
+        | _ -> Definitions.raise_bug "an evaluated call that does not return"
       in
       let result = Lowering.allocate_temporary st result_ty in
       Targets.lower_instance_call st

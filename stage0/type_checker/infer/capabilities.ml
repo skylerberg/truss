@@ -126,7 +126,7 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
                   (Printf.sprintf
                      "This call uses `%s`, which is not available here. Declare it with `uses %s`."
                      shown shown)
-            | Capability_error _ -> State.bug "a capability with an error is missing"))
+            | Capability_error _ -> State.raise_bug "a capability with an error is missing"))
       (missing :> Types.capability list)
   in
   if required <> Types.no_capabilities then
@@ -392,7 +392,7 @@ let rec can_call_capability_code (state : State.state) ~bounds ?(seen = []) (typ
     let can_hold_a_capability : Types.capability -> bool = function
       | Capability_projection _ -> ( match type_ with Types.Any _ -> false | _ -> true)
       | Capability _ | Capability_parameter _ | Capability_variable _ -> true
-      | Capability_error _ -> State.bug "a trait's method uses a capability with an error"
+      | Capability_error _ -> State.raise_bug "a trait's method uses a capability with an error"
     in
     List.exists
       (fun (bound : Types.trait_reference) ->

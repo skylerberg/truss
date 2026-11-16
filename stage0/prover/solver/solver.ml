@@ -1,6 +1,6 @@
 let version = "5.3.3"
 let steps = 1_000_000
-let bug format = Compiler_bug.bug ~stage:"Solver" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Solver" format
 
 type cache = { find : string -> string option; add : string -> string -> unit }
 type t = { program : string; cache : cache option; mutable queries_run : int }
@@ -180,7 +180,7 @@ let solve solver (request, query) =
   | None ->
       let text = Logic.show_query query in
       if request_key_of_text text request.value_arguments <> request.key then
-        bug "the query is not the one its request was made from";
+        raise_bug "the query is not the one its request was made from";
       let input =
         header ^ text
         ^
@@ -209,7 +209,7 @@ let solve solver (request, query) =
               | _ -> [])
         | Atom "unknown" :: _ -> Out_of_steps_canonical
         | _ ->
-            bug
+            raise_bug
               "Z3 exited with status %d without answering a query, writing `%s` to stdout and `%s` \
                to stderr"
               status (String.trim output) (String.trim errors)

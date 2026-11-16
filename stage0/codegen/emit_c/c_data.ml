@@ -63,12 +63,12 @@ let rec render_initializer context ty (value : Lowered.static_value) : string op
   | Tag_only { variants; _ }, Static_variant (name, _) -> (
       match List.find_index (String.equal name) variants with
       | Some index -> Some (string_of_int index)
-      | None -> C_runtime.bug "no variant %s" name)
+      | None -> C_runtime.raise_bug "no variant %s" name)
   | Tagged { variants; _ }, Static_variant (name, values) -> (
       match
         List.find_opt (fun (variant : Memory_layout.variant) -> variant.name = name) variants
       with
-      | None -> C_runtime.bug "no variant %s" name
+      | None -> C_runtime.raise_bug "no variant %s" name
       | Some variant -> (
           match variant.payload.form with
           | Zero_size -> Some (Printf.sprintf "{ .tag = %d }" variant.index)
@@ -80,27 +80,27 @@ let rec render_initializer context ty (value : Lowered.static_value) : string op
               Some
                 (Printf.sprintf "{ .tag = %d, .payload.v_%s = %s }" variant.index name
                    (block_c name values))
-          | _ -> C_runtime.bug "a payload"))
+          | _ -> C_runtime.raise_bug "a payload"))
   | Niche_encoded { dataful; dataless }, Static_variant (name, values) ->
       if dataful.name = name then
         match dataful.payload.form with
         | Struct fields -> Some ("{ " ^ fields_c fields values "" ^ " }")
         | Scalar (Pointer (Block _)) -> Some (block_c name values)
-        | _ -> C_runtime.bug "a payload"
+        | _ -> C_runtime.raise_bug "a payload"
       else
         begin match dataless with
         | Some { niche; niche_values } -> (
             match List.assoc_opt name niche_values with
-            | None -> C_runtime.bug "no variant %s" name
+            | None -> C_runtime.raise_bug "no variant %s" name
             | Some value -> (
                 let stored = C_values.render_niche_value context niche value in
                 match niche.path with
                 | [] -> Some stored
                 | path -> Some (Printf.sprintf "{ %s = %s }" (C_values.render_path "" path) stored))
             )
-        | None -> C_runtime.bug "no variant %s" name
+        | None -> C_runtime.raise_bug "no variant %s" name
         end
-  | _ -> C_runtime.bug "static data that does not fit %s" (Ground.to_string ty)
+  | _ -> C_runtime.raise_bug "static data that does not fit %s" (Ground.to_string ty)
 
 let render_table context (table : Lowered.table) =
   let entries =

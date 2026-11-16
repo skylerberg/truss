@@ -189,7 +189,7 @@ let run_tests ?rerun ?progress database snapshot packages tests =
         (List.map (fun test -> test.path) tests)
     with
     | Ok records -> records
-    | Error message -> Outcome.cannot_run "%s" message
+    | Error message -> Outcome.raise_cannot_run "%s" message
 
 let run ~paths ~match_ ~timings:show_timings ~rerun =
   let json = Output.json () in

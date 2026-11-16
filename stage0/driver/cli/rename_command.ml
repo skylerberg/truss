@@ -29,7 +29,7 @@ let locate_in_package packages from_ =
   match Path.split_module ~is_package (argument.prefix @ [ argument.last ]) with
   | Some module_ -> (module_, argument.member)
   | None ->
-      Outcome.cannot_run
+      Outcome.raise_cannot_run
         "Only the definitions of this project's packages can be renamed, and `%s` is not in one."
         from_
 
@@ -59,8 +59,8 @@ let resolve_target snapshot database packages from_ =
           | Some name -> Method { owner = Top { module_; name = last }; name; receiver = Static }
         in
         if declared path then Definition path
-        else Outcome.cannot_run "Nothing named `%s` is defined in %s." from_ package_name
-    | _ -> Outcome.cannot_run "Nothing named `%s` is defined in %s." from_ package_name
+        else Outcome.raise_cannot_run "Nothing named `%s` is defined in %s." from_ package_name
+    | _ -> Outcome.raise_cannot_run "Nothing named `%s` is defined in %s." from_ package_name
 
 let new_name ~from_ to_ =
   let written = Path_argument.parse to_ and old = Path_argument.parse from_ in
@@ -69,12 +69,12 @@ let new_name ~from_ to_ =
   in
   let from_owner, _ = owner_and_name old in
   if written.prefix <> [] && written.prefix <> old.prefix then
-    Outcome.cannot_run
+    Outcome.raise_cannot_run
       "A rename keeps a definition in its module, and `%s` is in another one than `%s`." to_ from_;
   let owner, name = owner_and_name written in
   if written.member <> None && owner <> from_owner then
-    Outcome.cannot_run "A rename keeps a method with its type, and `%s` is not under `%s`." to_
-      from_owner;
+    Outcome.raise_cannot_run "A rename keeps a method with its type, and `%s` is not under `%s`."
+      to_ from_owner;
   name
 
 let list_occurrences database snapshot packages =
@@ -119,16 +119,18 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
     | { package = named; modules = _ :: _ as modules }, None when named = package -> modules
     | _ | (exception Outcome.Cannot_run _) ->
         let package = Path.show_package package in
-        Outcome.cannot_run "`%s` is not a module path in %s, such as `%s::name`." to_ package
+        Outcome.raise_cannot_run "`%s` is not a module path in %s, such as `%s::name`." to_ package
           package
   in
   List.iter
     (fun name ->
       if not (Manifest.is_valid_name name) then
-        Outcome.cannot_run "`%s` is not a lower_snake_case name, which a module's must be." name)
+        Outcome.raise_cannot_run "`%s` is not a lower_snake_case name, which a module's must be."
+          name)
     modules;
   let new_module : Path.module_ = { package; modules } in
-  if module_exists snapshot packages new_module then Outcome.cannot_run "`%s` already exists." to_;
+  if module_exists snapshot packages new_module then
+    Outcome.raise_cannot_run "`%s` already exists." to_;
   let full = Path.show_module new_module in
   let last = List.nth modules (List.length modules - 1) in
   let edits =
@@ -174,7 +176,7 @@ let locate_directory snapshot packages (module_ : Path.module_) =
     List.fold_left Filename.concat
       (Command_packages.locate_directory snapshot module_.package)
       module_.modules
-  else Outcome.cannot_run "%s is not in this project." (Path.show_module module_)
+  else Outcome.raise_cannot_run "%s is not in this project." (Path.show_module module_)
 
 let locate_path snapshot packages (file : Path.file) =
   Filename.concat (locate_directory snapshot packages file.module_) (file.name ^ ".truss")

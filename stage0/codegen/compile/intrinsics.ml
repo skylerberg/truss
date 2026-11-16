@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"Intrinsics" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Intrinsics" format
 
 type argument = Place of Lowered.place | Value of Lowered.operand
 type types = { uint64 : Ground.ty; string_slice : Ground.ty }
@@ -7,16 +7,16 @@ let make_operand = function Place place -> Lowered.Copy place | Value operand ->
 
 let extract_place = function
   | Place place -> place
-  | Value _ -> bug "an operation on storage given a value"
+  | Value _ -> raise_bug "an operation on storage given a value"
 
 let read = function
   | Place place | Value (Copy place) -> place
-  | Value _ -> bug "a value to read that is in no place"
+  | Value _ -> raise_bug "a value to read that is in no place"
 
 let classify_scalar env (ty : Ground.ty) =
   match (Memory_layout.of_type env ty).form with
   | Scalar scalar -> scalar
-  | _ -> bug "%s is not a number" (Ground.to_string ty)
+  | _ -> raise_bug "%s is not a number" (Ground.to_string ty)
 
 let list_consumed_places : Intrinsic.operation -> int list = function
   | Array_from_storage -> [ 0 ]
@@ -34,7 +34,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
   let type_argument position =
     match List.nth_opt type_arguments position with
     | Some ty -> ty
-    | None -> bug "a missing type argument"
+    | None -> raise_bug "a missing type argument"
   in
   let binary op = set (Binary (op, value 0, value 1)) in
   let unary op = set (Unary (op, value 0)) in
@@ -186,7 +186,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
   | Array_at_mut ->
       (match value_arguments with
       | [ count ] -> check_index (value 1) (Constant (Integer (UInt64, count)))
-      | _ -> bug "array_at_mut without the array's length");
+      | _ -> raise_bug "array_at_mut without the array's length");
       lent (Lowered.project (extract_place (argument 0)) (Index (value 1)))
   | _ ->
       let integer_argument () =
@@ -253,7 +253,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
               (Ground.make_builtin (Intrinsic.builtin_of_libc (Libc.classify_number number)))
           with
           | Integer integer -> integer
-          | _ -> bug "a number of the C library that is not an integer"
+          | _ -> raise_bug "a number of the C library that is not an integer"
         in
         Constant
           (Integer (integer, Z.of_int (Libc.evaluate_number (Memory_layout.system env) number)))
@@ -429,7 +429,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                 | [] -> Use (Constant (Bool true))
                 | [ only ] -> Use only
                 | [ first; second ] -> Binary (Bit_and, first, second)
-                | _ -> bug "more than two bounds")
+                | _ -> raise_bug "more than two bounds")
             | ((Float32 | Float64) as source), Integer target_integer ->
                 let low, high = Memory_layout.compute_integer_range target_integer in
                 let held bound =
@@ -461,7 +461,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                   ( Bit_and,
                     Copy (Lowered.make_local_place above),
                     Copy (Lowered.make_local_place below) )
-            | _ -> bug "fits between these types"
+            | _ -> raise_bug "fits between these types"
           in
           match
             (operation, classify_scalar env (type_argument 0), classify_scalar env (type_argument 1))
@@ -626,7 +626,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           let count =
             match value_arguments with
             | [ count ] -> count
-            | _ -> bug "storage_from_array without the array's length"
+            | _ -> raise_bug "storage_from_array without the array's length"
           in
           let array_ty : Ground.ty =
             Named
@@ -662,7 +662,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           let count =
             match value_arguments with
             | [ count ] -> count
-            | _ -> bug "array_from_storage without the array's length"
+            | _ -> raise_bug "array_from_storage without the array's length"
           in
           let array_ty : Ground.ty =
             Named
@@ -712,7 +712,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           let count =
             match value_arguments with
             | [ count ] -> count
-            | _ -> bug "array_view without the array's length"
+            | _ -> raise_bug "array_view without the array's length"
           in
           let array_ty : Ground.ty =
             Named
@@ -773,13 +773,13 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                  (Address { place = Storage.index_view_element view (value 1); writable = false })
                ~length:(Copy (Lowered.make_local_place count)))
       | Storage_model | View_model | Array_model ->
-          bug "a model, which exists only in specifications"
+          raise_bug "a model, which exists only in specifications"
       | Crash ->
           let message = read (argument 0) in
           let bytes =
             match (Memory_layout.of_type env types.string_slice).form with
             | Struct [ only ] -> Lowered.project message (Field only.name)
-            | _ -> bug "a StringSlice that is not a record of one field"
+            | _ -> raise_bug "a StringSlice that is not a record of one field"
           in
           Emit_c.Builder.finish builder
             (Fail
@@ -824,8 +824,8 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                })
       | Shared_key ->
           set (Convert (Copy (Lowered.project (read (argument 0)) (Field "value")), Integer UInt64))
-      | Shared_update -> bug "shared_update is lowered with the call of its function value"
-      | Holds_invariant -> bug "holds_invariant is lowered with its type's invariant"
+      | Shared_update -> raise_bug "shared_update is lowered with the call of its function value"
+      | Holds_invariant -> raise_bug "holds_invariant is lowered with its type's invariant"
       | Handle_release ->
           let released =
             Emit_c.Builder.allocate_local builder
@@ -1012,7 +1012,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                                Binary (Multiply, count, Lowered.make_uint64_constant each) ));
                         Some (Copy (Lowered.make_local_place scaled))
                       end
-                  | None -> bug "a C library row counts by %s, which it does not take" by)
+                  | None -> raise_bug "a C library row counts by %s, which it does not take" by)
               | Exactly elements -> Some (Lowered.make_uint64_constant elements)
               | Number number -> Some (as_uint64 (number_constant number))
               | Through_zero -> None
@@ -1048,7 +1048,8 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                         let zero : Lowered.operand =
                           match classify_scalar env (ground element) with
                           | Integer integer -> Constant (Integer (integer, Z.zero))
-                          | _ -> bug "a C library row reads up to a zero that is not an integer"
+                          | _ ->
+                              raise_bug "a C library row reads up to a zero that is not an integer"
                         in
                         panic_if
                           (Binary (Equal, view_length view, Lowered.make_uint64_constant 0))

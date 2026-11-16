@@ -26,20 +26,21 @@ let resolve_impl (context : Definitions.context) substitution ~(trait : Types.tr
              })
         with
         | Some (From_impl { impl; substitution }) -> (impl, substitution)
-        | _ -> Definitions.bug "no impl of %s for %s" (Types.show_trait trait) (Types.show self))
-    | Dynamic -> Definitions.bug "a call through any, which reaches no one instance"
+        | _ ->
+            Definitions.raise_bug "no impl of %s for %s" (Types.show_trait trait) (Types.show self))
+    | Dynamic -> Definitions.raise_bug "a call through any, which reaches no one instance"
   in
   let impl_interface =
     match Interface.Definition.read_impl_interface context.lookups.interface impl with
     | Some position -> position
-    | None -> Definitions.bug "no interface for %s" (Path.show impl)
+    | None -> Definitions.raise_bug "no interface for %s" (Path.show impl)
   in
   let impl_arguments =
     List.map
       (fun (generic : Types.generic) ->
         match List.assoc_opt generic.generic arguments with
         | Some argument -> Monomorphic.ground_argument context.monomorphic [] argument
-        | None -> Definitions.bug "the impl's parameter %s is not bound" generic.generic.name)
+        | None -> Definitions.raise_bug "the impl's parameter %s is not bound" generic.generic.name)
       impl_interface.impl_generics
   in
   (impl, impl_arguments)
@@ -84,7 +85,7 @@ let lookup_capability_method (context : Definitions.context) capability name =
   lookup_method_slot context ~owner:capability
     (Definitions.read_trait_interface context capability).methods
     ~is_wanted:(fun (declared : Types.trait_method) -> declared.method_name = name)
-    ~missing:(fun () -> Definitions.bug "%s has no method %s" (Path.show capability) name)
+    ~missing:(fun () -> Definitions.raise_bug "%s has no method %s" (Path.show capability) name)
 
 let make_entry_signature context (signature : Types.signature) =
   let entry, result =
@@ -108,7 +109,7 @@ let lookup_dynamic_method context trait name receiver =
   lookup_method_slot context ~owner:trait (list_any_methods context trait)
     ~is_wanted:(fun (declared : Types.trait_method) ->
       declared.method_name = name && declared.method_receiver = receiver)
-    ~missing:(fun () -> Definitions.bug "%s cannot be called through any" name)
+    ~missing:(fun () -> Definitions.raise_bug "%s cannot be called through any" name)
 
 let is_copyable_any (context : Definitions.context) (any : Types.trait_reference) =
   Interface.Impls.is_copyable context.lookups.interface ~bounds:Interface.Impls.no_bounds
@@ -127,7 +128,8 @@ let make_any_substitution (context : Definitions.context) ~(any : Types.trait_re
       with
       | Some bound -> bound
       | None ->
-          Definitions.bug "%s is not a trait of %s" (Path.show trait) (Types.show (Types.Any any))
+          Definitions.raise_bug "%s is not a trait of %s" (Path.show trait)
+            (Types.show (Types.Any any))
   in
   Interface.Properties.make_trait_substitution
     (Definitions.read_trait_interface context trait)
@@ -150,7 +152,7 @@ let lower_implementation_evidence (st : Lowering.state) ~impl ~type_arguments ~i
       (fun captured ->
         match List.find_opt (fun (path, _) -> Path.equal path captured) st.evidence with
         | Some (_, operand) -> operand
-        | None -> Definitions.bug "no evidence for %s here" (Path.show captured))
+        | None -> Definitions.raise_bug "no evidence for %s here" (Path.show captured))
       (Definitions.list_evidence st.context []
          (Definitions.read_impl_interface st.context impl).impl_uses)
   in
@@ -172,7 +174,7 @@ let lookup_evidence (st : Lowering.state) capability =
   match List.find_opt (fun (path, _) -> Path.equal path capability) st.evidence with
   | Some (_, operand) -> operand
   | None -> (
-      let missing () = Definitions.bug "no evidence for %s here" (Path.show capability) in
+      let missing () = Definitions.raise_bug "no evidence for %s here" (Path.show capability) in
       match st.frame.code.enclosing_impl with
       | Some impl
         when Path.equal (Definitions.read_impl_interface st.context impl).implements.trait
@@ -192,7 +194,7 @@ let lookup_evidence (st : Lowering.state) capability =
               (fun (generic : Types.generic) ->
                 match List.assoc_opt generic.generic st.frame.code.substitution with
                 | Some argument -> Monomorphic.ground_argument st.context.monomorphic [] argument
-                | None -> Definitions.bug "an unbound parameter of %s" (Path.show impl))
+                | None -> Definitions.raise_bug "an unbound parameter of %s" (Path.show impl))
               interface.impl_generics
           in
           lower_implementation_evidence st ~impl ~type_arguments ~implementation
@@ -343,17 +345,17 @@ let lower_call_through_any (st : Lowering.state) ~(any_type : Types.trait_refere
        });
   if not c_signature.returns then Lowering.emit_unreachable_block st
 
-let in_type_definition (st : Lowering.state) ~(source : Resolve.Names.key) (ty : Ground.ty)
+let run_in_type_definition (st : Lowering.state) ~(source : Resolve.Names.key) (ty : Ground.ty)
     nested_function =
   let path, arguments =
     match ty with
     | Named { path; arguments } -> (path, arguments)
-    | _ -> Definitions.bug "defaults of %s" (Ground.to_string ty)
+    | _ -> Definitions.raise_bug "defaults of %s" (Ground.to_string ty)
   in
   let interface =
     match Interface.Definition.read_type_interface st.context.lookups.interface path with
     | Some position -> position
-    | None -> Definitions.bug "no interface for %s" (Path.show path)
+    | None -> Definitions.raise_bug "no interface for %s" (Path.show path)
   in
   let caller = st.frame in
   st.frame <-
@@ -430,7 +432,7 @@ let lower_provided_evidence (st : Lowering.state) ~(implementation : Lowered.ope
             | Some argument ->
                 Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution
                   argument
-            | None -> Definitions.bug "an unbound parameter of %s" (Path.show impl))
+            | None -> Definitions.raise_bug "an unbound parameter of %s" (Path.show impl))
           (Definitions.read_impl_interface st.context impl).impl_generics
       in
       (capability, lower_implementation_evidence st ~impl ~type_arguments ~implementation))
@@ -481,7 +483,7 @@ let lower_literal st ty (literal : literal) : Lowered.operand =
   | Integer_value value, Character -> Constant (Character (Z.to_int value))
   | Float_value value, Float64 -> Constant (Float64 (Int64.bits_of_float value))
   | Float_value value, Float32 -> Constant (Float32 (Int32.bits_of_float value))
-  | _ -> Definitions.bug "a literal of type %s" (Ground.to_string ty)
+  | _ -> Definitions.raise_bug "a literal of type %s" (Ground.to_string ty)
 
 let lower_literal_place st (ty : Ground.ty) text =
   let bytes : Lowered.operand = Constant (Bytes text) in
@@ -497,7 +499,7 @@ let lower_literal_place st (ty : Ground.ty) text =
         (field, build storage (Storage.build_storage storage ~buffer:bytes ~length ~capacity:length))
     | _, Record [ (field, Typed view) ] ->
         (field, build view (Storage.build_view view ~elements:bytes ~length))
-    | _ -> Definitions.bug "a string literal of type %s" (Ground.to_string ty)
+    | _ -> Definitions.raise_bug "a string literal of type %s" (Ground.to_string ty)
   in
   build ty (Build { ty; variant = None; fields = [ (field, Copy part) ] })
 
@@ -505,23 +507,23 @@ let lower_static_constant (st : Lowering.state) path : Lowered.place =
   match Interface.Definition.read_constant_type st.context.lookups.interface path with
   | Some ty ->
       { root = Static { key = Constant path; ty = Lowering.ground st ty }; projections = [] }
-  | None -> Definitions.bug "no type for the constant %s" (Path.show path)
+  | None -> Definitions.raise_bug "no type for the constant %s" (Path.show path)
 
 let list_parts monomorphic ty =
   match Monomorphic.compute_shape monomorphic ty with
   | Record [ (field, Typed storage) ] -> (
       match Storage.match_storage_element storage with
       | Some element -> (field, storage, element)
-      | None -> Definitions.bug "%s is not a list" (Ground.to_string ty))
-  | _ -> Definitions.bug "%s is not a list" (Ground.to_string ty)
+      | None -> Definitions.raise_bug "%s is not a list" (Ground.to_string ty))
+  | _ -> Definitions.raise_bug "%s is not a list" (Ground.to_string ty)
 
 let list_of (st : Lowering.state) ty destination ~site fills =
   let field, _, element = list_parts st.context.monomorphic ty in
   let storage_place = Lowered.project destination (Field field) in
   let lower operation arguments destination =
     ignore
-      (Intrinsics.lower ~checks:st.context.checks st.context.env st.builder st.context.types
-         operation ~type_arguments:[ element ] arguments ~destination ~site)
+      (Intrinsics.lower ~checks:(Lowering.checks_operations st) st.context.env st.builder
+         st.context.types operation ~type_arguments:[ element ] arguments ~destination ~site)
   in
   lower Storage_with_capacity
     [ Value (Lowered.make_uint64_constant (List.length fills)) ]
@@ -541,8 +543,8 @@ let lower_template_value (st : Lowering.state) template_ty literals ~site ~parts
     | Record fields -> (
         match List.assoc_opt name fields with
         | Some (Memory_layout.Typed ty) -> ty
-        | _ -> Definitions.bug "%s has no field %s" (Ground.to_string ty) name)
-    | _ -> Definitions.bug "%s is not a record" (Ground.to_string ty)
+        | _ -> Definitions.raise_bug "%s has no field %s" (Ground.to_string ty) name)
+    | _ -> Definitions.raise_bug "%s is not a record" (Ground.to_string ty)
   in
   let element list_ty =
     let _, _, element = list_parts st.context.monomorphic list_ty in
@@ -573,7 +575,7 @@ let lower_template_value (st : Lowering.state) template_ty literals ~site ~parts
 
 let pull_loop st ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
     ~(body : Lowered.place -> unit) =
-  Lowering.in_scope st (fun () ->
+  Lowering.run_in_scope st (fun () ->
       let next = Lowering.allocate_local st (Value option) in
       let depth = List.length st.scopes in
       let test = Emit_c.Builder.allocate_block st.builder
@@ -587,8 +589,8 @@ let pull_loop st ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
         (Assign (Lowered.make_local_place more, Is_variant (next, "Some")));
       Emit_c.Builder.branch st.builder (Copy (Lowered.make_local_place more)) ~yes:inside ~no:after;
       Emit_c.Builder.start st.builder inside;
-      Lowering.in_scope st (fun () ->
-          Lowering.looping st ~continue_:test ~break_:after ~depth (fun () ->
+      Lowering.run_in_scope st (fun () ->
+          Lowering.run_in_loop st ~continue_:test ~break_:after ~depth (fun () ->
               body (Lowered.project next (Variant_field { variant = "Some"; field = "value" }))));
       Emit_c.Builder.finish st.builder (Goto test);
       Emit_c.Builder.start st.builder after)

@@ -34,7 +34,7 @@ let check_widened location ~is_written actual expected =
   | Types.Function actual, Types.Function expected
     when (not is_written)
          && not (List.for_all (fun cost -> List.mem cost actual.costs) expected.costs) ->
-      Facts.unsupported location "a function value's costs"
+      Facts.raise_unsupported location "a function value's costs"
   | _ -> ()
 
 let find_parameter_spelling (context : State.context) (frame : State.frame) term =
@@ -347,10 +347,10 @@ let arithmetic context (frame : State.frame) (site : Invocation.site) ty
     | Multiply -> (Logic.Operation ("*", [ left; right ]), false)
     | Divide -> (Logic.truncated_divide left right, true)
     | Remainder -> (Logic.truncated_remainder left right, true)
-    | _ -> Facts.bug "`%s` is not arithmetic" (Intrinsic.show_operation operation)
+    | _ -> Facts.raise_bug "`%s` is not arithmetic" (Intrinsic.show_operation operation)
   in
   if is_division then
-    Facts.oblige context frame Division location
+    Facts.oblige_safe_operation context frame Division location
       ~fixes:
         (match find_parameter_spelling context frame right with
         | Some text -> Facts.add_requires context frame [ Text (text ^ " != 0") ]
@@ -360,7 +360,7 @@ let arithmetic context (frame : State.frame) (site : Invocation.site) ty
   (match Facts.find_bounds ty with
   | Some (low, _) when is_division ->
       if Z.sign low < 0 then
-        Facts.oblige context frame Overflow location
+        Facts.oblige_safe_operation context frame Overflow location
           ~fixes:(make_division_overflow_fix context frame ty left right)
           [
             Text "`";
@@ -370,7 +370,7 @@ let arithmetic context (frame : State.frame) (site : Invocation.site) ty
           (Logic.not_ Logic.(equal left (Integer low) &&& equal right (int (-1))))
   | Some (low, high) ->
       let unsigned = Z.sign low = 0 && not (Types.is_builtin Character ty) in
-      Facts.oblige context frame Overflow location
+      Facts.oblige_safe_operation context frame Overflow location
         ~fixes:(make_overflow_fix context frame ty operation left right exact)
         [
           Text "`";
@@ -484,7 +484,7 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
     | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
     | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
     | Wrapping_multiply | Multiply_overflows -> Logic.Operation ("*", [ left; right ])
-    | _ -> Facts.bug "`%s` has no exact integer result" (Intrinsic.show_operation operation)
+    | _ -> Facts.raise_bug "`%s` has no exact integer result" (Intrinsic.show_operation operation)
   in
   match (operation, types, operands) with
   | Add, _ :: _, [ left; right ] when is_float -> make_float_operation "fp.add" left right
@@ -500,7 +500,7 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
   | Negate, ty :: _, [ inner ] when not is_float ->
       let negated = Logic.Operation ("-", [ inner ]) in
       if Facts.find_bounds ty <> None then
-        Facts.oblige context frame Overflow location
+        Facts.oblige_safe_operation context frame Overflow location
           ~fixes:(make_negation_fix context frame ty inner)
           [
             Text "`";
@@ -509,7 +509,7 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
           ]
           (Facts.make_in_range ty negated)
       else if ty <> Types.Integer then
-        Facts.unsupported location "negating a value of `%s`" (Types.show ty);
+        Facts.raise_unsupported location "negating a value of `%s`" (Types.show ty);
       negated
   | Complement, ty :: _, [ inner ] -> declare_opaque_operation context frame ty Complement [ inner ]
   | (Shift_left | Shift_right), ty :: _, [ left; right ] ->
@@ -529,10 +529,10 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
                   [ Text "The shift amount in `"; Facts.quote source site.origin; Text "`" ],
                   [] )
           in
-          Facts.oblige context frame Shift at_amount ~fixes
+          Facts.oblige_safe_operation context frame Shift at_amount ~fixes
             (text @ [ Text (Printf.sprintf " may not be less than %d." bits) ])
             Logic.(Operation ("<", [ right; int bits ]))
-      | None -> Facts.unsupported location "a shift of `%s`" (Types.show ty));
+      | None -> Facts.raise_unsupported location "a shift of `%s`" (Types.show ty));
       let shifted = declare_opaque_operation context frame ty operation [ left; right ] in
       (match (Facts.find_bounds ty, find_width ty) with
       | Some (low, high), Some bits

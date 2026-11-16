@@ -2,7 +2,7 @@ type build = Development | Release
 type linkage = External | Internal
 type failure = Echo | Todo
 
-val bug : ('a, unit, string, 'b) format4 -> 'a
+val raise_bug : ('a, unit, string, 'b) format4 -> 'a
 val render_site_symbol : Lowered.site -> string
 val site_struct : string
 val render_integer_type : Memory_layout.integer -> string

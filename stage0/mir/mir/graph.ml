@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"MIR" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"MIR" format
 
 type block = int
 type early_exit = { resume : block; returned : Tree.local option }
@@ -79,7 +79,7 @@ let canonicalize (blocks : basic_block array) =
   let target block =
     match renumbered.(block) with
     | Some index -> index
-    | None -> bug "a jump to block %d, which is unreachable" block
+    | None -> raise_bug "a jump to block %d, which is unreachable" block
   in
   let reached blocks = List.filter_map (fun block -> renumbered.(block)) blocks in
   let innermost = Hashtbl.create 4 in
@@ -99,7 +99,7 @@ let canonicalize (blocks : basic_block array) =
   let loop_of block =
     match Hashtbl.find_opt innermost block with
     | Some (loop, _) -> target loop
-    | None -> bug "the end of an iteration outside every loop"
+    | None -> raise_bug "the end of an iteration outside every loop"
   in
   let renumber at = function
     | Goto block -> Goto (target block)
@@ -154,7 +154,7 @@ let find_iteration_loop = function Iteration_end { loop } -> Some loop | _ -> No
 let read_loop_head (body : body) loop =
   match body.blocks.(loop).terminator with
   | For head -> head
-  | _ -> bug "the end of an iteration names block %d, which is no loop" loop
+  | _ -> raise_bug "the end of an iteration names block %d, which is no loop" loop
 
 let list_block_successors (body : body) block =
   let terminator = body.blocks.(block).terminator in

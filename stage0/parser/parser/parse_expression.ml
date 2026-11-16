@@ -128,7 +128,7 @@ let has_comma cursor ~opener =
   scan (opener + 1)
 
 let rec parse_type_expression cursor : Syntax.type_expression =
-  Cursor.nested cursor @@ fun cursor ->
+  Cursor.run_nested cursor @@ fun cursor ->
   let start = Cursor.index cursor in
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1, Cursor.peek_ahead cursor 2) with
   | Keyword Self_type, _, _ ->
@@ -440,7 +440,7 @@ and parse_parenthesized_expression cursor =
   value
 
 and parse_expression ?(open_range = false) cursor =
-  Cursor.nested cursor (fun cursor ->
+  Cursor.run_nested cursor (fun cursor ->
       let start = Cursor.index cursor in
       let value = parse_pipes cursor start (parse_binary cursor ~level:0 ~open_range) in
       match Cursor.peek cursor with
@@ -578,14 +578,14 @@ and parse_prefix cursor : Syntax.expression =
         Atoms.make_expression_node cursor start (Return value)
     | Foreign Minus_minus ->
         let operator = Cursor.take cursor in
-        let operand = Cursor.nested cursor parse_prefix in
+        let operand = Cursor.run_nested cursor parse_prefix in
         Habits.report_double_negation cursor ~operator ~operand;
         Atoms.make_error_expression cursor start
     | Punctuation Ampersand ->
         let before = Cursor.find_previous_token cursor in
         let ampersand = Cursor.take cursor in
         Habits.report_address_of cursor ~before ~ampersand ~next:(Cursor.peek cursor);
-        Cursor.nested cursor parse_prefix
+        Cursor.run_nested cursor parse_prefix
     | Punctuation (Bar | Or_or) -> parse_closure_bars cursor
     | _ -> parse_postfix cursor
   in
@@ -599,7 +599,7 @@ and parse_prefix cursor : Syntax.expression =
 
 and parse_prefix_operator cursor start operator =
   Cursor.advance cursor;
-  let operand = Cursor.nested cursor parse_prefix in
+  let operand = Cursor.run_nested cursor parse_prefix in
   Atoms.make_expression_node cursor start (Prefix (operator, operand))
 
 and parse_quantified cursor =
@@ -1071,7 +1071,7 @@ and parse_body cursor =
   parse_block cursor
 
 and parse_block cursor : Syntax.block =
-  Cursor.nested cursor @@ fun cursor ->
+  Cursor.run_nested cursor @@ fun cursor ->
   let start = Cursor.index cursor in
   let previous = ref None in
   let item cursor =
