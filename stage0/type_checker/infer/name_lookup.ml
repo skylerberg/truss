@@ -52,14 +52,20 @@ and named (state : State.state) (env : State.env) (value : Syntax.expression)
            "`%s` is a theorem, so it is not a value. Call it in a proof to use its `ensures`." text)
   | Definition (Function, path) -> (
       match Instantiation.function_signature state path with
-      | Some signature ->
+      | Some signature -> (
           let instance =
             Instantiation.instantiate state (State.read_span state value.id) signature
           in
-          Option.iter (explicit_type_arguments state value instance) type_arguments;
-          state.tables.resolutions.(value.id) <-
-            Some (Global { path; type_arguments = instance.type_arguments });
-          function_value state value instance.signature
+          match
+            match type_arguments with
+            | Some items -> explicit_type_arguments state value instance items
+            | None -> Ok ()
+          with
+          | Error error -> error
+          | Ok () ->
+              state.tables.resolutions.(value.id) <-
+                Some (Global { path; type_arguments = instance.type_arguments });
+              function_value state value instance.signature)
       | None -> State.bug "`%s` has no signature" (Path.show path))
   | Definition (Constant, path) -> (
       state.tables.resolutions.(value.id) <- Some (Global { path; type_arguments = [] });
@@ -257,38 +263,47 @@ and static_member state (value : Syntax.expression) type_ (member : Syntax.name)
       State.error state Unknown_member (State.read_span state member.id)
         (Printf.sprintf "`%s` has no member `%s`." (State.show state type_) member.text)
 
-and explicit_type_arguments ?(head = 0) state (value : Syntax.expression) instance items =
-  if items <> [] then begin
-    let written =
-      List.filter_map
-        (function
-          | Syntax.Item item -> Some (Instantiation.type_argument_of_expression state item)
-          | Item_constraint _ -> None)
-        items
-    in
-    let own = List.filteri (fun index _ -> index >= head) instance.type_arguments in
-    if List.length written <> List.length own then
-      State.report state Arity (State.read_span state value.id)
-        (Printf.sprintf "This takes %d type %s, and %d %s given." (List.length own)
-           (if List.length own = 1 then "argument" else "arguments")
-           (List.length written)
-           (if List.length written = 1 then "is" else "are"))
-    else
-      List.iter2
-        (fun written own ->
-          match (written, own) with
-          | Types.Type written, Types.Type own -> ignore (State.unify state written own)
-          | Types.Value written, Types.Value own ->
-              ignore (Unify.unify_value state.unifier written own)
-          | Types.Type _, Types.Value _ ->
-              State.report state Argument_kind (State.read_span state value.id)
-                "A type argument is given where a `UInt64` value is expected."
-          | Types.Value _, Types.Type _ ->
-              State.report state Argument_kind (State.read_span state value.id)
-                "A `UInt64` value is given where a type argument is expected."
-          | _ -> ())
-        written own
-  end
+and explicit_type_arguments ?(head = 0) state (value : Syntax.expression) instance items :
+    (unit, Types.ty) result =
+  if items = [] then Ok ()
+  else
+    match Instantiation.written_arguments state items with
+    | Error error -> Error error
+    | Ok written -> (
+        let own = List.filteri (fun index _ -> index >= head) instance.type_arguments in
+        if List.length written <> List.length own then
+          Error
+            (State.error state Arity (State.read_span state value.id)
+               (Printf.sprintf "This takes %d type %s, and %d %s given." (List.length own)
+                  (if List.length own = 1 then "argument" else "arguments")
+                  (List.length written)
+                  (if List.length written = 1 then "is" else "are")))
+        else
+          let errors =
+            List.concat
+              (List.map2
+                 (fun written own ->
+                   match (written, own) with
+                   | Types.Type written, Types.Type own ->
+                       ignore (State.unify state written own);
+                       []
+                   | Types.Value written, Types.Value own ->
+                       ignore (Unify.unify_value state.unifier written own);
+                       []
+                   | Types.Type _, Types.Value _ ->
+                       [
+                         State.error state Argument_kind (State.read_span state value.id)
+                           "A type argument is given where a `UInt64` value is expected.";
+                       ]
+                   | Types.Value _, Types.Type _ ->
+                       [
+                         State.error state Argument_kind (State.read_span state value.id)
+                           "A `UInt64` value is given where a type argument is expected.";
+                       ]
+                   | _ -> [])
+                 written own)
+          in
+          match errors with [] -> Ok () | error :: _ -> Error error)
 
 and finish_call (state : State.state) env (value : Syntax.expression) path callee
     (instance : Instantiation.instance) arguments left_out =

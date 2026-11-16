@@ -810,6 +810,22 @@ let () =
       fine Fixtures.Infer.add_of_two_literals_written_in_full);
   Harness.test "a generic parameter takes no type arguments" (fun () ->
       one_diagnostic Fixtures.Infer.generic_parameter_given_type_arguments "types.arity");
+  Harness.test "a generic parameter given type arguments is an error type, not the parameter"
+    (fun () ->
+      one_diagnostic Fixtures.Infer.method_of_a_parameter_given_type_arguments "types.arity");
+  Harness.test "`~` of a string is one error, and its value is not a string" (fun () ->
+      one_diagnostic Fixtures.Infer.complement_of_a_string "types.no_impl");
+  Harness.test "a negated unsigned value is one error, and its value is not unsigned" (fun () ->
+      one_diagnostic Fixtures.Infer.negation_of_an_unsigned_parameter "types.negated_unsigned");
+  Harness.test "a sum of strings is one error, and its value is not a string" (fun () ->
+      one_diagnostic Fixtures.Infer.string_addition_bound_to_a_let "types.string_addition");
+  Harness.test "a variant that its type does not have is one error" (fun () ->
+      one_diagnostic Fixtures.Infer.unknown_variant_of_an_option "types.unknown_variant");
+  Harness.test "a variant constructor of a record is an error" (fun () ->
+      one_diagnostic Fixtures.Infer.variant_constructor_of_a_record "types.unknown_variant");
+  Harness.test "a function value given too many arguments is one error" (fun () ->
+      one_diagnostic Fixtures.Infer.function_value_called_with_two_arguments
+        "types.too_many_arguments");
   Harness.test "a member of a generic parameter that it does not have is an error" (fun () ->
       one_diagnostic Fixtures.Infer.member_of_an_unbounded_generic "types.unknown_member");
   Harness.test "a type with no fields is not its own value" (fun () ->

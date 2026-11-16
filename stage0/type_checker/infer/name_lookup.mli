@@ -24,7 +24,7 @@ val explicit_type_arguments :
   Syntax.expression ->
   Instantiation.instance ->
   Syntax.bracket_item list ->
-  unit
+  (unit, Types.ty) result
 
 val finish_call :
   State.state ->

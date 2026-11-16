@@ -1,0 +1,4 @@
+fn f(text: String) -> Int64 {
+  let count = "a" + text
+  count
+}
