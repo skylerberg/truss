@@ -1,0 +1,12 @@
+fn halve(count: UInt32) -> UInt32
+  requires count < 100
+{
+  count / 2
+}
+
+fn quarter(flag: Bool, count: UInt32) -> UInt32 {
+  if flag {
+    return halve(count) / 2
+  }
+  0
+}

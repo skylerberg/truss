@@ -1144,6 +1144,28 @@ let () =
       match fix_titles Fixtures.Prover.signed_quotient with
       | [ "Add `requires dividend != Int64.minimum || divisor != -1`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
+  Harness.test "an overflow with a literal under an if offers the if's condition as a premise"
+    (fun () ->
+      match fix_titles Fixtures.Prover.next_count_under_an_if with
+      | [ "Add `requires (flag) ==> (count <= UInt8.maximum - 1)`" ] -> ()
+      | actual -> Harness.fail "%s" (String.concat "; " actual));
+  Harness.test "a divisor under an if offers the if's condition as a premise" (fun () ->
+      match fix_titles Fixtures.Prover.divisor_under_an_if with
+      | [ "Add `requires (flag) ==> (parts != 0)`" ] -> ()
+      | actual -> Harness.fail "%s" (String.concat "; " actual));
+  Harness.test "a shift amount under an if offers the if's condition as a premise" (fun () ->
+      match fix_titles Fixtures.Prover.shift_under_an_if with
+      | [ "Add `requires (flag) ==> (by < 64)`" ] -> ()
+      | actual -> Harness.fail "%s" (String.concat "; " actual));
+  Harness.test "a callee's requires under an if offers the if's condition as a premise" (fun () ->
+      match fix_titles Fixtures.Prover.call_under_an_if with
+      | [ "Add `requires (flag) ==> (count < 100)`" ] -> ()
+      | actual -> Harness.fail "%s" (String.concat "; " actual));
+  Harness.test "a condition with no spelling in the parameters leaves the requires unconditional"
+    (fun () ->
+      match fix_titles Fixtures.Prover.next_count_under_a_quotient with
+      | [ "Add `requires count <= UInt8.maximum - 1`" ] -> ()
+      | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "a failed assert about a call's result offers no requires" (fun () ->
       let packages = Support.setup [ ("app::main", Fixtures.Prover.assert_on_a_list_length) ] in
       match check packages (Support.file_of "app::main") with

@@ -56,8 +56,8 @@ let make_range_fix context frame ty term =
   match (find_integer_limits ty, find_parameter_spelling context frame term) with
   | Some (name, low, _), Some text ->
       let least = if Z.sign low = 0 then "0" else name ^ ".minimum" in
-      Facts.add_requires_under_condition context frame
-        (Printf.sprintf "%s <= %s && %s <= %s.maximum" least text text name)
+      Facts.add_requires context frame
+        [ Text (Printf.sprintf "%s <= %s && %s <= %s.maximum" least text text name) ]
   | _ -> []
 
 let convert_from_integer context frame (site : Invocation.site) term =
@@ -301,12 +301,12 @@ let make_overflow_fix context frame ty (operation : Intrinsic.operation) left ri
         | _ -> None
       in
       match (bound_on_left, operation) with
-      | Some required, _ -> Facts.add_requires context [ Text required ]
+      | Some required, _ -> Facts.add_requires context frame [ Text required ]
       | None, (Add | Multiply) when is_unsigned -> (
           match find_parameter_spelling context frame exact with
           | Some text ->
-              Facts.add_requires_under_condition context frame
-                (Printf.sprintf "%s <= %s.maximum" text name)
+              Facts.add_requires context frame
+                [ Text (Printf.sprintf "%s <= %s.maximum" text name) ]
           | None -> [])
       | None, Subtract when is_unsigned -> []
       | None, _ -> make_range_fix context frame ty exact)
@@ -317,19 +317,19 @@ let make_division_overflow_fix context frame ty left right =
       let dividend_not_minimum = Printf.sprintf "%s != %s.minimum" dividend name in
       match right with
       | Logic.Integer divisor when Z.equal divisor Z.minus_one ->
-          Facts.add_requires_under_condition context frame dividend_not_minimum
+          Facts.add_requires context frame [ Text dividend_not_minimum ]
       | _ -> (
           match find_parameter_spelling context frame right with
           | Some divisor ->
-              Facts.add_requires_under_condition context frame
-                (Printf.sprintf "%s || %s != -1" dividend_not_minimum divisor)
+              Facts.add_requires context frame
+                [ Text (Printf.sprintf "%s || %s != -1" dividend_not_minimum divisor) ]
           | None -> []))
   | _ -> []
 
 let make_negation_fix context frame ty inner =
   match (find_integer_limits ty, find_parameter_spelling context frame inner) with
   | Some (name, _, _), Some text ->
-      Facts.add_requires_under_condition context frame (Printf.sprintf "%s != %s.minimum" text name)
+      Facts.add_requires context frame [ Text (Printf.sprintf "%s != %s.minimum" text name) ]
   | _ -> []
 
 let arithmetic context (frame : State.frame) (site : Invocation.site) ty
@@ -349,7 +349,7 @@ let arithmetic context (frame : State.frame) (site : Invocation.site) ty
       Facts.oblige context frame Division location
         ~fixes:
           (match find_parameter_spelling context frame right with
-          | Some text -> Facts.add_requires context [ Text (text ^ " != 0") ]
+          | Some text -> Facts.add_requires context frame [ Text (text ^ " != 0") ]
           | None -> [])
         [ Text "The divisor in `"; Facts.quote source site.origin; Text "` may be zero." ]
         (Logic.not_ (Logic.equal right (Logic.int 0)))
@@ -518,7 +518,7 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
                   [ State.Text "The shift amount `"; Facts.quote source amount; Text "`" ],
                   match find_parameter_spelling context frame right with
                   | Some text ->
-                      Facts.add_requires context [ Text (Printf.sprintf "%s < %d" text bits) ]
+                      Facts.add_requires context frame [ Text (Printf.sprintf "%s < %d" text bits) ]
                   | None -> [] )
             | None ->
                 ( location,
