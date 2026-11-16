@@ -84,7 +84,7 @@ fn highest_bit(value: UInt32) -> UInt32
 }
 
 fn byte_at(bytes: Slice[UInt8], at: UInt64) -> UInt64
-  ensures result <= 255
+  ensures result <= UInt8.maximum
 {
   if at < bytes.length() { intrinsic::convert(bytes[at]) } else { 0 }
 }
@@ -100,13 +100,13 @@ fn little_endian(bytes: Slice[UInt8], at: UInt64, count: UInt64) -> UInt64 {
 }
 
 fn u16_at(bytes: Slice[UInt8], at: UInt64) -> UInt64
-  ensures result <= 65535
+  ensures result <= UInt16.maximum
 {
   byte_at(bytes, at: at) | (byte_at(bytes, at: at.saturating_add(1)) << 8)
 }
 
 fn u32_at(bytes: Slice[UInt8], at: UInt64) -> UInt64
-  ensures result <= 4294967295
+  ensures result <= UInt32.maximum
 {
   little_endian(bytes, at: at, count: 4) & 0xFFFFFFFF
 }
