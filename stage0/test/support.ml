@@ -83,7 +83,7 @@ let core_nodes packages (key : Resolve.Names.key) : core_nodes =
   | None -> failwith (Printf.sprintf "%s has no core form" (Resolve.Names.show_key key))
   | Some { form; _ } ->
       let expressions = ref [] and statements = ref [] and patterns = ref [] in
-      Core_walk.definition
+      Core_walk.walk_definition
         {
           Core_walk.ignore_all with
           expression = (fun node -> expressions := node :: !expressions);
@@ -106,7 +106,7 @@ let declarations packages (module_ : Path.module_) =
 let first_core_nodes text =
   let packages = setup [ ("app::main", text) ] in
   core_nodes packages
-    (Resolve.Names.key_of (List.hd (declarations packages (module_of "app::main"))))
+    (Resolve.Names.make_key (List.hd (declarations packages (module_of "app::main"))))
 
 let no_diagnostics ~check files =
   let packages = setup files in

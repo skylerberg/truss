@@ -11,16 +11,16 @@ val require :
   unmet:(Types.ty -> (string * Types.ty) option -> unit) ->
   unit
 
-val fresh_arguments : State.state -> Path.t -> Types.argument list
+val make_fresh_arguments : State.state -> Path.t -> Types.argument list
 val instantiate_type : State.state -> Source.Definition_span.t -> Path.t -> Types.argument list
-val static_ : State.state -> Syntax.expression -> static_ option
+val find_static : State.state -> Syntax.expression -> static_ option
 
-val named_type :
+val check_named_type :
   State.state -> Syntax.expression -> Path.t -> Syntax.bracket_item list option -> Types.ty
 
-val type_argument_of_expression : State.state -> Syntax.expression -> Types.argument
+val check_type_argument : State.state -> Syntax.expression -> Types.argument
 
-val written_arguments :
+val check_written_arguments :
   State.state -> Syntax.bracket_item list -> (Types.argument list, Types.ty) result
 
 type instance = {
@@ -36,4 +36,4 @@ val instantiate :
   Types.signature ->
   instance
 
-val function_signature : State.state -> Path.t -> Types.signature option
+val find_function_signature : State.state -> Path.t -> Types.signature option

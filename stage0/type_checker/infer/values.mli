@@ -1,4 +1,4 @@
-val string_literal :
+val check_string_literal :
   State.state ->
   State.env ->
   ?expected:Types.ty ->
@@ -22,7 +22,7 @@ val map_literal :
   (Syntax.expression * Syntax.expression) list ->
   Types.ty
 
-val lambda :
+val check_lambda :
   State.state ->
   State.env ->
   ?expected:Types.ty ->
@@ -31,7 +31,7 @@ val lambda :
   Syntax.block ->
   Types.ty
 
-val if_ :
+val check_if :
   State.state ->
   State.env ->
   ?expected:Types.ty ->
@@ -50,5 +50,5 @@ val match_ :
   Syntax.arm list ->
   Types.ty
 
-val element_of_collection :
+val check_collection_element :
   State.state -> State.env -> quantifier:Syntax.expression -> Syntax.expression -> Types.ty

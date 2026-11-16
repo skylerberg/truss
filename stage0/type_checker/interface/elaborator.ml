@@ -108,7 +108,7 @@ let show_path (path : Syntax.path) =
     (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
 let is_uint64 (lookups : Lookups.t) path =
-  match Resolve.Names.definition_of_path lookups.names path with
+  match Resolve.Names.find_definition lookups.names path with
   | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) ->
       (lookups.resolved Interface key).names.(written.path.last.id)
       = Some (Definition (Type, Intrinsic.builtin_path UInt64))
@@ -152,7 +152,7 @@ let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
       match elaborate_function_type context function_type with
       | Ok function_type -> Types.Function function_type
       | Error report -> Types.Error report)
-  | Type_error -> Types.Error (Resolve.Parts.recovery_report context.spans.(written.id))
+  | Type_error -> Types.Error (Diagnostic.recovered context.spans.(written.id))
 
 and elaborate_self context (span : Source.Definition_span.t) =
   match context.self_type with
@@ -307,7 +307,7 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
           let arguments = elaborate_arguments context path in
           match
             check_arity context path shown
-              (Resolve.Names.generics_of context.lookups.names definition_path)
+              (Resolve.Names.find_generics context.lookups.names definition_path)
           with
           | Error report -> Types.Error report
           | Ok () ->
@@ -338,7 +338,7 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
     in
     let trait_arguments = elaborate_arguments context path in
     match
-      check_arity context path shown (Resolve.Names.generics_of context.lookups.names trait)
+      check_arity context path shown (Resolve.Names.find_generics context.lookups.names trait)
     with
     | Error report -> Error report
     | Ok () -> Ok { trait; trait_arguments; associated }
@@ -617,7 +617,7 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
   match find_target context head.path.last with
   | Some (Definition (Type, type_path)) ->
       let type_ =
-        match Resolve.Names.generics_of context.lookups.names type_path with
+        match Resolve.Names.find_generics context.lookups.names type_path with
         | Some expected when List.length expected <> List.length generics ->
             report_error_type context Arity context.spans.(head.id)
               (Printf.sprintf "`%s` takes %d generic %s, and this head names %d."
@@ -637,7 +637,7 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
         report_error_type context Not_a_type context.spans.(head.id)
           (Printf.sprintf "`%s` is %s, not a type, so it has no methods, constants, or `impl`s."
              (show_path head.path)
-             (Resolve.Names.kind_name (Resolve.Names.kind_of_named kind))) )
+             (Resolve.Names.show_kind (Resolve.Names.kind_of_named kind))) )
   | Some (Unknown report) -> (generics, Types.Error report)
   | _ -> bug "the type head `%s` is not resolved" (show_path head.path)
 
@@ -943,7 +943,7 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
            { elaborated with terminates = elaborated.terminates || inherits_termination })
   | _ ->
       make_elaborated_interface context
-        (Error_interface (Resolve.Parts.recovery_report spans.(definition.id)))
+        (Error_interface (Diagnostic.recovered spans.(definition.id)))
 
 let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let resolved = lookups.resolved Interface key in
@@ -954,10 +954,10 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
       let context = create lookups resolved ~spans empty_scope in
       let recovered () =
         make_elaborated_interface context
-          (Error_interface (Resolve.Parts.recovery_report spans.(definition.id)))
+          (Error_interface (Diagnostic.recovered spans.(definition.id)))
       in
       match
-        ( Resolve.Names.recovery_report lookups.names key Header,
+        ( Resolve.Names.find_recovery_report lookups.names key Header,
           Option.map lookups.header (lookups.names.container key) )
       with
       | Some report, _ -> make_elaborated_interface context (Error_interface report)

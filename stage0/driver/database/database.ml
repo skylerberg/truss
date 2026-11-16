@@ -537,7 +537,7 @@ let find_parsed_file database (file : Path.file) =
 
 let make_namespace database note (package_database : package_database) =
   note (Part.Input (Modules package_database.name));
-  Resolve.Names.namespace
+  Resolve.Names.build_namespace
     (make_recording_name_lookups database note)
     package_database.name
     (List.map
@@ -555,7 +555,7 @@ let make_namespace database note (package_database : package_database) =
        package_database.modules)
 
 let list_file_keys database file =
-  List.map Resolve.Names.key_of ((make_stored_name_lookups database).declarations_in file)
+  List.map Resolve.Names.make_key ((make_stored_name_lookups database).declarations_in file)
 
 let read_resolution_part database note section (key : Resolve.Names.key) =
   read database note (Resolved (key, section));
@@ -660,7 +660,7 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.c
     List.map (fun (declaration : Resolve.Names.declaration) -> declaration.path) declarations
   in
   let of_declaration (declaration : Resolve.Names.declaration) : Part.computed list =
-    let key = Resolve.Names.key_of declaration in
+    let key = Resolve.Names.make_key declaration in
     List.map (fun section -> Part.Resolved (key, section)) Resolve.sections
     @ [
         Part.Interface key;
@@ -723,7 +723,7 @@ let type_check run lookups key =
   | exception Reads_failed_part -> Blocked
 
 let make_form_origin database note =
-  Infer.form_origin (make_recording_interface_lookups database note ~is_checked:true)
+  Infer.find_form_origin (make_recording_interface_lookups database note ~is_checked:true)
     ~is_derived:(fun path ->
       read database note (Derived_form path);
       Path_table.mem (find_owner database (Path.package path)).derived_forms path)
@@ -804,7 +804,7 @@ let list_used_imports database note file =
 let list_import_diagnostics database note (file : Path.file) =
   read database note (Parsed file);
   note (Part.Input (Source file));
-  Resolve.file_diagnostics
+  Resolve.list_file_diagnostics
     (make_recording_name_lookups database note)
     file (find_parsed_file database file).tree
     ~text:(Source.text (find_source database file))
@@ -1290,7 +1290,7 @@ let compute_namespace database (package_database : package_database) =
           ignore (Call_graph.add_root graph root)
       | _ -> ())
     implied;
-  List.iter (mark_change database package) (Resolve.Names.changes before after);
+  List.iter (mark_change database package) (Resolve.Names.list_changes before after);
   List.iter (fun part -> if not (was_implied part) then mark_stale database part) implied;
   forget database (List.filter (fun part -> not (is_implied part)) implied_before);
   own_lowering_roots database (make_stored_name_lookups database) package
@@ -1376,7 +1376,7 @@ let compute_part database (part : Part.computed) =
                  read_resolution_part database note Interface key )
              with
             | definition, Value resolved -> (
-                match Resolve.trait_header definition resolved with
+                match Resolve.make_trait_header definition resolved with
                 | Some header -> Value header
                 | None -> Blocked)
             | _, (Failed _ | Blocked) -> Blocked))
@@ -1444,16 +1444,18 @@ let compute_part database (part : Part.computed) =
   | Contract key ->
       into (make_keyed_slot package_database.contracts key) (fun note ->
           Some
-            (match type_check Infer.contract (make_recording_infer_lookups database note) key with
+            (match
+               type_check Infer.check_contract (make_recording_infer_lookups database note) key
+             with
             | Value (checked : Infer.checked) -> Value checked.form
             | Failed diagnostics -> Failed diagnostics
             | Blocked -> Blocked))
   | Checked_body key ->
       into (make_keyed_slot package_database.checked_bodies key) (fun note ->
-          Some (type_check Infer.body (make_recording_infer_lookups database note) key))
+          Some (type_check Infer.check_body (make_recording_infer_lookups database note) key))
   | Derived_form path ->
       into (make_path_slot package_database.derived_forms path) (fun note ->
-          match Infer.derived (make_recording_infer_lookups database note) path with
+          match Infer.derive_form (make_recording_infer_lookups database note) path with
           | Some form -> Some (Value form)
           | None -> None
           | exception Reads_failed_part -> Some Blocked)
@@ -1910,7 +1912,8 @@ let mark_differences database name ~(before : package_database option)
   let namespace (package_database : package_database) =
     Option.value package_database.namespace ~default:Resolve.Names.empty_namespace
   in
-  List.iter (mark_change database name) (Resolve.Names.changes (namespace before) (namespace after));
+  List.iter (mark_change database name)
+    (Resolve.Names.list_changes (namespace before) (namespace after));
   let text (package_database : package_database) file =
     Option.map Source.text (Hashtbl.find_opt package_database.sources file)
   in
@@ -2293,7 +2296,7 @@ let list_code_packages database package =
     match declaration.path with
     | Test _ -> Some []
     | _ -> (
-        let key = Resolve.Names.key_of declaration in
+        let key = Resolve.Names.make_key declaration in
         match Hashtbl.find_opt checked_bodies key with
         | Some (Value checked) -> Some checked.used_packages
         | Some (Failed _ | Blocked) -> None

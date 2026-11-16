@@ -83,7 +83,7 @@ let occurrences database snapshot packages =
     (fun file ->
       List.concat_map
         (fun declaration ->
-          let key = Resolve.Names.key_of declaration in
+          let key = Resolve.Names.make_key declaration in
           match Database.read_resolved database key with
           | Some resolved ->
               let ({ file; base } : Resolve.Names.place) = names.place key in
@@ -148,7 +148,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
               if module_ = old_module then Some (file, Diagnostic.replace span full) else None)
             (Inspect.References.uses
                ~used_module:
-                 (Resolve.Names.used_module
+                 (Resolve.Names.resolve_used_module
                     (Database.make_name_lookups database packages)
                     ~from:file.module_)
                (Database.read_parsed database file).uses))

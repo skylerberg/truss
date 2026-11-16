@@ -15,11 +15,11 @@ let project (place : Tree.place) projection =
 let ( let* ) = Option.bind
 
 let core_operand_type : Core.operand -> Types.ty = function
-  | Place place -> Core_walk.place_type place
+  | Place place -> Core_walk.compute_place_type place
   | Value value -> value.type_
 
 let operand_origin : Core.operand -> Core.origin = function
-  | Place place -> Core_walk.place_origin place
+  | Place place -> Core_walk.compute_place_origin place
   | Value value -> value.origin
 
 module In_order = struct
@@ -142,20 +142,20 @@ let is_functional walk =
                     | Core.Passed _ | Core.Default -> false)
                   arguments
               then fine := false;
-              Core_walk.expression_children visit node
-          | _ -> Core_walk.expression_children visit node);
+              Core_walk.walk_expression_children visit node
+          | _ -> Core_walk.walk_expression_children visit node);
       statement =
         (fun (node : Core.statement) ->
           match node.kind with
           | Let { pattern; else_ = None; _ } when not (binds_variable pattern) ->
-              Core_walk.statement_children visit node
-          | Evaluate _ -> Core_walk.statement_children visit node
+              Core_walk.walk_statement_children visit node
+          | Evaluate _ -> Core_walk.walk_statement_children visit node
           | _ -> fine := false);
-      pattern = (fun node -> Core_walk.pattern_children visit node);
+      pattern = (fun node -> Core_walk.walk_pattern_children visit node);
     }
   and binds_variable (pattern : Core.pattern) =
     let child_binds = ref false in
-    Core_walk.pattern_children
+    Core_walk.walk_pattern_children
       {
         Core_walk.ignore_all with
         pattern = (fun inner -> if binds_variable inner then child_binds := true);
@@ -168,7 +168,7 @@ let is_functional walk =
 
 let names_of (written : Core.expression) =
   let names = ref [] in
-  Core_walk.expression
+  Core_walk.walk_expression
     {
       Core_walk.ignore_all with
       place =
@@ -280,7 +280,7 @@ let rec expression builder (node : Core.expression) : Tree.operand option =
                 {
                   destination = Emitter.at local;
                   base = Emitter.borrowed_place builder base_place;
-                  base_type = Core_walk.place_type base;
+                  base_type = Core_walk.compute_place_type base;
                   call;
                 }))
           origin;
@@ -517,14 +517,20 @@ and operand builder (mode : Types.mode) (passed : Core.operand) =
 
 and borrow (written : Core.place) (place : Tree.place) mode =
   Borrow
-    { place; type_ = Core_walk.place_type written; mode; origin = Core_walk.place_origin written }
+    {
+      place;
+      type_ = Core_walk.compute_place_type written;
+      mode;
+      origin = Core_walk.compute_place_origin written;
+    }
 
 and plan_borrow builder (written : Core.place) =
   In_order.operand_with builder
     (fun () ->
       let* place = place builder written in
       Some (borrow written place Read, place))
-    (Core_walk.place_type written) (Core_walk.place_origin written)
+    (Core_walk.compute_place_type written)
+    (Core_walk.compute_place_origin written)
 
 and place builder (written : Core.place) : Tree.place option =
   if not (Emitter.reaches builder) then None
@@ -1142,8 +1148,8 @@ and statement builder (node : Core.statement) =
                       _;
                     }
                     :: _ )
-                  when is_functional (fun visit -> Core_walk.expression visit left)
-                       && is_functional (fun visit -> Core_walk.expression visit right) ->
+                  when is_functional (fun visit -> Core_walk.walk_expression visit left)
+                       && is_functional (fun visit -> Core_walk.walk_expression visit right) ->
                     Some { Tree.comparison; left = low; right = high }
                 | _ -> None
               in
@@ -1319,7 +1325,7 @@ and cursor_loop builder ~origin ~pattern ~cursor ~next ~loop ~each =
   match place builder cursor with
   | None -> ()
   | Some place_ ->
-      let cursor_type = Core_walk.place_type cursor in
+      let cursor_type = Core_walk.compute_place_type cursor in
       let cursor = place_ in
       Option.iter
         (fun next ->
@@ -1462,7 +1468,7 @@ and lambda builder (parameters : Core.pattern list) (captures : Core.capture lis
   in
   let body =
     Emitter.finish inner ~parameters:parameter_locals ~captures:capture_locals
-      ~is_functional:(is_functional (fun visit -> Core_walk.block visit body))
+      ~is_functional:(is_functional (fun visit -> Core_walk.walk_block visit body))
       ?value_type:(Option.map unconverted body.value)
   in
   Emitter.add_lambda builder body

@@ -216,7 +216,7 @@ let callee_amount ?ends_in (context : State.context) after ~path ~(parts : State
       | _ -> Operations.declare_unknown_amount context after counter)
 
 let find_generic_argument context frame (operation : Intrinsic.operation) type_arguments name =
-  let generics = (Intrinsic_signatures.signature operation).generics in
+  let generics = (Intrinsic_signatures.make_signature operation).generics in
   List.find_map
     (fun ((parameter : Types.parameter), argument) ->
       match argument with
@@ -229,7 +229,7 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
     (counter : Costs.counter) =
   match invocation.callee with
   | Intrinsic { operation; type_arguments } -> (
-      let cost = Intrinsic_signatures.cost operation in
+      let cost = Intrinsic_signatures.classify_cost operation in
       match counter.resource with
       | Time -> (
           match (cost.time, counter.counting) with

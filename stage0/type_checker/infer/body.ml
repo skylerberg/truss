@@ -13,7 +13,7 @@ let no_output : State.env =
 
 let constant_expression : State.env = { no_output with compile_time = true }
 
-let body state (env : State.env) (written : Syntax.block) =
+let check_body state (env : State.env) (written : Syntax.block) =
   let rec check_statements = function
     | [] -> (
         match env.output with
@@ -29,22 +29,22 @@ let body state (env : State.env) (written : Syntax.block) =
         State.in_statement state env (State.read_span state last.id) (fun () ->
             match (last.kind, env.output) with
             | Expression _, Some (Returns output) when State.resolve state output = Types.unit ->
-                Statements.statement state env last ~last:false
+                Statements.check_statement state env last ~last:false
             | Expression value, Some (Returns output) -> Expressions.check state env value output
             | Expression value, Some (Lends (_, part)) ->
                 State.mark_lent_tails state value;
                 Expressions.check state env value part
             | _, Some (Returns output) ->
-                Statements.statement state env last ~last:true;
+                Statements.check_statement state env last ~last:true;
                 if not (State.statement_diverges state last || State.unify state output Types.unit)
                 then
                   State.report state Mismatch (State.read_span state last.id)
                     (Printf.sprintf "This body must end with a value of type `%s`."
                        (State.show state output))
-            | _ -> Statements.statement state env last ~last:false)
+            | _ -> Statements.check_statement state env last ~last:false)
     | (first : Syntax.statement) :: rest ->
         State.in_statement state env (State.read_span state first.id) (fun () ->
-            Statements.statement state env first ~last:false);
+            Statements.check_statement state env first ~last:false);
         check_statements rest
   in
   State.in_statement state env (State.read_span state written.id) (fun () ->
@@ -65,13 +65,13 @@ let declare_parameters state (written : Syntax.parameter list) (signature : Type
       | Self_parameter _ | Parameter_error -> ())
     written
 
-let self_mode (signature : Types.signature) =
+let classify_self_mode (signature : Types.signature) =
   match signature.receiver with
   | Some (Mut, _) -> Types.Mut
   | Some (Own, _) -> Types.Own
   | _ -> Types.Read
 
-let clause_expressions (clauses : Syntax.clause list) =
+let list_clause_expressions (clauses : Syntax.clause list) =
   List.concat_map
     (fun (clause : Syntax.clause) ->
       match clause.kind with
@@ -93,8 +93,8 @@ let check_clauses state env (clauses : Syntax.clause list) =
       State.in_statement state env (State.read_span state value.id) (fun () ->
           match kind with
           | `Bool -> Expressions.check state env value Types.bool
-          | `Cost_function -> ignore (Expressions.expression state env value)))
-    (clause_expressions clauses)
+          | `Cost_function -> ignore (Expressions.check_expression state env value)))
+    (list_clause_expressions clauses)
 
 let check_function_type_requires state env (written : Syntax.parameter list)
     (signature : Types.signature) =
@@ -141,7 +141,7 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
           with
           | Some info ->
               State.in_statement state env (State.read_span state value.id) (fun () ->
-                  let actual = Expressions.expression state env ~expected:info.type_ value in
+                  let actual = Expressions.check_expression state env ~expected:info.type_ value in
                   Name_lookup.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
               Constant.check state ~default:true value
@@ -149,7 +149,7 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
       | _ -> ())
     written
 
-let core_contract state (clauses : Syntax.clause list) : Core.contract =
+let build_core_contract state (clauses : Syntax.clause list) : Core.contract =
   let each choose = List.concat_map (fun (clause : Syntax.clause) -> choose clause.kind) clauses in
   let requires =
     each (function
@@ -179,7 +179,7 @@ let core_contract state (clauses : Syntax.clause list) : Core.contract =
         clauses;
   }
 
-let core_parameters state (written : Syntax.parameter list) (signature : Types.signature) :
+let build_core_parameters state (written : Syntax.parameter list) (signature : Types.signature) :
     Core.parameter list =
   List.filter_map
     (fun (parameter : Syntax.parameter) : Core.parameter option ->
@@ -245,7 +245,7 @@ let check_function state ~broken_body (written : Syntax.signature)
       output = Some signature.output;
       specification = signature.specification_only;
       self = Option.map snd signature.receiver;
-      self_mode = self_mode signature;
+      self_mode = classify_self_mode signature;
       loop_element = None;
       compile_time = false;
       in_quantifier = false;
@@ -260,8 +260,8 @@ let check_function state ~broken_body (written : Syntax.signature)
   state.form.definition_builder <-
     Some
       (fun ~holds_body ->
-        let parameters = core_parameters state written.parameters signature in
-        let contract = core_contract state written.clauses in
+        let parameters = build_core_parameters state written.parameters signature in
+        let contract = build_core_contract state written.clauses in
         let body = if holds_body then Option.map (State.build_block state) body_block else None in
         let body =
           match signature.output with
@@ -269,7 +269,7 @@ let check_function state ~broken_body (written : Syntax.signature)
           | Returns _ -> body
         in
         Function { parameters; contract; body });
-  match body_block with Some block when not broken_body -> body state env block | _ -> ()
+  match body_block with Some block when not broken_body -> check_body state env block | _ -> ()
 
 let check_deserialized_invariants state (elaborated : Interface.Environment.elaborated_interface)
     (form : Core.t) =
@@ -317,7 +317,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                     Expressions.check state env value Types.bool)
             | Potential value ->
                 State.in_statement state env (State.read_span state value.id) (fun () ->
-                    ignore (Expressions.expression state env value))
+                    ignore (Expressions.check_expression state env value))
             | Derives _ -> ())
           clauses;
         let defaulted variant (fields : Syntax.field list) =
@@ -464,7 +464,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                           Expressions.check state env requirement Types.bool))
                     law.requires;
                   if not (broken (Member_body index)) then
-                    body state { env with output = Some (Returns Types.bool) } law.body
+                    check_body state { env with output = Some (Returns Types.bool) } law.body
               | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
           members
     | Constant { value; _ }, Constant_interface constant ->
@@ -490,7 +490,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
             (fun ~holds_body ->
               Test (if holds_body then Some (State.build_block state written) else None));
         if not (broken Body) then
-          body state { no_output with output = Some (Returns Types.unit) } written
+          check_body state { no_output with output = Some (Returns Types.unit) } written
     | Theorem { parameters; clauses; body = written; _ }, Theorem_interface signature ->
         declare_parameters state parameters signature;
         let env : State.env =
@@ -500,15 +500,15 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
         state.form.definition_builder <-
           Some
             (fun ~holds_body ->
-              let parameters = core_parameters state parameters signature in
-              let contract = core_contract state clauses in
+              let parameters = build_core_parameters state parameters signature in
+              let contract = build_core_contract state clauses in
               Function
                 {
                   parameters;
                   contract;
                   body = (if holds_body then Some (State.build_block state written) else None);
                 });
-        if not (broken Body) then body state env written
+        if not (broken Body) then check_body state env written
     | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type; _ } ->
         (match Interface.Definition.read_trait_interface state.lookups.interface trait.trait with
         | Some interface ->
@@ -530,7 +530,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       local = Synthetic index;
                       name;
                       mode = Read;
-                      type_ = State.final_type state type_;
+                      type_ = State.finalize_type state type_;
                       default = None;
                       callback_contract = None;
                     })
@@ -543,7 +543,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                   body = (if holds_body then Some (State.build_block state written) else None);
                 });
         if not (broken Body) then
-          body state
+          check_body state
             { no_output with specification = true; output = Some (Returns Types.unit) }
             written
     | Law_proof { body = written; _ }, _ ->
@@ -556,13 +556,13 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                   body = (if holds_body then Some (State.build_block state written) else None);
                 });
         if not (broken Body) then
-          body state
+          check_body state
             { no_output with specification = true; output = Some (Returns Types.unit) }
             written
     | _ -> ()
 
 let finalize (state : State.state) =
-  let final_type = State.final_type state and argument = State.final_argument state in
+  let final_type = State.finalize_type state and argument = State.finalize_argument state in
   let trait (reference : Types.trait_reference) =
     {
       reference with
@@ -601,7 +601,7 @@ let finalize (state : State.state) =
         | Intrinsic intrinsic ->
             Intrinsic { intrinsic with type_arguments = List.map argument intrinsic.type_arguments }
         | other -> other);
-      uses = State.final_capabilities state written.uses;
+      uses = State.finalize_capabilities state written.uses;
       callee_result = final_type written.callee_result;
     }
   in
@@ -644,7 +644,7 @@ let finalize (state : State.state) =
         part_conversions = List.map (Option.map call) template.part_conversions;
       })
 
-let integer_literal_range bounds =
+let find_integer_literal_range bounds =
   Option.bind (Types.find_bound_integer_implementors bounds) (fun builtins ->
       List.fold_left
         (fun range builtin ->
@@ -664,8 +664,8 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
       (Array.to_list resolved.names)
   in
   let called = ref evidence_packages in
-  Core_walk.definition
-    (Core_walk.callees (function
+  Core_walk.walk_definition
+    (Core_walk.make_callee_visitor (function
       | Trait_method { trait; evidence; _ } ->
           called :=
             Path.package trait.trait
@@ -729,13 +729,14 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   in
   state.unifier.integer_range <-
     (fun type_ ->
-      integer_literal_range
-        (Interface.Properties.list_known_bounds lookups.interface ~bounds:(State.bounds state) type_));
+      find_integer_literal_range
+        (Interface.Properties.list_known_bounds lookups.interface
+           ~bounds:(State.lookup_bounds state) type_));
   check_definition state elaborated ~checks_body;
   state.diagnostics <- !(context.diagnostics) @ state.diagnostics;
   state.diagnostics <-
     Interface.Check.list_bound_diagnostics lookups.interface ~package:state.package
-      ~bounds:(State.bounds state) ~spans !(context.named)
+      ~bounds:(State.lookup_bounds state) ~spans !(context.named)
     @ state.diagnostics;
   finalize state;
   Exported_parts.check state;

@@ -113,7 +113,7 @@ let () =
       in
       match
         Support.proofs (Support.database packages) (Support.file_of "app::main")
-          (Resolve.Names.key_of caller)
+          (Resolve.Names.make_key caller)
       with
       | Obligations { obligations = [ obligation ]; _ } ->
           if not (List.exists applies_limited obligation.query.facts) then
@@ -162,7 +162,7 @@ let () =
       match
         Database.For_testing.read_proof
           (Support.proven (Support.database packages) main)
-          (Resolve.Names.key_of caller)
+          (Resolve.Names.make_key caller)
       with
       | Some Blocked -> ()
       | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
@@ -190,7 +190,7 @@ let () =
       match
         Database.For_testing.read_proof
           (Support.proven (Support.database packages) main)
-          (Resolve.Names.key_of caller)
+          (Resolve.Names.make_key caller)
       with
       | Some (Value (Obligations _)) -> ()
       | Some (Value (Unsupported _ | Not_proven_here)) ->
@@ -218,7 +218,7 @@ let () =
       match
         Database.For_testing.read_proof
           (Support.proven (Support.database packages) main)
-          (Resolve.Names.key_of caller)
+          (Resolve.Names.make_key caller)
       with
       | Some (Value (Obligations _)) -> ()
       | Some (Value (Unsupported _ | Not_proven_here)) ->
@@ -251,7 +251,7 @@ let () =
       let proofs = Support.proven database main in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          match Database.For_testing.read_proof proofs (Resolve.Names.key_of declaration) with
+          match Database.For_testing.read_proof proofs (Resolve.Names.make_key declaration) with
           | Some (Value (Obligations _)) -> ()
           | Some (Value (Unsupported _ | Not_proven_here)) ->
               Harness.fail "%s has no obligations" (Path.show declaration.path)
@@ -835,7 +835,7 @@ let holes text =
   let proof = Support.proofs (Support.database packages) (Support.file_of "app::main") in
   List.fold_left
     (fun total declaration ->
-      match proof (Resolve.Names.key_of declaration) with
+      match proof (Resolve.Names.make_key declaration) with
       | Obligations outcome -> total + List.length outcome.holes
       | Unsupported _ | Not_proven_here -> total)
     0
@@ -1365,7 +1365,7 @@ let () =
       let key = List.hd (Support.declarations packages (Support.module_of "app::main")) in
       match
         Support.proofs (Support.database packages) (Support.file_of "app::main")
-          (Resolve.Names.key_of key)
+          (Resolve.Names.make_key key)
       with
       | Obligations { obligations = [ obligation ]; _ } ->
           let text = Logic.show_query obligation.query in
@@ -1377,7 +1377,7 @@ let () =
         let key = List.hd (Support.declarations packages (Support.module_of "app::main")) in
         match
           Support.proofs (Support.database packages) (Support.file_of "app::main")
-            (Resolve.Names.key_of key)
+            (Resolve.Names.make_key key)
         with
         | Obligations { obligations = [ obligation ]; _ } -> Solver.For_testing.key obligation.query
         | _ -> "none"
@@ -1429,7 +1429,7 @@ let () =
         in
         match
           Support.proofs (Support.database packages) (Support.file_of "app::main")
-            (Resolve.Names.key_of key)
+            (Resolve.Names.make_key key)
         with
         | Obligations { obligations; _ } ->
             List.fold_left

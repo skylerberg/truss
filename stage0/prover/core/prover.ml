@@ -597,7 +597,7 @@ let file_states { lookups; verdicts } file =
   let verdict key = Option.value (Hashtbl.find_opt verdicts key) ~default:[] in
   List.map
     (fun declaration ->
-      let key = Resolve.Names.key_of declaration in
+      let key = Resolve.Names.make_key declaration in
       let ({ base; _ } : Resolve.Names.place) = lookups.interface.names.place key in
       List.map
         (fun (state, cited) ->

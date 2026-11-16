@@ -59,20 +59,20 @@ type head = {
   type_arguments : Syntax.bracket_item list option;
 }
 
-let rec head resolved (value : Syntax.expression) =
+let rec find_head resolved (value : Syntax.expression) =
   match value.kind with
   | Name path ->
       Option.map
         (fun target -> { name = path.last; target; type_arguments = None })
         resolved.names.(path.last.id)
-  | Parenthesized inner -> head resolved inner
+  | Parenthesized inner -> find_head resolved inner
   | Bracket (base, items) when resolved.brackets.(value.id) = Some Type_arguments ->
       Option.map
         (fun resolved_head -> { resolved_head with type_arguments = Some items })
-        (head resolved base)
+        (find_head resolved base)
   | _ -> None
 
-let declared_name (definition : Syntax.definition) : Syntax.name option =
+let find_declared_name (definition : Syntax.definition) : Syntax.name option =
   match definition.kind with
   | Function { signature = { name = Plain_name name | Member_name (_, name); _ }; _ }
   | Method_declaration { name = Plain_name name | Member_name (_, name); _ }
@@ -101,7 +101,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
     | Some container -> not (Names.is_broken lookups container Header)
     | None -> true
   in
-  if is_walked then Walk.definition state ~path:key.path ?container definition;
+  if is_walked then Walk.resolve_definition state ~path:key.path ?container definition;
   (match key.path with
   | Top { name; _ } when List.mem name Prelude.names -> (
       let defines_it =
@@ -109,7 +109,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
         | Some prelude_module -> prelude_module = module_
         | None -> false
       in
-      match declared_name definition with
+      match find_declared_name definition with
       | Some declared when not defines_it ->
           Walk.report state Shadowed_name spans.(declared.id)
             (Printf.sprintf
@@ -120,7 +120,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
   | _ -> ());
   if key.ordinal > 0 then begin
     let span =
-      match declared_name definition with
+      match find_declared_name definition with
       | Some name -> spans.(name.id)
       | None -> Source.Definition_span.zero_width spans.(definition.id).start
     in
@@ -133,7 +133,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
          (Path.show key.path) first)
   end;
   let outcome () =
-    let walked = Walk.names_of state section in
+    let walked = Walk.lookup_section_names state section in
     let resolved =
       {
         names = walked.names;
@@ -156,9 +156,10 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
     | Interface | Contract -> is_walked
     | Body -> is_walked && not (Names.is_broken lookups key Body)
   in
-  if is_parsed || (Walk.names_of state section).diagnostics <> [] then Some (outcome ()) else None
+  if is_parsed || (Walk.lookup_section_names state section).diagnostics <> [] then Some (outcome ())
+  else None
 
-let file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
+let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
     ~(used : string list option) =
   let module_ = path.module_ in
   let is_recovered (item : Syntax.definition Syntax.item) =
@@ -181,8 +182,8 @@ let file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax
     (List.fold_left
        (fun seen (item : Syntax.path Syntax.item) ->
          let span = Source.span item.base item.stop in
-         let used_module = Names.used_module lookups ~from:module_ item.value in
-         let last = Names.last_name used_module in
+         let used_module = Names.resolve_used_module lookups ~from:module_ item.value in
+         let last = Names.extract_last_name used_module in
          if used_module = Intrinsic.module_ && module_.package <> Path.standard_package then
            report Intrinsic_import span "Only the `standard` package can use `standard::intrinsic`."
          else if not (Names.is_visible_module lookups ~from:module_ used_module) then
@@ -221,7 +222,7 @@ type trait_header = {
   laws : string list;
 }
 
-let trait_header (definition : Syntax.definition) (resolved : resolved) =
+let make_trait_header (definition : Syntax.definition) (resolved : resolved) =
   match definition.kind with
   | Trait { requires; members; _ } ->
       let member_names select =

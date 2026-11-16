@@ -195,7 +195,7 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
                   let shown = Elaborator.show_path written.path in
                   if
                     not
-                      (Resolve.Names.derivable trait || Well_known.is Copyable trait
+                      (Resolve.Names.is_derivable trait || Well_known.is Copyable trait
                      || Well_known.is Plain trait)
                   then
                     Checking.report state Not_derivable state.spans.(written.id)
@@ -390,19 +390,19 @@ let check (state : Checking.state) =
     | ( Some container,
         (Function { signature; _ } | Method_declaration signature),
         Function_interface written ) -> (
-        let name = Resolve.Names.signature_name signature in
+        let name = Resolve.Names.extract_signature_name signature in
         match
           (lookups.names.definition container, (lookups.elaborated_interface container).interface)
         with
         | { kind = Trait _; visibility; _ }, Trait_interface trait ->
             check_redeclared state name
-              (Resolve.Names.receiver signature.parameters)
+              (Resolve.Names.classify_receiver signature.parameters)
               ~trait_path:container.path trait;
             check_private_in_public state ~visibility (list_signature_types written)
               state.spans.(name.id)
         | { kind = Impl { trait_; _ }; _ }, Impl_interface impl ->
             Impl_checks.check_impl_method state name
-              (Resolve.Names.receiver signature.parameters)
+              (Resolve.Names.classify_receiver signature.parameters)
               written impl
               ~trait_span:(lookups.names.spans container).(trait_.id)
               trait_
@@ -429,7 +429,7 @@ let check (state : Checking.state) =
         let arity_matches =
           match for_type with
           | Types.Named { path; _ } -> (
-              match Resolve.Names.generics_of lookups.names path with
+              match Resolve.Names.find_generics lookups.names path with
               | Some expected -> List.length expected = List.length generics
               | None -> true)
           | _ -> true

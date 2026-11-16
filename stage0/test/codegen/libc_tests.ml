@@ -145,7 +145,7 @@ let () =
       let modes operation =
         List.map
           (fun (parameter : Types.parameter_info) -> (parameter.name, parameter.mode))
-          (Intrinsic_signatures.signature operation).parameters
+          (Intrinsic_signatures.make_signature operation).parameters
       in
       if
         modes (Libc Read) <> [ ("descriptor", Types.Read); ("buffer", Mut); ("count", Read) ]
@@ -224,7 +224,7 @@ let () =
       let names =
         List.map
           (fun (parameter : Types.parameter_info) -> parameter.name)
-          (Intrinsic_signatures.signature (Libc Fcntl_dupfd_cloexec)).parameters
+          (Intrinsic_signatures.make_signature (Libc Fcntl_dupfd_cloexec)).parameters
       in
       if names <> [ "descriptor"; "least" ] then
         Codegen_support.fail "fcntl_dupfd_cloexec takes %s" (String.concat ", " names);

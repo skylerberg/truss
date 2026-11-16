@@ -29,7 +29,7 @@ let run ~position =
       let symbol_at =
         List.find_map
           (fun (declaration : Resolve.Names.declaration) ->
-            let key = Resolve.Names.key_of declaration in
+            let key = Resolve.Names.make_key declaration in
             let ({ base; _ } : Resolve.Names.place) = names.place key in
             let text = names.text key in
             if base <= offset && offset <= base + String.length text then

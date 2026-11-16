@@ -14,7 +14,7 @@ type kind =
 type named = Function | Type | Trait | Capability | Constant | Theorem
 
 val kind_of_named : named -> kind
-val kind_name : kind -> string
+val show_kind : kind -> string
 
 type declaration = {
   module_ : Path.module_;
@@ -28,11 +28,11 @@ type declaration = {
 type key = { module_ : Path.module_; path : Path.t; ordinal : int }
 type place = { file : Path.file; base : int }
 
-val key_of : declaration -> key
+val make_key : declaration -> key
 val show_key : key -> string
-val signature_name : Syntax.signature -> Syntax.name
-val receiver : Syntax.parameter list -> Path.receiver
-val last_name : Path.module_ -> string
+val extract_signature_name : Syntax.signature -> Syntax.name
+val classify_receiver : Syntax.parameter list -> Path.receiver
+val extract_last_name : Path.module_ -> string
 
 type entry = { name : string; kind : named; visibility : Syntax.visibility; generic : bool }
 
@@ -41,11 +41,11 @@ module String_map : Map.S with type key = String.t
 val is_type_kind : named -> bool
 val is_value_kind : named -> bool
 val is_public : Syntax.visibility -> bool
-val visible : from:Path.module_ -> Path.module_ -> Syntax.visibility -> bool
+val is_visible : from:Path.module_ -> Path.module_ -> Syntax.visibility -> bool
 
 type law_proof_name = { trait : Path.t; law : string; type_head : Path.t }
 
-val derivable : Path.t -> bool
+val is_derivable : Path.t -> bool
 
 type lookups = {
   find : Path.module_ -> string -> entry option;
@@ -79,7 +79,7 @@ type module_lookup =
   | Ambiguous_module of Path.module_ * Path.module_
   | No_module of string
 
-val used_module : lookups -> from:Path.module_ -> Syntax.path -> Path.module_
+val resolve_used_module : lookups -> from:Path.module_ -> Syntax.path -> Path.module_
 val list_visible_packages : lookups -> Path.package -> Path.package list
 val list_transitive_dependencies : lookups -> Path.package -> Path.package list
 val is_visible_module : lookups -> from:Path.module_ -> Path.module_ -> bool
@@ -92,14 +92,14 @@ val lookup_module :
   string list ->
   module_lookup
 
-val definition_of_path : lookups -> Path.t -> (key * Syntax.definition) option
-val law_parameters : lookups -> Path.t -> string -> string list option
+val find_definition : lookups -> Path.t -> (key * Syntax.definition) option
+val find_law_parameters : lookups -> Path.t -> string -> string list option
 
 type generic_kind = Type_kind | Value_kind | Capability_kind
 
-val recovery_report : lookups -> key -> Parts.part -> Diagnostic.reported option
+val find_recovery_report : lookups -> key -> Parts.part -> Diagnostic.reported option
 val is_broken : lookups -> key -> Parts.part -> bool
-val generics_of : lookups -> Path.t -> (string * generic_kind) list option
+val find_generics : lookups -> Path.t -> (string * generic_kind) list option
 
 type name_lookup = Found_name of entry * Path.t | Hidden_name of entry | No_name
 
@@ -107,11 +107,11 @@ val find_in :
   lookups -> from:Path.module_ -> Path.module_ -> string -> is_kind:(named -> bool) -> name_lookup
 
 val find_bare_type : lookups -> from:Path.module_ -> string -> (entry * Path.t) option
-val kind_of : lookups -> Path.t -> named option
+val find_kind : lookups -> Path.t -> named option
 
 type namespace
 
-val namespace :
+val build_namespace :
   lookups ->
   Path.package ->
   (Path.module_ * (Path.file * Syntax.file * string) list) list ->
@@ -140,7 +140,7 @@ type change =
   | Impls_of_trait of Path.t
   | Law_proofs of law_proof_name
 
-val changes : namespace -> namespace -> change list
+val list_changes : namespace -> namespace -> change list
 
 val of_namespaces :
   namespace:(Path.package -> namespace) ->

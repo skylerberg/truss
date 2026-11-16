@@ -1,13 +1,14 @@
-let rec binding_pattern state env written type_ ~is_var ~mode =
-  pattern_with state env written type_ ~is_var ~mode
+let rec check_binding_pattern state env written type_ ~is_var ~mode =
+  check_pattern_with state env written type_ ~is_var ~mode
 
-and pattern state env written type_ ~mode = pattern_with state env written type_ ~is_var:false ~mode
+and check_pattern state env written type_ ~mode =
+  check_pattern_with state env written type_ ~is_var:false ~mode
 
-and pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode =
+and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode =
   let type_ = State.normalize state type_ in
   state.tables.scrutinee_types.(written.id) <- Some type_;
-  let recurse = pattern_with state env ~is_var ~mode in
-  let unknown type_ = unknown_pattern state env written type_ ~is_var ~mode in
+  let recurse = check_pattern_with state env ~is_var ~mode in
+  let unknown type_ = check_unknown_pattern state env written type_ ~is_var ~mode in
   let binds id (bound : Syntax.name) =
     State.register_pattern state written (fun () ->
         Bind { local = Named id; name = bound.text; is_var; mode })
@@ -15,7 +16,7 @@ and pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode =
   match written.kind with
   | Wildcard | Pattern_error -> State.register_pattern state written (fun () -> Wildcard)
   | Binding bound -> (
-      match State.target state bound with
+      match State.find_target state bound with
       | Some Binding ->
           binds bound.id bound;
           State.declare_compiled state env bound type_ ~is_var ~mode
@@ -34,12 +35,14 @@ and pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode =
   | Qualified_constant written_constant ->
       State.register_pattern state written (fun () ->
           Form.build_constant_pattern state written.id (Form.build_named_constant state written.id));
-      qualified_constant state written.id (State.read_span state written.id) written_constant type_
+      check_qualified_constant state written.id
+        (State.read_span state written.id)
+        written_constant type_
   | Literal literal ->
       State.register_pattern state written (fun () ->
           Form.build_constant_pattern state written.id
             (Form.build_literal_constant state written.id literal));
-      literal_pattern state written.id (State.read_span state written.id) literal type_
+      check_literal_pattern state written.id (State.read_span state written.id) literal type_
   | Pattern_range { start; stop; inclusive } ->
       State.register_pattern state written (fun () ->
           Range
@@ -51,7 +54,7 @@ and pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode =
       let rejects_ranges (resolved : Types.ty) =
         match resolved with
         | Types.Named _ | Types.Function _ | Types.Any _ | Types.Parameter _ ->
-            not (State.integer_type state resolved || Types.is_builtin Character resolved)
+            not (State.is_integer_type state resolved || Types.is_builtin Character resolved)
         | _ -> false
       in
       let report_not_range_type resolved =
@@ -67,9 +70,10 @@ and pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode =
           (fun (bound : Syntax.range_end) ->
             match bound.kind with
             | End_literal literal ->
-                literal_pattern state bound.id (State.read_span state bound.id) literal type_
+                check_literal_pattern state bound.id (State.read_span state bound.id) literal type_
             | End_constant constant ->
-                qualified_constant state bound.id (State.read_span state bound.id) constant type_)
+                check_qualified_constant state bound.id (State.read_span state bound.id) constant
+                  type_)
           [ start; stop ];
         State.defer state (fun () ->
             match State.resolve state type_ with
@@ -81,9 +85,9 @@ and pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode =
   | Variant { name = variant_name; fields } -> (
       match type_ with
       | Types.Named { path; arguments } -> (
-          match Members.variants state.lookups path arguments with
+          match Members.find_variants state.lookups path arguments with
           | Some variants -> (
-              if not (Members.fields_visible state.lookups ~package:state.package path) then
+              if not (Members.are_fields_visible state.lookups ~package:state.package path) then
                 State.report state Private_field
                   (State.read_span state written.id)
                   (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
@@ -111,8 +115,8 @@ and pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode =
                   | _ -> ());
                   let declared = Option.value ~default:[] variant.fields in
                   let matched =
-                    pattern_fields state env written declared (Option.value ~default:[] fields)
-                      ~is_var ~mode
+                    check_pattern_fields state env written declared
+                      (Option.value ~default:[] fields) ~is_var ~mode
                   in
                   State.register_pattern state written (fun () ->
                       Variant
@@ -122,7 +126,7 @@ and pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode =
                         })
               | None ->
                   unknown
-                  @@ State.error state Unknown_variant
+                  @@ State.make_error_type state Unknown_variant
                        (State.read_span state variant_name.id)
                        ~fixes:
                          (match
@@ -142,38 +146,40 @@ and pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode =
                           variant_name.text))
           | None ->
               unknown
-                (State.error state Unknown_variant
+                (State.make_error_type state Unknown_variant
                    (State.read_span state written.id)
                    (Printf.sprintf "`%s` has no variants." (Types.show type_))))
       | Types.Error _ | Types.Hole -> unknown type_
       | _ ->
           unknown
-            (State.error state Unknown_variant
+            (State.make_error_type state Unknown_variant
                (State.read_span state written.id)
                (Printf.sprintf "`%s` has no variants." (State.show state type_))))
   | Record fields -> (
       match type_ with
       | Types.Named { path; arguments } -> (
-          match Members.fields state.lookups path arguments with
+          match Members.find_fields state.lookups path arguments with
           | Some record_fields ->
-              if not (Members.fields_visible state.lookups ~package:state.package path) then
+              if not (Members.are_fields_visible state.lookups ~package:state.package path) then
                 State.report state Private_field
                   (State.read_span state written.id)
                   (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
                      (Types.show type_));
               state.tables.patterns.(written.id) <- Some (Record_pattern { type_ });
-              let matched = pattern_fields state env written record_fields fields ~is_var ~mode in
+              let matched =
+                check_pattern_fields state env written record_fields fields ~is_var ~mode
+              in
               State.register_pattern state written (fun () ->
                   Record (Form.build_pattern_fields state record_fields matched))
           | None ->
               unknown
-                (State.error state Not_a_record
+                (State.make_error_type state Not_a_record
                    (State.read_span state written.id)
                    (Printf.sprintf "`%s` is not a record." (State.show state type_))))
       | Types.Error _ | Types.Hole -> unknown type_
       | _ ->
           unknown
-            (State.error state Not_a_record
+            (State.make_error_type state Not_a_record
                (State.read_span state written.id)
                (Printf.sprintf "`%s` is not a record." (State.show state type_))))
   | Alternatives alternatives ->
@@ -181,7 +187,7 @@ and pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode =
       State.register_pattern state written (fun () ->
           Alternatives (List.map (State.build_pattern state) alternatives))
 
-and pattern_fields state env (written : Syntax.pattern) (fields : Types.field list)
+and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.field list)
     (written_fields : Syntax.pattern_field list) ~is_var ~mode =
   let bare_name (inner : Syntax.pattern) =
     match inner.kind with Binding name -> Some name.text | _ -> None
@@ -230,11 +236,11 @@ and pattern_fields state env (written : Syntax.pattern) (fields : Types.field li
             List.find_opt (fun (declared : Types.field) -> declared.field_name = name.text) fields
           with
           | Some declared ->
-              pattern_with state env inner declared.field_type ~is_var ~mode;
+              check_pattern_with state env inner declared.field_type ~is_var ~mode;
               Some (declared.field_name, inner)
           | None ->
-              pattern_with state env inner ~is_var ~mode
-              @@ State.error state Unknown_member (State.read_span state name.id)
+              check_pattern_with state env inner ~is_var ~mode
+              @@ State.make_error_type state Unknown_member (State.read_span state name.id)
                    ~fixes:
                      (match
                         Diagnostic.closest name.text
@@ -256,7 +262,7 @@ and pattern_fields state env (written : Syntax.pattern) (fields : Types.field li
           in
           match (named, fields) with
           | Some declared, _ | None, [ declared ] ->
-              pattern_with state env inner declared.field_type ~is_var ~mode;
+              check_pattern_with state env inner declared.field_type ~is_var ~mode;
               Some (declared.field_name, inner)
           | None, _ ->
               let names =
@@ -265,8 +271,8 @@ and pattern_fields state env (written : Syntax.pattern) (fields : Types.field li
                      (fun (declared : Types.field) -> "`" ^ declared.field_name ^ "`")
                      fields)
               in
-              pattern_with state env inner ~is_var ~mode
-                (State.error state Unknown_member (State.read_span state inner.id)
+              check_pattern_with state env inner ~is_var ~mode
+                (State.make_error_type state Unknown_member (State.read_span state inner.id)
                    (Printf.sprintf
                       "A bare pattern must name a field, since this has %d fields: %s. Truss has \
                        no tuples, so fields match by name."
@@ -274,7 +280,7 @@ and pattern_fields state env (written : Syntax.pattern) (fields : Types.field li
               None))
     written_fields
 
-and unknown_pattern state env (written : Syntax.pattern) unknown ~is_var ~mode =
+and check_unknown_pattern state env (written : Syntax.pattern) unknown ~is_var ~mode =
   state.tables.scrutinee_types.(written.id) <- Some unknown;
   match written.kind with
   | Variant { fields = Some fields; _ } | Record fields ->
@@ -282,18 +288,18 @@ and unknown_pattern state env (written : Syntax.pattern) unknown ~is_var ~mode =
         (fun (field : Syntax.pattern_field) ->
           match field.kind with
           | Named_field (_, inner) | Field inner ->
-              pattern_with state env inner unknown ~is_var ~mode
+              check_pattern_with state env inner unknown ~is_var ~mode
           | Rest -> ())
         fields
   | _ -> ()
 
-and constant_pattern (state : State.state) id span path type_ =
+and check_constant_pattern (state : State.state) id span path type_ =
   state.tables.patterns.(id) <- Some (Constant_pattern path);
   match Interface.Definition.read_constant_type state.lookups.interface path with
   | Some constant_type ->
       if not (State.unify state constant_type type_) then
-        State.mismatch state span ~expected:type_ ~actual:constant_type
-      else if not (structural state (State.resolve state constant_type)) then
+        State.report_mismatch state span ~expected:type_ ~actual:constant_type
+      else if not (is_structural state (State.resolve state constant_type)) then
         State.report state Not_structural span
           (Printf.sprintf
              "A constant in a pattern needs a type with structural equality, so that matching it \
@@ -306,9 +312,9 @@ and constant_pattern (state : State.state) id span path type_ =
              | _ -> "the_constant"))
   | None -> ()
 
-and structural ?(seen = []) state (type_ : Types.ty) =
+and is_structural ?(seen = []) state (type_ : Types.ty) =
   if
-    State.integer_type state type_ || Types.is_builtin Bool type_
+    State.is_integer_type state type_ || Types.is_builtin Bool type_
     || Types.is_builtin Character type_ || Types.is_builtin Unit type_
     || Types.is_well_known String type_
   then true
@@ -327,7 +333,7 @@ and structural ?(seen = []) state (type_ : Types.ty) =
             let fields_structural (fields : Types.field list) =
               List.for_all
                 (fun (field : Types.field) ->
-                  structural ~seen:(type_ :: seen) state
+                  is_structural ~seen:(type_ :: seen) state
                     (Types.substitute substitution field.field_type))
                 fields
             in
@@ -346,20 +352,21 @@ and structural ?(seen = []) state (type_ : Types.ty) =
         | _ -> false)
     | _ -> false
 
-and qualified_constant state id span constant type_ =
+and check_qualified_constant state id span constant type_ =
   let path =
     match constant with
     | Module_constant written_path -> (
-        match State.target state written_path.last with
+        match State.find_target state written_path.last with
         | Some (Definition (Constant, path)) -> Some path
         | _ -> None)
     | Type_constant (written_path, member) -> (
-        match State.target state written_path.last with
-        | Some (Definition (Type, owner)) -> Members.own_constant state.lookups owner member.text
+        match State.find_target state written_path.last with
+        | Some (Definition (Type, owner)) ->
+            Members.find_own_constant state.lookups owner member.text
         | _ -> None)
   in
   match path with
-  | Some path -> constant_pattern state id span path type_
+  | Some path -> check_constant_pattern state id span path type_
   | None -> State.report state Unknown_member span "This names no constant."
 
 and check_literal_fits state (value : Syntax.expression) number type_ =
@@ -379,10 +386,10 @@ and check_literal_fits state (value : Syntax.expression) number type_ =
           | _ -> ());
           true)
 
-and character_tag state (literal : Syntax.string_literal) =
+and find_character_tag state (literal : Syntax.string_literal) =
   match literal.tag with
   | Some tag -> (
-      match State.target state tag.last with
+      match State.find_target state tag.last with
       | Some (Definition (Type, path)) -> (
           match Intrinsic.builtin_of_path path with
           | Some ((Character | UInt8) as builtin) -> Some builtin
@@ -390,7 +397,7 @@ and character_tag state (literal : Syntax.string_literal) =
       | _ -> None)
   | None -> None
 
-and character_value (state : State.state) id (literal : Syntax.string_literal)
+and check_character_value (state : State.state) id (literal : Syntax.string_literal)
     (builtin : Intrinsic.builtin) =
   let text = literal.first.value in
   let scalars =
@@ -418,16 +425,17 @@ and character_value (state : State.state) id (literal : Syntax.string_literal)
             "`Character\"...\"` holds exactly one Unicode scalar value, with no `${...}`."
         | _ -> "`UInt8\"...\"` holds exactly one ASCII character, with no `${...}`.")
 
-and character_literal state id literal builtin =
-  character_value state id literal builtin;
+and check_character_literal state id literal builtin =
+  check_character_value state id literal builtin;
   Types.make_builtin builtin
 
-and literal_pattern state id (span : Source.Definition_span.t) literal type_ =
+and check_literal_pattern state id (span : Source.Definition_span.t) literal type_ =
   match literal with
   | Literal_integer number -> (
       state.tables.literals.(id) <- Some (Integer_value number);
       let check type_ =
-        if not (State.integer_type state type_ || Types.is_error type_ || type_ = Types.Hole) then
+        if not (State.is_integer_type state type_ || Types.is_error type_ || type_ = Types.Hole)
+        then
           State.report state Mismatch span
             (Printf.sprintf "An integer pattern matches an integer, not `%s`." (Types.show type_))
         else
@@ -448,16 +456,16 @@ and literal_pattern state id (span : Source.Definition_span.t) literal type_ =
       | _ -> check type_)
   | Literal_true | Literal_false ->
       if not (State.unify state type_ Types.bool) then
-        State.mismatch state span ~expected:type_ ~actual:Types.bool
+        State.report_mismatch state span ~expected:type_ ~actual:Types.bool
   | Literal_string tagged -> (
-      match character_tag state tagged with
+      match find_character_tag state tagged with
       | Some builtin ->
-          character_value state id tagged builtin;
+          check_character_value state id tagged builtin;
           if not (State.unify state type_ (Types.make_builtin builtin)) then
-            State.mismatch state span ~expected:type_ ~actual:(Types.make_builtin builtin)
-      | None -> string_pattern state span type_)
+            State.report_mismatch state span ~expected:type_ ~actual:(Types.make_builtin builtin)
+      | None -> check_string_pattern state span type_)
 
-and string_pattern state span type_ =
+and check_string_pattern state span type_ =
   if
     not
       (Types.is_well_known String type_

@@ -1,32 +1,32 @@
-let public (lookups : Lookups.t) (module_ : Path.module_) name =
+let is_public (lookups : Lookups.t) (module_ : Path.module_) name =
   match lookups.interface.names.find module_ name with
   | Some entry -> Resolve.Names.is_public entry.visibility
   | None -> true
 
-let visible_to_other_packages (lookups : Lookups.t) (path : Path.t) =
+let is_visible_to_other_packages (lookups : Lookups.t) (path : Path.t) =
   match path with
-  | Top { module_; name } -> module_ = Intrinsic.module_ || public lookups module_ name
+  | Top { module_; name } -> module_ = Intrinsic.module_ || is_public lookups module_ name
   | Method { owner = Top { module_; name }; _ }
   | Member_constant { owner = Top { module_; name }; _ } -> (
-      public lookups module_ name
+      is_public lookups module_ name
       &&
-      match Resolve.Names.definition_of_path lookups.interface.names path with
+      match Resolve.Names.find_definition lookups.interface.names path with
       | Some (_, definition) -> Resolve.Names.is_public definition.visibility
       | None -> true)
   | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ -> true
   | Unresolved _ -> false
 
-let called_from_other_packages (state : State.state) =
+let is_called_from_other_packages (state : State.state) =
   match state.lookups.interface.names.container state.key with
   | None -> Resolve.Names.is_public state.definition.visibility
   | Some container -> (
       match Interface.Definition.read_interface state.lookups.interface container.path with
-      | Some (Trait_interface _) -> visible_to_other_packages state.lookups container.path
+      | Some (Trait_interface _) -> is_visible_to_other_packages state.lookups container.path
       | Some (Impl_interface impl) -> (
-          visible_to_other_packages state.lookups impl.implements.trait
+          is_visible_to_other_packages state.lookups impl.implements.trait
           &&
           match impl.for_type with
-          | Types.Named { path; _ } -> visible_to_other_packages state.lookups path
+          | Types.Named { path; _ } -> is_visible_to_other_packages state.lookups path
           | _ -> true)
       | _ -> false)
 
@@ -39,7 +39,7 @@ let check_clauses (state : State.state) (name : Syntax.name) clauses =
         | Ensures _ | Uses _ | Decreases _ | Clause_error -> None)
       clauses
   in
-  if called_from_other_packages state && requires_and_costs <> [] then begin
+  if is_called_from_other_packages state && requires_and_costs <> [] then begin
     let named id (path : Path.t) =
       let span = State.read_span state id in
       if
@@ -47,7 +47,7 @@ let check_clauses (state : State.state) (name : Syntax.name) clauses =
           (fun (clause : Source.Definition_span.t) ->
             clause.start <= span.start && span.stop <= clause.stop)
           requires_and_costs
-        && not (visible_to_other_packages state.lookups path)
+        && not (is_visible_to_other_packages state.lookups path)
       then
         let hidden = Path.show path in
         State.report state Private_in_public span
@@ -70,6 +70,6 @@ let check_clauses (state : State.state) (name : Syntax.name) clauses =
 let check (state : State.state) =
   match state.definition.kind with
   | Syntax.Function { signature; _ } | Method_declaration signature ->
-      check_clauses state (Resolve.Names.signature_name signature) signature.clauses
+      check_clauses state (Resolve.Names.extract_signature_name signature) signature.clauses
   | Theorem { name; clauses; _ } -> check_clauses state name clauses
   | _ -> ()

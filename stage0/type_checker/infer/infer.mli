@@ -22,16 +22,18 @@ val statement_diverges : tables -> Syntax.statement -> bool
 
 type checked = Body.checked = { form : Core.t; tables : tables; used_packages : Path.package list }
 
-val contract : Lookups.t -> Resolve.Names.key -> (checked, Diagnostic.in_definition list) result
-val body : Lookups.t -> Resolve.Names.key -> (checked, Diagnostic.in_definition list) result
-val derived : Lookups.t -> Path.t -> Core.t option
+val check_contract :
+  Lookups.t -> Resolve.Names.key -> (checked, Diagnostic.in_definition list) result
+
+val check_body : Lookups.t -> Resolve.Names.key -> (checked, Diagnostic.in_definition list) result
+val derive_form : Lookups.t -> Path.t -> Core.t option
 
 type form_origin =
   | Written of Resolve.Names.key
   | Derived of Resolve.Names.key
   | Inherited of Resolve.Names.key
 
-val form_origin :
+val find_form_origin :
   Interface.Lookups.t ->
   is_derived:(Path.t -> bool) ->
   Path.t ->

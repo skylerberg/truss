@@ -87,12 +87,12 @@ type state = {
   annotatable : (Syntax.id, unit) Hashtbl.t;
 }
 
-let reported state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
+let add_diagnostic state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
   let diagnostic = Diagnostic.make ?notes ~fixes ~code:(Types code) span message in
   state.diagnostics <- diagnostic :: state.diagnostics;
   Diagnostic.reported diagnostic
 
-let report state ?fixes code span message = ignore (reported state ?fixes code span message)
+let report state ?fixes code span message = ignore (add_diagnostic state ?fixes code span message)
 let is_formula env = env.specification || env.in_quantifier
 
 let reject_in_formula state env span what =
@@ -105,35 +105,38 @@ let reject_in_formula state env span what =
 
 let read_span state id = state.context.spans.(id)
 let bug format = Compiler_bug.bug ~stage:"Infer" format
-let error state ?fixes code span message = Types.Error (reported state ?fixes code span message)
-let source state span = Source.Definition_span.quote (Lazy.force state.text) span
 
-let fresh_node_id state =
+let make_error_type state ?fixes code span message =
+  Types.Error (add_diagnostic state ?fixes code span message)
+
+let quote_span state span = Source.Definition_span.quote (Lazy.force state.text) span
+
+let allocate_node_id state =
   let id = state.form.next_node_id in
   state.form.next_node_id <- id + 1;
   id
 
-let synthetic_expression state ~origin type_ kind : Core.expression =
-  { id = fresh_node_id state; origin; type_; kind }
+let make_synthetic_expression state ~origin type_ kind : Core.expression =
+  { id = allocate_node_id state; origin; type_; kind }
 
 let register_expression state (value : Syntax.expression) kind =
   state.form.expression_builders.(value.id) <-
     Some
       (fun () ->
-        let id = fresh_node_id state in
+        let id = allocate_node_id state in
         match state.tables.types.(value.id) with
         | Some type_ -> { Core.id; origin = value.id; type_; kind = kind () }
-        | None -> bug "`%s` has a node and no type" (source state (read_span state value.id)))
+        | None -> bug "`%s` has a node and no type" (quote_span state (read_span state value.id)))
 
 let was_hole state (table : Tables.t -> Types.ty option array) (id : Syntax.id) =
   match state.form.tables_with_holes with
   | Some tables -> (table tables).(id) = Some Types.Hole
   | None -> false
 
-let rec operands state (value : Syntax.expression) : Syntax.expression list =
+let rec list_operands state (value : Syntax.expression) : Syntax.expression list =
   let checked (part : Syntax.expression) =
     if Option.is_some state.form.expression_builders.(part.id) then [ part ]
-    else operands state part
+    else list_operands state part
   in
   match value.kind with
   | Match { scrutinees; _ } -> List.concat_map checked scrutinees
@@ -148,7 +151,7 @@ let rec operands state (value : Syntax.expression) : Syntax.expression list =
 
 let rec build_expression state (value : Syntax.expression) : Core.expression =
   let evaluated =
-    if Option.is_some state.form.tables_with_holes then operands state value else []
+    if Option.is_some state.form.tables_with_holes then list_operands state value else []
   in
   if
     List.exists
@@ -162,14 +165,14 @@ let rec build_expression state (value : Syntax.expression) : Core.expression =
           let node = build_expression state operand in
           Some
             {
-              id = fresh_node_id state;
+              id = allocate_node_id state;
               origin = operand.id;
               kind =
                 Let
                   {
                     pattern =
                       {
-                        id = fresh_node_id state;
+                        id = allocate_node_id state;
                         origin = operand.id;
                         type_ = node.type_;
                         kind = Wildcard;
@@ -180,18 +183,18 @@ let rec build_expression state (value : Syntax.expression) : Core.expression =
             }
     in
     let statements = List.filter_map evaluate evaluated in
-    let todo = synthetic_expression state ~origin:value.id Types.Never Todo in
-    synthetic_expression state ~origin:value.id Types.Never
+    let todo = make_synthetic_expression state ~origin:value.id Types.Never Todo in
+    make_synthetic_expression state ~origin:value.id Types.Never
       (Block { statements; value = Some todo })
   end
   else
     match state.form.expression_builders.(value.id) with
     | Some build -> build ()
-    | None -> bug "`%s` has no node in the core form" (source state (read_span state value.id))
+    | None -> bug "`%s` has no node in the core form" (quote_span state (read_span state value.id))
 
 let register_statement state (written : Syntax.statement) kind =
   state.form.statement_builders.(written.id) <-
-    Some (fun () -> { Core.id = fresh_node_id state; origin = written.id; kind = kind () })
+    Some (fun () -> { Core.id = allocate_node_id state; origin = written.id; kind = kind () })
 
 let build_statement state (written : Syntax.statement) : Core.statement =
   let rec without_mode_keyword (value : Syntax.expression) =
@@ -211,31 +214,33 @@ let build_statement state (written : Syntax.statement) : Core.statement =
   with
   | Some value ->
       {
-        id = fresh_node_id state;
+        id = allocate_node_id state;
         origin = written.id;
         kind = Evaluate (build_expression state value);
       }
   | None -> (
       match state.form.statement_builders.(written.id) with
       | Some build -> build ()
-      | None -> bug "`%s` has no node in the core form" (source state (read_span state written.id)))
+      | None ->
+          bug "`%s` has no node in the core form" (quote_span state (read_span state written.id)))
 
 let register_pattern state (written : Syntax.pattern) kind =
   state.form.pattern_builders.(written.id) <-
     Some
       (fun () ->
-        let id = fresh_node_id state in
+        let id = allocate_node_id state in
         match state.tables.scrutinee_types.(written.id) with
         | Some type_ -> { Core.id; origin = written.id; type_; kind = kind () }
-        | None -> bug "`%s` has a node and no type" (source state (read_span state written.id)))
+        | None -> bug "`%s` has a node and no type" (quote_span state (read_span state written.id)))
 
 let build_pattern state (written : Syntax.pattern) : Core.pattern =
   if was_hole state (fun tables -> tables.scrutinee_types) written.id then
-    { id = fresh_node_id state; origin = written.id; type_ = Types.Never; kind = Wildcard }
+    { id = allocate_node_id state; origin = written.id; type_ = Types.Never; kind = Wildcard }
   else
     match state.form.pattern_builders.(written.id) with
     | Some build -> build ()
-    | None -> bug "`%s` has no node in the core form" (source state (read_span state written.id))
+    | None ->
+        bug "`%s` has no node in the core form" (quote_span state (read_span state written.id))
 
 let alias_expression state (value : Syntax.expression) (inner : Syntax.expression) =
   state.form.expression_builders.(value.id) <- Some (fun () -> build_expression state inner)
@@ -262,10 +267,10 @@ and mark_lent_block state (body : Syntax.block) =
   | { kind = Expression value; _ } :: _ -> mark_lent_tails state value
   | _ -> ()
 
-let place_of (node : Core.expression) : Core.place =
+let make_place (node : Core.expression) : Core.place =
   match node.kind with Use place -> place | _ -> Temporary node
 
-let fresh_synthetic_local state : Core.local =
+let allocate_synthetic_local state : Core.local =
   let number = state.form.next_synthetic_local in
   state.form.next_synthetic_local <- number + 1;
   Synthetic number
@@ -273,25 +278,25 @@ let fresh_synthetic_local state : Core.local =
 let fix title edits = Diagnostic.fix title edits
 let replace = Diagnostic.replace
 let insert position text = Diagnostic.insert (Source.Definition_span.zero_width position) text
-let current_frame state = match state.frames with frame :: _ -> Some frame | [] -> None
+let find_current_frame state = match state.frames with frame :: _ -> Some frame | [] -> None
 
 let record state (value : Syntax.expression) type_ =
   state.tables.types.(value.id) <- Some type_;
-  match current_frame state with
+  match find_current_frame state with
   | Some frame -> frame.recorded_expressions <- value.id :: frame.recorded_expressions
   | None -> ()
 
 let note_compiled_expression state env (value : Syntax.expression) =
-  match current_frame state with
+  match find_current_frame state with
   | Some frame when is_compiled env ->
       frame.compiled_expressions <- value.id :: frame.compiled_expressions
   | _ -> ()
 
 let report_specification_only state span message =
-  match current_frame state with
+  match find_current_frame state with
   | Some { specification_only_report = Some report; _ } -> report
   | frame ->
-      let report = reported state Specification_only span message in
+      let report = add_diagnostic state Specification_only span message in
       Option.iter (fun frame -> frame.specification_only_report <- Some report) frame;
       report
 
@@ -318,7 +323,7 @@ let check_compiled_binding state (id : Syntax.id) =
       let span = read_span state id in
       match
         reject_specification_only_type state
-          ~subject:(Printf.sprintf "`%s`" (source state span))
+          ~subject:(Printf.sprintf "`%s`" (quote_span state span))
           span (Unify.zonk state.unifier type_)
       with
       | Some report ->
@@ -342,22 +347,22 @@ let compare_in_source_order state left right =
   compare (left.start, -left.stop) (right.start, -right.stop)
 
 let defer state check =
-  match current_frame state with
+  match find_current_frame state with
   | Some frame -> if not (check ()) then frame.deferred_checks <- check :: frame.deferred_checks
   | None -> ignore (check ())
 
 let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
-let fresh state = Unify.fresh state.unifier
+let make_fresh_type state = Unify.make_fresh_type state.unifier
 
-let integer_type state (type_ : Types.ty) =
+let is_integer_type state (type_ : Types.ty) =
   Types.is_integer_type type_
   ||
   match type_ with
   | Parameter _ | Projection _ -> state.unifier.integer_range type_ <> None
   | _ -> false
 
-let signed_type state (type_ : Types.ty) =
+let is_signed_type state (type_ : Types.ty) =
   Types.is_signed type_
   ||
   match type_ with
@@ -365,18 +370,18 @@ let signed_type state (type_ : Types.ty) =
       match state.unifier.integer_range type_ with Some (low, _) -> Z.sign low < 0 | None -> false)
   | _ -> false
 
-let bounds state parameter =
+let lookup_bounds state parameter =
   Option.value ~default:[] (Hashtbl.find_opt state.context.bounds parameter)
 
 let normalize state type_ =
-  Interface.Impls.normalize state.lookups.interface ~bounds:(bounds state) (zonk state type_)
+  Interface.Impls.normalize state.lookups.interface ~bounds:(lookup_bounds state) (zonk state type_)
 
-let unsolved state =
+let make_unsolved_type state =
   match state.unsolved with
   | Some report -> Types.Error report
   | None ->
       let report =
-        reported state Cannot_infer
+        add_diagnostic state Cannot_infer
           (Source.Definition_span.make (read_span state state.definition.id).start
              (read_span state state.definition.id).start)
           "A type in this definition cannot be inferred. Give the `let` a type, or the call type \
@@ -397,35 +402,35 @@ let resolve_capabilities state (capabilities : Types.capability_set) =
         capabilities
   | _ -> capabilities
 
-let rec final_type state type_ =
-  Types.map ~capabilities:(final_capabilities state)
+let rec finalize_type state type_ =
+  Types.map ~capabilities:(finalize_capabilities state)
     (function
-      | Types.Variable _ | Types.Literal _ -> Some (unsolved state)
+      | Types.Variable _ | Types.Literal _ -> Some (make_unsolved_type state)
       | Types.Hole when Option.is_some state.form.tables_with_holes -> Some Types.Never
       | _ -> None)
     (normalize state type_)
 
-and final_capabilities state capabilities =
+and finalize_capabilities state capabilities =
   resolve_capabilities state
-    (Interface.Impls.normalize_capabilities state.lookups.interface ~bounds:(bounds state)
+    (Interface.Impls.normalize_capabilities state.lookups.interface ~bounds:(lookup_bounds state)
        (Types.flat_map_capabilities
           (function
             | Types.Capability_projection { base; trait; name } ->
-                [ Types.Capability_projection { base = final_type state base; trait; name } ]
+                [ Types.Capability_projection { base = finalize_type state base; trait; name } ]
             | capability -> [ capability ])
           capabilities))
 
-let final_argument state = function
-  | Types.Type type_ -> Types.Type (final_type state type_)
+let finalize_argument state = function
+  | Types.Type type_ -> Types.Type (finalize_type state type_)
   | Types.Value value -> (
       match Unify.resolve_value state.unifier value with
-      | Types.Value_variable _ -> Types.Type (unsolved state)
+      | Types.Value_variable _ -> Types.Type (make_unsolved_type state)
       | value -> Types.Value value)
-  | Types.Capabilities capabilities -> Types.Capabilities (final_capabilities state capabilities)
+  | Types.Capabilities capabilities -> Types.Capabilities (finalize_capabilities state capabilities)
 
 let unify state left right =
   let normalize type_ =
-    Interface.Impls.normalize state.lookups.interface ~bounds:(bounds state)
+    Interface.Impls.normalize state.lookups.interface ~bounds:(lookup_bounds state)
       (Unify.zonk state.unifier type_)
   in
   Unify.unify state.unifier (normalize left) (normalize right)
@@ -446,54 +451,58 @@ let normalize_trait state (trait : Types.trait_reference) : Types.trait_referenc
   }
 
 let implements state type_ trait =
-  Interface.Impls.implements state.lookups.interface ~bounds:(bounds state) (normalize state type_)
-    (normalize_trait state trait)
+  Interface.Impls.implements state.lookups.interface ~bounds:(lookup_bounds state)
+    (normalize state type_) (normalize_trait state trait)
 
-let copyable state type_ =
-  Interface.Impls.is_copyable state.lookups.interface ~bounds:(bounds state) (zonk state type_)
+let is_copyable state type_ =
+  Interface.Impls.is_copyable state.lookups.interface ~bounds:(lookup_bounds state)
+    (zonk state type_)
 
-let plain state type_ =
-  Interface.Impls.is_plain state.lookups.interface ~bounds:(bounds state) (zonk state type_)
+let is_plain state type_ =
+  Interface.Impls.is_plain state.lookups.interface ~bounds:(lookup_bounds state) (zonk state type_)
 
 let is_view state type_ =
-  Interface.Impls.is_view state.lookups.interface ~bounds:(bounds state) (zonk state type_)
+  Interface.Impls.is_view state.lookups.interface ~bounds:(lookup_bounds state) (zonk state type_)
 
-let associated state type_ (trait : Types.trait_reference) name ~(at : Source.Definition_span.t) =
+let resolve_associated_type state type_ (trait : Types.trait_reference) name
+    ~(at : Source.Definition_span.t) =
   let type_ = normalize state type_ and trait = normalize_trait state trait in
   match
-    Interface.Impls.project_associated_type state.lookups.interface ~bounds:(bounds state) type_
-      trait name
+    Interface.Impls.project_associated_type state.lookups.interface ~bounds:(lookup_bounds state)
+      type_ trait name
   with
   | Some associated_type -> associated_type
   | None ->
-      error state Unknown_associated_type at
+      make_error_type state Unknown_associated_type at
         (Printf.sprintf "`%s` gives no `%s` as a `%s`." (Types.show type_) name
            (Types.show_trait trait))
 
-let evidence_of = function
+let convert_evidence = function
   | Interface.Impls.From_impl { impl; substitution } ->
       Tables.Impl { impl; arguments = substitution }
   | Interface.Impls.From_bound -> Tables.Bound
   | Interface.Impls.From_any -> Tables.Dynamic
   | Interface.Impls.Built_in | Interface.Impls.Accepted _ -> Tables.Built_in
 
-let trait_reference ?(arguments = []) trait : Types.trait_reference =
+let make_trait_reference ?(arguments = []) trait : Types.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }
 
 let string_type = Types.Named { path = Well_known.path String; arguments = [] }
-let undecided_type (undecided : undecided_literal) = Types.Literal (undecided.kind, undecided.index)
+
+let make_undecided_type (undecided : undecided_literal) =
+  Types.Literal (undecided.kind, undecided.index)
 
 let decide_literals state ~(at : Source.Definition_span.t) ~is_default =
   state.undecided <-
     List.filter
       (fun (undecided : undecided_literal) ->
-        match Unify.resolve state.unifier (undecided_type undecided) with
+        match Unify.resolve state.unifier (make_undecided_type undecided) with
         | Types.Literal _ -> true
         | _ ->
             Hashtbl.replace state.decisions undecided.index
               {
                 decided_local = undecided.local;
-                decided_type = Unify.zonk state.unifier (undecided_type undecided);
+                decided_type = Unify.zonk state.unifier (make_undecided_type undecided);
                 decided_at = at;
                 is_default;
                 decision_report = None;
@@ -551,8 +560,8 @@ let settle state frame =
       frame.recorded_expressions
   in
   let unknowns () =
-    List.concat_map (Unify.unknowns state.unifier) (all_types ())
-    @ List.concat_map (Unify.argument_unknowns state.unifier) (call_arguments ())
+    List.concat_map (Unify.list_unknowns state.unifier) (all_types ())
+    @ List.concat_map (Unify.list_argument_unknowns state.unifier) (call_arguments ())
   in
   (match parent with
   | Some parent when parent.frame_specification = frame.frame_specification ->
@@ -567,7 +576,7 @@ let settle state frame =
                         Hashtbl.replace state.unifier.code_literals index ();
                       state.undecided <- { index; kind; local; owner = parent } :: state.undecided
                   | _ -> ())
-                (Unify.unknowns state.unifier type_)
+                (Unify.list_unknowns state.unifier type_)
           | None -> ())
         frame.declared
   | _ -> ());
@@ -576,7 +585,7 @@ let settle state frame =
       (fun (undecided : undecided_literal) ->
         if undecided.owner == frame then None
         else
-          match Unify.resolve state.unifier (undecided_type undecided) with
+          match Unify.resolve state.unifier (make_undecided_type undecided) with
           | Types.Literal (_, root) -> Some root
           | _ -> None)
       state.undecided
@@ -605,7 +614,7 @@ let settle state frame =
     List.filter (fun (undecided : undecided_literal) -> undecided.owner != frame) state.undecided;
   if unsolved <> [] then begin
     let report =
-      reported state Cannot_infer frame.span
+      add_diagnostic state Cannot_infer frame.span
         "The types in this statement cannot be inferred from it alone. Give the `let` a type, or \
          the call type arguments, such as `var names: List[String] = []`."
     in
@@ -628,11 +637,11 @@ let settle state frame =
         match table.(id) with
         | Some type_ -> (
             let type_ =
-              Interface.Impls.normalize state.lookups.interface ~bounds:(bounds state)
+              Interface.Impls.normalize state.lookups.interface ~bounds:(lookup_bounds state)
                 (zonk state type_)
             in
             table.(id) <- Some type_;
-            if List.exists is_open (Unify.unknowns state.unifier type_) then
+            if List.exists is_open (Unify.list_unknowns state.unifier type_) then
               match parent with Some parent -> keep parent id | None -> ())
         | None -> ())
       ids
@@ -643,7 +652,7 @@ let settle state frame =
       parent.bindings <- id :: parent.bindings);
   let is_settled table id =
     match table.(id) with
-    | Some type_ -> not (List.exists is_open (Unify.unknowns state.unifier type_))
+    | Some type_ -> not (List.exists is_open (Unify.list_unknowns state.unifier type_))
     | None -> true
   in
   let settled_bindings, open_bindings =
@@ -717,7 +726,7 @@ let build_block state (written : Syntax.block) : Core.block =
 let declare state (name : Syntax.name) type_ ~is_var ~mode =
   Hashtbl.replace state.locals name.id { type_; is_var; mode };
   state.tables.local_types.(name.id) <- Some type_;
-  match current_frame state with
+  match find_current_frame state with
   | Some frame ->
       frame.bindings <- name.id :: frame.bindings;
       frame.declared <- name.id :: frame.declared
@@ -725,17 +734,17 @@ let declare state (name : Syntax.name) type_ ~is_var ~mode =
 
 let declare_compiled state env (name : Syntax.name) type_ ~is_var ~mode =
   declare state name type_ ~is_var ~mode;
-  match current_frame state with
+  match find_current_frame state with
   | Some frame when is_compiled env ->
       frame.compiled_bindings <- name.id :: frame.compiled_bindings;
       check_compiled_binding state name.id
   | _ -> ()
 
-let target state (name : Syntax.name) = state.resolved.names.(name.id)
+let find_target state (name : Syntax.name) = state.resolved.names.(name.id)
 
-let default_literal state ~at type_ =
+let decide_default_literal state ~at type_ =
   let decide default =
-    (match current_frame state with
+    (match find_current_frame state with
     | Some frame -> decide_literals state ~at:frame.span ~is_default:false
     | None -> ());
     ignore (Unify.unify state.unifier type_ default);
@@ -747,14 +756,14 @@ let default_literal state ~at type_ =
   | Types.Literal (Float_literal, _) -> decide (Types.make_builtin Float64)
   | _ -> type_
 
-let head state (value : Syntax.expression) = Resolve.head state.resolved value
+let find_head state (value : Syntax.expression) = Resolve.find_head state.resolved value
 
-let names_variant (member : Syntax.name) =
+let is_variant_name (member : Syntax.name) =
   member.text <> "" && member.text.[0] >= 'A' && member.text.[0] <= 'Z'
 
 let show state type_ = Types.show (zonk state type_)
 
-let literal_decision state type_ =
+let find_literal_decision state type_ =
   let rec follow (type_ : Types.ty) =
     match type_ with
     | Literal (_, index) | Variable index -> (
@@ -765,20 +774,20 @@ let literal_decision state type_ =
   in
   follow type_
 
-let reported_mismatch state ?(fixes = []) code (span : Source.Definition_span.t)
+let add_mismatch_diagnostic state ?(fixes = []) code (span : Source.Definition_span.t)
     ~(sides : (Types.ty * Types.ty) list) message =
   let other_fixes = fixes in
   match
     List.find_map
       (fun (decided, wanted) ->
-        Option.map (fun decision -> (decision, wanted)) (literal_decision state decided))
+        Option.map (fun decision -> (decision, wanted)) (find_literal_decision state decided))
       sides
   with
-  | None -> reported state ~fixes code span message
+  | None -> add_diagnostic state ~fixes code span message
   | Some ({ decision_report = Some report; _ }, _) -> report
   | Some (decision, wanted) ->
       let name = read_span state decision.decided_local in
-      let text = source state name in
+      let text = quote_span state name in
       let local = Printf.sprintf "`%s`" text in
       let decided = Types.show decision.decided_type and wanted = zonk state wanted in
       let explanation, note =
@@ -804,7 +813,7 @@ let reported_mismatch state ?(fixes = []) code (span : Source.Definition_span.t)
         else other_fixes
       in
       let report =
-        reported state code span
+        add_diagnostic state code span
           ~notes:[ (decision.decided_at, note) ]
           ~fixes
           (message ^ " " ^ explanation)
@@ -812,20 +821,21 @@ let reported_mismatch state ?(fixes = []) code (span : Source.Definition_span.t)
       decision.decision_report <- Some report;
       report
 
-let mismatched state (span : Source.Definition_span.t) ~expected ~actual =
+let add_mismatch state (span : Source.Definition_span.t) ~expected ~actual =
   let sides = [ (actual, expected); (expected, actual) ] in
   let expected = zonk state expected and actual = zonk state actual in
   match (resolve state actual, expected) with
   | Types.Literal (Integer_literal, _), _ when Types.is_float_type expected ->
-      reported state Integer_for_float span
+      add_diagnostic state Integer_for_float span
         ~fixes:[ fix "Write it as a float." [ insert span.stop ".0" ] ]
         (Printf.sprintf "An integer literal is never a float, and `%s` is expected here."
            (Types.show expected))
   | _ ->
-      reported_mismatch state Mismatch span ~sides
+      add_mismatch_diagnostic state Mismatch span ~sides
         (Printf.sprintf "Expected `%s`, found `%s`." (Types.show expected) (Types.show actual))
 
-let mismatch state span ~expected ~actual = ignore (mismatched state span ~expected ~actual)
+let report_mismatch state span ~expected ~actual =
+  ignore (add_mismatch state span ~expected ~actual)
 
 let is_member_constant state (value : Syntax.expression) =
   match state.tables.resolutions.(value.id) with
@@ -835,7 +845,7 @@ let is_member_constant state (value : Syntax.expression) =
 let rec is_place state (value : Syntax.expression) =
   match value.kind with
   | Name path -> (
-      match target state path.last with
+      match find_target state path.last with
       | Some (Local _ | Law_parameter _ | Field _ | Definition (Constant, _)) -> true
       | _ -> false)
   | Self_value -> true
@@ -849,18 +859,18 @@ let rec is_place state (value : Syntax.expression) =
   | Parenthesized inner -> is_place state inner
   | _ -> false
 
-let rec call_with_mode_keyword state (value : Syntax.expression) =
+let rec find_call_with_mode_keyword state (value : Syntax.expression) =
   match value.kind with
   | Call ({ kind = Member (base, _); _ }, _)
   | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) ->
-      if is_place state base then Some value.id else call_with_mode_keyword state base
-  | Member (base, _) | Bracket (base, _) | Try base -> call_with_mode_keyword state base
+      if is_place state base then Some value.id else find_call_with_mode_keyword state base
+  | Member (base, _) | Bracket (base, _) | Try base -> find_call_with_mode_keyword state base
   | _ -> None
 
 let check_resource state (resource : Syntax.resource) =
   let capability (path : Syntax.path_type) (method_ : Syntax.name option) =
     let shown = Interface.Elaborator.show_path path.path in
-    match target state path.path.last with
+    match find_target state path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with
         | Some method_ when state.lookups.interface.names.members capability method_.text = [] ->
@@ -877,7 +887,7 @@ let check_resource state (resource : Syntax.resource) =
   | Calls (Call_capability path) -> capability path None
   | Calls (Call_method (path, method_)) -> capability path (Some method_)
   | Calls (Call_parameter name) -> (
-      match target state name with
+      match find_target state name with
       | Some (Local id) -> (
           match
             Option.map
@@ -897,11 +907,11 @@ let check_resource state (resource : Syntax.resource) =
                 capability, and `%s` is neither."
                name.text))
 
-let slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
-  let make = synthetic_expression state ~origin in
+let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
+  let make = make_synthetic_expression state ~origin in
   let uint64 = Types.make_builtin UInt64 in
   let path, type_arguments =
-    match Core_walk.place_type base with
+    match Core_walk.compute_place_type base with
     | Types.Named { path; arguments } -> (path, arguments)
     | type_ -> bug "a slice of `%s`" (Types.show type_)
   in
@@ -933,9 +943,9 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
           Option.map
             (fun build () ->
               let inner : Core.expression = build () in
-              let expected = final_type state expected in
+              let expected = finalize_type state expected in
               let convert conversion =
-                synthetic_expression state ~origin:id expected
+                make_synthetic_expression state ~origin:id expected
                   (Convert { conversion; value = inner })
               in
               match conversion with
@@ -949,12 +959,12 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                   let base : Core.place =
                     match inner.kind with Use place -> place | _ -> Temporary inner
                   in
-                  synthetic_expression state ~origin:id expected
-                    (slice state ~origin:id base ~start:None ~stop:None ~inclusive:false)
+                  make_synthetic_expression state ~origin:id expected
+                    (make_slice state ~origin:id base ~start:None ~stop:None ~inclusive:false)
               | Owned_to_view -> (
                   match inner.type_ with
                   | Types.Named { path; arguments } ->
-                      synthetic_expression state ~origin:id expected
+                      make_synthetic_expression state ~origin:id expected
                         (Call
                            {
                              callee =
@@ -975,7 +985,7 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
   @@
   let actual_type = normalize state actual and wanted = normalize state expected in
   let refused () =
-    mismatch state span ~expected ~actual;
+    report_mismatch state span ~expected ~actual;
     None
   in
   match (actual_type, wanted, expression) with
@@ -990,14 +1000,16 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                 (Well_known.path String, Well_known.path String_slice);
               ] ->
       if not (Unify.unify_arguments state.unifier wanted_named.arguments actual_named.arguments)
-      then mismatch state span ~expected ~actual;
+      then report_mismatch state span ~expected ~actual;
       Some Owned_to_view
-  | Types.Integer, _, Some _ when is_argument && env.specification && integer_type state wanted ->
+  | Types.Integer, _, Some _ when is_argument && env.specification && is_integer_type state wanted
+    ->
       Some From_integer
   | Types.Literal (Integer_literal, index), Types.Integer, _
     when env.specification && Hashtbl.mem state.unifier.code_literals index ->
       Some To_integer
-  | _, Types.Integer, _ when env.specification && integer_type state actual_type -> Some To_integer
+  | _, Types.Integer, _ when env.specification && is_integer_type state actual_type ->
+      Some To_integer
   | Types.Function actual_function, Types.Function wanted_function, _
     when not (Types.has_same_clauses actual_function wanted_function) ->
       let unlisted =
@@ -1025,8 +1037,8 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
               superset = wanted_function.uses;
               report_missing =
                 (fun _ ->
-                  mismatch state span ~expected:(final_type state expected)
-                    ~actual:(final_type state actual));
+                  report_mismatch state span ~expected:(finalize_type state expected)
+                    ~actual:(finalize_type state actual));
             }
             :: state.capability_constraints;
         Some Function_widening
