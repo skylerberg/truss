@@ -35,14 +35,14 @@ type context = {
   mutable environments : (string * Lowered.ty) list Keys.t;
   bytes : (string, int) Hashtbl.t;
   mutable prototypes : (string * string) list;
-  mutable anchors : (string * Path.t) list;
+  mutable sites : Lowered.site list;
   mutable references : key list option;
   mutable helpers_used : string list;
   mutable statics : string list;
   mutable instances : Instance.key list;
   mutable called : Instance.key list;
   mutable calls : (Path.t * int) list;
-  mutable failures : (failure * site) list;
+  mutable failures : (failure * Lowered.site) list;
 }
 
 let new_context env prefix =
@@ -54,7 +54,7 @@ let new_context env prefix =
     environments = Keys.empty;
     bytes = Hashtbl.create 16;
     prototypes = [];
-    anchors = [];
+    sites = [];
     references = None;
     helpers_used = [];
     statics = [];

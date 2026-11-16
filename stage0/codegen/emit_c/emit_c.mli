@@ -1,6 +1,5 @@
 type build = Development | Release
 type linkage = External | Internal
-type site = C_runtime.site = { definition : Path.t; line : int; column : int }
 type failure = C_runtime.failure = Echo | Todo
 
 module Builder = Builder
@@ -18,13 +17,14 @@ val calls : fragment -> (Path.t * int) list
 val called : fragment -> Instance.key list
 val table : fragment -> Path.t option option
 val is_small : fragment -> bool
-val anchors : fragment -> Path.t list
-val failures : fragment -> (failure * site) list
+val failures : fragment -> (failure * Lowered.site) list
 val text : fragment -> string
 val file : Memory_layout.env -> build -> (fragment * linkage) list -> string
-val anchor_struct : string
-val runtime_declarations : string
-val anchor_symbol : Path.t -> string
+val site_struct : string
+
+type position = { file : string; line : int; column : int }
+
+val sites_file : position:(Lowered.site -> position) -> fragment list -> string
 
 module For_testing : sig
   val c : fragment -> string

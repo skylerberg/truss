@@ -78,18 +78,11 @@ val worker_counts : int list
 val run_program :
   ?extra:(string * Memory_layout.shape) list ->
   ?env:Memory_layout.env ->
-  ?anchors:Positions.anchor list ->
   ?input:string ->
   instance list ->
   int * string * string
 
-val expect_status :
-  ?extra:(string * Memory_layout.shape) list ->
-  ?anchors:Positions.anchor list ->
-  int ->
-  instance list ->
-  unit
-
+val expect_status : ?extra:(string * Memory_layout.shape) list -> int -> instance list -> unit
 val example : Path.module_
 val example_file : Path.file
 val pipeline : Project.package list -> Pipeline.t

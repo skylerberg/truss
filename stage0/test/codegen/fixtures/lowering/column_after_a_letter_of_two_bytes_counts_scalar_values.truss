@@ -1,0 +1,4 @@
+test "an index past the end, after an accented letter on its line" {
+  let words = ["é"]
+  assert words[0] == "é" && words[1] == "é"
+}

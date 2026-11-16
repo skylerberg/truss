@@ -18,11 +18,9 @@ let declare_prototype context symbol declaration =
   if not (List.mem_assoc symbol context.prototypes) then
     context.prototypes <- (symbol, declaration) :: context.prototypes
 
-let anchor_c context definition =
-  let symbol = anchor_symbol definition in
-  if not (List.mem_assoc symbol context.anchors) then
-    context.anchors <- (symbol, definition) :: context.anchors;
-  "&" ^ symbol
+let site_c context site =
+  context.sites <- site :: context.sites;
+  "&" ^ site_symbol site
 
 let integer_literal integer value =
   let c_type = integer_c integer in
@@ -153,10 +151,7 @@ and constant_c context : Lowered.constant -> string * Lowered.ty = function
       (Printf.sprintf "((uint64_t)sizeof(%s))" (value_c context ty), Raw (Integer UInt64))
   | Alignment_of ty ->
       (Printf.sprintf "((uint64_t)_Alignof(%s))" (value_c context ty), Raw (Integer UInt64))
-  | Site { definition; line; column } ->
-      ( Printf.sprintf "((void *)&(const struct t_site){ %s, %d, %d })"
-          (anchor_c context definition) line column,
-        Raw (Pointer Opaque) )
+  | Site site -> ("((void *)" ^ site_c context site ^ ")", Raw (Pointer Opaque))
   | Symbol_address key ->
       refer context key;
       let symbol = Instance.symbol key in

@@ -154,7 +154,7 @@ let constant_state context path =
   in
   let code =
     {
-      (unwritten ~definition_key:key ~anchor:path ~substitution:[] ~result:(Returns Types.unit)) with
+      (unwritten ~definition_key:key ~substitution:[] ~result:(Returns Types.unit)) with
       text = text_of context key;
     }
   in

@@ -71,7 +71,8 @@ let begin_body st ~(body : Mir.Graph.body) ~defaults =
   let evidence = evidence_parameters st (evidence_for st.context code.substitution code.uses) in
   start st.builder (block st.builder);
   st.evidence <-
-    st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
+    st.evidence
+    @ Generated.real_implementations st ~user:(Path.show code.definition_key.path) code.real;
   let places =
     match mask with
     | Some mask -> Mir_form.fill_defaults st (at mask) body ~defaults places
@@ -95,7 +96,7 @@ let template_check context (key : Instance.key) ~from_template ~literals ~clause
   in_scope st (fun () ->
       let template =
         template_value st (ground st template_type) literals
-          ~site:{ definition = st.frame.code.anchor; line = 1; column = 1 }
+          ~site:{ definition = st.frame.code.definition_key.path; offset = 0 }
           ~parts:[]
       in
       let output = begin_output st in

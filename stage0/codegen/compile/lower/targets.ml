@@ -347,7 +347,6 @@ let in_type_definition st (ty : Ground.ty) nested_function =
         {
           caller.code with
           definition_key = key;
-          anchor = path;
           enclosing_impl = None;
           text = text_of st.context key;
           substitution = bind interface.type_generics arguments;

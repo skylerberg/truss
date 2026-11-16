@@ -1,0 +1,13 @@
+trait Shape {
+  fn area(self) -> Int64
+}
+
+type Square(side: Int64)
+
+impl Shape for Square {
+  fn area(self) -> Int64 { self.side * self.side }
+}
+
+test "the area of a square too large to hold" {
+  assert Square(side: 4000000000).area() > 0
+}

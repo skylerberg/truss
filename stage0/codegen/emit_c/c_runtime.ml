@@ -1,13 +1,19 @@
 type build = Development | Release
 type linkage = External | Internal
-type site = { definition : Path.t; line : int; column : int }
 type failure = Echo | Todo
 
 let bug format = Compiler_bug.bug ~stage:"Emit_c" format
-let anchor_symbol definition = "t_Anchor_" ^ Instance.path_symbol definition
 
-let anchor_struct =
-  "struct t_anchor {\n  const uint8_t *path;\n  uint64_t path_length;\n  uint32_t line;\n};\n"
+let site_symbol (site : Lowered.site) =
+  Printf.sprintf "t_Site_%s_%d" (Instance.path_symbol site.definition) site.offset
+
+let site_struct =
+  "struct t_site {\n\
+  \  const uint8_t *file;\n\
+  \  uint64_t file_length;\n\
+  \  uint32_t line;\n\
+  \  uint32_t column;\n\
+   };\n"
 
 let integer_c : Memory_layout.integer -> string = function
   | Int8 -> "int8_t"
@@ -40,20 +46,14 @@ let runtime_declarations =
       "typedef __UINT16_TYPE__ uint16_t;\n";
       "typedef __UINT32_TYPE__ uint32_t;\n";
       "typedef __UINT64_TYPE__ uint64_t;\n";
-      anchor_struct;
-      "struct t_site {\n\
-      \  const struct t_anchor *anchor;\n\
-      \  uint32_t line;\n\
-      \  uint32_t column;\n\
-       };\n";
-      "_Noreturn void t_runtime_panic(const uint8_t *message, uint64_t length, const struct \
-       t_anchor *anchor, uint32_t line, uint32_t column);\n";
+      site_struct;
+      "_Noreturn void t_runtime_panic(const uint8_t *message, uint64_t length, const struct t_site \
+       *site);\n";
       "_Noreturn void t_runtime_assertion_failed(const uint8_t *message, uint64_t length, const \
-       struct t_anchor *anchor, uint32_t line, uint32_t column);\n";
-      "_Noreturn void t_runtime_todo(const uint8_t *message, uint64_t length, const struct \
-       t_anchor *anchor, uint32_t line, uint32_t column);\n";
-      "void t_runtime_echo(const uint8_t *text, uint64_t length, const struct t_anchor *anchor, \
-       uint32_t line, uint32_t column);\n";
+       struct t_site *site);\n";
+      "_Noreturn void t_runtime_todo(const uint8_t *message, uint64_t length, const struct t_site \
+       *site);\n";
+      "void t_runtime_echo(const uint8_t *text, uint64_t length, const struct t_site *site);\n";
       "_Noreturn void t_runtime_compiler_bug(void);\n";
       "struct t_evidence {\n\
       \  void *implementation;\n\

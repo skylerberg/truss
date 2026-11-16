@@ -32,7 +32,7 @@ type facts = {
   mutable instances : Instance.key list;
   mutable called : Instance.key list;
   mutable calls : (Path.t * int) list;
-  mutable failures : (C_runtime.failure * C_runtime.site) list;
+  mutable failures : (C_runtime.failure * Lowered.site) list;
 }
 
 let no_facts () = { instances = []; called = []; calls = []; failures = [] }

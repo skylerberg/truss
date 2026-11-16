@@ -194,26 +194,29 @@ let worker_counts =
   if List.exists (String.starts_with ~prefix:"-fsanitize=") added_flags then [ 8 ]
   else [ 1; 2; 8; 32 ]
 
-let run_program ?(extra = []) ?env ?(anchors = []) ?input (instances : instance list) =
+let test_position (site : Lowered.site) : Emit_c.position =
+  { file = "test.truss"; line = 1; column = site.offset + 1 }
+
+let run_program ?(extra = []) ?env ?input (instances : instance list) =
   incr counter;
   let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "program%d" !counter) in
   let env = match env with Some env -> env | None -> shape_env ~extra () in
+  let fragments = List.map (fun instance -> Emit_c.fragment env (Code (instance env))) instances in
   let sources =
     [
       ("main", Startup.For_testing.main_calling (Instance.symbol (key "entry")));
-      ("anchors", Positions.anchors_file anchors);
+      ("sites", Emit_c.sites_file ~position:test_position fragments);
     ]
   in
   match
     Build.program (Lazy.force compiler) (Lazy.force cache) env (Lazy.force settings)
-      ~files:[ List.map (fun instance -> Emit_c.fragment env (Code (instance env))) instances ]
-      ~sources ~output
+      ~files:[ fragments ] ~sources ~output
   with
   | Ok () -> Process.run ?input output []
   | Error message -> failwith message
 
-let expect_status ?extra ?anchors expected instances =
-  let status, _, errors = run_program ?extra ?anchors instances in
+let expect_status ?extra expected instances =
+  let status, _, errors = run_program ?extra instances in
   if status <> expected then fail "expected status %d, got %d (%s)" expected status errors
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }

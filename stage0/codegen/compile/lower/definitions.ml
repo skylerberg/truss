@@ -41,7 +41,6 @@ let test_key path = Instance.Code { path; type_arguments = [] }
 
 type code = {
   definition_key : Names.key;
-  anchor : Path.t;
   enclosing_impl : Path.t option;
   text : string;
   result : Types.result;
@@ -51,10 +50,9 @@ type code = {
   has_defaults : bool;
 }
 
-let unwritten ~definition_key ~anchor ~substitution ~result =
+let unwritten ~definition_key ~substitution ~result =
   {
     definition_key;
-    anchor;
     enclosing_impl = None;
     text = "";
     result;
@@ -95,11 +93,9 @@ let written context path =
   | _ -> None
 
 let code_of context (path : Path.t) type_arguments : code =
-  let function_code ~anchor ~enclosing_impl (key, _, _) ~(interface : Types.signature) ~substitution
-      =
+  let function_code ~enclosing_impl (key, _, _) ~(interface : Types.signature) ~substitution =
     {
       definition_key = key;
-      anchor;
       enclosing_impl;
       text = text_of context key;
       result = interface.output;
@@ -117,9 +113,7 @@ let code_of context (path : Path.t) type_arguments : code =
       match Resolve.Names.definition_of_path context.lookups.interface.names path with
       | Some (key, { kind = Test _; _ }) ->
           {
-            (unwritten ~definition_key:key ~anchor:path ~substitution:[]
-               ~result:(Returns Types.unit))
-            with
+            (unwritten ~definition_key:key ~substitution:[] ~result:(Returns Types.unit)) with
             text = text_of context key;
             real =
               (match Interface.Definition.test_uses context.lookups.interface path with
@@ -139,12 +133,11 @@ let code_of context (path : Path.t) type_arguments : code =
         | _ -> None
       in
       match (written context path, path) with
-      | Some code, _ -> function_code ~anchor:path ~enclosing_impl code ~interface ~substitution
+      | Some code, _ -> function_code ~enclosing_impl code ~interface ~substitution
       | None, Method { owner = Derived { type_; _ }; _ }
         when Mir.is_generated context.lookups.mir path ->
           {
-            (unwritten ~definition_key:(key_of context type_) ~anchor:path ~substitution
-               ~result:interface.output)
+            (unwritten ~definition_key:(key_of context type_) ~substitution ~result:interface.output)
             with
             enclosing_impl;
           }
@@ -168,7 +161,7 @@ let code_of context (path : Path.t) type_arguments : code =
                   trait_signature.generics
               in
               let own = List.filteri (fun position _ -> position >= count) type_arguments in
-              function_code ~anchor:provided ~enclosing_impl code ~interface:trait_signature
+              function_code ~enclosing_impl code ~interface:trait_signature
                 ~substitution:(of_trait @ bind own_generics own @ substitution)
           | None -> bug "%s neither writes nor is given %s" (Path.show impl) name)
       | None, _ -> bug "%s is not a function" (Path.show path))

@@ -10,7 +10,7 @@ type ty =
   | Lend
   | Lend_mark
 
-type site = { definition : Path.t; line : int; column : int }
+type site = { definition : Path.t; offset : int }
 type root = Local of local | Static of { key : Instance.key; ty : Ground.ty }
 
 type place = { root : root; projections : projection list }

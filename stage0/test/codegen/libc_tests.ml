@@ -10,7 +10,7 @@ let operate builder ?destination ?(type_arguments = []) operation arguments =
   ignore
     (Intrinsics.lower (shape_env ~extra ()) builder intrinsic_types operation ~type_arguments
        arguments ~destination
-       ~site:{ definition = definition "entry"; line = 0; column = 1 })
+       ~site:{ definition = definition "entry"; offset = 0 })
 
 let built_entry body : instance =
  fun env ->
@@ -91,7 +91,7 @@ let () =
         (Intrinsics.lower env builder intrinsic_types (Libc Proc_pidpath) ~type_arguments:[]
            [ Value (constant_int32 1); Place (at path); Value (constant_uint64 64) ]
            ~destination:(Some (at length))
-           ~site:{ definition = definition "entry"; line = 0; column = 1 });
+           ~site:{ definition = definition "entry"; offset = 0 });
       finish builder (Return (Some (Copy (at length))));
       build builder ~parameters:[] ~result:(Some (value int32));
       let c = Emit_c.For_testing.c (Emit_c.fragment env (Code (built builder))) in
@@ -287,7 +287,7 @@ let () =
         ignore
           (Intrinsics.lower (shape_env ~extra ()) builder intrinsic_types operation
              ~type_arguments:[] arguments ~destination
-             ~site:{ definition = definition "entry"; line = 0; column = 1 })
+             ~site:{ definition = definition "entry"; offset = 0 })
       in
       expect_status ~extra 16
         [
@@ -429,7 +429,7 @@ let () =
                  Value (constant_int32 0);
                ]
                ~destination:(Some (at descriptor))
-               ~site:{ definition = definition "entry"; line = 0; column = 1 });
+               ~site:{ definition = definition "entry"; offset = 0 });
           descriptor
         in
         let first = opened () in
@@ -458,12 +458,10 @@ let checked builder ?destination ?(type_arguments = []) operation arguments =
   ignore
     (Intrinsics.lower ~checks:true (shape_env ~extra ()) builder intrinsic_types operation
        ~type_arguments arguments ~destination
-       ~site:{ definition = definition "entry"; line = 0; column = 1 })
-
-let anchors = [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
+       ~site:{ definition = definition "entry"; offset = 0 })
 
 let expect_panic ~saying instances =
-  let status, _, errors = run_program ~extra ~anchors instances in
+  let status, _, errors = run_program ~extra instances in
   if status <> 101 then fail "expected a panic, got status %d (%s)" status errors;
   if not (contains errors saying) then fail "expected %S in %S" saying errors
 
@@ -512,7 +510,7 @@ let () =
         ]);
   test "a checked build passes a C library call whose arguments are large enough" (fun () ->
       let open Emit_c.Builder in
-      expect_status ~extra ~anchors (Libc.value host Enoent)
+      expect_status ~extra (Libc.value host Enoent)
         [
           built_entry (fun builder ->
               let name = view_of builder "/nonexistent/truss\000" in
@@ -534,12 +532,12 @@ let () =
              ~type_arguments:[ float64; int32 ]
              [ Value (Constant (Float64 (Int64.bits_of_float number))) ]
              ~destination:(Some (at result))
-             ~site:{ definition = definition "entry"; line = 0; column = 1 });
+             ~site:{ definition = definition "entry"; offset = 0 });
         result
       in
-      expect_status ~extra ~anchors 7 [ built_entry (fun builder -> convert builder 7.9) ];
+      expect_status ~extra 7 [ built_entry (fun builder -> convert builder 7.9) ];
       let status, _, errors =
-        run_program ~extra ~anchors [ built_entry (fun builder -> convert builder 1.0e30) ]
+        run_program ~extra [ built_entry (fun builder -> convert builder 1.0e30) ]
       in
       if status <> 101 || not (contains errors "conversion out of range") then
         fail "expected a panic about the conversion, got status %d (%s)" status errors)
