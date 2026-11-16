@@ -234,6 +234,7 @@ module Code : sig
     | Not_strictly_positive
     | Growing_type
     | Instantiation_cycle
+    | Constant_cycle
     | Duplicate_test
 
   type t =

@@ -2,7 +2,7 @@ open Environment
 open Syntax
 module Names = Resolve.Names
 
-type context = {
+type t = {
   lookups : Lookups.t;
   resolved : Resolve.resolved;
   bounds : (Types.parameter, Types.trait_reference list) Hashtbl.t;
@@ -15,7 +15,7 @@ type context = {
   spans : Source.Definition_span.t array;
 }
 
-let create_context lookups resolved ~spans (scope : Environment.scope) =
+let create lookups resolved ~spans (scope : Environment.scope) =
   let bounds = Hashtbl.create 8 in
   List.iter (fun (parameter, traits) -> Hashtbl.replace bounds parameter traits) scope.bounds;
   {
@@ -96,20 +96,20 @@ let is_uint64 (lookups : Lookups.t) path =
       = Some (Definition (Type, Intrinsic.builtin_path UInt64))
   | _ -> false
 
-let rec type_ context (written : type_expression) : Types.ty =
+let rec elaborate_type context (written : type_expression) : Types.ty =
   match written.kind with
-  | Path_type path -> path_type context path
+  | Path_type path -> elaborate_path_type context path
   | Self_type None -> (
-      match self context context.spans.(written.id) with
+      match elaborate_self context context.spans.(written.id) with
       | Ok self -> self
       | Error report -> Types.Error report)
-  | Self_type (Some key) -> self_associated context context.spans.(written.id) key
+  | Self_type (Some key) -> elaborate_self_associated context context.spans.(written.id) key
   | Associated (base, key) -> (
       match find_parameter context base with
-      | Ok parameter -> associated context (Types.Parameter parameter) parameter key
+      | Ok parameter -> elaborate_associated context (Types.Parameter parameter) parameter key
       | Error report -> Types.Error report)
   | Any_type path -> (
-      match trait_reference context path with
+      match elaborate_trait_reference context path with
       | Ok (trait : Types.trait_reference) ->
           let open_names =
             List.concat_map
@@ -129,10 +129,10 @@ let rec type_ context (written : type_expression) : Types.ty =
                  (show_path path.path) (show_path path.path) (List.hd open_names));
           Types.Any trait
       | Error report -> Types.Error report)
-  | Function_type function_type -> Types.Function (function_type_ context function_type)
+  | Function_type function_type -> Types.Function (elaborate_function_type context function_type)
   | Type_error -> Types.Error (Resolve.Parts.recovery_report context.spans.(written.id))
 
-and self context (span : Source.Definition_span.t) =
+and elaborate_self context (span : Source.Definition_span.t) =
   match context.self_type with
   | Some self -> Ok self
   | None ->
@@ -140,11 +140,11 @@ and self context (span : Source.Definition_span.t) =
         (record_diagnostic context.diagnostics Misplaced_self_type span
            "`Self` names a type only in a type's definition, a trait, an `impl`, or a method.")
 
-and self_associated context (span : Source.Definition_span.t) (key : name) =
+and elaborate_self_associated context (span : Source.Definition_span.t) (key : name) =
   match List.assoc_opt key.text context.self_associated with
   | Some fixed -> fixed
   | None -> (
-      match (self context span, context.self_trait) with
+      match (elaborate_self context span, context.self_trait) with
       | Error report, _ -> Types.Error report
       | Ok _, None ->
           report_error_type context Unknown_associated_type context.spans.(key.id)
@@ -176,7 +176,7 @@ and find_declaring_trait ?(capability = false) context trait name =
       | None -> false)
     (list_trait_closure context.lookups trait)
 
-and associated context base parameter (key : name) =
+and elaborate_associated context base parameter (key : name) =
   let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
   let associated_type =
     List.find_map
@@ -200,16 +200,16 @@ and associated context base parameter (key : name) =
       report_error_type context Unknown_associated_type context.spans.(key.id)
         (Printf.sprintf "No bound of `%s` declares an associated type `%s`." parameter.name key.text)
 
-and arguments context (path : path_type) =
+and elaborate_arguments context (path : path_type) =
   List.filter_map
     (function
-      | Type_argument written -> Some (Types.Type (type_ context written))
+      | Type_argument written -> Some (Types.Type (elaborate_type context written))
       | Count (value, _) -> Some (Types.Value (Types.Known value))
-      | Count_name name -> Some (count_name context name)
+      | Count_name name -> Some (elaborate_count_name context name)
       | Constraint _ -> None)
     path.arguments
 
-and count_name context (name : name) : Types.argument =
+and elaborate_count_name context (name : name) : Types.argument =
   match find_target context name with
   | Some (Value_parameter parameter) -> Types.Value (Types.Value_parameter parameter)
   | Some (Definition (Constant, path)) -> (
@@ -260,7 +260,7 @@ and check_arity context (path : path_type) shown expected =
             | _ -> ())
           written expected
 
-and path_type context (path : path_type) : Types.ty =
+and elaborate_path_type context (path : path_type) : Types.ty =
   let shown = show_path path.path in
   match find_target context path.path.last with
   | Some (Type_parameter parameter) ->
@@ -278,7 +278,9 @@ and path_type context (path : path_type) : Types.ty =
       | Some Integer -> Types.Integer
       | Some _ | None ->
           check_arity context path shown (Names.generics_of context.lookups.names definition_path);
-          let type_ = Types.Named { path = definition_path; arguments = arguments context path } in
+          let type_ =
+            Types.Named { path = definition_path; arguments = elaborate_arguments context path }
+          in
           context.named := (path.id, type_) :: !(context.named);
           type_)
   | Some (Definition (Trait, _)) ->
@@ -291,7 +293,7 @@ and path_type context (path : path_type) : Types.ty =
   | Some (Unknown report) -> Types.Error report
   | _ -> bug "`%s` is not resolved as a type" shown
 
-and trait_reference ?(capability = false) context (path : path_type) :
+and elaborate_trait_reference ?(capability = false) context (path : path_type) :
     (Types.trait_reference, Diagnostic.reported) Stdlib.result =
   let shown = show_path path.path in
   let trait_reference_of trait : (Types.trait_reference, Diagnostic.reported) Stdlib.result =
@@ -300,11 +302,11 @@ and trait_reference ?(capability = false) context (path : path_type) :
       List.sort compare
         (List.filter_map
            (function
-             | Constraint (name, written) -> Some (name.text, type_ context written)
+             | Constraint (name, written) -> Some (name.text, elaborate_type context written)
              | Type_argument _ | Count _ | Count_name _ -> None)
            path.arguments)
     in
-    Ok { trait; trait_arguments = arguments context path; associated }
+    Ok { trait; trait_arguments = elaborate_arguments context path; associated }
   in
   match find_target context path.path.last with
   | Some (Definition (Trait, trait)) -> trait_reference_of trait
@@ -320,10 +322,10 @@ and trait_reference ?(capability = false) context (path : path_type) :
   | Some (Unknown report) -> Error report
   | _ -> bug "`%s` is not resolved as a trait" shown
 
-and trait_bounds context paths =
-  List.filter_map (fun path -> Result.to_option (trait_reference context path)) paths
+and elaborate_trait_bounds context paths =
+  List.filter_map (fun path -> Result.to_option (elaborate_trait_reference context path)) paths
 
-and capability_path context (path : path_type) : Types.capability list =
+and elaborate_capability_path context (path : path_type) : Types.capability list =
   let shown = show_path path.path in
   match find_target context path.path.last with
   | Some (Capability_parameter parameter) -> [ Types.Capability_parameter parameter ]
@@ -354,14 +356,14 @@ and find_capability_projection context base traits (key : name) =
         (find_declaring_trait ~capability:true context bound.trait key.text))
     traits
 
-and capability context (written : capability_reference) : Types.capability list =
+and elaborate_capability context (written : capability_reference) : Types.capability list =
   match written.kind with
-  | Capability_path path -> capability_path context path
+  | Capability_path path -> elaborate_capability_path context path
   | Self_capabilities key -> (
       match List.assoc_opt key.text context.self_capabilities with
       | Some set -> (set :> Types.capability list)
       | None -> (
-          match (self context context.spans.(written.id), context.self_trait) with
+          match (elaborate_self context context.spans.(written.id), context.self_trait) with
           | Error _, _ -> []
           | Ok _, None ->
               report context Unknown_associated_capability context.spans.(key.id)
@@ -391,29 +393,33 @@ and capability context (written : capability_reference) : Types.capability list 
                    parameter.name key.text);
               []))
 
-and capabilities context written =
-  Types.make_capability_set (List.concat_map (capability context) written)
+and elaborate_capabilities context written =
+  Types.make_capability_set (List.concat_map (elaborate_capability context) written)
 
-and mode = function None -> Types.Read | Some Mut -> Types.Mut | Some Own -> Types.Own
+and elaborate_mode = function None -> Types.Read | Some Mut -> Types.Mut | Some Own -> Types.Own
 
-and function_type_ context (written : function_type) : Types.function_type =
+and elaborate_function_type context (written : function_type) : Types.function_type =
   {
     inputs =
       List.map
-        (fun (input : function_input) -> (mode input.mode, type_ context input.type_))
+        (fun (input : function_input) ->
+          (elaborate_mode input.mode, elaborate_type context input.type_))
         written.inputs;
-    output = (match written.output with Some output -> type_ context output | None -> Types.unit);
-    uses = uses context written.clauses;
-    costs = costs context written.clauses;
+    output =
+      (match written.output with
+      | Some output -> elaborate_type context output
+      | None -> Types.unit);
+    uses = elaborate_uses context written.clauses;
+    costs = elaborate_costs context written.clauses;
   }
 
-and uses context clauses =
-  capabilities context
+and elaborate_uses context clauses =
+  elaborate_capabilities context
     (List.concat_map
        (fun (clause : clause) -> match clause.kind with Uses written -> written | _ -> [])
        clauses)
 
-and costs context clauses =
+and elaborate_costs context clauses =
   let counted (path : path_type) (method_ : name option) : Types.resource option =
     let shown = show_path path.path in
     match find_target context path.path.last with
@@ -470,7 +476,7 @@ and costs context clauses =
       | _ -> None)
     clauses
 
-let generics context owner (written : generic_parameter list) : Types.generic list =
+let elaborate_generics context owner (written : generic_parameter list) : Types.generic list =
   let parameter (name : name) : Types.parameter = { owner; name = name.text } in
   let declared =
     List.filter_map
@@ -486,7 +492,7 @@ let generics context owner (written : generic_parameter list) : Types.generic li
     (fun (parameter, kind) ->
       match kind with
       | `Type bounds ->
-          let bounds = trait_bounds context bounds in
+          let bounds = elaborate_trait_bounds context bounds in
           Hashtbl.replace context.bounds parameter bounds;
           { Types.generic = parameter; kind = Type_generic bounds }
       | `Value _ -> { Types.generic = parameter; kind = Value_generic }
@@ -502,14 +508,14 @@ let terminates (clauses : clause list) =
       match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
     clauses
 
-let signature context ~owner ~head ~self_type (written : signature) : Types.signature =
-  let own = generics context owner written.generics in
+let elaborate_signature context ~owner ~head ~self_type (written : signature) : Types.signature =
+  let own = elaborate_generics context owner written.generics in
   let generics_ = head @ own in
   let receiver =
     match written.parameters with
-    | { kind = Self_parameter written_mode; _ } :: _ ->
+    | { kind = Self_parameter mode; _ } :: _ ->
         let receiver : Path.receiver =
-          match written_mode with None -> Read | Some Mut -> Mut | Some Own -> Own
+          match mode with None -> Read | Some Mut -> Mut | Some Own -> Own
         in
         Option.map (fun self -> (receiver, self)) self_type
     | _ -> None
@@ -518,12 +524,12 @@ let signature context ~owner ~head ~self_type (written : signature) : Types.sign
     List.filter_map
       (fun (parameter : parameter) ->
         match parameter.kind with
-        | Named_parameter { name; mode = written_mode; type_ = written_type; default } ->
+        | Named_parameter { name; mode; type_; default } ->
             Some
               {
                 Types.name = name.text;
-                mode = mode written_mode;
-                type_ = type_ context written_type;
+                mode = elaborate_mode mode;
+                type_ = elaborate_type context type_;
                 has_default = Option.is_some default;
               }
         | Self_parameter _ | Parameter_error -> None)
@@ -532,8 +538,8 @@ let signature context ~owner ~head ~self_type (written : signature) : Types.sign
   let output =
     match written.result with
     | None -> Types.Returns Types.unit
-    | Some (Returns result) -> Types.Returns (type_ context result)
-    | Some (Lends (written_mode, result)) -> Types.Lends (mode written_mode, type_ context result)
+    | Some (Returns result) -> Types.Returns (elaborate_type context result)
+    | Some (Lends (mode, result)) -> Types.Lends (elaborate_mode mode, elaborate_type context result)
   in
   let terminates = terminates written.clauses in
   let result_type = Types.extract_result_type output in
@@ -542,7 +548,7 @@ let signature context ~owner ~head ~self_type (written : signature) : Types.sign
     receiver;
     parameters;
     output;
-    uses = uses context written.clauses;
+    uses = elaborate_uses context written.clauses;
     terminates;
     specification_only =
       Well_known.is Model owner
@@ -560,8 +566,8 @@ let signature context ~owner ~head ~self_type (written : signature) : Types.sign
         parameters;
   }
 
-let type_head context owner (head : type_head) =
-  let generics = generics context owner head.generics in
+let elaborate_type_head context owner (head : type_head) =
+  let generics = elaborate_generics context owner head.generics in
   match find_target context head.path.last with
   | Some (Definition (Type, type_path)) ->
       (match Names.generics_of context.lookups.names type_path with
@@ -591,20 +597,20 @@ let type_head context owner (head : type_head) =
 
 let make_self_parameter trait : Types.parameter = { owner = trait; name = "Self" }
 
-let fields context (written : field list) =
+let elaborate_fields context (written : field list) =
   List.stable_sort
     (fun (left : Types.field) (right : Types.field) ->
       String.compare left.field_name right.field_name)
     (List.filter_map
        (fun (field : field) ->
          match field.kind with
-         | Field_declaration { name; type_ = written_type; default } ->
-             let field_type = type_ context written_type in
+         | Field_declaration { name; type_; default } ->
+             let field_type = elaborate_type context type_ in
              let field_type =
                match Types.find_specification_only_type field_type with
                | None -> field_type
                | Some specification_type ->
-                   report_error_type context Specification_only context.spans.(written_type.id)
+                   report_error_type context Specification_only context.spans.(type_.id)
                      (Printf.sprintf
                         "`%s` exists only in specifications and has no representation in code that \
                          runs, so it is not the type of a field."
@@ -619,11 +625,11 @@ let fields context (written : field list) =
          | Field_error -> None)
        written)
 
-let container (context : context) (path : Path.t) (definition : definition) :
-    (Environment.container, Diagnostic.reported) Stdlib.result * context =
+let elaborate_container (context : t) (path : Path.t) (definition : definition) :
+    (Environment.container, Diagnostic.reported) Stdlib.result * t =
   match definition.kind with
-  | Trait { generics = written_generics; requires; members; _ } ->
-      let trait_generics = generics context path written_generics in
+  | Trait { generics; requires; members; _ } ->
+      let trait_generics = elaborate_generics context path generics in
       let self_parameter = make_self_parameter path in
       let self_trait : Types.trait_reference =
         {
@@ -640,7 +646,7 @@ let container (context : context) (path : Path.t) (definition : definition) :
           self_trait = Some self_trait;
         }
       in
-      let requires = trait_bounds context requires in
+      let requires = elaborate_trait_bounds context requires in
       let associated_types =
         List.filter_map
           (fun (line : trait_member node) ->
@@ -649,7 +655,7 @@ let container (context : context) (path : Path.t) (definition : definition) :
                 Some
                   {
                     Types.associated_name = name.text;
-                    associated_bounds = trait_bounds context bounds;
+                    associated_bounds = elaborate_trait_bounds context bounds;
                   }
             | Associated_capability _ | Law _ | Trait_member_error -> None)
           members
@@ -670,8 +676,8 @@ let container (context : context) (path : Path.t) (definition : definition) :
                     List.filter_map
                       (fun (parameter : parameter) ->
                         match parameter.kind with
-                        | Named_parameter { name; type_ = written; _ } ->
-                            Some (name.text, type_ context written)
+                        | Named_parameter { name; type_; _ } ->
+                            Some (name.text, elaborate_type context type_)
                         | Self_parameter _ | Parameter_error -> None)
                       law.parameters )
             | Associated_type _ | Associated_capability _ | Trait_member_error -> None)
@@ -680,9 +686,9 @@ let container (context : context) (path : Path.t) (definition : definition) :
       ( Ok
           (Trait_parts { trait_generics; requires; associated_types; associated_capabilities; laws }),
         context )
-  | Impl { trait_; type_ = head; uses = written_uses; members } -> (
-      let impl_generics, for_type = type_head context path head in
-      match trait_reference ~capability:true context trait_ with
+  | Impl { trait_; type_ = head; uses; members } -> (
+      let impl_generics, for_type = elaborate_type_head context path head in
+      match elaborate_trait_reference ~capability:true context trait_ with
       | Error report -> (Error report, context)
       | Ok implements ->
           let associated =
@@ -691,7 +697,9 @@ let container (context : context) (path : Path.t) (definition : definition) :
                  (fun (line : impl_member node) ->
                    match line.kind with
                    | Associated_definition (name, written) ->
-                       Some (name.text, type_ { context with self_type = Some for_type } written)
+                       Some
+                         ( name.text,
+                           elaborate_type { context with self_type = Some for_type } written )
                    | Capability_definition _ | Impl_member_error -> None)
                  members)
           in
@@ -709,7 +717,9 @@ let container (context : context) (path : Path.t) (definition : definition) :
               (fun sets (line : impl_member node) ->
                 match line.kind with
                 | Capability_definition (name, written) ->
-                    let set = capabilities { context with self_capabilities = sets } written in
+                    let set =
+                      elaborate_capabilities { context with self_capabilities = sets } written
+                    in
                     let is_defined_by_this_impl = function
                       | Types.Capability_projection { base; trait; _ } ->
                           Types.equal base for_type && Path.equal trait.trait implements.trait
@@ -751,7 +761,7 @@ let container (context : context) (path : Path.t) (definition : definition) :
                    impl_generics;
                    implements;
                    for_type;
-                   impl_uses = capabilities context written_uses;
+                   impl_uses = elaborate_capabilities context uses;
                    capability_sets =
                      List.sort compare
                        (List.filter (fun (name, _) -> List.mem name declared) capability_sets);
@@ -759,13 +769,13 @@ let container (context : context) (path : Path.t) (definition : definition) :
             context ))
   | _ -> (Ok Capability_parts, context)
 
-let header (lookups : Lookups.t) (key : Names.key) =
+let elaborate_header (lookups : Lookups.t) (key : Names.key) =
   let resolved = lookups.resolved Interface key in
   if Names.is_broken lookups.names key Header then Error []
   else
     match
-      container
-        (create_context lookups resolved ~spans:(lookups.names.spans key) empty_scope)
+      elaborate_container
+        (create lookups resolved ~spans:(lookups.names.spans key) empty_scope)
         key.path (lookups.names.definition key)
     with
     | _, context when !(context.diagnostics) <> [] -> Error (List.rev !(context.diagnostics))
@@ -840,10 +850,11 @@ let make_container_interface lookups key (header : header) : elaborated_interfac
   in
   { interface; diagnostics = []; named = header.container_named; scope = header.container_scope }
 
-let member (lookups : Lookups.t) ~path ~spans resolved (definition : definition) (header : header) =
-  let context = create_context lookups resolved ~spans header.container_scope in
+let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : definition)
+    (header : header) =
+  let context = create lookups resolved ~spans header.container_scope in
   match definition.kind with
-  | Function { signature = written; _ } | Method_declaration written ->
+  | Function { signature; _ } | Method_declaration signature ->
       let impl_generics, impl_uses =
         match header.container with
         | Impl_parts { impl_generics; impl_uses; _ } -> (impl_generics, impl_uses)
@@ -851,8 +862,8 @@ let member (lookups : Lookups.t) ~path ~spans resolved (definition : definition)
       in
       let elaborated =
         Types.add_impl_generics_and_uses ~impl_generics ~impl_uses
-          (signature context ~owner:path ~head:[] ~self_type:header.container_scope.self_type
-             written)
+          (elaborate_signature context ~owner:path ~head:[]
+             ~self_type:header.container_scope.self_type signature)
       in
       let inherits_termination =
         match (path, header.container_scope.self_trait) with
@@ -874,13 +885,13 @@ let member (lookups : Lookups.t) ~path ~spans resolved (definition : definition)
       make_elaborated_interface context
         (Error_interface (Resolve.Parts.recovery_report spans.(definition.id)))
 
-let definition (lookups : Lookups.t) (key : Names.key) =
+let elaborate_definition (lookups : Lookups.t) (key : Names.key) =
   let resolved = lookups.resolved Interface key in
   let definition = lookups.names.definition key in
   let spans = lookups.names.spans key in
   let path = key.path in
   Compiler_bug.while_doing ~stage:"Interface" (Names.show_key key) (fun () ->
-      let context = create_context lookups resolved ~spans empty_scope in
+      let context = create lookups resolved ~spans empty_scope in
       let recovered () =
         make_elaborated_interface context
           (Error_interface (Resolve.Parts.recovery_report spans.(definition.id)))
@@ -891,7 +902,7 @@ let definition (lookups : Lookups.t) (key : Names.key) =
       with
       | Some report, _ -> make_elaborated_interface context (Error_interface report)
       | None, Some None -> recovered ()
-      | None, Some (Some header) -> member lookups ~path ~spans resolved definition header
+      | None, Some (Some header) -> elaborate_member lookups ~path ~spans resolved definition header
       | None, None -> (
           match definition.kind with
           | Trait _ | Capability _ | Impl _ -> (
@@ -899,33 +910,34 @@ let definition (lookups : Lookups.t) (key : Names.key) =
               | Some header -> make_container_interface lookups key header
               | None -> bug "`%s` has no header" (Names.show_key key))
           | Method_declaration _ | Definition_error _ -> recovered ()
-          | Function { signature = written; _ } ->
+          | Function { signature; _ } ->
               let head, self_type =
-                match written.name with
+                match signature.name with
                 | Plain_name _ -> ([], None)
                 | Member_name (head, _) ->
-                    let generics, self = type_head context path head in
+                    let generics, self = elaborate_type_head context path head in
                     (generics, Some self)
               in
               let context = { context with self_type } in
               make_elaborated_interface context
-                (Function_interface (signature context ~owner:path ~head ~self_type written))
-          | Type_definition { generics = written_generics; body; clauses; _ } ->
-              let type_generics = generics context path written_generics in
+                (Function_interface
+                   (elaborate_signature context ~owner:path ~head ~self_type signature))
+          | Type_definition { generics; body; clauses; _ } ->
+              let type_generics = elaborate_generics context path generics in
               let self =
                 Types.Named { path; arguments = Types.list_generic_arguments type_generics }
               in
               let context = { context with self_type = Some self } in
               let shape =
                 match body with
-                | Fields written -> Types.Record (fields context written)
+                | Fields written -> Types.Record (elaborate_fields context written)
                 | Variants variants ->
                     Types.Sum
                       (List.map
                          (fun (variant : variant) ->
                            {
                              Types.variant_name = variant.name.text;
-                             fields = Option.map (fields context) variant.fields;
+                             fields = Option.map (elaborate_fields context) variant.fields;
                              indirect = variant.indirect;
                            })
                          variants)
@@ -948,23 +960,24 @@ let definition (lookups : Lookups.t) (key : Names.key) =
               make_elaborated_interface context
                 (Type_interface
                    { type_generics; shape; opaque = definition.visibility = Public_opaque; derives })
-          | Constant { name; type_ = written; _ } ->
+          | Constant { name; type_; _ } ->
               let context =
                 match name with
                 | Plain_name _ -> context
                 | Member_name (head, _) ->
-                    let _, self_type = type_head context path head in
+                    let _, self_type = elaborate_type_head context path head in
                     { context with self_type = Some self_type }
               in
               make_elaborated_interface context
-                (Constant_interface { constant_type = type_ context written })
-          | Test { uses = written; _ } ->
-              make_elaborated_interface context (Test_interface (capabilities context written))
-          | Theorem { generics = written_generics; parameters; clauses; _ } ->
-              let written : signature =
+                (Constant_interface { constant_type = elaborate_type context type_ })
+          | Test { uses; _ } ->
+              make_elaborated_interface context
+                (Test_interface (elaborate_capabilities context uses))
+          | Theorem { generics; parameters; clauses; _ } ->
+              let signature : signature =
                 {
                   name = Plain_name { text = ""; id = definition.id };
-                  generics = written_generics;
+                  generics;
                   parameters;
                   result = None;
                   clauses;
@@ -973,12 +986,12 @@ let definition (lookups : Lookups.t) (key : Names.key) =
               make_elaborated_interface context
                 (Theorem_interface
                    {
-                     (signature context ~owner:path ~head:[] ~self_type:None written) with
+                     (elaborate_signature context ~owner:path ~head:[] ~self_type:None signature) with
                      specification_only = true;
                    })
-          | Law_proof { trait_; law; type_ = written; _ } -> (
-              let generics, for_type = type_head context path written in
-              match trait_reference context trait_ with
+          | Law_proof { trait_; law; type_; _ } -> (
+              let generics, for_type = elaborate_type_head context path type_ in
+              match elaborate_trait_reference context trait_ with
               | Ok trait ->
                   make_elaborated_interface context
                     (Law_proof_interface { generics; trait; law = law.text; for_type })

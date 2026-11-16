@@ -61,7 +61,7 @@ let compiler_implements (impl : Types.impl_interface) =
 
 let make_conformance lookups ~bounds ~(trait_span : Source.Definition_span.t)
     (impl : Types.impl_interface) (trait_path : path_type) =
-  let shown_trait = Elaborate.show_path trait_path.path in
+  let shown_trait = Elaborator.show_path trait_path.path in
   let impl_bounds parameter =
     match
       List.find_opt
@@ -146,7 +146,7 @@ let check_impl state (written_members : impl_member node list) (impl : Types.imp
     report state Implements_built_in state.spans.(trait_path.id)
       (Printf.sprintf
          "The compiler implements `%s` from a type's fields; no `impl` of it can be written."
-         (Elaborate.show_path trait_path.path))
+         (Elaborator.show_path trait_path.path))
   else
     match
       make_conformance lookups ~bounds:(list_bounds state) ~trait_span:state.spans.(trait_path.id)

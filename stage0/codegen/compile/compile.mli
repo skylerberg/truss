@@ -81,20 +81,12 @@ val run_template_check :
   (bool list, string) result
 
 val roots : tests:Path.t list -> mains:Path.t list -> Instance.key list
-val list_folded_constants : Mir.lookups -> Path.t -> Path.t list
-
-val lower :
-  Lookups.settings ->
-  Lookups.t ->
-  lowered_constant:(Path.t -> (lowered, unsupported) result) ->
-  Instance.key ->
-  (lowered, unsupported) result
-
+val lower : Lookups.settings -> Lookups.t -> Instance.key -> (lowered, unsupported) result
 val references : lowered -> Instance.key list
 
 val check_calls :
   Interface.Lookups.t ->
-  list_callees:(Path.t -> Path.t list option) ->
+  list_call_edges:(Path.t -> Path.t list option) ->
   Instance.key ->
   lowered ->
   unit

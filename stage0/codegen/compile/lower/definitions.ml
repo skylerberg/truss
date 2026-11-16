@@ -4,7 +4,6 @@ let bug format = Compiler_bug.bug ~stage:"Lower" format
 
 type context = {
   lookups : Lookups.t;
-  constant : Path.t -> Lowered.static_value option;
   env : Memory_layout.env;
   drop_and_copy : Drop_and_copy.t;
   monomorphic : Monomorphic.context;
@@ -24,11 +23,10 @@ let monomorphic (interface : Interface.Lookups.t) : Monomorphic.context =
 let uint64 = Ground.builtin UInt64
 let string_slice : Ground.ty = Named { path = Well_known.path String_slice; arguments = [] }
 
-let context (settings : Lookups.settings) ~constant ~env (lookups : Lookups.t) =
+let context (settings : Lookups.settings) ~env (lookups : Lookups.t) =
   let monomorphic = monomorphic lookups.interface in
   {
     lookups;
-    constant;
     env;
     drop_and_copy = Drop_and_copy.create env;
     monomorphic;

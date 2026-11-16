@@ -26,6 +26,63 @@ let operand_origin : Core.operand -> Core.origin = function
   | Place place -> Core_walk.place_origin place
   | Value value -> value.origin
 
+module In_order = struct
+  type 'value t = {
+    slots : int;
+    origin : Core.origin option;
+    evaluate : count:int -> index:int -> loans:int list ref -> 'value option;
+  }
+
+  let pure value =
+    { slots = 0; origin = None; evaluate = (fun ~count:_ ~index:_ ~loans:_ -> Some value) }
+
+  let operand builder evaluate type_ origin =
+    {
+      slots = 1;
+      origin = Some origin;
+      evaluate =
+        (fun ~count ~index ~loans ->
+          let* value = evaluate () in
+          if count > 1 then begin
+            let value = held builder value type_ origin in
+            (match value with
+            | Constant _ | Take _ -> ()
+            | _ ->
+                if index < count - 1 then
+                  loans := start_loan builder value Read Operand_evaluation origin :: !loans);
+            Some value
+          end
+          else Some value);
+    }
+
+  let map transform evaluation =
+    {
+      evaluation with
+      evaluate =
+        (fun ~count ~index ~loans ->
+          Option.map transform (evaluation.evaluate ~count ~index ~loans));
+    }
+
+  let map2 combine first second =
+    {
+      slots = first.slots + second.slots;
+      origin = (match first.origin with None -> second.origin | origin -> origin);
+      evaluate =
+        (fun ~count ~index ~loans ->
+          let* first_value = first.evaluate ~count ~index ~loans in
+          let* second_value = second.evaluate ~count ~index:(index + first.slots) ~loans in
+          Some (combine first_value second_value));
+    }
+
+  let all evaluations = List.fold_right (map2 List.cons) evaluations (pure [])
+
+  let run builder evaluation =
+    let loans = ref [] in
+    let value = evaluation.evaluate ~count:evaluation.slots ~index:0 ~loans in
+    Option.iter (end_loans builder (List.rev !loans)) evaluation.origin;
+    value
+end
+
 let rec runs_code (place : Core.place) =
   match place with
   | Local _ | Constant _ -> false
@@ -170,18 +227,27 @@ let rec expression builder (node : Core.expression) : operand option =
     | Collection_literal { elements; construction = Array } ->
         let* elements = operands builder elements in
         hold (Array elements)
-    | Record_update { base; updates } -> (
-        let* values = operands builder (base :: List.map snd updates) in
-        match values with
-        | base_value :: update_values ->
-            let local = temporary builder node.type_ origin in
-            assign builder (at local) (Operand base_value) origin;
-            List.iter2
-              (fun (fields, (written : Core.expression)) value ->
-                assign builder (field_path (at local) fields) (Operand value) written.origin)
-              updates update_values;
-            Some (Use { place = at local; type_ = node.type_; origin = node.origin })
-        | [] -> bug "a record update without a base")
+    | Record_update { base; updates } ->
+        let* base_value, update_values =
+          In_order.run builder
+            (In_order.map2
+               (fun base_value update_values -> (base_value, update_values))
+               (plan_expression builder base)
+               (In_order.all
+                  (List.map
+                     (fun (fields, (written : Core.expression)) ->
+                       In_order.map
+                         (fun value -> (fields, written, value))
+                         (plan_expression builder written))
+                     updates)))
+        in
+        let local = temporary builder node.type_ origin in
+        assign builder (at local) (Operand base_value) origin;
+        List.iter
+          (fun (fields, (written : Core.expression), value) ->
+            assign builder (field_path (at local) fields) (Operand value) written.origin)
+          update_values;
+        Some (Use { place = at local; type_ = node.type_; origin = node.origin })
     | Slice { call = { kind = Call called; _ }; _ } -> (
         let* call = call_of builder called ~node:node.id ~origin:node.origin in
         match call.arguments with
@@ -200,11 +266,9 @@ let rec expression builder (node : Core.expression) : operand option =
           List.map (fun (argument : Core.expression) -> Types.Type argument.type_) arguments
         in
         hold (Operation { operation; type_arguments; operands })
-    | Compare { comparison; left; right } -> (
-        let* compared = operands builder [ left; right ] in
-        match compared with
-        | [ left; right ] -> hold (Compare { comparison; left; right })
-        | _ -> bug "a comparison without two operands")
+    | Compare { comparison; left; right } ->
+        let* left, right = evaluate_pair builder left right in
+        hold (Compare { comparison; left; right })
     | Not inner ->
         let* inner = expression builder inner in
         hold (Not inner)
@@ -243,26 +307,24 @@ let rec expression builder (node : Core.expression) : operand option =
     | Match { scrutinees; arms } -> match_ builder node scrutinees arms
     | Block inner -> in_value_scope builder origin (fun () -> block builder inner)
     | Provide { implementations; body } ->
-        let* values =
-          in_order builder
-            (List.map
-               (fun (implementation : Core.implementation) ->
-                 ( (fun () -> operand builder implementation.mode implementation.value),
-                   implementation.type_,
-                   implementation.origin ))
-               implementations)
-        in
-        let provided =
-          List.map2
-            (fun (implementation : Core.implementation) value ->
-              {
-                mode = implementation.mode;
-                value;
-                type_ = implementation.type_;
-                provides = implementation.provides;
-                origin = implementation.origin;
-              })
-            implementations values
+        let* provided =
+          In_order.run builder
+            (In_order.all
+               (List.map
+                  (fun (implementation : Core.implementation) ->
+                    In_order.map
+                      (fun value ->
+                        {
+                          mode = implementation.mode;
+                          value;
+                          type_ = implementation.type_;
+                          provides = implementation.provides;
+                          origin = implementation.origin;
+                        })
+                      (In_order.operand builder
+                         (fun () -> operand builder implementation.mode implementation.value)
+                         implementation.type_ implementation.origin))
+                  implementations))
         in
         emit builder
           (Basic (Provide { provided; can_use_tasks = Core_walk.can_use_tasks body }))
@@ -323,19 +385,23 @@ let rec expression builder (node : Core.expression) : operand option =
         let* elements = operands builder elements in
         hold (Array elements)
     | Map_literal { entries } ->
-        let* values =
-          operands builder (List.concat_map (fun (key, value) -> [ key; value ]) entries)
+        let* entries =
+          In_order.run builder
+            (In_order.all
+               (List.map
+                  (fun (key, value) ->
+                    In_order.map2
+                      (fun key value -> (key, value))
+                      (plan_expression builder key) (plan_expression builder value))
+                  entries))
         in
-        let rec paired = function key :: value :: rest -> (key, value) :: paired rest | _ -> [] in
-        hold (Specification (Map (paired values)))
+        hold (Specification (Map entries))
     | Result -> hold (Specification Result)
     | Yielded -> hold (Specification Yielded)
     | Old inner -> in_old builder (fun () -> expression builder inner)
-    | Identical (first, second) -> (
-        let* compared = operands builder [ first; second ] in
-        match compared with
-        | [ first; second ] -> hold (Specification (Identical (first, second)))
-        | _ -> bug "an identity without two operands")
+    | Identical (first, second) ->
+        let* first, second = evaluate_pair builder first second in
+        hold (Specification (Identical (first, second)))
     | Specification_function { function_; arguments } ->
         let rec unconverted (argument : Core.expression) =
           match argument.kind with
@@ -350,78 +416,43 @@ let rec expression builder (node : Core.expression) : operand option =
         hold (Specification (Method_time callee))
     | Quantified _ -> bug "a quantifier over a type or a collection in code that runs"
 
-and operands builder nodes =
-  in_order builder
-    (List.map
-       (fun (node : Core.expression) ->
-         ((fun () -> expression builder node), node.type_, node.origin))
-       nodes)
+and plan_expression builder (node : Core.expression) =
+  In_order.operand builder (fun () -> expression builder node) node.type_ node.origin
 
-and in_order builder (operands : ((unit -> operand option) * Types.ty * Core.origin) list) =
-  let count = List.length operands in
-  let loans = ref [] in
-  let evaluated =
-    List.fold_left
-      (fun (reached, index) (evaluate, type_, origin) ->
-        match reached with
-        | None -> (None, index + 1)
-        | Some evaluated -> (
-            match evaluate () with
-            | None -> (None, index + 1)
-            | Some value ->
-                let value =
-                  if count > 1 then begin
-                    let value = held builder value type_ origin in
-                    (match value with
-                    | Constant _ | Take _ -> ()
-                    | _ ->
-                        if index < count - 1 then
-                          loans := start_loan builder value Read Operand_evaluation origin :: !loans);
-                    value
-                  end
-                  else value
-                in
-                (Some (evaluated @ [ value ]), index + 1)))
-      (Some [], 0) operands
-    |> fst
-  in
-  (match operands with
-  | (_, _, origin) :: _ -> end_loans builder (List.rev !loans) origin
-  | [] -> ());
-  evaluated
+and plan_operand builder mode (passed : Core.operand) =
+  In_order.operand builder
+    (fun () -> operand builder mode passed)
+    (core_operand_type passed) (operand_origin passed)
+
+and operands builder nodes =
+  In_order.run builder (In_order.all (List.map (plan_expression builder) nodes))
+
+and evaluate_pair builder (first : Core.expression) (second : Core.expression) =
+  In_order.run builder
+    (In_order.map2
+       (fun first second -> (first, second))
+       (plan_expression builder first) (plan_expression builder second))
 
 and construct_fields builder fields =
-  let written =
-    List.filter_map (fun (name, field) -> Option.map (fun field -> (name, field)) field) fields
-  in
-  let* values =
-    in_order builder
-      (List.map
-         (fun (_, (field : Core.operand)) ->
-           ( (fun () ->
-               match field with
-               | Place _ ->
-                   bug
-                     "a constructor field that is a place, in a construct that no lending method \
-                      lends"
-               | Value value -> expression builder value),
-             core_operand_type field,
-             operand_origin field ))
-         written)
-  in
-  let values = ref values in
-  Some
-    (List.map
-       (fun (name, field) ->
-         match field with
-         | None -> (name, None)
-         | Some _ -> (
-             match !values with
-             | value :: rest ->
-                 values := rest;
-                 (name, Some value)
-             | [] -> bug "a constructor with fewer values than fields"))
-       fields)
+  In_order.run builder
+    (In_order.all
+       (List.map
+          (fun (name, field) ->
+            match field with
+            | None -> In_order.pure (name, None)
+            | Some (field : Core.operand) ->
+                In_order.map
+                  (fun value -> (name, Some value))
+                  (In_order.operand builder
+                     (fun () ->
+                       match field with
+                       | Place _ ->
+                           bug
+                             "a constructor field that is a place, in a construct that no lending \
+                              method lends"
+                       | Value value -> expression builder value)
+                     (core_operand_type field) (operand_origin field)))
+          fields))
 
 and yielded builder (mode : Types.mode) (part : Core.operand) : yielded option =
   let rec lends : Core.operand -> bool = function
@@ -432,35 +463,22 @@ and yielded builder (mode : Types.mode) (part : Core.operand) : yielded option =
   in
   match part with
   | Value { kind = Construct _; _ } when lends part ->
-      let rec leaves (field : Core.operand) =
-        match field with
-        | Value { kind = Construct { fields; _ }; _ } when lends field ->
-            List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:leaves field) fields
-        | _ ->
-            [
-              ((fun () -> operand builder mode field), core_operand_type field, operand_origin field);
-            ]
-      in
-      let* values = in_order builder (leaves part) in
-      let remaining = ref values in
-      let rec rebuild (field : Core.operand) =
+      let rec plan_part (field : Core.operand) : yielded In_order.t =
         match field with
         | Value ({ kind = Construct { variant; fields }; _ } as node) when lends field ->
-            Built
-              {
-                variant;
-                fields = List.map (fun (name, field) -> (name, Option.map rebuild field)) fields;
-                type_ = node.type_;
-                node = node.id;
-              }
-        | _ -> (
-            match !remaining with
-            | value :: rest ->
-                remaining := rest;
-                Part value
-            | [] -> bug "a yielded constructor with fewer values than fields")
+            In_order.map
+              (fun fields -> Built { variant; fields; type_ = node.type_; node = node.id })
+              (In_order.all
+                 (List.map
+                    (fun (name, field) ->
+                      match field with
+                      | None -> In_order.pure (name, None)
+                      | Some field ->
+                          In_order.map (fun built -> (name, Some built)) (plan_part field))
+                    fields))
+        | _ -> In_order.map (fun value -> Part value) (plan_operand builder mode field)
       in
-      Some (rebuild part)
+      In_order.run builder (plan_part part)
   | _ -> Option.map (fun value -> Part value) (operand builder mode part)
 
 and operand builder (mode : Types.mode) (passed : Core.operand) =
@@ -564,42 +582,28 @@ and callee_of builder (callee : Core.callee) : callee option =
 
 and call_of builder (called : Core.call) ~node ~origin : call option =
   let* callee = callee_of builder called.callee in
-  let functions = ref [] in
-  let* values =
-    in_order builder
-      (List.filter_map
-         (function
-           | Core.Default -> None
-           | Passed { mode; value; _ } ->
-               Some
-                 ( (fun () ->
-                     let passed, function_ =
-                       match value with
-                       | Value written when is_function_expression written -> (
-                           match function_expression builder written ~is_argument:true with
-                           | Some (passed, function_) -> (Some passed, Some function_)
-                           | None -> (None, None))
-                       | Place _ | Value _ -> (operand builder mode value, None)
-                     in
-                     functions := function_ :: !functions;
-                     passed),
-                   core_operand_type value,
-                   operand_origin value ))
-         called.arguments)
-  in
-  let values = ref (List.combine values (List.rev !functions)) in
-  let arguments =
-    List.map
-      (fun (argument : Core.argument) ->
-        match argument with
-        | Default -> Default
-        | Passed { mode; mode_keyword; _ } -> (
-            match !values with
-            | (value, function_) :: rest ->
-                values := rest;
-                Passed { mode; value; mode_keyword; function_ }
-            | [] -> bug "a call with fewer values than arguments"))
-      called.arguments
+  let* arguments =
+    In_order.run builder
+      (In_order.all
+         (List.map
+            (function
+              | Core.Default -> In_order.pure Default
+              | Passed { mode; value; mode_keyword } ->
+                  let function_ = ref None in
+                  In_order.map
+                    (fun value -> Passed { mode; value; mode_keyword; function_ = !function_ })
+                    (In_order.operand builder
+                       (fun () ->
+                         match value with
+                         | Value written when is_function_expression written ->
+                             Option.map
+                               (fun (passed, made) ->
+                                 function_ := Some made;
+                                 passed)
+                               (function_expression builder written ~is_argument:true)
+                         | Place _ | Value _ -> operand builder mode value)
+                       (core_operand_type value) (operand_origin value)))
+            called.arguments))
   in
   Some { callee; arguments; uses = called.uses; node; origin }
 
@@ -608,15 +612,13 @@ and call_value builder (node : Core.expression) (called : Core.call) =
   match called.callee with
   | Intrinsic { operation; type_arguments } when Intrinsic.primitive operation ->
       let* operands =
-        in_order builder
-          (List.map
-             (function
-               | Core.Passed { value; mode; _ } ->
-                   ( (fun () -> operand builder mode value),
-                     core_operand_type value,
-                     operand_origin value )
-               | Default -> bug "a primitive operation with a default argument")
-             called.arguments)
+        In_order.run builder
+          (In_order.all
+             (List.map
+                (function
+                  | Core.Passed { value; mode; _ } -> plan_operand builder mode value
+                  | Default -> bug "a primitive operation with a default argument")
+                called.arguments))
       in
       hold ~node:node.id builder node.type_ origin
         (Operation { operation; type_arguments; operands })
@@ -701,20 +703,20 @@ and match_patterns ?(covers = false) builder (patterns : Core.pattern list) plac
 
 and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : operand option =
   let origin = node.origin in
-  let* evaluated =
-    in_order builder
-      (List.map
-         (fun (scrutinee : Core.operand) ->
-           ( (fun () -> operand builder Read scrutinee),
-             core_operand_type scrutinee,
-             operand_origin scrutinee ))
-         scrutinees)
+  let* scrutinee_values =
+    In_order.run builder
+      (In_order.all
+         (List.map
+            (fun (scrutinee : Core.operand) ->
+              In_order.map (fun value -> (scrutinee, value)) (plan_operand builder Read scrutinee))
+            scrutinees))
   in
+  let evaluated = List.map snd scrutinee_values in
   let places =
-    List.map2
-      (fun (scrutinee : Core.operand) value ->
+    List.map
+      (fun ((scrutinee : Core.operand), value) ->
         scrutinee_place builder value (core_operand_type scrutinee) (operand_origin scrutinee))
-      scrutinees evaluated
+      scrutinee_values
   in
   let result = value_local builder node in
   let left_by_arm_before = ref [] in
@@ -1319,10 +1321,11 @@ and quantified builder (node : Core.expression) (quantifier : Core.quantifier)
   let range, value_type =
     match binder with
     | Over_type { type_; _ } -> (Some (Over_type type_), type_)
-    | Over_range { pattern; start; stop; inclusive } -> (
-        match operands builder [ start; stop ] with
-        | Some [ start; stop ] -> (Some (Over_range { start; stop; inclusive }), pattern.type_)
-        | _ -> (None, pattern.type_))
+    | Over_range { pattern; start; stop; inclusive } ->
+        ( Option.map
+            (fun (start, stop) -> Over_range { start; stop; inclusive })
+            (evaluate_pair builder start stop),
+          pattern.type_ )
     | Over_collection { pattern; collection } ->
         ( Option.map (fun collection -> Over_collection collection) (expression builder collection),
           pattern.type_ )

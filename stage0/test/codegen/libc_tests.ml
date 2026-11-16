@@ -18,8 +18,7 @@ let built_entry body : instance =
   Emit_c.Builder.start builder (Emit_c.Builder.block builder);
   let result = body builder in
   Emit_c.Builder.finish builder (Return (Some (Copy (Emit_c.Builder.at result))));
-  Emit_c.Builder.build builder ~parameters:[] ~result:(Some (value int32));
-  Emit_c.Builder.built builder
+  Emit_c.Builder.build builder { parameters = []; result = Some (value int32); returns = true }
 
 let view_of builder text =
   let open Emit_c.Builder in
@@ -93,8 +92,8 @@ let () =
            ~destination:(Some (at length))
            ~site:{ definition = definition "entry"; offset = 0 });
       finish builder (Return (Some (Copy (at length))));
-      build builder ~parameters:[] ~result:(Some (value int32));
-      let c = Emit_c.For_testing.c (Emit_c.fragment env (Code (built builder))) in
+      let built = build builder { parameters = []; result = Some (value int32); returns = true } in
+      let c = Emit_c.For_testing.c (Emit_c.fragment env (Code built)) in
       if not (contains c "t_runtime_panic(") then fail "the call does not stop the program:\n%s" c;
       if contains c "proc_pidpath(" then fail "the function is called:\n%s" c);
   test "a function that takes a structure is declared with no header" (fun () ->
@@ -441,8 +440,7 @@ let () =
         emit builder (Assign (at same, Binary (Equal, Copy (at first), Copy (at second))));
         emit builder (Assign (at status, Convert (Copy (at same), Integer Int32)));
         finish builder (Return (Some (Copy (at status))));
-        build builder ~parameters:[] ~result:(Some (value int32));
-        built builder
+        build builder { parameters = []; result = Some (value int32); returns = true }
       in
       let status, _, errors =
         run_program ~env

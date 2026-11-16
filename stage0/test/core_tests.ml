@@ -96,7 +96,7 @@ let definition_form text (path : Path.t) =
   match definition with
   | Some (key, core) ->
       Core_lint.check
-        (Database.drain_interface_lookups (database packages) [ key.module_.package ])
+        (Database.make_interface_lookups (database packages) [ key.module_.package ])
         key core;
       form_of core
   | None -> failwith (Printf.sprintf "`%s` has no core form" (Path.show path))
@@ -414,7 +414,7 @@ let () =
           forms :=
             !forms
             + Core_lint.check_file
-                (Database.drain_interface_lookups (database packages) [ file.module_.package ])
+                (Database.make_interface_lookups (database packages) [ file.module_.package ])
                 ~core:(core_of packages) file))
     Standard_library.files;
   test "the standard library has core forms" (fun () ->
@@ -443,7 +443,7 @@ let () =
      invariants" (fun () ->
       let packages = setup [] in
       let interface =
-        Database.drain_interface_lookups (database packages) [ Path.standard_package ]
+        Database.make_interface_lookups (database packages) [ Path.standard_package ]
       in
       let derived =
         List.filter_map
@@ -499,7 +499,7 @@ let () =
     let owner =
       match
         Interface.Impls.implements
-          (Database.drain_interface_lookups (database packages) [ both_package ])
+          (Database.make_interface_lookups (database packages) [ both_package ])
           ~bounds
           (Types.make_named both [ Types.Parameter parameter ])
           described

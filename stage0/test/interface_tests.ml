@@ -9,7 +9,7 @@ let no_diagnostics = no_diagnostics ~check
 let app name : Path.t = Top { module_ = module_of "app::main"; name }
 
 let interface packages =
-  Database.drain_interface_lookups (Support.database packages) [ (module_of "app::main").package ]
+  Database.make_interface_lookups (Support.database packages) [ (module_of "app::main").package ]
 
 let standard = Path.standard
 let int64 = Types.make_builtin Int64

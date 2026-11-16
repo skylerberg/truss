@@ -47,6 +47,21 @@ let () =
       fine Fixtures.Package_checks.type_that_contains_itself_through_a_collection);
   test "a record cannot contain itself through an Option" (fun () ->
       one_diagnostic "type Node(next: Option[Node])\n" "package.needs_indirect");
+  test "constants whose values read each other are an error at each of them" (fun () ->
+      let packages =
+        setup [ ("app::main", "let first: Int64 = second + 1\nlet second: Int64 = first + 1\n") ]
+      in
+      match codes (check packages (file_of "app::main")) with
+      | [ "package.constant_cycle"; "package.constant_cycle" ] -> ()
+      | found -> fail "found [%s]" (String.concat "; " found));
+  test "a constant whose value reads itself is an error" (fun () ->
+      one_diagnostic "let count: Int64 = count + 1\n" "package.constant_cycle"
+        ~says:"in its own value");
+  test "a constant built with a field default that reads the constant is an error" (fun () ->
+      one_diagnostic "type Point(x: Int64, y: Int64 = origin.x)\nlet origin: Point = Point(x: 1)\n"
+        "package.constant_cycle" ~says:"leaves out the field `y`, whose default reads");
+  test "a constant that sets the field whose default reads the constant is fine" (fun () ->
+      fine "type Point(x: Int64, y: Int64 = origin.x)\nlet origin: Point = Point(x: 1, y: 2)\n");
   test "a type that contains itself with growing arguments is an error" (fun () ->
       one_diagnostic Fixtures.Package_checks.type_that_contains_itself_with_growing_arguments
         "package.growing_type");

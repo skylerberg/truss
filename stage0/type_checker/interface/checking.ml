@@ -11,7 +11,7 @@ type state = {
 }
 
 let report state ?fixes code span message =
-  ignore (Elaborate.record_diagnostic state.diagnostics ?fixes code span message)
+  ignore (Elaborator.record_diagnostic state.diagnostics ?fixes code span message)
 
 let list_bounds state parameter =
   Option.value ~default:[] (List.assoc_opt parameter state.elaborated.scope.bounds)

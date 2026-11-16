@@ -15,13 +15,12 @@ type t =
   | Checked_bodies
   | Derived_forms
   | Mir
-  | Call_edges
+  | Mir_call_edges
   | Body_checks
   | Package_checks
-  | Callees
+  | Call_edges
   | Recursion_groups
   | Proofs
-  | Folded_constants
   | Lowered_code
   | Test_keys
 

@@ -28,7 +28,7 @@ val read_checked_body : t -> Resolve.Names.key -> Infer.checked option
 val read_parsed : t -> Path.file -> Syntax.file
 val make_name_lookups : t -> Path.package list -> Resolve.Names.lookups
 val read_resolved : t -> Resolve.Names.key -> Resolve.resolved option
-val drain_interface_lookups : t -> Path.package list -> Interface.Lookups.t
+val make_interface_lookups : t -> Path.package list -> Interface.Lookups.t
 val make_lowering_requests : t -> Path.package list -> Compile.requests
 val find_main : t -> Path.package -> Path.t option
 val list_callers : t -> viewer:Path.package -> Path.t -> Path.t list
@@ -58,6 +58,7 @@ module For_testing : sig
   val read_ownership : t -> Resolve.Names.key -> (Core.origin * Core.origin) list part
   val read_proof : proofs -> Resolve.Names.key -> Prover.proof part option
   val list_reads : t -> string -> string list
+  val list_unread_parts : t -> Path.package list -> Part.computed list
   val list_differences : t -> t -> string list
 
   type observed = { recomputed : string list; collected : string list }

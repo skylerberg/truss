@@ -2,7 +2,7 @@ open Syntax
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Elaborate = Interface.Elaborate
+module Elaborator = Interface.Elaborator
 open State
 open Modes
 open Hooks
@@ -74,7 +74,7 @@ and statement state env (written : statement) ~last : unit =
       let type_ =
         match annotation with
         | Some annotation ->
-            let annotated = Elaborate.type_ state.context annotation in
+            let annotated = Elaborator.elaborate_type state.context annotation in
             check state env value annotated;
             annotated
         | None -> expression state env value
@@ -97,7 +97,7 @@ and statement state env (written : statement) ~last : unit =
         if is_var then Types.Own else if borrowed state value then Types.Read else Types.Own
       in
       register_statement state written (fun () ->
-          let value = build_operand mode (build_expression state value) in
+          let value = Operands.build mode (build_expression state value) in
           let pattern = build_pattern state written_pattern in
           Let { pattern; value; else_ = Option.map (build_block state) else_ });
       (match (annotation, written_pattern.kind) with
@@ -170,7 +170,7 @@ and statement state env (written : statement) ~last : unit =
           let element, variable_mode = loop_iterable state env written ~mode inner in
           (match annotation with
           | Some written_annotation ->
-              let annotated = Elaborate.type_ state.context written_annotation in
+              let annotated = Elaborator.elaborate_type state.context written_annotation in
               if not (unify state element annotated) then
                 ignore
                   (reported_mismatch state Mismatch
