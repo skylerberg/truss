@@ -194,4 +194,6 @@ Every stage of stage0 is tested the same way:
   runs only the tests whose names contain it, for working on one:
   `TRUSS_TEST=standard::text _build/default/stage0/test/standard_library_tests.exe`.
   A test must not depend on what an earlier test did, since `TRUSS_TEST`
-  and `TRUSS_TEST_SHARE` run it without the tests before it.
+  and `TRUSS_TEST_SHARE` run it without the tests before it. The harness
+  restores the environment after each test, so a test sets or unsets the
+  variables it needs and does not restore them itself.
