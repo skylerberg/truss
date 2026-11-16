@@ -234,7 +234,7 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
     | Value_parameter parameter -> hold (Value_parameter parameter)
     | Construct { variant; fields } ->
         let* fields = construct_fields builder fields in
-        hold (Construct { variant; fields })
+        hold (Construct { variant; fields; type_ = node.type_ })
     | Collection_literal { elements; construction = Array } ->
         let* elements = lower_operands builder elements in
         hold (Array elements)

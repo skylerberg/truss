@@ -1397,18 +1397,19 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
   | Compare { comparison; left; right } ->
       assign (Binary (convert_binary comparison, lower_operand st left, lower_operand st right))
   | Not inner -> assign (Unary (Not, lower_operand st inner))
-  | Construct { variant; fields } ->
+  | Construct { variant; fields; type_ } ->
+      let built = Lowering.ground st type_ in
       let fields =
         List.map
           (fun (name, (field : Mir.operand option)) ->
             match field with
             | Some field -> (name, lower_operand st field)
             | None ->
-                let default, default_ty = lower_field_default_place st ty ~variant ~field:name in
+                let default, default_ty = lower_field_default_place st built ~variant ~field:name in
                 (name, Lowering.make_owned_operand st default default_ty))
           fields
       in
-      assign (Build { ty; variant; fields })
+      assign (Build { ty = built; variant; fields })
   | Array elements ->
       List.iteri
         (fun index element ->

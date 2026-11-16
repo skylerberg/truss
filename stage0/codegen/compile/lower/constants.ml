@@ -205,7 +205,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
     | Not inner -> (
         let* inner = operand inner in
         match inner with Static_scalar (Bool x) -> make_static_bool (not x) | _ -> None)
-    | Construct { variant; fields } -> (
+    | Construct { variant; fields; _ } -> (
         let* fields =
           collect_all
             (List.map

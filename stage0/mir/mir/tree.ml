@@ -79,7 +79,11 @@ type rvalue =
     }
   | Compare of { comparison : Core.comparison; left : operand; right : operand }
   | Not of operand
-  | Construct of { variant : string option; fields : (string * operand option) list }
+  | Construct of {
+      variant : string option;
+      fields : (string * operand option) list;
+      type_ : Types.ty;
+    }
   | Array of operand list
   | Is_variant of { place : place; variant : string }
   | Convert of {

@@ -135,10 +135,10 @@ and visit_statement_places visit (kind : Tree.statement_kind) =
       ());
   List.iter (iter_places_read visit) (list_nested_blocks_of_kind kind)
 
-let rec visit_block visit locals (block : Tree.block) =
+let rec visit_block visit (block : Tree.block) =
   List.iter
     (fun (statement : Tree.statement) ->
-      visit locals statement;
+      visit statement;
       (match statement.kind with
       | Basic (Ghost_assert { condition; _ }) -> visit_formula visit condition
       | Basic (Proof code) -> visit_code visit code
@@ -148,11 +148,11 @@ let rec visit_block visit locals (block : Tree.block) =
           | Provide _ | Provide_end | Loan_start _ | Loan_end _ | Matched _ )
       | Choose _ | Assert_by_bit_vector _ | Fork _ | Resume _ | Yield _ | Jump _ ->
           ());
-      List.iter (visit_block visit locals) (list_nested_blocks statement))
+      List.iter (visit_block visit) (list_nested_blocks statement))
     block.statements
 
 and visit_formula visit (formula : Tree.formula) =
-  visit_block visit formula.locals formula.value;
+  visit_block visit formula.value;
   Array.iter (visit_body visit) formula.lambdas
 
 and visit_loop visit (loop : Tree.loop) =
@@ -165,16 +165,14 @@ and visit_loop visit (loop : Tree.loop) =
           visit_formula visit amount)
     loop.clauses
 
-and visit_body visit (body : Tree.body) = visit_block visit body.locals body.code
+and visit_body visit (body : Tree.body) = visit_block visit body.code
 
 and visit_code visit (code : Tree.t) =
   visit_body visit code.body;
   Array.iter (visit_body visit) code.lambdas
 
-let iter_code visit code = visit_code (fun _ statement -> visit statement) code
-let iter_formula visit formula = visit_formula (fun _ statement -> visit statement) formula
-let iter_code_with_locals = visit_code
-let iter_formula_with_locals = visit_formula
+let iter_code = visit_code
+let iter_formula = visit_formula
 
 let extract_operand_type : Tree.operand -> Types.ty = function
   | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Constant { type_; _ } -> type_
