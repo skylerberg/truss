@@ -204,8 +204,6 @@ val make_slice :
   inclusive:bool ->
   Core.kind
 
-type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
-
 val convert :
   state ->
   env ->
