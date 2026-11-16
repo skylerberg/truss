@@ -37,7 +37,7 @@ val call :
   ('response, string) result
 
 val list_servers : unit -> string list
-val stop_servers : unit -> bool
+val stop_servers : ?key:string -> unit -> bool
 
 exception Unusable_cache of string
 

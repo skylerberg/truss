@@ -803,7 +803,7 @@ let serve ~key ~handle =
 
 let call = Server.call
 let list_servers = Server.list_servers
-let stop_servers () = Server.stop_servers ~wait:true ()
+let stop_servers ?key () = Server.stop_servers ?key ~wait:true ()
 
 module For_testing = struct
   let load_standard_package_database () = (load_standard_package ()).package_database

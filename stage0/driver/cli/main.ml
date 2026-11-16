@@ -241,13 +241,31 @@ let status =
       $ common)
 
 let stop =
-  make_command "stop" ~doc:"Stop the background processes of every build of truss."
+  let all =
+    Cmdliner.Arg.(
+      value & flag
+      & info [ "all" ] ~doc:"Stop the background processes of every project, not only this one.")
+  in
+  make_command "stop" ~doc:"Stop the background processes of every build of truss for the project."
     Cmdliner.Term.(
-      const (fun () ->
-          if not (Workspace.stop_servers ()) then
-            Output.eprint_line "No background process is running.";
-          Outcome.Exit 0)
-      $ common)
+      const (fun all () ->
+          let directory = Sys.getcwd () in
+          match (all, Workspace.make_server_key directory) with
+          | true, _ ->
+              if not (Workspace.stop_servers ()) then
+                Output.eprint_line "No background process is running.";
+              Outcome.Exit 0
+          | false, "" ->
+              Output.eprintf
+                "No `truss.toml` in %s or any directory above it, so it is in no project. To stop \
+                 the background processes of every project, use --all.\n"
+                directory;
+              Outcome.Exit 2
+          | false, root ->
+              if not (Workspace.stop_servers ~key:root ()) then
+                Output.eprintf "No background process serves %s.\n" root;
+              Outcome.Exit 0)
+      $ all $ common)
 
 let database_counts_variable = "TRUSS_DATABASE_COUNTS"
 
