@@ -537,12 +537,6 @@ let open_database ?(checks = true) snapshot =
   | Trial { database; _ } when checks -> Lazy.force database
   | Worktree _ | Trial _ | Published -> build_cold_database ~checks snapshot
 
-let is_watched relative =
-  List.for_all
-    (fun part -> not (Registry.Content.is_skipped part))
-    (String.split_on_char '/' relative)
-  || relative = ""
-
 let is_under prefix path =
   prefix = "" || path = prefix || String.starts_with ~prefix:(prefix ^ "/") path
 
@@ -550,7 +544,7 @@ let list_changed_files root files paths =
   let prefixes =
     List.filter
       (fun path -> not (List.exists (fun other -> other <> path && is_under other path) paths))
-      (List.sort_uniq compare (List.filter is_watched paths))
+      (List.sort_uniq compare paths)
   in
   let list_with_prefix prefix =
     let absolute = if prefix = "" then root else Filename.concat root prefix in
