@@ -3,15 +3,11 @@ let find_core packages key =
     (fun (checked : Infer.checked) -> checked.form)
     (Database.read_checked_body (Support.make_database packages) key)
 
-type form = { core : Core.t }
-
-let form_of (core : Core.t) = { core }
-
-let list_expressions form =
+let list_expressions (form : Core.t) =
   let found = ref [] in
   Core_walk.walk_definition
     { Core_walk.ignore_all with expression = (fun node -> found := node :: !found) }
-    form.core.definition;
+    form.definition;
   List.rev !found
 
 let list_calls form =
@@ -19,32 +15,32 @@ let list_calls form =
     (fun (node : Core.expression) -> match node.kind with Call call -> Some call | _ -> None)
     (list_expressions form)
 
-let name _ (local : Core.local) =
+let name (local : Core.local) =
   match local with
   | Self -> "self"
   | Declared { name; _ } | Trait_parameter { name; _ } -> name
   | Synthetic index -> Printf.sprintf "synthetic %d" index
 
-let rec show_access_path form (place : Core.place) =
+let rec show_access_path (place : Core.place) =
   match place with
-  | Local { local; _ } -> name form local
-  | Field { base; field; _ } -> show_access_path form base ^ "." ^ field
+  | Local { local; _ } -> name local
+  | Field { base; field; _ } -> show_access_path base ^ "." ^ field
   | Constant { path; _ } -> Path.show path
-  | Lent call -> "lent " ^ show_expression form call
-  | Temporary value -> "temporary " ^ show_expression form value
+  | Lent call -> "lent " ^ show_expression call
+  | Temporary value -> "temporary " ^ show_expression value
 
-and show_expression form (node : Core.expression) =
+and show_expression (node : Core.expression) =
   let list describe items = String.concat ", " (List.map describe items) in
   match node.kind with
   | Integer number -> Z.to_string number
-  | Use place -> "use " ^ show_access_path form place
+  | Use place -> "use " ^ show_access_path place
   | Slice { base; callee; bounds } ->
       Printf.sprintf "slice %s(%s)" (Core_lint.show_callee callee)
-        (list (show_argument form) (Passed { mode = Read; value = Place base } :: bounds))
+        (list show_argument (Passed { mode = Read; value = Place base } :: bounds))
   | Operator { operation; arguments } ->
       Printf.sprintf "%s(%s)"
         (Intrinsic.show_operation (Scalar operation))
-        (list (show_expression form) arguments)
+        (list show_expression arguments)
   | Call { callee; arguments; _ } ->
       let dispatch =
         match callee with
@@ -57,17 +53,17 @@ and show_expression form (node : Core.expression) =
         | _ -> ""
       in
       Printf.sprintf "%s%s(%s)" (Core_lint.show_callee callee) dispatch
-        (list (show_argument form) arguments)
+        (list show_argument arguments)
   | _ -> "a value of the type " ^ Types.show node.type_
 
-and show_operand form (value : Core.operand) =
+and show_operand (value : Core.operand) =
   match value with
-  | Place place -> "place " ^ show_access_path form place
-  | Value value -> show_expression form value
+  | Place place -> "place " ^ show_access_path place
+  | Value value -> show_expression value
 
-and show_argument form (passed : Core.argument) =
+and show_argument (passed : Core.argument) =
   match passed with
-  | Passed { mode; value; _ } -> Types.show_mode mode ^ show_operand form value
+  | Passed { mode; value; _ } -> Types.show_mode mode ^ show_operand value
   | Default -> "default"
 
 let make_definition_form text (path : Path.t) =
@@ -99,7 +95,7 @@ let make_definition_form text (path : Path.t) =
       Core_lint.check
         (Database.make_interface_lookups (Support.make_database packages) [ key.module_.package ])
         key core;
-      form_of core
+      core
   | None -> failwith (Printf.sprintf "`%s` has no core form" (Path.show path))
 
 let expect_observed expected observed =
@@ -111,19 +107,19 @@ let expect ?(definition = Support.make_top_path "app::main" "g") test_name text 
   Harness.test test_name (fun () ->
       expect_observed expected (observe (make_definition_form text definition)))
 
-let read_contract form : Core.contract =
-  match form.core.definition with
+let read_contract (form : Core.t) : Core.contract =
+  match form.definition with
   | Function { contract; _ } -> contract
   | _ -> failwith "the definition is not a function"
 
-let list_final_expressions form =
+let list_final_expressions (form : Core.t) =
   let of_block (block : Core.block) =
     match (block.value, List.rev block.statements) with
-    | Some value, _ -> [ show_expression form value ]
-    | None, { kind = Evaluate value; _ } :: _ -> [ show_expression form value ]
+    | Some value, _ -> [ show_expression value ]
+    | None, { kind = Evaluate value; _ } :: _ -> [ show_expression value ]
     | None, _ -> []
   in
-  match form.core.definition with
+  match form.definition with
   | Function { body = Some body; _ } | Law_proof { body = Some body; _ } -> of_block body
   | _ -> []
 
@@ -141,7 +137,7 @@ let () =
       List.concat_map
         (fun (node : Core.expression) ->
           match node.kind with
-          | Match { scrutinees; _ } -> List.map (show_operand form) scrutinees
+          | Match { scrutinees; _ } -> List.map show_operand scrutinees
           | _ -> [])
         (list_expressions form))
     [ "place shape" ];
@@ -151,7 +147,7 @@ let () =
       List.filter_map
         (fun (call : Core.call) ->
           if Core_lint.show_callee call.callee = "app::main::clear" then
-            Some (String.concat ", " (List.map (show_argument form) call.arguments))
+            Some (String.concat ", " (List.map show_argument call.arguments))
           else None)
         (list_calls form))
     [ "mut slice standard::list::List.slice_from(place items, 0)" ]
@@ -340,7 +336,7 @@ let () =
             | Time -> "time"
             | Allocations -> "allocations"
             | Allocated_bytes -> "allocated bytes"
-            | Calls (Function_parameter local) -> "calls through " ^ name form local
+            | Calls (Function_parameter local) -> "calls through " ^ name local
             | Calls (Capability path) -> "calls of " ^ Path.show path
             | Calls (Capability_method (path, method_)) ->
                 "calls of " ^ Path.show path ^ "." ^ method_
@@ -521,7 +517,7 @@ let () =
         (Method { owner; name; receiver = Read })
     with
     | Some (form, substitution) ->
-        ( form_of form,
+        ( form,
           List.map
             (fun ((parameter : Types.parameter), argument) ->
               parameter.name ^ " = " ^ Types.show_argument argument)
@@ -576,7 +572,7 @@ let () =
     (Fixtures.Core.pair_ordering
    ^ "proof Ordered.agrees_with_equal for Pair {\n  only_equal(first, second: second)\n}\n")
     (fun form ->
-      (match form.core.definition with
+      (match form.definition with
         | Law_proof { parameters; _ } ->
             List.map
               (fun (parameter : Core.parameter) ->
