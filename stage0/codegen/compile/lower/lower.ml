@@ -1,7 +1,4 @@
-open Emit_c.Builder
-open Definitions
-open Lowering
-open Targets
+module Builder = Emit_c.Builder
 
 type unsupported = Lowering.unsupported = { construct : string; at : Lowered.site option }
 
@@ -27,7 +24,7 @@ let bind_parameters st (body : Mir.Graph.body) ~(defaults : (int * Mir.Graph.t) 
   List.mapi
     (fun position local ->
       let mode, _, type_ = Mir_form.parameter_of body local in
-      let ty = ground st type_ in
+      let ty = Lowering.ground st type_ in
       let bit =
         Option.map
           (fun _ ->
@@ -43,119 +40,127 @@ let bind_parameters st (body : Mir.Graph.body) ~(defaults : (int * Mir.Graph.t) 
       (arrives, bit, place))
     body.parameters
 
-let begin_body st ~(body : Mir.Graph.body) ~defaults =
+let begin_body (st : Lowering.state) ~(body : Mir.Graph.body) ~defaults =
   let code = st.frame.code in
   let bound = bind_parameters st body ~defaults in
   let places = List.map (fun (_, _, place) -> place) bound in
   let mask =
-    if code.has_defaults then Some (local st.builder ~name:"passed" (Raw (Integer UInt64)))
+    if code.has_defaults then Some (Builder.local st.builder ~name:"passed" (Raw (Integer UInt64)))
     else None
   in
-  let evidence = evidence_parameters st (evidence_for st.context code.substitution code.uses) in
-  start st.builder (block st.builder);
+  let evidence =
+    Lowering.evidence_parameters st
+      (Definitions.evidence_for st.context code.substitution code.uses)
+  in
+  Builder.start st.builder (Builder.block st.builder);
   st.evidence <-
     st.evidence @ Generated.real_implementations st ~user:(Path.show code.definition) code.real;
   let places =
     match mask with
-    | Some mask -> Mir_form.fill_defaults st (at mask) body ~defaults places
+    | Some mask -> Mir_form.fill_defaults st (Builder.at mask) body ~defaults places
     | None -> places
   in
   (List.filter_map (fun (arrives, _, _) -> arrives) bound @ Option.to_list mask @ evidence, places)
 
 let code_state context ~key path =
-  let code = code_of context path [] in
-  (enter context ~builder:(create context.env ~key) (frame_of code), code)
+  let code = Definitions.code_of context path [] in
+  (Lowering.enter context ~builder:(Builder.create context.env ~key) (Lowering.frame_of code), code)
 
 let lower_template_check context ~from_template ~literals ~clauses : Emit_c.Builder.instance =
   let key = Instance.Template_check { from_template; literals; clauses } in
   let st, _ = code_state context ~key from_template in
   let template_type =
-    match interface_parameters (signature_of context from_template) with
+    match Definitions.interface_parameters (Definitions.signature_of context from_template) with
     | [ (_, template_type) ] -> template_type
-    | _ -> bug "%s does not take one template" (Path.show from_template)
+    | _ -> Definitions.bug "%s does not take one template" (Path.show from_template)
   in
-  start st.builder (block st.builder);
-  in_scope st (fun () ->
+  Builder.start st.builder (Builder.block st.builder);
+  Lowering.in_scope st (fun () ->
       let template =
-        template_value st (ground st template_type) literals
+        Targets.template_value st
+          (Lowering.ground st template_type)
+          literals
           ~site:{ definition = st.frame.code.definition; offset = 0 }
           ~parts:[]
       in
-      let output = begin_output st in
+      let output = Targets.begin_output st in
       List.iter
         (fun clause ->
-          let holds = temporary st context.bool in
+          let holds = Lowering.temporary st context.bool in
           Mir_form.mir_into ~arguments:[ template ] st clause holds;
           Encoding.encode_call context.env st.builder
             ~output:(Address { place = output; writable = true })
             context.bool holds)
-        (template_clauses context from_template clauses);
+        (Definitions.template_clauses context from_template clauses);
       Constants.write_output st output);
-  finish_instance st ~rest:[] ()
+  Lowering.finish_instance st ~rest:[] ()
 
 let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.instance =
   let key = Instance.Call_evaluation { function_; arguments } in
   let st, _ = code_state context ~key function_ in
-  start st.builder (block st.builder);
-  let signature = signature_of context function_ in
-  in_scope st (fun () ->
+  Builder.start st.builder (Builder.block st.builder);
+  let signature = Definitions.signature_of context function_ in
+  Lowering.in_scope st (fun () ->
       let passed =
         List.map2
           (fun (mode, ty) value ->
-            let ty = ground st ty in
-            let place = temporary st ty in
+            let ty = Lowering.ground st ty in
+            let place = Lowering.temporary st ty in
             let constant =
-              match scalar_of st ty with
-              | Integer integer -> constant_int integer value
+              match Lowering.scalar_of st ty with
+              | Integer integer -> Lowering.constant_int integer value
               | Bool -> Lowered.Constant (Bool (not (Z.equal value Z.zero)))
-              | _ -> bug "an evaluated call's argument of type %s" (Ground.to_string ty)
+              | _ -> Definitions.bug "an evaluated call's argument of type %s" (Ground.to_string ty)
             in
-            emit st.builder (Assign (place, Use constant));
+            Builder.emit st.builder (Assign (place, Use constant));
             (mode, ty, place))
-          (interface_parameters signature) arguments
+          (Definitions.interface_parameters signature)
+          arguments
       in
       let result_ty =
         match signature.output with
-        | Returns ty -> ground st ty
-        | _ -> bug "an evaluated call that does not return"
+        | Returns ty -> Lowering.ground st ty
+        | _ -> Definitions.bug "an evaluated call that does not return"
       in
-      let result = temporary st result_ty in
-      call_instance st
+      let result = Lowering.temporary st result_ty in
+      Targets.call_instance st
         (Code { path = function_; type_arguments = [] })
         ~signature ~substitution:[] ~arguments:passed ~destination:result ();
-      let output = begin_output st in
+      let output = Targets.begin_output st in
       Encoding.encode_call context.env st.builder
         ~output:(Address { place = output; writable = true })
         result_ty result;
       Constants.write_output st output);
-  finish_instance st ~rest:[] ()
+  Lowering.finish_instance st ~rest:[] ()
 
 let lower_source_code context ~path ~type_arguments : Emit_c.Builder.instance =
   let key = Instance.Code { path; type_arguments } in
-  let code = code_of context path type_arguments in
+  let code = Definitions.code_of context path type_arguments in
   let body = (Mir_form.mir_of context path).body in
-  let st = enter context ~builder:(create context.env ~key) (frame_of code) in
-  let convention, returns = result_of context code.substitution code.result in
-  result_slot st convention;
+  let st =
+    Lowering.enter context ~builder:(Builder.create context.env ~key) (Lowering.frame_of code)
+  in
+  let convention, returns = Definitions.result_of context code.substitution code.result in
+  Lowering.result_slot st convention;
   let parameter_locals, places =
     begin_body st ~body ~defaults:(Mir_form.parameter_defaults context path).form
   in
   let lending_locals =
     List.map
-      (fun ty -> local st.builder ~name:"lend" ty)
-      (lending_parameters context code.substitution code.result)
+      (fun ty -> Builder.local st.builder ~name:"lend" ty)
+      (Definitions.lending_parameters context code.substitution code.result)
   in
   let lending : Lowering.lending option =
     match (code.result, List.rev lending_locals) with
     | Lends (_, ty), site :: record :: slot ->
         Some
           {
-            slot = (match slot with [ slot ] -> Some (at slot) | _ -> None);
-            part = ground st ty;
-            record = Copy (at record);
-            site = Copy (at site);
+            slot = (match slot with [ slot ] -> Some (Builder.at slot) | _ -> None);
+            part = Lowering.ground st ty;
+            record = Copy (Builder.at record);
+            site = Copy (Builder.at site);
           }
     | _ -> None
   in
   Mir_form.lower_code st path ~parameters:places ?lending ();
-  finish_instance st ~returns ~rest:(parameter_locals @ lending_locals) ()
+  Lowering.finish_instance st ~returns ~rest:(parameter_locals @ lending_locals) ()

@@ -1,45 +1,44 @@
-open Cmdliner
-
 let common =
   let directory =
-    Arg.(
+    Cmdliner.Arg.(
       value & opt dir "."
       & info [ "C" ] ~docv:"DIRECTORY"
           ~doc:"Run as if from $(docv): find the packages and resolve paths from there.")
   and json =
-    Arg.(
+    Cmdliner.Arg.(
       value & flag
       & info [ "json" ]
           ~doc:
             "Write one JSON document to standard output instead of the report for people, with \
              every diagnostic and the command's own fields.")
   in
-  Term.(
+  Cmdliner.Term.(
     const (fun directory json ->
         Sys.chdir directory;
         Output.set_json json)
     $ directory $ json)
 
 let paths items =
-  Arg.(
+  Cmdliner.Arg.(
     value & pos_all string []
     & info [] ~docv:"FILE_OR_DIRECTORY"
         ~doc:("Select only the " ^ items ^ " in these files and directories."))
 
 let exits =
   [
-    Cmd.Exit.info 0 ~doc:"when the command succeeded and the code has no error.";
-    Cmd.Exit.info 1
+    Cmdliner.Cmd.Exit.info 0 ~doc:"when the command succeeded and the code has no error.";
+    Cmdliner.Cmd.Exit.info 1
       ~doc:
         "when the code has an error: a diagnostic, a test that did not pass, or a rejected build.";
-    Cmd.Exit.info 2 ~doc:"when the command could not run.";
+    Cmdliner.Cmd.Exit.info 2 ~doc:"when the command could not run.";
   ]
 
-let command name ~doc ?(man = []) term = Cmd.v (Cmd.info name ~doc ~man ~exits) term
+let command name ~doc ?(man = []) term =
+  Cmdliner.Cmd.v (Cmdliner.Cmd.info name ~doc ~man ~exits) term
 
 let check =
   let fix =
-    Arg.(
+    Cmdliner.Arg.(
       value & flag
       & info [ "fix" ]
           ~doc:
@@ -47,26 +46,26 @@ let check =
              such fix remains, then report the remaining diagnostics.")
   in
   let no_proofs =
-    Arg.(
+    Cmdliner.Arg.(
       value & flag
       & info [ "no-proofs" ]
           ~doc:"Skip the prover: report every other diagnostic, without the pinned solver.")
   in
   command "check"
     ~doc:"Report every diagnostic of the packages and of the project's packages they depend on."
-    Term.(
+    Cmdliner.Term.(
       const (fun () fix no_proofs -> Outcome.Exit (Check_command.run ~fix ~proofs:(not no_proofs)))
       $ common $ fix $ no_proofs)
 
 let test =
   let match_ =
-    Arg.(
+    Cmdliner.Arg.(
       value
       & opt (some string) None
       & info [ "match" ] ~docv:"TEXT" ~doc:"Run only the tests whose names contain $(docv).")
   in
   let timings =
-    Arg.(
+    Cmdliner.Arg.(
       value & flag
       & info [ "timings" ]
           ~doc:
@@ -74,33 +73,34 @@ let test =
              test shows the duration from the run that produced its result.")
   in
   let rerun =
-    Arg.(
+    Cmdliner.Arg.(
       value & flag
       & info [ "rerun" ]
           ~doc:"Run every selected test without reading cached results, and cache the new ones.")
   in
   command "test" ~doc:"Check the packages, then run the tests without a cached result."
-    Term.(
+    Cmdliner.Term.(
       const (fun () paths match_ timings rerun ->
           Outcome.Exit (Test_command.run ~paths ~match_ ~timings ~rerun))
       $ common $ paths "tests" $ match_ $ timings $ rerun)
 
-let release_flag doc = Arg.(value & flag & info [ "release" ] ~doc)
+let release_flag doc = Cmdliner.Arg.(value & flag & info [ "release" ] ~doc)
 
 let run =
   let arguments =
-    Arg.(value & pos_all string [] & info [] ~docv:"ARGUMENT" ~doc:"The program's arguments.")
+    Cmdliner.Arg.(
+      value & pos_all string [] & info [] ~docv:"ARGUMENT" ~doc:"The program's arguments.")
   in
   command "run"
     ~doc:"Check the package, build its program for development, and run it with the arguments."
     ~man:
       [
-        `S Manpage.s_description;
+        `S Cmdliner.Manpage.s_description;
         `P
           "The first argument that is not an option starts the program's arguments, and $(b,--) \
            marks the start when the first one begins with $(b,-).";
       ]
-    Term.(
+    Cmdliner.Term.(
       const (fun () release arguments -> Program_command.run ~release ~arguments)
       $ common
       $ release_flag "Build as $(b,truss build) does, then run the program."
@@ -108,7 +108,7 @@ let run =
 
 let build =
   let output =
-    Arg.(
+    Cmdliner.Arg.(
       value
       & opt (some string) None
       & info [ "o"; "output" ] ~docv:"PATH"
@@ -120,18 +120,19 @@ let build =
     ~doc:
       "Check the package and build its program for release, rejecting a program whose $(b,main) \
        reaches a $(b,todo) or an $(b,echo)."
-    Term.(const (fun () output -> Program_command.build ~output) $ common $ output)
+    Cmdliner.Term.(const (fun () output -> Program_command.build ~output) $ common $ output)
 
 let holes =
   command "holes"
     ~doc:
       "List every $(b,todo) with its expected type, the bindings in scope, and the tests and \
        $(b,main) that reach it."
-    Term.(const (fun () paths -> Outcome.Exit (Holes_command.run ~paths)) $ common $ paths "holes")
+    Cmdliner.Term.(
+      const (fun () paths -> Outcome.Exit (Holes_command.run ~paths)) $ common $ paths "holes")
 
 let show =
   let paths =
-    Arg.(
+    Cmdliner.Arg.(
       non_empty & pos_all string []
       & info [] ~docv:"PATH"
           ~doc:
@@ -139,15 +140,15 @@ let show =
              $(b,weather::forecast), $(b,weather::forecast::parse), or \
              $(b,weather::forecast::Forecast.summary).")
   in
-  let body = Arg.(value & flag & info [ "body" ] ~doc:"Print whole definitions.") in
+  let body = Cmdliner.Arg.(value & flag & info [ "body" ] ~doc:"Print whole definitions.") in
   command "show" ~doc:"Print the signatures of a package, module, type, or definition."
-    Term.(
+    Cmdliner.Term.(
       const (fun () paths body -> Outcome.Exit (Show_command.run ~paths ~body))
       $ common $ paths $ body)
 
 let explain =
   let position =
-    Arg.(
+    Cmdliner.Arg.(
       required
       & pos 0 (some string) None
       & info [] ~docv:"FILE:LINE:COLUMN" ~doc:"A position, written as diagnostics write it.")
@@ -156,11 +157,11 @@ let explain =
     ~doc:
       "Describe the name or expression at a position: its meaning, its type, and the signature of \
        its definition."
-    Term.(
+    Cmdliner.Term.(
       const (fun () position -> Outcome.Exit (Explain_command.run ~position)) $ common $ position)
 
 let name_argument =
-  Arg.(
+  Cmdliner.Arg.(
     required
     & pos 0 (some string) None
     & info [] ~docv:"NAME"
@@ -171,35 +172,35 @@ let name_argument =
 let dependents =
   command "dependents"
     ~doc:"List the parts of other definitions that read a part of a definition, by kind of part."
-    Term.(
+    Cmdliner.Term.(
       const (fun () name -> Outcome.Exit (Graph_command.run ~direction:Dependents ~name))
       $ common $ name_argument)
 
 let dependencies =
   command "dependencies"
     ~doc:"List the parts of other definitions that a definition's parts read, by kind of part."
-    Term.(
+    Cmdliner.Term.(
       const (fun () name -> Outcome.Exit (Graph_command.run ~direction:Dependencies ~name))
       $ common $ name_argument)
 
 let rename =
-  let from_ = Arg.(required & pos 0 (some string) None & info [] ~docv:"FROM") in
-  let to_ = Arg.(required & pos 1 (some string) None & info [] ~docv:"TO") in
+  let from_ = Cmdliner.Arg.(required & pos 0 (some string) None & info [] ~docv:"FROM") in
+  let to_ = Cmdliner.Arg.(required & pos 1 (some string) None & info [] ~docv:"TO") in
   command "rename"
     ~doc:
       "Rename a definition, method, or module, and every reference to it in the project's packages."
-    Term.(
+    Cmdliner.Term.(
       const (fun () from_ to_ -> Outcome.Exit (Rename_command.run ~from_ ~to_))
       $ common $ from_ $ to_)
 
-let packages_argument ~doc = Arg.(value & pos_all string [] & info [] ~docv:"PACKAGE" ~doc)
+let packages_argument ~doc = Cmdliner.Arg.(value & pos_all string [] & info [] ~docv:"PACKAGE" ~doc)
 
 let add =
   command "add"
     ~doc:
       "Add registry packages as dependencies of the package, each granted nothing, at the version \
        written after $(b,@) or the newest."
-    Term.(
+    Cmdliner.Term.(
       const (fun () names -> Outcome.Exit (Add_command.run ~names))
       $ common
       $ packages_argument
@@ -210,7 +211,7 @@ let upgrade =
     ~doc:
       "Change the project's registry packages, or only the named ones, to their newest versions or \
        the version written after $(b,@), and report the effect."
-    Term.(
+    Cmdliner.Term.(
       const (fun () names -> Outcome.Exit (Upgrade_command.run ~names))
       $ common
       $ packages_argument
@@ -221,16 +222,16 @@ let publish =
     ~doc:
       "Publish the package to the registry as its next version, if it is complete and compatible \
        with its previous version."
-    Term.(const (fun () -> Outcome.Exit (Publish_command.run ())) $ common)
+    Cmdliner.Term.(const (fun () -> Outcome.Exit (Publish_command.run ())) $ common)
 
 let new_ =
-  let name = Arg.(required & pos 0 (some string) None & info [] ~docv:"NAME") in
+  let name = Cmdliner.Arg.(required & pos 0 (some string) None & info [] ~docv:"NAME") in
   command "new" ~doc:"Create a package in a directory named $(i,NAME)."
-    Term.(const (fun () name -> Outcome.Exit (New_command.run ~name)) $ common $ name)
+    Cmdliner.Term.(const (fun () name -> Outcome.Exit (New_command.run ~name)) $ common $ name)
 
 let status =
   command "status" ~doc:"List the package databases that the background process holds."
-    Term.(
+    Cmdliner.Term.(
       const (fun () ->
           List.iter Output.print_line (Workspace.list_package_databases ());
           Outcome.Exit 0)
@@ -238,7 +239,7 @@ let status =
 
 let stop =
   command "stop" ~doc:"Stop the background process."
-    Term.(
+    Cmdliner.Term.(
       const (fun () ->
           Workspace.stop ();
           Outcome.Exit 0)
@@ -249,11 +250,11 @@ let version =
     Emit_c.version Unicode.version
 
 let truss =
-  Cmd.group
-    (Cmd.info "truss" ~version ~exits
+  Cmdliner.Cmd.group
+    (Cmdliner.Cmd.info "truss" ~version ~exits
        ~man:
          [
-           `S Manpage.s_environment;
+           `S Cmdliner.Manpage.s_environment;
            `P
              "$(b,TRUSS_NO_SERVER=1), or $(b,--no-server) before or after the command, runs the \
               command in its own process, and not in the background process.";
@@ -288,7 +289,9 @@ let evaluate arguments =
     | "__check-buffers" :: rest -> Outcome.Exit (Lsp_command.check_buffers rest)
     | _ -> (
         match
-          Cmd.eval_value ~help ~err ~catch:false ~argv:(Array.of_list ("truss" :: arguments)) truss
+          Cmdliner.Cmd.eval_value ~help ~err ~catch:false
+            ~argv:(Array.of_list ("truss" :: arguments))
+            truss
         with
         | Ok (`Ok outcome) -> outcome
         | Ok (`Version | `Help) -> Outcome.Exit 0

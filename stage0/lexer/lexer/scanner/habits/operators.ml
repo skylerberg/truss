@@ -1,17 +1,14 @@
-open Token
-open Cursor
-
 type scanned = Lexed of Token.kind | Ellipsis
 
 let replace cursor ~start ~length ~replacements ~code message =
-  report cursor ~code
-    ~fixes:(code_fixes cursor (span start (start + length)) replacements)
-    (span start (start + length))
+  Cursor.report cursor ~code
+    ~fixes:(Cursor.code_fixes cursor (Cursor.span start (start + length)) replacements)
+    (Cursor.span start (start + length))
     message
 
-let scan cursor =
+let scan (cursor : Cursor.t) =
   let start = cursor.position in
-  let is offset character = is_at cursor (start + offset) character in
+  let is offset character = Cursor.is_at cursor (start + offset) character in
   let lexed kind length =
     cursor.position <- start + length;
     Some (Lexed kind)
@@ -33,7 +30,7 @@ let scan cursor =
       (Punctuation Not_equal)
   else if (is 0 '=' || is 0 '!') && is 1 '=' && is 2 '=' && not (is 3 '=') then (
     let written, replacement, kind =
-      if is 0 '=' then ("===", "==", Equal_equal) else ("!==", "!=", Not_equal)
+      if is 0 '=' then ("===", "==", Token.Equal_equal) else ("!==", "!=", Not_equal)
     in
     replace cursor ~start ~length:3 ~replacements:[ replacement ] ~code:Strict_equality
       (Printf.sprintf "Truss has no `%s`. `%s` already compares values of the same type." written
@@ -56,13 +53,13 @@ let ellipsis cursor ~start ~follows_operand ~operand_follows =
       replaced ~replacements:[ ".."; "..=" ]
         "Truss has no `...`. A range that leaves out its end is written `..`, and one that \
          includes its end is written `..=`."
-        (Punctuation Dot_dot_equal)
+        (Token.Punctuation Dot_dot_equal)
   | false, false ->
       replaced ~replacements:[ "todo" ]
-        "Truss has no `...`; code that is not written yet is `todo`." (Keyword Todo)
+        "Truss has no `...`; code that is not written yet is `todo`." (Token.Keyword Todo)
   | _ ->
-      report cursor ~code:Foreign_operator
-        (span start (start + 3))
+      Cursor.report cursor ~code:Foreign_operator
+        (Cursor.span start (start + 3))
         "Truss has no `...`: it has no spread or rest operator, and a function takes a list where \
          it takes any number of values.";
       None

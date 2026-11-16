@@ -45,8 +45,8 @@ let impl_laws (lookups : Lookups.t) (key : Names.key) source =
 let is_specification_module (key : Names.key) = key.module_ = Well_known.specification
 
 let integer_implementors (bounds : Types.trait_reference list) =
-  let signed = Intrinsic.[ Int8; Int16; Int32; Int64 ]
-  and unsigned = Intrinsic.[ UInt8; UInt16; UInt32; UInt64 ] in
+  let signed = [ Intrinsic.Int8; Int16; Int32; Int64 ]
+  and unsigned = [ Intrinsic.UInt8; UInt16; UInt32; UInt64 ] in
   List.fold_left
     (fun found (bound : Types.trait_reference) ->
       let these =

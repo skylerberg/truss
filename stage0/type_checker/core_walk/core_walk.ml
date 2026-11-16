@@ -1,11 +1,9 @@
-open Core
-
 type visit = {
-  expression : expression -> unit;
-  statement : statement -> unit;
-  pattern : pattern -> unit;
-  callee : callee -> unit;
-  place : place -> unit;
+  expression : Core.expression -> unit;
+  statement : Core.statement -> unit;
+  pattern : Core.pattern -> unit;
+  callee : Core.callee -> unit;
+  place : Core.place -> unit;
 }
 
 let ignore_all =
@@ -19,11 +17,11 @@ let callees on_callee =
     callee = on_callee;
   }
 
-let place_type : place -> Types.ty = function
+let place_type : Core.place -> Types.ty = function
   | Local { type_; _ } | Constant { type_; _ } | Field { type_; _ } -> type_
   | Lent value | Temporary value -> value.type_
 
-let place_origin : place -> origin = function
+let place_origin : Core.place -> Core.origin = function
   | Local { origin; _ } | Constant { origin; _ } | Field { origin; _ } -> origin
   | Lent value | Temporary value -> value.origin
 
@@ -36,24 +34,24 @@ let rec place visit core_place =
   | Temporary value -> visit.expression value
 
 let operand visit = function
-  | Place core_place -> place visit core_place
+  | Core.Place core_place -> place visit core_place
   | Value value -> visit.expression value
 
-let block visit (body : block) =
+let block visit (body : Core.block) =
   List.iter visit.statement body.statements;
   Option.iter visit.expression body.value
 
-let cost visit (cost : cost) =
+let cost visit (cost : Core.cost) =
   match cost.bound with
   | Finite -> ()
   | Order_of value | At_most value | Exactly value -> visit.expression value
 
 let loop_clause visit = function
-  | Invariant value -> visit.expression value
+  | Core.Invariant value -> visit.expression value
   | Decreases measures -> List.iter visit.expression measures
   | Cost bound -> cost visit bound
 
-let expression_children visit (node : expression) =
+let expression_children visit (node : Core.expression) =
   match node.kind with
   | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _ | Break
   | Continue | Todo | Unreachable | Result | Current_target | Yielded | Method_time _ ->
@@ -79,13 +77,13 @@ let expression_children visit (node : expression) =
   | Slice { base; callee; bounds } ->
       place visit base;
       visit.callee callee;
-      List.iter (function Passed { value; _ } -> operand visit value | Default -> ()) bounds
+      List.iter (function Core.Passed { value; _ } -> operand visit value | Default -> ()) bounds
   | Call call ->
       (match call.callee with
       | Indirect function_value -> operand visit function_value
       | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> ());
       List.iter
-        (function Passed { value; _ } -> operand visit value | Default -> ())
+        (function Core.Passed { value; _ } -> operand visit value | Default -> ())
         call.arguments
   | Operator { arguments; _ } | Specification_function { arguments; _ } ->
       List.iter visit.expression arguments
@@ -108,7 +106,7 @@ let expression_children visit (node : expression) =
   | Match { scrutinees; arms; _ } ->
       List.iter (operand visit) scrutinees;
       List.iter
-        (fun (arm : arm) ->
+        (fun (arm : Core.arm) ->
           List.iter visit.pattern arm.patterns;
           Option.iter visit.expression arm.guard;
           block visit arm.body)
@@ -116,7 +114,7 @@ let expression_children visit (node : expression) =
   | Block body -> block visit body
   | Provide { implementations; body } ->
       List.iter
-        (fun (implementation : implementation) -> operand visit implementation.value)
+        (fun (implementation : Core.implementation) -> operand visit implementation.value)
         implementations;
       block visit body
   | Return value -> Option.iter visit.expression value
@@ -137,7 +135,7 @@ let expression_children visit (node : expression) =
           visit.pattern pattern);
       visit.expression body
 
-let statement_children visit (node : statement) =
+let statement_children visit (node : Core.statement) =
   match node.kind with
   | Let { pattern; value; else_ } ->
       operand visit value;
@@ -175,7 +173,7 @@ let statement_children visit (node : statement) =
   | Assert { condition = { value; _ }; _ } -> visit.expression value
   | Yield { part; _ } -> operand visit part
 
-let pattern_children visit (node : pattern) =
+let pattern_children visit (node : Core.pattern) =
   match node.kind with
   | Wildcard | Bind _ | Literal _ | Range _ -> ()
   | Variant { fields; _ } | Record fields ->
@@ -203,27 +201,29 @@ let rec deep visit =
 
 let expression visit node = (deep visit).expression node
 
-let parameter visit (parameter : parameter) =
+let parameter visit (parameter : Core.parameter) =
   Option.iter visit.expression parameter.default;
   Option.iter
-    (fun (contract : callback_contract) -> List.iter visit.expression contract.requires)
+    (fun (contract : Core.callback_contract) -> List.iter visit.expression contract.requires)
     parameter.callback_contract
 
 let definition_children visit = function
-  | Function { parameters; contract; body } ->
+  | Core.Function { parameters; contract; body } ->
       List.iter (parameter visit) parameters;
-      List.iter (fun (condition : condition) -> visit.expression condition.value) contract.requires;
+      List.iter
+        (fun (condition : Core.condition) -> visit.expression condition.value)
+        contract.requires;
       List.iter visit.expression contract.ensures;
       List.iter visit.expression contract.decreases;
       List.iter (cost visit) contract.costs;
       Option.iter (block visit) body
   | Type { defaults; invariants; potential } ->
       List.iter (fun (_, _, value) -> visit.expression value) defaults;
-      List.iter (fun (invariant : condition) -> visit.expression invariant.value) invariants;
+      List.iter (fun (invariant : Core.condition) -> visit.expression invariant.value) invariants;
       Option.iter visit.expression potential
   | Trait laws ->
       List.iter
-        (fun (law : law) ->
+        (fun (law : Core.law) ->
           List.iter (parameter visit) law.parameters;
           List.iter visit.expression law.requires;
           block visit law.body)
@@ -237,7 +237,7 @@ let definition visit core_definition = definition_children (deep visit) core_def
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 
 let tasks_use ?(solved = fun (_ : int) : Types.capability_set -> Types.no_capabilities)
-    (body : block) : tasks_use =
+    (body : Core.block) : tasks_use =
   let usage = ref No_tasks in
   let rec used (capability : Types.capability) =
     match capability with
@@ -264,40 +264,42 @@ let tasks_use ?(solved = fun (_ : int) : Types.capability_set -> Types.no_capabi
     body;
   !usage
 
-let can_use_tasks ?solved (body : block) : bool = tasks_use ?solved body <> No_tasks
+let can_use_tasks ?solved (body : Core.block) : bool = tasks_use ?solved body <> No_tasks
 
-let traverse_indirect (change : 'a -> 'b option) : 'a target -> 'b target option = function
+let traverse_indirect (change : 'a -> 'b option) : 'a Core.target -> 'b Core.target option =
+  function
   | Function { path; type_arguments } -> Some (Function { path; type_arguments })
   | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } ->
       Some (Trait_method { trait; name; receiver; self_type; type_arguments; evidence })
   | Capability_method { capability; name } -> Some (Capability_method { capability; name })
   | Intrinsic { operation; type_arguments } -> Some (Intrinsic { operation; type_arguments })
-  | Indirect value -> Option.map (fun value -> Indirect value) (change value)
+  | Indirect value -> Option.map (fun value -> Core.Indirect value) (change value)
 
 module For_testing = struct
   let local_names core_definition =
     let names = Hashtbl.create 16 in
-    let parameter (declared : parameter) =
+    let parameter (declared : Core.parameter) =
       Hashtbl.replace names declared.local declared.name;
       Option.iter
-        (fun (contract : callback_contract) ->
+        (fun (contract : Core.callback_contract) ->
           List.iter (fun (input, name) -> Hashtbl.replace names input name) contract.inputs)
         declared.callback_contract
     in
     (match core_definition with
-    | Function { parameters; _ } | Law_proof { parameters; _ } -> List.iter parameter parameters
-    | Trait laws -> List.iter (fun (law : law) -> List.iter parameter law.parameters) laws
+    | Core.Function { parameters; _ } | Law_proof { parameters; _ } ->
+        List.iter parameter parameters
+    | Trait laws -> List.iter (fun (law : Core.law) -> List.iter parameter law.parameters) laws
     | Type _ | Constant _ | Test _ | Empty -> ());
     definition
       {
         ignore_all with
         pattern =
-          (fun (node : pattern) ->
+          (fun (node : Core.pattern) ->
             match node.kind with
             | Bind { local; name; _ } -> Hashtbl.replace names local name
             | _ -> ());
         expression =
-          (fun (node : expression) ->
+          (fun (node : Core.expression) ->
             match node.kind with
             | Quantified { binder = Over_type { local; name; _ }; _ } ->
                 Hashtbl.replace names local name

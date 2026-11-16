@@ -1,18 +1,14 @@
-open Token
-open Syntax
-open Atoms
-
 let is_clause_keyword = function
-  | Keyword (Uses | Requires | Ensures | Decreases | Cost) -> true
+  | Token.Keyword (Uses | Requires | Ensures | Decreases | Cost) -> true
   | _ -> false
 
-type operator = Binary_operator of binary | Is_operator | Range_operator of bool
+type operator = Binary_operator of Syntax.binary | Is_operator | Range_operator of bool
 
 let comparison_level = 3
 let range_level = 4
 
 let binary_level = function
-  | Connective Implies -> 0
+  | Syntax.Connective Implies -> 0
   | Connective Or -> 1
   | Connective And -> 2
   | Comparison _ -> comparison_level
@@ -29,7 +25,7 @@ let operator_level = function
   | Range_operator _ -> range_level
 
 let operator = function
-  | Punctuation Implies -> Some (Binary_operator (Connective Implies))
+  | Token.Punctuation Implies -> Some (Binary_operator (Connective Implies))
   | Punctuation Or_or -> Some (Binary_operator (Connective Or))
   | Punctuation And_and -> Some (Binary_operator (Connective And))
   | Punctuation Equal_equal -> Some (Binary_operator (Comparison Equal))
@@ -54,7 +50,7 @@ let operator = function
   | _ -> None
 
 let assignment_operator = function
-  | Punctuation Equal -> Some Assign
+  | Token.Punctuation Equal -> Some Syntax.Assign
   | Punctuation Plus_equal -> Some (Compound (Arithmetic Add))
   | Punctuation Minus_equal -> Some (Compound (Arithmetic Subtract))
   | Punctuation Star_equal -> Some (Compound (Arithmetic Multiply))
@@ -110,7 +106,7 @@ let coalescing_follows cursor =
   let third = Cursor.peek_ahead cursor 2 in
   question.kind = Punctuation Question
   && second.span.start = question.span.stop
-  && begins_expression third
+  && Atoms.begins_expression third
   &&
   match second.kind with
   | Punctuation Question -> (
@@ -130,7 +126,7 @@ let has_comma cursor ~opener =
   in
   scan (opener + 1)
 
-let rec type_expression cursor : type_expression =
+let rec type_expression cursor : Syntax.type_expression =
   Cursor.nested cursor @@ fun cursor ->
   let start = Cursor.index cursor in
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1, Cursor.peek_ahead cursor 2) with
@@ -141,20 +137,22 @@ let rec type_expression cursor : type_expression =
           Some (Atoms.upper_name cursor "an associated type after `Self.`")
         else None
       in
-      type_node cursor start (Self_type associated)
+      Atoms.type_node cursor start (Self_type associated)
   | Keyword Any, _, _ ->
       Cursor.advance cursor;
-      type_node cursor start (Any_type (path_type cursor))
-  | Keyword Fn, _, _ -> type_node cursor start (Function_type (function_type cursor ~clauses:false))
+      Atoms.type_node cursor start (Any_type (path_type cursor))
+  | Keyword Fn, _, _ ->
+      Atoms.type_node cursor start (Function_type (function_type cursor ~clauses:false))
   | Punctuation (Open Paren), _, _ -> parenthesized_function_type cursor
   | Upper text, Punctuation Dot, Upper _ ->
       let parameter = Atoms.name cursor (Cursor.next cursor) text in
       Cursor.advance cursor;
-      type_node cursor start (Associated (parameter, Atoms.upper_name cursor "an associated type"))
-  | (Upper _ | Lower _), _, _ -> type_node cursor start (Path_type (path_type cursor))
+      Atoms.type_node cursor start
+        (Associated (parameter, Atoms.upper_name cursor "an associated type"))
+  | (Upper _ | Lower _), _, _ -> Atoms.type_node cursor start (Path_type (path_type cursor))
   | _ -> Cursor.fail cursor "a type"
 
-and path_type cursor : path_type =
+and path_type cursor : Syntax.path_type =
   let start = Cursor.index cursor in
   let path = Atoms.upper_path cursor "a type name" in
   let arguments =
@@ -170,7 +168,7 @@ and type_arguments cursor =
   let start = Cursor.index cursor in
   let arguments =
     Cursor.bracketed cursor ~item:type_argument ~recover:(fun span ->
-        Type_argument { kind = Type_error; id = Cursor.allocate_id cursor span })
+        Syntax.Type_argument { kind = Type_error; id = Cursor.allocate_id cursor span })
   in
   if arguments = [] then begin
     Cursor.report cursor Unexpected_token (Cursor.token_at cursor start).span
@@ -208,8 +206,8 @@ and function_type cursor ~clauses:with_clauses =
               Some name
           | _ -> None
         in
-        let mode = mode cursor in
-        ({ name; mode; type_ = type_expression cursor } : function_input))
+        let mode = Atoms.mode cursor in
+        ({ name; mode; type_ = type_expression cursor } : Syntax.function_input))
       ~recover:(fun span ->
         {
           name = None;
@@ -233,9 +231,10 @@ and function_type cursor ~clauses:with_clauses =
       gather []
     else []
   in
-  let is_named (input : function_input) = Option.is_some input.name in
+  let is_named (input : Syntax.function_input) = Option.is_some input.name in
   let has_requires =
-    List.exists (fun (clause : clause) -> match clause.kind with Requires _ -> true | _ -> false)
+    List.exists (fun (clause : Syntax.clause) ->
+        match clause.kind with Requires _ -> true | _ -> false)
   in
   let span = (Cursor.token_at cursor start).span in
   if has_requires clauses then
@@ -272,14 +271,14 @@ and parenthesized_function_type cursor =
   with
   | function_type ->
       Cursor.skip_to cursor (closer + 1);
-      type_node cursor start (Function_type function_type)
+      Atoms.type_node cursor start (Function_type function_type)
   | exception Cursor.Failed ->
       Cursor.skip_to cursor (closer + 1);
-      type_node cursor start Type_error
+      Atoms.type_node cursor start Type_error
 
 and bounds cursor = Cursor.separated cursor ~separator:Plus path_type
 
-and generics cursor : generic_parameter list =
+and generics cursor : Syntax.generic_parameter list =
   if Cursor.is_punctuation cursor Less then begin
     skip_angle_brackets cursor;
     []
@@ -298,13 +297,13 @@ and generics cursor : generic_parameter list =
     end;
     parameters
 
-and generic_parameter cursor : generic_parameter =
+and generic_parameter cursor : Syntax.generic_parameter =
   let start = Cursor.index cursor in
   let kind =
     match Cursor.peek_kind cursor with
     | Keyword Capability ->
         Cursor.advance cursor;
-        Capability_parameter (Atoms.upper_name cursor "the name of a capability parameter")
+        Syntax.Capability_parameter (Atoms.upper_name cursor "the name of a capability parameter")
     | Upper text ->
         let name = Atoms.name cursor (Cursor.next cursor) text in
         Type_parameter (name, if Cursor.accept_punctuation cursor Colon then bounds cursor else [])
@@ -318,7 +317,7 @@ and generic_parameter cursor : generic_parameter =
 
 and path_type_list cursor = Cursor.separated cursor ~separator:Comma path_type
 
-and capability_reference cursor : capability_reference =
+and capability_reference cursor : Syntax.capability_reference =
   let start = Cursor.index cursor in
   let kind =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1, Cursor.peek_ahead cursor 2) with
@@ -328,7 +327,8 @@ and capability_reference cursor : capability_reference =
           Cursor.fail cursor
             "`.` and an associated capability set, as in `Self.Uses`; `Self` is a type, not a \
              capability";
-        Self_capabilities (Atoms.upper_name cursor "an associated capability set after `Self.`")
+        Syntax.Self_capabilities
+          (Atoms.upper_name cursor "an associated capability set after `Self.`")
     | Upper text, Punctuation Dot, Upper _ ->
         let parameter = Atoms.name cursor (Cursor.next cursor) text in
         Cursor.advance cursor;
@@ -342,12 +342,12 @@ and capability_list cursor = Cursor.separated cursor ~separator:Comma capability
 and expression_list cursor =
   Cursor.separated cursor ~separator:Comma (fun cursor -> expression cursor)
 
-and clause cursor : clause =
+and clause cursor : Syntax.clause =
   let start = Cursor.index cursor in
   let keyword = Cursor.next cursor in
   let kind =
     match keyword.kind with
-    | Keyword Uses -> Uses (capability_list cursor)
+    | Keyword Uses -> Syntax.Uses (capability_list cursor)
     | Keyword Requires -> Requires (expression cursor)
     | Keyword Ensures -> Ensures (expression cursor)
     | Keyword Decreases -> Decreases (expression_list cursor)
@@ -374,7 +374,7 @@ and cost cursor =
       Contextual_keyword.expect cursor ~accepted:Contextual_keyword.resources ~category:"a resource"
         ~expected:"a resource: `time`, `allocations`, `allocated_bytes`, or `calls(...)`"
     with
-    | Time -> Time
+    | Time -> Syntax.Time
     | Allocations -> Allocations
     | Allocated_bytes -> Allocated_bytes
     | _ -> Calls (call_target cursor)
@@ -384,7 +384,7 @@ and cost cursor =
     match bound_token.kind with
     | Punctuation Less_equal ->
         Cursor.advance cursor;
-        At_most (expression cursor)
+        Syntax.At_most (expression cursor)
     | Punctuation Equal_equal ->
         Cursor.advance cursor;
         Exactly (expression cursor)
@@ -412,7 +412,7 @@ and call_target cursor =
   let target =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
     | Lower text, next when next <> Punctuation Colon_colon ->
-        Call_parameter (Atoms.name cursor (Cursor.next cursor) text)
+        Syntax.Call_parameter (Atoms.name cursor (Cursor.next cursor) text)
     | _ ->
         let capability = path_type cursor in
         if Cursor.accept_punctuation cursor Dot then
@@ -448,21 +448,21 @@ and expression ?(open_range = false) cursor =
           | false -> value)
       | _ -> value)
 
-and pipes cursor start (value : expression) =
+and pipes cursor start (value : Syntax.expression) =
   match Cursor.peek cursor with
   | { kind = Foreign Pipe_greater; _ } as operator ->
       Cursor.advance cursor;
       let callee = binary cursor ~level:0 ~open_range:false in
       Habits.pipe_operator cursor ~value ~operator ~callee;
-      pipes cursor start (error_expression cursor start)
+      pipes cursor start (Atoms.error_expression cursor start)
   | _ -> value
 
-and coalescing cursor start (value : expression) =
+and coalescing cursor start (value : Syntax.expression) =
   let first = Cursor.next cursor in
   let second = Cursor.next cursor in
   let default = binary cursor ~level:0 ~open_range:false in
   Habits.null_coalescing cursor ~value ~first ~second ~default;
-  error_expression cursor start
+  Atoms.error_expression cursor start
 
 and binary cursor ~level ~open_range =
   let start = Cursor.index cursor in
@@ -474,7 +474,7 @@ and binary cursor ~level ~open_range =
         let stop =
           range_stop cursor ~open_range ~inclusive:(range = Dot_dot_equal) ~operator:token
         in
-        expression_node cursor start
+        Atoms.expression_node cursor start
           (Range
              {
                start = None;
@@ -484,7 +484,7 @@ and binary cursor ~level ~open_range =
              })
     | _ -> prefix cursor
   in
-  let rec climb ~chain_length (left : expression) =
+  let rec climb ~chain_length (left : Syntax.expression) =
     match operator (Cursor.peek_kind cursor) with
     | Some operator when operator_level operator >= level -> (
         Cursor.check_chain_length cursor ~chain_length;
@@ -496,14 +496,15 @@ and binary cursor ~level ~open_range =
         match operator with
         | Binary_operator operator ->
             let right = binary cursor ~level:(binary_level operator + 1) ~open_range:false in
-            climb (expression_node cursor start (Binary { operator; operator_id; left; right }))
+            climb
+              (Atoms.expression_node cursor start (Binary { operator; operator_id; left; right }))
         | Is_operator ->
             let pattern = Parse_pattern.pattern cursor in
-            climb (expression_node cursor start (Is { value = left; operator_id; pattern }))
+            climb (Atoms.expression_node cursor start (Is { value = left; operator_id; pattern }))
         | Range_operator inclusive ->
             let stop = range_stop cursor ~open_range ~inclusive ~operator:operator_token in
             climb
-              (expression_node cursor start
+              (Atoms.expression_node cursor start
                  (Range { start = Some left; operator_id; stop; inclusive })))
     | _ -> (
         match Cursor.peek cursor with
@@ -512,7 +513,7 @@ and binary cursor ~level ~open_range =
             Habits.power_operator cursor ~operator:power;
             Cursor.advance cursor;
             ignore (prefix cursor);
-            climb ~chain_length:(chain_length + 1) (error_expression cursor start)
+            climb ~chain_length:(chain_length + 1) (Atoms.error_expression cursor start)
         | _ -> left)
   in
   climb ~chain_length:0 left
@@ -524,7 +525,7 @@ and range_stop cursor ~open_range ~inclusive ~(operator : Token.t) =
         Cursor.report cursor Open_range operator.span
           "A range that includes its end needs the end, as in `items[2..=4]`.";
       None
-  | kind when begins_expression kind ->
+  | kind when Atoms.begins_expression kind ->
       Some (binary cursor ~level:(range_level + 1) ~open_range:false)
   | _ ->
       open_range_error cursor operator "end";
@@ -539,37 +540,38 @@ and open_range_error cursor (token : Token.t) part =
   Cursor.report cursor Open_range token.span (open_range_message part);
   raise Cursor.Failed
 
-and prefix cursor : expression =
+and prefix cursor : Syntax.expression =
   let start = Cursor.index cursor in
   let value =
     match Cursor.peek_kind cursor with
-    | Punctuation Minus -> prefix_operator cursor start Negate
+    | Punctuation Minus -> prefix_operator cursor start Syntax.Negate
     | Punctuation Bang -> prefix_operator cursor start Not
     | Punctuation Tilde -> prefix_operator cursor start Complement
     | Keyword Mut ->
         Cursor.advance cursor;
-        expression_node cursor start (Mode (Mut, postfix cursor))
+        Atoms.expression_node cursor start (Mode (Mut, postfix cursor))
     | Keyword Own ->
         Cursor.advance cursor;
-        expression_node cursor start (Mode (Own, postfix cursor))
+        Atoms.expression_node cursor start (Mode (Own, postfix cursor))
     | Keyword Any ->
         Cursor.advance cursor;
-        expression_node cursor start (Any (postfix cursor))
+        Atoms.expression_node cursor start (Any (postfix cursor))
     | Keyword (Forall | Exists) -> quantified cursor
     | Keyword Echo ->
         Cursor.advance cursor;
-        expression_node cursor start (Echo (expression cursor))
+        Atoms.expression_node cursor start (Echo (expression cursor))
     | Keyword Return ->
         Cursor.advance cursor;
         let value =
-          if begins_expression (Cursor.peek_kind cursor) then Some (expression cursor) else None
+          if Atoms.begins_expression (Cursor.peek_kind cursor) then Some (expression cursor)
+          else None
         in
-        expression_node cursor start (Return value)
+        Atoms.expression_node cursor start (Return value)
     | Foreign Minus_minus ->
         let operator = Cursor.next cursor in
         let operand = Cursor.nested cursor prefix in
         Habits.double_negation cursor ~operator ~operand;
-        error_expression cursor start
+        Atoms.error_expression cursor start
     | Punctuation Ampersand ->
         let before = Cursor.previous_token cursor in
         let ampersand = Cursor.next cursor in
@@ -583,30 +585,30 @@ and prefix cursor : expression =
       let as_token = Cursor.next cursor in
       let target = type_expression cursor in
       Habits.as_conversion cursor ~value ~as_token ~target;
-      error_expression cursor start
+      Atoms.error_expression cursor start
   | _ -> value
 
 and prefix_operator cursor start operator =
   Cursor.advance cursor;
   let operand = Cursor.nested cursor prefix in
-  expression_node cursor start (Prefix (operator, operand))
+  Atoms.expression_node cursor start (Prefix (operator, operand))
 
 and quantified cursor =
   let start = Cursor.index cursor in
-  let quantifier = if (Cursor.next cursor).kind = Keyword Forall then Forall else Exists in
+  let quantifier = if (Cursor.next cursor).kind = Keyword Forall then Syntax.Forall else Exists in
   let binder =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
     | Lower text, Punctuation Colon ->
         let name = Atoms.name cursor (Cursor.next cursor) text in
         Cursor.advance cursor;
-        Binder_type (name, type_expression cursor)
+        Syntax.Binder_type (name, type_expression cursor)
     | _ ->
         let pattern = Parse_pattern.pattern cursor in
         Cursor.expect_keyword cursor In;
         Binder_in (pattern, expression cursor)
   in
   Cursor.expect_punctuation cursor Fat_arrow;
-  expression_node cursor start (Quantified { quantifier; binder; body = expression cursor })
+  Atoms.expression_node cursor start (Quantified { quantifier; binder; body = expression cursor })
 
 and closure_bars cursor =
   let start = Cursor.index cursor in
@@ -626,11 +628,11 @@ and closure_bars cursor =
   in
   let body = expression cursor in
   Habits.closure_bars cursor ~opening ~closing ~body ~is_before_else:(Cursor.is_keyword cursor Else);
-  error_expression cursor start
+  Atoms.error_expression cursor start
 
-and postfix cursor : expression =
+and postfix cursor : Syntax.expression =
   let start = Cursor.index cursor in
-  let rec with_postfixes ~chain_length (value : expression) =
+  let rec with_postfixes ~chain_length (value : Syntax.expression) =
     let with_postfixes value =
       Cursor.check_chain_length cursor ~chain_length;
       with_postfixes ~chain_length:(chain_length + 1) value
@@ -641,7 +643,7 @@ and postfix cursor : expression =
         match Cursor.peek_kind cursor with
         | Lower text | Upper text ->
             let name = Atoms.name cursor (Cursor.next cursor) text in
-            with_postfixes (expression_node cursor start (Member (value, name)))
+            with_postfixes (Atoms.expression_node cursor start (Member (value, name)))
         | Integer _ | Float _ -> Habits.tuple_field cursor ~field:(Cursor.peek cursor)
         | _ -> Cursor.fail cursor "a name after `.`")
     | Punctuation (Open Square) ->
@@ -652,10 +654,10 @@ and postfix cursor : expression =
         let opener = Cursor.index cursor in
         let items =
           Cursor.bracketed cursor ~item:bracket_item ~recover:(fun span ->
-              Item { kind = Expression_error; id = Cursor.allocate_id cursor span })
+              Syntax.Item { kind = Expression_error; id = Cursor.allocate_id cursor span })
         in
         let is_open_range = function
-          | Item { kind = Range { start = None; _ } | Range { stop = None; _ }; _ } -> true
+          | Syntax.Item { kind = Range { start = None; _ } | Range { stop = None; _ }; _ } -> true
           | _ -> false
         in
         (match items with
@@ -670,7 +672,7 @@ and postfix cursor : expression =
         if List.compare_length_with items 1 > 0 then
           List.iter
             (function
-              | Item
+              | Syntax.Item
                   {
                     kind =
                       Range { start = None; operator_id; _ } | Range { stop = None; operator_id; _ };
@@ -682,14 +684,14 @@ and postfix cursor : expression =
                      in `items[2..]`."
               | _ -> ())
             items;
-        with_postfixes (expression_node cursor start (Bracket (value, items)))
+        with_postfixes (Atoms.expression_node cursor start (Bracket (value, items)))
     | Punctuation (Open Paren) ->
         let arguments = arguments cursor in
-        with_postfixes (expression_node cursor start (Call (value, arguments)))
+        with_postfixes (Atoms.expression_node cursor start (Call (value, arguments)))
     | Punctuation Question when coalescing_follows cursor -> value
     | Punctuation Question when not (conditional_follows (Cursor.peek_ahead cursor 1)) ->
         Cursor.advance cursor;
-        with_postfixes (expression_node cursor start (Try value))
+        with_postfixes (Atoms.expression_node cursor start (Try value))
     | Keyword With ->
         Cursor.advance cursor;
         if not (Cursor.is_punctuation cursor (Open Paren)) then
@@ -698,21 +700,21 @@ and postfix cursor : expression =
           Cursor.bracketed cursor ~item:update ~recover:(fun span ->
               { kind = Update_error; id = Cursor.allocate_id cursor span })
         in
-        with_postfixes (expression_node cursor start (With (value, updates)))
+        with_postfixes (Atoms.expression_node cursor start (With (value, updates)))
     | _ -> value
   in
   with_postfixes ~chain_length:0 (primary cursor)
 
 and conditional_follows = function
   | Punctuation (Open _ | Minus | Dot_dot | Dot_dot_equal) -> false
-  | kind -> begins_expression kind
+  | kind -> Atoms.begins_expression kind
 
 and conditional cursor start condition question =
   let then_ = expression cursor in
   Cursor.expect_punctuation cursor Colon;
   let else_ = expression cursor in
   Habits.conditional cursor ~condition ~then_ ~else_ ~question;
-  error_expression cursor start
+  Atoms.error_expression cursor start
 
 and bracket_item cursor =
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
@@ -724,7 +726,10 @@ and bracket_item cursor =
 
 and arguments cursor =
   Cursor.bracketed cursor ~item:argument ~recover:(fun span ->
-      { label = None; value = { kind = Expression_error; id = Cursor.allocate_id cursor span } })
+      {
+        Syntax.label = None;
+        value = { kind = Expression_error; id = Cursor.allocate_id cursor span };
+      })
 
 and argument cursor =
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
@@ -734,7 +739,7 @@ and argument cursor =
       { label = Some label; value = expression cursor }
   | _ -> { label = None; value = expression cursor }
 
-and update cursor : update =
+and update cursor : Syntax.update =
   let start = Cursor.index cursor in
   let field = Atoms.lower_name cursor "a field name" in
   let rec path fields =
@@ -746,17 +751,17 @@ and update cursor : update =
   let value = if Cursor.accept_punctuation cursor Colon then Some (expression cursor) else None in
   { kind = Update { field; path; value }; id = Cursor.allocate_id_from cursor start }
 
-and primary cursor : expression =
+and primary cursor : Syntax.expression =
   let start = Cursor.index cursor in
   let simple kind =
     Cursor.advance cursor;
-    expression_node cursor start kind
+    Atoms.expression_node cursor start kind
   in
   match Cursor.peek_kind cursor with
   | Integer value -> simple (Integer value)
   | Float value -> simple (Float value)
   | String literal ->
-      expression_node cursor start (String (string_literal cursor ~start ~modules:[] literal))
+      Atoms.expression_node cursor start (String (string_literal cursor ~start ~modules:[] literal))
   | Keyword True -> simple True
   | Keyword False -> simple False
   | Keyword Todo -> keyword_macro cursor (simple Todo)
@@ -778,19 +783,19 @@ and primary cursor : expression =
       with
       | inner ->
           Cursor.skip_to cursor (closer + 1);
-          expression_node cursor start (Parenthesized inner)
+          Atoms.expression_node cursor start (Parenthesized inner)
       | exception Cursor.Failed ->
           Cursor.skip_to cursor (closer + 1);
-          error_expression cursor start)
+          Atoms.error_expression cursor start)
   | Punctuation (Open Square) -> collection cursor
-  | Punctuation (Open Curly) -> expression_node cursor start (Block (block cursor))
+  | Punctuation (Open Curly) -> Atoms.expression_node cursor start (Block (block cursor))
   | Keyword Fn -> lambda cursor
   | Keyword If -> if_expression cursor
   | Keyword Match -> match_expression cursor
   | Keyword Provide ->
       Cursor.advance cursor;
       let implementations = expression_list cursor in
-      expression_node cursor start (Provide { implementations; body = body cursor })
+      Atoms.expression_node cursor start (Provide { implementations; body = body cursor })
   | _ -> Cursor.fail cursor "an expression"
 
 and name_expression cursor start =
@@ -801,29 +806,30 @@ and name_expression cursor start =
       let name = Atoms.name cursor token text in
       if modules = [] && macro_follows cursor ~name_stop:token.span.stop then
         macro cursor start name
-      else expression_node cursor start (Name { modules; last = name })
+      else Atoms.expression_node cursor start (Name { modules; last = name })
   | Upper text ->
       let name = Atoms.name cursor (Cursor.next cursor) text in
       let value =
-        path_separators cursor start (expression_node cursor start (Name { modules; last = name }))
+        path_separators cursor start
+          (Atoms.expression_node cursor start (Name { modules; last = name }))
       in
       let value = path_separators cursor start (angle_arguments cursor start value) in
       if brace_record_follows cursor then brace_record cursor start value else value
   | String ({ tag = Some _; _ } as literal) ->
-      expression_node cursor start (String (string_literal cursor ~start ~modules literal))
+      Atoms.expression_node cursor start (String (string_literal cursor ~start ~modules literal))
   | Punctuation Less -> turbofish cursor start
   | _ -> Cursor.fail cursor "a name after `::`"
 
-and path_separators cursor start (value : expression) =
+and path_separators cursor start (value : Syntax.expression) =
   match (Cursor.peek cursor, Cursor.peek_ahead cursor 1) with
   | ({ kind = Punctuation Colon_colon; _ } as separator), (Upper text | Lower text) ->
       Habits.path_separator cursor ~separator;
       Cursor.advance cursor;
       let name = Atoms.name cursor (Cursor.next cursor) text in
-      path_separators cursor start (expression_node cursor start (Member (value, name)))
+      path_separators cursor start (Atoms.expression_node cursor start (Member (value, name)))
   | _ -> value
 
-and angle_arguments cursor start (value : expression) =
+and angle_arguments cursor start (value : Syntax.expression) =
   let follows_closer closer =
     match (Cursor.token_at cursor (closer + 1)).kind with
     | Punctuation (Dot | Open Paren | Colon_colon) -> true
@@ -832,19 +838,19 @@ and angle_arguments cursor start (value : expression) =
   match if Cursor.is_punctuation cursor Less then angle_closer cursor else None with
   | Some closer when follows_closer closer ->
       skip_angle_brackets cursor;
-      error_expression cursor start
+      Atoms.error_expression cursor start
   | _ -> value
 
-and macro cursor start (name : name) =
+and macro cursor start (name : Syntax.name) =
   let bang = Cursor.next cursor in
   let opening = Cursor.peek cursor in
   Habits.macro_call cursor ~name ~bang ~opening;
   (match opening.kind with
   | Punctuation (Open Square) -> ignore (collection cursor)
   | _ -> ignore (arguments cursor));
-  error_expression cursor start
+  Atoms.error_expression cursor start
 
-and keyword_macro cursor (value : expression) =
+and keyword_macro cursor (value : Syntax.expression) =
   if macro_follows cursor ~name_stop:(Cursor.previous_stop cursor) then begin
     let bang = Cursor.next cursor in
     let closer = Cursor.closer cursor (Cursor.index cursor) in
@@ -863,7 +869,7 @@ and brace_record_follows cursor =
   | Lower _, Punctuation Colon -> true
   | _ -> false
 
-and brace_record cursor start (record : expression) =
+and brace_record cursor start (record : Syntax.expression) =
   let opening = Cursor.peek cursor in
   let closer = Cursor.closer cursor (Cursor.index cursor) in
   Cursor.advance cursor;
@@ -881,7 +887,7 @@ and brace_record cursor start (record : expression) =
   Cursor.skip_to cursor (closer + 1);
   Habits.brace_record cursor ~name_stop:(Cursor.read_file_span cursor record.id).stop ~opening
     ~first ~last_stop ~closing;
-  error_expression cursor start
+  Atoms.error_expression cursor start
 
 and turbofish cursor start =
   let colons = Cursor.token_at cursor (Cursor.index cursor - 1) in
@@ -891,12 +897,12 @@ and turbofish cursor start =
     Cursor.fail cursor "`>` after the type arguments";
   let greater = Cursor.next cursor in
   Habits.turbofish cursor ~colons ~less ~greater;
-  error_expression cursor start
+  Atoms.error_expression cursor start
 
 and string_literal cursor ~start ~modules literal =
   Atoms.string_literal cursor ~start ~modules literal ~interpolation:(interpolation cursor)
 
-and interpolation cursor (inner : Token.interpolation) : expression =
+and interpolation cursor (inner : Token.interpolation) : Syntax.expression =
   let nested = Cursor.interpolation cursor inner in
   if Cursor.at_end nested then
     {
@@ -923,7 +929,7 @@ and collection cursor =
       Cursor.advance cursor;
       Cursor.advance cursor;
       Cursor.advance cursor;
-      expression_node cursor start (Map [])
+      Atoms.expression_node cursor start (Map [])
   | _ -> (
       let element cursor =
         let key = expression cursor in
@@ -936,25 +942,25 @@ and collection cursor =
         Cursor.bracketed cursor ~item:element ~recover:(fun span ->
             ({ kind = Expression_error; id = Cursor.allocate_id cursor span }, None))
       in
-      let is_error ((key : expression), _) = key.kind = Expression_error in
+      let is_error ((key : Syntax.expression), _) = key.kind = Expression_error in
       let entries =
         List.filter_map (fun (key, value) -> Option.map (fun value -> (key, value)) value) elements
       in
       match elements with
       | first :: _ when (not (is_error first)) && snd first <> None ->
           if List.length entries = List.length elements then
-            expression_node cursor start (Map entries)
+            Atoms.expression_node cursor start (Map entries)
           else mixed_collection cursor start (List.find (fun (_, value) -> value = None) elements)
       | _ -> (
           match List.find_opt (fun (_, value) -> value <> None) elements with
-          | None -> expression_node cursor start (List (List.map fst elements))
+          | None -> Atoms.expression_node cursor start (List (List.map fst elements))
           | Some entry -> mixed_collection cursor start entry))
 
-and mixed_collection cursor start ((key : expression), _) =
+and mixed_collection cursor start ((key : Syntax.expression), _) =
   Cursor.report cursor Unexpected_token
     (Cursor.read_file_span cursor key.id)
     "A collection holds either list elements or map entries, `key: value`, not both.";
-  error_expression cursor start
+  Atoms.error_expression cursor start
 
 and lambda cursor =
   let start = Cursor.index cursor in
@@ -966,7 +972,7 @@ and lambda cursor =
     if Cursor.is_punctuation cursor Colon then begin
       let from = Cursor.previous_stop cursor in
       Cursor.advance cursor;
-      ignore (mode cursor);
+      ignore (Atoms.mode cursor);
       ignore (type_expression cursor);
       Habits.lambda_annotation cursor ~from ~stop:(Cursor.previous_stop cursor)
     end;
@@ -982,14 +988,15 @@ and lambda cursor =
     ignore (type_expression cursor);
     Habits.lambda_annotation cursor ~from ~stop:(Cursor.previous_stop cursor)
   end;
-  expression_node cursor start (Lambda { parameters; body = body cursor })
+  Atoms.expression_node cursor start (Lambda { parameters; body = body cursor })
 
 and if_expression ?(chain_length = 0) cursor =
   let start = Cursor.index cursor in
   Cursor.expect_keyword cursor If;
   let condition = expression cursor in
   let then_ = body cursor in
-  expression_node cursor start (If { condition; then_; else_ = else_branch cursor ~chain_length })
+  Atoms.expression_node cursor start
+    (If { condition; then_; else_ = else_branch cursor ~chain_length })
 
 and else_branch cursor ~chain_length =
   if Cursor.accept_keyword cursor Else then
@@ -1014,9 +1021,9 @@ and match_expression cursor =
           id = Cursor.allocate_id cursor span;
         })
   in
-  expression_node cursor start (Match { scrutinees; arms })
+  Atoms.expression_node cursor start (Match { scrutinees; arms })
 
-and arm cursor : arm =
+and arm cursor : Syntax.arm =
   let start = Cursor.index cursor in
   let patterns = Cursor.separated cursor ~separator:Comma Parse_pattern.pattern in
   let guard = if Cursor.accept_keyword cursor If then Some (expression cursor) else None in
@@ -1042,7 +1049,7 @@ and body cursor =
   expect_body_opening cursor;
   block cursor
 
-and block cursor : block =
+and block cursor : Syntax.block =
   Cursor.nested cursor @@ fun cursor ->
   let start = Cursor.index cursor in
   let previous = ref None in
@@ -1056,13 +1063,13 @@ and block cursor : block =
         previous := None;
         { kind = Statement_error; id = Cursor.allocate_id cursor span })
   in
-  { statements; id = Cursor.allocate_id_from cursor start }
+  { Syntax.statements; id = Cursor.allocate_id_from cursor start }
 
-and statement_line cursor ~previous : statement =
+and statement_line cursor ~previous : Syntax.statement =
   match (Cursor.peek cursor, previous) with
   | ( ({ kind = Lower "elif"; _ } as elif_token),
       Some ({ kind = Expression { kind = If _; _ }; _ } as previous_if) )
-    when begins_expression (Cursor.peek_ahead cursor 1) ->
+    when Atoms.begins_expression (Cursor.peek_ahead cursor 1) ->
       let start = Cursor.index cursor in
       Habits.elif cursor ~previous_stop:(Cursor.read_file_span cursor previous_if.id).stop
         ~elif_token;
@@ -1070,13 +1077,13 @@ and statement_line cursor ~previous : statement =
       let condition = expression cursor in
       let then_ = body cursor in
       let else_ = else_branch cursor ~chain_length:0 in
-      let value = expression_node cursor start (If { condition; then_; else_ }) in
+      let value = Atoms.expression_node cursor start (If { condition; then_; else_ }) in
       { kind = Expression value; id = Cursor.allocate_id cursor (Cursor.read_span cursor value.id) }
   | _ ->
       let statement = statement cursor in
       trailing_habits cursor statement
 
-and trailing_habits cursor (statement : statement) =
+and trailing_habits cursor (statement : Syntax.statement) =
   match (Cursor.peek_kind cursor, statement.kind) with
   | Foreign (Plus_plus | Minus_minus), Expression target
     when match Cursor.peek_ahead cursor 1 with
@@ -1089,13 +1096,14 @@ and trailing_habits cursor (statement : statement) =
       trailing_lambda cursor statement
   | _ -> statement
 
-and statement_error_through cursor (statement : statement) (last : Source.Definition_span.t) =
+and statement_error_through cursor (statement : Syntax.statement) (last : Source.Definition_span.t)
+    =
   Cursor.set_span cursor statement.id
     (Source.Definition_span.make (Cursor.read_span cursor statement.id).start last.stop);
   { statement with kind = Statement_error }
 
-and trailing_callee (statement : statement) =
-  let rec rightmost (value : expression) =
+and trailing_callee (statement : Syntax.statement) =
+  let rec rightmost (value : Syntax.expression) =
     match value.kind with
     | Name _ | Member _ -> Some value
     | Binary { right = inner; _ } | Return (Some inner) | Echo inner | Mode (_, inner) | Any inner
@@ -1119,7 +1127,7 @@ and uses_of_it (tokens : Token.t array) =
       | _ -> [])
     (Array.to_list tokens)
 
-and trailing_lambda cursor (statement : statement) =
+and trailing_lambda cursor (statement : Syntax.statement) =
   let opening = Cursor.peek cursor in
   let closing = Cursor.token_at cursor (Cursor.closer cursor (Cursor.index cursor)) in
   match (uses_of_it (Cursor.group cursor), trailing_callee statement) with
@@ -1130,9 +1138,11 @@ and trailing_lambda cursor (statement : statement) =
       statement_error_through cursor statement (Cursor.definition_span cursor closing.span)
   | _ -> statement
 
-and statement cursor : statement =
+and statement cursor : Syntax.statement =
   let start = Cursor.index cursor in
-  let statement_node kind : statement = { kind; id = Cursor.allocate_id_from cursor start } in
+  let statement_node kind : Syntax.statement =
+    { kind; id = Cursor.allocate_id_from cursor start }
+  in
   match Cursor.peek_kind cursor with
   | Keyword Let ->
       let let_token = Cursor.next cursor in
@@ -1147,7 +1157,7 @@ and statement cursor : statement =
       statement_node (binding cursor ~is_var:true)
   | Keyword For ->
       Cursor.advance cursor;
-      statement_node (for_loop cursor ~mode:Sequential)
+      statement_node (for_loop cursor ~mode:Syntax.Sequential)
   | Keyword While ->
       Cursor.advance cursor;
       let condition = expression cursor in
@@ -1264,19 +1274,21 @@ and loop_clauses cursor =
                   "Potential belongs to the values the loop mutates, which the function's own \
                    `cost` accounts for."));
         gather
-          (({ kind = Loop_cost cost; id = Cursor.allocate_id_from cursor start } : loop_clause)
+          (({ kind = Loop_cost cost; id = Cursor.allocate_id_from cursor start }
+             : Syntax.loop_clause)
           :: clauses)
     | Keyword Invariant ->
         Cursor.advance cursor;
         let value = expression cursor in
         gather
-          (({ kind = Invariant value; id = Cursor.allocate_id_from cursor start } : loop_clause)
+          (({ kind = Invariant value; id = Cursor.allocate_id_from cursor start }
+             : Syntax.loop_clause)
           :: clauses)
     | Keyword Decreases ->
         let keyword = Cursor.next cursor in
         if
           List.exists
-            (fun (clause : loop_clause) ->
+            (fun (clause : Syntax.loop_clause) ->
               match clause.kind with Loop_decreases _ -> true | _ -> false)
             clauses
         then
@@ -1286,7 +1298,7 @@ and loop_clauses cursor =
         let measures = expression_list cursor in
         gather
           (({ kind = Loop_decreases measures; id = Cursor.allocate_id_from cursor start }
-             : loop_clause)
+             : Syntax.loop_clause)
           :: clauses)
     | _ -> List.rev clauses
   in

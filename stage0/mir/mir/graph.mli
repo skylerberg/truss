@@ -1,36 +1,34 @@
-open Tree
-
 type block = int
-type early_exit = { resume : block; returned : local option }
+type early_exit = { resume : block; returned : Tree.local option }
 type branch = { entry : block; blocks : block list }
-type statement = { kind : basic; origin : Core.origin }
+type statement = { kind : Tree.basic; origin : Core.origin }
 
 type terminator =
   | Goto of block
-  | Branch of { condition : operand; yes : block; no : block; is_if_condition : bool }
+  | Branch of { condition : Tree.operand; yes : block; no : block; is_if_condition : bool }
   | For of {
-      iteration : iteration;
-      part : local;
-      lent : lent_element option;
+      iteration : Tree.iteration;
+      part : Tree.local;
+      lent : Tree.lent_element option;
       body : block;
       binding_count : int;
       blocks : block list;
       after : block;
-      loop : loop;
+      loop : Tree.loop;
     }
   | Fork of { fork : Core.origin; concurrent : bool; branches : branch list; join : block option }
   | Join of { fork : Core.origin; next : block }
   | Iteration_end of { loop : block }
-  | Yield of { mode : Types.mode; part : yielded; resume : block }
-  | Return of operand option
+  | Yield of { mode : Types.mode; part : Tree.yielded; resume : block }
+  | Return of Tree.operand option
   | Cancel of {
-      task : task;
+      task : Tree.task;
       task_end : block option;
-      winner : local;
+      winner : Tree.local;
       number : int;
-      returned : (operand * local) option;
+      returned : (Tree.operand * Tree.local) option;
     }
-  | Resume of { winner : local; exits : early_exit list; next : block }
+  | Resume of { winner : Tree.local; exits : early_exit list; next : block }
   | Unreachable
   | Written_unreachable
   | Todo
@@ -42,9 +40,9 @@ type basic_block = {
 }
 
 type body = {
-  parameters : local list;
-  captures : local list;
-  locals : local_info array;
+  parameters : Tree.local list;
+  captures : Tree.local list;
+  locals : Tree.local_info array;
   blocks : basic_block array;
 }
 

@@ -1,9 +1,8 @@
-open Definitions
-open Lowering
-open Emit_c.Builder
+module Builder = Emit_c.Builder
+module Names = Resolve.Names
 
-let resolve_impl context substitution ~(trait : Types.trait_reference) ~self_type
-    ~(evidence : Core.evidence) =
+let resolve_impl (context : Definitions.context) substitution ~(trait : Types.trait_reference)
+    ~self_type ~(evidence : Core.evidence) =
   let substitute = Types.substitute substitution in
   let impl, arguments =
     match evidence with
@@ -30,20 +29,20 @@ let resolve_impl context substitution ~(trait : Types.trait_reference) ~self_typ
              })
         with
         | Some (From_impl { impl; substitution }) -> (impl, substitution)
-        | _ -> bug "no impl of %s for %s" (Types.show_trait trait) (Types.show self))
-    | Dynamic -> bug "a call through any, which reaches no one instance"
+        | _ -> Definitions.bug "no impl of %s for %s" (Types.show_trait trait) (Types.show self))
+    | Dynamic -> Definitions.bug "a call through any, which reaches no one instance"
   in
   let impl_interface =
     match Interface.Definition.read_impl_interface context.lookups.interface impl with
     | Some position -> position
-    | None -> bug "no interface for %s" (Path.show impl)
+    | None -> Definitions.bug "no interface for %s" (Path.show impl)
   in
   let impl_arguments =
     List.map
       (fun (generic : Types.generic) ->
         match List.assoc_opt generic.generic arguments with
         | Some argument -> Monomorphic.ground_argument context.monomorphic [] argument
-        | None -> bug "the impl's parameter %s is not bound" generic.generic.name)
+        | None -> Definitions.bug "the impl's parameter %s is not bound" generic.generic.name)
       impl_interface.impl_generics
   in
   (impl, impl_arguments)
@@ -63,15 +62,17 @@ let operand_as st (mode : Types.mode) ty (place : Lowered.place) (passed : Lower
   match passed with
   | None -> None
   | Some (Pointer _) when mode = Types.Own ->
-      ignore (moved st place);
+      ignore (Lowering.moved st place);
       Some (Lowered.Moved_address place)
   | Some (Pointer { writable; _ }) -> Some (Lowered.Address { place; writable })
-  | Some _ -> ( match mode with Own -> Some (owned st place ty) | Read | Mut -> Some (Copy place))
+  | Some _ -> (
+      match mode with Own -> Some (Lowering.owned st place ty) | Read | Mut -> Some (Copy place))
 
 let pass st (mode : Types.mode) ty place =
   operand_as st mode ty place (Convention.parameter st.context.env (Monomorphic.mode mode) ty)
 
-let method_slot context ~owner ~first ~missing (methods : Types.trait_method list) name =
+let method_slot (context : Definitions.context) ~owner ~first ~missing
+    (methods : Types.trait_method list) name =
   match
     List.find_index
       (fun (trait_method : Types.trait_method) -> trait_method.method_name = name)
@@ -83,41 +84,42 @@ let method_slot context ~owner ~first ~missing (methods : Types.trait_method lis
           (List.nth methods index) )
   | None -> missing ()
 
-let capability_method context capability name =
+let capability_method (context : Definitions.context) capability name =
   let interface =
     match Interface.Definition.read_trait_interface context.lookups.interface capability with
     | Some position -> position
-    | None -> bug "no interface for %s" (Path.show capability)
+    | None -> Definitions.bug "no interface for %s" (Path.show capability)
   in
   method_slot context ~owner:capability ~first:0 interface.methods name ~missing:(fun () ->
-      bug "%s has no method %s" (Path.show capability) name)
+      Definitions.bug "%s has no method %s" (Path.show capability) name)
 
 let entry_signature context (signature : Types.signature) =
   let entry, result =
-    c_signature context []
-      ~parameters:(interface_parameters { signature with receiver = None })
+    Definitions.c_signature context []
+      ~parameters:(Definitions.interface_parameters { signature with receiver = None })
       ~has_defaults:false signature.output
   in
   ({ entry with parameters = Convention.evidence :: entry.parameters }, result)
 
-let callable_through_any context trait (trait_method : Types.trait_method) =
+let callable_through_any (context : Definitions.context) trait (trait_method : Types.trait_method) =
   trait_method.method_receiver <> Static
   && Interface.Impls.classify_through_any context.lookups.interface ~trait trait_method = Callable
 
-let any_methods context trait =
+let any_methods (context : Definitions.context) trait =
   match Interface.Definition.read_trait_interface context.lookups.interface trait with
   | Some position -> List.filter (callable_through_any context trait) position.methods
-  | None -> bug "no interface for %s" (Path.show trait)
+  | None -> Definitions.bug "no interface for %s" (Path.show trait)
 
 let dynamic_method context trait name =
   method_slot context ~owner:trait ~first:0 (any_methods context trait) name ~missing:(fun () ->
-      bug "%s cannot be called through any" name)
+      Definitions.bug "%s cannot be called through any" name)
 
-let is_copyable_any context (any : Types.trait_reference) =
+let is_copyable_any (context : Definitions.context) (any : Types.trait_reference) =
   Interface.Impls.is_copyable context.lookups.interface ~bounds:Interface.Impls.no_bounds
     (Types.Any any)
 
-let any_substitution context ~(any : Types.trait_reference) trait : Types.substitution =
+let any_substitution (context : Definitions.context) ~(any : Types.trait_reference) trait :
+    Types.substitution =
   match Interface.Definition.read_trait_interface context.lookups.interface trait with
   | Some interface ->
       let reference =
@@ -130,53 +132,56 @@ let any_substitution context ~(any : Types.trait_reference) trait : Types.substi
                  ~self:(Types.Any any) any)
           with
           | Some bound -> bound
-          | None -> bug "%s is not a trait of %s" (Path.show trait) (Types.show (Types.Any any))
+          | None ->
+              Definitions.bug "%s is not a trait of %s" (Path.show trait)
+                (Types.show (Types.Any any))
       in
       Interface.Properties.make_trait_substitution interface ~self:(Types.Any any) reference
-  | None -> bug "no interface for %s" (Path.show trait)
+  | None -> Definitions.bug "no interface for %s" (Path.show trait)
 
 let any_entry_signature context ~any ~trait (signature : Types.signature) =
   let substitution = any_substitution context ~any trait in
   let entry, result =
-    c_signature context substitution
-      ~parameters:(interface_parameters { signature with receiver = None })
+    Definitions.c_signature context substitution
+      ~parameters:(Definitions.interface_parameters { signature with receiver = None })
       ~has_defaults:false ~uses:signature.uses signature.output
   in
   ( { entry with parameters = Lowered.Raw (Pointer Opaque) :: entry.parameters },
     result,
-    evidence_for context substitution signature.uses )
+    Definitions.evidence_for context substitution signature.uses )
 
-let implementation_evidence st ~impl ~type_arguments ~implementation =
+let implementation_evidence (st : Lowering.state) ~impl ~type_arguments ~implementation =
   let outer =
     List.map
       (fun captured ->
         match List.find_opt (fun (path, _) -> Path.equal path captured) st.evidence with
         | Some (_, operand) -> operand
-        | None -> bug "no evidence for %s here" (Path.show captured))
-      (evidence_for st.context [] (impl_interface st.context impl).impl_uses)
+        | None -> Definitions.bug "no evidence for %s here" (Path.show captured))
+      (Definitions.evidence_for st.context [] (Definitions.impl_interface st.context impl).impl_uses)
   in
-  let slot = local st.builder (Evidence (List.length outer)) in
-  emit st.builder
+  let slot = Builder.local st.builder (Evidence (List.length outer)) in
+  Builder.emit st.builder
     (Call
        {
          target = Intrinsic Evidence_fill;
          arguments =
-           Address { place = at slot; writable = true }
+           Address { place = Builder.at slot; writable = true }
            :: implementation
            :: Constant (Symbol_address (Table (Impl_table { impl; type_arguments })))
            :: outer;
          result = Discarded;
        });
-  Lowered.Address { place = at slot; writable = false }
+  Lowered.Address { place = Builder.at slot; writable = false }
 
-let evidence_of st capability =
+let evidence_of (st : Lowering.state) capability =
   match List.find_opt (fun (path, _) -> Path.equal path capability) st.evidence with
   | Some (_, operand) -> operand
   | None -> (
-      let missing () = bug "no evidence for %s here" (Path.show capability) in
+      let missing () = Definitions.bug "no evidence for %s here" (Path.show capability) in
       match st.frame.code.enclosing_impl with
-      | Some impl when Path.equal (impl_interface st.context impl).implements.trait capability ->
-          let interface = impl_interface st.context impl in
+      | Some impl
+        when Path.equal (Definitions.impl_interface st.context impl).implements.trait capability ->
+          let interface = Definitions.impl_interface st.context impl in
           let self_ty =
             Monomorphic.ground st.context.monomorphic st.frame.code.substitution interface.for_type
           in
@@ -191,16 +196,16 @@ let evidence_of st capability =
               (fun (generic : Types.generic) ->
                 match List.assoc_opt generic.generic st.frame.code.substitution with
                 | Some argument -> Monomorphic.ground_argument st.context.monomorphic [] argument
-                | None -> bug "an unbound parameter of %s" (Path.show impl))
+                | None -> Definitions.bug "an unbound parameter of %s" (Path.show impl))
               interface.impl_generics
           in
           implementation_evidence st ~impl ~type_arguments ~implementation
       | _ -> missing ())
 
-let nested_function st ~(function_type : Ground.function_type) ~(output : Types.result option)
-    ~(captures : (Lowered.place * Ground.ty) list)
+let nested_function (st : Lowering.state) ~(function_type : Ground.function_type)
+    ~(output : Types.result option) ~(captures : (Lowered.place * Ground.ty) list)
     ~(body :
-       state ->
+       Lowering.state ->
        captures:Lowered.place list ->
        (Lowered.place * Ground.mode * Ground.ty) list ->
        unit) destination =
@@ -217,13 +222,15 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
       captured
   in
   Emit_c.Builder.build_nested st.builder ~index ~environment (fun builder ->
-      let environment_local = at (local st.builder (Environment index)) in
+      let environment_local = Builder.at (Builder.local st.builder (Environment index)) in
       List.iter
         (fun (name, place, _) ->
-          emit st.builder
-            (Assign (environment_local / Field name, Use (Address { place; writable = false }))))
+          Builder.emit st.builder
+            (Assign
+               ( Lowered.project environment_local (Field name),
+                 Use (Address { place; writable = false }) )))
         captured;
-      emit st.builder
+      Builder.emit st.builder
         (Assign
            ( destination,
              Function_value
@@ -232,7 +239,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
                  environment = Some (Address { place = environment_local; writable = false });
                } ));
       let inner =
-        enter st.context ~nested:st.nested ~builder
+        Lowering.enter st.context ~nested:st.nested ~builder
           {
             st.frame with
             exit = None;
@@ -243,21 +250,22 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
           }
       in
       let environment_parameter =
-        local builder ~name:"environment" (Raw (Nullable_pointer Opaque))
+        Builder.local builder ~name:"environment" (Raw (Nullable_pointer Opaque))
       in
-      result_slot inner (Convention.result st.context.env function_type.result);
+      Lowering.result_slot inner (Convention.result st.context.env function_type.result);
       let parameter_places =
         List.map
           (fun ((mode : Ground.mode), ty) ->
-            (parameter inner ~in_scope:false ~owned:(mode = Own) mode ty, mode, ty))
+            (Lowering.parameter inner ~in_scope:false ~owned:(mode = Own) mode ty, mode, ty))
           function_type.parameters
       in
-      let evidence = evidence_parameters inner function_type.uses in
+      let evidence = Lowering.evidence_parameters inner function_type.uses in
       let environment_pointer =
-        local builder (Pointer { target = Environment index; writable = false })
+        Builder.local builder (Pointer { target = Environment index; writable = false })
       in
-      start builder (block builder);
-      emit builder (Assign (at environment_pointer, Use (Copy (at environment_parameter))));
+      Builder.start builder (Builder.block builder);
+      Builder.emit builder
+        (Assign (Builder.at environment_pointer, Use (Copy (Builder.at environment_parameter))));
       body inner
         ~captures:
           (List.map
@@ -268,7 +276,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
                })
              captured)
         (List.map (fun ((_, place), mode, ty) -> (place, mode, ty)) parameter_places);
-      finish_function inner ~first:[ environment_parameter ]
+      Lowering.finish_function inner ~first:[ environment_parameter ]
         ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
         ())
 
@@ -287,17 +295,21 @@ let call_indirect st ~(function_type : Ground.function_type) ~(value : Lowered.p
     Lowered.Indirect
       { value = Copy value; signature = Convention.function_value st.context.env function_type }
   in
-  emit st.builder
+  Builder.emit st.builder
     (Call
        {
          target;
          arguments = passed;
-         result = Convention.(destination (result st.context.env function_type.result)) destination;
+         result =
+           Convention.destination
+             (Convention.result st.context.env function_type.result)
+             destination;
        });
-  if function_type.result = Never then unreachable_block st
+  if function_type.result = Never then Lowering.unreachable_block st
 
-let call_through_any st ~(any_type : Types.trait_reference) ~trait ~name ~(any : Lowered.place)
-    ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?(lending = []) destination =
+let call_through_any (st : Lowering.state) ~(any_type : Types.trait_reference) ~trait ~name
+    ~(any : Lowered.place) ~(arguments : (Types.mode * Ground.ty * Lowered.place) list)
+    ?(lending = []) destination =
   let index, signature = dynamic_method st.context trait name in
   let slot =
     Drop_and_copy.first_method_slot ~is_copyable:(is_copyable_any st.context any_type) + index
@@ -310,31 +322,32 @@ let call_through_any st ~(any_type : Types.trait_reference) ~trait ~name ~(any :
   let target =
     Lowered.Table_call
       {
-        table = Copy (any / Field "vtable");
-        value = Copy (any / Field "value");
+        table = Copy (Lowered.project any (Field "vtable"));
+        value = Copy (Lowered.project any (Field "value"));
         slot;
         signature = c_signature;
       }
   in
-  emit st.builder
+  Builder.emit st.builder
     (Call
        {
          target;
          arguments = passed @ evidence @ lending;
          result = Convention.destination result destination;
        });
-  if not c_signature.returns then unreachable_block st
+  if not c_signature.returns then Lowering.unreachable_block st
 
-let in_type_definition st ~(source : Names.key) (ty : Ground.ty) nested_function =
+let in_type_definition (st : Lowering.state) ~(source : Names.key) (ty : Ground.ty) nested_function
+    =
   let path, arguments =
     match ty with
     | Named { path; arguments } -> (path, arguments)
-    | _ -> bug "defaults of %s" (Ground.to_string ty)
+    | _ -> Definitions.bug "defaults of %s" (Ground.to_string ty)
   in
   let interface =
     match Interface.Definition.read_type_interface st.context.lookups.interface path with
     | Some position -> position
-    | None -> bug "no interface for %s" (Path.show path)
+    | None -> Definitions.bug "no interface for %s" (Path.show path)
   in
   let caller = st.frame in
   st.frame <-
@@ -344,9 +357,9 @@ let in_type_definition st ~(source : Names.key) (ty : Ground.ty) nested_function
         {
           caller.code with
           definition = source.path;
-          written = Some (read_written st.context source);
+          written = Some (Definitions.read_written st.context source);
           enclosing_impl = None;
-          substitution = bind interface.type_generics arguments;
+          substitution = Definitions.bind interface.type_generics arguments;
         };
       self_place = None;
     };
@@ -355,8 +368,8 @@ let in_type_definition st ~(source : Names.key) (ty : Ground.ty) nested_function
   result
 
 let begin_output st =
-  let output = temporary st Writing.output_ty in
-  emit st.builder (Assign (output, Storage.build_empty Writing.output_ty));
+  let output = Lowering.temporary st Writing.output_ty in
+  Builder.emit st.builder (Assign (output, Storage.build_empty Writing.output_ty));
   output
 
 let echo st place ty ~site =
@@ -364,7 +377,7 @@ let echo st place ty ~site =
   Debug_output.debug_call st.context.env st.builder
     ~output:(Address { place = output; writable = true })
     ty place;
-  emit st.builder
+  Builder.emit st.builder
     (Echo
        {
          text = Copy (Storage.project_buffer output);
@@ -372,15 +385,17 @@ let echo st place ty ~site =
          site;
        })
 
-let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lowered.place) destination =
+let any_into (st : Lowering.state) ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lowered.place)
+    destination =
   let box = Drop_and_copy.box st.context.drop_and_copy st.builder inner_ty in
-  if not (is_zero_size st inner_ty) then begin
-    let typed = local st.builder (Pointer { target = Value inner_ty; writable = true }) in
-    emit st.builder (Assign (at typed, Use (Copy (at box))));
-    emit st.builder
-      (Assign ({ root = Local typed; projections = [ Deref ] }, Use (owned st value inner_ty)))
+  if not (Lowering.is_zero_size st inner_ty) then begin
+    let typed = Builder.local st.builder (Pointer { target = Value inner_ty; writable = true }) in
+    Builder.emit st.builder (Assign (Builder.at typed, Use (Copy (Builder.at box))));
+    Builder.emit st.builder
+      (Assign
+         ({ root = Local typed; projections = [ Deref ] }, Use (Lowering.owned st value inner_ty)))
   end;
-  emit st.builder
+  Builder.emit st.builder
     (Assign
        ( destination,
          Build
@@ -389,12 +404,12 @@ let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lowered.place)
              variant = None;
              fields =
                [
-                 ("value", Copy (at box));
+                 ("value", Copy (Builder.at box));
                  ("vtable", Constant (Symbol_address (Table (Any_table { impl; type_arguments }))));
                ];
            } ))
 
-let provided_evidence st ~(implementation : Lowered.operand) provides =
+let provided_evidence (st : Lowering.state) ~(implementation : Lowered.operand) provides =
   List.map
     (fun (capability, impl, (arguments : Types.substitution)) ->
       let type_arguments =
@@ -404,8 +419,8 @@ let provided_evidence st ~(implementation : Lowered.operand) provides =
             | Some argument ->
                 Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution
                   argument
-            | None -> bug "an unbound parameter of %s" (Path.show impl))
-          (impl_interface st.context impl).impl_generics
+            | None -> Definitions.bug "an unbound parameter of %s" (Path.show impl))
+          (Definitions.impl_interface st.context impl).impl_generics
       in
       (capability, implementation_evidence st ~impl ~type_arguments ~implementation))
     provides
@@ -419,45 +434,48 @@ let all_passed (signature : Types.signature) =
   in
   (1 lsl defaulted) - 1
 
-let call_instance st key ~(signature : Types.signature) ~substitution
+let call_instance (st : Lowering.state) key ~(signature : Types.signature) ~substitution
     ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?mask ?(lending = []) ~destination
     () =
   let mask = match mask with Some mask -> mask | None -> all_passed signature in
   let c_signature, result =
-    c_signature st.context substitution ~parameters:(interface_parameters signature)
-      ~has_defaults:(has_defaults signature) ~uses:signature.uses signature.output
+    Definitions.c_signature st.context substitution
+      ~parameters:(Definitions.interface_parameters signature)
+      ~has_defaults:(Definitions.has_defaults signature)
+      ~uses:signature.uses signature.output
   in
   let passed = List.filter_map (fun (mode, ty, place) -> pass st mode ty place) arguments in
   let mask =
-    (if has_defaults signature then [ constant_int UInt64 (Z.of_int mask) ] else [])
-    @ List.map (evidence_of st) (evidence_for st.context substitution signature.uses)
+    (if Definitions.has_defaults signature then [ Lowering.constant_int UInt64 (Z.of_int mask) ]
+     else [])
+    @ List.map (evidence_of st) (Definitions.evidence_for st.context substitution signature.uses)
   in
   let target = Lowered.Direct { function_ = Instance key; signature = c_signature } in
-  emit st.builder
+  Builder.emit st.builder
     (Call
        {
          target;
          arguments = passed @ mask @ lending;
          result = Convention.destination result destination;
        });
-  if not c_signature.returns then unreachable_block st
+  if not c_signature.returns then Lowering.unreachable_block st
 
 type literal = Integer_value of Z.t | Float_value of float
 
 let constant_of st ty (literal : literal) : Lowered.operand =
-  match (literal, scalar_of st ty) with
-  | Integer_value value, Integer integer -> constant_int integer value
+  match (literal, Lowering.scalar_of st ty) with
+  | Integer_value value, Integer integer -> Lowering.constant_int integer value
   | Integer_value value, Character -> Constant (Character (Z.to_int value))
   | Float_value value, Float64 -> Constant (Float64 (Int64.bits_of_float value))
   | Float_value value, Float32 -> Constant (Float32 (Int32.bits_of_float value))
-  | _ -> bug "a literal of type %s" (Ground.to_string ty)
+  | _ -> Definitions.bug "a literal of type %s" (Ground.to_string ty)
 
 let literal_place st (ty : Ground.ty) text =
   let bytes : Lowered.operand = Constant (Bytes text) in
-  let length = constant_uint64 (String.length text) in
+  let length = Builder.constant_uint64 (String.length text) in
   let build part_ty value =
-    let built = held st (Value part_ty) in
-    emit st.builder (Assign (built, value));
+    let built = Lowering.held st (Value part_ty) in
+    Builder.emit st.builder (Assign (built, value));
     built
   in
   let field, part =
@@ -466,47 +484,50 @@ let literal_place st (ty : Ground.ty) text =
         (field, build storage (Storage.build_storage storage ~buffer:bytes ~length ~capacity:length))
     | _, Record [ (field, Typed view) ] ->
         (field, build view (Storage.build_view view ~elements:bytes ~length))
-    | _ -> bug "a string literal of type %s" (Ground.to_string ty)
+    | _ -> Definitions.bug "a string literal of type %s" (Ground.to_string ty)
   in
   build ty (Build { ty; variant = None; fields = [ (field, Copy part) ] })
 
-let static_constant st path : Lowered.place =
+let static_constant (st : Lowering.state) path : Lowered.place =
   match Interface.Definition.read_constant_type st.context.lookups.interface path with
-  | Some ty -> { root = Static { key = Constant path; ty = ground st ty }; projections = [] }
-  | None -> bug "no type for the constant %s" (Path.show path)
+  | Some ty ->
+      { root = Static { key = Constant path; ty = Lowering.ground st ty }; projections = [] }
+  | None -> Definitions.bug "no type for the constant %s" (Path.show path)
 
 let list_parts monomorphic ty =
   match Monomorphic.shape monomorphic ty with
   | Record [ (field, Typed storage) ] -> (
       match Storage.match_storage_element storage with
       | Some element -> (field, storage, element)
-      | None -> bug "%s is not a list" (Ground.to_string ty))
-  | _ -> bug "%s is not a list" (Ground.to_string ty)
+      | None -> Definitions.bug "%s is not a list" (Ground.to_string ty))
+  | _ -> Definitions.bug "%s is not a list" (Ground.to_string ty)
 
-let list_of st ty destination ~site fills =
+let list_of (st : Lowering.state) ty destination ~site fills =
   let field, _, element = list_parts st.context.monomorphic ty in
-  let storage_place = destination / Field field in
+  let storage_place = Lowered.project destination (Field field) in
   let lower operation arguments destination =
     ignore
       (Intrinsics.lower ~checks:st.context.checks st.context.env st.builder st.context.types
          operation ~type_arguments:[ element ] arguments ~destination ~site)
   in
-  lower Storage_with_capacity [ Value (constant_uint64 (List.length fills)) ] (Some storage_place);
+  lower Storage_with_capacity
+    [ Value (Builder.constant_uint64 (List.length fills)) ]
+    (Some storage_place);
   List.iter
     (fun fill ->
-      let value = temporary st element in
+      let value = Lowering.temporary st element in
       fill value;
-      lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
+      lower Storage_push [ Place storage_place; Value (Lowering.owned st value element) ] None)
     fills
 
-let template_value st template_ty literals ~site ~parts =
+let template_value (st : Lowering.state) template_ty literals ~site ~parts =
   let field_type ty name =
     match Monomorphic.shape st.context.monomorphic ty with
     | Record fields -> (
         match List.assoc_opt name fields with
         | Some (Memory_layout.Typed ty) -> ty
-        | _ -> bug "%s has no field %s" (Ground.to_string ty) name)
-    | _ -> bug "%s is not a record" (Ground.to_string ty)
+        | _ -> Definitions.bug "%s has no field %s" (Ground.to_string ty) name)
+    | _ -> Definitions.bug "%s is not a record" (Ground.to_string ty)
   in
   let element list_ty =
     let _, _, element = list_parts st.context.monomorphic list_ty in
@@ -516,11 +537,13 @@ let template_value st template_ty literals ~site ~parts =
   let parts_ty = field_type template_ty "parts" in
   let literal_ty = element literals_ty in
   let slice_ty = field_type literal_ty "text" in
-  let built = temporary st template_ty in
-  list_of st literals_ty (built / Field "literals") ~site
+  let built = Lowering.temporary st template_ty in
+  list_of st literals_ty
+    (Lowered.project built (Field "literals"))
+    ~site
     (List.map
        (fun text value ->
-         emit st.builder
+         Builder.emit st.builder
            (Assign
               ( value,
                 Build
@@ -530,24 +553,26 @@ let template_value st template_ty literals ~site ~parts =
                     fields = [ ("text", Copy (literal_place st slice_ty text)) ];
                   } )))
        literals);
-  list_of st parts_ty (built / Field "parts") ~site parts;
+  list_of st parts_ty (Lowered.project built (Field "parts")) ~site parts;
   built
 
 let pull_loop st ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
     ~(body : Lowered.place -> unit) =
-  in_scope st (fun () ->
-      let next = held st (Value option) in
+  Lowering.in_scope st (fun () ->
+      let next = Lowering.held st (Value option) in
       let depth = List.length st.scopes in
-      let test = block st.builder and inside = block st.builder and after = block st.builder in
-      finish st.builder (Goto test);
-      start st.builder test;
+      let test = Builder.block st.builder
+      and inside = Builder.block st.builder
+      and after = Builder.block st.builder in
+      Builder.finish st.builder (Goto test);
+      Builder.start st.builder test;
       call_next next;
-      let more = local st.builder (Raw Bool) in
-      emit st.builder (Assign (at more, Is_variant (next, "Some")));
-      branch st.builder (Copy (at more)) ~yes:inside ~no:after;
-      start st.builder inside;
-      in_scope st (fun () ->
-          looping st ~continue_:test ~break_:after ~depth (fun () ->
-              body (next / Variant_field { variant = "Some"; field = "value" })));
-      finish st.builder (Goto test);
-      start st.builder after)
+      let more = Builder.local st.builder (Raw Bool) in
+      Builder.emit st.builder (Assign (Builder.at more, Is_variant (next, "Some")));
+      Builder.branch st.builder (Copy (Builder.at more)) ~yes:inside ~no:after;
+      Builder.start st.builder inside;
+      Lowering.in_scope st (fun () ->
+          Lowering.looping st ~continue_:test ~break_:after ~depth (fun () ->
+              body (Lowered.project next (Variant_field { variant = "Some"; field = "value" }))));
+      Builder.finish st.builder (Goto test);
+      Builder.start st.builder after)

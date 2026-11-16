@@ -3,18 +3,16 @@ module Graph = Graph
 module Call_edges = Call_edges
 include Walk
 include Parts
-open Builder
-open Expansion
 
-let code_of_formula = code_of_formula
-let code_of tree : Parts.code = { tree; graph = expanded tree }
+let code_of_formula = Expansion.code_of_formula
+let code_of tree : Parts.code = { tree; graph = Expansion.expanded tree }
 
 let body_part ?interface (form : Core.t) : body_part =
   match form.definition with
-  | Constant (Some value) -> Initializer (code_of (of_expression value))
+  | Constant (Some value) -> Initializer (code_of (Builder.of_expression value))
   | definition -> (
       match
-        of_definition
+        Builder.of_definition
           ~is_specification:
             (Option.fold ~none:false ~some:Interface.Definition.is_specification interface)
           definition
@@ -31,7 +29,7 @@ let defaults_of (definition : Core.definition) =
               (List.mapi
                  (fun position (parameter : Core.parameter) ->
                    match parameter.default with
-                   | Some default -> [ (position, of_expression default) ]
+                   | Some default -> [ (position, Builder.of_expression default) ]
                    | None -> [])
                  parameters)))
   | Type { defaults; _ } ->
@@ -39,7 +37,7 @@ let defaults_of (definition : Core.definition) =
         (Field_defaults
            (List.map
               (fun (variant, field, (default : Core.expression)) ->
-                { variant; field; type_ = default.type_; value = of_expression default })
+                { variant; field; type_ = default.type_; value = Builder.of_expression default })
               defaults))
   | Test _ | Law_proof _ -> Some (Parameter_defaults [])
   | Trait _ | Constant _ | Empty -> None
@@ -57,22 +55,23 @@ let contract_of (definition : Core.definition) =
             List.map
               (fun (written : Core.condition) ->
                 {
-                  clause = of_clause ~is_executable:written.executable ~parameters written.value;
+                  clause =
+                    Builder.of_clause ~is_executable:written.executable ~parameters written.value;
                   is_executable = written.executable;
-                  names = names_of written.value;
+                  names = Builder.names_of written.value;
                 })
               contract.requires;
-          ensures = List.map (of_clause ~parameters) contract.ensures;
-          decreases = List.map (of_clause ~parameters) contract.decreases;
+          ensures = List.map (Builder.of_clause ~parameters) contract.ensures;
+          decreases = List.map (Builder.of_clause ~parameters) contract.decreases;
           costs =
             List.map
               (fun ({ origin; amortized; resource; bound } : Core.cost) ->
                 let bound : bound =
                   match bound with
                   | Finite -> Finite
-                  | Order_of amount -> Order_of (of_clause ~parameters amount)
-                  | At_most amount -> At_most (of_clause ~parameters amount)
-                  | Exactly amount -> Exactly (of_clause ~parameters amount)
+                  | Order_of amount -> Order_of (Builder.of_clause ~parameters amount)
+                  | At_most amount -> At_most (Builder.of_clause ~parameters amount)
+                  | Exactly amount -> Exactly (Builder.of_clause ~parameters amount)
                 in
                 { origin; amortized; resource; bound })
               contract.costs;
@@ -89,7 +88,7 @@ let contract_of (definition : Core.definition) =
                           ( position,
                             {
                               inputs;
-                              requires = List.map (of_specification ~entry_locals) requires;
+                              requires = List.map (Builder.of_specification ~entry_locals) requires;
                             } );
                         ]
                     | None -> [])
@@ -111,8 +110,8 @@ let laws_of (definition : Core.definition) =
               List.map
                 (fun (parameter : Core.parameter) -> (parameter.local, parameter.type_))
                 law.parameters;
-            requires = List.map (of_specification ~entry_locals) law.requires;
-            states = of_law_statement ~entry_locals law.body;
+            requires = List.map (Builder.of_specification ~entry_locals) law.requires;
+            states = Builder.of_law_statement ~entry_locals law.body;
           })
         laws
   | Function _ | Type _ | Constant _ | Test _ | Law_proof _ | Empty -> []
@@ -140,13 +139,13 @@ let type_clauses_of ~type_interface path (definition : Core.definition) =
                 (fun (invariant : Core.condition) ->
                   {
                     clause =
-                      of_clause ~is_executable:invariant.executable ~parameters:[ self ]
+                      Builder.of_clause ~is_executable:invariant.executable ~parameters:[ self ]
                         invariant.value;
                     is_executable = invariant.executable;
-                    names = names_of invariant.value;
+                    names = Builder.names_of invariant.value;
                   })
                 invariants;
-            potential = Option.map (of_specification ~entry_locals:[]) potential;
+            potential = Option.map (Builder.of_specification ~entry_locals:[]) potential;
           })
         (type_interface path)
   | Function _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty -> None
@@ -154,11 +153,12 @@ let type_clauses_of ~type_interface path (definition : Core.definition) =
 let expanded_defaults = function
   | Parameter_defaults defaults ->
       Parameter_defaults
-        (List.map (fun (position, default) -> (position, expanded default)) defaults)
+        (List.map (fun (position, default) -> (position, Expansion.expanded default)) defaults)
   | Field_defaults defaults ->
       Field_defaults
         (List.map
-           (fun (default : t field_default) -> { default with value = expanded default.value })
+           (fun (default : t field_default) ->
+             { default with value = Expansion.expanded default.value })
            defaults)
 
 let contract_part ~type_interface path (form : Core.t) : contract_part =
@@ -172,5 +172,5 @@ let contract_part ~type_interface path (form : Core.t) : contract_part =
   }
 
 module For_testing = struct
-  let expanded = expanded
+  let expanded = Expansion.expanded
 end

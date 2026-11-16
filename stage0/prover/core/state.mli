@@ -1,16 +1,11 @@
-module Symbol = Logic.Symbol
-module Names = Resolve.Names
-module Code = Diagnostic.Code
-module Locals = Locals
-
 type template_check = { from_template : Path.t; literals : string list; clauses : int list }
 type template_clause = { check : template_check; clause : int }
 
 type piece =
   | Text of string
-  | Quote of Names.key * Core.origin
+  | Quote of Resolve.Names.key * Core.origin
   | Substituted of {
-      key : Names.key;
+      key : Resolve.Names.key;
       clause : Core.origin;
       replacements : (Core.origin * string) list;
     }
@@ -21,10 +16,10 @@ type edit = { at : Source.Definition_span.t; replacement : message }
 type fix = { title : message; edits : edit list }
 
 type obligation = {
-  code : Code.prover;
+  code : Diagnostic.Code.prover;
   location : location;
   message : message;
-  cited : (Names.key * Core.origin) option;
+  cited : (Resolve.Names.key * Core.origin) option;
   fixes : fix list;
   query : Logic.query;
   values : (Logic.symbol * string) list;
@@ -33,8 +28,8 @@ type obligation = {
   decisions : (string * string option * Logic.term * Logic.term) list;
 }
 
-type outcome = { obligations : obligation list; holes : (Names.key * location) list }
-type source = { key : Names.key option; name : string }
+type outcome = { obligations : obligation list; holes : (Resolve.Names.key * location) list }
+type source = { key : Resolve.Names.key option; name : string }
 
 type part = {
   callee : source;
@@ -146,7 +141,7 @@ type context = {
   mutable indexes : (int * place_value) list;
   mutable yielded_part : Types.ty option;
   mutable yield_ensures : (Mir.formula list * Mir.formula list) option;
-  home : Names.key;
+  home : Resolve.Names.key;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   mutable counters : Costs.counter list;
   mutable own_bounds : Costs.counter list;
@@ -164,7 +159,7 @@ type context = {
   mutable decisions : (string * string option * Logic.term * Logic.term) list;
   mutable entry : Logic.symbol list;
   mutable proving : bool;
-  mutable holes : (Names.key * location) list;
+  mutable holes : (Resolve.Names.key * location) list;
   mutable unfinished : Logic.term list;
   mutable call_targets : (Logic.term * Core.local) list;
   mutable reading_callback : bool;

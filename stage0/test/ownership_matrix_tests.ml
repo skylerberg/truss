@@ -1,8 +1,6 @@
-open Harness
-open Support
-
 let check packages =
-  Database.For_testing.(list_diagnostics [ Resolve; Interface; Infer; Patterns; Usage; Ownership ])
+  Database.For_testing.list_diagnostics
+    [ Resolve; Interface; Infer; Patterns; Usage; Ownership ]
     (Support.database packages)
 
 let helpers = Fixtures.Ownership_matrix.helpers
@@ -247,14 +245,16 @@ let is_ownership (diagnostic : Diagnostic.t) =
 let () =
   List.iter
     (fun (maker : maker) ->
-      test (Printf.sprintf "%s cannot be used after its source is mutated or moved" maker.maker)
+      Harness.test
+        (Printf.sprintf "%s cannot be used after its source is mutated or moved" maker.maker)
         (fun () ->
           let text, functions = generate maker in
-          let packages = setup [ ("app::main", text) ] in
-          let file = file_of "app::main" in
-          (match parse_errors packages file with
+          let packages = Support.setup [ ("app::main", text) ] in
+          let file = Support.file_of "app::main" in
+          (match Support.parse_errors packages file with
           | [] -> ()
-          | errors -> fail "the generated module does not parse: %s" (String.concat " " errors));
+          | errors ->
+              Harness.fail "the generated module does not parse: %s" (String.concat " " errors));
           let diagnostics = check packages file in
           let verdict_of (generated : generated) =
             List.filter
@@ -265,7 +265,8 @@ let () =
           let shown = ref 0 in
           let wrong (generated : generated) problem =
             incr shown;
-            if !shown <= 5 then fail "%s: %s\n%s" generated.description problem generated.text
+            if !shown <= 5 then
+              Harness.fail "%s: %s\n%s" generated.description problem generated.text
           in
           List.iter
             (fun (generated : generated) ->
@@ -285,5 +286,6 @@ let () =
                               Diagnostic.Code.name diagnostic.code ^ " " ^ diagnostic.message)
                             actual)))
             functions;
-          if !shown > 5 then fail "%d of %d functions are wrong" !shown (List.length functions)))
+          if !shown > 5 then
+            Harness.fail "%d of %d functions are wrong" !shown (List.length functions)))
     makers

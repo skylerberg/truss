@@ -1,0 +1,3 @@
+(executable
+ (name opens)
+ (libraries compiler-libs.common))

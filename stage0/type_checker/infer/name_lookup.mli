@@ -1,9 +1,3 @@
-module Names = Resolve.Names
-module Environment = Interface.Environment
-module Impls = Interface.Impls
-module Properties = Interface.Properties
-module Elaborator = Interface.Elaborator
-
 type overload =
   | Type_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
@@ -46,7 +40,7 @@ val finish_call :
 val trait_static_method :
   State.state ->
   Path.t ->
-  State.Names.String_map.key ->
+  Resolve.Names.String_map.key ->
   Path.receiver ->
   (Types.trait_reference * Types.trait_method) list
 
@@ -55,7 +49,7 @@ val resolve_evidence : State.state -> Syntax.expression -> Types.ty -> Types.tra
 val overloads :
   State.state ->
   Types.ty ->
-  State.Names.String_map.key ->
+  Resolve.Names.String_map.key ->
   ((Path.receiver * overload) list, Types.trait_reference list) Result.t
 
 val elements_calls :

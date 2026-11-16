@@ -1,11 +1,9 @@
-open Harness
-
 let hex bytes = Blake3.to_hex bytes
 
 let encodes name value expected =
-  test name (fun () ->
+  Harness.test name (fun () ->
       let actual = hex (Cbor.encode value) in
-      if actual <> expected then fail "expected %s, got %s" expected actual)
+      if actual <> expected then Harness.fail "expected %s, got %s" expected actual)
 
 let () =
   encodes "zero is one byte" (Cbor.int 0) "00";
@@ -61,13 +59,13 @@ let () =
     (Cbor.Map
        [ (Cbor.Text "b", Cbor.int 2); (Cbor.int 10, Cbor.int 1); (Cbor.Text "a", Cbor.int 3) ])
     "a30a01616103616202";
-  test "a negative tag has no encoding" (fun () ->
+  Harness.test "a negative tag has no encoding" (fun () ->
       match Cbor.encode (Cbor.Tag (-1, Cbor.Null)) with
-      | _ -> fail "encoded"
+      | _ -> Harness.fail "encoded"
       | exception Invalid_argument _ -> ());
-  test "a map that repeats a key has no encoding" (fun () ->
+  Harness.test "a map that repeats a key has no encoding" (fun () ->
       match Cbor.encode (Cbor.Map [ (Cbor.int 1, Cbor.Null); (Cbor.int 1, Cbor.Null) ]) with
-      | _ -> fail "encoded"
+      | _ -> Harness.fail "encoded"
       | exception Invalid_argument _ -> ())
 
 let blake3_repository_context = "BLAKE3 2019-12-27 16:29:52 test vectors context"
@@ -128,13 +126,14 @@ let () =
   List.iter
     (fun (length, expected_hash, expected_derived) ->
       let input = String.init length (fun index -> Char.chr (index mod 251)) in
-      test (Printf.sprintf "BLAKE3 of the BLAKE3 repository's %d-byte test vector" length)
+      Harness.test (Printf.sprintf "BLAKE3 of the BLAKE3 repository's %d-byte test vector" length)
         (fun () ->
           let actual = hex (Blake3.For_testing.hash input) in
-          if actual <> expected_hash then fail "expected %s, got %s" expected_hash actual);
-      test
+          if actual <> expected_hash then Harness.fail "expected %s, got %s" expected_hash actual);
+      Harness.test
         (Printf.sprintf "BLAKE3 derive-key of the BLAKE3 repository's %d-byte test vector" length)
         (fun () ->
           let actual = hex (Blake3.derive_key ~context:blake3_repository_context input) in
-          if actual <> expected_derived then fail "expected %s, got %s" expected_derived actual))
+          if actual <> expected_derived then
+            Harness.fail "expected %s, got %s" expected_derived actual))
     blake3_repository_vectors

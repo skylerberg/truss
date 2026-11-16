@@ -1,92 +1,104 @@
-open Codegen_support
-
 let () =
-  passes
+  Codegen_support.passes
     "a derived ordering compares fields in declaration order, and a construction evaluates its \
      fields in the order written"
     Fixtures.Feature.derived_ordering_compares_fields_in_declaration;
-  test "derived methods satisfy the laws of their traits, and a sum type orders by variant"
-    (fun () ->
-      expect_output Fixtures.Feature.derived_methods_satisfy_their_traits_laws
+  Codegen_support.test
+    "derived methods satisfy the laws of their traits, and a sum type orders by variant" (fun () ->
+      Codegen_support.expect_output Fixtures.Feature.derived_methods_satisfy_their_traits_laws
         (String.concat "" (List.init 3 (Printf.sprintf "test %d passed\n"))));
-  passes "an assignment through an index inserts a map's key or replaces its value"
+  Codegen_support.passes "an assignment through an index inserts a map's key or replaces its value"
     Fixtures.Feature.assignment_through_an_index_inserts_or_replaces;
-  passes "a cursor gives each value and then None"
+  Codegen_support.passes "a cursor gives each value and then None"
     Fixtures.Feature.cursor_gives_each_value_and_then_none;
-  passes "a cursor's next uses the implementation provided where it is called"
+  Codegen_support.passes "a cursor's next uses the implementation provided where it is called"
     Fixtures.Feature.cursors_next_uses_the_implementation_provided;
-  test "an associated capability set gives each instance the evidence that its type needs"
-    (fun () ->
-      expect_output Fixtures.Feature.associated_capability_set_gives_each_instance_the
+  Codegen_support.test
+    "an associated capability set gives each instance the evidence that its type needs" (fun () ->
+      Codegen_support.expect_output
+        Fixtures.Feature.associated_capability_set_gives_each_instance_the
         (String.concat "" (List.init 8 (Printf.sprintf "test %d passed\n"))));
-  test "a lending method that calls itself lends a part of its receiver" (fun () ->
-      expect_output Fixtures.Feature.lending_method_that_calls_itself_lends_a_part_of
+  Codegen_support.test "a lending method that calls itself lends a part of its receiver" (fun () ->
+      Codegen_support.expect_output
+        Fixtures.Feature.lending_method_that_calls_itself_lends_a_part_of
         (String.concat "" (List.init 5 (Printf.sprintf "test %d passed\n"))));
-  test "a lending method that calls itself lends a value that the innermost call made" (fun () ->
-      expect_output Fixtures.Feature.lending_method_that_calls_itself_lends_a_value_it
+  Codegen_support.test
+    "a lending method that calls itself lends a value that the innermost call made" (fun () ->
+      Codegen_support.expect_output
+        Fixtures.Feature.lending_method_that_calls_itself_lends_a_value_it
         (String.concat "" (List.init 2 (Printf.sprintf "test %d passed\n"))));
-  test "a lent constructor owns the fields that the method made, beside the places it lends"
+  Codegen_support.test
+    "a lent constructor owns the fields that the method made, beside the places it lends" (fun () ->
+      Codegen_support.expect_output
+        Fixtures.Feature.lent_constructor_owns_the_fields_that_the_method_made
+        (String.concat "" (List.init 3 (Printf.sprintf "test %d passed\n"))));
+  Codegen_support.test
+    "a constructor lent `mut` writes each place back when the lend ends, at any depth" (fun () ->
+      Codegen_support.expect_output
+        Fixtures.Feature.constructor_lent_mut_writes_each_place_back_at_any_depth
+        (String.concat "" (List.init 2 (Printf.sprintf "test %d passed\n"))));
+  Codegen_support.test "a lending method forwards a part of another lending method's part"
     (fun () ->
-      expect_output Fixtures.Feature.lent_constructor_owns_the_fields_that_the_method_made
+      Codegen_support.expect_output
+        Fixtures.Feature.lending_method_forwards_a_part_of_another_lending
         (String.concat "" (List.init 3 (Printf.sprintf "test %d passed\n"))));
-  test "a constructor lent `mut` writes each place back when the lend ends, at any depth" (fun () ->
-      expect_output Fixtures.Feature.constructor_lent_mut_writes_each_place_back_at_any_depth
+  Codegen_support.test "a lending method is called through an `any` value" (fun () ->
+      Codegen_support.expect_output Fixtures.Feature.lending_method_is_called_through_an_any_value
         (String.concat "" (List.init 2 (Printf.sprintf "test %d passed\n"))));
-  test "a lending method forwards a part of another lending method's part" (fun () ->
-      expect_output Fixtures.Feature.lending_method_forwards_a_part_of_another_lending
-        (String.concat "" (List.init 3 (Printf.sprintf "test %d passed\n"))));
-  test "a lending method is called through an `any` value" (fun () ->
-      expect_output Fixtures.Feature.lending_method_is_called_through_an_any_value
-        (String.concat "" (List.init 2 (Printf.sprintf "test %d passed\n"))));
-  passes "a lending method lends a local it owns, which lives until the caller's statement ends"
+  Codegen_support.passes
+    "a lending method lends a local it owns, which lives until the caller's statement ends"
     Fixtures.Feature.lending_method_lends_a_local_it_owns_which_lives;
-  passes "a lending method owns a value on one of its paths and not on another"
+  Codegen_support.passes "a lending method owns a value on one of its paths and not on another"
     Fixtures.Feature.lending_method_owns_a_value_on_one_of_its_paths;
-  passes "a lending method lends from a `return` inside a loop, while it owns a value"
+  Codegen_support.passes
+    "a lending method lends from a `return` inside a loop, while it owns a value"
     Fixtures.Feature.lending_method_lends_from_a_return_inside_a_loop;
-  passes "a `lends mut` method lends on two paths, and owns a local on one of them"
+  Codegen_support.passes "a `lends mut` method lends on two paths, and owns a local on one of them"
     Fixtures.Feature.lends_mut_method_lends_on_two_paths_and_owns_a;
-  passes "a name that a `while` condition binds from a lent value lives until the body ends"
+  Codegen_support.passes
+    "a name that a `while` condition binds from a lent value lives until the body ends"
     Fixtures.Feature.name_a_while_condition_binds_from_a_lent_value;
-  passes "sets and maps keep one of each key, in order"
+  Codegen_support.passes "sets and maps keep one of each key, in order"
     Fixtures.Feature.sets_and_maps_keep_one_of_each_key_in_order;
-  passes "strings, constants, and ranges of constants are patterns"
+  Codegen_support.passes "strings, constants, and ranges of constants are patterns"
     Fixtures.Feature.strings_constants_and_ranges_of_constants_are;
-  passes "floats display as the shortest decimal that reads back"
+  Codegen_support.passes "floats display as the shortest decimal that reads back"
     Fixtures.Feature.floats_display_as_the_shortest_decimal_that_reads;
-  passes "a range is a value with its ends" Fixtures.Feature.range_is_a_value_with_its_ends;
-  passes "a loop that binds an owned value each time frees each one once"
+  Codegen_support.passes "a range is a value with its ends"
+    Fixtures.Feature.range_is_a_value_with_its_ends;
+  Codegen_support.passes "a loop that binds an owned value each time frees each one once"
     Fixtures.Feature.loop_that_binds_an_owned_value_each_time_frees;
-  passes "provide runs its body with the implementations given, nested and narrowed"
+  Codegen_support.passes "provide runs its body with the implementations given, nested and narrowed"
     Fixtures.Feature.provide_runs_its_body_with_the_implementations;
-  passes "tagged characters are numbers, in values, constants, and patterns"
+  Codegen_support.passes "tagged characters are numbers, in values, constants, and patterns"
     Fixtures.Feature.tagged_characters_are_numbers_in_values_constants;
-  passes "a tagged string gives its tag a template of its text and parts"
+  Codegen_support.passes "a tagged string gives its tag a template of its text and parts"
     Fixtures.Feature.tagged_string_gives_its_tag_a_template_of_its_text;
-  passes "a constant that needs its code run is evaluated while compiling"
+  Codegen_support.passes "a constant that needs its code run is evaluated while compiling"
     Fixtures.Feature.constant_that_needs_its_code_run_is_evaluated;
-  passes "a program of many features together: generics, any, lambdas, ?, Map, mut loops"
+  Codegen_support.passes
+    "a program of many features together: generics, any, lambdas, ?, Map, mut loops"
     Fixtures.Feature.program_of_many_features_together_generics_any;
-  passes "a read-only parameter's default with something to drop is dropped once"
+  Codegen_support.passes "a read-only parameter's default with something to drop is dropped once"
     Fixtures.Feature.read_only_parameters_default_with_something_to;
-  passes "names an is test binds are used where it holds"
+  Codegen_support.passes "names an is test binds are used where it holds"
     Fixtures.Feature.names_an_is_test_binds_are_used_where_it_holds;
-  passes "a guard that fails leaves the value for the next arm"
+  Codegen_support.passes "a guard that fails leaves the value for the next arm"
     Fixtures.Feature.guard_that_fails_leaves_the_value_for_the_next_arm;
-  passes "an expression a pattern looks into is evaluated once"
+  Codegen_support.passes "an expression a pattern looks into is evaluated once"
     Fixtures.Feature.expression_a_pattern_looks_into_is_evaluated_once;
-  passes "a slice of a temporary evaluates the temporary once"
+  Codegen_support.passes "a slice of a temporary evaluates the temporary once"
     Fixtures.Feature.slice_of_a_temporary_evaluates_it_once
 
 let () =
-  passes "a list grows as it is pushed and keeps its elements"
+  Codegen_support.passes "a list grows as it is pushed and keeps its elements"
     Fixtures.Feature.list_grows_as_it_is_pushed_and_keeps_its_elements;
-  passes "a var bound to a string literal holds a copy"
+  Codegen_support.passes "a var bound to a string literal holds a copy"
     Fixtures.Feature.var_bound_to_a_string_literal_holds_a_copy
 
 let () =
-  test "values echo as Truss writes them" (fun () ->
-      expect_output Fixtures.Feature.values_echo_as_truss_writes_them
+  Codegen_support.test "values echo as Truss writes them" (fun () ->
+      Codegen_support.expect_output Fixtures.Feature.values_echo_as_truss_writes_them
         "test 0 passed\n\
          echo 265\n\
          example/main.truss:4:11: Some(true)\n\
@@ -96,8 +108,8 @@ let () =
          example/main.truss:8:11: Point(x: 0.1, y: 2.0)\n\
          example/main.truss:9:11: -7\n\
          example/main.truss:10:11: Character\"\195\169\"\n\n");
-  test "signed integers narrower than Int64 echo as their values" (fun () ->
-      expect_output Fixtures.Feature.narrow_signed_integers_echo_as_their_values
+  Codegen_support.test "signed integers narrower than Int64 echo as their values" (fun () ->
+      Codegen_support.expect_output Fixtures.Feature.narrow_signed_integers_echo_as_their_values
         "test 0 passed\n\
          echo 86\n\
          example/main.truss:5:11: -8\n\

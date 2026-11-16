@@ -1,5 +1,3 @@
-open Token
-
 type piece = { first : int; stop : int }
 
 let stop (tokens : Token.t array) ~first =

@@ -1,7 +1,3 @@
-open C_types
-open C_values
-open C_code
-
 let bug format = Compiler_bug.bug ~stage:"Builder" format
 
 module Locals = Set.Make (Int)
@@ -105,7 +101,7 @@ let start_function builder ~code =
   builder
 
 let create env ~key =
-  let code = { key; context = new_context env (Instance.symbol key); nested = [] } in
+  let code = { key; context = C_types.new_context env (Instance.symbol key); nested = [] } in
   start_function (new_builder env) ~code
 
 let local builder ?name ?(is_zeroed = false) ty =
@@ -118,7 +114,7 @@ let token local = Printf.sprintf "\001%d\002" local
 
 let function_context builder (function_ : function_) ~name =
   {
-    symbol = Instance.symbol function_.code.key;
+    C_values.symbol = Instance.symbol function_.code.key;
     local =
       (fun local ->
         name local;
@@ -165,7 +161,8 @@ let emit builder statement =
   let function_ = current_function builder in
   function_.size <- function_.size + 1;
   in_block_facts builder function_.code.context (fun () ->
-      statement_c function_.code.context (block_context builder function_) builder.pending statement)
+      C_code.statement_c function_.code.context (block_context builder function_) builder.pending
+        statement)
 
 let finish builder (terminator : Lowered.terminator) =
   let function_ = current_function builder in
@@ -173,13 +170,16 @@ let finish builder (terminator : Lowered.terminator) =
   (match terminator with
   | Return value ->
       let gives =
-        match value with Some operand -> operand_c context fc operand <> None | None -> false
+        match value with
+        | Some operand -> C_values.operand_c context fc operand <> None
+        | None -> false
       in
       function_.returns <- gives :: function_.returns
   | _ -> ());
   Dynarray.set builder.successors builder.current (Lowered.successors terminator);
   function_.size <- function_.size + 2;
-  in_block_facts builder context (fun () -> terminator_c context fc builder.pending terminator);
+  in_block_facts builder context (fun () ->
+      C_code.terminator_c context fc builder.pending terminator);
   Dynarray.set builder.texts builder.current (Some (Buffer.contents builder.pending));
   builder.pending <- Buffer.create 256
 
@@ -191,10 +191,6 @@ let in_block builder block body =
   builder.pending <- pending
 
 let at = Lowered.local_place
-
-let ( / ) (place : Lowered.place) projection : Lowered.place =
-  { place with projections = place.projections @ [ projection ] }
-
 let constant_uint64 number = Lowered.Constant (Integer (UInt64, Z.of_int number))
 
 let branch builder value ~yes ~no =
@@ -249,7 +245,7 @@ let outline builder ~index ~parts body =
        ~entry);
   let number = Dynarray.length builder.functions - 1 in
   let function_ = Dynarray.get builder.functions number in
-  statement_c code.context
+  C_code.statement_c code.context
     (prologue_context builder function_)
     function_.prologue
     (Assign (at environment, Use (Copy (at arrives))));
@@ -379,7 +375,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
       | Outlined { index; _ } ->
           let context = function_.code.context in
           context.environments <-
-            Keys.add
+            C_types.Keys.add
               (Environment (Instance.symbol function_.code.key, index))
               (List.map
                  (fun (local, field) ->
@@ -396,7 +392,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
           let parent = functions.(parent_number) in
           List.iter
             (fun (local, field) ->
-              statement_c parent.code.context (prologue_context builder parent)
+              C_code.statement_c parent.code.context (prologue_context builder parent)
                 fills.(parent_number)
                 (Assign
                    ( { root = Local holder; projections = [ Field field ] },
@@ -417,12 +413,13 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
       let context = function_.code.context in
       let captures = captures number in
       let name local =
-        if is_own number local then local_name local (Dynarray.get builder.locals local).name
+        if is_own number local then
+          C_values.local_name local (Dynarray.get builder.locals local).name
         else
           match (function_.role, List.assoc_opt local captures) with
           | Outlined { environment; _ }, Some field ->
               Printf.sprintf "(*(*%s).f_%s)"
-                (local_name environment (Dynarray.get builder.locals environment).name)
+                (C_values.local_name environment (Dynarray.get builder.locals environment).name)
                 field
           | _ -> bug "local %d is neither a function's own nor in its environment" local
       in
@@ -432,18 +429,19 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
       List.iter
         (fun local ->
           let ty = local_type builder local in
-          if (not (List.mem local (parameters_of number))) && not (erased context ty) then
+          if (not (List.mem local (parameters_of number))) && not (C_values.erased context ty) then
             let initializer_ =
               if not (Dynarray.get builder.locals local).is_zeroed then ""
               else
                 match ty with
-                | Value ty when is_struct context ty -> " = {0}"
+                | Value ty when C_types.is_struct context ty -> " = {0}"
                 | Value _ | Pointer _ | Raw _ -> " = 0"
                 | Lend | Lend_mark -> " = {0}"
                 | Environment _ | Evidence _ -> bug "a zeroed environment or evidence slot"
             in
             Buffer.add_string body
-              (Printf.sprintf "  %s %s%s;\n" (c_ty context symbol ty) (name local) initializer_))
+              (Printf.sprintf "  %s %s%s;\n" (C_types.c_ty context symbol ty) (name local)
+                 initializer_))
         (List.sort compare
            (Hashtbl.fold
               (fun local owner locals -> if owner = number then local :: locals else locals)
@@ -472,7 +470,7 @@ let write_function_texts builder ~own_symbol { parameters; result; returns } =
       in
       let parameters = parameters_of number in
       let header =
-        prototype context
+        C_values.prototype context
           (Instance.symbol function_.code.key)
           symbol ~names:(List.map name parameters) ~linkage:External
           {
@@ -510,7 +508,9 @@ let build builder prototype : instance =
 let build_nested parent ~index ~environment body =
   let code = (current_function parent).code in
   code.context.environments <-
-    Keys.add (Environment (Instance.symbol code.key, index)) environment code.context.environments;
+    C_types.Keys.add
+      (Environment (Instance.symbol code.key, index))
+      environment code.context.environments;
   let builder = start_function (new_builder parent.env) ~code in
   let prototype = body builder in
   code.nested <-

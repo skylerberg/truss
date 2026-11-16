@@ -1,15 +1,12 @@
-module Lock = Registry.Lock
-module Version = Registry.Version
-
-val wanted : string -> Path.package * Version.t option
+val wanted : string -> Path.package * Registry.Version.t option
 
 type change =
-  | Entered of Lock.entry
-  | Left of Lock.entry
-  | Moved of { name : Path.package; from : Version.t; to_ : Version.t }
+  | Entered of Registry.Lock.entry
+  | Left of Registry.Lock.entry
+  | Moved of { name : Path.package; from : Registry.Version.t; to_ : Registry.Version.t }
   | Holds of { name : Path.package; gained : string list }
 
-val lock_changes : before:Lock.t -> after:Lock.t -> change list
+val lock_changes : before:Registry.Lock.t -> after:Registry.Lock.t -> change list
 
 type signature
 

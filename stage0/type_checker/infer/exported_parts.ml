@@ -1,7 +1,4 @@
-open Syntax
 module Names = Resolve.Names
-module Environment = Interface.Environment
-open State
 
 let public (lookups : Lookups.t) (module_ : Path.module_) name =
   match lookups.interface.names.find module_ name with
@@ -21,7 +18,7 @@ let visible_to_other_packages (lookups : Lookups.t) (path : Path.t) =
   | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ -> true
   | Unresolved _ -> false
 
-let called_from_other_packages (state : state) =
+let called_from_other_packages (state : State.state) =
   match state.lookups.interface.names.container state.key with
   | None -> Names.is_public state.definition.visibility
   | Some container -> (
@@ -35,7 +32,7 @@ let called_from_other_packages (state : state) =
           | _ -> true)
       | _ -> false)
 
-let check (state : state) =
+let check (state : State.state) =
   let clauses, name =
     match state.definition.kind with
     | Function { signature; _ } | Method_declaration signature ->
@@ -45,15 +42,15 @@ let check (state : state) =
   in
   let requires_and_costs =
     List.filter_map
-      (fun (clause : clause) ->
+      (fun (clause : Syntax.clause) ->
         match clause.kind with
-        | Requires _ | Cost _ -> Some (read_span state clause.id)
+        | Requires _ | Cost _ -> Some (State.read_span state clause.id)
         | Ensures _ | Uses _ | Decreases _ | Clause_error -> None)
       clauses
   in
   if called_from_other_packages state && requires_and_costs <> [] then begin
     let named id (path : Path.t) =
-      let span = read_span state id in
+      let span = State.read_span state id in
       if
         List.exists
           (fun (clause : Source.Definition_span.t) ->
@@ -62,7 +59,7 @@ let check (state : state) =
         && not (visible_to_other_packages state.lookups path)
       then
         let hidden = Path.show path in
-        report state Private_in_public span
+        State.report state Private_in_public span
           (Printf.sprintf
              "Other packages can call `%s`, so the proofs of its callers there read this clause, \
               and those packages cannot see `%s`. Make `%s` public, or state the clause with \

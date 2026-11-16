@@ -1,5 +1,3 @@
-open Harness
-
 let markdown_files = Harness.markdown_documents ()
 let source_of = Support.source
 
@@ -20,7 +18,7 @@ let () =
           let packages = Support.setup [ ("example", text) ] in
           let file = Support.file_of "example" in
           if Support.parse_errors packages file = [] then
-            test
+            Harness.test
               (Printf.sprintf "%s block %d checks and proves unless it is an excerpt" name
                  (index + 1))
               (fun () ->
@@ -37,11 +35,11 @@ let () =
                       match Support.proof_diagnostics database file with
                       | [] -> ()
                       | unproven ->
-                          fail "%s"
+                          Harness.fail "%s"
                             (String.concat ""
                                (List.map (Diagnostic.render (source_of packages file)) unproven)))
                   | diagnostics ->
-                      fail "%s"
+                      Harness.fail "%s"
                         (String.concat ""
                            (List.map (Diagnostic.render (source_of packages file)) diagnostics))))
         (Documents.truss_blocks (File_system.read (Harness.workspace_path name))))

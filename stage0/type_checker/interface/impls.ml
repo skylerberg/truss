@@ -1,5 +1,3 @@
-open Environment
-
 let find_head = function Types.Named { path; _ } -> Some path | _ -> None
 
 let list_impls_for_type (lookups : Lookups.t) (type_ : Path.t) package =

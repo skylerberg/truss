@@ -1,4 +1,3 @@
-open Syntax
 module Lookups = Lookups
 
 type context = {
@@ -14,25 +13,26 @@ let report context ?(fixes = []) code (span : Source.Definition_span.t) message 
     Diagnostic.make ~fixes ~code:(Usage code) span message :: context.diagnostics
 
 type removal = Wildcard | Field_wildcard | Field_deletion of Source.Definition_span.t
-type binding = { name : name; removal : removal }
+type binding = { name : Syntax.name; removal : removal }
 
-let collect_bindings context (definition : definition) =
+let collect_bindings context (definition : Syntax.definition) =
   let bindings = ref [] in
-  let bind (name : name) removal = bindings := { name; removal } :: !bindings in
-  let rec pattern (written : pattern) =
+  let bind (name : Syntax.name) removal = bindings := { name; removal } :: !bindings in
+  let rec pattern (written : Syntax.pattern) =
     match written.kind with
     | Binding name -> bind name Wildcard
     | Variant { fields = Some fields; _ } | Record fields -> pattern_fields fields
     | Alternatives alternatives -> List.iter pattern alternatives
     | _ -> ()
-  and pattern_fields (fields : pattern_field list) =
-    let has_rest = List.exists (fun (field : pattern_field) -> field.kind = Rest) fields in
+  and pattern_fields (fields : Syntax.pattern_field list) =
+    let has_rest = List.exists (fun (field : Syntax.pattern_field) -> field.kind = Rest) fields in
     let has_several_fields =
-      List.length (List.filter (fun (field : pattern_field) -> field.kind <> Rest) fields) > 1
+      List.length (List.filter (fun (field : Syntax.pattern_field) -> field.kind <> Rest) fields)
+      > 1
     in
     let rec bind_fields = function
       | [] -> ()
-      | (field : pattern_field) :: following ->
+      | (field : Syntax.pattern_field) :: following ->
           (match (field.kind, following) with
           | Field { kind = Binding name; _ }, next :: _ when has_rest ->
               bind name
@@ -47,15 +47,15 @@ let collect_bindings context (definition : definition) =
     in
     bind_fields fields
   in
-  let rec expression (value : expression) =
+  let rec expression (value : Syntax.expression) =
     (match value.kind with
     | Is { pattern = written; _ } -> pattern written
     | Lambda { parameters; _ } -> List.iter pattern parameters
-    | Match { arms; _ } -> List.iter (fun (arm : arm) -> List.iter pattern arm.patterns) arms
+    | Match { arms; _ } -> List.iter (fun (arm : Syntax.arm) -> List.iter pattern arm.patterns) arms
     | Quantified { binder = Binder_in (written, _); _ } -> pattern written
     | _ -> ());
     Syntax_walk.expression_parts ~expression ~statement value
-  and statement (written : statement) =
+  and statement (written : Syntax.statement) =
     (match written.kind with
     | Let { pattern = written_pattern; _ } | For { pattern = written_pattern; _ } ->
         pattern written_pattern
@@ -81,7 +81,7 @@ let make_edit context (binding : binding) =
   | Field_wildcard -> Diagnostic.replace span (binding.name.text ^ ": _")
   | Field_deletion field -> Diagnostic.delete field
 
-let check_unused context (definition : definition) =
+let check_unused context (definition : Syntax.definition) =
   let targets = context.resolved.names in
   let bindings = collect_bindings context definition in
   let is_binding = Array.make (Array.length targets) false in
@@ -121,7 +121,7 @@ let check_unused context (definition : definition) =
           (Printf.sprintf "`%s` is never used. %s" name.text instruction))
     bindings
 
-let check_block context (written : block) =
+let check_block context (written : Syntax.block) =
   let rec check_statements = function
     | first :: (next :: _ as rest) ->
         if Infer.statement_diverges context.tables first then begin
@@ -145,8 +145,8 @@ let check_block context (written : block) =
   in
   check_statements written.statements
 
-let check_unreachable context (definition : definition) =
-  let rec expression (value : expression) =
+let check_unreachable context (definition : Syntax.definition) =
+  let rec expression (value : Syntax.expression) =
     (match value.kind with
     | Block block | Lambda { body = block; _ } | Provide { body = block; _ } ->
         check_block context block
@@ -155,7 +155,7 @@ let check_unreachable context (definition : definition) =
         match else_ with Some (Else block) -> check_block context block | _ -> ())
     | _ -> ());
     Syntax_walk.expression_parts ~expression ~statement value
-  and statement (written : statement) =
+  and statement (written : Syntax.statement) =
     (match written.kind with
     | For { body; _ } | While { body; _ } | Proof body -> check_block context body
     | Parallel _ | Concurrent _ -> ()
@@ -169,7 +169,7 @@ let check_unreachable context (definition : definition) =
         [ body ]
     | Trait { members; _ } ->
         List.filter_map
-          (fun (line : trait_member node) ->
+          (fun (line : Syntax.trait_member Syntax.node) ->
             match line.kind with Law law -> Some law.body | _ -> None)
           members
     | _ -> []

@@ -1,10 +1,7 @@
-open Harness
-open Support
-
 let core_of packages key =
   Option.map
     (fun (checked : Infer.checked) -> checked.form)
-    (Database.read_checked_body (database packages) key)
+    (Database.read_checked_body (Support.database packages) key)
 
 type form = { core : Core.t; names : (Core.local, string) Hashtbl.t }
 
@@ -74,13 +71,13 @@ and argument form (passed : Core.argument) =
   | Default -> "default"
 
 let definition_form text (path : Path.t) =
-  let packages = setup [ ("app::main", text) ] in
-  let file = file_of "app::main" in
+  let packages = Support.setup [ ("app::main", text) ] in
+  let file = Support.file_of "app::main" in
   (match
      List.map
        (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.span 0 0) message)
-       (parse_errors packages file)
-     @ Database.For_testing.(list_diagnostics [ Resolve; Interface; Infer ])
+       (Support.parse_errors packages file)
+     @ Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
          (Support.database packages) file
    with
   | [] -> ()
@@ -99,17 +96,19 @@ let definition_form text (path : Path.t) =
   match definition with
   | Some (key, core) ->
       Core_lint.check
-        (Database.make_interface_lookups (database packages) [ key.module_.package ])
+        (Database.make_interface_lookups (Support.database packages) [ key.module_.package ])
         key core;
       form_of core
   | None -> failwith (Printf.sprintf "`%s` has no core form" (Path.show path))
 
 let expect_observed expected observed =
   if observed <> expected then
-    fail "expected [%s], found [%s]" (String.concat "; " expected) (String.concat "; " observed)
+    Harness.fail "expected [%s], found [%s]" (String.concat "; " expected)
+      (String.concat "; " observed)
 
 let expect ?(definition = Support.top "app::main" "g") test_name text observe expected =
-  test test_name (fun () -> expect_observed expected (observe (definition_form text definition)))
+  Harness.test test_name (fun () ->
+      expect_observed expected (observe (definition_form text definition)))
 
 let contract form : Core.contract =
   match form.core.definition with
@@ -159,10 +158,10 @@ let () =
 let () =
   List.iter
     (fun statement ->
-      test (Printf.sprintf "`%s` on a hole has a core form" statement) (fun () ->
-          no_diagnostics
+      Harness.test (Printf.sprintf "`%s` on a hole has a core form" statement) (fun () ->
+          Support.no_diagnostics
             ~check:(fun packages module_ ->
-              Database.For_testing.(list_diagnostics [ Resolve; Interface; Infer ])
+              Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
                 (Support.database packages) module_)
             [
               ( "app::main",
@@ -226,10 +225,11 @@ let () =
     (apply ^ Fixtures.Core.named_function_passed_for_a_capability_generic)
     granted
     [ "standard::capabilities::Console" ];
-  test "a call's `uses` and a lambda's type contain the inferred set, not the callee's parameter"
+  Harness.test
+    "a call's `uses` and a lambda's type contain the inferred set, not the callee's parameter"
     (fun () ->
       let text = apply ^ Fixtures.Core.calls_uses_and_a_lambdas_type_contain_the_inferred in
-      let packages = setup [ ("app::main", text) ] in
+      let packages = Support.setup [ ("app::main", text) ] in
       let actual = ref [] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
@@ -251,13 +251,14 @@ let () =
                         | _ -> ());
                   }
                   form.definition
-            | None -> fail "no core form")
+            | None -> Harness.fail "no core form")
         (Support.declarations packages (Support.module_of "app::main"));
       if List.sort compare !actual <> [ "(fn() uses Console)"; "needs {Console}" ] then
-        fail "found [%s]" (String.concat "; " !actual));
-  test "a capability parameter in a result type is inferred separately for each call" (fun () ->
+        Harness.fail "found [%s]" (String.concat "; " !actual));
+  Harness.test "a capability parameter in a result type is inferred separately for each call"
+    (fun () ->
       let text = Fixtures.Core.capability_parameter_in_a_result_type_is_inferred in
-      let packages = setup [ ("app::main", text) ] in
+      let packages = Support.setup [ ("app::main", text) ] in
       let actual = ref [] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
@@ -276,15 +277,15 @@ let () =
                         | _ -> ());
                   }
                   form.definition
-            | None -> fail "no core form")
+            | None -> Harness.fail "no core form")
         (Support.declarations packages (Support.module_of "app::main"));
       if List.sort compare !actual <> [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
-      then fail "found [%s]" (String.concat "; " !actual))
+      then Harness.fail "found [%s]" (String.concat "; " !actual))
 
 let () =
-  test "a node's origin gives its source span" (fun () ->
+  Harness.test "a node's origin gives its source span" (fun () ->
       let text = Fixtures.Core.nodes_origin_gives_its_source_span in
-      let packages = setup [ ("app::main", text) ] in
+      let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
@@ -308,8 +309,9 @@ let () =
                       | _ -> ());
                 }
                 form.definition;
-              if !actual <> [ "total += item" ] then fail "found [%s]" (String.concat "; " !actual)
-          | _ -> fail "no core form")
+              if !actual <> [ "total += item" ] then
+                Harness.fail "found [%s]" (String.concat "; " !actual)
+          | _ -> Harness.fail "no core form")
         (Support.declarations packages (Support.module_of "app::main")))
 
 let () =
@@ -378,17 +380,17 @@ let () =
           | _ -> None)
         (expressions form))
     [ "time(standard::core::Equal.equal) for Element by a bound" ];
-  test "in a trait, `time(Self.method)` names the trait's own method" (fun () ->
-      no_diagnostics
+  Harness.test "in a trait, `time(Self.method)` names the trait's own method" (fun () ->
+      Support.no_diagnostics
         ~check:(fun packages module_ ->
-          Database.For_testing.(list_diagnostics [ Resolve; Interface; Infer ])
+          Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
             (Support.database packages) module_)
         [ ("app::main", Fixtures.Core.in_a_trait_time_self_method_names_the_traits_own) ])
 
 let () =
-  test "the origin of a cost is its cost clause" (fun () ->
+  Harness.test "the origin of a cost is its cost clause" (fun () ->
       let text = Fixtures.Core.origin_of_a_cost_is_its_cost_clause in
-      let packages = setup [ ("app::main", text) ] in
+      let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
@@ -402,62 +404,63 @@ let () =
               written ) ->
               let span = spans.(cost.origin) in
               let quoted = String.sub written span.start (span.stop - span.start) in
-              if quoted <> "cost time O(items.length())" then fail "found `%s`" quoted
-          | _ -> fail "no core form with exactly one cost")
+              if quoted <> "cost time O(items.length())" then Harness.fail "found `%s`" quoted
+          | _ -> Harness.fail "no core form with exactly one cost")
         (Support.declarations packages (Support.module_of "app::main")))
 
 let () =
-  let packages = setup [] in
+  let packages = Support.setup [] in
   let forms = ref 0 in
   List.iter
     (fun ((file : Path.file), _) ->
-      test
+      Harness.test
         (Printf.sprintf "%s's core forms satisfy the invariants" (Path.show_file file))
         (fun () ->
           forms :=
             !forms
             + Core_lint.check_file
-                (Database.make_interface_lookups (database packages) [ file.module_.package ])
+                (Database.make_interface_lookups (Support.database packages)
+                   [ file.module_.package ])
                 ~core:(core_of packages) file))
     Standard_library.files;
-  test "the standard library has core forms" (fun () ->
-      if !forms < 500 then fail "only %d of its definitions have one" !forms)
+  Harness.test "the standard library has core forms" (fun () ->
+      if !forms < 500 then Harness.fail "only %d of its definitions have one" !forms)
 
 let () =
-  test "a `todo` type has no derived core form" (fun () ->
-      let packages = setup [ ("app::main", "type Later = todo\n  derives Equal\n") ] in
+  Harness.test "a `todo` type has no derived core form" (fun () ->
+      let packages = Support.setup [ ("app::main", "type Later = todo\n  derives Equal\n") ] in
       let path : Path.t =
         Method
           {
             owner =
               Derived
                 {
-                  type_ = Top { module_ = module_of "app::main"; name = "Later" };
+                  type_ = Top { module_ = Support.module_of "app::main"; name = "Later" };
                   trait = Well_known.path Equal;
                 };
             name = "equal";
             receiver = Read;
           }
       in
-      if Database.For_testing.read_derived_form (database packages) path <> None then
-        fail "it has a core form");
-  test
+      if Database.For_testing.read_derived_form (Support.database packages) path <> None then
+        Harness.fail "it has a core form");
+  Harness.test
     "every method of a derived impl in the standard library has a core form that satisfies the \
      invariants" (fun () ->
-      let packages = setup [] in
+      let packages = Support.setup [] in
       let interface =
-        Database.make_interface_lookups (database packages) [ Path.standard_package ]
+        Database.make_interface_lookups (Support.database packages) [ Path.standard_package ]
       in
       let derived =
         List.filter_map
           (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
           (interface.names.impls Path.standard_package)
       in
-      if derived = [] then fail "the standard library derives nothing";
+      if derived = [] then Harness.fail "the standard library derives nothing";
       List.iter
         (fun impl ->
           match Interface.Definition.read_impl_interface interface impl with
-          | None -> fail "`%s` has no interface" (Path.show impl)
+          | None -> Harness.fail "`%s` has no interface" (Path.show impl)
           | Some impl_interface ->
               let provided =
                 match
@@ -474,35 +477,36 @@ let () =
               List.iter
                 (fun (name, receiver) ->
                   let path : Path.t = Method { owner = impl; name; receiver } in
-                  match Database.For_testing.read_derived_form (database packages) path with
+                  match Database.For_testing.read_derived_form (Support.database packages) path with
                   | Some form -> Core_lint.check_derived interface path form
                   | None ->
                       if not (List.mem name provided) then
-                        fail "`%s` has no core form for `%s`" (Path.show impl) name
+                        Harness.fail "`%s` has no core form for `%s`" (Path.show impl) name
                   | exception Compiler_bug.Bug bug ->
-                      fail "`%s`, `%s`: %s" (Path.show impl) name (Compiler_bug.to_string bug))
+                      Harness.fail "`%s`, `%s`: %s" (Path.show impl) name
+                        (Compiler_bug.to_string bug))
                 impl_interface.impl_methods)
         derived)
 
 let () =
   let text = Fixtures.Core.described_both in
-  let both : Path.t = Top { module_ = module_of "app::main"; name = "Both" } in
+  let both : Path.t = Top { module_ = Support.module_of "app::main"; name = "Both" } in
   let described : Types.trait_reference =
     {
-      trait = Top { module_ = module_of "app::main"; name = "Described" };
+      trait = Top { module_ = Support.module_of "app::main"; name = "Described" };
       trait_arguments = [];
       associated = [];
     }
   in
   let core_of_method name =
-    let packages = setup [ ("app::main", text) ] in
+    let packages = Support.setup [ ("app::main", text) ] in
     let both_package = Path.package both in
     let parameter : Types.parameter = { owner = both; name = "Value" } in
     let bounds (actual : Types.parameter) = if actual = parameter then [ described ] else [] in
     let owner =
       match
         Interface.Impls.implements
-          (Database.make_interface_lookups (database packages) [ both_package ])
+          (Database.make_interface_lookups (Support.database packages) [ both_package ])
           ~bounds
           (Types.make_named both [ Types.Parameter parameter ])
           described
@@ -511,7 +515,8 @@ let () =
       | _ -> failwith "no impl"
     in
     match
-      Database.For_testing.read_core (database packages) (Method { owner; name; receiver = Read })
+      Database.For_testing.read_core (Support.database packages)
+        (Method { owner; name; receiver = Read })
     with
     | Some (form, substitution) ->
         ( form_of form,
@@ -525,29 +530,30 @@ let () =
     let form, substitution = core_of_method name in
     final_expression form @ substitution
   in
-  test "a method defined in an impl has its own core form" (fun () ->
+  Harness.test "a method defined in an impl has its own core form" (fun () ->
       expect_observed
         [ "app::main::Described.describe for Value by a bound(place self.first)" ]
         (observed "describe"));
-  test
+  Harness.test
     "a method inherited from a trait has the default method's core form and a substitution for Self"
     (fun () ->
       let describe = "app::main::Described.describe for Self by a bound(place self)" in
       expect_observed
         [ Printf.sprintf "add(%s, %s)" describe describe; "Self = Both[Value]" ]
         (observed "twice"));
-  test "a method of a derived impl has the generated core form" (fun () ->
-      let packages = setup [ ("app::main", text) ] in
+  Harness.test "a method of a derived impl has the generated core form" (fun () ->
+      let packages = Support.setup [ ("app::main", text) ] in
       let owner : Path.t = Derived { type_ = both; trait = Well_known.path Equal } in
       match
-        ( Database.For_testing.read_core (database packages)
+        ( Database.For_testing.read_core (Support.database packages)
             (Method { owner; name = "equal"; receiver = Read }),
-          Database.For_testing.read_core (database packages)
+          Database.For_testing.read_core (Support.database packages)
             (Method { owner; name = "not_equal"; receiver = Read }) )
       with
       | Some (_, []), Some (_, [ _ ]) -> ()
       | _ ->
-          fail "expected the derived method with no substitution and the inherited method with one")
+          Harness.fail
+            "expected the derived method with no substitution and the inherited method with one")
 
 let () =
   expect

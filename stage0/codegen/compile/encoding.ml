@@ -1,13 +1,13 @@
 let bug format = Compiler_bug.bug ~stage:"Encoding" format
 let variant_index : Memory_layout.integer = UInt32
 
-open Emit_c.Builder
+module Builder = Emit_c.Builder
 
 let signature env ty = Writing.signature env [ Writing.value_parameter ty ]
 
 let encode_call env builder ~output ty (place : Lowered.place) =
   if not (Memory_layout.has_zero_size env ty) then
-    emit builder
+    Builder.emit builder
       (Call
          {
            target = Direct { function_ = Instance (Encode ty); signature = signature env ty };
@@ -16,21 +16,21 @@ let encode_call env builder ~output ty (place : Lowered.place) =
          })
 
 let encode env ty =
-  let builder = create env ~key:(Encode ty) in
-  let parameter = local builder ~name:"value" (Writing.value_parameter ty) in
+  let builder = Builder.create env ~key:(Encode ty) in
+  let parameter = Builder.local builder ~name:"value" (Writing.value_parameter ty) in
   let value : Lowered.place = { root = Local parameter; projections = [ Deref ] } in
-  let output_pointer = local builder ~name:"output" (Writing.output_parameter env) in
-  let output = Lowered.Copy (at output_pointer) in
+  let output_pointer = Builder.local builder ~name:"output" (Writing.output_parameter env) in
+  let output = Lowered.Copy (Builder.at output_pointer) in
   let encode_call = encode_call env builder ~output in
-  start builder (block builder);
+  Builder.start builder (Builder.block builder);
   let append_bytes (place : Lowered.place) size =
     let byte = Ground.builtin UInt8 in
-    let first = local builder (Raw (Pointer (Data byte))) in
-    emit builder
-      (Assign (at first, Convert (Address { place; writable = false }, Pointer (Data byte))));
+    let first = Builder.local builder (Raw (Pointer (Data byte))) in
+    Builder.emit builder
+      (Assign (Builder.at first, Convert (Address { place; writable = false }, Pointer (Data byte))));
     Writing.call_with_bytes env builder ~output Writing_append
-      ~elements:(Copy (at first))
-      ~length:(constant_uint64 size)
+      ~elements:(Copy (Builder.at first))
+      ~length:(Builder.constant_uint64 size)
   in
   let fields place variant (fields : (string * Memory_layout.member) list) =
     List.iter
@@ -39,8 +39,8 @@ let encode env ty =
         | Memory_layout.Typed field_ty ->
             encode_call field_ty
               (match variant with
-              | None -> place / Field name
-              | Some variant -> place / Variant_field { variant; field = name })
+              | None -> Lowered.project place (Field name)
+              | Some variant -> Lowered.project place (Variant_field { variant; field = name }))
         | Raw _ -> bug "a raw field in a value written out")
       fields
   in
@@ -50,35 +50,37 @@ let encode env ty =
   | Any -> bug "an any value cannot be computed while compiling"
   | Storage element ->
       append_bytes (Storage.project_length value) (Memory_layout.integer_size UInt64);
-      loop builder
+      Builder.loop builder
         ~count:(Copy (Storage.project_length value))
-        (fun index -> encode_call element (Storage.index_element value (Copy (at index))))
+        (fun index -> encode_call element (Storage.index_element value (Copy (Builder.at index))))
   | Shape (Scalar _) -> append_bytes value (Memory_layout.of_type env ty).size
   | Shape (Record members) -> fields value None members
   | Shape (Array (element, count)) ->
-      loop builder ~count:(constant_uint64 count) (fun index ->
-          encode_call element (value / Index (Copy (at index))))
+      Builder.loop builder ~count:(Builder.constant_uint64 count) (fun index ->
+          encode_call element (Lowered.project value (Index (Copy (Builder.at index)))))
   | Shape (Sum variants) ->
-      let after = block builder in
+      let after = Builder.block builder in
       let cases =
         List.mapi
           (fun index (variant_shape : Memory_layout.variant_shape) ->
-            let case = block builder in
-            in_block builder case (fun () ->
-                let encoded_index = local builder (Raw (Integer variant_index)) in
-                emit builder
+            let case = Builder.block builder in
+            Builder.in_block builder case (fun () ->
+                let encoded_index = Builder.local builder (Raw (Integer variant_index)) in
+                Builder.emit builder
                   (Assign
-                     (at encoded_index, Use (Constant (Integer (variant_index, Z.of_int index)))));
-                append_bytes (at encoded_index) (Memory_layout.integer_size variant_index);
+                     ( Builder.at encoded_index,
+                       Use (Constant (Integer (variant_index, Z.of_int index))) ));
+                append_bytes (Builder.at encoded_index) (Memory_layout.integer_size variant_index);
                 fields value (Some variant_shape.name) variant_shape.fields;
-                finish builder (Goto after));
+                Builder.finish builder (Goto after));
             (variant_shape.name, case))
           variants
       in
-      finish builder (Switch_variant { place = value; cases; default = None });
-      start builder after);
-  finish builder (Return None);
-  build builder { parameters = [ parameter; output_pointer ]; result = None; returns = true }
+      Builder.finish builder (Switch_variant { place = value; cases; default = None });
+      Builder.start builder after);
+  Builder.finish builder (Return None);
+  Builder.build builder
+    { parameters = [ parameter; output_pointer ]; result = None; returns = true }
 
 type reader = { encoded : string; mutable offset : int }
 

@@ -29,17 +29,14 @@ let make_storage_shape ~uint64 element : Memory_layout.shape =
 let make_view_shape ~uint64 element : Memory_layout.shape =
   Record [ (elements_field, Raw (Pointer (Data element))); (length_field, Typed uint64) ]
 
-let ( / ) (place : Lowered.place) projection : Lowered.place =
-  { place with projections = place.projections @ [ projection ] }
-
 let constant_uint64 number = Lowered.Constant (Integer (UInt64, Z.of_int number))
-let project_buffer storage = storage / Lowered.Field buffer_field
-let project_length storage = storage / Lowered.Field length_field
-let project_capacity storage = storage / Lowered.Field capacity_field
-let index_element storage index = project_buffer storage / Index index
-let project_view_elements view = view / Lowered.Field elements_field
-let project_view_length view = view / Lowered.Field length_field
-let index_view_element view index = project_view_elements view / Index index
+let project_buffer storage = Lowered.project storage (Lowered.Field buffer_field)
+let project_length storage = Lowered.project storage (Lowered.Field length_field)
+let project_capacity storage = Lowered.project storage (Lowered.Field capacity_field)
+let index_element storage index = Lowered.project (project_buffer storage) (Index index)
+let project_view_elements view = Lowered.project view (Lowered.Field elements_field)
+let project_view_length view = Lowered.project view (Lowered.Field length_field)
+let index_view_element view index = Lowered.project (project_view_elements view) (Index index)
 
 let build_is_allocated storage : Lowered.rvalue =
   Binary (Not_equal, Copy (project_capacity storage), constant_uint64 0)

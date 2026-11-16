@@ -1,5 +1,3 @@
-open Context
-
 type held_views = (Place.root * Actions.view list) list
 type state = { views : held_views; loans : (int * Actions.loan list) list }
 
@@ -10,10 +8,12 @@ let add_views (held_views : held_views) holder views : held_views =
   let added = List.filter (fun view -> not (List.mem view known)) views in
   (holder, known @ added) :: List.remove_assoc holder held_views
 
-let aliases_place context (root : Place.root) =
+let aliases_place (context : Context.context) (root : Place.root) =
   match root with
   | Local local ->
-      local <> Self && (not (List.mem local context.parameters)) && binding_mode context root <> Own
+      local <> Self
+      && (not (List.mem local context.parameters))
+      && Context.binding_mode context root <> Own
   | Temporary _ | Constant _ | Environment -> false
 
 let resolve context (held_views : held_views) (views : Actions.view list) : Actions.view list =

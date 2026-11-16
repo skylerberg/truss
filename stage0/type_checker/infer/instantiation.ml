@@ -1,9 +1,9 @@
-open Syntax
-open State
+module Impls = Interface.Impls
 
-let check_evidence_grants state (span : Source.Definition_span.t) evidence =
+let check_evidence_grants (state : State.state) (span : Source.Definition_span.t) evidence =
   let impls =
-    Interface.Grants.list_evidence_uses state.lookups.interface ~bounds:(bounds state) evidence
+    Interface.Grants.list_evidence_uses state.lookups.interface ~bounds:(State.bounds state)
+      evidence
   in
   state.evidence_packages <-
     List.map (fun (impl, _, _) -> Path.package impl) impls @ state.evidence_packages;
@@ -13,10 +13,10 @@ let check_evidence_grants state (span : Source.Definition_span.t) evidence =
         Diagnostic.make ~code:(Capabilities Not_granted) span message :: state.diagnostics)
     (Interface.Grants.describe_missing_in_impls state.lookups.interface ~package:state.package impls)
 
-let error_at state ?fixes code (value : expression) message =
-  match head state value with
+let error_at state ?fixes code (value : Syntax.expression) message =
+  match State.head state value with
   | Some { target = Unknown report; _ } -> Types.Error report
-  | _ -> error state ?fixes code (read_span state value.id) message
+  | _ -> State.error state ?fixes code (State.read_span state value.id) message
 
 type static_ =
   | Static_type of Types.ty
@@ -25,11 +25,11 @@ type static_ =
 
 let require state ~(at : Source.Definition_span.t) type_ (bound : Types.trait_reference) ~unmet =
   let trait = { bound with associated = [] } in
-  defer state (fun () ->
-      let type_ = normalize state type_ in
+  State.defer state (fun () ->
+      let type_ = State.normalize state type_ in
       if Unify.unknowns state.unifier type_ <> [] then false
       else begin
-        (match implements state type_ trait with
+        (match State.implements state type_ trait with
         | None -> unmet type_ None
         | Some evidence ->
             check_evidence_grants state at evidence;
@@ -37,9 +37,9 @@ let require state ~(at : Source.Definition_span.t) type_ (bound : Types.trait_re
               (fun (name, wanted) ->
                 match
                   Interface.Impls.project_associated_type state.lookups.interface
-                    ~bounds:(bounds state) type_ trait name
+                    ~bounds:(State.bounds state) type_ trait name
                 with
-                | Some associated_type when not (unify state associated_type wanted) ->
+                | Some associated_type when not (State.unify state associated_type wanted) ->
                     unmet type_ (Some (name, associated_type))
                 | _ -> ())
               bound.associated);
@@ -52,7 +52,7 @@ let require_bounds state (span : Source.Definition_span.t) ?of_type generics sub
       require state ~at:span argument bound ~unmet:(fun argument other ->
           let bound = Unify.zonk_trait state.unifier bound in
           let reported =
-            match current_frame state with
+            match State.current_frame state with
             | Some frame ->
                 let reported = List.mem (argument, bound) frame.reported_unmet_bounds in
                 frame.reported_unmet_bounds <- (argument, bound) :: frame.reported_unmet_bounds;
@@ -63,30 +63,31 @@ let require_bounds state (span : Source.Definition_span.t) ?of_type generics sub
             let needs =
               Printf.sprintf "%s needs `%s: %s`"
                 (match of_type with
-                | Some type_ -> Printf.sprintf "`%s`" (show state type_)
+                | Some type_ -> Printf.sprintf "`%s`" (State.show state type_)
                 | None -> "This")
                 (Types.show argument) (Types.show_trait bound)
             in
-            report state Unsatisfied_bound span
+            State.report state Unsatisfied_bound span
               (match other with
               | None -> needs ^ ", which does not hold."
               | Some (name, associated_type) ->
-                  Printf.sprintf "%s, and its `%s` is `%s`." needs name (show state associated_type))))
+                  Printf.sprintf "%s, and its `%s` is `%s`." needs name
+                    (State.show state associated_type))))
     (Impls.list_required_bounds generics substitution)
 
-let fresh_arguments state (path : Path.t) =
+let fresh_arguments (state : State.state) (path : Path.t) =
   match Interface.Definition.read_type_interface state.lookups.interface path with
   | Some interface ->
       List.map
         (fun (generic : Types.generic) ->
           match generic.kind with
           | Value_generic -> Types.Value (Unify.fresh_value state.unifier)
-          | Type_generic _ -> Types.Type (fresh state)
+          | Type_generic _ -> Types.Type (State.fresh state)
           | Capability_generic -> Types.Capabilities (Unify.fresh_capability_variable state.unifier))
         interface.type_generics
   | None -> []
 
-let require_type_bounds state span path arguments =
+let require_type_bounds (state : State.state) span path arguments =
   match Interface.Definition.read_type_interface state.lookups.interface path with
   | Some interface ->
       Option.iter
@@ -101,14 +102,14 @@ let instantiate_type state span path =
   require_type_bounds state span path arguments;
   arguments
 
-let rec static_ state (value : expression) : static_ option =
-  match (value.kind, head state value) with
+let rec static_ state (value : Syntax.expression) : static_ option =
+  match (value.kind, State.head state value) with
   | Self_type_value, _ -> Option.map (fun self -> Static_type self) state.context.self_type
   | _, Some { target = Definition (Type, path); type_arguments; _ } ->
       Some (Static_type (named_type state value path type_arguments))
   | _, Some { target = Type_parameter parameter; name; type_arguments } ->
       if Option.is_some type_arguments then
-        report state Arity (read_span state value.id)
+        State.report state Arity (State.read_span state value.id)
           (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." name.text);
       Some (Static_type (Types.Parameter parameter))
   | _, Some { target = Definition (Trait, path); type_arguments; _ } ->
@@ -117,7 +118,7 @@ let rec static_ state (value : expression) : static_ option =
   | Parenthesized inner, None -> static_ state inner
   | _ -> None
 
-and named_type state (value : expression) path type_arguments =
+and named_type state (value : Syntax.expression) path type_arguments =
   let type_ arguments =
     match Intrinsic.builtin_of_path path with
     | Some Never -> Types.Never
@@ -125,34 +126,34 @@ and named_type state (value : expression) path type_arguments =
     | _ -> Types.Named { path; arguments }
   in
   match type_arguments with
-  | None -> type_ (instantiate_type state (read_span state value.id) path)
+  | None -> type_ (instantiate_type state (State.read_span state value.id) path)
   | Some items ->
       let arguments = written_arguments state items in
       (match Resolve.Names.generics_of state.lookups.interface.names path with
       | Some expected when List.length expected <> List.length arguments ->
-          report state Arity (read_span state value.id)
+          State.report state Arity (State.read_span state value.id)
             (Printf.sprintf "`%s` takes %d %s, and %d %s given."
                (Types.show (Named { path; arguments = [] }))
                (List.length expected)
                (if List.length expected = 1 then "argument" else "arguments")
                (List.length arguments)
                (if List.length arguments = 1 then "is" else "are"))
-      | _ -> require_type_bounds state (read_span state value.id) path arguments);
+      | _ -> require_type_bounds state (State.read_span state value.id) path arguments);
       type_ arguments
 
 and written_arguments state items =
   List.filter_map
     (function
-      | Item item -> Some (type_argument_of_expression state item)
+      | Syntax.Item item -> Some (type_argument_of_expression state item)
       | Item_constraint (name, _) ->
-          report state Arity (read_span state name.id)
+          State.report state Arity (State.read_span state name.id)
             "An associated type is fixed where a type is written, as in `any Trait[Name = Type]`, \
              not among type arguments in an expression.";
           None)
     items
 
-and type_argument_of_expression state (value : expression) : Types.argument =
-  match (value.kind, head state value) with
+and type_argument_of_expression state (value : Syntax.expression) : Types.argument =
+  match (value.kind, State.head state value) with
   | Integer value, _ -> Types.Value (Known value)
   | _, Some { target = Value_parameter parameter; _ } -> Types.Value (Value_parameter parameter)
   | _, Some { target = Definition (Constant, path); name; _ } -> (
@@ -160,7 +161,7 @@ and type_argument_of_expression state (value : expression) : Types.argument =
       | Some value -> Types.Value (Known value)
       | None ->
           Types.Type
-            (error state Arity (read_span state value.id)
+            (State.error state Arity (State.read_span state value.id)
                (Printf.sprintf
                   "The value of `%s` cannot be computed: a constant used in a type cannot refer to \
                    itself, and is made of literals, arithmetic, and other such constants."
@@ -178,15 +179,15 @@ type instance = {
   type_arguments : Types.argument list;
 }
 
-let instantiate state (span : Source.Definition_span.t) ?(extra = []) (signature : Types.signature)
-    =
+let instantiate (state : State.state) (span : Source.Definition_span.t) ?(extra = [])
+    (signature : Types.signature) =
   let substitution =
     List.map
       (fun (generic : Types.generic) ->
         ( generic.generic,
           match generic.kind with
           | Value_generic -> Types.Value (Unify.fresh_value state.unifier)
-          | Type_generic _ -> Types.Type (fresh state)
+          | Type_generic _ -> Types.Type (State.fresh state)
           | Capability_generic -> Types.Capabilities (Unify.fresh_capability_variable state.unifier)
         ))
       signature.generics
@@ -205,7 +206,7 @@ let instantiate state (span : Source.Definition_span.t) ?(extra = []) (signature
 let intrinsic_signature path =
   Option.map Intrinsic_signatures.signature (Intrinsic.operation_of_path path)
 
-let function_signature state (path : Path.t) =
+let function_signature (state : State.state) (path : Path.t) =
   match intrinsic_signature path with
   | Some signature -> Some signature
   | None -> Interface.Definition.read_declared_signature state.lookups.interface path

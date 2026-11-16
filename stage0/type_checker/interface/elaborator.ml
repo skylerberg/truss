@@ -1,5 +1,3 @@
-open Environment
-open Syntax
 module Names = Resolve.Names
 
 type t = {
@@ -11,7 +9,7 @@ type t = {
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
   diagnostics : Diagnostic.in_definition list ref;
-  named : (id * Types.ty) list ref;
+  named : (Syntax.id * Types.ty) list ref;
   spans : Source.Definition_span.t array;
 }
 
@@ -44,7 +42,7 @@ let make_scope context : Environment.scope =
            context.bounds []);
   }
 
-let empty_scope =
+let empty_scope : Environment.scope =
   { self_type = None; self_trait = None; self_associated = []; self_capabilities = []; bounds = [] }
 
 let list_trait_closure (lookups : Lookups.t) path =
@@ -72,9 +70,9 @@ let report_error_type context code span message =
   Types.Error (record_diagnostic context.diagnostics code span message)
 
 let bug format = Compiler_bug.bug ~stage:"Interface" format
-let find_target context (name : name) = context.resolved.names.(name.id)
+let find_target context (name : Syntax.name) = context.resolved.names.(name.id)
 
-let find_parameter context (name : name) =
+let find_parameter context (name : Syntax.name) =
   match find_target context name with
   | Some (Type_parameter parameter) -> Ok parameter
   | Some (Capability_parameter _) ->
@@ -86,8 +84,9 @@ let find_parameter context (name : name) =
   | Some (Unknown report) -> Error report
   | _ -> bug "`%s` is not resolved as a generic parameter" name.text
 
-let show_path (path : path) =
-  String.concat "::" (List.map (fun (name : name) -> name.text) (path.modules @ [ path.last ]))
+let show_path (path : Syntax.path) =
+  String.concat "::"
+    (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
 let is_uint64 (lookups : Lookups.t) path =
   match Names.definition_of_path lookups.names path with
@@ -96,7 +95,7 @@ let is_uint64 (lookups : Lookups.t) path =
       = Some (Definition (Type, Intrinsic.builtin_path UInt64))
   | _ -> false
 
-let rec elaborate_type context (written : type_expression) : Types.ty =
+let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
   match written.kind with
   | Path_type path -> elaborate_path_type context path
   | Self_type None -> (
@@ -140,7 +139,7 @@ and elaborate_self context (span : Source.Definition_span.t) =
         (record_diagnostic context.diagnostics Misplaced_self_type span
            "`Self` names a type only in a type's definition, a trait, an `impl`, or a method.")
 
-and elaborate_self_associated context (span : Source.Definition_span.t) (key : name) =
+and elaborate_self_associated context (span : Source.Definition_span.t) (key : Syntax.name) =
   match List.assoc_opt key.text context.self_associated with
   | Some fixed -> fixed
   | None -> (
@@ -176,7 +175,7 @@ and find_declaring_trait ?(capability = false) context trait name =
       | None -> false)
     (list_trait_closure context.lookups trait)
 
-and elaborate_associated context base parameter (key : name) =
+and elaborate_associated context base parameter (key : Syntax.name) =
   let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
   let associated_type =
     List.find_map
@@ -200,16 +199,16 @@ and elaborate_associated context base parameter (key : name) =
       report_error_type context Unknown_associated_type context.spans.(key.id)
         (Printf.sprintf "No bound of `%s` declares an associated type `%s`." parameter.name key.text)
 
-and elaborate_arguments context (path : path_type) =
+and elaborate_arguments context (path : Syntax.path_type) =
   List.filter_map
     (function
-      | Type_argument written -> Some (Types.Type (elaborate_type context written))
+      | Syntax.Type_argument written -> Some (Types.Type (elaborate_type context written))
       | Count (value, _) -> Some (Types.Value (Types.Known value))
       | Count_name name -> Some (elaborate_count_name context name)
       | Constraint _ -> None)
     path.arguments
 
-and elaborate_count_name context (name : name) : Types.argument =
+and elaborate_count_name context (name : Syntax.name) : Types.argument =
   match find_target context name with
   | Some (Value_parameter parameter) -> Types.Value (Types.Value_parameter parameter)
   | Some (Definition (Constant, path)) -> (
@@ -231,12 +230,13 @@ and elaborate_count_name context (name : name) : Types.argument =
   | Some (Unknown report) -> Types.Type (Types.Error report)
   | _ -> bug "`%s` is not resolved as a type argument" name.text
 
-and check_arity context (path : path_type) shown expected =
+and check_arity context (path : Syntax.path_type) shown expected =
   match expected with
   | None -> ()
   | Some expected ->
       let argument_count =
-        List.length (List.filter (function Constraint _ -> false | _ -> true) path.arguments)
+        List.length
+          (List.filter (function Syntax.Constraint _ -> false | _ -> true) path.arguments)
       in
       if argument_count <> List.length expected then
         report context Arity context.spans.(path.id)
@@ -245,10 +245,14 @@ and check_arity context (path : path_type) shown expected =
              argument_count
              (if argument_count = 1 then "is" else "are"))
       else
-        let written = List.filter (function Constraint _ -> false | _ -> true) path.arguments in
+        let written =
+          List.filter (function Syntax.Constraint _ -> false | _ -> true) path.arguments
+        in
         List.iter2
           (fun argument (name, kind) ->
-            let is_value = match argument with Count _ | Count_name _ -> true | _ -> false in
+            let is_value =
+              match argument with Syntax.Count _ | Count_name _ -> true | _ -> false
+            in
             match (kind, is_value) with
             | Resolve.Names.Value_kind, false ->
                 report context Argument_kind context.spans.(path.id)
@@ -260,7 +264,7 @@ and check_arity context (path : path_type) shown expected =
             | _ -> ())
           written expected
 
-and elaborate_path_type context (path : path_type) : Types.ty =
+and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
   let shown = show_path path.path in
   match find_target context path.path.last with
   | Some (Type_parameter parameter) ->
@@ -293,7 +297,7 @@ and elaborate_path_type context (path : path_type) : Types.ty =
   | Some (Unknown report) -> Types.Error report
   | _ -> bug "`%s` is not resolved as a type" shown
 
-and elaborate_trait_reference ?(capability = false) context (path : path_type) :
+and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_type) :
     (Types.trait_reference, Diagnostic.reported) Stdlib.result =
   let shown = show_path path.path in
   let trait_reference_of trait : (Types.trait_reference, Diagnostic.reported) Stdlib.result =
@@ -302,7 +306,7 @@ and elaborate_trait_reference ?(capability = false) context (path : path_type) :
       List.sort compare
         (List.filter_map
            (function
-             | Constraint (name, written) -> Some (name.text, elaborate_type context written)
+             | Syntax.Constraint (name, written) -> Some (name.text, elaborate_type context written)
              | Type_argument _ | Count _ | Count_name _ -> None)
            path.arguments)
     in
@@ -325,7 +329,7 @@ and elaborate_trait_reference ?(capability = false) context (path : path_type) :
 and elaborate_trait_bounds context paths =
   List.filter_map (fun path -> Result.to_option (elaborate_trait_reference context path)) paths
 
-and elaborate_capability_path context (path : path_type) : Types.capability list =
+and elaborate_capability_path context (path : Syntax.path_type) : Types.capability list =
   let shown = show_path path.path in
   match find_target context path.path.last with
   | Some (Capability_parameter parameter) -> [ Types.Capability_parameter parameter ]
@@ -343,7 +347,7 @@ and elaborate_capability_path context (path : path_type) : Types.capability list
   | Some (Unknown _) -> []
   | _ -> bug "`%s` is not resolved as a capability" shown
 
-and find_capability_projection context base traits (key : name) =
+and find_capability_projection context base traits (key : Syntax.name) =
   List.find_map
     (fun (bound : Types.trait_reference) ->
       Option.map
@@ -356,7 +360,7 @@ and find_capability_projection context base traits (key : name) =
         (find_declaring_trait ~capability:true context bound.trait key.text))
     traits
 
-and elaborate_capability context (written : capability_reference) : Types.capability list =
+and elaborate_capability context (written : Syntax.capability_reference) : Types.capability list =
   match written.kind with
   | Capability_path path -> elaborate_capability_path context path
   | Self_capabilities key -> (
@@ -396,13 +400,16 @@ and elaborate_capability context (written : capability_reference) : Types.capabi
 and elaborate_capabilities context written =
   Types.make_capability_set (List.concat_map (elaborate_capability context) written)
 
-and elaborate_mode = function None -> Types.Read | Some Mut -> Types.Mut | Some Own -> Types.Own
+and elaborate_mode = function
+  | None -> Types.Read
+  | Some Syntax.Mut -> Types.Mut
+  | Some Own -> Types.Own
 
-and elaborate_function_type context (written : function_type) : Types.function_type =
+and elaborate_function_type context (written : Syntax.function_type) : Types.function_type =
   {
     inputs =
       List.map
-        (fun (input : function_input) ->
+        (fun (input : Syntax.function_input) ->
           (elaborate_mode input.mode, elaborate_type context input.type_))
         written.inputs;
     output =
@@ -416,11 +423,11 @@ and elaborate_function_type context (written : function_type) : Types.function_t
 and elaborate_uses context clauses =
   elaborate_capabilities context
     (List.concat_map
-       (fun (clause : clause) -> match clause.kind with Uses written -> written | _ -> [])
+       (fun (clause : Syntax.clause) -> match clause.kind with Uses written -> written | _ -> [])
        clauses)
 
 and elaborate_costs context clauses =
-  let counted (path : path_type) (method_ : name option) : Types.resource option =
+  let counted (path : Syntax.path_type) (method_ : Syntax.name option) : Types.resource option =
     let shown = show_path path.path in
     match find_target context path.path.last with
     | Some (Definition (Capability, capability)) -> (
@@ -432,8 +439,10 @@ and elaborate_costs context clauses =
         | _ ->
             Some
               (Calls
-                 { capability; method_ = Option.map (fun (method_ : name) -> method_.text) method_ })
-        )
+                 {
+                   capability;
+                   method_ = Option.map (fun (method_ : Syntax.name) -> method_.text) method_;
+                 }))
     | Some (Unknown _) -> None
     | _ ->
         report context Not_a_capability context.spans.(path.id)
@@ -441,7 +450,7 @@ and elaborate_costs context clauses =
         None
   in
   List.filter_map
-    (fun (clause : clause) ->
+    (fun (clause : Syntax.clause) ->
       match clause.kind with
       | Cost cost ->
           let resource : Types.resource option =
@@ -460,7 +469,7 @@ and elaborate_costs context clauses =
                      name.text);
                 None
           in
-          let constant (value : expression) =
+          let constant (value : Syntax.expression) =
             match value.kind with Integer value -> Some value | _ -> None
           in
           let bound : Types.cost_bound =
@@ -476,11 +485,12 @@ and elaborate_costs context clauses =
       | _ -> None)
     clauses
 
-let elaborate_generics context owner (written : generic_parameter list) : Types.generic list =
-  let parameter (name : name) : Types.parameter = { owner; name = name.text } in
+let elaborate_generics context owner (written : Syntax.generic_parameter list) : Types.generic list
+    =
+  let parameter (name : Syntax.name) : Types.parameter = { owner; name = name.text } in
   let declared =
     List.filter_map
-      (fun (generic : generic_parameter) ->
+      (fun (generic : Syntax.generic_parameter) ->
         match generic.kind with
         | Type_parameter (name, bounds) -> Some (parameter name, `Type bounds)
         | Value_parameter (name, type_) -> Some (parameter name, `Value type_)
@@ -502,13 +512,14 @@ let elaborate_generics context owner (written : generic_parameter list) : Types.
 let mentions_specification_only_type type_ =
   Option.is_some (Types.find_specification_only_type type_)
 
-let terminates (clauses : clause list) =
+let terminates (clauses : Syntax.clause list) =
   List.exists
-    (fun (clause : clause) ->
+    (fun (clause : Syntax.clause) ->
       match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
     clauses
 
-let elaborate_signature context ~owner ~head ~self_type (written : signature) : Types.signature =
+let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signature) :
+    Types.signature =
   let own = elaborate_generics context owner written.generics in
   let generics_ = head @ own in
   let receiver =
@@ -522,7 +533,7 @@ let elaborate_signature context ~owner ~head ~self_type (written : signature) : 
   in
   let parameters =
     List.filter_map
-      (fun (parameter : parameter) ->
+      (fun (parameter : Syntax.parameter) ->
         match parameter.kind with
         | Named_parameter { name; mode; type_; default } ->
             Some
@@ -566,7 +577,7 @@ let elaborate_signature context ~owner ~head ~self_type (written : signature) : 
         parameters;
   }
 
-let elaborate_type_head context owner (head : type_head) =
+let elaborate_type_head context owner (head : Syntax.type_head) =
   let generics = elaborate_generics context owner head.generics in
   match find_target context head.path.last with
   | Some (Definition (Type, type_path)) ->
@@ -597,12 +608,12 @@ let elaborate_type_head context owner (head : type_head) =
 
 let make_self_parameter trait : Types.parameter = { owner = trait; name = "Self" }
 
-let elaborate_fields context (written : field list) =
+let elaborate_fields context (written : Syntax.field list) =
   List.stable_sort
     (fun (left : Types.field) (right : Types.field) ->
       String.compare left.field_name right.field_name)
     (List.filter_map
-       (fun (field : field) ->
+       (fun (field : Syntax.field) ->
          match field.kind with
          | Field_declaration { name; type_; default } ->
              let field_type = elaborate_type context type_ in
@@ -625,7 +636,7 @@ let elaborate_fields context (written : field list) =
          | Field_error -> None)
        written)
 
-let elaborate_container (context : t) (path : Path.t) (definition : definition) :
+let elaborate_container (context : t) (path : Path.t) (definition : Syntax.definition) :
     (Environment.container, Diagnostic.reported) Stdlib.result * t =
   match definition.kind with
   | Trait { generics; requires; members; _ } ->
@@ -649,7 +660,7 @@ let elaborate_container (context : t) (path : Path.t) (definition : definition) 
       let requires = elaborate_trait_bounds context requires in
       let associated_types =
         List.filter_map
-          (fun (line : trait_member node) ->
+          (fun (line : Syntax.trait_member Syntax.node) ->
             match line.kind with
             | Associated_type (name, bounds) ->
                 Some
@@ -662,19 +673,19 @@ let elaborate_container (context : t) (path : Path.t) (definition : definition) 
       in
       let associated_capabilities =
         List.filter_map
-          (fun (line : trait_member node) ->
+          (fun (line : Syntax.trait_member Syntax.node) ->
             match line.kind with Associated_capability name -> Some name.text | _ -> None)
           members
       in
       let laws =
         List.filter_map
-          (fun (line : trait_member node) ->
+          (fun (line : Syntax.trait_member Syntax.node) ->
             match line.kind with
             | Law law ->
                 Some
                   ( law.name.text,
                     List.filter_map
-                      (fun (parameter : parameter) ->
+                      (fun (parameter : Syntax.parameter) ->
                         match parameter.kind with
                         | Named_parameter { name; type_; _ } ->
                             Some (name.text, elaborate_type context type_)
@@ -694,7 +705,7 @@ let elaborate_container (context : t) (path : Path.t) (definition : definition) 
           let associated =
             List.sort compare
               (List.filter_map
-                 (fun (line : impl_member node) ->
+                 (fun (line : Syntax.impl_member Syntax.node) ->
                    match line.kind with
                    | Associated_definition (name, written) ->
                        Some
@@ -714,7 +725,7 @@ let elaborate_container (context : t) (path : Path.t) (definition : definition) 
           in
           let capability_sets =
             List.fold_left
-              (fun sets (line : impl_member node) ->
+              (fun sets (line : Syntax.impl_member Syntax.node) ->
                 match line.kind with
                 | Capability_definition (name, written) ->
                     let set =
@@ -783,12 +794,12 @@ let elaborate_header (lookups : Lookups.t) (key : Names.key) =
     | Ok container, context ->
         Ok
           {
-            container;
+            Environment.container;
             container_scope = make_scope context;
             container_named = List.rev !(context.named);
           }
 
-let make_elaborated_interface context interface : elaborated_interface =
+let make_elaborated_interface context interface : Environment.elaborated_interface =
   {
     interface;
     diagnostics = List.rev !(context.diagnostics);
@@ -807,12 +818,13 @@ let list_methods (lookups : Lookups.t) key =
       | _ -> None)
     (lookups.names.contained key)
 
-let make_container_interface lookups key (header : header) : elaborated_interface =
+let make_container_interface lookups key (header : Environment.header) :
+    Environment.elaborated_interface =
   let methods = list_methods lookups key in
   let interface =
     match header.container with
     | Trait_parts { trait_generics; requires; associated_types; associated_capabilities; laws } ->
-        Trait_interface
+        Environment.Trait_interface
           {
             trait_generics;
             requires;
@@ -850,8 +862,8 @@ let make_container_interface lookups key (header : header) : elaborated_interfac
   in
   { interface; diagnostics = []; named = header.container_named; scope = header.container_scope }
 
-let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : definition)
-    (header : header) =
+let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : Syntax.definition)
+    (header : Environment.header) =
   let context = create lookups resolved ~spans header.container_scope in
   match definition.kind with
   | Function { signature; _ } | Method_declaration signature ->
@@ -934,7 +946,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Names.key) =
                 | Variants variants ->
                     Types.Sum
                       (List.map
-                         (fun (variant : variant) ->
+                         (fun (variant : Syntax.variant) ->
                            {
                              Types.variant_name = variant.name.text;
                              fields = Option.map (elaborate_fields context) variant.fields;
@@ -945,11 +957,11 @@ let elaborate_definition (lookups : Lookups.t) (key : Names.key) =
               in
               let derives =
                 List.concat_map
-                  (fun (clause : type_clause) ->
+                  (fun (clause : Syntax.type_clause) ->
                     match clause.kind with
                     | Derives traits ->
                         List.filter_map
-                          (fun (trait : path_type) ->
+                          (fun (trait : Syntax.path_type) ->
                             match find_target context trait.path.last with
                             | Some (Definition (_, trait)) -> Some trait
                             | _ -> None)
@@ -974,7 +986,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Names.key) =
               make_elaborated_interface context
                 (Test_interface (elaborate_capabilities context uses))
           | Theorem { generics; parameters; clauses; _ } ->
-              let signature : signature =
+              let signature : Syntax.signature =
                 {
                   name = Plain_name { text = ""; id = definition.id };
                   generics;

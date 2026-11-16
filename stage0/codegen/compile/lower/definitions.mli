@@ -1,5 +1,3 @@
-module Names = Resolve.Names
-
 val bug : ('a, unit, string, 'b) format4 -> 'a
 
 type context = {
@@ -30,7 +28,7 @@ type code = {
 }
 
 val unwritten : definition:Path.t -> substitution:Types.substitution -> result:Types.result -> code
-val read_written : context -> Names.key -> written
+val read_written : context -> Resolve.Names.key -> written
 val bind : Types.generic list -> Ground.argument list -> Types.substitution
 val impl_interface : context -> Path.t -> Types.impl_interface
 val signature_of : context -> Path.t -> Types.signature

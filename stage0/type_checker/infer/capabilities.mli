@@ -1,7 +1,3 @@
-module Names = Resolve.Names
-module Environment = Interface.Environment
-module Impls = Interface.Impls
-
 type checking = {
   state : State.state;
   mutable provides : (Types.capability_set * Core.implementation list * Core.block) list;
@@ -15,4 +11,4 @@ type scope = {
   implemented_capability : Types.capability option;
 }
 
-val check : State.state -> State.Environment.elaborated_interface -> Core.t -> unit
+val check : State.state -> Interface.Environment.elaborated_interface -> Core.t -> unit

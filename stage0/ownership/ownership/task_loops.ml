@@ -1,5 +1,3 @@
-open Context
-
 let collection_type (body : Mir.Graph.body) ~(inside : Mir.Graph.block) (element : Mir.local) =
   List.find_map
     (fun (statement : Mir.Graph.statement) ->
@@ -31,7 +29,7 @@ let check context (mir : Mir.Graph.t) =
                   match collection_type body ~inside element with
                   | Some collection when Place.is_storage_type collection -> ()
                   | collection ->
-                      report context Data_race (span context origin)
+                      Context.report context Data_race (Context.span context origin)
                         (Printf.sprintf
                            "Data race: the iterations of a `%s for` run at the same time, and each \
                             is lent an element of %s to mutate. Only a `List`, a `Slice`, or an \
@@ -44,9 +42,9 @@ let check context (mir : Mir.Graph.t) =
                            | None -> "the collection")))
               | _ -> ());
               match (schedule, iteration) with
-              | Concurrent_loop, Pull _ when is_view context body.locals.(part).type_ ->
-                  report context Task_outlives_view
-                    (span context block.terminator_origin)
+              | Concurrent_loop, Pull _ when Context.is_view context body.locals.(part).type_ ->
+                  Context.report context Task_outlives_view
+                    (Context.span context block.terminator_origin)
                     (Printf.sprintf
                        "Each iteration of a `concurrent for` runs as a task that outlives the pull \
                         that started it. The element type `%s` is a view, and the next pull could \

@@ -1,8 +1,3 @@
-module Names = Resolve.Names
-module Environment = Interface.Environment
-module Impls = Interface.Impls
-module Elaborator = Interface.Elaborator
-
 val string_literal :
   State.state ->
   State.env ->

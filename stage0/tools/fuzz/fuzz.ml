@@ -1,5 +1,3 @@
-open Token
-
 let failures = ref 0
 
 let fail format =
@@ -38,14 +36,14 @@ let rec check_tokens text ~start ~stop (tokens : Token.t array) =
           check_spans ~start:token.span.start ~stop:token.span.stop
             (literal.first.span
             :: List.concat_map
-                 (fun ((interpolation : interpolation), (text : text)) ->
+                 (fun ((interpolation : Token.interpolation), (text : Token.text)) ->
                    [ interpolation.span; text.span ])
                  (Array.to_list literal.rest));
           Array.iter
-            (fun (interpolation : interpolation) ->
+            (fun (interpolation : Token.interpolation) ->
               check_tokens text ~start:interpolation.span.start ~stop:interpolation.span.stop
                 interpolation.tokens)
-            (interpolations literal)
+            (Token.interpolations literal)
       | _ -> ())
     tokens;
   if !stack <> [] then fail "unbalanced brackets in %s" quoted
@@ -162,8 +160,8 @@ let check_parsers_agree text =
         match token.kind with
         | String literal ->
             List.map
-              (fun (inner : interpolation) -> inner.span)
-              (Array.to_list (interpolations literal))
+              (fun (inner : Token.interpolation) -> inner.span)
+              (Array.to_list (Token.interpolations literal))
         | _ -> [])
   in
   let inside_interpolation (span : Source.span) =
@@ -473,7 +471,7 @@ let round_trip random =
   let pick array = array.(Random.State.int random (Array.length array)) in
   let names =
     [|
-      ("count", Lower "count");
+      ("count", Token.Lower "count");
       ("user_name", Lower "user_name");
       ("Point", Upper "Point");
       ("O", Upper "O");
@@ -481,13 +479,15 @@ let round_trip random =
   in
   let others =
     Array.of_list
-      (List.map (fun (spelling, keyword) -> (spelling, Keyword keyword)) Token.keywords
-      @ List.map (fun (spelling, reserved) -> (spelling, Reserved reserved)) Token.reserved_words
+      (List.map (fun (spelling, keyword) -> (spelling, Token.Keyword keyword)) Token.keywords
+      @ List.map
+          (fun (spelling, reserved) -> (spelling, Token.Reserved reserved))
+          Token.reserved_words
       @ List.filter_map
           (fun (spelling, punctuation) ->
             match punctuation with
-            | Open _ | Close _ -> None
-            | _ -> Some (spelling, Punctuation punctuation))
+            | Token.Open _ | Close _ -> None
+            | _ -> Some (spelling, Token.Punctuation punctuation))
           Token.punctuation)
   in
   let items =
@@ -506,7 +506,7 @@ let round_trip random =
   let kinds =
     Array.to_list tokens
     |> List.map (fun (token : Token.t) -> token.kind)
-    |> List.filter (fun kind -> kind <> Newline && kind <> End_of_file)
+    |> List.filter (fun kind -> kind <> Token.Newline && kind <> End_of_file)
   in
   if kinds <> List.map snd items then
     fail "the tokens of %s do not round-trip" (Diagnostic.quote text)

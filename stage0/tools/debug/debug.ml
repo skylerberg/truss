@@ -1,11 +1,9 @@
-open Token
-
 let float_to_string significand exponent =
   Printf.sprintf "%se%s" (Z.to_string significand) (Z.to_string exponent)
 
 let rec describe kind =
   match kind with
-  | Upper name -> Printf.sprintf "Upper %s" name
+  | Token.Upper name -> Printf.sprintf "Upper %s" name
   | Lower name -> Printf.sprintf "Lower %s" name
   | Underscore -> "_"
   | Keyword keyword -> Printf.sprintf "Keyword %s" (Token.keyword_spelling keyword)

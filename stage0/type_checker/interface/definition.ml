@@ -1,13 +1,10 @@
-open Syntax
-open Environment
-
 let read_interface (lookups : Lookups.t) path =
   Option.map (fun key -> (lookups.elaborated_interface key).interface) (lookups.names.key path)
 
 let list_declared_fields (lookups : Lookups.t) path =
-  let list_names (written : field list) =
+  let list_names (written : Syntax.field list) =
     List.filter_map
-      (fun (field : field) ->
+      (fun (field : Syntax.field) ->
         match field.kind with
         | Field_declaration { name; _ } -> Some name.text
         | Field_error -> None)
@@ -18,7 +15,7 @@ let list_declared_fields (lookups : Lookups.t) path =
       [ (None, list_names written) ]
   | Some { kind = Type_definition { body = Variants variants; _ }; _ } ->
       List.map
-        (fun (variant : variant) ->
+        (fun (variant : Syntax.variant) ->
           (Some variant.name.text, list_names (Option.value ~default:[] variant.fields)))
         variants
   | _ -> []
@@ -96,7 +93,8 @@ let read_method_signature lookups ~owner (method_ : Types.trait_method) =
   | None -> Compiler_bug.bug ~stage:"Interface" "the method `%s` has no signature" (Path.show path)
 
 let is_specification = function
-  | Function_interface signature | Theorem_interface signature -> signature.specification_only
+  | Environment.Function_interface signature | Theorem_interface signature ->
+      signature.specification_only
   | Law_proof_interface _ -> true
   | Type_interface _ | Trait_interface _ | Impl_interface _ | Constant_interface _
   | Test_interface _ | Error_interface _ ->

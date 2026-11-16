@@ -1,5 +1,4 @@
 module Lookups = Lookups
-open Syntax
 module Names = Resolve.Names
 module Properties = Interface.Properties
 
@@ -12,7 +11,7 @@ let read_definition (lookups : Lookups.t) (declaration : Names.declaration) =
   let key = Names.key_of declaration in
   (lookups.interface.names.definition key, lookups.interface.names.spans key)
 
-let header_span (spans : Source.Definition_span.t array) (definition : definition) =
+let header_span (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
   match definition.kind with
   | Impl { trait_; _ } -> spans.(trait_.id)
   | Type_definition { name; _ } -> spans.(name.id)
@@ -25,7 +24,7 @@ let outer_packages (impl : Types.impl_interface) =
       (function Types.Type (Types.Named { path; _ }) -> Some (Path.package path) | _ -> None)
       impl.implements.trait_arguments
 
-let check_location (declaration : Names.declaration) spans (definition : definition)
+let check_location (declaration : Names.declaration) spans (definition : Syntax.definition)
     (impl : Types.impl_interface) =
   let key = Names.key_of declaration in
   let package = declaration.module_.package in
@@ -49,9 +48,9 @@ let check_sealed (lookups : Lookups.t) (declaration : Names.declaration) =
   with
   | Some ((trait, type_), _), (definition, spans) -> (
       let implementors =
-        if Well_known.is Signed_integer trait then Some Intrinsic.[ Int8; Int16; Int32; Int64 ]
+        if Well_known.is Signed_integer trait then Some [ Intrinsic.Int8; Int16; Int32; Int64 ]
         else if Well_known.is Unsigned_integer trait then
-          Some Intrinsic.[ UInt8; UInt16; UInt32; UInt64 ]
+          Some [ Intrinsic.UInt8; UInt16; UInt32; UInt64 ]
         else if Well_known.is Fixed_width_integer trait then
           Some
             (List.filter
@@ -119,7 +118,7 @@ let overlap (first : Types.impl_interface) (second : Types.impl_interface) =
   && List.for_all2 argument first.implements.trait_arguments second.implements.trait_arguments
 
 let check_method_names (lookups : Lookups.t) (declaration : Names.declaration) spans
-    (definition : definition) (impl : Types.impl_interface) =
+    (definition : Syntax.definition) (impl : Types.impl_interface) =
   match
     ( impl.for_type,
       Interface.Definition.read_trait_interface lookups.interface impl.implements.trait )
@@ -289,7 +288,7 @@ let not_strictly_positive_message =
    function with a `time` clause might not terminate. Remove the `time` clause from the function \
    type, or pass the function the fields that it needs instead of the whole value."
 
-let field_span (spans : Source.Definition_span.t array) (body : type_body)
+let field_span (spans : Source.Definition_span.t array) (body : Syntax.type_body)
     ((variant : Types.variant option), (field : Types.field)) =
   let among (fields : Syntax.field list) =
     List.find_map
@@ -310,7 +309,7 @@ let field_span (spans : Source.Definition_span.t array) (body : type_body)
   | _ -> None
 
 let check_recursion lookups ~contained (declaration : Names.declaration) spans
-    (definition : definition) =
+    (definition : Syntax.definition) =
   match definition.kind with
   | Type_definition _ when grows lookups declaration.path ->
       [
@@ -332,9 +331,9 @@ let check_recursion lookups ~contained (declaration : Names.declaration) spans
               match (body, variant) with
               | Variants variants, Some (variant : Types.variant) ->
                   Option.map
-                    (fun (written : variant) -> spans.(written.name.id))
+                    (fun (written : Syntax.variant) -> spans.(written.name.id))
                     (List.find_opt
-                       (fun (written : variant) -> written.name.text = variant.variant_name)
+                       (fun (written : Syntax.variant) -> written.name.text = variant.variant_name)
                        variants)
               | _ -> None
             in
@@ -375,14 +374,14 @@ let check_recursion lookups ~contained (declaration : Names.declaration) spans
   | _ -> []
 
 let check_associated_types (lookups : Lookups.t) ~contained (declaration : Names.declaration) spans
-    (definition : definition) (impl : Types.impl_interface) =
+    (definition : Syntax.definition) (impl : Types.impl_interface) =
   let key = Names.key_of declaration in
   let bounds = Types.list_bounds impl.impl_generics in
   let written name =
     match definition.kind with
     | Impl { members; _ } ->
         List.find_map
-          (fun (member : impl_member node) ->
+          (fun (member : Syntax.impl_member Syntax.node) ->
             match member.kind with
             | Associated_definition (written, _) when written.text = name -> Some spans.(member.id)
             | _ -> None)
@@ -556,9 +555,9 @@ let check_overlaps (lookups : Lookups.t) (declaration : Names.declaration) spans
         (earlier @ dependencies)
   | _ -> []
 
-let check_impl lookups ~contained (declaration : Names.declaration) =
+let check_impl (lookups : Lookups.t) ~contained (declaration : Names.declaration) =
   match
-    ( Interface.Definition.read_impl_interface lookups.Lookups.interface declaration.path,
+    ( Interface.Definition.read_impl_interface lookups.interface declaration.path,
       read_definition lookups declaration )
   with
   | Some impl, (definition, spans) ->

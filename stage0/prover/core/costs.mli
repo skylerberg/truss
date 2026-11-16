@@ -1,5 +1,3 @@
-module Symbol = Logic.Symbol
-
 val zero : Logic.term
 
 type target = Through of Logic.term | Capability of Path.t | Capability_method of Path.t * string

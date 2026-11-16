@@ -1,13 +1,9 @@
-open C_runtime
-open C_types
-open C_values
-
 let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * Lowered.ty) list) =
   let argument position = fst (List.nth arguments position) in
-  let scalar position = scalar_of context (snd (List.nth arguments position)) in
-  let width position = bit_width (scalar position) in
+  let scalar position = C_values.scalar_of context (snd (List.nth arguments position)) in
+  let width position = C_values.bit_width (scalar position) in
   let unsigned position =
-    Printf.sprintf "((%s)%s)" (unsigned_of context (scalar position)) (argument position)
+    Printf.sprintf "((%s)%s)" (C_values.unsigned_of context (scalar position)) (argument position)
   in
   let all = String.concat ", " (List.map fst arguments) in
   let float_builtin name = if scalar 0 = Float32 then name ^ "f" else name in
@@ -17,7 +13,7 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
   | Free -> "t_runtime_free(" ^ all ^ ")"
   | Copy_bytes -> "__builtin_memcpy(" ^ all ^ ")"
   | Move_bytes -> "__builtin_memmove(" ^ all ^ ")"
-  | Compare_bytes -> use_helper context "t_compare_bytes" ^ "(" ^ all ^ ")"
+  | Compare_bytes -> C_types.use_helper context "t_compare_bytes" ^ "(" ^ all ^ ")"
   | Add_overflow -> "((uint8_t)__builtin_add_overflow(" ^ all ^ "))"
   | Subtract_overflow -> "((uint8_t)__builtin_sub_overflow(" ^ all ^ "))"
   | Multiply_overflow -> "((uint8_t)__builtin_mul_overflow(" ^ all ^ "))"
@@ -30,20 +26,20 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
         (width 0) (unsigned 0)
   | Count_ones -> Printf.sprintf "__builtin_popcountll((unsigned long long)%s)" (unsigned 0)
   | Swap_bytes -> (
-      let c_type = scalar_c context (scalar 0) in
+      let c_type = C_types.scalar_c context (scalar 0) in
       match width 0 with
       | 8 -> argument 0
       | width -> Printf.sprintf "((%s)__builtin_bswap%d(%s))" c_type width (unsigned 0))
   | Rotate_left | Rotate_right ->
-      let c_type = scalar_c context (scalar 0) in
+      let c_type = C_types.scalar_c context (scalar 0) in
       let mask = width 0 - 1 in
       let first, second = if intrinsic = Rotate_left then ("<<", ">>") else (">>", "<<") in
       Printf.sprintf "((%s)((%s %s (%s & %d)) | (%s %s ((-%s) & %d))))" c_type (unsigned 0) first
         (argument 1) mask (unsigned 0) second (argument 1) mask
   | Multiply_high ->
-      let c_type = scalar_c context (scalar 0) in
+      let c_type = C_types.scalar_c context (scalar 0) in
       let width = width 0 in
-      let signed = match scalar 0 with Integer integer -> signed integer | _ -> false in
+      let signed = match scalar 0 with Integer integer -> C_runtime.signed integer | _ -> false in
       let wide =
         if width = 64 then if signed then "__int128" else "unsigned __int128"
         else if signed then "int64_t"
@@ -59,11 +55,13 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
   | Round_even -> Printf.sprintf "%s(%s)" (float_builtin "__builtin_roundeven") all
   | Float_bits ->
       Printf.sprintf "%s(%s)"
-        (use_helper context (if scalar 0 = Float32 then "t_float32_bits" else "t_float64_bits"))
+        (C_types.use_helper context
+           (if scalar 0 = Float32 then "t_float32_bits" else "t_float64_bits"))
         all
   | Float_from_bits ->
       Printf.sprintf "%s(%s)"
-        (use_helper context (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
+        (C_types.use_helper context
+           (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
   | Run_test -> "t_runtime_run_test(" ^ all ^ ")"
   | Coroutine_start ->
@@ -90,13 +88,14 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
         | Shared_lock -> ("t_runtime_shared_lock", "void ", "void *value")
         | _ -> ("t_runtime_shared_unlock", "void ", "void *value")
       in
-      declare_prototype context symbol (Printf.sprintf "%s%s(%s);\n" result symbol parameters);
+      C_values.declare_prototype context symbol
+        (Printf.sprintf "%s%s(%s);\n" result symbol parameters);
       symbol ^ "(" ^ all ^ ")"
   | (Blocking_begin | Blocking_end) as blocking ->
       let symbol =
         if blocking = Blocking_begin then "t_runtime_blocking_begin" else "t_runtime_blocking_end"
       in
-      declare_prototype context symbol (Printf.sprintf "void %s(void);\n" symbol);
+      C_values.declare_prototype context symbol (Printf.sprintf "void %s(void);\n" symbol);
       symbol ^ "()"
   | Report_tests_to -> "t_runtime_report_tests_to(" ^ all ^ ")"
   | ( Lend_begin | Lend_called | Lend_release | Lend_transfer | Lend_allocate | Lend_defer_drop
@@ -111,10 +110,10 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
         | Lend_defer_drop -> "_defer_drop"
         | _ -> "_defer_write_back"
       in
-      use_helper context "t_lend" ^ name ^ "(" ^ all ^ ")"
+      C_types.use_helper context "t_lend" ^ name ^ "(" ^ all ^ ")"
   | Live_blocks -> "t_runtime_live_blocks()"
   | Environment ->
-      declare_prototype context "environ" "extern char **environ;\n";
+      C_values.declare_prototype context "environ" "extern char **environ;\n";
       "((void *)environ)"
   | Terminated_length ->
       Printf.sprintf "((uint64_t)__builtin_strlen((const char *)%s))" (argument 0)
@@ -138,7 +137,7 @@ let intrinsic_c context (intrinsic : Lowered.intrinsic) (arguments : (string * L
         (argument 1)
 
 let call_c context fc (target : Lowered.target) arguments =
-  let arguments = List.filter_map (operand_c context fc) arguments in
+  let arguments = List.filter_map (C_values.operand_c context fc) arguments in
   let texts = String.concat ", " (List.map fst arguments) in
   (match target with
   | Direct { signature; _ }
@@ -148,7 +147,7 @@ let call_c context fc (target : Lowered.target) arguments =
       let leading = match target with Direct _ -> 0 | _ -> 1 in
       let arity = List.length signature.parameters in
       if leading + List.length arguments <> arity then
-        bug "a call that passes %d arguments to a target that takes %d"
+        C_runtime.bug "a call that passes %d arguments to a target that takes %d"
           (leading + List.length arguments)
           arity
   | Intrinsic _ | Foreign _ -> ());
@@ -156,65 +155,67 @@ let call_c context fc (target : Lowered.target) arguments =
   | Direct { function_; signature } ->
       (match function_ with
       | Instance key ->
-          refer context key;
+          C_types.refer context key;
           if not (List.exists (Instance.equal key) context.called) then
             context.called <- key :: context.called
       | Nested _ -> ());
-      let symbol = function_ref_symbol fc function_ in
-      let linkage = match function_ with Nested _ -> Internal | Instance _ -> External in
-      declare_prototype context symbol
-        (prototype context fc.symbol symbol ~linkage signature ^ ";\n");
+      let symbol = C_values.function_ref_symbol fc function_ in
+      let linkage =
+        match function_ with Nested _ -> C_runtime.Internal | Instance _ -> External
+      in
+      C_values.declare_prototype context symbol
+        (C_values.prototype context fc.symbol symbol ~linkage signature ^ ";\n");
       Printf.sprintf "%s(%s)" symbol texts
   | Indirect { value; _ } ->
       let value =
-        match operand_c context fc value with
+        match C_values.operand_c context fc value with
         | Some (text, _) -> text
-        | None -> bug "a function value of zero size"
+        | None -> C_runtime.bug "a function value of zero size"
       in
       Printf.sprintf "%s.f_code(%s)" value
         (String.concat ", " ((value ^ ".f_environment") :: List.map fst arguments))
   | Intrinsic intrinsic -> intrinsic_c context intrinsic arguments
   | Foreign declaration -> (
-      declare_prototype context declaration.symbol (Libc.prototype declaration);
+      C_values.declare_prototype context declaration.symbol (Libc.prototype declaration);
       let cast_arguments =
         try
           List.map2
             (fun c_type (text, _) -> Printf.sprintf "(%s)(%s)" (Libc.show_c_type c_type) text)
             declaration.takes arguments
         with Invalid_argument _ ->
-          bug "a call of %s with an argument of zero size" declaration.symbol
+          C_runtime.bug "a call of %s with an argument of zero size" declaration.symbol
       in
       let called = Printf.sprintf "%s(%s)" declaration.symbol (String.concat ", " cast_arguments) in
       match declaration.returns with Pointer _ -> "((void *)" ^ called ^ ")" | _ -> called)
   | Table_call { table; value; slot; signature } ->
       let table =
-        match operand_c context fc table with
+        match C_values.operand_c context fc table with
         | Some (text, _) -> text
-        | None -> bug "a table of zero size"
+        | None -> C_runtime.bug "a table of zero size"
       in
       let texts =
-        match operand_c context fc value with
+        match C_values.operand_c context fc value with
         | Some (value, _) -> String.concat ", " (value :: List.map fst arguments)
-        | None -> bug "an any value of zero size"
+        | None -> C_runtime.bug "an any value of zero size"
       in
       let result =
-        match signature.result with None -> "void" | Some ty -> c_ty context fc.symbol ty
+        match signature.result with None -> "void" | Some ty -> C_types.c_ty context fc.symbol ty
       in
       Printf.sprintf "((%s (*)(%s))((const void *const *)%s)[%d])(%s)" result
-        (signature_parameters context fc.symbol signature.parameters None)
+        (C_types.signature_parameters context fc.symbol signature.parameters None)
         table slot texts
   | Evidence_call { evidence; capability; slot; signature } ->
       context.calls <- (capability, slot) :: context.calls;
       let evidence =
-        match operand_c context fc evidence with
+        match C_values.operand_c context fc evidence with
         | Some (text, _) -> text
-        | None -> bug "evidence of zero size"
+        | None -> C_runtime.bug "evidence of zero size"
       in
       let result =
-        match signature.result with None -> "void" | Some ty -> c_ty context fc.symbol ty
+        match signature.result with None -> "void" | Some ty -> C_types.c_ty context fc.symbol ty
       in
       Printf.sprintf "((%s (*)(%s))((const struct t_evidence *)%s)->table[%d])(%s)" result
-        (signature_parameters context fc.symbol signature.parameters None)
+        (C_types.signature_parameters context fc.symbol signature.parameters None)
         evidence slot
         (String.concat ", " (evidence :: List.map fst arguments))
 
@@ -237,14 +238,14 @@ let statement_c context fc buffer (statement : Lowered.statement) =
   in
   match statement with
   | Assign (place, rvalue) -> (
-      match place_c context fc place with
+      match C_values.place_c context fc place with
       | None -> ()
       | Some (target, target_ty) -> (
-          match rvalue_c context fc target_ty rvalue with
+          match C_values.rvalue_c context fc target_ty rvalue with
           | None -> ()
           | Some (Expression text) -> line "%s = %s;" target text
           | Some (Allocating { block; fill; value }) ->
-              let name = key_name block in
+              let name = C_types.key_name block in
               line "{";
               line "  %s *block = t_runtime_allocate(sizeof(%s), _Alignof(%s));" name name name;
               line "  *block = %s;" fill;
@@ -255,7 +256,7 @@ let statement_c context fc buffer (statement : Lowered.statement) =
         (fun (argument : Lowered.operand) ->
           match argument with
           | (Address { place = passed; _ } | Moved_address passed) when may_alias place passed ->
-              bug "a call that writes its result to a place it is also given"
+              C_runtime.bug "a call that writes its result to a place it is also given"
           | _ -> ())
         arguments;
       line "%s;" (call_c context fc target (Address { place; writable = true } :: arguments))
@@ -263,45 +264,49 @@ let statement_c context fc buffer (statement : Lowered.statement) =
       let call = call_c context fc target arguments in
       match result with
       | Returned place -> (
-          match place_c context fc place with
+          match C_values.place_c context fc place with
           | Some (place, _) -> line "%s = %s;" place call
           | None -> line "%s;" call)
       | Discarded | Written _ -> line "%s;" call)
   | Drop place -> (
-      match place_c context fc place with
+      match C_values.place_c context fc place with
       | None -> ()
       | Some (text, Value ty) ->
-          refer context (Drop ty);
+          C_types.refer context (Drop ty);
           let symbol = Instance.symbol (Drop ty) in
-          declare_prototype context symbol
-            (prototype context fc.symbol symbol ~linkage:External (Convention.drop_signature ty)
+          C_values.declare_prototype context symbol
+            (C_values.prototype context fc.symbol symbol ~linkage:External
+               (Convention.drop_signature ty)
             ^ ";\n");
           line "%s(&%s);" symbol text
-      | Some _ -> bug "a drop of a place that is not a value")
+      | Some _ -> C_runtime.bug "a drop of a place that is not a value")
   | Echo { text; length; site } ->
       context.failures <- (Echo, site) :: context.failures;
       let operand argument =
-        match operand_c context fc argument with
+        match C_values.operand_c context fc argument with
         | Some (text, _) -> text
-        | None -> bug "an echo of nothing"
+        | None -> C_runtime.bug "an echo of nothing"
       in
-      line "t_runtime_echo(%s, %s, %s);" (operand text) (operand length) (site_c context site)
+      line "t_runtime_echo(%s, %s, %s);" (operand text) (operand length)
+        (C_values.site_c context site)
   | Free_block { place; variant } -> (
-      match place_c context fc place with
+      match C_values.place_c context fc place with
       | Some (text, Value sum) ->
-          line "t_runtime_free(%s);" (block_pointer context text sum variant)
-      | _ -> bug "a block of a place that is not a sum type")
+          line "t_runtime_free(%s);" (C_values.block_pointer context text sum variant)
+      | _ -> C_runtime.bug "a block of a place that is not a sum type")
   | Defer_free_block { lend; place; variant } -> (
-      match (operand_c context fc lend, place_c context fc place) with
+      match (C_values.operand_c context fc lend, C_values.place_c context fc place) with
       | Some (lend, _), Some (text, Value sum) ->
-          line "%s_defer_free(%s, %s);" (use_helper context "t_lend") lend
-            (block_pointer context text sum variant)
-      | _ -> bug "a block of a place that is not a sum type")
+          line "%s_defer_free(%s, %s);"
+            (C_types.use_helper context "t_lend")
+            lend
+            (C_values.block_pointer context text sum variant)
+      | _ -> C_runtime.bug "a block of a place that is not a sum type")
   | Fork { branches } ->
       let operand argument =
-        match operand_c context fc argument with
+        match C_values.operand_c context fc argument with
         | Some (text, _) -> text
-        | None -> bug "an environment of zero size"
+        | None -> C_runtime.bug "an environment of zero size"
       in
       line "{";
       line "  const struct t_branch branches[%d] = { %s };" (List.length branches)
@@ -309,19 +314,19 @@ let statement_c context fc buffer (statement : Lowered.statement) =
            (List.map
               (fun (nested, environment) ->
                 Printf.sprintf "{ &%s, (void *)%s }"
-                  (function_ref_symbol fc (Nested nested))
+                  (C_values.function_ref_symbol fc (Nested nested))
                   (operand environment))
               branches));
       line "  t_runtime_parallel(branches, %d);" (List.length branches);
       line "}"
   | Fork_range { body; environment; first; last } ->
       let operand argument =
-        match operand_c context fc argument with
+        match C_values.operand_c context fc argument with
         | Some (text, _) -> text
-        | None -> bug "an operand of zero size"
+        | None -> C_runtime.bug "an operand of zero size"
       in
       line "t_runtime_parallel_range(&%s, (void *)%s, %s, %s);"
-        (function_ref_symbol fc (Nested body))
+        (C_values.function_ref_symbol fc (Nested body))
         (operand environment) (operand first) (operand last)
 
 let unreachable_c _ = "T_UNREACHABLE();"
@@ -331,9 +336,9 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
     Printf.ksprintf (fun text -> Buffer.add_string buffer ("  " ^ text ^ "\n")) format
   in
   let operand argument =
-    match operand_c context fc argument with
+    match C_values.operand_c context fc argument with
     | Some expression -> expression
-    | None -> bug "an operand of zero size"
+    | None -> C_runtime.bug "an operand of zero size"
   in
   let default = function
     | Some block -> Printf.sprintf "goto b%d;" block
@@ -343,7 +348,7 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
   | Goto block -> line "goto b%d;" block
   | Switch { value; cases; default = otherwise } ->
       let text, ty = operand value in
-      let c_type = scalar_c context (scalar_of context ty) in
+      let c_type = C_types.scalar_c context (C_values.scalar_of context ty) in
       line "switch (%s) {" text;
       List.iter
         (fun (value, block) -> line "case (%s)%sULL: goto b%d;" c_type (Z.to_string value) block)
@@ -351,15 +356,15 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
       line "default: %s" (default otherwise);
       line "}"
   | Switch_variant { place; cases; default = otherwise } -> (
-      match place_c context fc place with
+      match C_values.place_c context fc place with
       | None -> (
           match cases with
           | (_, block) :: _ -> line "goto b%d;" block
           | [] -> line "%s" (default otherwise))
       | Some (text, Value sum) -> (
-          match Memory_layout.dispatch (layout context sum) cases with
+          match Memory_layout.dispatch (C_types.layout context sum) cases with
           | Switch { tag; cases } ->
-              line "switch (%s) {" (path_c text tag.at);
+              line "switch (%s) {" (C_values.path_c text tag.at);
               List.iter
                 (fun (value, block) -> line "case %sULL: goto b%d;" (Z.to_string value) block)
                 cases;
@@ -368,13 +373,15 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
           | Tests tests ->
               List.iter
                 (fun (discriminant, block) ->
-                  line "if (%s) goto b%d;" (discriminant_test_c context text discriminant) block)
+                  line "if (%s) goto b%d;"
+                    (C_values.discriminant_test_c context text discriminant)
+                    block)
                 tests;
               line "%s" (default otherwise))
-      | Some _ -> bug "a variant switch on a place that is not a value")
+      | Some _ -> C_runtime.bug "a variant switch on a place that is not a value")
   | Return None -> line "return;"
   | Return (Some value) -> (
-      match operand_c context fc value with
+      match C_values.operand_c context fc value with
       | None -> line "return;"
       | Some (text, _) -> line "return %s;" text)
   | Unreachable -> line "%s" (unreachable_c context)
@@ -388,6 +395,8 @@ let terminator_c context fc buffer (terminator : Lowered.terminator) =
         | Todo -> "t_runtime_todo"
       in
       let site =
-        match reported with Some reported -> fst (operand reported) | None -> site_c context site
+        match reported with
+        | Some reported -> fst (operand reported)
+        | None -> C_values.site_c context site
       in
       line "%s(%s, %s, %s);" runtime (fst (operand message)) (fst (operand length)) site

@@ -1,5 +1,3 @@
-open C_runtime
-
 type key =
   | Type of Ground.ty
   | Block of Ground.ty * string
@@ -42,7 +40,7 @@ type context = {
   mutable instances : Instance.key list;
   mutable called : Instance.key list;
   mutable calls : (Path.t * int) list;
-  mutable failures : (failure * Lowered.site) list;
+  mutable failures : (C_runtime.failure * Lowered.site) list;
 }
 
 let new_context env prefix =
@@ -100,7 +98,7 @@ let rec value_c context (ty : Ground.ty) =
       Instance.type_symbol ty
 
 and scalar_c context : Memory_layout.scalar -> string = function
-  | Integer integer -> integer_c integer
+  | Integer integer -> C_runtime.integer_c integer
   | Float32 -> "float"
   | Float64 -> "double"
   | Bool -> "uint8_t"
@@ -176,7 +174,7 @@ and define_text context key =
   match key with
   | Type ty -> (
       match (layout context ty).form with
-      | Tag_only { tag; _ } -> Typedef (integer_c tag)
+      | Tag_only { tag; _ } -> Typedef (C_runtime.integer_c tag)
       | Niche_encoded { dataful = { payload = { form = Scalar scalar; _ }; _ }; _ } ->
           Typedef (scalar_c context scalar)
       | Niche_encoded { dataful = { payload = { form = Struct fields; _ }; _ }; _ } | Struct fields
@@ -208,24 +206,24 @@ and define_text context key =
                    | Scalar scalar ->
                        Some
                          (Printf.sprintf "    %s v_%s;\n" (scalar_c context scalar) variant.name, [])
-                   | _ -> bug "a variant's payload is a struct, a pointer, or nothing")
+                   | _ -> C_runtime.bug "a variant's payload is a struct, a pointer, or nothing")
                  variants)
           in
           Struct
             {
               body =
-                Printf.sprintf "  %s tag;\n  union {\n%s  } payload;\n" (integer_c tag)
+                Printf.sprintf "  %s tag;\n  union {\n%s  } payload;\n" (C_runtime.integer_c tag)
                   (String.concat "" members);
               holds = List.concat holds;
             }
-      | Niche_encoded _ -> bug "a niche-encoded payload is a struct or a pointer"
-      | Zero_size | Scalar _ -> bug "%s needs no definition" (Ground.to_string ty))
+      | Niche_encoded _ -> C_runtime.bug "a niche-encoded payload is a struct or a pointer"
+      | Zero_size | Scalar _ -> C_runtime.bug "%s needs no definition" (Ground.to_string ty))
   | Block (ty, variant) -> (
       match (Memory_layout.block context.env ty variant).form with
       | Struct fields ->
           let body, holds = field_declarations context fields in
           Struct { body; holds }
-      | _ -> bug "the block of %s.%s has no fields" (Ground.to_string ty) variant)
+      | _ -> C_runtime.bug "the block of %s.%s has no fields" (Ground.to_string ty) variant)
   | Code function_type ->
       let signature = Convention.function_value context.env function_type in
       let result = match signature.result with None -> "void" | Some ty -> c_ty context "" ty in

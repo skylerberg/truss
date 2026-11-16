@@ -24,5 +24,4 @@ val loop :
 val outline : t -> index:int -> parts:Lowered.local list -> (unit -> unit) -> Lowered.local
 val build : t -> prototype -> instance
 val at : Lowered.local -> Lowered.place
-val ( / ) : Lowered.place -> Lowered.projection -> Lowered.place
 val constant_uint64 : int -> Lowered.operand

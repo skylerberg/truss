@@ -1,16 +1,14 @@
-open Token
-open Syntax
-
-let expression_node cursor start kind : expression =
+let expression_node cursor start kind : Syntax.expression =
   { kind; id = Cursor.allocate_id_from cursor start }
 
-let type_node cursor start kind : type_expression =
+let type_node cursor start kind : Syntax.type_expression =
   { kind; id = Cursor.allocate_id_from cursor start }
 
-let error_expression cursor start : expression = expression_node cursor start Expression_error
+let error_expression cursor start : Syntax.expression =
+  expression_node cursor start Expression_error
 
 let begins_expression = function
-  | Upper _ | Lower _ | Integer _ | Float _ | String _ -> true
+  | Token.Upper _ | Lower _ | Integer _ | Float _ | String _ -> true
   | Punctuation (Open _ | Minus | Bang | Tilde | Dot_dot | Dot_dot_equal) -> true
   | Keyword
       ( True | False | Todo | Unreachable | Break | Continue | Self_value | Self_type | Fn | If
@@ -19,11 +17,11 @@ let begins_expression = function
   | _ -> false
 
 let begins_statement = function
-  | Keyword (Let | Var | For | While | Parallel | Concurrent | Proof | Assert) -> true
+  | Token.Keyword (Let | Var | For | While | Parallel | Concurrent | Proof | Assert) -> true
   | kind -> begins_expression kind
 
 let mode cursor =
-  if Cursor.accept_keyword cursor Mut then Some Mut
+  if Cursor.accept_keyword cursor Mut then Some Syntax.Mut
   else if Cursor.accept_keyword cursor Own then Some Own
   else None
 

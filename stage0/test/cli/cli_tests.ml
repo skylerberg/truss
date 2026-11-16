@@ -1,4 +1,16 @@
-open Cli
+module Shown_path = Cli__Shown_path
+module Output = Cli__Output
+module Main = Cli__Main
+module Json = Cli__Json
+module Arguments = Cli__Arguments
+module Command_packages = Cli__Command_packages
+module Report = Cli__Report
+module Test_command = Cli__Test_command
+module Program_command = Cli__Program_command
+module Status_line = Cli__Status_line
+module Compiler = Cli__Compiler
+module Lsp_command = Cli__Lsp_command
+module Outcome = Cli__Outcome
 
 let test = Harness.test
 let fail = Harness.fail

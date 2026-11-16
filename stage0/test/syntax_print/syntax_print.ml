@@ -1,16 +1,15 @@
-open Syntax
-
 let form head parts = "(" ^ String.concat " " (List.filter (( <> ) "") (head :: parts)) ^ ")"
 let optional print = function Some value -> print value | None -> ""
 let list print values = List.map print values
 
-let path (path : path) =
-  String.concat "::" (List.map (fun (name : name) -> name.text) (path.modules @ [ path.last ]))
+let path (path : Syntax.path) =
+  String.concat "::"
+    (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
-let mode = function Mut -> "mut" | Own -> "own"
+let mode = function Syntax.Mut -> "mut" | Own -> "own"
 
 let intended_keyword = function
-  | Intended_function -> "fn"
+  | Syntax.Intended_function -> "fn"
   | Intended_constant -> "let"
   | Intended_type -> "type"
   | Intended_trait -> "trait"
@@ -18,7 +17,7 @@ let intended_keyword = function
   | Intended_theorem -> "theorem"
 
 let operation = function
-  | Arithmetic Multiply -> "*"
+  | Syntax.Arithmetic Multiply -> "*"
   | Arithmetic Divide -> "/"
   | Arithmetic Remainder -> "%"
   | Arithmetic Add -> "+"
@@ -30,7 +29,7 @@ let operation = function
   | Bitwise Bit_or -> "|"
 
 let binary = function
-  | Operation written -> operation written
+  | Syntax.Operation written -> operation written
   | Comparison Equal -> "=="
   | Comparison Not_equal -> "!="
   | Comparison Less -> "<"
@@ -41,7 +40,7 @@ let binary = function
   | Connective Or -> "||"
   | Connective Implies -> "==>"
 
-let assignment = function Assign -> "=" | Compound written -> operation written ^ "="
+let assignment = function Syntax.Assign -> "=" | Compound written -> operation written ^ "="
 
 let escape value =
   let buffer = Buffer.create (String.length value + 2) in
@@ -54,7 +53,7 @@ let escape value =
     value;
   Buffer.contents buffer
 
-let rec type_expression (type_ : type_expression) =
+let rec type_expression (type_ : Syntax.type_expression) =
   match type_.kind with
   | Path_type path_type -> path_type_text path_type
   | Self_type None -> "Self"
@@ -64,7 +63,7 @@ let rec type_expression (type_ : type_expression) =
   | Function_type function_type_ -> function_type function_type_
   | Type_error -> "error"
 
-and path_type_text (path_type : path_type) =
+and path_type_text (path_type : Syntax.path_type) =
   path path_type.path
   ^
   match path_type.arguments with
@@ -82,7 +81,7 @@ and function_type { inputs; output; clauses } =
     ([
        form ""
          (List.map
-            (fun (input : function_input) ->
+            (fun (input : Syntax.function_input) ->
               (match input.name with Some name -> name.text ^ ": " | None -> "")
               ^ (match input.mode with Some input_mode -> mode input_mode ^ " " | None -> "")
               ^ type_expression input.type_)
@@ -91,7 +90,7 @@ and function_type { inputs; output; clauses } =
     @ [ optional (fun output -> "-> " ^ type_expression output) output ]
     @ list clause clauses)
 
-and generic (parameter : generic_parameter) =
+and generic (parameter : Syntax.generic_parameter) =
   match parameter.kind with
   | Type_parameter (name, []) -> name.text
   | Type_parameter (name, bounds) ->
@@ -104,13 +103,13 @@ and generics = function
   | [] -> ""
   | parameters -> "[" ^ String.concat ", " (list generic parameters) ^ "]"
 
-and capability_reference (reference : capability_reference) =
+and capability_reference (reference : Syntax.capability_reference) =
   match reference.kind with
   | Capability_path path_type -> path_type_text path_type
   | Self_capabilities name -> "Self." ^ name.text
   | Associated_capabilities (parameter, name) -> parameter.text ^ "." ^ name.text
 
-and clause (clause : clause) =
+and clause (clause : Syntax.clause) =
   match clause.kind with
   | Uses capabilities -> form "uses" (list capability_reference capabilities)
   | Requires value -> form "requires" [ expression value ]
@@ -139,15 +138,15 @@ and cost { amortized; resource; bound } =
   in
   form "cost" [ (if amortized then "amortized" else ""); resource; bound ]
 
-and string_literal (literal : string_literal) =
+and string_literal (literal : Syntax.string_literal) =
   optional path literal.tag ^ "\"" ^ escape literal.first.value
   ^ String.concat ""
       (List.map
-         (fun (value, (text : text)) -> "${" ^ expression value ^ "}" ^ escape text.value)
+         (fun (value, (text : Syntax.text)) -> "${" ^ expression value ^ "}" ^ escape text.value)
          literal.rest)
   ^ "\""
 
-and expression (value : expression) =
+and expression (value : Syntax.expression) =
   match value.kind with
   | Integer value -> Z.to_string value
   | Float { significand; exponent } ->
@@ -214,32 +213,34 @@ and bracket_item = function
   | Item value -> expression value
   | Item_constraint (name, type_) -> name.text ^ " = " ^ type_expression type_
 
-and argument (argument : argument) =
+and argument (argument : Syntax.argument) =
   match argument.label with
   | Some label -> form (label.text ^ ":") [ expression argument.value ]
   | None -> expression argument.value
 
-and update (update : update) =
+and update (update : Syntax.update) =
   match update.kind with
   | Update { field; path; value } -> (
-      let fields = String.concat "." (List.map (fun (name : name) -> name.text) (field :: path)) in
+      let fields =
+        String.concat "." (List.map (fun (name : Syntax.name) -> name.text) (field :: path))
+      in
       match value with Some value -> form (fields ^ ":") [ expression value ] | None -> fields)
   | Update_error -> "error"
 
-and arm (arm : arm) =
+and arm (arm : Syntax.arm) =
   form "=>"
     (list pattern arm.patterns
     @ [ optional (fun guard -> form "if" [ expression guard ]) arm.guard; statement arm.body ])
 
-and block (block : block) = form "block" (list statement block.statements)
+and block (block : Syntax.block) = form "block" (list statement block.statements)
 
-and loop_clause (clause : loop_clause) =
+and loop_clause (clause : Syntax.loop_clause) =
   match clause.kind with
   | Invariant value -> form "invariant" [ expression value ]
   | Loop_decreases measures -> form "decreases" (list expression measures)
   | Loop_cost cost_ -> cost cost_
 
-and statement (statement : statement) =
+and statement (statement : Syntax.statement) =
   match statement.kind with
   | Let { is_var; pattern = bound; annotation; value; else_ } ->
       form
@@ -276,23 +277,23 @@ and statement (statement : statement) =
   | Statement_error -> "error"
 
 and constant = function
-  | Module_constant constant -> path constant
+  | Syntax.Module_constant constant -> path constant
   | Type_constant (owner, name) -> path owner ^ "." ^ name.text
 
 and literal = function
-  | Literal_integer value -> Z.to_string value
+  | Syntax.Literal_integer value -> Z.to_string value
   | Literal_true -> "true"
   | Literal_false -> "false"
   | Literal_string literal -> string_literal literal
 
-and pattern (written : pattern) =
+and pattern (written : Syntax.pattern) =
   match written.kind with
   | Wildcard -> "_"
   | Binding name -> name.text
   | Qualified_constant written -> constant written
   | Literal written -> literal written
   | Pattern_range { start; stop; inclusive } ->
-      let range_end (written : range_end) =
+      let range_end (written : Syntax.range_end) =
         match written.kind with
         | End_literal value -> literal value
         | End_constant value -> constant value
@@ -304,25 +305,25 @@ and pattern (written : pattern) =
   | Alternatives alternatives -> form "|" (list pattern alternatives)
   | Pattern_error -> "error"
 
-and pattern_field (field : pattern_field) =
+and pattern_field (field : Syntax.pattern_field) =
   match field.kind with
   | Named_field (name, inner) -> form (name.text ^ ":") [ pattern inner ]
   | Field inner -> pattern inner
   | Rest -> ".."
 
 let visibility = function
-  | Private -> ""
+  | Syntax.Private -> ""
   | Internal -> "internal"
   | Public -> "public"
   | Public_opaque -> "public opaque"
 
-let type_head (head : type_head) = path head.path ^ generics head.generics
+let type_head (head : Syntax.type_head) = path head.path ^ generics head.generics
 
 let definition_name = function
-  | Plain_name name -> name.text
+  | Syntax.Plain_name name -> name.text
   | Member_name (head, name) -> type_head head ^ "." ^ name.text
 
-let parameter (parameter : parameter) =
+let parameter (parameter : Syntax.parameter) =
   match parameter.kind with
   | Self_parameter None -> "self"
   | Self_parameter (Some written) -> mode written ^ " self"
@@ -338,7 +339,7 @@ let parameter (parameter : parameter) =
 let moded written type_ =
   (match written with Some written -> mode written ^ " " | None -> "") ^ type_expression type_
 
-let signature (signature : signature) =
+let signature (signature : Syntax.signature) =
   [
     definition_name signature.name ^ generics signature.generics;
     form "" (list parameter signature.parameters);
@@ -351,16 +352,16 @@ let signature (signature : signature) =
 
 let function_ written body = form "fn" (signature written @ [ optional block body ])
 
-let law ({ name; parameters; requires; body } : law) =
+let law ({ name; parameters; requires; body } : Syntax.law) =
   form "law"
     ([ name.text; form "" (list parameter parameters) ]
     @ list (fun value -> form "requires" [ expression value ]) requires
     @ [ block body ])
 
-let function_definition (definition : function_definition) =
+let function_definition (definition : Syntax.function_definition) =
   function_ definition.signature (Some definition.body)
 
-let field (field : field) =
+let field (field : Syntax.field) =
   match field.kind with
   | Field_declaration { name; type_; default } ->
       form (name.text ^ ":")
@@ -369,10 +370,10 @@ let field (field : field) =
 
 let fields list_ = form "" (list field list_)
 
-let members print (members : _ node list) =
-  list (fun (member : _ node) -> print member.kind) members
+let members print (members : _ Syntax.node list) =
+  list (fun (member : _ Syntax.node) -> print member.kind) members
 
-let definition ?(methods = []) (definition : definition) =
+let definition ?(methods = []) (definition : Syntax.definition) =
   let body =
     match definition.kind with
     | Function function_ -> function_definition function_
@@ -384,7 +385,7 @@ let definition ?(methods = []) (definition : definition) =
           | Variants variants ->
               form "="
                 (list
-                   (fun (variant : variant) ->
+                   (fun (variant : Syntax.variant) ->
                      let name =
                        (if variant.indirect then "indirect " else "") ^ variant.name.text
                      in
@@ -396,7 +397,7 @@ let definition ?(methods = []) (definition : definition) =
         in
         let clauses =
           list
-            (fun (clause : type_clause) ->
+            (fun (clause : Syntax.type_clause) ->
               match clause.kind with
               | Type_invariant value -> form "invariant" [ expression value ]
               | Derives traits -> form "derives" (list path_type_text traits)
@@ -414,7 +415,7 @@ let definition ?(methods = []) (definition : definition) =
            ]
           @ members
               (function
-                | Associated_type (name, []) -> form "type" [ name.text ]
+                | Syntax.Associated_type (name, []) -> form "type" [ name.text ]
                 | Associated_type (name, bounds) ->
                     form "type"
                       [ name.text ^ ": " ^ String.concat " + " (list path_type_text bounds) ]
@@ -433,7 +434,7 @@ let definition ?(methods = []) (definition : definition) =
            ]
           @ members
               (function
-                | Associated_definition (name, type_) ->
+                | Syntax.Associated_definition (name, type_) ->
                     form "type" [ name.text; "="; type_expression type_ ]
                 | Capability_definition (name, capabilities) ->
                     form "capability" (name.text :: "=" :: list capability_reference capabilities)
@@ -442,7 +443,8 @@ let definition ?(methods = []) (definition : definition) =
           @ methods)
     | Capability { name; members = capability_members } ->
         form "capability"
-          ((name.text :: members (function Capability_member_error -> "error") capability_members)
+          (name.text
+           :: members (function Syntax.Capability_member_error -> "error") capability_members
           @ methods)
     | Constant { name; type_; value } ->
         form "let" [ definition_name name; ": " ^ type_expression type_; expression value ]
@@ -465,16 +467,18 @@ let definition ?(methods = []) (definition : definition) =
   in
   match visibility definition.visibility with "" -> body | written -> form written [ body ]
 
-let definitions (top_levels : top_level list) =
+let definitions (top_levels : Syntax.top_level list) =
   List.map
-    (fun (top_level : top_level) ->
+    (fun (top_level : Syntax.top_level) ->
       definition
         ~methods:
-          (List.map (fun (method_ : definition item) -> definition method_.value) top_level.methods)
+          (List.map
+             (fun (method_ : Syntax.definition Syntax.item) -> definition method_.value)
+             top_level.methods)
         top_level.definition.value)
     top_levels
 
-let file (file : file) =
+let file (file : Syntax.file) =
   String.concat "\n"
-    (List.map (fun (item : path item) -> form "use" [ path item.value ]) file.uses
+    (List.map (fun (item : Syntax.path Syntax.item) -> form "use" [ path item.value ]) file.uses
     @ definitions file.definitions)

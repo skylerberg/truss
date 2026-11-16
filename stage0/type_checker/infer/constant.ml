@@ -1,9 +1,6 @@
-open Syntax
-open State
-
-let rec offending state (value : expression) : expression option =
+let rec offending (state : State.state) (value : Syntax.expression) : Syntax.expression option =
   let first = List.find_map (offending state) in
-  let built_in (operand : expression) =
+  let built_in (operand : Syntax.expression) =
     match state.tables.types.(operand.id) with
     | Some type_ ->
         Types.is_integer_type type_ || Types.is_float_type type_ || Types.is_builtin Bool type_
@@ -26,13 +23,13 @@ let rec offending state (value : expression) : expression option =
   | Call (_, arguments) -> (
       match state.tables.calls.(value.id) with
       | Some { callee = Constructor _; _ } ->
-          first (List.map (fun (argument : argument) -> argument.value) arguments)
+          first (List.map (fun (argument : Syntax.argument) -> argument.value) arguments)
       | _ -> Some value)
   | List items -> first items
   | Map entries -> first (List.concat_map (fun (key, item) -> [ key; item ]) entries)
   | _ -> Some value
 
-let rec check_arithmetic state (value : expression) =
+let rec check_arithmetic (state : State.state) (value : Syntax.expression) =
   let worked_out part =
     Interface.Constants.evaluate_expression state.lookups.interface ~visiting:[] state.resolved part
   in
@@ -41,26 +38,27 @@ let rec check_arithmetic state (value : expression) =
   | (Prefix _ | Binary _), Some type_ -> (
       match (Types.find_integer_range type_, worked_out value, value.kind) with
       | Some (low, high), Some constant, _ when Z.lt constant low || Z.gt constant high ->
-          report state Constant_overflow (read_span state value.id)
+          State.report state Constant_overflow (State.read_span state value.id)
             (Printf.sprintf "This is %s, which does not fit in `%s`, which holds %s to %s."
                (Z.to_string constant) (Types.show type_) (Z.to_string low) (Z.to_string high))
       | Some _, None, Binary { operator = Operation (Arithmetic (Divide | Remainder)); right; _ }
         when worked_out right = Some Z.zero ->
-          report state Constant_overflow (read_span state right.id) "This divides by zero."
+          State.report state Constant_overflow (State.read_span state right.id)
+            "This divides by zero."
       | _ -> ())
   | _ -> ());
   Syntax_walk.expression_parts ~expression:(check_arithmetic state) ~statement:ignore value
 
-let check state ~default (value : expression) =
+let check state ~default (value : Syntax.expression) =
   (match offending state value with
   | Some part ->
       if default then
-        report state Default_not_constant (read_span state part.id)
+        State.report state Default_not_constant (State.read_span state part.id)
           "A default must be a constant expression: literals, arithmetic, constants, and records, \
            variants, and collections built from them. It cannot call a function or name a \
            parameter."
       else
-        report state Not_constant (read_span state part.id)
+        State.report state Not_constant (State.read_span state part.id)
           "A constant must be a constant expression: literals, arithmetic, other constants, and \
            records, variants, and collections built from them. It cannot call a function."
   | None -> ());

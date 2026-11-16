@@ -1,27 +1,27 @@
-open Cursor
-
 type context = Code | Ordinary_string | Raw_string
 
 let remove_trivia cursor ~start ~stop ~line_break =
-  let before = spaces_before cursor start in
-  let after = skip_spaces cursor stop in
-  let code_before = not (only_spaces_before cursor start) in
-  let code_after = not (is_end_of_line cursor after) in
+  let before = Cursor.spaces_before cursor start in
+  let after = Cursor.skip_spaces cursor stop in
+  let code_before = not (Cursor.only_spaces_before cursor start) in
+  let code_after = not (Cursor.is_end_of_line cursor after) in
   match (code_before, code_after) with
   | true, true ->
-      Diagnostic.replace (span before after)
-        (if line_break then "\n" ^ indentation cursor start else " ")
-  | true, false -> Diagnostic.delete (span before after)
-  | false, true -> Diagnostic.delete (span start after)
+      Diagnostic.replace (Cursor.span before after)
+        (if line_break then "\n" ^ Cursor.indentation cursor start else " ")
+  | true, false -> Diagnostic.delete (Cursor.span before after)
+  | false, true -> Diagnostic.delete (Cursor.span start after)
   | false, false ->
       let line_start = Source.line_start cursor.source start in
-      let stop = if at_end cursor after then after else after + line_break_length cursor after in
-      Diagnostic.delete (span line_start stop)
+      let stop =
+        if Cursor.at_end cursor after then after else after + Cursor.line_break_length cursor after
+      in
+      Diagnostic.delete (Cursor.span line_start stop)
 
-let forbidden_run cursor ~context =
+let forbidden_run (cursor : Cursor.t) ~context =
   let start = cursor.position in
   let rec collect characters =
-    let decoded = decode cursor cursor.position in
+    let decoded = Cursor.decode cursor cursor.position in
     if Unicode.Decoded.is_valid decoded && Unicode.is_forbidden (Unicode.Decoded.code_point decoded)
     then begin
       cursor.position <- cursor.position + Unicode.Decoded.length decoded;
@@ -31,7 +31,7 @@ let forbidden_run cursor ~context =
   in
   let characters = collect [] in
   let stop = cursor.position in
-  let names = String.concat ", " (List.map describe_code_point characters) in
+  let names = String.concat ", " (List.map Cursor.describe_code_point characters) in
   let reasons =
     List.sort_uniq compare
       (List.map
@@ -64,7 +64,7 @@ let forbidden_run cursor ~context =
           [
             Diagnostic.fix
               ("Replace with `" ^ escapes ^ "`")
-              [ Diagnostic.replace (span start stop) escapes ];
+              [ Diagnostic.replace (Cursor.span start stop) escapes ];
           ] )
     | Raw_string ->
         ( base
@@ -72,25 +72,26 @@ let forbidden_run cursor ~context =
              character as an escape such as `\\u{200B}`.",
           [] )
   in
-  report cursor ~fixes ~code:Forbidden_character (span start stop) message
+  Cursor.report cursor ~fixes ~code:Forbidden_character (Cursor.span start stop) message
 
-let invalid_run cursor =
+let invalid_run (cursor : Cursor.t) =
   let start = cursor.position in
   while
-    (not (at_end cursor cursor.position))
-    && not (Unicode.Decoded.is_valid (decode cursor cursor.position))
+    (not (Cursor.at_end cursor cursor.position))
+    && not (Unicode.Decoded.is_valid (Cursor.decode cursor cursor.position))
   do
     cursor.position <- cursor.position + 1
   done;
-  report cursor ~code:Invalid_utf8 (span start cursor.position)
+  Cursor.report cursor ~code:Invalid_utf8
+    (Cursor.span start cursor.position)
     "Source files must be UTF-8, and these bytes are not valid UTF-8."
 
-let copy_plain cursor buffer ~special =
+let copy_plain (cursor : Cursor.t) buffer ~special =
   let start = cursor.position in
   let rec stop index =
-    if at_end cursor index then index
+    if Cursor.at_end cursor index then index
     else
-      let current = char cursor index in
+      let current = Cursor.char cursor index in
       if (current >= ' ' && current < '\x7F' && not (special current)) || current = '\t' then
         stop (index + 1)
       else index
@@ -102,7 +103,7 @@ let copy_plain cursor buffer ~special =
   end
 
 let read_character cursor buffer ~context =
-  let decoded = decode cursor cursor.position in
+  let decoded = Cursor.decode cursor cursor.position in
   if not (Unicode.Decoded.is_valid decoded) then invalid_run cursor
   else if Unicode.is_forbidden (Unicode.Decoded.code_point decoded) then
     forbidden_run cursor ~context
@@ -111,28 +112,28 @@ let read_character cursor buffer ~context =
     cursor.position <- cursor.position + Unicode.Decoded.length decoded
   end
 
-let consume_line_break cursor =
+let consume_line_break (cursor : Cursor.t) =
   let start = cursor.position in
-  let length = line_break_length cursor start in
-  if length = 1 && is_at cursor start '\r' then
-    report cursor ~code:Carriage_return
+  let length = Cursor.line_break_length cursor start in
+  if length = 1 && Cursor.is_at cursor start '\r' then
+    Cursor.report cursor ~code:Carriage_return
       ~fixes:
         [
           Diagnostic.fix "Replace with a line feed"
-            [ Diagnostic.replace (span start (start + 1)) "\n" ];
+            [ Diagnostic.replace (Cursor.span start (start + 1)) "\n" ];
         ]
-      (span start (start + 1))
+      (Cursor.span start (start + 1))
       "A carriage return is a line break only before a line feed.";
   cursor.position <- start + length;
-  span start cursor.position
+  Cursor.span start cursor.position
 
-let note_line_break cursor line_break =
+let note_line_break (cursor : Cursor.t) line_break =
   if cursor.first_line_break <> None && cursor.line_is_blank then cursor.blank_line <- true;
   if cursor.first_line_break = None then cursor.first_line_break <- Some line_break;
   cursor.line_is_blank <- true
 
-let reject ?(code = Diagnostic.Code.Unexpected_character) cursor ~length message =
+let reject ?(code = Diagnostic.Code.Unexpected_character) (cursor : Cursor.t) ~length message =
   let start = cursor.position in
   cursor.position <- start + length;
   cursor.line_is_blank <- false;
-  report cursor ~code (span start (start + length)) message
+  Cursor.report cursor ~code (Cursor.span start (start + length)) message

@@ -1,7 +1,4 @@
-open State
-open Facts
-open Validity
-open Operations
+module Symbol = Logic.Symbol
 
 type quantified_range =
   | Range_of_type of Types.ty
@@ -10,21 +7,21 @@ type quantified_range =
       collection_type : Types.ty;
       collected : Logic.term;
       element : Types.ty;
-      location : location;
+      location : State.location;
     }
 
 let under_binder :
     'read.
-    context ->
-    frame ->
+    State.context ->
+    State.frame ->
     Logic.symbol ->
     Logic.sort ->
     Logic.term ->
-    (frame -> 'read) ->
-    frame * 'read * (Logic.term -> Logic.term) =
+    (State.frame -> 'read) ->
+    State.frame * 'read * (Logic.term -> Logic.term) =
  fun context frame bound_symbol sort premise read ->
   let body_frame =
-    restrict { frame with binders = (bound_symbol, sort, premise) :: frame.binders } premise
+    Facts.restrict { frame with binders = (bound_symbol, sort, premise) :: frame.binders } premise
   in
   let facts = ref [] in
   context.scopes <- (bound_symbol, facts) :: context.scopes;
@@ -46,10 +43,11 @@ let sequence_type element = Types.Named { path = sequence_path; arguments = [ Ty
 let sequence_length context element term =
   let path = Path.Method { owner = sequence_path; name = "length"; receiver = Read } in
   let symbol = Symbol.Function { callee = path; instance = [ Types.Type element ] } in
-  declare context (Logic.Function (symbol, [ sort_of context (sequence_type element) ], Logic.Int));
+  Facts.declare context
+    (Logic.Function (symbol, [ Facts.sort_of context (sequence_type element) ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
-let rec sequence_at context element term index =
+let rec sequence_at (context : State.context) element term index =
   let sequence = sequence_type element in
   let index_trait = Well_known.path Index in
   match
@@ -59,31 +57,32 @@ let rec sequence_at context element term index =
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "at"; receiver = Read } in
       let symbol = Symbol.Function { callee = path; instance = [ Types.Type sequence ] } in
-      declare context
-        (Logic.Function (symbol, [ sort_of context sequence; Logic.Int ], sort_of context element));
+      Facts.declare context
+        (Logic.Function
+           (symbol, [ Facts.sort_of context sequence; Logic.Int ], Facts.sort_of context element));
       let at sequence index = Logic.Apply (symbol, [ sequence; index ]) in
-      if context.ranking && constructors context element <> None then
-        once context (Ranked_elements sequence) (fun () ->
+      if context.ranking && Facts.constructors context element <> None then
+        Facts.once context (Ranked_elements sequence) (fun () ->
             let each = Symbol.Variable { label = "ranked.sequence"; numbers = [] }
             and index = Symbol.Variable { label = "ranked.index"; numbers = [] } in
             let ranked = Logic.Symbol each and position = Logic.Symbol index in
             let below = rank context element (at ranked position) in
             let fact =
               Logic.forall
-                ( [ (each, sort_of context sequence); (index, Logic.Int) ],
+                ( [ (each, Facts.sort_of context sequence); (index, Logic.Int) ],
                   Logic.(
                     Operation ("<=", [ int 0; position ])
                     &&& Operation ("<", [ position; sequence_length context element ranked ])
                     ==> (Operation ("<=", [ int 0; below ])
                         &&& Operation ("<", [ below; rank context sequence ranked ]))) )
             in
-            add_fact context fact);
+            Facts.add_fact context fact);
       Some (at term index)
   | [] -> None
 
 and rank context ty term =
   let symbol = Symbol.Rank ty in
-  declare context (Logic.Function (symbol, [ sort_of context ty ], Logic.Int));
+  Facts.declare context (Logic.Function (symbol, [ Facts.sort_of context ty ], Logic.Int));
   (match ty with
   | Types.Named { path; arguments = [ Types.Type element ] }
     when context.ranking && Path.equal path sequence_path ->
@@ -98,7 +97,8 @@ let finite_function context (ty : Types.ty) name output inputs =
         Symbol.Function
           { callee = Path.Method { owner = path; name; receiver = Read }; instance = arguments }
       in
-      declare context (Logic.Function (symbol, sort_of context ty :: List.map snd inputs, output));
+      Facts.declare context
+        (Logic.Function (symbol, Facts.sort_of context ty :: List.map snd inputs, output));
       fun term -> Logic.Apply (symbol, term :: List.map fst inputs)
   | _ -> fun term -> term
 
@@ -109,19 +109,19 @@ let substituted_value_term context (value : Types.value) =
   | Known number -> Logic.Integer number
   | Value_parameter parameter ->
       let symbol = Symbol.Generic_value { owner = parameter.owner; name = parameter.name } in
-      once context (In_range symbol) (fun () ->
-          declare context (Logic.Constant (symbol, Int));
-          add_fact context (in_range (Types.make_builtin UInt64) (Logic.Symbol symbol)));
+      Facts.once context (In_range symbol) (fun () ->
+          Facts.declare context (Logic.Constant (symbol, Int));
+          Facts.add_fact context (Facts.in_range (Types.make_builtin UInt64) (Logic.Symbol symbol)));
       Logic.Symbol symbol
-  | Value_variable _ -> raise (Foreign_unsupported "an unsolved size")
+  | Value_variable _ -> raise (Facts.Foreign_unsupported "an unsolved size")
 
-let model_ranked context (ty : Types.ty) ~(model : Types.ty) symbol =
+let model_ranked (context : State.context) (ty : Types.ty) ~(model : Types.ty) symbol =
   if context.ranking then
-    once context (Ranked_model symbol) (fun () ->
+    Facts.once context (Ranked_model symbol) (fun () ->
         let each = Symbol.Variable { label = "ranked.value"; numbers = [] } in
         let fact =
           Logic.forall
-            ( [ (each, sort_of context ty) ],
+            ( [ (each, Facts.sort_of context ty) ],
               Logic.Operation
                 ( "<=",
                   [
@@ -129,9 +129,9 @@ let model_ranked context (ty : Types.ty) ~(model : Types.ty) symbol =
                     rank context ty (Logic.Symbol each);
                   ] ) )
         in
-        add_fact context fact)
+        Facts.add_fact context fact)
 
-let find_model_function context (ty : Types.ty) ~(model : Types.ty) =
+let find_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   let model_trait = Well_known.path Model in
   match
     Mir.Call_edges.impls_for context.lookups.interface Path.standard_package [ model_trait ] ty
@@ -139,17 +139,18 @@ let find_model_function context (ty : Types.ty) ~(model : Types.ty) =
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
       let symbol = Symbol.Function { callee = path; instance = [ Types.Type ty ] } in
-      declare context (Logic.Function (symbol, [ sort_of context ty ], sort_of context model));
+      Facts.declare context
+        (Logic.Function (symbol, [ Facts.sort_of context ty ], Facts.sort_of context model));
       model_ranked context ty ~model symbol;
       (match ty with
       | Types.Named { path; arguments = [ Types.Type element; Types.Value count ] }
         when Intrinsic.builtin_of_path path = Some Array ->
-          once context (Array_length symbol) (fun () ->
+          Facts.once context (Array_length symbol) (fun () ->
               let each = Symbol.Variable { label = "array.value"; numbers = [] } in
               let elements = Logic.Apply (symbol, [ Logic.Symbol each ]) in
-              add_fact context
+              Facts.add_fact context
                 (Logic.forall
-                   ( [ (each, sort_of context ty) ],
+                   ( [ (each, Facts.sort_of context ty) ],
                      Logic.equal
                        (sequence_length context element elements)
                        (substituted_value_term context count) )))
@@ -157,7 +158,7 @@ let find_model_function context (ty : Types.ty) ~(model : Types.ty) =
       Some (fun term -> Logic.Apply (symbol, [ term ]))
   | [] -> None
 
-let model_function context (ty : Types.ty) ~(model : Types.ty) =
+let model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   let key = (ty, model) in
   match Hashtbl.find_opt context.models key with
   | Some model_fn -> model_fn
@@ -172,8 +173,8 @@ let rec model_of context (ty : Types.ty) term ~element =
 and model_as context (ty : Types.ty) term ~(model : Types.ty) =
   Option.map (fun model_of -> model_of term) (model_function context ty ~model)
 
-let quantified_over context frame (quantifier : Core.quantifier) (range : quantified_range) ~bind
-    ~read =
+let quantified_over (context : State.context) (frame : State.frame) (quantifier : Core.quantifier)
+    (range : quantified_range) ~bind ~read =
   let make ?count bound_symbol sort premise body_frame bound_value =
     let mark = context.fresh in
     let body_frame, (after, body_value), with_facts =
@@ -184,16 +185,18 @@ let quantified_over context frame (quantifier : Core.quantifier) (range : quanti
     let frame =
       match count with
       | Some count when frame.makes_obligations ->
-          spend context frame (fun counter ->
+          Operations.spend context frame (fun counter ->
               let spent =
                 match
-                  (List.assoc_opt counter body_frame.spent, List.assoc_opt counter after.spent)
+                  (List.assoc_opt counter body_frame.spent, List.assoc_opt counter after.State.spent)
                 with
                 | Some start, Some total -> Costs.since ~start total
                 | _ -> Costs.zero
               in
-              if mentions_fresh_after context mark spent || Logic.mentions [ bound_symbol ] spent
-              then unknown_amount context frame counter
+              if
+                Facts.mentions_fresh_after context mark spent
+                || Logic.mentions [ bound_symbol ] spent
+              then Operations.unknown_amount context frame counter
               else
                 match counter.counting with
                 | Units ->
@@ -201,7 +204,8 @@ let quantified_over context frame (quantifier : Core.quantifier) (range : quanti
                       (Costs.times (Costs.at_least_zero count) (Costs.plus spent (Logic.int 1)))
                       (Logic.int 1)
                 | At_most | Exactly ->
-                    if spent = Costs.zero then Costs.zero else unknown_amount context frame counter)
+                    if spent = Costs.zero then Costs.zero
+                    else Operations.unknown_amount context frame counter)
       | _ -> frame
     in
     let term =
@@ -211,14 +215,15 @@ let quantified_over context frame (quantifier : Core.quantifier) (range : quanti
     in
     Some (frame, with_facts term)
   in
-  let symbol = fresh_name context "bound" in
+  let symbol = Facts.fresh_name context "bound" in
   let inner = { frame with bound = symbol :: frame.bound } in
   let each = Logic.Symbol symbol in
   match range with
   | Range_of_type ty ->
       let _, inner = bind inner each ty in
-      make symbol (sort_of context ty)
-        (Logic.( &&& ) (in_range ty each) (validity context inner ~assuming:true ty each))
+      make symbol (Facts.sort_of context ty)
+        (Logic.( &&& ) (Facts.in_range ty each)
+           (Validity.validity context inner ~assuming:true ty each))
         inner each
   | Range_of_integers { low; high; inclusive; type_ } ->
       let _, inner = bind inner each type_ in
@@ -243,13 +248,14 @@ let quantified_over context frame (quantifier : Core.quantifier) (range : quanti
           let model =
             match model with
             | Some model -> model
-            | None -> unsupported location "a quantifier over `%s`" (Types.show collection_type)
+            | None ->
+                Facts.unsupported location "a quantifier over `%s`" (Types.show collection_type)
           in
           let matched, inner = bind inner each element in
-          make symbol (sort_of context element)
+          make symbol (Facts.sort_of context element)
             (Logic.( &&& )
                (finite_function context finite "contains" Logic.Bool
-                  [ (each, sort_of context element) ]
+                  [ (each, Facts.sort_of context element) ]
                   model)
                matched)
             inner each
@@ -271,10 +277,12 @@ let quantified_over context frame (quantifier : Core.quantifier) (range : quanti
                       &&& Operation ("<", [ each; length ])
                       &&& matched)
                     inner element_value
-              | None -> unsupported location "a quantifier over `%s`" (Types.show collection_type))
-          | None -> unsupported location "a quantifier over `%s`" (Types.show collection_type)))
+              | None ->
+                  Facts.unsupported location "a quantifier over `%s`" (Types.show collection_type))
+          | None -> Facts.unsupported location "a quantifier over `%s`" (Types.show collection_type)
+          ))
 
-let rec value_term context frame (value : Types.value) =
+let rec value_term context (frame : State.frame) (value : Types.value) =
   match value with
   | Value_parameter parameter -> (
       match List.assoc_opt parameter frame.substitution with
@@ -288,10 +296,11 @@ let array_model context frame (ty : Types.ty) term =
   | Types.Named { arguments = [ Types.Type element; Types.Value count ]; _ } -> (
       match model_of context ty term ~element with
       | Some sequence ->
-          assume context frame
+          Facts.assume context frame
             (Logic.equal
                (sequence_length context element sequence)
                (value_term context frame count));
           sequence
-      | None -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (Types.show ty))))
-  | _ -> raise (Foreign_unsupported (Printf.sprintf "the elements of `%s`" (Types.show ty)))
+      | None ->
+          raise (Facts.Foreign_unsupported (Printf.sprintf "the elements of `%s`" (Types.show ty))))
+  | _ -> raise (Facts.Foreign_unsupported (Printf.sprintf "the elements of `%s`" (Types.show ty)))

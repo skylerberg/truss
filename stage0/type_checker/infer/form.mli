@@ -1,6 +1,3 @@
-module Impls = Interface.Impls
-module Properties = Interface.Properties
-
 val convert_evidence : Tables.evidence -> Core.evidence
 val register_call : ?function_value:Syntax.expression -> State.state -> Syntax.expression -> unit
 val register_index : State.state -> Syntax.expression -> unit

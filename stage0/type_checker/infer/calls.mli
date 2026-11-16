@@ -1,8 +1,3 @@
-module Names = Resolve.Names
-module Environment = Interface.Environment
-module Impls = Interface.Impls
-module Elaborator = Interface.Elaborator
-
 val arguments_alone : State.state -> State.env -> Syntax.argument list -> Types.ty -> Types.ty
 
 val function_value_call :

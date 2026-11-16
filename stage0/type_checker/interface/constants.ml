@@ -1,6 +1,4 @@
-open Syntax
-
-let rec evaluate_expression lookups ~visiting resolved (value : expression) : Z.t option =
+let rec evaluate_expression lookups ~visiting resolved (value : Syntax.expression) : Z.t option =
   let recurse = evaluate_expression lookups ~visiting resolved in
   match value.kind with
   | Integer value -> Some value

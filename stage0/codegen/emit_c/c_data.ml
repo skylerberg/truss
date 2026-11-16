@@ -1,13 +1,9 @@
-open C_runtime
-open C_types
-open C_values
-
-let static_name context =
+let static_name (context : C_types.context) =
   let name = Printf.sprintf "%s_static_%d" context.prefix (List.length context.statics) in
   name
 
 let rec initializer_c context ty (value : Lowered.static_value) : string option =
-  let layout = layout context ty in
+  let layout = C_types.layout context ty in
   let fields_c (fields : Memory_layout.field list) (values : (string * Lowered.static_value) list)
       prefix =
     String.concat ", "
@@ -22,8 +18,8 @@ let rec initializer_c context ty (value : Lowered.static_value) : string option 
          fields)
   in
   let block_c variant fields =
-    let key = Block (ty, variant) in
-    register context key;
+    let key = C_types.Block (ty, variant) in
+    C_types.register context key;
     let block_fields =
       match (Memory_layout.block context.env ty variant).form with
       | Struct fields -> fields
@@ -32,18 +28,18 @@ let rec initializer_c context ty (value : Lowered.static_value) : string option 
     let block_value = fields_c block_fields fields "" in
     let name = static_name context in
     context.statics <-
-      Printf.sprintf "static const %s %s = { %s };\n" (key_name key) name block_value
+      Printf.sprintf "static const %s %s = { %s };\n" (C_types.key_name key) name block_value
       :: context.statics;
-    Printf.sprintf "((%s *)&%s)" (key_name key) name
+    Printf.sprintf "((%s *)&%s)" (C_types.key_name key) name
   in
   match (layout.form, value) with
   | Zero_size, _ -> None
   | _, Static_storage { element; elements } ->
-      let element_c = value_c context element in
+      let element_c = C_types.value_c context element in
       let count = List.length elements in
       let buffer =
         if count = 0 || Memory_layout.has_zero_size context.env element then
-          "((void *)" ^ bytes_name context "" ^ ")"
+          "((void *)" ^ C_values.bytes_name context "" ^ ")"
         else begin
           let values = List.filter_map (initializer_c context element) elements in
           let name = static_name context in
@@ -57,7 +53,7 @@ let rec initializer_c context ty (value : Lowered.static_value) : string option 
       Some
         (Printf.sprintf "{ .f_%s = %s, .f_%s = %d, .f_%s = %d }" Storage.buffer_field buffer
            Storage.length_field count Storage.capacity_field count)
-  | Scalar _, Static_scalar constant -> Some (fst (constant_c context constant))
+  | Scalar _, Static_scalar constant -> Some (fst (C_values.constant_c context constant))
   | Struct fields, Static_record values -> Some ("{ " ^ fields_c fields values "" ^ " }")
   | Array { element; _ }, Static_array values ->
       Some
@@ -67,12 +63,12 @@ let rec initializer_c context ty (value : Lowered.static_value) : string option 
   | Tag_only { variants; _ }, Static_variant (name, _) -> (
       match List.find_index (String.equal name) variants with
       | Some index -> Some (string_of_int index)
-      | None -> bug "no variant %s" name)
+      | None -> C_runtime.bug "no variant %s" name)
   | Tagged { variants; _ }, Static_variant (name, values) -> (
       match
         List.find_opt (fun (variant : Memory_layout.variant) -> variant.name = name) variants
       with
-      | None -> bug "no variant %s" name
+      | None -> C_runtime.bug "no variant %s" name
       | Some variant -> (
           match variant.payload.form with
           | Zero_size -> Some (Printf.sprintf "{ .tag = %d }" variant.index)
@@ -84,34 +80,34 @@ let rec initializer_c context ty (value : Lowered.static_value) : string option 
               Some
                 (Printf.sprintf "{ .tag = %d, .payload.v_%s = %s }" variant.index name
                    (block_c name values))
-          | _ -> bug "a payload"))
+          | _ -> C_runtime.bug "a payload"))
   | Niche_encoded { dataful; dataless }, Static_variant (name, values) ->
       if dataful.name = name then
         match dataful.payload.form with
         | Struct fields -> Some ("{ " ^ fields_c fields values "" ^ " }")
         | Scalar (Pointer (Block _)) -> Some (block_c name values)
-        | _ -> bug "a payload"
+        | _ -> C_runtime.bug "a payload"
       else
         begin match dataless with
         | Some { niche; niche_values } -> (
             match List.assoc_opt name niche_values with
-            | None -> bug "no variant %s" name
+            | None -> C_runtime.bug "no variant %s" name
             | Some value -> (
-                let stored = niche_value context niche value in
+                let stored = C_values.niche_value context niche value in
                 match niche.path with
                 | [] -> Some stored
-                | path -> Some (Printf.sprintf "{ %s = %s }" (path_c "" path) stored)))
-        | None -> bug "no variant %s" name
+                | path -> Some (Printf.sprintf "{ %s = %s }" (C_values.path_c "" path) stored)))
+        | None -> C_runtime.bug "no variant %s" name
         end
-  | _ -> bug "static data that does not fit %s" (Ground.to_string ty)
+  | _ -> C_runtime.bug "static data that does not fit %s" (Ground.to_string ty)
 
 let table_c context (table : Lowered.table) =
   let entries =
     List.map
       (fun (key, signature) ->
         let symbol = Instance.symbol key in
-        declare_prototype context symbol
-          (prototype context "" symbol ~linkage:External signature ^ ";\n");
+        C_values.declare_prototype context symbol
+          (C_values.prototype context "" symbol ~linkage:External signature ^ ";\n");
         Printf.sprintf "(const void *)&%s" symbol)
       table.entries
   in
@@ -123,4 +119,5 @@ let data_c context (data : Lowered.data) =
   let symbol = Instance.symbol data.data_key in
   match initializer_c context data.ty data.value with
   | None -> ""
-  | Some value -> Printf.sprintf "const %s %s = %s;\n" (value_c context data.ty) symbol value
+  | Some value ->
+      Printf.sprintf "const %s %s = %s;\n" (C_types.value_c context data.ty) symbol value

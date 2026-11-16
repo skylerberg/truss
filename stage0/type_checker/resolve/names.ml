@@ -1,5 +1,3 @@
-open Syntax
-
 type kind =
   | Function
   | Type
@@ -41,7 +39,7 @@ type declaration = {
   path : Path.t;
   ordinal : int;
   kind : kind;
-  visibility : visibility;
+  visibility : Syntax.visibility;
   generic : bool;
 }
 
@@ -56,10 +54,10 @@ let show_key key =
   if key.ordinal = 0 then Path.show key.path
   else Printf.sprintf "%s#%d" (Path.show key.path) key.ordinal
 
-let signature_name (signature : signature) =
+let signature_name (signature : Syntax.signature) =
   match signature.name with Plain_name name | Member_name (_, name) -> name
 
-let receiver (parameters : parameter list) : Path.receiver =
+let receiver (parameters : Syntax.parameter list) : Path.receiver =
   match parameters with
   | { kind = Self_parameter None; _ } :: _ -> Read
   | { kind = Self_parameter (Some Mut); _ } :: _ -> Mut
@@ -69,7 +67,7 @@ let receiver (parameters : parameter list) : Path.receiver =
 let last_name (module_ : Path.module_) =
   match List.rev (Path.module_parts module_) with last :: _ -> last | [] -> ""
 
-type entry = { name : string; kind : named; visibility : visibility; generic : bool }
+type entry = { name : string; kind : named; visibility : Syntax.visibility; generic : bool }
 
 module String_map = Map.Make (String)
 
@@ -78,7 +76,7 @@ let is_type_kind : named -> bool = function
   | Function | Constant | Theorem -> false
 
 let is_value_kind kind = not (is_type_kind kind)
-let is_public = function Public | Public_opaque -> true | Private | Internal -> false
+let is_public = function Syntax.Public | Public_opaque -> true | Private | Internal -> false
 
 let visible ~(from : Path.module_) (module_ : Path.module_) visibility =
   module_ = from || is_public visibility || (visibility = Internal && module_.package = from.package)
@@ -103,7 +101,7 @@ type lookups = {
   declarations : Path.module_ -> declaration list;
   declarations_in : Path.file -> declaration list;
   package_declarations : Path.package -> declaration list;
-  definition : key -> definition;
+  definition : key -> Syntax.definition;
   text : key -> string;
   spans : key -> Source.Definition_span.t array;
   recovered : key -> Source.Definition_span.t list;
@@ -139,9 +137,9 @@ let full_module lookups ~(from : Path.module_) (names : string list) : Path.modu
       | name :: modules -> { package = { owner = None; name }; modules }
       | [] -> { package = { owner = None; name = "" }; modules = [] })
 
-let used_module lookups ~from (path : path) =
+let used_module lookups ~from (path : Syntax.path) =
   full_module lookups ~from
-    (List.map (fun (name : name) -> name.text) path.modules @ [ path.last.text ])
+    (List.map (fun (name : Syntax.name) -> name.text) path.modules @ [ path.last.text ])
 
 let is_visible_module lookups ~(from : Path.module_) (module_ : Path.module_) =
   module_ = Intrinsic.module_
@@ -187,12 +185,12 @@ let law_parameters lookups (trait : Path.t) law =
   match definition_of_path lookups trait with
   | Some (_, { kind = Trait { members; _ }; _ }) ->
       List.find_map
-        (fun (member : trait_member node) ->
+        (fun (member : Syntax.trait_member Syntax.node) ->
           match member.kind with
           | Law written_law when written_law.name.text = law ->
               Some
                 (List.filter_map
-                   (fun (parameter : parameter) ->
+                   (fun (parameter : Syntax.parameter) ->
                      match parameter.kind with
                      | Named_parameter { name; _ } -> Some name.text
                      | Self_parameter _ | Parameter_error -> None)
@@ -203,9 +201,9 @@ let law_parameters lookups (trait : Path.t) law =
 
 type generic_kind = Type_kind | Value_kind | Capability_kind
 
-let generic_kinds (generics : generic_parameter list) =
+let generic_kinds (generics : Syntax.generic_parameter list) =
   List.filter_map
-    (fun (generic : generic_parameter) ->
+    (fun (generic : Syntax.generic_parameter) ->
       match generic.kind with
       | Type_parameter (name, _) -> Some (name.text, Type_kind)
       | Value_parameter (name, _) -> Some (name.text, Value_kind)
@@ -237,7 +235,7 @@ let kind_of lookups (path : Path.t) =
       Option.map (fun (entry : entry) -> entry.kind) (lookups.find module_ name)
   | _ -> None
 
-let named_of_intended : intended_kind -> named = function
+let named_of_intended : Syntax.intended_kind -> named = function
   | Intended_function -> Function
   | Intended_constant -> Constant
   | Intended_type -> Type
@@ -307,7 +305,7 @@ let find_bare_type lookups ~(from : Path.module_) name =
           | _ -> None)
       | None -> None)
 
-let head_type lookups ~(from : Path.module_) ~imports (path : path) =
+let head_type lookups ~(from : Path.module_) ~imports (path : Syntax.path) =
   match path.modules with
   | [] -> find_bare_type lookups ~from path.last.text
   | modules -> (
@@ -323,30 +321,30 @@ let head_type lookups ~(from : Path.module_) ~imports (path : path) =
 
 let unresolved (file : Path.file) names : Path.t = Unresolved { file; names }
 
-let resolve_type_path lookups ~(file : Path.file) ~imports (path : path) : Path.t =
+let resolve_type_path lookups ~(file : Path.file) ~imports (path : Syntax.path) : Path.t =
   match head_type lookups ~from:file.module_ ~imports path with
   | Some (_, resolved) -> resolved
   | None ->
       unresolved file
         (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
-let head_parameters (head : type_head) =
+let head_parameters (head : Syntax.type_head) =
   List.filter_map
-    (fun (generic : generic_parameter) ->
+    (fun (generic : Syntax.generic_parameter) ->
       match generic.kind with
       | Type_parameter (name, _) | Value_parameter (name, _) | Capability_parameter name ->
           Some name.text
       | Generic_error -> None)
     head.generics
 
-let resolve_count lookups ~(file : Path.file) ~parameters (name : name) : Path.argument =
+let resolve_count lookups ~(file : Path.file) ~parameters (name : Syntax.name) : Path.argument =
   if List.mem name.text parameters then Parameter name.text
   else
     match lookups.find file.module_ name.text with
     | Some { kind = Constant; _ } -> Constant (top file.module_ name.text)
     | _ -> Constant (unresolved file [ name.text ])
 
-let rec resolve_reference lookups ~file ~imports ~parameters ~self (written : path_type) :
+let rec resolve_reference lookups ~file ~imports ~parameters ~self (written : Syntax.path_type) :
     Path.reference =
   let argument = resolve_argument lookups ~file ~imports ~parameters ~self in
   {
@@ -354,7 +352,7 @@ let rec resolve_reference lookups ~file ~imports ~parameters ~self (written : pa
     arguments =
       List.filter_map
         (function
-          | Type_argument type_ -> Some (argument type_)
+          | Syntax.Type_argument type_ -> Some (argument type_)
           | Count (value, _) -> Some (Path.Count value)
           | Count_name name -> Some (resolve_count lookups ~file ~parameters name)
           | Constraint _ -> None)
@@ -363,12 +361,12 @@ let rec resolve_reference lookups ~file ~imports ~parameters ~self (written : pa
       List.sort compare
         (List.filter_map
            (function
-             | Constraint (name, type_) -> Some (name.text, argument type_)
+             | Syntax.Constraint (name, type_) -> Some (name.text, argument type_)
              | Type_argument _ | Count _ | Count_name _ -> None)
            written.arguments);
   }
 
-and resolve_argument lookups ~file ~imports ~parameters ~self (type_ : type_expression) :
+and resolve_argument lookups ~file ~imports ~parameters ~self (type_ : Syntax.type_expression) :
     Path.argument =
   let rejected names : Path.argument =
     Named { path = unresolved file names; arguments = []; associated = [] }
@@ -391,7 +389,7 @@ and resolve_argument lookups ~file ~imports ~parameters ~self (type_ : type_expr
   | Function_type _ -> rejected [ "fn" ]
   | Type_error -> rejected []
 
-let resolve_header lookups ~file ~imports (trait_ : path_type) (head : type_head) =
+let resolve_header lookups ~file ~imports (trait_ : Syntax.path_type) (head : Syntax.type_head) =
   let for_type = resolve_type_path lookups ~file ~imports head.path in
   ( resolve_reference lookups ~file ~imports ~parameters:(head_parameters head) ~self:for_type trait_,
     for_type )
@@ -401,16 +399,16 @@ type written = {
   file : Path.file;
   index : int;
   container : int option;
-  item : definition Syntax.item;
+  item : Syntax.definition Syntax.item;
   text : string;
 }
 
 let file_declarations lookups (file : Path.file) ~imports ~text (top_levels : Syntax.top_level list)
     =
   let module_ = file.module_ in
-  let owner (head : type_head) = resolve_type_path lookups ~file ~imports head.path in
+  let owner (head : Syntax.type_head) = resolve_type_path lookups ~file ~imports head.path in
   let header = resolve_header lookups ~file ~imports in
-  let written index ?container (item : definition Syntax.item) path kind generic =
+  let written index ?container (item : Syntax.definition Syntax.item) path kind generic =
     Some
       {
         declaration =
@@ -422,7 +420,8 @@ let file_declarations lookups (file : Path.file) ~imports ~text (top_levels : Sy
         text = String.sub text item.base (item.stop - item.base);
       }
   in
-  let method_declaration index ~container ~owner:(owner, static) (item : definition Syntax.item) =
+  let method_declaration index ~container ~owner:(owner, static)
+      (item : Syntax.definition Syntax.item) =
     let declare = written index ~container item in
     match item.value.kind with
     | Function { signature; _ } | Method_declaration signature ->
@@ -438,7 +437,7 @@ let file_declarations lookups (file : Path.file) ~imports ~text (top_levels : Sy
         declare (Method { owner; name = name.text; receiver = Static }) Method false
     | _ -> None
   in
-  let top_level_declaration index (item : definition Syntax.item) =
+  let top_level_declaration index (item : Syntax.definition Syntax.item) =
     let declare = written index item in
     match item.value.kind with
     | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
@@ -460,7 +459,7 @@ let file_declarations lookups (file : Path.file) ~imports ~text (top_levels : Sy
     | Test { name; _ } ->
         let text =
           name.first.value
-          ^ String.concat "" (List.map (fun (_, (text : text)) -> text.value) name.rest)
+          ^ String.concat "" (List.map (fun (_, (text : Syntax.text)) -> text.value) name.rest)
         in
         declare (Test { module_; name = text }) Test false
     | Law_proof { trait_; law; type_; _ } ->
@@ -551,7 +550,7 @@ end)
 
 type declared = {
   declaration : declaration;
-  item : definition Syntax.item;
+  item : Syntax.definition Syntax.item;
   text : string;
   place : place;
   imports : (string * Path.module_) list;
@@ -608,12 +607,12 @@ let is_head_kind lookups (path : Path.t) ~(kinds : named list) =
       match Intrinsic.builtin_of_path path with Some (Never | Integer) -> false | _ -> true)
   | _ -> false
 
-let resolved_head lookups ~from ~imports (path : path) ~kinds =
+let resolved_head lookups ~from ~imports (path : Syntax.path) ~kinds =
   match head_type lookups ~from ~imports path with
   | Some (_, path) when is_head_kind lookups path ~kinds -> Some path
   | _ -> None
 
-let impl_entries lookups ~imports (declaration : declaration) (definition : definition) =
+let impl_entries lookups ~imports (declaration : declaration) (definition : Syntax.definition) =
   match (declaration.path, definition.kind) with
   | Impl { trait = { path = trait; _ }; for_type; _ }, _ ->
       if
@@ -624,11 +623,11 @@ let impl_entries lookups ~imports (declaration : declaration) (definition : defi
   | _, Type_definition { clauses; _ } ->
       let resolved_head = resolved_head lookups ~from:declaration.module_ ~imports in
       List.concat_map
-        (fun (clause : type_clause) ->
+        (fun (clause : Syntax.type_clause) ->
           match clause.kind with
           | Derives traits ->
               List.filter_map
-                (fun (trait : path_type) ->
+                (fun (trait : Syntax.path_type) ->
                   match resolved_head trait.path ~kinds:[ Trait ] with
                   | Some trait when derivable trait ->
                       Some
@@ -674,9 +673,9 @@ let namespace lookups package
     if module_.package = package then Module_map.mem module_ modules_map
     else lookups.module_exists module_
   in
-  let imports_of (file : Path.file) (uses : path Syntax.item list) =
+  let imports_of (file : Path.file) (uses : Syntax.path Syntax.item list) =
     List.map
-      (fun (item : path Syntax.item) ->
+      (fun (item : Syntax.path Syntax.item) ->
         let used = used_module lookups ~from:file.module_ item.value in
         (last_name used, used))
       uses

@@ -1,5 +1,3 @@
-open Syntax
-
 type enclosing_loop = No_loop | In_loop | Across_lambda | Across_parallel_branch | In_parallel_for
 
 type context = {
@@ -22,7 +20,7 @@ let plain =
 let specification context = { context with is_specification = true }
 let proof context = { context with is_specification = true; allows_assert = true }
 let may_be_specification context = context.is_specification || context.is_function_body
-let quantifier_word = function Forall -> "forall" | Exists -> "exists"
+let quantifier_word = function Syntax.Forall -> "forall" | Exists -> "exists"
 
 let report cursor code id message =
   Cursor.report cursor code (Cursor.read_file_span cursor id) message
@@ -31,7 +29,7 @@ let try_operator_span cursor id =
   let span = Cursor.read_span cursor id in
   Cursor.file_span cursor (Source.Definition_span.make (max span.start (span.stop - 1)) span.stop)
 
-let rec expression cursor context (value : expression) =
+let rec expression cursor context (value : Syntax.expression) =
   (match value.kind with
   | Quantified { quantifier; binder = Binder_type _; _ } when not (may_be_specification context) ->
       report cursor Specification_only value.id
@@ -72,7 +70,7 @@ and parts cursor context value =
   Syntax_walk.expression_parts ~expression:(expression cursor context)
     ~statement:(statement cursor context) value
 
-and loop_exit cursor context (value : expression) =
+and loop_exit cursor context (value : Syntax.expression) =
   let word = match value.kind with Break -> "break" | _ -> "continue" in
   match (context.enclosing_loop, value.kind) with
   | In_loop, _ | In_parallel_for, Continue -> ()
@@ -88,18 +86,19 @@ and loop_exit cursor context (value : expression) =
       report cursor Exits_parallel value.id
         (Printf.sprintf "`%s` cannot leave a branch of a `parallel` block." word)
 
-and block cursor context (body : block) = List.iter (statement cursor context) body.statements
+and block cursor context (body : Syntax.block) =
+  List.iter (statement cursor context) body.statements
 
 and types ?(parameter = false) cursor context type_ =
   requires_placement cursor ~top:parameter type_;
   Syntax_walk.type_expression (expression cursor (specification context)) type_
 
-and requires_placement cursor ~top (type_ : type_expression) =
+and requires_placement cursor ~top (type_ : Syntax.type_expression) =
   match type_.kind with
   | Function_type { inputs; output; clauses; _ } ->
       if not top then
         List.iter
-          (fun (clause : clause) ->
+          (fun (clause : Syntax.clause) ->
             match clause.kind with
             | Requires _ ->
                 report cursor Misplaced_requires clause.id
@@ -108,23 +107,24 @@ and requires_placement cursor ~top (type_ : type_expression) =
             | _ -> ())
           clauses;
       List.iter
-        (fun (input : function_input) -> requires_placement cursor ~top:false input.type_)
+        (fun (input : Syntax.function_input) -> requires_placement cursor ~top:false input.type_)
         inputs;
       Option.iter (requires_placement cursor ~top:false) output
   | Path_type path | Any_type path -> path_requires_placement cursor path
   | Self_type _ | Associated _ | Type_error -> ()
 
-and path_requires_placement cursor (path : path_type) =
+and path_requires_placement cursor (path : Syntax.path_type) =
   List.iter
     (function
-      | Type_argument type_ | Constraint (_, type_) -> requires_placement cursor ~top:false type_
+      | Syntax.Type_argument type_ | Constraint (_, type_) ->
+          requires_placement cursor ~top:false type_
       | Count _ | Count_name _ -> ())
     path.arguments
 
 and loop_clauses cursor context clauses =
   List.iter (Syntax_walk.loop_clause (expression cursor (specification context))) clauses
 
-and statement cursor context (statement : statement) =
+and statement cursor context (statement : Syntax.statement) =
   match statement.kind with
   | Let { annotation; value; else_; _ } ->
       Option.iter (types cursor context) annotation;
@@ -163,13 +163,13 @@ and statement cursor context (statement : statement) =
       statement_parts cursor context statement
   | Expression _ | Assignment _ | Statement_error -> statement_parts cursor context statement
 
-and statement_parts cursor context (parent : statement) =
+and statement_parts cursor context (parent : Syntax.statement) =
   Syntax_walk.statement_parts ~expression:(expression cursor context)
     ~statement:(statement cursor context) parent
 
-let parameters ?(lends = false) cursor (parameters : parameter list) =
+let parameters ?(lends = false) cursor (parameters : Syntax.parameter list) =
   List.iter
-    (fun (parameter : parameter) ->
+    (fun (parameter : Syntax.parameter) ->
       match parameter.kind with
       | Named_parameter { name; type_; default; _ } ->
           if name.text = "result" then
@@ -185,14 +185,15 @@ let parameters ?(lends = false) cursor (parameters : parameter list) =
       | Self_parameter _ | Parameter_error -> ())
     parameters
 
-let rec trait_arguments cursor ~is_law_proof (trait_ : path_type) =
+let rec trait_arguments cursor ~is_law_proof (trait_ : Syntax.path_type) =
   List.iter
     (function
-      | Type_argument type_ | Constraint (_, type_) -> trait_argument cursor ~is_law_proof type_
+      | Syntax.Type_argument type_ | Constraint (_, type_) ->
+          trait_argument cursor ~is_law_proof type_
       | Count _ | Count_name _ -> ())
     trait_.arguments
 
-and trait_argument cursor ~is_law_proof (type_ : type_expression) =
+and trait_argument cursor ~is_law_proof (type_ : Syntax.type_expression) =
   let report_associated_type written =
     report cursor Misplaced_associated_type type_.id
       (if is_law_proof then
@@ -218,10 +219,10 @@ and trait_argument cursor ~is_law_proof (type_ : type_expression) =
   | Self_type (Some name) -> report_associated_type ("Self." ^ name.text)
   | Self_type None | Type_error -> ()
 
-let header_trait cursor ~is_law_proof (trait_ : path_type) =
+let header_trait cursor ~is_law_proof (trait_ : Syntax.path_type) =
   List.iter
     (function
-      | Constraint (name, type_) ->
+      | Syntax.Constraint (name, type_) ->
           let span =
             Cursor.file_span cursor
               (Source.Definition_span.make (Cursor.read_span cursor name.id).start
@@ -251,7 +252,7 @@ let clauses cursor clauses =
 let generic_parameters cursor generics =
   List.iter (Syntax_walk.generic_parameter (expression cursor (specification plain))) generics
 
-let function_name cursor (name : definition_name) =
+let function_name cursor (name : Syntax.definition_name) =
   let name = match name with Plain_name name | Member_name (_, name) -> name in
   if name.text = "old" then
     report cursor Reserved_specification_name name.id
@@ -262,7 +263,7 @@ let function_name cursor (name : definition_name) =
       "A function cannot be named `identical`, which tests whether two values are the same value, \
        in specifications."
 
-let signature cursor (signature : signature) =
+let signature cursor (signature : Syntax.signature) =
   function_name cursor signature.name;
   Syntax_walk.definition_name (expression cursor (specification plain)) signature.name;
   generic_parameters cursor signature.generics;
@@ -273,16 +274,16 @@ let signature cursor (signature : signature) =
   | None -> ());
   clauses cursor signature.clauses
 
-let function_ cursor (declared : signature) body =
+let function_ cursor (declared : Syntax.signature) body =
   signature cursor declared;
   Option.iter (block cursor { plain with is_function_body = true }) body
 
-let function_definition cursor (definition : function_definition) =
+let function_definition cursor (definition : Syntax.function_definition) =
   function_ cursor definition.signature (Some definition.body)
 
-let fields cursor (fields : field list) =
+let fields cursor (fields : Syntax.field list) =
   List.iter
-    (fun (field : field) ->
+    (fun (field : Syntax.field) ->
       match field.kind with
       | Field_declaration { type_; default; _ } ->
           types cursor plain type_;
@@ -290,7 +291,7 @@ let fields cursor (fields : field list) =
       | Field_error -> ())
     fields
 
-let definition cursor (definition : definition) =
+let definition cursor (definition : Syntax.definition) =
   match definition.kind with
   | Function function_ -> function_definition cursor function_
   | Method_declaration declared -> signature cursor declared
@@ -299,10 +300,12 @@ let definition cursor (definition : definition) =
       (match body with
       | Fields list -> fields cursor list
       | Variants variants ->
-          List.iter (fun (variant : variant) -> Option.iter (fields cursor) variant.fields) variants
+          List.iter
+            (fun (variant : Syntax.variant) -> Option.iter (fields cursor) variant.fields)
+            variants
       | Type_todo -> ());
       List.iter
-        (fun (clause : type_clause) ->
+        (fun (clause : Syntax.type_clause) ->
           match clause.kind with
           | Type_invariant value | Potential value -> expression cursor (specification plain) value
           | Derives _ -> ())
@@ -310,7 +313,7 @@ let definition cursor (definition : definition) =
   | Trait { generics; members; _ } ->
       generic_parameters cursor generics;
       List.iter
-        (fun (member : trait_member node) ->
+        (fun (member : Syntax.trait_member Syntax.node) ->
           match member.kind with
           | Law law ->
               parameters cursor law.parameters;
@@ -322,7 +325,7 @@ let definition cursor (definition : definition) =
       header_trait cursor ~is_law_proof:false trait_;
       generic_parameters cursor type_.generics;
       List.iter
-        (fun (member : impl_member node) ->
+        (fun (member : Syntax.impl_member Syntax.node) ->
           match member.kind with
           | Associated_definition (_, type_) -> types cursor plain type_
           | Capability_definition _ | Impl_member_error -> ())

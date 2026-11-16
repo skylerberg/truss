@@ -1,9 +1,7 @@
-open Core
-open State
-open Facts
-open Contracts
+module Names = Resolve.Names
+module Symbol = Logic.Symbol
 
-let note_place context frame origin place =
+let note_place (context : State.context) (frame : State.frame) origin place =
   if
     frame.source.key = Some context.home
     && List.exists (fun (first, second) -> first = origin || second = origin) context.disjoint
@@ -31,13 +29,13 @@ let note_place context frame origin place =
                         Logic.Operation ("<=", [ other_stop; other_start ]);
                       ]
               in
-              oblige context frame Disjoint
-                (locate context frame.source origin)
+              Facts.oblige context frame Disjoint
+                (Facts.locate context frame.source origin)
                 [
                   Text "`";
-                  quote frame.source first;
+                  Facts.quote frame.source first;
                   Text "` and `";
-                  quote frame.source second;
+                  Facts.quote frame.source second;
                   Text "` may reach the same elements, which are used together.";
                 ]
                 apart
@@ -46,7 +44,7 @@ let note_place context frame origin place =
   end
 
 let without_costs : 'a. _ -> (unit -> 'a) -> 'a =
- fun context read ->
+ fun (context : State.context) read ->
   let saved = context.counters in
   context.counters <- [];
   Fun.protect ~finally:(fun () -> context.counters <- saved) read
@@ -55,19 +53,21 @@ let specification_value context frame (formula : Mir.formula) =
   without_costs context (fun () -> context.formula_term frame formula ~arguments:[])
 
 let selected context ty variant field term =
-  match (term, constructors context ty) with
-  | Logic.Apply (name, arguments), Some shape when name = constructor_name ty variant -> (
+  match (term, Facts.constructors context ty) with
+  | Logic.Apply (name, arguments), Some shape when name = Facts.constructor_name ty variant -> (
       let fields = Option.value (List.assoc_opt variant shape) ~default:[] in
       match List.find_index (fun (named, _) -> named = field) fields with
       | Some index when index < List.length arguments -> List.nth arguments index
-      | _ -> Logic.Apply (selector_name ty variant field, [ term ]))
-  | _ -> Logic.Apply (selector_name ty variant field, [ term ])
+      | _ -> Logic.Apply (Facts.selector_name ty variant field, [ term ]))
+  | _ -> Logic.Apply (Facts.selector_name ty variant field, [ term ])
 
 let type_frame context frame source (ty : Types.ty) ~self =
-  let substitution = match visible_type context ty with Some (_, symbol) -> symbol | None -> [] in
+  let substitution =
+    match Facts.visible_type context ty with Some (_, symbol) -> symbol | None -> []
+  in
   {
     frame with
-    source;
+    State.source;
     locals = Locals.empty;
     types = Locals.empty;
     old_locals = Locals.empty;
@@ -79,10 +79,10 @@ let type_frame context frame source (ty : Types.ty) ~self =
     substitution;
   }
 
-let type_source context (ty : Types.ty) =
+let type_source (context : State.context) (ty : Types.ty) =
   match ty with
   | Types.Named { path; _ } when Names.kind_of context.lookups.interface.names path = Some Type ->
-      Option.map (fun (source, _, _) -> source) (source_at context.lookups path)
+      Option.map (fun (source, _, _) -> source) (Contracts.source_at context.lookups path)
   | _ -> None
 
 let type_clauses context (ty : Types.ty) =
@@ -102,7 +102,8 @@ let invariants_of context (ty : Types.ty) =
       Some (source, List.map (fun (invariant : Mir.requirement) -> invariant.clause) invariants)
   | _ -> None
 
-let rec validity context frame ~assuming ?(deep = true) ?(own = true) ?(seen = []) ty term =
+let rec validity (context : State.context) frame ~assuming ?(deep = true) ?(own = true) ?(seen = [])
+    ty term =
   if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) context.validating then
     Logic.Boolean true
   else
@@ -112,9 +113,9 @@ let rec validity context frame ~assuming ?(deep = true) ?(own = true) ?(seen = [
     let own =
       match invariants_of context ty with
       | _ when not own -> Logic.Boolean true
-      | Some _ when constructors context ty = None ->
+      | Some _ when Facts.constructors context ty = None ->
           let symbol = Symbol.Valid ty in
-          declare context (Logic.Function (symbol, [ sort_of context ty ], Logic.Bool));
+          Facts.declare context (Logic.Function (symbol, [ Facts.sort_of context ty ], Logic.Bool));
           Logic.Apply (symbol, [ term ])
       | Some (source, written) -> (
           let inner = type_frame context frame source ty ~self:(Some term) in
@@ -123,13 +124,14 @@ let rec validity context frame ~assuming ?(deep = true) ?(own = true) ?(seen = [
               (List.map
                  (fun invariant -> snd (specification_value context inner invariant))
                  written)
-          with Unsupported _ | Foreign_unsupported _ when assuming -> Logic.Boolean true)
+          with Facts.Unsupported _ | Facts.Foreign_unsupported _ when assuming ->
+            Logic.Boolean true)
       | None -> Logic.Boolean true
     in
     let fields =
       if not deep then Logic.Boolean true
       else
-        match constructors context ty with
+        match Facts.constructors context ty with
         | Some shape ->
             Logic.conjunction
               (List.concat_map
@@ -143,7 +145,9 @@ let rec validity context frame ~assuming ?(deep = true) ?(own = true) ?(seen = [
                        match (variant, part) with
                        | _, Logic.Boolean true -> part
                        | Some name_, _ ->
-                           Logic.( ==> ) (Logic.Is (constructor_name ty (Some name_), term)) part
+                           Logic.( ==> )
+                             (Logic.Is (Facts.constructor_name ty (Some name_), term))
+                             part
                        | None, _ -> part)
                      fields)
                  shape)
@@ -152,18 +156,18 @@ let rec validity context frame ~assuming ?(deep = true) ?(own = true) ?(seen = [
     Logic.( &&& ) own fields
 
 let assume_valid context frame ty term =
-  assume context frame (validity context frame ~assuming:true ty term)
+  Facts.assume context frame (validity context frame ~assuming:true ty term)
 
 let callback_arguments context frame inputs =
   List.map
     (fun (_, input) ->
-      let input = substituted context frame input in
-      let term = arrive context frame "argument" input in
+      let input = Facts.substituted context frame input in
+      let term = Facts.arrive context frame "argument" input in
       assume_valid context frame input term;
       term)
     inputs
 
-let callback_contract_frame frame inputs arguments =
+let callback_contract_frame (frame : State.frame) inputs arguments =
   let locals =
     List.fold_left2
       (fun locals (input, _) term -> Locals.add input term locals)
@@ -171,7 +175,7 @@ let callback_contract_frame frame inputs arguments =
   in
   { frame with locals; self = frame.old_self; makes_obligations = false }
 
-let own_callback context local =
+let own_callback (context : State.context) local =
   List.find_map
     (fun (parameter, name, callback) -> if parameter = local then Some (name, callback) else None)
     context.callbacks
@@ -180,34 +184,34 @@ let check_callback_contract context frame location ~name inputs requires argumen
   let inside = callback_contract_frame frame inputs arguments in
   List.iter
     (fun (clause : Mir.formula) ->
-      oblige context (restrict frame promised) Requires location
+      Facts.oblige context (Facts.restrict frame promised) Requires location
         [
           Text (Printf.sprintf "`%s` %s, so its `" name why);
-          quote frame.source clause.origin;
+          Facts.quote frame.source clause.origin;
           Text "` may not hold.";
         ]
         (snd (specification_value context inside clause)))
     requires
 
 let escaping_callback context frame local =
-  match (own_callback context local, local_type context frame local) with
+  match (own_callback context local, Facts.local_type context frame local) with
   | ( Some (name, ({ inputs; requires = _ :: _ as requires } : Mir.callback)),
       Some (Types.Function function_type) )
     when List.length inputs = List.length function_type.inputs ->
       let arguments = callback_arguments context frame function_type.inputs in
       check_callback_contract context frame
-        (locate context frame.source (List.hd requires).origin)
+        (Facts.locate context frame.source (List.hd requires).origin)
         ~name inputs requires arguments ~promised:(Logic.Boolean true)
         ~why:"is used as a value whose type promises nothing of its arguments"
   | _ -> ()
 
 let reading_callback : 'a. _ -> (unit -> 'a) -> 'a =
- fun context read ->
+ fun (context : State.context) read ->
   let saved = context.reading_callback in
   context.reading_callback <- true;
   Fun.protect ~finally:(fun () -> context.reading_callback <- saved) read
 
-let part_frame frame (part : part) ~arguments ~substitution =
+let part_frame frame (part : State.part) ~arguments ~substitution =
   let locals, types, self =
     List.fold_left
       (fun (locals, types, self) (position, (parameter : Mir.parameter)) ->
@@ -221,7 +225,7 @@ let part_frame frame (part : part) ~arguments ~substitution =
   in
   {
     frame with
-    source = part.callee;
+    State.source = part.callee;
     locals;
     types;
     old_locals = locals;
@@ -233,7 +237,7 @@ let part_frame frame (part : part) ~arguments ~substitution =
     substitution;
   }
 
-let callee_substitution frame (signature : Types.signature) type_arguments =
+let callee_substitution (frame : State.frame) (signature : Types.signature) type_arguments =
   let rec pair (generics : Types.generic list) arguments =
     match (generics, arguments) with
     | generic :: generics, argument :: arguments ->
@@ -243,12 +247,13 @@ let callee_substitution frame (signature : Types.signature) type_arguments =
   in
   pair signature.generics type_arguments
 
-let callback_facts context frame (invocation : Invocation.t) position known arguments =
+let callback_facts (context : State.context) frame (invocation : Invocation.t) position known
+    arguments =
   match invocation.callee with
   | Function { path; type_arguments } -> (
       match
-        Option.bind (source_at context.lookups path) (fun (callee, _, _) ->
-            part_of context.lookups path callee)
+        Option.bind (Contracts.source_at context.lookups path) (fun (callee, _, _) ->
+            Contracts.part_of context.lookups path callee)
       with
       | Some part -> (
           match List.assoc_opt position part.callbacks with
@@ -274,7 +279,7 @@ let callback_facts context frame (invocation : Invocation.t) position known argu
       | None -> [])
   | _ -> []
 
-let parameter_type context frame (invocation : Invocation.t) index =
+let parameter_type (context : State.context) frame (invocation : Invocation.t) index =
   match invocation.callee with
   | Function { path; type_arguments } -> (
       match Interface.Impls.read_signature context.lookups.interface path with
@@ -292,15 +297,17 @@ let parameter_type context frame (invocation : Invocation.t) index =
   | _ -> None
 
 let check_forwarded_callback context frame (site : Invocation.site) (invocation : Invocation.t)
-    (passed : passed) local values =
+    (passed : State.passed) local values =
   match own_callback context local with
   | Some (name, ({ inputs; requires = _ :: _ as requires } : Mir.callback)) -> (
       match parameter_type context frame invocation passed.position with
       | Some (Types.Function expected) when List.length expected.inputs = List.length inputs ->
           let arguments = callback_arguments context frame expected.inputs in
-          let known = List.map (fun (passed : passed) -> (passed.position, passed.term)) values in
+          let known =
+            List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values
+          in
           check_callback_contract context frame
-            (locate context frame.source site.origin)
+            (Facts.locate context frame.source site.origin)
             ~name inputs requires arguments
             ~promised:
               (Logic.conjunction
