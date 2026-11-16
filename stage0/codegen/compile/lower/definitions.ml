@@ -12,7 +12,7 @@ type context = {
 
 let make_monomorphic_context (interface : Interface.Lookups.t) : Monomorphic.context =
   {
-    find_type_interface = Interface.Definition.read_type_interface interface;
+    find_type_interface = Interface.Definition.find_type_interface interface;
     normalize = Interface.Impls.normalize interface ~list_bounds:Interface.Impls.list_no_bounds;
     normalize_capabilities =
       Interface.Impls.normalize_capabilities interface ~list_bounds:Interface.Impls.list_no_bounds;
@@ -67,14 +67,10 @@ let read_written context key =
 let bind = Monomorphic.make_substitution
 
 let read_impl_interface context impl =
-  match Interface.Definition.read_impl_interface context.lookups.interface impl with
-  | Some position -> position
-  | None -> raise_bug "no interface for %s" (Path.show impl)
+  Interface.Definition.read_impl_interface context.lookups.interface impl
 
 let read_trait_interface context trait =
-  match Interface.Definition.read_trait_interface context.lookups.interface trait with
-  | Some interface -> interface
-  | None -> raise_bug "no interface for %s" (Path.show trait)
+  Interface.Definition.read_trait_interface context.lookups.interface trait
 
 let make_trait_substitution context impl =
   match Interface.Impls.make_impl_substitution context.lookups.interface impl with
@@ -111,9 +107,8 @@ let make_code context (path : Path.t) type_arguments : code =
             (make_unwritten_code ~definition:path ~substitution:[] ~result:(Returns Types.unit)) with
             written = Some (read_written context key);
             real =
-              (match Interface.Definition.read_test_uses context.lookups.interface path with
-              | Some uses -> Monomorphic.list_evidence context.monomorphic [] uses
-              | None -> raise_bug "%s has no test interface" (Path.show path));
+              Monomorphic.list_evidence context.monomorphic []
+                (Interface.Definition.read_test_uses context.lookups.interface path);
           }
       | _ -> raise_bug "%s is not a test" (Path.show path))
   | Top _ | Method _ -> (

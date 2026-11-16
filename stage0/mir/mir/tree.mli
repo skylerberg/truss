@@ -73,7 +73,7 @@ type connective = And | Or | Implies
 type rvalue =
   | Operand of operand
   | Operation of {
-      operation : Intrinsic.operation;
+      operation : Intrinsic.scalar;
       type_arguments : Types.argument list;
       operands : operand list;
     }

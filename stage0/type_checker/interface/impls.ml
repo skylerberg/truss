@@ -29,7 +29,7 @@ let list_impls_of_trait (lookups : Lookups.t) ~trait package =
 
 let derive_interface lookups ~type_ ~trait =
   match
-    (Definition.read_type_interface lookups type_, Definition.read_trait_interface lookups trait)
+    (Definition.find_type_interface lookups type_, Definition.find_trait_interface lookups trait)
   with
   | Some type_interface, Some trait_interface ->
       let trait_reference : Types.trait_reference =
@@ -63,14 +63,12 @@ let derive_interface lookups ~type_ ~trait =
   | _ -> None
 
 let make_impl_substitution lookups (impl : Path.t) =
-  Option.bind (Definition.read_impl_interface lookups impl)
+  Option.bind (Definition.find_impl_interface lookups impl)
     (fun (interface : Types.impl_interface) ->
       Option.map
         (fun trait ->
           Properties.make_trait_substitution trait ~self:interface.for_type interface.implements)
-        (Definition.read_trait_interface lookups interface.implements.trait))
-
-let is_open_type = function Types.Error _ | Types.Variable _ | Types.Hole -> true | _ -> false
+        (Definition.find_trait_interface lookups interface.implements.trait))
 
 let is_open_value = function
   | Types.Value_variable _ -> true
@@ -81,10 +79,10 @@ let rec match_type ~variables (substitution : Types.substitution) pattern type_ 
   | Types.Parameter parameter, _ when List.mem parameter variables -> (
       match List.assoc_opt parameter substitution with
       | Some (Types.Type bound) ->
-          if Types.equal bound type_ || is_open_type type_ then Some substitution else None
+          if Types.equal bound type_ || Types.is_open_type type_ then Some substitution else None
       | Some (Types.Value _ | Types.Capabilities _) -> None
       | None -> Some ((parameter, Types.Type type_) :: substitution))
-  | _, argument_type when is_open_type argument_type -> Some substitution
+  | _, argument_type when Types.is_open_type argument_type -> Some substitution
   | Types.Named left, Types.Named right when Path.equal left.path right.path ->
       match_arguments ~variables substitution left.arguments right.arguments
   | _ -> if Types.equal pattern type_ then Some substitution else None
@@ -163,7 +161,7 @@ let list_required_bounds (generics : Types.generic list) (substitution : Types.s
 let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
     (type_ : Types.ty) (wanted : Types.trait_reference) : evidence option =
   let broken_trait =
-    match Definition.read_interface lookups wanted.trait with
+    match Definition.find_interface lookups wanted.trait with
     | Some (Error_interface report) -> Some report
     | _ -> None
   in
@@ -220,7 +218,7 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
         in
         List.find_map
           (fun impl_path ->
-            match Definition.read_impl_interface lookups impl_path with
+            match Definition.find_impl_interface lookups impl_path with
             | None -> None
             | Some impl -> (
                 let variables =
@@ -264,7 +262,7 @@ and list_matching_bounds lookups ~list_bounds (type_ : Types.ty) (wanted : Types
          (fun wanted actual ->
            match (wanted, actual) with
            | Types.Type wanted, Types.Type actual ->
-               is_open_type wanted || is_open_type actual
+               Types.is_open_type wanted || Types.is_open_type actual
                || Types.equal
                     (normalize lookups ~list_bounds wanted)
                     (normalize lookups ~list_bounds actual)
@@ -298,11 +296,12 @@ and has_matching_associated_types lookups ~list_bounds (wanted : Types.trait_ref
   List.for_all
     (fun (name, wanted_type) ->
       let wanted_type = normalize lookups ~list_bounds wanted_type in
-      if is_open_type wanted_type then true
+      if Types.is_open_type wanted_type then true
       else
         match List.assoc_opt name fixed with
         | Some defined ->
-            is_open_type defined || Types.equal (normalize lookups ~list_bounds defined) wanted_type
+            Types.is_open_type defined
+            || Types.equal (normalize lookups ~list_bounds defined) wanted_type
         | None -> (
             match (base, wanted_type) with
             | Some base, Types.Projection { base = projected; name = projected_name; _ } ->
@@ -323,7 +322,7 @@ and project_declared_type lookups ~list_bounds ?defining type_ (trait : Types.tr
   | None -> (
       match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
       | Some (From_impl { impl; substitution }) -> (
-          match Definition.read_impl_interface lookups impl with
+          match Definition.find_impl_interface lookups impl with
           | Some interface ->
               Option.iter (fun defining -> defining := impl :: !defining) defining;
               Option.map (Types.substitute substitution)
@@ -368,7 +367,7 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
   else
     match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
     | Some (From_impl { impl; substitution }) -> (
-        match Definition.read_impl_interface lookups impl with
+        match Definition.find_impl_interface lookups impl with
         | Some interface ->
             normalize_capabilities lookups ~list_bounds ~depth:(depth + 1)
               (Types.substitute_capabilities substitution
@@ -417,11 +416,11 @@ and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
     type_
 
 let read_signature lookups (path : Path.t) =
-  match (Definition.read_declared_signature lookups path, path) with
+  match (Definition.find_declared_signature lookups path, path) with
   | Some signature, _ -> Some signature
   | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
       match
-        (Definition.read_impl_interface lookups owner, make_impl_substitution lookups owner)
+        (Definition.find_impl_interface lookups owner, make_impl_substitution lookups owner)
       with
       | Some impl, Some substitution ->
           Option.map
@@ -433,7 +432,7 @@ let read_signature lookups (path : Path.t) =
               in
               let list_bounds = Types.list_bounds signature.generics in
               { signature with uses = normalize_capabilities lookups ~list_bounds signature.uses })
-            (Definition.read_declared_signature lookups
+            (Definition.find_declared_signature lookups
                (Method { owner = impl.implements.trait; name; receiver }))
       | _ -> None)
   | None, _ -> None

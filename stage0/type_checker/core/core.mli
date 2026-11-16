@@ -73,7 +73,7 @@ and kind =
   | Record_update of { base : expression; updates : (string list * expression) list }
   | Slice of { base : place; callee : callee; bounds : argument list }
   | Call of call
-  | Operator of { operation : Intrinsic.operation; arguments : expression list }
+  | Operator of { operation : Intrinsic.scalar; arguments : expression list }
   | Compare of { comparison : comparison; left : expression; right : expression }
   | Not of expression
   | And of expression * expression

@@ -64,7 +64,7 @@ let list_runnable database =
     (fun (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.make_key declaration in
       match
-        ( Interface.Definition.read_declared_signature interface declaration.path,
+        ( Interface.Definition.find_declared_signature interface declaration.path,
           Mir.read_contract mir declaration.path )
       with
       | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),

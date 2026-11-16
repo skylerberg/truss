@@ -1,0 +1,7 @@
+fn triple(value: Int64) -> Int64 {
+  echo value * 3
+}
+
+test "triples" {
+  assert triple(2) == 6
+}

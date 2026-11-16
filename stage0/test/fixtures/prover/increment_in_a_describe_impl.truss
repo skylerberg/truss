@@ -1,0 +1,11 @@
+trait Describe {
+  fn describe(self) -> Int64
+}
+
+type Box(value: Int64)
+
+impl Describe for Box {
+  fn describe(self) -> Int64 {
+    self.value + 1
+  }
+}

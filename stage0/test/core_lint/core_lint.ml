@@ -10,14 +10,14 @@ let show_callee : Core.callee -> string = function
   | Indirect _ -> "a function value"
 
 let find_method_signature interface owner name receiver =
-  Interface.Definition.read_declared_signature interface (Method { owner; name; receiver })
+  Interface.Definition.find_declared_signature interface (Method { owner; name; receiver })
 
 let find_declared_fields interface path arguments =
-  Option.bind (Interface.Definition.read_type_interface interface path) (fun type_interface ->
+  Option.bind (Interface.Definition.find_type_interface interface path) (fun type_interface ->
       Types.instantiate_fields type_interface arguments)
 
 let find_declared_variants interface path arguments =
-  Option.bind (Interface.Definition.read_type_interface interface path) (fun type_interface ->
+  Option.bind (Interface.Definition.find_type_interface interface path) (fun type_interface ->
       Types.instantiate_variants type_interface arguments)
 
 type context = {
@@ -97,7 +97,7 @@ let instantiate context (callee : Core.callee) =
   | Trait_method { trait = reference; name; receiver; self_type; type_arguments; _ } -> (
       match
         ( find_method_signature context.interface reference.trait name receiver,
-          Interface.Definition.read_trait_interface context.interface reference.trait )
+          Interface.Definition.find_trait_interface context.interface reference.trait )
       with
       | Some signature, Some interface ->
           of_signature
@@ -159,8 +159,7 @@ let is_built_in context (ty : Types.ty) =
   | Projection { trait; _ } -> is_integer_trait trait.trait
   | _ -> Option.is_some (Types.find_builtin ty)
 
-let check_operator_types context (node : Core.expression) (operation : Intrinsic.operation)
-    arguments =
+let check_operator_types context (node : Core.expression) (operation : Intrinsic.scalar) arguments =
   if not (is_built_in context node.type_) then
     context.wrong "an operator has the type `%s`, which is not built in" (Types.show node.type_);
   let operands =
@@ -177,7 +176,7 @@ let check_operator_types context (node : Core.expression) (operation : Intrinsic
     (fun (operand : Core.expression) ->
       if not (fits context ~expected:node.type_ ~found:operand.type_) then
         context.wrong "an operand of `%s` has the type `%s`, and the operator `%s`"
-          (Intrinsic.show_operation operation)
+          (Intrinsic.show_operation (Scalar operation))
           (Types.show operand.type_) (Types.show node.type_))
     operands
 
@@ -406,7 +405,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let own =
     let of_generics = List.map (fun (generic : Types.generic) -> generic.generic) in
     let list_declared path =
-      match Interface.Definition.read_interface interface path with
+      match Interface.Definition.find_interface interface path with
       | Some (Function_interface signature | Theorem_interface signature) ->
           of_generics signature.generics
       | Some (Type_interface interface) -> of_generics interface.type_generics

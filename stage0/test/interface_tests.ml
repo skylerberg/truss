@@ -35,7 +35,7 @@ let () =
           ]
       in
       match
-        Interface.Definition.read_declared_signature (make_interface packages) (app "count")
+        Interface.Definition.find_declared_signature (make_interface packages) (app "count")
       with
       | Some { parameters = [ items; limit ]; output = Returns output; _ } ->
           if Types.show items.type_ <> "List[Int64]" then
@@ -48,7 +48,7 @@ let () =
         Support.setup [ ("app::main", Fixtures.Interface.method_head_with_generics) ]
       in
       let path : Path.t = Method { owner = app "Box"; name = "get"; receiver = Read } in
-      match Interface.Definition.read_declared_signature (make_interface packages) path with
+      match Interface.Definition.find_declared_signature (make_interface packages) path with
       | Some { receiver = Some (Read, self); _ } ->
           if Types.show self <> "Box[Value]" then Harness.fail "self: %s" (Types.show self)
       | _ -> Harness.fail "no receiver");
@@ -91,7 +91,7 @@ let () =
           ]
       in
       match
-        Interface.Definition.read_declared_signature (make_interface packages) (app "first")
+        Interface.Definition.find_declared_signature (make_interface packages) (app "first")
       with
       | Some { output = Returns output; _ } ->
           if Types.show output <> "Option[Items.Element]" then
@@ -164,6 +164,34 @@ let () =
         "types.missing_required_impl");
   Harness.test "nothing can implement Panic" (fun () ->
       expect_one_diagnostic Fixtures.Interface.panic_impl "types.implements_panic");
+  Harness.test "every standard capability except Panic has exactly one real implementation"
+    (fun () ->
+      let packages = Support.setup [] in
+      let interface = make_interface packages in
+      let capabilities =
+        List.filter
+          (fun (declaration : Resolve.Names.declaration) -> declaration.kind = Capability)
+          (List.concat_map
+             (Support.list_declarations packages)
+             (List.sort_uniq compare
+                (List.map (fun ((file : Path.file), _) -> file.module_) Standard_library.files)))
+      in
+      let has_real_implementation (capability : Resolve.Names.declaration) =
+        Option.is_some (Interface.Definition.find_real_implementation interface capability.path)
+      in
+      match
+        List.partition
+          (fun (capability : Resolve.Names.declaration) -> Well_known.is Panic capability.path)
+          capabilities
+      with
+      | [ panic ], others ->
+          if has_real_implementation panic then Harness.fail "Panic has a real implementation";
+          List.iter
+            (fun (capability : Resolve.Names.declaration) ->
+              if not (has_real_implementation capability) then
+                Harness.fail "%s has no real implementation" (Path.show capability.path))
+            others
+      | _ -> Harness.fail "the standard library does not declare Panic exactly once");
   Harness.test "a test cannot declare Panic, with a fix that removes its uses" (fun () ->
       expect_one_diagnostic "test \"t\" uses Panic {\n  assert 1 + 1 == 2\n}\n"
         "types.no_real_implementation" ~fixed:"test \"t\" {\n  assert 1 + 1 == 2\n}\n");

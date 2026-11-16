@@ -2098,7 +2098,7 @@ test "config loads with defaults" {
   does not depend on the world, so declaring `Panic` would only stop a
   deterministic test's result from being cached.
 - A test's standard output and standard error are attached to its report
-  as one text, in the order written.
+  as one text, in the order written. Its standard input is empty.
 - A failed test is never retried.
 - A failed `assert` ends the test as failed, and the rest of the test can
   rely on the asserted fact.

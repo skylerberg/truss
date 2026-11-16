@@ -1,0 +1,7 @@
+fn find(key: Int64) -> Option[Int64] {
+  if key == 1 { Some(10) } else { None }
+}
+
+test "the key is missing" {
+  assert find(1) is None
+}

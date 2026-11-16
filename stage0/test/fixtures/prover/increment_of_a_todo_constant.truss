@@ -1,0 +1,5 @@
+let limit: Int64 = todo
+
+fn above_limit() -> Int64 {
+  limit + 1
+}

@@ -26,8 +26,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
   | Method { owner = Derived { type_; trait } as impl; name; receiver = _ } when gives trait name
     -> (
       match
-        ( Interface.Definition.read_impl_interface lookups.interface impl,
-          Interface.Definition.read_type_interface lookups.interface type_,
+        ( Interface.Definition.find_impl_interface lookups.interface impl,
+          Interface.Definition.find_type_interface lookups.interface type_,
           Interface.Impls.read_signature lookups.interface path )
       with
       | _, Some { shape = Todo_type; _ }, _ -> None
@@ -677,7 +677,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                            callee =
                              Intrinsic
                                {
-                                 operation = Holds_invariant;
+                                 operation = Runtime Holds_invariant;
                                  type_arguments = [ Types.Type self_type ];
                                };
                            arguments =

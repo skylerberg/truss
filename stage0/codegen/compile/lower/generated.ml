@@ -71,9 +71,8 @@ let build_entry context (key : Instance.key) (impl_method : Instance.impl_method
     match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read
   in
   let result_ty =
-    match capability_signature.output with
-    | Returns ty -> Monomorphic.ground context.monomorphic [] ty
-    | _ -> Definitions.raise_bug "a capability method that lends"
+    Monomorphic.ground context.monomorphic []
+      (Types.extract_result_type capability_signature.output)
   in
   Targets.lower_instance_call st
     (Code { path; type_arguments })
@@ -158,9 +157,8 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
          })
   in
   let result_ty =
-    match capability_signature.output with
-    | Returns ty -> Monomorphic.ground context.monomorphic [] ty
-    | _ -> Definitions.raise_bug "a capability method that lends"
+    Monomorphic.ground context.monomorphic []
+      (Types.extract_result_type capability_signature.output)
   in
   call_tasks "lock";
   Emit_c.Builder.emit builder
@@ -288,7 +286,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
     (Assign
        ( Lowered.make_local_place wanted,
          Convert (Copy (Lowered.make_local_place count), Integer UInt64) ));
-  lower Storage_with_capacity [ string_ty ]
+  lower (Buffer Storage_with_capacity) [ string_ty ]
     [ Value (Copy (Lowered.make_local_place wanted)) ]
     (Some (Lowered.project list (Field storage_field)));
   Emit_c.Builder.emit_loop builder ~integer:Int32
@@ -324,7 +322,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
         ~substitution:[]
         ~arguments:[ (Read, view_ty, view) ]
         ~destination:text ();
-      lower Storage_push [ string_ty ]
+      lower (Buffer Storage_push) [ string_ty ]
         [ Place (Lowered.project list (Field storage_field)); Value (Lowering.move_place st text) ]
         None);
   st.evidence <-

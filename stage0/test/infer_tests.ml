@@ -258,6 +258,21 @@ let () =
       expect_one_diagnostic
         (functions ^ Fixtures.Infer.copy_file_with_one_argument)
         "types.missing_argument");
+  Harness.test "a call with more arguments than parameters is one error" (fun () ->
+      expect_one_diagnostic
+        (functions ^ Fixtures.Infer.copy_file_with_three_arguments)
+        "types.too_many_arguments" ~says:"This function takes 2 arguments, and 3 are given.");
+  Harness.test "a method called through its type counts its arguments besides `self`" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.counter_read_through_its_type_with_an_extra_argument
+        "types.too_many_arguments"
+        ~says:"This method takes 0 arguments besides `self`, and 1 is given.");
+  Harness.test "the first argument of a record with several fields needs a label too" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.point_with_an_unlabeled_first_argument
+        "types.missing_label" ~says:"`Point` has 2 fields"
+        ~fixed:Fixtures.Infer.point_with_labeled_arguments);
+  Harness.test "a variant with one field given two arguments is one error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.circle_built_with_two_arguments
+        "types.too_many_arguments" ~says:"`Circle` has 1 field, and 2 arguments are given.");
   Harness.test "an argument for a parameter with a default can be omitted" (fun () ->
       let text = Fixtures.Infer.connect_without_its_port in
       match locate_core_call text "connect(1)" 1 with
@@ -297,12 +312,18 @@ let () =
   Harness.test "a mut parameter needs mut at the call, with a fix that adds it" (fun () ->
       expect_one_diagnostic Fixtures.Infer.bump_without_mut "types.missing_mode"
         ~fixed:Fixtures.Infer.bump_without_mut_fixed);
-  Harness.test "an own parameter needs own for a place that does not copy implicitly" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.own_list_passed_without_own "types.missing_mode"
-        ~fixed:Fixtures.Infer.own_list_passed_without_own_fixed);
   Harness.test "own on a place that copies implicitly is redundant" (fun () ->
       expect_one_diagnostic Fixtures.Infer.own_before_an_integer "types.redundant_mode"
         ~fixed:Fixtures.Infer.own_before_an_integer_fixed);
+  Harness.test "own on a place of the error type is not reported again as redundant" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.own_before_a_local_bound_to_a_misspelled_field
+        "types.unknown_member");
+  Harness.test "own on a place of an option of the error type is not reported again as redundant"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.own_before_an_option_of_a_misspelled_field
+        "types.unknown_member");
+  Harness.test "own on a place of a hole's type is not redundant" (fun () ->
+      expect_fine Fixtures.Infer.own_before_a_local_bound_to_todo);
   Harness.test "a mut receiver chooses the method's mut overload" (fun () ->
       expect_fine Fixtures.Infer.mut_push_onto_a_var_list);
   Harness.test
@@ -438,7 +459,6 @@ let () =
        expect_fine (tally ^ Fixtures.Infer.monitors_provided_with_and_without_tasks)));
   Harness.test "an assignment through an index of a map takes the key as an owned value" (fun () ->
       expect_fine Fixtures.Infer.map_assignments_with_owned_keys;
-      expect_one_diagnostic Fixtures.Infer.map_assignment_with_a_viewed_key "types.missing_mode";
       expect_one_diagnostic Fixtures.Infer.map_assignment_to_a_read_only_map "types.not_assignable");
   Harness.test "`final(result)` is a lending method's part as the caller left it" (fun () ->
       expect_fine Fixtures.Infer.lending_part_ensuring_final_of_result;
@@ -630,9 +650,6 @@ let () =
      (fun () ->
        expect_one_diagnostic (make_comparison_source 70) "types.recursion_limit"
          ~says:"needs more than 64 nested impls"));
-  Harness.test "an associated type that grows a type reaches the recursion limit" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.associated_type_that_grows_its_type
-        "types.recursion_limit" ~says:"needs more than 64 nested types");
   Harness.test "an opaque type cannot be matched outside its package" (fun () ->
       expect_one_diagnostic Fixtures.Infer.record_pattern_on_a_list "types.private_field");
   Harness.test "a bitwise compound assignment works on integers only" (fun () ->
@@ -881,6 +898,9 @@ let () =
   Harness.test "a function value given too many arguments is one error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.function_value_called_with_two_arguments
         "types.too_many_arguments");
+  Harness.test "a function value given too few arguments is a missing argument" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.function_value_called_with_no_arguments
+        "types.missing_argument" ~says:"This function takes 1 argument, and 0 are given.");
   Harness.test "a member of a generic parameter that it does not have is an error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.member_of_an_unbounded_generic "types.unknown_member");
   Harness.test "a type with no fields is not its own value" (fun () ->

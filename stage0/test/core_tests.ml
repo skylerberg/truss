@@ -45,7 +45,7 @@ and show_expression form (node : Core.expression) =
            (Passed { mode = Read; value = Place base; mode_keyword = None } :: bounds))
   | Operator { operation; arguments } ->
       Printf.sprintf "%s(%s)"
-        (Intrinsic.show_operation operation)
+        (Intrinsic.show_operation (Scalar operation))
         (list (show_expression form) arguments)
   | Call { callee; arguments; _ } ->
       let dispatch =
@@ -137,7 +137,7 @@ let list_capabilities (set : Types.capability_set) =
 let shape = Fixtures.Core.shape
 
 let () =
-  expect "a match on a local borrows the local: its scrutinee is a place"
+  expect "a match on a local views the local: its scrutinee is a place"
     (shape ^ Fixtures.Core.match_on_a_shape_parameter)
     (fun form ->
       List.concat_map
@@ -461,12 +461,12 @@ let () =
       if derived = [] then Harness.fail "the standard library derives nothing";
       List.iter
         (fun impl ->
-          match Interface.Definition.read_impl_interface interface impl with
+          match Interface.Definition.find_impl_interface interface impl with
           | None -> Harness.fail "`%s` has no interface" (Path.show impl)
           | Some impl_interface ->
               let provided =
                 match
-                  Interface.Definition.read_trait_interface interface
+                  Interface.Definition.find_trait_interface interface
                     impl_interface.implements.trait
                 with
                 | Some trait ->
