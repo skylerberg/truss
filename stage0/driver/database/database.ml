@@ -57,6 +57,7 @@ type package_database = {
   parsed : (Path.file, parsed) Hashtbl.t;
   mutable namespace : Resolve.Names.namespace option;
   resolved_names : (Resolve.Names.key * Resolve.section, Resolve.resolved part) Hashtbl.t;
+  grants : (Path.package, Interface.Environment.grant) Hashtbl.t;
   import_checks : (Path.file, Diagnostic.t list) Hashtbl.t;
   trait_headers : (Resolve.Names.key, Resolve.trait_header part) Hashtbl.t;
   constant_values : Z.t option part Path_table.t;
@@ -64,7 +65,6 @@ type package_database = {
   interfaces : (Resolve.Names.key, Interface.Environment.elaborated_interface part) Hashtbl.t;
   derived_interfaces : (Path.t * Path.t, Types.impl_interface part) Hashtbl.t;
   type_facts : Interface.Environment.type_facts part Path_table.t;
-  grants : (Path.package, Interface.Environment.grant) Hashtbl.t;
   signature_checks : (Resolve.Names.key, unit part) Hashtbl.t;
   contracts : (Resolve.Names.key, Core.t part) Hashtbl.t;
   checked_bodies : (Resolve.Names.key, Infer.checked part) Hashtbl.t;
@@ -113,6 +113,7 @@ let make_empty_package_database name ~dependencies =
     parsed = Hashtbl.create 64;
     namespace = None;
     resolved_names = Hashtbl.create 1024;
+    grants = Hashtbl.create 4;
     import_checks = Hashtbl.create 64;
     trait_headers = Hashtbl.create 64;
     constant_values = Path_table.create 64;
@@ -120,7 +121,6 @@ let make_empty_package_database name ~dependencies =
     interfaces = Hashtbl.create 256;
     derived_interfaces = Hashtbl.create 16;
     type_facts = Path_table.create 64;
-    grants = Hashtbl.create 4;
     signature_checks = Hashtbl.create 256;
     contracts = Hashtbl.create 256;
     checked_bodies = Hashtbl.create 256;
@@ -242,6 +242,7 @@ let copy_package_database (package_database : package_database) =
     parsed = Hashtbl.copy package_database.parsed;
     namespace = package_database.namespace;
     resolved_names = Hashtbl.copy package_database.resolved_names;
+    grants = Hashtbl.copy package_database.grants;
     import_checks = Hashtbl.copy package_database.import_checks;
     trait_headers = Hashtbl.copy package_database.trait_headers;
     constant_values = Path_table.copy package_database.constant_values;
@@ -249,7 +250,6 @@ let copy_package_database (package_database : package_database) =
     interfaces = Hashtbl.copy package_database.interfaces;
     derived_interfaces = Hashtbl.copy package_database.derived_interfaces;
     type_facts = Path_table.copy package_database.type_facts;
-    grants = Hashtbl.copy package_database.grants;
     signature_checks = Hashtbl.copy package_database.signature_checks;
     contracts = Hashtbl.copy package_database.contracts;
     checked_bodies = Hashtbl.copy package_database.checked_bodies;
@@ -998,6 +998,8 @@ let make_stored database (part : Part.stored) =
           keyed ~is_failed:failed
             (fun package_database -> package_database.resolved_names)
             (key, section)
+      | Grant (_, dependency) ->
+          keyed ~is_failed:never (fun package_database -> package_database.grants) dependency
       | Import_check file ->
           keyed ~is_failed:never (fun package_database -> package_database.import_checks) file
       | Trait_header key ->
@@ -1013,8 +1015,6 @@ let make_stored database (part : Part.stored) =
             (type_, trait)
       | Type_facts path ->
           at_path ~is_failed:failed (fun package_database -> package_database.type_facts) path
-      | Grant (_, dependency) ->
-          keyed ~is_failed:never (fun package_database -> package_database.grants) dependency
       | Signature_check key ->
           keyed ~is_failed:failed (fun package_database -> package_database.signature_checks) key
       | Contract key ->
@@ -1371,6 +1371,18 @@ let compute_part database (part : Part.computed) =
             | Some (Ok resolved) -> Value resolved
             | Some (Error diagnostics) -> Failed diagnostics
             | None -> Blocked))
+  | Grant (package, dependency) ->
+      let entry =
+        List.find
+          (fun (entry : Manifest.dependency) -> entry.package = dependency)
+          package_database.dependencies
+      in
+      into (make_keyed_slot package_database.grants dependency) (fun note ->
+          note (Input (Dependencies package));
+          Some
+            (Interface.Grants.resolve_grant
+               (make_recording_name_lookups database note)
+               ~package entry.capabilities))
   | Import_check file ->
       into (make_keyed_slot package_database.import_checks file) (fun note ->
           Some (list_import_diagnostics database note file))
@@ -1432,18 +1444,6 @@ let compute_part database (part : Part.computed) =
             | Value (Some interface) -> Value interface
             | Value None | Failed _ | Blocked -> Blocked))
   | Type_facts path -> compute_type_facts database [ path ]
-  | Grant (package, dependency) ->
-      let entry =
-        List.find
-          (fun (entry : Manifest.dependency) -> entry.package = dependency)
-          package_database.dependencies
-      in
-      into (make_keyed_slot package_database.grants dependency) (fun note ->
-          note (Input (Dependencies package));
-          Some
-            (Interface.Grants.resolve_grant
-               (make_recording_interface_lookups database note ~is_checked:false)
-               ~package entry.capabilities))
   | Signature_check key ->
       into (make_keyed_slot package_database.signature_checks key) (fun note ->
           read database note (Interface key);
@@ -1893,6 +1893,8 @@ let list_stored_parts (package_database : package_database) : Part.stored list =
            make_keyed_slot package_database.parsed (fun file -> Part.Parsed file);
            make_keyed_slot package_database.resolved_names (fun (key, section) ->
                Part.Resolved (key, section));
+           make_keyed_slot package_database.grants (fun dependency ->
+               Part.Grant (package_database.name, dependency));
            make_keyed_slot package_database.import_checks (fun file -> Part.Import_check file);
            make_keyed_slot package_database.trait_headers (fun key -> Part.Trait_header key);
            at_paths package_database.constant_values (fun path -> Part.Constant_value path);
@@ -1901,8 +1903,6 @@ let list_stored_parts (package_database : package_database) : Part.stored list =
            make_keyed_slot package_database.derived_interfaces (fun (type_, trait) ->
                Part.Derived_interface { type_; trait });
            at_paths package_database.type_facts (fun path -> Part.Type_facts path);
-           make_keyed_slot package_database.grants (fun dependency ->
-               Part.Grant (package_database.name, dependency));
            make_keyed_slot package_database.signature_checks (fun key -> Part.Signature_check key);
            make_keyed_slot package_database.contracts (fun key -> Part.Contract key);
            make_keyed_slot package_database.checked_bodies (fun key -> Part.Checked_body key);
