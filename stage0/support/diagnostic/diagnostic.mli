@@ -61,6 +61,7 @@ module Code : sig
     | Misplaced_requires
     | Misplaced_function_type
     | Misplaced_associated_type
+    | Misplaced_constraint
     | Misplaced_potential
     | Increment
     | Double_negation

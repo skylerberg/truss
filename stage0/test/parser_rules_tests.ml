@@ -127,6 +127,16 @@ let () =
         ~at:"fn(";
       error "proof Add[Self.Output].associative for Meters {}" ~code:Misplaced_associated_type
         ~at:"Self.Output");
+  test "an impl's trait takes no constraint, which its body would override" (fun () ->
+      error "impl Cursor[Element = Int64] for Numbers {}" ~code:Misplaced_constraint
+        ~at:"Element = Int64";
+      error "impl Convert[Int64, Output = Text] for Number {}" ~code:Misplaced_constraint
+        ~at:"Output = Text";
+      error "proof Cursor[Element = Int64].ordered for Numbers {}" ~code:Misplaced_constraint
+        ~at:"Element = Int64");
+  test "a constraint inside an impl's trait arguments is part of an any type" (fun () ->
+      definition "impl From[any Cursor[Element = Int64]] for Numbers {}"
+        "(impl From[(any Cursor[Element = Int64])] for Numbers)");
   test "an impl's trait arguments may be types, its generic parameters, Self, any, and counts"
     (fun () ->
       definition "impl Add[Element] for Vector[Element] {}"
