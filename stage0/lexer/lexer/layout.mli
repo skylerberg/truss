@@ -13,14 +13,14 @@ type input =
       ends_unterminated : bool;
     }
 
-val file :
+val lex_file :
   source:Source.t ->
   diagnostics:Diagnostic.Collector.t ->
   recovery:bool ->
   (unit -> input) ->
   Token.t array * bool
 
-val interpolation :
+val lex_interpolation :
   source:Source.t -> diagnostics:Diagnostic.Collector.t -> (unit -> input) -> Token.t array
 
 val starts_definition : Source.t -> int -> bool
