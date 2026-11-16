@@ -111,7 +111,6 @@ let () =
 let () =
   test "a command refuses a cache that other users can write, and exits with 2" (fun () ->
       let root = package [ ("main.truss", "fn main() {}\n") ] in
-      ignore (quietly [ "check"; "-C"; root ]);
       let cache = Harness.scratch "writable-cache" in
       Unix.chmod cache 0o777;
       Workspace.reset ();

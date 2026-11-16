@@ -118,31 +118,36 @@ let load_package_database (package : Project.package) ~hash ~visible =
 let standard_package : Project.package =
   { name = Path.standard_package; dependencies = []; files = Standard_library.files }
 
-let standard_package_database =
-  lazy
-    (let standard =
-       load_package_database standard_package ~visible:[]
-         ~hash:
-           (Registry.Content.hash
-              (List.map
-                 (fun (file, text) -> (Project.file_path ~directory:"" file, text))
-                 Standard_library.files))
-     in
-     let database = Database.create ~loaded:[ standard.package_database ] [] in
-     let rendered =
-       List.concat_map
-         (fun ((file : Path.file), text) ->
-           match Database.list_file_diagnostics database file with
-           | [] -> []
-           | diagnostics ->
-               let source = Source.create ~path:(Path.show_file file) text in
-               List.map (Diagnostic.render source) diagnostics)
-         Standard_library.files
-     in
-     if rendered <> [] then
-       Compiler_bug.bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
-         (String.concat "" rendered);
-     standard)
+let checked_standard_package : loaded option ref = ref None
+
+let load_standard_package () =
+  match !checked_standard_package with
+  | Some standard -> standard
+  | None ->
+      let standard =
+        load_package_database standard_package ~visible:[]
+          ~hash:
+            (Registry.Content.hash
+               (List.map
+                  (fun (file, text) -> (Project.file_path ~directory:"" file, text))
+                  Standard_library.files))
+      in
+      let database = Database.create ~loaded:[ standard.package_database ] [] in
+      let rendered =
+        List.concat_map
+          (fun ((file : Path.file), text) ->
+            match Database.list_file_diagnostics database file with
+            | [] -> []
+            | diagnostics ->
+                let source = Source.create ~path:(Path.show_file file) text in
+                List.map (Diagnostic.render source) diagnostics)
+          Standard_library.files
+      in
+      if rendered <> [] then
+        Compiler_bug.bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
+          (String.concat "" rendered);
+      checked_standard_package := Some standard;
+      standard
 
 let list_package_databases () =
   List.sort compare
@@ -297,7 +302,7 @@ let registry_packages snapshot =
     snapshot.project.selection.selected
 
 let load_package_databases snapshot =
-  let standard = Lazy.force standard_package_database in
+  let standard = load_standard_package () in
   let hashes =
     List.filter_map
       (fun (name, (place : Project.place)) ->
@@ -799,7 +804,7 @@ let stop = Server.stop
 let wait_until_ended = Server.wait_until_ended
 
 module For_testing = struct
-  let load_standard_package_database () = (Lazy.force standard_package_database).package_database
+  let load_standard_package_database () = (load_standard_package ()).package_database
   let build_cold_database = build_cold_database ~checks:true
   let collect_cache = collect
   let listen = Server.listen
