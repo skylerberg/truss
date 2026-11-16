@@ -32,6 +32,23 @@ let () =
   Harness.test "an overflow's counterexample names the value" (fun () ->
       let actual = read_message Fixtures.Prover.addition_that_can_overflow in
       if not (String.includes ~affix:"`count` is 255" actual) then Harness.fail "message %S" actual);
+  Harness.test "a counterexample names a value that a pattern binds" (fun () ->
+      let actual = read_message Fixtures.Prover.increment_of_a_matched_count in
+      if not (String.includes ~affix:"`count` is 255" actual) then Harness.fail "message %S" actual);
+  Harness.test "a counterexample the solver misses is found in a model of few elements" (fun () ->
+      let actual = read_message Fixtures.Prover.increment_of_a_word_count in
+      if not (String.includes ~affix:"`count` is 9223372036854775807" actual) then
+        Harness.fail "message %S" actual);
+  Harness.test "a counterexample leaves out a value that nothing constrains" (fun () ->
+      let actual = read_message Fixtures.Prover.increment_under_a_long_name in
+      if
+        String.includes ~affix:"`name` is" actual
+        || not (String.includes ~affix:"`count` is 255" actual)
+      then Harness.fail "message %S" actual);
+  Harness.test "an obligation with neither a proof nor a counterexample says so" (fun () ->
+      let actual = read_message Fixtures.Prover.sum_of_two_cubes in
+      if not (String.includes ~affix:"found neither a proof nor a counterexample" actual) then
+        Harness.fail "message %S" actual);
   Harness.test "code generic over an integer trait is proven for each type that implements it"
     (fun () ->
       expect_proven Fixtures.Prover.twice_of_a_signed_integer;
@@ -1490,6 +1507,46 @@ let () =
           if Solver.count_queries_run solver <> 1 then Harness.fail "did not run the solver";
           if Hashtbl.find_opt cached_answers (Solver.request_key request) <> Some "proven\n" then
             Harness.fail "the cache does not have the answer");
+  let find_obligation_query text code =
+    let packages = Support.setup [ ("app::main", text) ] in
+    let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
+    match
+      Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
+        (Resolve.Names.make_key key)
+    with
+    | Obligations { obligations; _ } ->
+        List.find_map
+          (fun (obligation : Prover.State.obligation) ->
+            if obligation.code = code then Some obligation.query else None)
+          obligations
+    | Unsupported _ | Not_proven_here -> None
+  in
+  Harness.test "an unknown answer without an uninterpreted sort is not searched further" (fun () ->
+      match (find_obligation_query Fixtures.Prover.sum_of_two_cubes Ensures, Solver.find ()) with
+      | None, _ -> Harness.fail "no obligation of the `ensures`"
+      | _, Error message -> Harness.fail "%s" message
+      | Some query, Ok solver ->
+          let request = Solver.request query in
+          if Solver.read request (List.hd (Solver.solve_all solver [ (request, query) ])) <> Unknown
+          then Harness.fail "expected an unknown answer";
+          if Solver.count_queries_run solver <> 1 then
+            Harness.fail "ran %d queries" (Solver.count_queries_run solver));
+  Harness.test "a second request for a query solved in a small model runs one query" (fun () ->
+      match
+        (find_obligation_query Fixtures.Prover.increment_of_a_word_count Overflow, Solver.find ())
+      with
+      | None, _ -> Harness.fail "no obligation of the addition"
+      | _, Error message -> Harness.fail "%s" message
+      | Some query, Ok solver -> (
+          let first = Solver.request query
+          and second = Solver.request ~terms:[ (Logic.Symbol.Reached 0, Logic.int 1) ] query in
+          match Solver.read first (List.hd (Solver.solve_all solver [ (first, query) ])) with
+          | Proven | Unknown -> Harness.fail "expected a counterexample"
+          | Counterexample _ ->
+              let queries_before = Solver.count_queries_run solver in
+              ignore (Solver.solve_all solver [ (second, query) ]);
+              let queries_run = Solver.count_queries_run solver - queries_before in
+              if queries_run <> 1 then Harness.fail "ran %d queries" queries_run));
   Harness.test "a query's text names nothing by its Truss name" (fun () ->
       let packages = Support.setup [ ("app::main", Fixtures.Prover.addition_that_can_overflow) ] in
       let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in

@@ -23,7 +23,7 @@ type obligation = {
   fixes : fix list;
   query : Logic.query;
   values : (Logic.symbol * string) list;
-  locals : (Logic.symbol * string) list;
+  locals : (Logic.term * string) list;
   template_clause : template_clause option;
   decisions : (string * string option * Logic.term * Logic.term) list;
   may_stop_with_panic : bool;

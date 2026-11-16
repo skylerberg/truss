@@ -1,5 +1,6 @@
 let version = "5.3.3"
 let steps = 1_000_000
+let cardinality_bounds = [ 2; 3; 4 ]
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Solver" format
 
 type cache = { find : string -> string option; add : string -> string -> unit }
@@ -27,7 +28,7 @@ let find ?cache () =
              version program (String.trim output))
   | _, _, errors -> Error (Printf.sprintf "`%s --version` failed: %s" program (String.trim errors))
 
-type answer = Proven | Counterexample of (Logic.symbol * string) list | Out_of_steps
+type answer = Proven | Counterexample of (Logic.symbol * string) list | Unknown
 
 let header =
   Printf.sprintf
@@ -37,7 +38,12 @@ let header =
      (set-option :rlimit %d)\n"
     steps
 
-let key_of_text text = Logic.hash (Printf.sprintf "z3 %s\n%s%s" version header text)
+let key_of_text text =
+  Logic.hash
+    (Printf.sprintf "z3 %s\nunknown retried with cardinality bounds %s\n%s%s" version
+       (String.concat ", " (List.map string_of_int cardinality_bounds))
+       header text)
+
 let hash_query query = key_of_text (Logic.show_query query)
 
 type sexp = Atom of string | List of sexp list
@@ -92,9 +98,10 @@ type request = {
   value_arguments : string list;
 }
 
-type canonical = Proven_canonical | Values of (string * string) list | Out_of_steps_canonical
+type canonical = Proven_canonical | Values of (string * string) list | Unknown_canonical
 
 let answers : (string, canonical) Hashtbl.t = Hashtbl.create 256
+let small_model_bounds : (string, int) Hashtbl.t = Hashtbl.create 16
 let lock = Mutex.create ()
 let run_locked work = Mutex.protect lock work
 let request_key_of_text text value_arguments = key_of_text text ^ String.concat "," value_arguments
@@ -128,7 +135,7 @@ let request_key request = request.key
 
 let read request = function
   | Proven_canonical -> Proven
-  | Out_of_steps_canonical -> Out_of_steps
+  | Unknown_canonical -> Unknown
   | Values pairs ->
       Counterexample
         (List.filter_map
@@ -138,7 +145,7 @@ let read request = function
 
 let print_canonical = function
   | Proven_canonical -> "proven\n"
-  | Out_of_steps_canonical -> "out_of_steps\n"
+  | Unknown_canonical -> "unknown\n"
   | Values pairs ->
       "counterexample\n"
       ^ String.concat ""
@@ -147,7 +154,7 @@ let print_canonical = function
 let parse_canonical text =
   match String.split_on_char '\n' text with
   | "proven" :: _ -> Some Proven_canonical
-  | "out_of_steps" :: _ -> Some Out_of_steps_canonical
+  | "unknown" :: _ -> Some Unknown_canonical
   | "counterexample" :: lines -> Some (Values (List.filter_map (String.split_first ~sep:" ") lines))
   | _ -> None
 
@@ -164,6 +171,50 @@ let find_known_answer solver key =
               Some answer
           | None -> None))
 
+let run_check solver request text =
+  let input =
+    header ^ text
+    ^
+    if request.requested = [] then ""
+    else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.value_arguments)
+  in
+  run_locked (fun () -> solver.queries_run <- solver.queries_run + 1);
+  let status, output, errors = Process.run ~input solver.program [ "-in"; "-smt2" ] in
+  match parse_sexps output with
+  | Atom "unsat" :: _ -> Proven_canonical
+  | Atom "sat" :: rest ->
+      Values
+        (match rest with
+        | List pairs :: _ ->
+            List.take (List.length request.requested)
+              (List.mapi
+                 (fun index pair ->
+                   match (pair, List.nth_opt request.requested index) with
+                   | List [ _; value ], Some (_, canonical) -> Some (canonical, show_sexp value)
+                   | _ -> None)
+                 pairs)
+            |> List.filter_map Fun.id
+        | _ -> [])
+  | Atom "unknown" :: _ -> Unknown_canonical
+  | _ ->
+      raise_bug
+        "Z3 exited with status %d without answering a query, writing `%s` to stdout and `%s` to \
+         stderr"
+        status (String.trim output) (String.trim errors)
+
+let search_small_models solver request query ~text_key =
+  let rec search_from = function
+    | [] -> Unknown_canonical
+    | cardinality_bound :: larger_bounds -> (
+        match run_check solver request (Logic.show_query ~cardinality_bound query) with
+        | Values _ as counterexample ->
+            run_locked (fun () -> Hashtbl.replace small_model_bounds text_key cardinality_bound);
+            counterexample
+        | Proven_canonical -> search_from larger_bounds
+        | Unknown_canonical -> Unknown_canonical)
+  in
+  search_from cardinality_bounds
+
 let solve solver (request, query) =
   match find_known_answer solver request.key with
   | Some answer -> answer
@@ -171,37 +222,16 @@ let solve solver (request, query) =
       let text = Logic.show_query query in
       if request_key_of_text text request.value_arguments <> request.key then
         raise_bug "the query is not the one its request was made from";
-      let input =
-        header ^ text
-        ^
-        if request.requested = [] then ""
-        else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.value_arguments)
-      in
-      run_locked (fun () -> solver.queries_run <- solver.queries_run + 1);
-      let status, output, errors = Process.run ~input solver.program [ "-in"; "-smt2" ] in
+      let text_key = key_of_text text in
       let answer =
-        match parse_sexps output with
-        | Atom "unsat" :: _ -> Proven_canonical
-        | Atom "sat" :: rest ->
-            Values
-              (match rest with
-              | List pairs :: _ ->
-                  List.take (List.length request.requested)
-                    (List.mapi
-                       (fun index pair ->
-                         match (pair, List.nth_opt request.requested index) with
-                         | List [ _; value ], Some (_, canonical) ->
-                             Some (canonical, show_sexp value)
-                         | _ -> None)
-                       pairs)
-                  |> List.filter_map Fun.id
-              | _ -> [])
-        | Atom "unknown" :: _ -> Out_of_steps_canonical
-        | _ ->
-            raise_bug
-              "Z3 exited with status %d without answering a query, writing `%s` to stdout and `%s` \
-               to stderr"
-              status (String.trim output) (String.trim errors)
+        match run_locked (fun () -> Hashtbl.find_opt small_model_bounds text_key) with
+        | Some cardinality_bound ->
+            run_check solver request (Logic.show_query ~cardinality_bound query)
+        | None -> (
+            match run_check solver request text with
+            | Unknown_canonical when Logic.has_uninterpreted_sort query ->
+                search_small_models solver request query ~text_key
+            | (Proven_canonical | Values _ | Unknown_canonical) as answer -> answer)
       in
       run_locked (fun () ->
           Hashtbl.replace answers request.key answer;
@@ -210,7 +240,7 @@ let solve solver (request, query) =
 
 let solve_all solver requests =
   let requests = Array.of_list requests in
-  let answers = Array.make (Array.length requests) Out_of_steps_canonical in
+  let answers = Array.make (Array.length requests) Unknown_canonical in
   let next = Atomic.make 0 in
   let rec run_worker () =
     let index = Atomic.fetch_and_add next 1 in

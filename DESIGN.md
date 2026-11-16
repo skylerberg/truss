@@ -1517,6 +1517,7 @@ the start.
 | Rule | Reason |
 |---|---|
 | Each obligation goes to an automated solver, as in Dafny. | A programmer writes a proof only where the solver fails. |
+| A query that the solver answers `unknown` is solved again with each uninterpreted sort bounded to 2, then 3, then 4 elements, until a bound has a model or is `unknown`. | A model of the bounded query is a model of the query, so its counterexample is real. Z3's search for a model runs out of steps on a fact that nests `exists` in `forall`, such as the definition of `contains_equal_key` that `Map.get` reaches, though a model of two elements satisfies the query. |
 | A proof is written in the language's own syntax: calls, `match`, `if`, and `assert`. | Programmers and LLMs already know that syntax. |
 | A proof is a result of its own. | An edit to a proof re-checks proofs, with no rebuild of the program and no rerun of tests. A reviewer trusts a checked proof without reading it, and reads only signatures. |
 | There is no `assume`. | A missing proof that an addition cannot overflow would allow a failure that the signature does not show. A claim that is not ready is left out of the signature. |

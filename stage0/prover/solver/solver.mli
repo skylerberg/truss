@@ -3,7 +3,7 @@ type cache = { find : string -> string option; add : string -> string -> unit }
 
 val find : ?cache:cache -> unit -> (t, string) result
 
-type answer = Proven | Counterexample of (Logic.symbol * string) list | Out_of_steps
+type answer = Proven | Counterexample of (Logic.symbol * string) list | Unknown
 type request
 type canonical
 

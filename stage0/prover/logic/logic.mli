@@ -89,7 +89,8 @@ val substitute : (symbol * term) list -> term -> term
 val replace : from:term -> into:term -> term -> term
 val has_untriggered_fact : query -> bool
 val prune : query -> query
-val show_query : query -> string
+val show_query : ?cardinality_bound:int -> query -> string
+val has_uninterpreted_sort : query -> bool
 
 type rendering
 
