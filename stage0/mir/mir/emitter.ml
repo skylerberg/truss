@@ -5,7 +5,7 @@ end))
 let raise_bug format = Compiler_bug.raise_bug ~stage:"MIR" format
 
 type frame = Bindings | Statement | Condition
-type held = { names : Tree.local list; lent : Tree.local list; loans : int list }
+type held = { names : Tree.local list; lent_parts : Tree.local list; receiver_loans : int list }
 
 type scope = {
   frame : frame;
@@ -208,11 +208,17 @@ let end_scope builder scope origin =
     (fun (ended : Tree.statement) -> emit builder ended.kind ended.origin)
     (list_scope_ends scope origin)
 
-let nothing_held = { names = []; lent = []; loans = [] }
+let nothing_held = { names = []; lent_parts = []; receiver_loans = [] }
 
 let run_in_scope ?(provides = false) ?(held = nothing_held) builder origin f =
   let scope =
-    { frame = Bindings; bound = held.names; loans = held.loans; temporaries = held.lent; provides }
+    {
+      frame = Bindings;
+      bound = held.names;
+      loans = held.receiver_loans;
+      temporaries = held.lent_parts;
+      provides;
+    }
   in
   builder.scopes <- scope :: builder.scopes;
   let result = f () in
@@ -301,28 +307,30 @@ let run_in_condition_frame builder evaluate =
   (value, scope)
 
 let run_in_condition_scope ~binds_lent_part builder evaluate =
-  let statement_scope = find_statement_scope builder in
-  let bound_before = statement_scope.bound in
-  let value, scope = run_in_condition_frame builder evaluate in
   if binds_lent_part then begin
+    let statement_scope = find_statement_scope builder in
+    let bound_before = statement_scope.bound in
+    let value, scope = run_in_condition_frame builder evaluate in
     let names =
       List.filter (fun local -> not (List.mem local bound_before)) statement_scope.bound
     in
     statement_scope.bound <- bound_before;
-    let lent, others = partition_lent builder scope.temporaries in
+    let lent_parts, others = partition_lent builder scope.temporaries in
     {
       value;
       ended_if_true = { scope with temporaries = others; loans = [] };
       ended_if_false = { scope with bound = names };
-      held_if_true = { names; lent; loans = scope.loans };
+      held_if_true = { names; lent_parts; receiver_loans = scope.loans };
     }
   end
-  else { value; ended_if_true = scope; ended_if_false = scope; held_if_true = nothing_held }
+  else
+    let value, scope = run_in_condition_frame builder evaluate in
+    { value; ended_if_true = scope; ended_if_false = scope; held_if_true = nothing_held }
 
 let run_in_guard_scope builder origin evaluate =
   let value, scope = run_in_condition_frame builder evaluate in
-  let lent, others = partition_lent builder scope.temporaries in
-  List.iter (add_temporary builder) (List.rev lent);
+  let lent_parts, others = partition_lent builder scope.temporaries in
+  List.iter (add_temporary builder) (List.rev lent_parts);
   (match builder.scopes with
   | enclosing :: _ -> enclosing.loans <- scope.loans @ enclosing.loans
   | [] -> ());
