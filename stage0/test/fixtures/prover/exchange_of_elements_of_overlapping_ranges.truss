@@ -1,0 +1,5 @@
+fn f(items: mut List[Int64])
+  requires items.length() >= 4
+{
+  exchange(mut items[..3][0], second: mut items[..2][0])
+}
