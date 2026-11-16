@@ -193,7 +193,7 @@ let list_proof_states database file = Prover.list_states (compute_verdicts datab
 let read_proofs database file =
   let proofs = prove database file in
   fun key ->
-    match Database.For_testing.read_proof proofs key with
+    match Database.For_testing.find_proof proofs key with
     | Some (Value proof) -> proof
     | Some (Failed _ | Blocked) ->
         failwith ("the proof of " ^ Resolve.Names.show_key key ^ " is blocked")

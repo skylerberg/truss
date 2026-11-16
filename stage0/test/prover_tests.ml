@@ -189,7 +189,7 @@ let () =
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
-        Database.For_testing.read_proof
+        Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
           (Resolve.Names.make_key caller)
       with
@@ -219,7 +219,7 @@ let () =
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
-        Database.For_testing.read_proof
+        Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
           (Resolve.Names.make_key caller)
       with
@@ -249,7 +249,7 @@ let () =
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
-        Database.For_testing.read_proof
+        Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
           (Resolve.Names.make_key caller)
       with
@@ -285,7 +285,7 @@ let () =
       let proofs = Support.prove database main in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          match Database.For_testing.read_proof proofs (Resolve.Names.make_key declaration) with
+          match Database.For_testing.find_proof proofs (Resolve.Names.make_key declaration) with
           | Some (Value (Obligations _)) -> ()
           | Some (Value (Unsupported _ | Not_proven_here)) ->
               Harness.fail "%s has no obligations" (Path.show declaration.path)
