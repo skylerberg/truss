@@ -101,10 +101,10 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
               Identical (first, State.build_expression state second.value));
           Types.bool
       | _ ->
-          State.report state
-            (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
-            (State.read_span state value.id) "`identical` takes two values of one type.";
-          Calls.check_arguments_alone state env arguments Types.bool)
+          Calls.check_arguments_alone state env arguments
+            (State.make_error_type state
+               (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
+               (State.read_span state value.id) "`identical` takes two values of one type."))
   | Specification_function function_ -> (
       let bound_method =
         match (function_, arguments) with
@@ -132,7 +132,11 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
                         State.build_expression state argument.value)
                       arguments;
                 });
-          Calls.check_arguments_alone state env arguments Types.Integer)
+          List.iter
+            (fun (argument : Syntax.argument) ->
+              ignore (Hooks.check_expression state env argument.value))
+            arguments;
+          Types.Integer)
   | Definition (Type, path) -> (
       match Instantiation.check_named_type state callee path type_arguments with
       | Types.Named { arguments = type_arguments; _ } ->
@@ -372,11 +376,9 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
   | Some written when List.length written <> List.length trait_generics ->
       Calls.check_arguments_alone state env arguments
         (State.make_error_type state Arity (State.read_span state value.id)
-           (Printf.sprintf "`%s` takes %d type %s, and %d %s given." (Types.show_trait trait)
-              (List.length trait_generics)
-              (if List.length trait_generics = 1 then "argument" else "arguments")
-              (List.length written)
-              (if List.length written = 1 then "is" else "are")))
+           (Printf.sprintf "`%s` takes %s, and %s given." (Types.show_trait trait)
+              (Diagnostic.show_count (List.length trait_generics) "type argument" "type arguments")
+              (Diagnostic.show_count (List.length written) "is" "are")))
   | Some trait_arguments ->
       check_trait_method_call state env value self_type trait method_ arguments ~trait_generics
         ~trait_arguments

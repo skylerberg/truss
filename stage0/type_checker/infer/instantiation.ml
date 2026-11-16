@@ -148,12 +148,10 @@ and check_named_type state (value : Syntax.expression) path type_arguments =
           match Resolve.Names.find_generics state.lookups.interface.names path with
           | Some expected when List.length expected <> List.length arguments ->
               State.make_error_type state Arity (State.read_span state value.id)
-                (Printf.sprintf "`%s` takes %d %s, and %d %s given."
+                (Printf.sprintf "`%s` takes %s, and %s given."
                    (Types.show (Named { path; arguments = [] }))
-                   (List.length expected)
-                   (if List.length expected = 1 then "argument" else "arguments")
-                   (List.length arguments)
-                   (if List.length arguments = 1 then "is" else "are"))
+                   (Diagnostic.show_count (List.length expected) "argument" "arguments")
+                   (Diagnostic.show_count (List.length arguments) "is" "are"))
           | _ ->
               require_type_bounds state (State.read_span state value.id) path arguments;
               make_type arguments))

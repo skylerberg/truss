@@ -280,6 +280,6 @@ let run ~from_ ~to_ =
              ])
       else
         Output.printf "Renamed %s to %s: %s in %s.\n" from_ to_
-          (Report.pluralize count "edit" "edits")
-          (Report.pluralize (List.length plan.edits) "file" "files");
+          (Diagnostic.show_count count "edit" "edits")
+          (Diagnostic.show_count (List.length plan.edits) "file" "files");
       0

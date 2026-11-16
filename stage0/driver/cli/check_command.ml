@@ -79,7 +79,7 @@ let run ~fix:fixing ~proofs =
           else []))
   else begin
     if fixed <> [] then
-      Output.eprintf "Fixed %s.\n" (Report.pluralize (List.length fixed) "error" "errors");
+      Output.eprintf "Fixed %s.\n" (Diagnostic.show_count (List.length fixed) "error" "errors");
     Report.print report
   end;
   if Report.clean report then 0 else 1
