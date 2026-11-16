@@ -136,11 +136,11 @@ let measure database ~is_measured =
 
 let timed label work =
   let start = Unix.gettimeofday () in
-  let runs_before = Solver.queries_run solver in
+  let runs_before = Solver.count_queries_run solver in
   let result = work () in
   Printf.printf "%6.1f s, %d queries solved: %s\n%!"
     (Unix.gettimeofday () -. start)
-    (Solver.queries_run solver - runs_before)
+    (Solver.count_queries_run solver - runs_before)
     label;
   result
 

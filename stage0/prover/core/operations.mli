@@ -1,17 +1,22 @@
-val compared_terms : Types.ty -> Core.comparison -> Logic.term -> Logic.term -> Logic.term
+val compare_terms : Types.ty -> Core.comparison -> Logic.term -> Logic.term -> Logic.term
 val check_widened : State.location -> is_written:bool -> Types.ty -> Types.ty -> unit
-val from_integer : State.context -> State.frame -> Invocation.site -> Logic.term -> Logic.term
-val spend : State.context -> State.frame -> (Costs.counter -> Logic.term) -> State.frame
-val unknown_amount : State.context -> State.frame -> Costs.counter -> Logic.term
-val to_any : State.context -> State.frame -> Invocation.site -> State.frame * Logic.term
-val current_bounds : State.context -> Interface.Impls.bounds
 
-val concrete_impl :
+val convert_from_integer :
+  State.context -> State.frame -> Invocation.site -> Logic.term -> Logic.term
+
+val spend : State.context -> State.frame -> (Costs.counter -> Logic.term) -> State.frame
+val declare_unknown_amount : State.context -> State.frame -> Costs.counter -> Logic.term
+val convert_to_any : State.context -> State.frame -> Invocation.site -> State.frame * Logic.term
+val compute_current_bounds : State.context -> Interface.Impls.bounds
+
+val find_concrete_impl :
   State.context -> Types.trait_reference -> Types.ty -> (Path.t * Types.substitution) option
 
-val equal_of : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
-val innermost_axiom : State.context -> State.frame -> Logic.term -> State.open_axiom option
-val power_of : State.context -> State.frame -> Logic.term -> Logic.term -> Logic.term
+val make_equality :
+  State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
+
+val find_innermost_axiom : State.context -> State.frame -> Logic.term -> State.open_axiom option
+val declare_power : State.context -> State.frame -> Logic.term -> Logic.term -> Logic.term
 
 val primitive_operation :
   State.context ->

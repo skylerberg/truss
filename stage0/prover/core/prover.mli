@@ -8,7 +8,7 @@ type proof =
   | Unsupported of State.location * string
   | Not_proven_here
 
-val proof : Lookups.t -> Resolve.Names.key -> proof
+val prove : Lookups.t -> Resolve.Names.key -> proof
 
 val resolve_location :
   Resolve.Names.lookups -> Resolve.Names.key -> State.location -> Source.Definition_span.t
