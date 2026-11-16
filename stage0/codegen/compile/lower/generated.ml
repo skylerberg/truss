@@ -221,33 +221,21 @@ let build_impl_table context (key : Instance.key) ~impl ~type_arguments : Lowere
   in
   { table_key = key; capability = Some capability; entries }
 
-let find_real_implementation (interface : Interface.Lookups.t) (capability : Path.t) =
-  match
-    List.filter
-      (function Path.Impl { module_; _ } -> Well_known.is_system_module module_ | _ -> false)
-      (interface.names.list_impls_of_trait Path.standard_package capability)
-  with
-  | [] -> None
-  | [ impl ] -> (
-      match Interface.Definition.read_impl_interface interface impl with
-      | Some impl_interface -> Some (impl, impl_interface)
-      | None -> Definitions.raise_bug "the real implementation %s has no interface" (Path.show impl)
-      )
-  | impls ->
-      Definitions.raise_bug "%s has %d real implementations: %s" (Path.show capability)
-        (List.length impls)
-        (String.concat ", " (List.map Path.show impls))
-
 let list_real_implementations (st : Lowering.state) ~user capabilities =
   List.map
     (fun capability ->
-      let impl, ty =
-        match find_real_implementation st.context.lookups.interface capability with
-        | Some (impl, impl_interface) ->
-            (impl, Monomorphic.ground st.context.monomorphic [] impl_interface.for_type)
+      let impl =
+        match
+          Interface.Definition.find_real_implementation st.context.lookups.interface capability
+        with
+        | Some impl -> impl
         | None ->
-            Lowering.raise_unsupported "%s uses %s, which has no real implementation" user
-              (Ground.show_path_name capability)
+            Definitions.raise_bug "%s uses %s, which has no real implementation" user
+              (Path.show capability)
+      in
+      let ty =
+        Monomorphic.ground st.context.monomorphic []
+          (Definitions.read_impl_interface st.context impl).for_type
       in
       let implementation =
         if Lowering.is_zero_size st ty then Lowered.Constant Null

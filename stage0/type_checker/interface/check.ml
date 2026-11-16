@@ -107,10 +107,31 @@ let list_signature_types (signature : Types.signature) =
         | _ -> [])
       signature.generics
 
+let check_real_implementations (state : Checking.state) (resolved : Resolve.resolved) ~recipient
+    ~report_panic (uses : Syntax.capability_reference list) =
+  List.iter
+    (fun (capability : Syntax.capability_reference) ->
+      match capability.kind with
+      | Capability_path written -> (
+          match resolved.names.(written.path.last.id) with
+          | Some (Definition (Capability, path))
+            when Option.is_none (Definition.find_real_implementation state.lookups path) ->
+              if Well_known.is Panic path then report_panic capability
+              else
+                Checking.report state No_real_implementation state.spans.(capability.id)
+                  (Printf.sprintf
+                     "`%s` has no real implementation, so the runtime cannot provide it to %s. \
+                      Provide an implementation in the body with `provide`."
+                     (Elaborator.show_path written.path)
+                     recipient)
+          | _ -> ())
+      | Self_capabilities _ | Associated_capabilities _ -> ())
+    uses
+
 let main_message =
   "`main` must have exactly the signature `fn main(arguments: List[String]) -> ExitCode`."
 
-let check_main state (signature : Types.signature) span =
+let check_main state resolved (clauses : Syntax.clause list) (signature : Types.signature) span =
   let list_of_string =
     match signature.parameters with
     | [
@@ -130,7 +151,48 @@ let check_main state (signature : Types.signature) span =
     | _ -> false
   in
   if not (list_of_string && exit_code && signature.generics = [] && signature.receiver = None) then
-    Checking.report state Main_signature span main_message
+    Checking.report state Main_signature span main_message;
+  check_real_implementations state resolved ~recipient:"`main`" ~report_panic:ignore
+    (List.concat_map
+       (fun (clause : Syntax.clause) -> match clause.kind with Uses written -> written | _ -> [])
+       clauses)
+
+let make_element_removal (spans : Source.Definition_span.t array)
+    ~(clause : Source.Definition_span.t) (elements : Syntax.id list) (removed : Syntax.id) =
+  let delete start stop = Diagnostic.delete (Source.Definition_span.make start stop) in
+  let rec find_neighbors previous = function
+    | element :: next :: _ when element = removed -> (previous, Some next)
+    | [ element ] when element = removed -> (previous, None)
+    | element :: rest -> find_neighbors (Some element) rest
+    | [] -> Compiler_bug.raise_bug ~stage:"Interface" "the removed element is not in its list"
+  in
+  match find_neighbors None elements with
+  | _, Some next -> delete spans.(removed).start spans.(next).start
+  | Some previous, None -> delete spans.(previous).stop spans.(removed).stop
+  | None, None -> delete clause.start clause.stop
+
+let check_test_uses (state : Checking.state) (resolved : Resolve.resolved)
+    (name : Syntax.string_literal) (uses : Syntax.capability_reference list) =
+  match List.rev uses with
+  | [] -> ()
+  | (last : Syntax.capability_reference) :: _ ->
+      let clause =
+        Source.Definition_span.make state.spans.(name.id).stop state.spans.(last.id).stop
+      in
+      let elements =
+        List.map (fun (capability : Syntax.capability_reference) -> capability.id) uses
+      in
+      let report_panic (panic : Syntax.capability_reference) =
+        Checking.report state No_real_implementation state.spans.(panic.id)
+          ~fixes:
+            [
+              Diagnostic.fix "Remove `Panic`"
+                [ make_element_removal state.spans ~clause elements panic.id ];
+            ]
+          "`Panic` has no real implementation. Every test has it without declaring it. Declaring \
+           it would make this test external, so the test's result would never be cached."
+      in
+      check_real_implementations state resolved ~recipient:"a test" ~report_panic uses
 
 let check_duplicates state member_kind (names : Syntax.name list) =
   ignore
@@ -147,29 +209,6 @@ let list_field_names (fields : Syntax.field list) =
     (fun (field : Syntax.field) ->
       match field.kind with Field_declaration { name; _ } -> Some name | Field_error -> None)
     fields
-
-let make_derive_removal (spans : Source.Definition_span.t array) (clause : Syntax.type_clause)
-    (traits : Syntax.path_type list) (written : Syntax.path_type) =
-  let delete start stop = Diagnostic.delete (Source.Definition_span.make start stop) in
-  match traits with
-  | [ _ ] -> delete spans.(clause.id).start spans.(clause.id).stop
-  | _ -> (
-      let rec find_next = function
-        | (first : Syntax.path_type) :: (next :: _ as rest) ->
-            if first == written then Some next else find_next rest
-        | _ -> None
-      in
-      match find_next traits with
-      | Some next -> delete spans.(written.id).start spans.(next.id).start
-      | None -> (
-          let rec find_previous = function
-            | (previous : Syntax.path_type) :: (next :: _ as rest) ->
-                if next == written then Some previous else find_previous rest
-            | _ -> None
-          in
-          match find_previous traits with
-          | Some previous -> delete spans.(previous.id).stop spans.(written.id).stop
-          | None -> delete spans.(written.id).start spans.(written.id).stop))
 
 let check_derives state (interface : Types.type_interface) (clauses : Syntax.type_clause list)
     resolved =
@@ -210,7 +249,11 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
                         ~fixes:
                           [
                             Diagnostic.fix "Remove the declaration."
-                              [ make_derive_removal state.spans clause traits written ];
+                              [
+                                make_element_removal state.spans ~clause:state.spans.(clause.id)
+                                  (List.map (fun (trait : Syntax.path_type) -> trait.id) traits)
+                                  written.id;
+                              ];
                           ]
                         (Printf.sprintf
                            "Whether `%s` holds for this type is derived from its fields, which are \
@@ -415,7 +458,7 @@ let check (state : Checking.state) =
         | Member_name (head, _) -> check_method_location state head
         | Plain_name name ->
             if name.text = "main" && state.key.module_.modules = [] then
-              check_main state elaborated state.spans.(name.id));
+              check_main state resolved signature.clauses elaborated state.spans.(name.id));
         let span =
           match signature.name with
           | Plain_name name | Member_name (_, name) -> state.spans.(name.id)
@@ -478,6 +521,7 @@ let check (state : Checking.state) =
     | None, Impl { trait_; members; _ }, Impl_interface impl ->
         Impl_checks.check_impl state members impl trait_
     | None, Constant { name = Member_name (head, _); _ }, _ -> check_method_location state head
+    | None, Test { name; uses; _ }, Test_interface _ -> check_test_uses state resolved name uses
     | None, _, _ -> ()
 
 let list_diagnostics (lookups : Lookups.t) key =

@@ -163,6 +163,7 @@ module Code : sig
     | Not_constant
     | Constant_overflow
     | Main_signature
+    | No_real_implementation
     | Duplicate_field
     | Cannot_derive
     | Derives_inferred

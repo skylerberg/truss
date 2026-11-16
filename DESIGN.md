@@ -1470,6 +1470,7 @@ in a test build takes constant time.
 |---|---|
 | A test with `uses` is external: it gets the real implementations, and its result is never cached. | Its result depends on the world. It gets no hidden isolation: a test that wants a scratch directory narrows file access where a reader can see it. |
 | A test's standard output and standard error are attached to its report as one text. | Tests run at once in several worker processes, so output sent to the terminal would interleave, with nothing to say which test wrote it. One text keeps the order that a terminal would show. |
+| A test has `Panic` and cannot declare it. | A panic does not depend on the world. Declaring `Panic` would make the test external, so the suite would run it every time instead of caching its result. |
 | A failed test is never retried. | A retry hides exactly the failures that an external test exists to catch. |
 | A test cannot expect a panic. | That would treat a panic as intended behavior, which is the job of `Result`. The misuse that other languages test this way, such as a violated precondition, does not compile. To check that a program crashes on bad input, an external test runs the program through `Processes`. |
 | A panic ends one worker process, and the test runner starts another. | Tests share a process safely, because Truss has no mutable global state and a test reaches only its inputs. |
