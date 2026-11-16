@@ -887,6 +887,41 @@ let () =
       expect_one_diagnostic Fixtures.Ownership.then_block_of_the_result_mutating_the_lender
         "ownership.mutated_while_viewed")
 
+let () =
+  List.iter
+    (fun (lender, fixture) ->
+      Harness.test
+        (Printf.sprintf "a list cannot be mutated while a name aliases a part lent by %s" lender)
+        (fun () -> expect_one_diagnostic fixture "ownership.mutated_while_viewed"))
+    [
+      ("a range of it", Fixtures.Ownership.then_block_mutating_the_list_a_range_lends);
+      ("a slice of it", Fixtures.Ownership.then_block_mutating_the_list_a_slice_lends);
+      ("a range of it in a `match`", Fixtures.Ownership.match_arm_mutating_the_list_a_range_lends);
+      ( "a range of it in a `while` condition",
+        Fixtures.Ownership.while_body_mutating_the_list_a_range_lends );
+      ( "a range of a range of it",
+        Fixtures.Ownership.then_block_mutating_the_list_a_range_of_a_range_lends );
+      ( "a view of it that a call returned",
+        Fixtures.Ownership.then_block_mutating_the_list_a_returned_view_lends );
+      ( "a field of a temporary that views it",
+        Fixtures.Ownership.then_block_mutating_the_list_a_field_of_a_temporary_lends );
+      ( "a range of a view of it",
+        Fixtures.Ownership.then_block_mutating_the_list_a_view_of_a_view_lends );
+    ];
+  Harness.test "a list cannot be mutated while a name aliases an element of a range of it"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Ownership.then_block_mutating_the_list_an_element_of_a_range_aliases
+        "ownership.mutated_while_viewed");
+  Harness.test "a list may be read while a name aliases a part that a range of it lent" (fun () ->
+      expect_fine Fixtures.Ownership.then_block_reading_the_list_a_range_lends);
+  Harness.test "a list may be mutated after a range of it lent a part that was copied" (fun () ->
+      expect_fine Fixtures.Ownership.then_block_mutating_the_list_after_a_range_lent_a_copy);
+  Harness.test "a list may be mutated in the statement after one in which a range of it lent a part"
+    (fun () -> expect_fine Fixtures.Ownership.statement_after_a_range_lent_mutating_the_list);
+  Harness.test "a temporary that owns its value lends a part without lending another list"
+    (fun () -> expect_fine Fixtures.Ownership.then_block_mutating_a_temporary_list_that_lends)
+
 let count_disjoint_obligations text =
   let packages = Support.setup [ ("app::main", text) ] in
   let file = Support.parse_file "app::main" in
@@ -923,6 +958,13 @@ let () =
     (fun () ->
       let actual =
         count_disjoint_obligations Fixtures.Ownership.mut_element_beside_a_view_of_the_same_list
+      in
+      if actual <> 1 then Harness.fail "%d obligations" actual);
+  Harness.test
+    "elements of two ranges of one list passed `mut` to one call produce one `Disjoint` obligation"
+    (fun () ->
+      let actual =
+        count_disjoint_obligations Fixtures.Ownership.two_mut_elements_of_two_ranges_of_one_list
       in
       if actual <> 1 then Harness.fail "%d obligations" actual)
 
