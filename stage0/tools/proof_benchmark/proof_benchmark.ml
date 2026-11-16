@@ -12,9 +12,9 @@ let () =
   let timed =
     List.filter_map
       (fun ((file : Path.file), _) ->
-        let pipeline = Pipeline.create [ standard ] in
-        Pipeline.check pipeline [ file.module_.package ];
-        match Pipeline.file_diagnostics pipeline file with
+        let database = Database.create [ standard ] in
+        Database.check database [ file.module_.package ];
+        match Database.file_diagnostics database file with
         | _ :: _ -> None
         | [] ->
             let runs_before = Solver.queries_run solver in
@@ -23,9 +23,9 @@ let () =
               List.length
                 (Prover.list_diagnostics
                    (Prover.decide ~runs:[]
-                      (Pipeline.make_proof_lookups pipeline)
+                      (Database.make_proof_lookups database)
                       solver
-                      (Pipeline.list_proofs (Pipeline.prove pipeline [ file ])))
+                      (Database.list_proofs (Database.prove database [ file ])))
                    file)
             in
             Some

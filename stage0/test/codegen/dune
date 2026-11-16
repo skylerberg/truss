@@ -72,7 +72,7 @@
   diagnostic
   source
   compile
-  pipeline
+  database
   components
   prover
   solver

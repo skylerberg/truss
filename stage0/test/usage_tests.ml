@@ -2,8 +2,8 @@ open Harness
 open Support
 
 let check packages =
-  Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer; Patterns; Usage ])
-    (Support.pipeline packages)
+  Database.For_testing.(diagnostics [ Resolve; Interface; Infer; Patterns; Usage ])
+    (Support.database packages)
 
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]

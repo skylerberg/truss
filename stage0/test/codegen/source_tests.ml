@@ -61,7 +61,7 @@ let () =
       match
         List.map
           (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code)
-          (diagnostics (pipeline packages) example_file)
+          (diagnostics (database packages) example_file)
       with
       | [ "types.constant_overflow" ] -> ()
       | actual -> fail "got [%s]" (String.concat "; " actual))

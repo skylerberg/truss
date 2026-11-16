@@ -2,7 +2,7 @@ open Harness
 open Support
 
 let check packages =
-  Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ]) (Support.pipeline packages)
+  Database.For_testing.(diagnostics [ Resolve; Interface; Infer ]) (Support.database packages)
 
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
@@ -216,9 +216,9 @@ let pays = ("app::main", Fixtures.Capabilities.pays)
 
 let problems packages =
   let app : Path.package = { owner = None; name = "app" } in
-  let pipeline = pipeline packages in
-  Pipeline.check pipeline [ app ];
-  Pipeline.manifest_problems pipeline app
+  let database = database packages in
+  Database.check database [ app ];
+  Database.manifest_problems database app
 
 let () =
   test "a grant names a capability outside the prelude by its full path" (fun () ->

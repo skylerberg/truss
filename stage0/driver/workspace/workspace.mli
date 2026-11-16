@@ -3,7 +3,7 @@ type snapshot
 val take_snapshot : string -> (snapshot * (string * Path.package) list, string) result
 val retake : snapshot -> (snapshot, string) result
 val root : snapshot -> string
-val pipeline : ?checks:bool -> snapshot -> Pipeline.t
+val open_database : ?checks:bool -> snapshot -> Database.t
 val problems : snapshot -> Project.problem list
 val packages : snapshot -> (string * Path.package) list
 val time_limit_ms : snapshot -> int
@@ -52,8 +52,8 @@ val open_cache : unit -> Cache.t
 val reset : unit -> unit
 
 module For_testing : sig
-  val standard_state : unit -> Pipeline.state
-  val cold_pipeline : snapshot -> Pipeline.t
+  val standard_state : unit -> Database.state
+  val build_cold_database : snapshot -> Database.t
   val collect_cache : unit -> unit
   val listen : key:string -> (Unix.file_descr, string) result
   val interrupt_commit : string -> unit

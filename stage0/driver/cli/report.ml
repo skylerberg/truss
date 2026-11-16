@@ -13,17 +13,17 @@ let shown snapshot packages file diagnostics =
   | diagnostics ->
       Some { file; source = Command_packages.source snapshot packages file; diagnostics }
 
-let gather ?(proofs = false) pipeline snapshot packages =
+let gather ?(proofs = false) database snapshot packages =
   let program_packages = Command_packages.program_packages snapshot packages in
   let files = Command_packages.files snapshot program_packages in
-  Pipeline.check pipeline program_packages;
+  Database.check database program_packages;
   let proofs =
-    if proofs then Some (lazy (Proofs.check pipeline snapshot packages files)) else None
+    if proofs then Some (lazy (Proofs.check database snapshot packages files)) else None
   in
   {
     checked =
       List.filter_map
-        (fun file -> shown snapshot packages file (Pipeline.file_diagnostics pipeline file))
+        (fun file -> shown snapshot packages file (Database.file_diagnostics database file))
         files;
     proofs;
     proven =
@@ -44,7 +44,7 @@ let gather ?(proofs = false) pipeline snapshot packages =
               line = None;
               message = Package_checks.manifest_sentence ~package problem;
             })
-          (Command_packages.manifest_problems snapshot pipeline packages);
+          (Command_packages.manifest_problems snapshot database packages);
   }
 
 let of_files files = { checked = files; proofs = None; proven = Lazy.from_val []; problems = [] }

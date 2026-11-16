@@ -2,7 +2,7 @@ type test = { path : Path.t; module_ : Path.module_; name : string; file : strin
 
 val select :
   Workspace.snapshot ->
-  Pipeline.t ->
+  Database.t ->
   Path.package list ->
   paths:string list ->
   match_:string option ->
@@ -13,7 +13,7 @@ val label : test -> string
 val run_tests :
   ?rerun:bool ->
   ?progress:(Compile.progress -> unit) ->
-  Pipeline.t ->
+  Database.t ->
   Workspace.snapshot ->
   Path.package list ->
   test list ->

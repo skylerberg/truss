@@ -168,53 +168,53 @@ let fresh_state name ~dependencies (texts : (Path.file * string) list) =
   list_files state (List.map fst texts);
   state
 
-let mark_unsaved pipeline entry = Entry_table.replace pipeline.unsaved entry ()
+let mark_unsaved database entry = Entry_table.replace database.unsaved entry ()
 
-let mark_state_unsaved pipeline (state : state) =
-  mark_unsaved pipeline (Package state.name);
-  List.iter (fun file -> mark_unsaved pipeline (File file)) state.files
+let mark_state_unsaved database (state : state) =
+  mark_unsaved database (Package state.name);
+  List.iter (fun file -> mark_unsaved database (File file)) state.files
 
-let mark_stale pipeline part =
+let mark_stale database part =
   let slot = (Part.package part, Stage.of_part part) in
   let parts =
-    match Hashtbl.find_opt pipeline.stale slot with
+    match Hashtbl.find_opt database.stale slot with
     | Some parts -> parts
     | None ->
         let parts = Part_table.create 64 in
-        Hashtbl.replace pipeline.stale slot parts;
+        Hashtbl.replace database.stale slot parts;
         parts
   in
   if not (Part_table.mem parts part) then begin
     Part_table.replace parts part ();
-    mark_unsaved pipeline (Stale part)
+    mark_unsaved database (Stale part)
   end
 
-let is_stale pipeline part =
+let is_stale database part =
   match Stage.of_part part with
   | Input -> false
   | stage -> (
-      match Hashtbl.find_opt pipeline.stale (Part.package part, stage) with
+      match Hashtbl.find_opt database.stale (Part.package part, stage) with
       | Some parts -> Part_table.mem parts part
       | None -> false)
 
-let unmark pipeline part =
+let unmark database part =
   Option.iter
     (fun parts ->
       if Part_table.mem parts part then begin
         Part_table.remove parts part;
-        mark_unsaved pipeline (Stale part)
+        mark_unsaved database (Stale part)
       end)
-    (Hashtbl.find_opt pipeline.stale (Part.package part, Stage.of_part part))
+    (Hashtbl.find_opt database.stale (Part.package part, Stage.of_part part))
 
-let stale_parts pipeline package stage =
-  match Hashtbl.find_opt pipeline.stale (package, stage) with
+let stale_parts database package stage =
+  match Hashtbl.find_opt database.stale (package, stage) with
   | Some parts -> Part_table.fold (fun part () parts -> part :: parts) parts []
   | None -> []
 
 let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
   let states = Hashtbl.create 8 in
   List.iter (fun state -> Hashtbl.replace states state.name state) loaded;
-  let pipeline =
+  let database =
     {
       states;
       project = List.map (fun (package : Project.package) -> package.name) packages;
@@ -241,11 +241,11 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
     (fun (package : Project.package) ->
       let state = fresh_state package.name ~dependencies:package.dependencies package.files in
       Hashtbl.replace states package.name state;
-      mark_state_unsaved pipeline state;
-      List.iter (fun file -> mark_stale pipeline (Parsed file)) state.files;
-      mark_stale pipeline (Namespace package.name))
+      mark_state_unsaved database state;
+      List.iter (fun file -> mark_stale database (Parsed file)) state.files;
+      mark_stale database (Namespace package.name))
     packages;
-  pipeline
+  database
 
 let copy_state (state : state) =
   {
@@ -282,57 +282,57 @@ let copy_state (state : state) =
     proofs = Hashtbl.copy state.proofs;
   }
 
-let copy pipeline =
-  let states = Hashtbl.copy pipeline.states in
+let copy database =
+  let states = Hashtbl.copy database.states in
   Hashtbl.filter_map_inplace
-    (fun name state -> Some (if List.mem name pipeline.project then copy_state state else state))
+    (fun name state -> Some (if List.mem name database.project then copy_state state else state))
     states;
-  let readers = Part_table.copy pipeline.readers in
+  let readers = Part_table.copy database.readers in
   Part_table.filter_map_inplace (fun _ parts -> Some (Part_table.copy parts)) readers;
-  let stale = Hashtbl.copy pipeline.stale in
+  let stale = Hashtbl.copy database.stale in
   Hashtbl.filter_map_inplace (fun _ parts -> Some (Part_table.copy parts)) stale;
-  let graphs = Hashtbl.copy pipeline.graphs in
+  let graphs = Hashtbl.copy database.graphs in
   Hashtbl.filter_map_inplace (fun _ graph -> Some (Call_graph.copy graph)) graphs;
-  let holders = Type_table.copy pipeline.holders in
+  let holders = Type_table.copy database.holders in
   Type_table.filter_map_inplace (fun _ instances -> Some (Instance_table.copy instances)) holders;
   {
     states;
-    project = pipeline.project;
-    absent = Hashtbl.copy pipeline.absent;
-    reads = Part_table.copy pipeline.reads;
+    project = database.project;
+    absent = Hashtbl.copy database.absent;
+    reads = Part_table.copy database.reads;
     readers;
     stale;
-    implied = Hashtbl.copy pipeline.implied;
+    implied = Hashtbl.copy database.implied;
     graphs;
-    lowering = pipeline.lowering;
-    ground_types = Instance_table.copy pipeline.ground_types;
-    layouts = Type_table.copy pipeline.layouts;
+    lowering = database.lowering;
+    ground_types = Instance_table.copy database.ground_types;
+    layouts = Type_table.copy database.layouts;
     holders;
-    lowered = Instance_table.copy pipeline.lowered;
-    test_keys = Instance_table.copy pipeline.test_keys;
-    references = References.copy pipeline.references;
-    owners = Instance_table.copy pipeline.owners;
-    owned = Part_table.copy pipeline.owned;
+    lowered = Instance_table.copy database.lowered;
+    test_keys = Instance_table.copy database.test_keys;
+    references = References.copy database.references;
+    owners = Instance_table.copy database.owners;
+    owned = Part_table.copy database.owned;
     unsaved = Entry_table.create 64;
     observe = ignore;
   }
 
-let add_reads pipeline part read_parts =
-  Part_table.replace pipeline.reads part read_parts;
+let add_reads database part read_parts =
+  Part_table.replace database.reads part read_parts;
   List.iter
     (fun read ->
       let readers =
-        match Part_table.find_opt pipeline.readers read with
+        match Part_table.find_opt database.readers read with
         | Some readers -> readers
         | None ->
             let readers = Part_table.create 4 in
-            Part_table.replace pipeline.readers read readers;
+            Part_table.replace database.readers read readers;
             readers
       in
       Part_table.replace readers part ())
     read_parts
 
-let record pipeline parts reads =
+let record database parts reads =
   let read_parts =
     Part_table.fold
       (fun part () read_parts ->
@@ -341,7 +341,7 @@ let record pipeline parts reads =
   in
   List.iter
     (fun part ->
-      let before = Part_table.find_opt pipeline.reads part in
+      let before = Part_table.find_opt database.reads part in
       let is_unchanged =
         match before with
         | Some before ->
@@ -349,20 +349,20 @@ let record pipeline parts reads =
             && List.for_all (Part_table.mem reads) before
         | None -> false
       in
-      if not is_unchanged then mark_unsaved pipeline (Reads part);
+      if not is_unchanged then mark_unsaved database (Reads part);
       Option.iter
         (List.iter (fun read ->
              Option.iter
                (fun readers -> Part_table.remove readers part)
-               (Part_table.find_opt pipeline.readers read)))
+               (Part_table.find_opt database.readers read)))
         before;
-      add_reads pipeline part read_parts)
+      add_reads database part read_parts)
     parts
 
-let computing pipeline parts compute =
+let computing database parts compute =
   let reads = Part_table.create 16 in
   let result = compute (fun part -> Part_table.replace reads part ()) in
-  record pipeline parts reads;
+  record database parts reads;
   result
 
 type 'a slot = { stored : 'a option; replace : 'a -> unit; remove : unit -> unit }
@@ -381,12 +381,12 @@ let at_path table path =
     remove = (fun () -> Path_table.remove table path);
   }
 
-let mark_readers ?(only = fun _ -> true) pipeline part =
+let mark_readers ?(only = fun _ -> true) database part =
   Option.iter
-    (Part_table.iter (fun reader () -> if only reader then mark_stale pipeline reader))
-    (Part_table.find_opt pipeline.readers part)
+    (Part_table.iter (fun reader () -> if only reader then mark_stale database reader))
+    (Part_table.find_opt database.readers part)
 
-let store pipeline part slot value =
+let store database part slot value =
   let is_changed =
     match (slot.stored, value) with
     | Some stored, Some value -> stored <> value
@@ -395,44 +395,44 @@ let store pipeline part slot value =
   in
   if is_changed then begin
     (match value with Some value -> slot.replace value | None -> slot.remove ());
-    mark_unsaved pipeline (Value part);
-    mark_readers pipeline part
+    mark_unsaved database (Value part);
+    mark_readers database part
   end
 
-let compute_into pipeline part slot compute =
-  store pipeline part slot (computing pipeline [ part ] compute)
+let compute_into database part slot compute =
+  store database part slot (computing database [ part ] compute)
 
-let owner pipeline package =
-  match Hashtbl.find_opt pipeline.states package with
+let owner database package =
+  match Hashtbl.find_opt database.states package with
   | Some state -> state
   | None -> (
-      match Hashtbl.find_opt pipeline.absent package with
+      match Hashtbl.find_opt database.absent package with
       | Some state -> state
       | None ->
           let state = empty_state package ~dependencies:[] in
           state.namespace <- Some Names.empty_namespace;
-          Hashtbl.replace pipeline.absent package state;
+          Hashtbl.replace database.absent package state;
           state)
 
-let call_graph pipeline package =
-  match Hashtbl.find_opt pipeline.graphs package with
+let call_graph database package =
+  match Hashtbl.find_opt database.graphs package with
   | Some graph -> graph
   | None ->
       let graph = Call_graph.create ~tracks_blocked:true in
-      Hashtbl.replace pipeline.graphs package graph;
+      Hashtbl.replace database.graphs package graph;
       graph
 
-let unchecked name = Compiler_bug.bug ~stage:"Pipeline" "%s is not computed" name
+let unchecked name = Compiler_bug.bug ~stage:"Database" "%s is not computed" name
 
-let read pipeline note part =
+let read database note part =
   note part;
-  if is_stale pipeline part then
-    Compiler_bug.bug ~stage:"Pipeline" "%s is read while it is stale" (Part.show part)
+  if is_stale database part then
+    Compiler_bug.bug ~stage:"Database" "%s is read while it is stale" (Part.show part)
 
-let read_part pipeline note part_of select (key : Names.key) =
+let read_part database note part_of select (key : Names.key) =
   let part = part_of key in
-  read pipeline note part;
-  match Hashtbl.find_opt (select (owner pipeline key.module_.package)) key with
+  read database note part;
+  match Hashtbl.find_opt (select (owner database key.module_.package)) key with
   | Some (Value value) -> value
   | Some (Failed _ | Blocked) -> raise Reads_failed_part
   | None -> unchecked (Part.show part)
@@ -447,29 +447,29 @@ let checked_part check key =
   | exception Reads_failed_part -> Blocked
 
 let value = function Value value -> value | Failed _ | Blocked -> raise Reads_failed_part
-let package pipeline name = Hashtbl.find_opt pipeline.states name
+let package database name = Hashtbl.find_opt database.states name
 
-let dependency_names pipeline name =
-  match package pipeline name with
+let dependency_names database name =
+  match package database name with
   | Some package ->
       List.map (fun (dependency : Manifest.dependency) -> dependency.package) package.dependencies
   | None -> []
 
-let modules pipeline name =
-  match package pipeline name with Some package -> package.modules | None -> []
+let modules database name =
+  match package database name with Some package -> package.modules | None -> []
 
-let source pipeline (file : Path.file) =
-  match Hashtbl.find_opt (owner pipeline file.module_.package).sources file with
+let source database (file : Path.file) =
+  match Hashtbl.find_opt (owner database file.module_.package).sources file with
   | Some source -> source
-  | None -> Compiler_bug.bug ~stage:"Pipeline" "%s is not a file of the build" (Path.show_file file)
+  | None -> Compiler_bug.bug ~stage:"Database" "%s is not a file of the build" (Path.show_file file)
 
-let visible_packages pipeline note package =
+let visible_packages database note package =
   let seen = Hashtbl.create 8 in
   let rec visit package =
     if not (Hashtbl.mem seen package) then begin
       Hashtbl.replace seen package ();
       note (Part.Dependencies package);
-      List.iter visit (dependency_names pipeline package)
+      List.iter visit (dependency_names database package)
     end
   in
   visit package;
@@ -477,13 +477,13 @@ let visible_packages pipeline note package =
   List.sort Path.compare_package
     (Hashtbl.fold (fun package () packages -> package :: packages) seen [])
 
-let in_dependency_order pipeline packages =
+let in_dependency_order database packages =
   let seen = Hashtbl.create 8 in
   let order = ref [] in
   let rec visit package =
     if not (Hashtbl.mem seen package) then begin
       Hashtbl.replace seen package ();
-      List.iter visit (List.sort Path.compare_package (dependency_names pipeline package));
+      List.iter visit (List.sort Path.compare_package (dependency_names database package));
       order := package :: !order
     end
   in
@@ -491,20 +491,20 @@ let in_dependency_order pipeline packages =
   List.iter visit packages;
   List.rev !order
 
-let namespace pipeline package =
-  match (owner pipeline package).namespace with
+let namespace database package =
+  match (owner database package).namespace with
   | Some namespace -> namespace
   | None -> unchecked (Part.show (Namespace package))
 
-let names_over pipeline ~namespace =
+let names_over database ~namespace =
   Names.of_namespaces ~namespace
     ~module_exists:(fun (module_ : Path.module_) ->
-      module_ = Intrinsic.module_ || List.mem module_ (modules pipeline module_.package))
+      module_ = Intrinsic.module_ || List.mem module_ (modules database module_.package))
     ~split_module:
-      (Path.split_module ~is_package:(fun name -> Option.is_some (package pipeline name)))
-    ~dependency_names:(dependency_names pipeline)
+      (Path.split_module ~is_package:(fun name -> Option.is_some (package database name)))
+    ~dependency_names:(dependency_names database)
 
-let names_lookups pipeline = names_over pipeline ~namespace:(namespace pipeline)
+let names_lookups database = names_over database ~namespace:(namespace database)
 
 let recording (names : Names.lookups) (note : Part.t -> unit) : Names.lookups =
   let noting (part : Part.t) read =
@@ -557,76 +557,76 @@ let recording (names : Names.lookups) (note : Part.t -> unit) : Names.lookups =
       (fun package name -> noting (Law_proofs (package, name)) (names.law_proofs package name));
   }
 
-let recording_names pipeline note = recording (names_lookups pipeline) note
+let recording_names database note = recording (names_lookups database) note
 
-let parsed_file pipeline (file : Path.file) =
-  match Hashtbl.find_opt (owner pipeline file.module_.package).parsed file with
+let parsed_file database (file : Path.file) =
+  match Hashtbl.find_opt (owner database file.module_.package).parsed file with
   | Some parsed -> parsed
   | None -> unchecked (Part.show (Parsed file))
 
-let namespace_of pipeline note (state : state) =
+let namespace_of database note (state : state) =
   note (Part.Modules state.name);
-  Names.namespace (recording_names pipeline note) state.name
+  Names.namespace (recording_names database note) state.name
     (List.map
        (fun module_ ->
          ( module_,
            List.filter_map
              (fun (file : Path.file) ->
                if file.module_ = module_ then begin
-                 read pipeline note (Parsed file);
-                 let parsed = parsed_file pipeline file in
+                 read database note (Parsed file);
+                 let parsed = parsed_file database file in
                  Some (file, parsed.file, parsed.text)
                end
                else None)
              state.files ))
        state.modules)
 
-let file_keys pipeline file = List.map Names.key_of ((names_lookups pipeline).declarations_in file)
+let file_keys database file = List.map Names.key_of ((names_lookups database).declarations_in file)
 
-let resolved_part pipeline note section (key : Names.key) =
-  read pipeline note (Resolved (key, section));
-  match Hashtbl.find_opt (owner pipeline key.module_.package).resolved_names (key, section) with
+let resolved_part database note section (key : Names.key) =
+  read database note (Resolved (key, section));
+  match Hashtbl.find_opt (owner database key.module_.package).resolved_names (key, section) with
   | Some part -> part
   | None -> unchecked (Part.show (Resolved (key, section)))
 
-let resolved pipeline note section (key : Names.key) =
-  read pipeline note (Resolved (key, section));
+let resolved database note section (key : Names.key) =
+  read database note (Resolved (key, section));
   Option.map value
-    (Hashtbl.find_opt (owner pipeline key.module_.package).resolved_names (key, section))
+    (Hashtbl.find_opt (owner database key.module_.package).resolved_names (key, section))
 
-let lowered_interface pipeline note ~is_checked (key : Names.key) =
-  let owner = owner pipeline key.module_.package in
-  read pipeline note (Interface key);
+let lowered_interface database note ~is_checked (key : Names.key) =
+  let owner = owner database key.module_.package in
+  read database note (Interface key);
   if is_checked then begin
-    read pipeline note (Signature_check key);
+    read database note (Signature_check key);
     match Hashtbl.find_opt owner.signature_checks key with
     | Some (Failed _ | Blocked) -> raise Reads_failed_part
     | Some (Value ()) | None -> ()
   end;
   Option.map value (Hashtbl.find_opt owner.interfaces key)
 
-let interface_lookups pipeline note ~is_checked : Interface.Lookups.t =
-  let names = recording_names pipeline note in
-  let lowered_interface = lowered_interface pipeline note ~is_checked in
+let interface_lookups database note ~is_checked : Interface.Lookups.t =
+  let names = recording_names database note in
+  let lowered_interface = lowered_interface database note ~is_checked in
   {
     names;
-    resolved = resolved pipeline note;
+    resolved = resolved database note;
     trait_header =
       (fun path ->
         Option.bind (names.key path) (fun key ->
-            read pipeline note (Trait_header key);
+            read database note (Trait_header key);
             Option.map value
-              (Hashtbl.find_opt (owner pipeline key.module_.package).trait_headers key)));
+              (Hashtbl.find_opt (owner database key.module_.package).trait_headers key)));
     constant_value =
       (fun path ->
-        read pipeline note (Constant_value path);
+        read database note (Constant_value path);
         Option.bind
-          (Path_table.find_opt (owner pipeline (Path.package path)).constant_values path)
+          (Path_table.find_opt (owner database (Path.package path)).constant_values path)
           value);
     header =
       (fun key ->
-        read pipeline note (Header key);
-        Option.map value (Hashtbl.find_opt (owner pipeline key.module_.package).headers key));
+        read database note (Header key);
+        Option.map value (Hashtbl.find_opt (owner database key.module_.package).headers key));
     lowered_interface;
     derived_interface =
       (fun path ->
@@ -634,17 +634,17 @@ let interface_lookups pipeline note ~is_checked : Interface.Lookups.t =
         | Derived { type_; _ } ->
             Option.iter (fun key -> ignore (lowered_interface key)) (names.key type_)
         | _ -> ());
-        read pipeline note (Derived_interface path);
+        read database note (Derived_interface path);
         Option.map value
-          (Path_table.find_opt (owner pipeline (Path.package path)).derived_interfaces path));
+          (Path_table.find_opt (owner database (Path.package path)).derived_interfaces path));
     type_facts =
       (fun path ->
-        read pipeline note (Type_facts path);
-        Option.map value (Path_table.find_opt (owner pipeline (Path.package path)).type_facts path));
+        read database note (Type_facts path);
+        Option.map value (Path_table.find_opt (owner database (Path.package path)).type_facts path));
     granted =
       (fun package dependency ->
-        read pipeline note (Grant (package, dependency));
-        Hashtbl.find_opt (owner pipeline package).grants dependency);
+        read database note (Grant (package, dependency));
+        Hashtbl.find_opt (owner database package).grants dependency);
   }
 
 let interface_part = function
@@ -687,8 +687,8 @@ let derived_paths names package =
     (function Path.Method { owner = Derived _; _ } -> true | _ -> false)
     (impl_methods names package)
 
-let package_parts pipeline (names : Names.lookups) package : Part.t list =
-  let state = owner pipeline package in
+let package_parts database (names : Names.lookups) package : Part.t list =
+  let state = owner database package in
   let declarations = names.package_declarations package in
   let paths = List.map (fun (declaration : Names.declaration) -> declaration.path) declarations in
   let of_declaration (declaration : Names.declaration) : Part.t list =
@@ -734,15 +734,15 @@ let package_parts pipeline (names : Names.lookups) package : Part.t list =
   @ List.map (fun file -> Part.Import_check file) state.files
   @ List.map (fun check -> Part.Package_check (package, check)) (Package_checks.checks declarations)
 
-let checked_body pipeline note key =
-  read_part pipeline note (fun key -> Part.Checked_body key) (fun owner -> owner.checked_bodies) key
+let checked_body database note key =
+  read_part database note (fun key -> Part.Checked_body key) (fun owner -> owner.checked_bodies) key
 
-let checked_core pipeline note key = (checked_body pipeline note key).form
+let checked_core database note key = (checked_body database note key).form
 
-let infer_lookups pipeline note : Infer.Lookups.t =
+let infer_lookups database note : Infer.Lookups.t =
   {
-    interface = interface_lookups pipeline note ~is_checked:true;
-    contract = read_part pipeline note (fun key -> Part.Contract key) (fun owner -> owner.contracts);
+    interface = interface_lookups database note ~is_checked:true;
+    contract = read_part database note (fun key -> Part.Contract key) (fun owner -> owner.contracts);
   }
 
 let type_check run lookups key =
@@ -753,162 +753,162 @@ let type_check run lookups key =
   | None -> None
   | exception Reads_failed_part -> Some Blocked
 
-let form_origin pipeline note =
-  Infer.form_origin (interface_lookups pipeline note ~is_checked:true) ~is_derived:(fun path ->
-      read pipeline note (Derived_form path);
-      Path_table.mem (owner pipeline (Path.package path)).derived_forms path)
+let form_origin database note =
+  Infer.form_origin (interface_lookups database note ~is_checked:true) ~is_derived:(fun path ->
+      read database note (Derived_form path);
+      Path_table.mem (owner database (Path.package path)).derived_forms path)
 
-let body_mir pipeline note =
-  read_part pipeline note (fun key -> Part.Body_mir key) (fun owner -> owner.body_parts)
+let body_mir database note =
+  read_part database note (fun key -> Part.Body_mir key) (fun owner -> owner.body_parts)
 
-let mir_lookups pipeline note : Mir.lookups =
+let mir_lookups database note : Mir.lookups =
   {
-    form_origin = form_origin pipeline note;
-    body_part = body_mir pipeline note;
+    form_origin = form_origin database note;
+    body_part = body_mir database note;
     contract_part =
-      read_part pipeline note (fun key -> Part.Contract_mir key) (fun owner -> owner.contract_parts);
+      read_part database note (fun key -> Part.Contract_mir key) (fun owner -> owner.contract_parts);
     generated_parts =
       (fun path ->
-        read pipeline note (Generated_mir path);
-        match Path_table.find_opt (owner pipeline (Path.package path)).generated_parts path with
+        read database note (Generated_mir path);
+        match Path_table.find_opt (owner database (Path.package path)).generated_parts path with
         | Some (Value parts) -> parts
         | Some (Failed _ | Blocked) -> raise Reads_failed_part
         | None -> unchecked (Part.show (Generated_mir path)));
   }
 
-let call_edge_lookups pipeline note : Mir.Call_edges.lookups =
-  { interface = interface_lookups pipeline note ~is_checked:true; mir = mir_lookups pipeline note }
+let call_edge_lookups database note : Mir.Call_edges.lookups =
+  { interface = interface_lookups database note ~is_checked:true; mir = mir_lookups database note }
 
-let call_edge_part pipeline note path =
-  read pipeline note (Call_edges path);
-  match Path_table.find_opt (owner pipeline (Path.package path)).call_edges path with
+let call_edge_part database note path =
+  read database note (Call_edges path);
+  match Path_table.find_opt (owner database (Path.package path)).call_edges path with
   | Some part -> part
   | None -> Value []
 
-let patterns_lookups pipeline note : Patterns.Lookups.t =
+let patterns_lookups database note : Patterns.Lookups.t =
   {
-    core = (fun key -> Some (checked_core pipeline note key));
-    interface = interface_lookups pipeline note ~is_checked:true;
+    core = (fun key -> Some (checked_core database note key));
+    interface = interface_lookups database note ~is_checked:true;
   }
 
-let usage_lookups pipeline note : Usage.Lookups.t =
+let usage_lookups database note : Usage.Lookups.t =
   {
-    names = recording_names pipeline note;
-    resolved = resolved pipeline note;
-    tables = (fun key -> Some (checked_body pipeline note key).tables);
+    names = recording_names database note;
+    resolved = resolved database note;
+    tables = (fun key -> Some (checked_body database note key).tables);
   }
 
-let ownership_lookups pipeline note : Ownership.Lookups.t =
+let ownership_lookups database note : Ownership.Lookups.t =
   {
-    graph = (fun key -> Mir.graph (body_mir pipeline note key));
-    interface = interface_lookups pipeline note ~is_checked:true;
+    graph = (fun key -> Mir.graph (body_mir database note key));
+    interface = interface_lookups database note ~is_checked:true;
   }
 
-let used_packages pipeline note (key : Names.key) =
-  let { Infer.form; evidence_packages; _ } = checked_body pipeline note key in
-  match Resolve.whole (resolved pipeline note) key with
+let used_packages database note (key : Names.key) =
+  let { Infer.form; evidence_packages; _ } = checked_body database note key in
+  match Resolve.whole (resolved database note) key with
   | Some resolved -> Package_checks.used_packages resolved ~evidence_packages form
   | None -> raise Reads_failed_part
 
-let package_checks_lookups pipeline note : Package_checks.Lookups.t =
+let package_checks_lookups database note : Package_checks.Lookups.t =
   {
-    interface = interface_lookups pipeline note ~is_checked:true;
-    core = (fun key -> Some (checked_core pipeline note key));
+    interface = interface_lookups database note ~is_checked:true;
+    core = (fun key -> Some (checked_core database note key));
     used_packages =
-      read_part pipeline note (fun key -> Part.Used_packages key) (fun owner -> owner.used_packages);
+      read_part database note (fun key -> Part.Used_packages key) (fun owner -> owner.used_packages);
   }
 
-let used_imports pipeline note file =
+let used_imports database note file =
   note (Part.File_declarations file);
   let used =
     List.concat_map
       (fun key ->
         List.map
           (fun section ->
-            match resolved_part pipeline note section key with
+            match resolved_part database note section key with
             | Value resolved -> Some resolved.used_imports
             | Failed _ | Blocked -> None)
           Resolve.sections)
-      (file_keys pipeline file)
+      (file_keys database file)
   in
   if List.for_all Option.is_some used then Some (List.concat_map Option.get used) else None
 
-let import_diagnostics pipeline note (file : Path.file) =
-  read pipeline note (Parsed file);
+let import_diagnostics database note (file : Path.file) =
+  read database note (Parsed file);
   note (Source file);
-  let parsed = parsed_file pipeline file in
-  Resolve.file_diagnostics (recording_names pipeline note) file parsed.file
-    ~text:(Source.text (source pipeline file))
-    ~used:(used_imports pipeline note file)
+  let parsed = parsed_file database file in
+  Resolve.file_diagnostics (recording_names database note) file parsed.file
+    ~text:(Source.text (source database file))
+    ~used:(used_imports database note file)
 
-let successors pipeline note ~viewer path =
-  match call_edge_part pipeline note path with
+let successors database note ~viewer path =
+  match call_edge_part database note path with
   | Failed _ | Blocked -> None
   | Value callees -> (
       match
-        Mir.Call_edges.implementations (call_edge_lookups pipeline note)
-          ~visible:(visible_packages pipeline note viewer)
+        Mir.Call_edges.implementations (call_edge_lookups database note)
+          ~visible:(visible_packages database note viewer)
           path
       with
       | implementations -> Some (List.sort_uniq Path.compare (callees @ implementations))
       | exception Reads_failed_part -> None)
 
-let recursion_group pipeline note path =
-  read pipeline note (Recursion_group path);
-  match Path_table.find_opt (owner pipeline (Path.package path)).recursion_groups path with
+let recursion_group database note path =
+  read database note (Recursion_group path);
+  match Path_table.find_opt (owner database (Path.package path)).recursion_groups path with
   | Some (Value members) -> members
   | Some (Failed _ | Blocked) -> raise Reads_failed_part
   | None -> []
 
-let proof_lookups pipeline note : Prover.Lookups.t =
+let proof_lookups database note : Prover.Lookups.t =
   {
     source =
       (fun file ->
         note (Part.Source file);
-        source pipeline file);
-    interface = interface_lookups pipeline note ~is_checked:true;
-    mir = mir_lookups pipeline note;
-    patterns = read_part pipeline note (fun key -> Part.Patterns key) (fun owner -> owner.patterns);
+        source database file);
+    interface = interface_lookups database note ~is_checked:true;
+    mir = mir_lookups database note;
+    patterns = read_part database note (fun key -> Part.Patterns key) (fun owner -> owner.patterns);
     must_be_disjoint =
-      read_part pipeline note (fun key -> Part.Ownership key) (fun owner -> owner.ownership);
-    recursion_group = recursion_group pipeline note;
+      read_part database note (fun key -> Part.Ownership key) (fun owner -> owner.ownership);
+    recursion_group = recursion_group database note;
   }
 
-let layout pipeline note ty =
-  read pipeline note (Layout ty);
-  match Type_table.find_opt pipeline.layouts ty with
+let layout database note ty =
+  read database note (Layout ty);
+  match Type_table.find_opt database.layouts ty with
   | Some (Value layout) -> layout
   | Some (Failed _ | Blocked) -> raise Reads_failed_part
   | None -> unchecked (Part.show (Layout ty))
 
-let stage_lowering_lookups pipeline note : Compile.Lookups.t =
-  { interface = interface_lookups pipeline note ~is_checked:true; mir = mir_lookups pipeline note }
+let stage_lowering_lookups database note : Compile.Lookups.t =
+  { interface = interface_lookups database note ~is_checked:true; mir = mir_lookups database note }
 
-let instance_part pipeline note table part instance =
-  read pipeline note part;
+let instance_part database note table part instance =
+  read database note part;
   match Instance_table.find_opt table instance with
   | Some (Value value) -> value
   | Some (Failed _ | Blocked) -> raise Reads_failed_part
   | None -> unchecked (Part.show part)
 
-let ground_types pipeline note key =
-  instance_part pipeline note pipeline.ground_types (Ground_types key) key
+let ground_types database note key =
+  instance_part database note database.ground_types (Ground_types key) key
 
-let lowered pipeline note key = instance_part pipeline note pipeline.lowered (Lowered key) key
-let test_key pipeline note key = instance_part pipeline note pipeline.test_keys (Test_key key) key
+let lowered database note key = instance_part database note database.lowered (Lowered key) key
+let test_key database note key = instance_part database note database.test_keys (Test_key key) key
 
-let instance_layout pipeline note key =
+let instance_layout database note key =
   let types =
     lazy
       (let types = Type_table.create 64 in
-       List.iter (fun ty -> Type_table.replace types ty ()) (ground_types pipeline note key).types;
+       List.iter (fun ty -> Type_table.replace types ty ()) (ground_types database note key).types;
        types)
   in
   fun ty ->
     if not (Type_table.mem (Lazy.force types) ty) then
-      Compiler_bug.bug ~stage:"Pipeline" "%s reads the layout of %s, which its ground types lack"
+      Compiler_bug.bug ~stage:"Database" "%s reads the layout of %s, which its ground types lack"
         (Instance.to_string key) (Ground.to_string ty);
-    layout pipeline note ty
+    layout database note ty
 
 let instance_slot table instance =
   {
@@ -919,9 +919,9 @@ let instance_slot table instance =
 
 exception Reaches_unsupported of Compile.unsupported
 
-let compute_test_keys pipeline keys =
+let compute_test_keys database keys =
   let outcome =
-    computing pipeline
+    computing database
       (List.map (fun key -> Part.Test_key key) keys)
       (fun note ->
         let supported = function
@@ -930,8 +930,8 @@ let compute_test_keys pipeline keys =
         in
         match
           Compile.test_keys
-            ~lowered:(fun key -> supported (lowered pipeline note key))
-            ~known:(fun key -> supported (test_key pipeline note key))
+            ~lowered:(fun key -> supported (lowered database note key))
+            ~known:(fun key -> supported (test_key database note key))
             keys
         with
         | test_keys -> Value (Ok test_keys)
@@ -941,9 +941,9 @@ let compute_test_keys pipeline keys =
   List.iter
     (fun key ->
       let part = Part.Test_key key in
-      pipeline.observe (Computed part);
-      store pipeline part
-        (instance_slot pipeline.test_keys key)
+      database.observe (Computed part);
+      store database part
+        (instance_slot database.test_keys key)
         (Some
            (match outcome with
            | Value (Ok test_keys) -> Value (Ok (List.assoc key test_keys))
@@ -961,9 +961,9 @@ type stored = {
 
 let marshalled value = Marshal.to_string value []
 
-let stored pipeline (part : Part.t) =
+let stored database (part : Part.t) =
   let package = Part.package part in
-  let state = owner pipeline package in
+  let state = owner database package in
   let failed = function Failed _ -> true | Value _ | Blocked -> false in
   let never _ = false in
   let keyed ~is_failed select key =
@@ -995,19 +995,19 @@ let stored pipeline (part : Part.t) =
     }
   in
   let of_instance select instance =
-    let find pipeline = Instance_table.find_opt (select pipeline) instance in
+    let find database = Instance_table.find_opt (select database) instance in
     {
-      is_failed = Option.fold ~none:false ~some:failed (find pipeline);
-      remove = (fun () -> Instance_table.remove (select pipeline) instance);
-      is_equal_in = (fun other -> compare (find other) (find pipeline) = 0);
-      saved = (fun () -> Option.map marshalled (find pipeline));
+      is_failed = Option.fold ~none:false ~some:failed (find database);
+      remove = (fun () -> Instance_table.remove (select database) instance);
+      is_equal_in = (fun other -> compare (find other) (find database) = 0);
+      saved = (fun () -> Option.map marshalled (find database));
       restore =
         (fun bytes ->
-          Instance_table.replace (select pipeline) instance (Marshal.from_string bytes 0));
+          Instance_table.replace (select database) instance (Marshal.from_string bytes 0));
     }
   in
   let unsaved () =
-    Compiler_bug.bug ~stage:"Pipeline" "%s is computed when a database opens, not saved"
+    Compiler_bug.bug ~stage:"Database" "%s is computed when a database opens, not saved"
       (Part.show part)
   in
   match part with
@@ -1044,68 +1044,68 @@ let stored pipeline (part : Part.t) =
   | Used_packages key -> keyed ~is_failed:failed (fun state -> state.used_packages) key
   | Package_check (_, check) -> keyed ~is_failed:failed (fun state -> state.package_checks) check
   | Successors (path, viewer) ->
-      let successors pipeline =
-        Option.bind (Hashtbl.find_opt pipeline.graphs viewer) (fun graph ->
+      let successors database =
+        Option.bind (Hashtbl.find_opt database.graphs viewer) (fun graph ->
             Call_graph.successors graph path)
       in
       {
         is_failed = false;
-        remove = (fun () -> Call_graph.remove_successors (call_graph pipeline viewer) path);
-        is_equal_in = (fun other -> successors other = successors pipeline);
-        saved = (fun () -> Option.map marshalled (successors pipeline));
+        remove = (fun () -> Call_graph.remove_successors (call_graph database viewer) path);
+        is_equal_in = (fun other -> successors other = successors database);
+        saved = (fun () -> Option.map marshalled (successors database));
         restore =
           (fun bytes ->
             ignore
-              (Call_graph.set_successors (call_graph pipeline viewer) path
+              (Call_graph.set_successors (call_graph database viewer) path
                  (Marshal.from_string bytes 0)));
       }
   | Recursion_group path -> at_path ~is_failed:failed (fun state -> state.recursion_groups) path
   | Proof key -> keyed ~is_failed:failed (fun state -> state.proofs) key
-  | Ground_types key -> of_instance (fun pipeline -> pipeline.ground_types) key
-  | Lowered key -> of_instance (fun pipeline -> pipeline.lowered) key
-  | Test_key key -> of_instance (fun pipeline -> pipeline.test_keys) key
+  | Ground_types key -> of_instance (fun database -> database.ground_types) key
+  | Lowered key -> of_instance (fun database -> database.lowered) key
+  | Test_key key -> of_instance (fun database -> database.test_keys) key
   | Layout ty ->
-      let find pipeline = Type_table.find_opt pipeline.layouts ty in
+      let find database = Type_table.find_opt database.layouts ty in
       {
-        is_failed = Option.fold ~none:false ~some:failed (find pipeline);
-        remove = (fun () -> Type_table.remove pipeline.layouts ty);
-        is_equal_in = (fun other -> compare (find other) (find pipeline) = 0);
-        saved = (fun () -> Option.map marshalled (find pipeline));
+        is_failed = Option.fold ~none:false ~some:failed (find database);
+        remove = (fun () -> Type_table.remove database.layouts ty);
+        is_equal_in = (fun other -> compare (find other) (find database) = 0);
+        saved = (fun () -> Option.map marshalled (find database));
         restore =
-          (fun bytes -> Type_table.replace pipeline.layouts ty (Marshal.from_string bytes 0));
+          (fun bytes -> Type_table.replace database.layouts ty (Marshal.from_string bytes 0));
       }
   | Source _ | Packages | Modules _ | Dependencies _ | Entry _ | Entries _ | Imports _
   | Declaration _ | Tree _ | Text _ | Place _ | Container _ | Contained _ | Module_declarations _
   | File_declarations _ | Package_declarations _ | Members _ | Traits_declaring _ | Impl_index _
   | Impls_of_type _ | Impls_of_trait _ | Law_proofs _ ->
-      Compiler_bug.bug ~stage:"Pipeline" "%s is not stored as a part" (Part.show part)
+      Compiler_bug.bug ~stage:"Database" "%s is not stored as a part" (Part.show part)
 
-let discard pipeline part =
-  unmark pipeline part;
-  record pipeline [ part ] (Part_table.create 0);
-  Part_table.remove pipeline.reads part;
-  mark_unsaved pipeline (Reads part)
+let discard database part =
+  unmark database part;
+  record database [ part ] (Part_table.create 0);
+  Part_table.remove database.reads part;
+  mark_unsaved database (Reads part)
 
 let instance_parts key : Part.t list = [ Ground_types key; Lowered key; Test_key key ]
 
-let is_stored pipeline (part : Part.t) =
+let is_stored database (part : Part.t) =
   match part with
-  | Ground_types key -> Instance_table.mem pipeline.ground_types key
-  | Lowered key -> Instance_table.mem pipeline.lowered key
-  | Test_key key -> Instance_table.mem pipeline.test_keys key
-  | Layout ty -> Type_table.mem pipeline.layouts ty
-  | part -> Compiler_bug.bug ~stage:"Pipeline" "%s is not a part of lowering" (Part.show part)
+  | Ground_types key -> Instance_table.mem database.ground_types key
+  | Lowered key -> Instance_table.mem database.lowered key
+  | Test_key key -> Instance_table.mem database.test_keys key
+  | Layout ty -> Type_table.mem database.layouts ty
+  | part -> Compiler_bug.bug ~stage:"Database" "%s is not a part of lowering" (Part.show part)
 
-let is_created pipeline part = is_stale pipeline part || is_stored pipeline part
-let is_current pipeline part = (not (is_stale pipeline part)) && is_stored pipeline part
+let is_created database part = is_stale database part || is_stored database part
+let is_current database part = (not (is_stale database part)) && is_stored database part
 
-let create_instance pipeline key =
+let create_instance database key =
   List.iter
-    (fun part -> if not (is_created pipeline part) then mark_stale pipeline part)
+    (fun part -> if not (is_created database part) then mark_stale database part)
     (instance_parts key)
 
-let held_types pipeline key =
-  match Instance_table.find_opt pipeline.ground_types key with
+let held_types database key =
+  match Instance_table.find_opt database.ground_types key with
   | Some (Value ground) -> List.sort_uniq Ground.compare ground.types
   | Some (Failed _ | Blocked) | None -> []
 
@@ -1119,148 +1119,148 @@ let rec sorted_difference compare left right =
       else if order < 0 then item :: sorted_difference compare rest right
       else sorted_difference compare left others
 
-let release pipeline key ty =
-  match Type_table.find_opt pipeline.holders ty with
+let release database key ty =
+  match Type_table.find_opt database.holders ty with
   | Some holders ->
       Instance_table.remove holders key;
       let is_unheld = Instance_table.length holders = 0 in
-      if is_unheld then Type_table.remove pipeline.holders ty;
+      if is_unheld then Type_table.remove database.holders ty;
       is_unheld
   | None -> false
 
-let hold pipeline key ty =
+let hold database key ty =
   let holders =
-    match Type_table.find_opt pipeline.holders ty with
+    match Type_table.find_opt database.holders ty with
     | Some holders -> holders
     | None ->
         let holders = Instance_table.create 4 in
-        Type_table.replace pipeline.holders ty holders;
+        Type_table.replace database.holders ty holders;
         holders
   in
   Instance_table.replace holders key ();
-  if not (is_created pipeline (Layout ty)) then mark_stale pipeline (Layout ty)
+  if not (is_created database (Layout ty)) then mark_stale database (Layout ty)
 
-let rec forget pipeline parts =
+let rec forget database parts =
   let removed = Part_table.create 16 in
   List.iter (fun part -> Part_table.replace removed part ()) parts;
   List.iter
     (fun part ->
-      (stored pipeline part).remove ();
-      mark_unsaved pipeline (Value part);
-      discard pipeline part)
+      (stored database part).remove ();
+      mark_unsaved database (Value part);
+      discard database part)
     parts;
-  List.iter (mark_readers ~only:(fun reader -> not (Part_table.mem removed reader)) pipeline) parts;
-  List.iter (function Part.Proof _ as owner -> own_roots pipeline owner [] | _ -> ()) parts
+  List.iter (mark_readers ~only:(fun reader -> not (Part_table.mem removed reader)) database) parts;
+  List.iter (function Part.Proof _ as owner -> own_roots database owner [] | _ -> ()) parts
 
-and own_roots pipeline owner roots =
-  let before = Option.value (Part_table.find_opt pipeline.owned owner) ~default:[] in
+and own_roots database owner roots =
+  let before = Option.value (Part_table.find_opt database.owned owner) ~default:[] in
   let roots = List.sort_uniq Instance.compare roots in
   if roots <> before then begin
-    if roots = [] then Part_table.remove pipeline.owned owner
-    else Part_table.replace pipeline.owned owner roots;
-    mark_unsaved pipeline (Owned owner);
-    let owners root = Option.value (Instance_table.find_opt pipeline.owners root) ~default:[] in
+    if roots = [] then Part_table.remove database.owned owner
+    else Part_table.replace database.owned owner roots;
+    mark_unsaved database (Owned owner);
+    let owners root = Option.value (Instance_table.find_opt database.owners root) ~default:[] in
     List.iter
       (fun root ->
         match List.filter (fun other -> not (Part.equal other owner)) (owners root) with
         | [] ->
-            Instance_table.remove pipeline.owners root;
-            References.remove_root pipeline.references root
-        | others -> Instance_table.replace pipeline.owners root others)
+            Instance_table.remove database.owners root;
+            References.remove_root database.references root
+        | others -> Instance_table.replace database.owners root others)
       (sorted_difference Instance.compare before roots);
     List.iter
       (fun root ->
-        Instance_table.replace pipeline.owners root (owner :: owners root);
-        if References.add_root pipeline.references root then create_instance pipeline root)
+        Instance_table.replace database.owners root (owner :: owners root);
+        if References.add_root database.references root then create_instance database root)
       (sorted_difference Instance.compare roots before);
-    settle_references pipeline
+    settle_references database
   end
 
-and settle_references pipeline =
-  if References.has_changes pipeline.references then
-    collect pipeline (References.update pipeline.references).removed
+and settle_references database =
+  if References.has_changes database.references then
+    collect database (References.update database.references).removed
 
-and collect pipeline keys =
+and collect database keys =
   let layouts =
     List.concat_map
       (fun key ->
         List.filter_map
-          (fun ty -> if release pipeline key ty then Some (Part.Layout ty) else None)
-          (held_types pipeline key))
+          (fun ty -> if release database key ty then Some (Part.Layout ty) else None)
+          (held_types database key))
       keys
   in
   let parts = List.concat_map instance_parts keys @ layouts in
-  List.iter (fun part -> pipeline.observe (Collected part)) parts;
-  forget pipeline parts
+  List.iter (fun part -> database.observe (Collected part)) parts;
+  forget database parts
 
-let update_holders pipeline key ~before =
-  let after = held_types pipeline key in
-  let unheld = List.filter (release pipeline key) (sorted_difference Ground.compare before after) in
-  List.iter (hold pipeline key) (sorted_difference Ground.compare after before);
+let update_holders database key ~before =
+  let after = held_types database key in
+  let unheld = List.filter (release database key) (sorted_difference Ground.compare before after) in
+  List.iter (hold database key) (sorted_difference Ground.compare after before);
   if unheld <> [] then begin
     let parts = List.map (fun ty -> Part.Layout ty) unheld in
-    List.iter (fun part -> pipeline.observe (Collected part)) parts;
-    forget pipeline parts
+    List.iter (fun part -> database.observe (Collected part)) parts;
+    forget database parts
   end
 
-let instance_edges pipeline key =
+let instance_edges database key =
   List.sort_uniq Instance.compare
-    ((match Instance_table.find_opt pipeline.ground_types key with
+    ((match Instance_table.find_opt database.ground_types key with
        | Some (Value ground) ->
            List.map (fun path -> Instance.Constant path) ground.folded_constants
        | Some (Failed _ | Blocked) | None -> [])
     @
-    match Instance_table.find_opt pipeline.lowered key with
+    match Instance_table.find_opt database.lowered key with
     | Some (Value (Ok lowered)) -> Compile.references lowered
     | Some (Value (Error _) | Failed _ | Blocked) | None -> [])
 
-let update_references pipeline key =
-  let edges = instance_edges pipeline key in
-  if References.successors pipeline.references key <> Some (Some edges) then begin
-    List.iter (create_instance pipeline)
-      (References.set_successors pipeline.references key (Some edges));
-    settle_references pipeline
+let update_references database key =
+  let edges = instance_edges database key in
+  if References.successors database.references key <> Some (Some edges) then begin
+    List.iter (create_instance database)
+      (References.set_successors database.references key (Some edges));
+    settle_references database
   end
 
-let refers_currently pipeline referrer (key : Instance.key) =
-  (not (is_stale pipeline (Ground_types referrer)))
-  && ((match (key, Instance_table.find_opt pipeline.ground_types referrer) with
+let refers_currently database referrer (key : Instance.key) =
+  (not (is_stale database (Ground_types referrer)))
+  && ((match (key, Instance_table.find_opt database.ground_types referrer) with
         | Constant path, Some (Value ground) ->
             List.exists (Path.equal path) ground.folded_constants
         | _ -> false)
-     || (not (is_stale pipeline (Lowered referrer)))
+     || (not (is_stale database (Lowered referrer)))
         &&
-        match Instance_table.find_opt pipeline.lowered referrer with
+        match Instance_table.find_opt database.lowered referrer with
         | Some (Value (Ok lowered)) -> List.exists (Instance.equal key) (Compile.references lowered)
         | Some (Value (Error _) | Failed _ | Blocked) | None -> false)
 
-let is_ready pipeline key =
+let is_ready database key =
   List.exists
-    (fun owner -> not (is_stale pipeline owner))
-    (Option.value (Instance_table.find_opt pipeline.owners key) ~default:[])
+    (fun owner -> not (is_stale database owner))
+    (Option.value (Instance_table.find_opt database.owners key) ~default:[])
   || List.exists
-       (fun referrer -> refers_currently pipeline referrer key)
-       (References.predecessors pipeline.references key)
+       (fun referrer -> refers_currently database referrer key)
+       (References.predecessors database.references key)
 
-let is_drained pipeline (part : Part.t) =
+let is_drained database (part : Part.t) =
   match part with
-  | Ground_types key | Lowered key | Test_key key -> is_ready pipeline key
+  | Ground_types key | Lowered key | Test_key key -> is_ready database key
   | Layout ty -> (
-      match Type_table.find_opt pipeline.holders ty with
+      match Type_table.find_opt database.holders ty with
       | Some holders ->
           Seq.exists
-            (fun holder -> not (is_stale pipeline (Ground_types holder)))
+            (fun holder -> not (is_stale database (Ground_types holder)))
             (Instance_table.to_seq_keys holders)
       | None -> false)
   | _ -> true
 
-let lowering_settings pipeline =
-  match pipeline.lowering with
+let lowering_settings database =
+  match database.lowering with
   | Some settings -> settings
-  | None -> Compiler_bug.bug ~stage:"Pipeline" "this host has no lowering settings"
+  | None -> Compiler_bug.bug ~stage:"Database" "this host has no lowering settings"
 
-let proof_template_checks pipeline (key : Names.key) =
-  match Hashtbl.find_opt (owner pipeline key.module_.package).proofs key with
+let proof_template_checks database (key : Names.key) =
+  match Hashtbl.find_opt (owner database key.module_.package).proofs key with
   | Some (Value (Obligations { obligations; _ })) ->
       List.filter_map
         (fun (obligation : Prover.State.obligation) ->
@@ -1273,10 +1273,10 @@ let proof_template_checks pipeline (key : Names.key) =
 let template_check_root ({ from_template; literals; clauses } : Prover.State.template_check) =
   Instance.Template_check { from_template; literals; clauses }
 
-let own_template_checks pipeline (key : Names.key) =
-  if Option.is_some pipeline.lowering then
-    own_roots pipeline (Proof key)
-      (List.map template_check_root (proof_template_checks pipeline key))
+let own_template_checks database (key : Names.key) =
+  if Option.is_some database.lowering then
+    own_roots database (Proof key)
+      (List.map template_check_root (proof_template_checks database key))
 
 let entry_point (names : Names.lookups) package =
   List.find_map
@@ -1287,9 +1287,9 @@ let entry_point (names : Names.lookups) package =
       | _ -> None)
     (names.declarations { package; modules = [] })
 
-let own_lowering_roots pipeline (names : Names.lookups) package =
-  if Option.is_some pipeline.lowering then
-    own_roots pipeline (Namespace package)
+let own_lowering_roots database (names : Names.lookups) package =
+  if Option.is_some database.lowering then
+    own_roots database (Namespace package)
       (Compile.roots
          ~tests:
            (List.filter_map
@@ -1298,12 +1298,12 @@ let own_lowering_roots pipeline (names : Names.lookups) package =
               (names.package_declarations package))
          ~mains:(Option.to_list (entry_point names package)))
 
-let holds_position pipeline (part : Part.t) =
+let holds_position database (part : Part.t) =
   match part with
   | Proof _ | Package_check _ | Lowered _ -> true
-  | _ -> (stored pipeline part).is_failed
+  | _ -> (stored database part).is_failed
 
-let mark_change pipeline package (change : Names.change) =
+let mark_change database package (change : Names.change) =
   let part : Part.t =
     match change with
     | Entry (module_, name) -> Entry (module_, name)
@@ -1326,42 +1326,42 @@ let mark_change pipeline package (change : Names.change) =
     | Law_proofs name -> Law_proofs (package, name)
   in
   match change with
-  | Positions _ -> mark_readers ~only:(holds_position pipeline) pipeline part
-  | _ -> mark_readers pipeline part
+  | Positions _ -> mark_readers ~only:(holds_position database) database part
+  | _ -> mark_readers database part
 
 let is_own_namespace_part package (part : Part.t) =
   match part with
   | Packages -> false
   | part -> Stage.of_part part = Namespaces && Part.package part = package
 
-let namespace_and_implied pipeline (state : state) =
+let namespace_and_implied database (state : state) =
   let package = state.name in
   let namespace, implied =
-    computing pipeline [ Part.Namespace package ] (fun note ->
+    computing database [ Part.Namespace package ] (fun note ->
         let note part = if not (is_own_namespace_part package part) then note part in
-        let own_namespace = namespace_of pipeline note state in
+        let own_namespace = namespace_of database note state in
         let names =
-          names_over pipeline ~namespace:(fun name ->
-              if name = package then own_namespace else namespace pipeline name)
+          names_over database ~namespace:(fun name ->
+              if name = package then own_namespace else namespace database name)
         in
-        (own_namespace, package_parts pipeline (recording names note) package))
+        (own_namespace, package_parts database (recording names note) package))
   in
   state.namespace <- Some namespace;
-  Hashtbl.replace pipeline.implied package implied;
+  Hashtbl.replace database.implied package implied;
   (namespace, implied)
 
-let compute_namespace pipeline (state : state) =
+let compute_namespace database (state : state) =
   let package = state.name in
   let before = Option.value state.namespace ~default:Names.empty_namespace in
-  let implied_before = Option.value ~default:[] (Hashtbl.find_opt pipeline.implied package) in
-  let after, implied = namespace_and_implied pipeline state in
+  let implied_before = Option.value ~default:[] (Hashtbl.find_opt database.implied package) in
+  let after, implied = namespace_and_implied database state in
   let membership parts =
     let members = Part_table.create 256 in
     List.iter (fun part -> Part_table.replace members part ()) parts;
     Part_table.mem members
   in
   let was_implied = membership implied_before and is_implied = membership implied in
-  let graph = call_graph pipeline package in
+  let graph = call_graph database package in
   List.iter
     (function
       | Part.Successors (root, _) as part when not (is_implied part) ->
@@ -1374,17 +1374,17 @@ let compute_namespace pipeline (state : state) =
           ignore (Call_graph.add_root graph root)
       | _ -> ())
     implied;
-  List.iter (mark_change pipeline package) (Names.changes before after);
-  List.iter (fun part -> if not (was_implied part) then mark_stale pipeline part) implied;
-  forget pipeline (List.filter (fun part -> not (is_implied part)) implied_before);
-  own_lowering_roots pipeline (names_lookups pipeline) package
+  List.iter (mark_change database package) (Names.changes before after);
+  List.iter (fun part -> if not (was_implied part) then mark_stale database part) implied;
+  forget database (List.filter (fun part -> not (is_implied part)) implied_before);
+  own_lowering_roots database (names_lookups database) package
 
-let compute_type_facts pipeline paths =
+let compute_type_facts database paths =
   let facts =
-    computing pipeline
+    computing database
       (List.map (fun path -> Part.Type_facts path) paths)
       (fun note ->
-        let lookups = interface_lookups pipeline note ~is_checked:false in
+        let lookups = interface_lookups database note ~is_checked:false in
         let interfaces = List.map (fun path -> (path, type_interface lookups path)) paths in
         if List.for_all (fun (_, interface) -> Option.is_some interface) interfaces then
           computed
@@ -1396,9 +1396,9 @@ let compute_type_facts pipeline paths =
   in
   List.iter
     (fun path ->
-      pipeline.observe (Computed (Type_facts path));
-      store pipeline (Type_facts path)
-        (at_path (owner pipeline (Path.package path)).type_facts path)
+      database.observe (Computed (Type_facts path));
+      store database (Type_facts path)
+        (at_path (owner database (Path.package path)).type_facts path)
         (Some
            (match facts with
            | Value facts -> (
@@ -1406,34 +1406,34 @@ let compute_type_facts pipeline paths =
            | Failed _ | Blocked -> Blocked)))
     paths
 
-let compute_part pipeline (part : Part.t) =
-  pipeline.observe (Computed part);
-  let state = owner pipeline (Part.package part) in
-  let into slot compute = compute_into pipeline part slot compute in
+let compute_part database (part : Part.t) =
+  database.observe (Computed part);
+  let state = owner database (Part.package part) in
+  let into slot compute = compute_into database part slot compute in
   match part with
   | Parsed file ->
       into (keyed state.parsed file) (fun note ->
           note (Source file);
-          Some (Parsed.parse (source pipeline file)))
-  | Namespace _ -> compute_namespace pipeline state
+          Some (Parsed.parse (source database file)))
+  | Namespace _ -> compute_namespace database state
   | Resolved (key, section) ->
       into
         (keyed state.resolved_names (key, section))
         (fun note ->
           Some
-            (match Resolve.resolve (recording_names pipeline note) key section with
+            (match Resolve.resolve (recording_names database note) key section with
             | Some (Ok resolved) -> Value resolved
             | Some (Error diagnostics) -> Failed diagnostics
             | None -> Blocked))
   | Import_check file ->
       into (keyed state.import_checks file) (fun note ->
-          Some (import_diagnostics pipeline note file))
+          Some (import_diagnostics database note file))
   | Trait_header key ->
       into (keyed state.trait_headers key) (fun note ->
           Some
             (match
-               ( (recording_names pipeline note).definition key,
-                 resolved_part pipeline note Interface key )
+               ( (recording_names database note).definition key,
+                 resolved_part database note Interface key )
              with
             | Some definition, Value resolved -> (
                 match Resolve.trait_header definition resolved with
@@ -1444,14 +1444,14 @@ let compute_part pipeline (part : Part.t) =
       into (at_path state.constant_values path) (fun note ->
           Some
             (computed
-               (Interface.Constants.value_of (interface_lookups pipeline note ~is_checked:false))
+               (Interface.Constants.value_of (interface_lookups database note ~is_checked:false))
                path))
   | Header key ->
       into (keyed state.headers key) (fun note ->
           Some
             (match
                computed
-                 (Interface.Definition.header (interface_lookups pipeline note ~is_checked:false))
+                 (Interface.Definition.header (interface_lookups database note ~is_checked:false))
                  key
              with
             | Value (Some (Ok header)) -> Value header
@@ -1462,7 +1462,7 @@ let compute_part pipeline (part : Part.t) =
           Some
             (match
                computed
-                 (Interface.Definition.lower (interface_lookups pipeline note ~is_checked:false))
+                 (Interface.Definition.lower (interface_lookups database note ~is_checked:false))
                  key
              with
             | Value lowered -> interface_part lowered
@@ -1474,13 +1474,13 @@ let compute_part pipeline (part : Part.t) =
                computed
                  (fun trait ->
                    Interface.Impls.derived_interface
-                     (interface_lookups pipeline note ~is_checked:false)
+                     (interface_lookups database note ~is_checked:false)
                      ~type_ ~trait)
                  trait
              with
             | Value (Some interface) -> Value interface
             | Value None | Failed _ | Blocked -> Blocked))
-  | Type_facts path -> compute_type_facts pipeline [ path ]
+  | Type_facts path -> compute_type_facts database [ path ]
   | Grant (package, dependency) ->
       let entry =
         List.find
@@ -1491,18 +1491,18 @@ let compute_part pipeline (part : Part.t) =
           note (Dependencies package);
           Some
             (Interface.Grants.grant
-               (interface_lookups pipeline note ~is_checked:false)
+               (interface_lookups database note ~is_checked:false)
                ~package entry.capabilities))
   | Signature_check key ->
       into (keyed state.signature_checks key) (fun note ->
-          read pipeline note (Interface key);
+          read database note (Interface key);
           Some
             (match Hashtbl.find_opt state.interfaces key with
             | Some (Value _) ->
                 checked_part
                   (fun key ->
                     ( Interface.Check.diagnostics
-                        (interface_lookups pipeline note ~is_checked:false)
+                        (interface_lookups database note ~is_checked:false)
                         key,
                       () ))
                   key
@@ -1514,23 +1514,23 @@ let compute_part pipeline (part : Part.t) =
               | Value (checked : Infer.checked) -> Value checked.form
               | Failed diagnostics -> Failed diagnostics
               | Blocked -> Blocked)
-            (type_check Infer.contract (infer_lookups pipeline note) key))
+            (type_check Infer.contract (infer_lookups database note) key))
   | Checked_body key ->
       into (keyed state.checked_bodies key) (fun note ->
-          type_check Infer.body (infer_lookups pipeline note) key)
+          type_check Infer.body (infer_lookups database note) key)
   | Derived_form path ->
       into (at_path state.derived_forms path) (fun note ->
-          match Infer.derived (infer_lookups pipeline note) path with
+          match Infer.derived (infer_lookups database note) path with
           | Some form -> Some (Value form)
           | None -> None
           | exception Reads_failed_part -> Some Blocked)
   | Body_mir key ->
       into (keyed state.body_parts key) (fun note ->
-          read pipeline note (Checked_body key);
+          read database note (Checked_body key);
           Some
             (match Hashtbl.find_opt state.checked_bodies key with
             | Some (Value checked) -> (
-                match lowered_interface pipeline note ~is_checked:true key with
+                match lowered_interface database note ~is_checked:true key with
                 | lowered ->
                     let interface =
                       Option.map
@@ -1542,7 +1542,7 @@ let compute_part pipeline (part : Part.t) =
             | Some (Failed _ | Blocked) | None -> Blocked))
   | Contract_mir key ->
       into (keyed state.contract_parts key) (fun note ->
-          read pipeline note (Contract key);
+          read database note (Contract key);
           Some
             (match Hashtbl.find_opt state.contracts key with
             | Some (Value form) ->
@@ -1550,12 +1550,12 @@ let compute_part pipeline (part : Part.t) =
                   (Mir.contract_part
                      ~type_interface:
                        (Interface.Definition.type_interface
-                          (interface_lookups pipeline note ~is_checked:true))
+                          (interface_lookups database note ~is_checked:true))
                      key.path form)
             | Some (Failed _ | Blocked) | None -> Blocked))
   | Generated_mir path ->
       into (at_path state.generated_parts path) (fun note ->
-          read pipeline note (Derived_form path);
+          read database note (Derived_form path);
           Option.map
             (function
               | Value form ->
@@ -1564,95 +1564,95 @@ let compute_part pipeline (part : Part.t) =
                       Mir.contract_part
                         ~type_interface:
                           (Interface.Definition.type_interface
-                             (interface_lookups pipeline note ~is_checked:true))
+                             (interface_lookups database note ~is_checked:true))
                         path form )
               | Failed _ | Blocked -> Blocked)
             (Path_table.find_opt state.derived_forms path))
   | Call_edges path ->
       into (at_path state.call_edges path) (fun note ->
-          Some (computed (Mir.Call_edges.of_path (call_edge_lookups pipeline note)) path))
+          Some (computed (Mir.Call_edges.of_path (call_edge_lookups database note)) path))
   | Patterns key ->
       into (keyed state.patterns key) (fun note ->
           Some
             (checked_part
-               (fun key -> (Patterns.check (patterns_lookups pipeline note) key, ()))
+               (fun key -> (Patterns.check (patterns_lookups database note) key, ()))
                key))
   | Usage key ->
       into (keyed state.usage key) (fun note ->
-          Some (checked_part (fun key -> (Usage.check (usage_lookups pipeline note) key, ())) key))
+          Some (checked_part (fun key -> (Usage.check (usage_lookups database note) key, ())) key))
   | Ownership key ->
       into (keyed state.ownership key) (fun note ->
           Some
             (checked_part
                (fun key ->
-                 match Ownership.check (ownership_lookups pipeline note) key with
+                 match Ownership.check (ownership_lookups database note) key with
                  | Some result -> (result.diagnostics, result.must_be_disjoint)
                  | None -> ([], []))
                key))
   | Used_packages key ->
       into (keyed state.used_packages key) (fun note ->
-          Some (computed (used_packages pipeline note) key))
+          Some (computed (used_packages database note) key))
   | Package_check (package, check) ->
       into (keyed state.package_checks check) (fun note ->
-          Some (computed (Package_checks.run (package_checks_lookups pipeline note) package) check))
+          Some (computed (Package_checks.run (package_checks_lookups database note) package) check))
   | Successors (path, viewer) ->
-      let graph = call_graph pipeline viewer in
+      let graph = call_graph database viewer in
       into
         {
           stored = Call_graph.successors graph path;
           replace =
             (fun successors ->
               List.iter
-                (fun node -> mark_stale pipeline (Successors (node, viewer)))
+                (fun node -> mark_stale database (Successors (node, viewer)))
                 (Call_graph.set_successors graph path successors));
           remove = (fun () -> Call_graph.remove_successors graph path);
         }
-        (fun note -> Some (successors pipeline note ~viewer path))
+        (fun note -> Some (successors database note ~viewer path))
   | Proof key ->
       into (keyed state.proofs key) (fun note ->
-          Some (computed (Prover.proof (proof_lookups pipeline note)) key));
-      own_template_checks pipeline key
+          Some (computed (Prover.proof (proof_lookups database note)) key));
+      own_template_checks database key
   | Ground_types key ->
-      let before = held_types pipeline key in
-      into (instance_slot pipeline.ground_types key) (fun note ->
+      let before = held_types database key in
+      into (instance_slot database.ground_types key) (fun note ->
           Some
             (computed
-               (Compile.ground_types (lowering_settings pipeline)
-                  (stage_lowering_lookups pipeline note))
+               (Compile.ground_types (lowering_settings database)
+                  (stage_lowering_lookups database note))
                key));
-      update_holders pipeline key ~before;
-      update_references pipeline key
+      update_holders database key ~before;
+      update_references database key
   | Lowered key ->
-      into (instance_slot pipeline.lowered key) (fun note ->
-          let layout_of = instance_layout pipeline note key in
+      into (instance_slot database.lowered key) (fun note ->
+          let layout_of = instance_layout database note key in
           Some
             (computed
                (fun key ->
                  match
-                   Compile.lower (lowering_settings pipeline)
-                     (stage_lowering_lookups pipeline note)
-                     ~layout_of ~lowered:(lowered pipeline note) key
+                   Compile.lower (lowering_settings database)
+                     (stage_lowering_lookups database note)
+                     ~layout_of ~lowered:(lowered database note) key
                  with
                  | lowered -> lowered
                  | exception Compile.Todo_type ty ->
                      ignore (layout_of ty);
-                     Compiler_bug.bug ~stage:"Pipeline" "%s is defined as todo, and has a layout"
+                     Compiler_bug.bug ~stage:"Database" "%s is defined as todo, and has a layout"
                        (Ground.to_string ty))
                key));
-      update_references pipeline key
+      update_references database key
   | Layout ty ->
       into
         {
-          stored = Type_table.find_opt pipeline.layouts ty;
-          replace = Type_table.replace pipeline.layouts ty;
-          remove = (fun () -> Type_table.remove pipeline.layouts ty);
+          stored = Type_table.find_opt database.layouts ty;
+          replace = Type_table.replace database.layouts ty;
+          remove = (fun () -> Type_table.remove database.layouts ty);
         }
         (fun note ->
           Some
             (match
                Compile.layout
-                 (interface_lookups pipeline note ~is_checked:true)
-                 ~layout_of:(layout pipeline note) ty
+                 (interface_lookups database note ~is_checked:true)
+                 ~layout_of:(layout database note) ty
              with
             | layout -> Value layout
             | exception Reads_failed_part -> Blocked
@@ -1662,31 +1662,31 @@ let compute_part pipeline (part : Part.t) =
   | Module_declarations _ | File_declarations _ | Package_declarations _ | Members _
   | Traits_declaring _ | Impl_index _ | Impls_of_type _ | Impls_of_trait _ | Law_proofs _
   | Recursion_group _ ->
-      Compiler_bug.bug ~stage:"Pipeline" "%s is not computed by a stage" (Part.show part)
+      Compiler_bug.bug ~stage:"Database" "%s is not computed by a stage" (Part.show part)
   | Test_key _ ->
-      Compiler_bug.bug ~stage:"Pipeline" "%s is computed with its component" (Part.show part)
+      Compiler_bug.bug ~stage:"Database" "%s is computed with its component" (Part.show part)
 
-let compute pipeline = function
+let compute database = function
   | Part.Test_key _ :: _ as parts ->
-      compute_test_keys pipeline
+      compute_test_keys database
         (List.map
            (function
              | Part.Test_key key -> key
              | part ->
-                 Compiler_bug.bug ~stage:"Pipeline" "%s is computed with test keys" (Part.show part))
+                 Compiler_bug.bug ~stage:"Database" "%s is computed with test keys" (Part.show part))
            parts)
-  | [ part ] -> compute_part pipeline part
+  | [ part ] -> compute_part database part
   | parts ->
-      compute_type_facts pipeline
+      compute_type_facts database
         (List.map
            (function
              | Part.Type_facts path -> path
              | part ->
-                 Compiler_bug.bug ~stage:"Pipeline" "%s is computed with other parts"
+                 Compiler_bug.bug ~stage:"Database" "%s is computed with other parts"
                    (Part.show part))
            parts)
 
-let units pipeline (stage : Stage.t) package parts =
+let units database (stage : Stage.t) package parts =
   match stage with
   | Type_facts ->
       let paths =
@@ -1694,7 +1694,7 @@ let units pipeline (stage : Stage.t) package parts =
       in
       let in_closure = Path_table.create 64 in
       List.iter (fun path -> Path_table.replace in_closure path ()) paths;
-      let lookups = interface_lookups pipeline ignore ~is_checked:false in
+      let lookups = interface_lookups database ignore ~is_checked:false in
       List.map
         (List.map (fun path -> Part.Type_facts path))
         (Path_components.of_graph
@@ -1707,11 +1707,11 @@ let units pipeline (stage : Stage.t) package parts =
            paths)
   | _ -> List.map (fun part -> [ part ]) parts
 
-let layout_units pipeline parts =
+let layout_units database parts =
   let types = List.filter_map (function Part.Layout ty -> Some ty | _ -> None) parts in
   let in_closure = Type_table.create 64 in
   List.iter (fun ty -> Type_table.replace in_closure ty ()) types;
-  let interface = interface_lookups pipeline ignore ~is_checked:true in
+  let interface = interface_lookups database ignore ~is_checked:true in
   let successors ty =
     match Compile.stored_in_place interface ty with
     | stored -> List.filter (Type_table.mem in_closure) stored
@@ -1721,18 +1721,18 @@ let layout_units pipeline parts =
     (function
       | [ ty ] when not (List.exists (Ground_key.equal ty) (successors ty)) -> [ Part.Layout ty ]
       | cycle ->
-          Compiler_bug.bug ~stage:"Pipeline"
+          Compiler_bug.bug ~stage:"Database"
             "%s contains itself in place, which the type checker rejects"
             (String.concat ", " (List.map Ground.to_string cycle)))
     (Type_components.of_graph ~successors types)
 
-let constant_units pipeline parts =
+let constant_units database parts =
   let in_closure = Part_table.create 64 in
   List.iter (fun part -> Part_table.replace in_closure part ()) parts;
   let successors (part : Part.t) =
     match part with
     | Lowered (Constant _ as key) -> (
-        match Instance_table.find_opt pipeline.ground_types key with
+        match Instance_table.find_opt database.ground_types key with
         | Some (Value { folded_constants; _ }) ->
             List.filter (Part_table.mem in_closure)
               (List.map (fun path -> Part.Lowered (Constant path)) folded_constants)
@@ -1743,18 +1743,18 @@ let constant_units pipeline parts =
     (function
       | [ part ] when not (List.exists (Part.equal part) (successors part)) -> [ part ]
       | cycle ->
-          Compiler_bug.bug ~stage:"Pipeline" "constants that read one another: %s"
+          Compiler_bug.bug ~stage:"Database" "constants that read one another: %s"
             (String.concat ", " (List.map Part.show cycle)))
     (Part_components.of_graph ~successors parts)
 
-let test_key_units pipeline parts =
+let test_key_units database parts =
   let in_closure = Part_table.create 64 in
   List.iter (fun part -> Part_table.replace in_closure part ()) parts;
   Part_components.of_graph
     ~successors:(fun (part : Part.t) ->
       match part with
       | Test_key key -> (
-          match Instance_table.find_opt pipeline.lowered key with
+          match Instance_table.find_opt database.lowered key with
           | Some (Value (Ok lowered)) ->
               List.filter (Part_table.mem in_closure)
                 (List.map (fun reference -> Part.Test_key reference) (Compile.references lowered))
@@ -1762,23 +1762,23 @@ let test_key_units pipeline parts =
       | _ -> [])
     parts
 
-let update_groups pipeline package =
-  match Hashtbl.find_opt pipeline.graphs package with
+let update_groups database package =
+  match Hashtbl.find_opt database.graphs package with
   | Some graph when Call_graph.has_changes graph ->
       let { Call_graph.touched; removed } = Call_graph.update graph in
       List.iter
         (fun node ->
           let part = Part.Successors (node, package) in
-          mark_unsaved pipeline (Value part);
-          discard pipeline part)
+          mark_unsaved database (Value part);
+          discard database part)
         removed;
-      let groups = at_path (owner pipeline package).recursion_groups in
+      let groups = at_path (owner database package).recursion_groups in
       let is_own node = Path.package node = package in
       List.iter
         (fun node ->
           if is_own node then begin
-            pipeline.observe (Computed (Recursion_group node));
-            store pipeline (Recursion_group node) (groups node)
+            database.observe (Computed (Recursion_group node));
+            store database (Recursion_group node) (groups node)
               (match Call_graph.group graph node with
               | Blocked -> Some Blocked
               | Members [] -> None
@@ -1786,24 +1786,24 @@ let update_groups pipeline package =
           end)
         touched;
       List.iter
-        (fun node -> if is_own node then store pipeline (Recursion_group node) (groups node) None)
+        (fun node -> if is_own node then store database (Recursion_group node) (groups node) None)
         removed
   | Some _ | None -> ()
 
-let has_work pipeline package (stage : Stage.t) =
+let has_work database package (stage : Stage.t) =
   match stage with
   | Recursion_groups -> (
-      match Hashtbl.find_opt pipeline.graphs package with
+      match Hashtbl.find_opt database.graphs package with
       | Some graph -> Call_graph.has_changes graph
       | None -> false)
   | stage -> (
-      match Hashtbl.find_opt pipeline.stale (package, stage) with
+      match Hashtbl.find_opt database.stale (package, stage) with
       | Some parts -> Part_table.length parts > 0
       | None -> false)
 
-let drain_stage pipeline ~is_drained ~on_raise (stage : Stage.t) packages =
+let drain_stage database ~is_drained ~on_raise (stage : Stage.t) packages =
   match stage with
-  | Recursion_groups -> List.iter (update_groups pipeline) packages
+  | Recursion_groups -> List.iter (update_groups database) packages
   | stage -> (
       let closure = Part_table.create 64 in
       let rec close part =
@@ -1816,21 +1816,21 @@ let drain_stage pipeline ~is_drained ~on_raise (stage : Stage.t) packages =
                    && List.mem (Part.package reader) packages
                    && is_drained reader
                  then close reader))
-            (Part_table.find_opt pipeline.readers part)
+            (Part_table.find_opt database.readers part)
         end
       in
       List.iter
         (fun package ->
-          List.iter close (List.filter is_drained (stale_parts pipeline package stage)))
+          List.iter close (List.filter is_drained (stale_parts database package stage)))
         packages;
       let compute_units =
         List.iter (fun unit ->
-            if List.exists (is_stale pipeline) unit then begin
-              List.iter (unmark pipeline) unit;
-              match compute pipeline unit with
+            if List.exists (is_stale database) unit then begin
+              List.iter (unmark database) unit;
+              match compute database unit with
               | () -> ()
               | exception raised ->
-                  List.iter (mark_stale pipeline) unit;
+                  List.iter (mark_stale database) unit;
                   on_raise unit raised
             end)
       in
@@ -1839,22 +1839,22 @@ let drain_stage pipeline ~is_drained ~on_raise (stage : Stage.t) packages =
       in
       let all_parts () = parts_where (fun _ -> true) in
       match stage with
-      | Layouts -> compute_units (layout_units pipeline (all_parts ()))
-      | Lowered_code -> compute_units (constant_units pipeline (all_parts ()))
-      | Test_keys -> compute_units (test_key_units pipeline (all_parts ()))
+      | Layouts -> compute_units (layout_units database (all_parts ()))
+      | Lowered_code -> compute_units (constant_units database (all_parts ()))
+      | Test_keys -> compute_units (test_key_units database (all_parts ()))
       | Ground_types -> compute_units (List.map (fun part -> [ part ]) (all_parts ()))
       | stage ->
           List.iter
             (fun package ->
               compute_units
-                (units pipeline stage package
+                (units database stage package
                    (parts_where (fun part -> Part.package part = package))))
             packages)
 
-let drain_where ?on_bug pipeline ~drains requested =
-  let packages = in_dependency_order pipeline requested in
+let drain_where ?on_bug database ~drains requested =
+  let packages = in_dependency_order database requested in
   let broken = Part_table.create 0 in
-  let is_drained part = is_drained pipeline part && not (Part_table.mem broken part) in
+  let is_drained part = is_drained database part && not (Part_table.mem broken part) in
   let on_raise unit raised =
     match (on_bug, raised) with
     | Some on_bug, Compiler_bug.Bug bug ->
@@ -1865,25 +1865,25 @@ let drain_where ?on_bug pipeline ~drains requested =
   let has_drained_work stage =
     List.exists
       (fun package ->
-        has_work pipeline package stage
+        has_work database package stage
         && ((Part_table.length broken = 0 && not (Stage.is_lowering stage))
-           || List.exists is_drained (stale_parts pipeline package stage)))
+           || List.exists is_drained (stale_parts database package stage)))
       packages
   in
   let rec next () =
     match List.find_opt (fun stage -> drains stage && has_drained_work stage) Stage.all with
     | Some stage ->
-        drain_stage pipeline ~is_drained ~on_raise stage packages;
+        drain_stage database ~is_drained ~on_raise stage packages;
         next ()
     | None -> ()
   in
   next ()
 
-let drain pipeline ~through requested =
-  drain_where pipeline ~drains:(Stage.drains ~through) requested
+let drain database ~through requested =
+  drain_where database ~drains:(Stage.drains ~through) requested
 
-let propagate ?on_bug pipeline =
-  drain_where ?on_bug pipeline ~drains:(fun _ -> true) pipeline.project
+let propagate ?on_bug database =
+  drain_where ?on_bug database ~drains:(fun _ -> true) database.project
 
 type read = { dependent : Part.t; dependency : Part.t }
 
@@ -1895,11 +1895,11 @@ let definition_set paths =
 let is_of_other definition part =
   match Part.definition part with Some other -> not (Path.equal other definition) | None -> false
 
-let drain_checks pipeline = drain pipeline ~through:Proofs pipeline.project
+let drain_checks database = drain database ~through:Proofs database.project
 let is_checked part = not (Stage.is_lowering (Stage.of_part part))
 
-let dependencies pipeline paths =
-  drain_checks pipeline;
+let dependencies database paths =
+  drain_checks database;
   let wanted = definition_set paths in
   Part_table.fold
     (fun dependent dependencies found ->
@@ -1911,10 +1911,10 @@ let dependencies pipeline paths =
               else found)
             found dependencies
       | Some _ | None -> found)
-    pipeline.reads []
+    database.reads []
 
-let dependents pipeline paths =
-  drain_checks pipeline;
+let dependents database paths =
+  drain_checks database;
   let wanted = definition_set paths in
   Part_table.fold
     (fun dependency readers found ->
@@ -1927,10 +1927,10 @@ let dependents pipeline paths =
               else found)
             readers found
       | Some _ | None -> found)
-    pipeline.readers []
+    database.readers []
 
-let changes pipeline other =
-  drain_checks pipeline;
+let changes database other =
+  drain_checks database;
   drain_checks other;
   let parts = Part_table.create 1024 in
   let add part =
@@ -1941,30 +1941,30 @@ let changes pipeline other =
           Part_table.replace parts part ()
   in
   List.iter
-    (fun pipeline ->
-      Part_table.iter (fun part _ -> add part) pipeline.reads;
-      Part_table.iter (fun part _ -> add part) pipeline.readers;
+    (fun database ->
+      Part_table.iter (fun part _ -> add part) database.reads;
+      Part_table.iter (fun part _ -> add part) database.readers;
       List.iter
         (fun package ->
           Path_table.iter
             (fun path _ -> add (Recursion_group path))
-            (owner pipeline package).recursion_groups)
-        pipeline.project)
-    [ pipeline; other ];
+            (owner database package).recursion_groups)
+        database.project)
+    [ database; other ];
   Part_table.fold
     (fun part () changed ->
-      if (stored pipeline part).is_equal_in other then changed else part :: changed)
+      if (stored database part).is_equal_in other then changed else part :: changed)
     parts []
 
-let update pipeline changes =
+let update database changes =
   List.iter
     (fun ((file : Path.file), text) ->
       let package = file.module_.package in
       let state =
-        match Hashtbl.find_opt pipeline.states package with
+        match Hashtbl.find_opt database.states package with
         | Some state -> state
         | None ->
-            Compiler_bug.bug ~stage:"Pipeline" "%s is not a package of the build"
+            Compiler_bug.bug ~stage:"Database" "%s is not a package of the build"
               (Path.show_package package)
       in
       let previous = Hashtbl.find_opt state.sources file in
@@ -1975,21 +1975,21 @@ let update pipeline changes =
         | Some _, None | None, Some _ -> false
       in
       if not is_unchanged then begin
-        mark_unsaved pipeline (File file);
+        mark_unsaved database (File file);
         (match text with
         | Some text ->
             Hashtbl.replace state.sources file (source_of file text);
-            mark_stale pipeline (Parsed file)
+            mark_stale database (Parsed file)
         | None ->
             Hashtbl.remove state.sources file;
-            forget pipeline [ Parsed file ]);
-        mark_readers pipeline (Source file);
+            forget database [ Parsed file ]);
+        mark_readers database (Source file);
         if Option.is_none previous || Option.is_none text then begin
           let modules = state.modules in
           list_files state
             (List.filter (( <> ) file) state.files @ if Option.is_some text then [ file ] else []);
-          if modules <> state.modules then mark_readers pipeline (Modules package);
-          mark_stale pipeline (Namespace package)
+          if modules <> state.modules then mark_readers database (Modules package);
+          mark_stale database (Namespace package)
         end
       end)
     changes
@@ -2026,7 +2026,7 @@ let state_parts (state : state) : Part.t list =
       keyed state.proofs (fun key -> Part.Proof key);
     ]
 
-let mark_differences pipeline name ~(before : state option) ~(after : state option) =
+let mark_differences database name ~(before : state option) ~(after : state option) =
   let empty () =
     let state = empty_state name ~dependencies:[] in
     state.namespace <- Some Names.empty_namespace;
@@ -2035,151 +2035,151 @@ let mark_differences pipeline name ~(before : state option) ~(after : state opti
   let before = match before with Some state -> state | None -> empty () in
   let after = match after with Some state -> state | None -> empty () in
   let namespace (state : state) = Option.value state.namespace ~default:Names.empty_namespace in
-  List.iter (mark_change pipeline name) (Names.changes (namespace before) (namespace after));
+  List.iter (mark_change database name) (Names.changes (namespace before) (namespace after));
   let text (state : state) file = Option.map Source.text (Hashtbl.find_opt state.sources file) in
   List.iter
-    (fun file -> if text before file <> text after file then mark_readers pipeline (Source file))
+    (fun file -> if text before file <> text after file then mark_readers database (Source file))
     (List.sort_uniq compare (before.files @ after.files));
-  if before.modules <> after.modules then mark_readers pipeline (Modules name);
-  if before.dependencies <> after.dependencies then mark_readers pipeline (Dependencies name);
+  if before.modules <> after.modules then mark_readers database (Modules name);
+  if before.dependencies <> after.dependencies then mark_readers database (Dependencies name);
   let view (state : state) =
     let states = Hashtbl.create 1 in
     Hashtbl.replace states name state;
-    { pipeline with states }
+    { database with states }
   in
   let parts = Part_table.create 1024 in
   List.iter (fun part -> Part_table.replace parts part ()) (state_parts before @ state_parts after);
   Part_table.iter
     (fun part () ->
-      if not ((stored (view before) part).is_equal_in (view after)) then mark_readers pipeline part)
+      if not ((stored (view before) part).is_equal_in (view after)) then mark_readers database part)
     parts
 
-let retire pipeline (state : state) =
+let retire database (state : state) =
   let package = state.name in
-  own_roots pipeline (Namespace package) [];
-  Hashtbl.iter (fun key _ -> own_roots pipeline (Proof key) []) state.proofs;
+  own_roots database (Namespace package) [];
+  Hashtbl.iter (fun key _ -> own_roots database (Proof key) []) state.proofs;
   let is_own (part : Part.t) =
     match Stage.of_part part with
     | Input -> false
     | stage -> (not (Stage.is_lowering stage)) && Part.package part = package
   in
-  mark_state_unsaved pipeline state;
-  List.iter (fun part -> mark_unsaved pipeline (Value part)) (state_parts state);
+  mark_state_unsaved database state;
+  List.iter (fun part -> mark_unsaved database (Value part)) (state_parts state);
   List.iter
     (fun part ->
-      mark_unsaved pipeline (Value part);
-      discard pipeline part)
+      mark_unsaved database (Value part);
+      discard database part)
     (Part_table.fold
        (fun part _ parts -> if is_own part then part :: parts else parts)
-       pipeline.reads []);
+       database.reads []);
   Hashtbl.filter_map_inplace
     (fun (owner, stage) parts ->
       if owner = package && not (Stage.is_lowering stage) then begin
-        Part_table.iter (fun part () -> mark_unsaved pipeline (Stale part)) parts;
+        Part_table.iter (fun part () -> mark_unsaved database (Stale part)) parts;
         None
       end
       else Some parts)
-    pipeline.stale;
-  Hashtbl.remove pipeline.graphs package;
-  Hashtbl.remove pipeline.implied package;
-  Hashtbl.remove pipeline.states package
+    database.stale;
+  Hashtbl.remove database.graphs package;
+  Hashtbl.remove database.implied package;
+  Hashtbl.remove database.states package
 
-let relayout pipeline ~(loaded : state list) (packages : Project.package list) =
+let relayout database ~(loaded : state list) (packages : Project.package list) =
   let project = List.map (fun (package : Project.package) -> package.name) packages in
   let loaded_as name = List.find_opt (fun (state : state) -> state.name = name) loaded in
-  let names_before = Hashtbl.fold (fun name _ names -> name :: names) pipeline.states [] in
+  let names_before = Hashtbl.fold (fun name _ names -> name :: names) database.states [] in
   List.iter
     (fun name ->
-      let before = Hashtbl.find pipeline.states name in
+      let before = Hashtbl.find database.states name in
       let is_kept =
-        if List.mem name pipeline.project then List.mem name project
+        if List.mem name database.project then List.mem name project
         else match loaded_as name with Some state -> state == before | None -> false
       in
       if not is_kept then begin
         let after = if List.mem name project then None else loaded_as name in
-        mark_differences pipeline name ~before:(Some before) ~after;
-        retire pipeline before;
-        Option.iter (Hashtbl.replace pipeline.states name) after
+        mark_differences database name ~before:(Some before) ~after;
+        retire database before;
+        Option.iter (Hashtbl.replace database.states name) after
       end)
     names_before;
   List.iter
     (fun (state : state) ->
-      if not (Hashtbl.mem pipeline.states state.name) then begin
-        mark_differences pipeline state.name ~before:None ~after:(Some state);
-        Hashtbl.remove pipeline.absent state.name;
-        Hashtbl.replace pipeline.states state.name state
+      if not (Hashtbl.mem database.states state.name) then begin
+        mark_differences database state.name ~before:None ~after:(Some state);
+        Hashtbl.remove database.absent state.name;
+        Hashtbl.replace database.states state.name state
       end)
     loaded;
   List.iter
     (fun (package : Project.package) ->
-      match Hashtbl.find_opt pipeline.states package.name with
+      match Hashtbl.find_opt database.states package.name with
       | Some state ->
           if state.dependencies <> package.dependencies then begin
             state.dependencies <- package.dependencies;
-            mark_unsaved pipeline (Package package.name);
-            mark_readers pipeline (Dependencies package.name);
-            mark_stale pipeline (Namespace package.name)
+            mark_unsaved database (Package package.name);
+            mark_readers database (Dependencies package.name);
+            mark_stale database (Namespace package.name)
           end;
-          update pipeline
+          update database
             (List.map (fun (file, text) -> (file, Some text)) package.files
             @ List.filter_map
                 (fun file -> if List.mem_assoc file package.files then None else Some (file, None))
                 state.files)
       | None ->
           let state = fresh_state package.name ~dependencies:package.dependencies package.files in
-          Hashtbl.remove pipeline.absent package.name;
-          Hashtbl.replace pipeline.states package.name state;
-          mark_state_unsaved pipeline state;
-          mark_readers pipeline (Modules package.name);
-          mark_readers pipeline (Dependencies package.name);
-          List.iter (fun file -> mark_stale pipeline (Parsed file)) state.files;
-          mark_stale pipeline (Namespace package.name))
+          Hashtbl.remove database.absent package.name;
+          Hashtbl.replace database.states package.name state;
+          mark_state_unsaved database state;
+          mark_readers database (Modules package.name);
+          mark_readers database (Dependencies package.name);
+          List.iter (fun file -> mark_stale database (Parsed file)) state.files;
+          mark_stale database (Namespace package.name))
     packages;
-  let names_after = Hashtbl.fold (fun name _ names -> name :: names) pipeline.states [] in
+  let names_after = Hashtbl.fold (fun name _ names -> name :: names) database.states [] in
   if List.sort compare names_before <> List.sort compare names_after then
-    mark_readers pipeline Packages;
-  pipeline.project <- project
+    mark_readers database Packages;
+  database.project <- project
 
 let fingerprint text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
 
-let is_saved_part pipeline (part : Part.t) =
+let is_saved_part database (part : Part.t) =
   match Stage.of_part part with
   | Input | Namespaces -> false
-  | stage -> Stage.is_lowering stage || List.mem (Part.package part) pipeline.project
+  | stage -> Stage.is_lowering stage || List.mem (Part.package part) database.project
 
-let saved_value pipeline (entry : Entry.t) =
+let saved_value database (entry : Entry.t) =
   match entry with
-  | Value part -> if is_saved_part pipeline part then (stored pipeline part).saved () else None
+  | Value part -> if is_saved_part database part then (stored database part).saved () else None
   | Reads part ->
-      if is_saved_part pipeline part then
-        Option.map marshalled (Part_table.find_opt pipeline.reads part)
+      if is_saved_part database part then
+        Option.map marshalled (Part_table.find_opt database.reads part)
       else None
-  | Stale part -> if is_saved_part pipeline part && is_stale pipeline part then Some "" else None
+  | Stale part -> if is_saved_part database part && is_stale database part then Some "" else None
   | Package name ->
-      if List.mem name pipeline.project then
-        Option.map (fun (state : state) -> marshalled state.dependencies) (package pipeline name)
+      if List.mem name database.project then
+        Option.map (fun (state : state) -> marshalled state.dependencies) (package database name)
       else None
   | File file ->
       let name = file.module_.package in
-      if List.mem name pipeline.project then
-        Option.bind (package pipeline name) (fun (state : state) ->
+      if List.mem name database.project then
+        Option.bind (package database name) (fun (state : state) ->
             Option.map
               (fun source -> fingerprint (Source.text source))
               (Hashtbl.find_opt state.sources file))
       else None
-  | Owned owner -> Option.map marshalled (Part_table.find_opt pipeline.owned owner)
+  | Owned owner -> Option.map marshalled (Part_table.find_opt database.owned owner)
 
-let unsaved pipeline =
-  drain pipeline ~through:Namespaces pipeline.project;
-  List.iter (update_groups pipeline) pipeline.project;
+let unsaved database =
+  drain database ~through:Namespaces database.project;
+  List.iter (update_groups database) database.project;
   Entry_table.fold
     (fun entry () entries ->
-      (Marshal.to_string entry [ No_sharing ], saved_value pipeline entry) :: entries)
-    pipeline.unsaved []
+      (Marshal.to_string entry [ No_sharing ], saved_value database entry) :: entries)
+    database.unsaved []
 
-let mark_saved pipeline = Entry_table.reset pipeline.unsaved
+let mark_saved database = Entry_table.reset database.unsaved
 
-let restore_packages pipeline ~texts entries =
+let restore_packages database ~texts entries =
   let files = Hashtbl.create 64 in
   List.iter
     (function
@@ -2202,71 +2202,71 @@ let restore_packages pipeline ~texts entries =
               | Some _ | None -> ())
             listed;
           list_files state (List.map fst listed);
-          Hashtbl.replace pipeline.states name state;
-          pipeline.project <- name :: pipeline.project
+          Hashtbl.replace database.states name state;
+          database.project <- name :: database.project
       | _ -> ())
     entries;
-  pipeline.project <- List.sort Path.compare_package pipeline.project
+  database.project <- List.sort Path.compare_package database.project
 
-let restore_parts pipeline entries =
+let restore_parts database entries =
   List.iter
     (fun ((entry : Entry.t), bytes) ->
       match entry with
-      | Value part when is_saved_part pipeline part -> (stored pipeline part).restore bytes
-      | Reads part when is_saved_part pipeline part ->
-          add_reads pipeline part (Marshal.from_string bytes 0)
-      | Stale part when is_saved_part pipeline part -> mark_stale pipeline part
-      | Owned owner -> Part_table.replace pipeline.owned owner (Marshal.from_string bytes 0)
+      | Value part when is_saved_part database part -> (stored database part).restore bytes
+      | Reads part when is_saved_part database part ->
+          add_reads database part (Marshal.from_string bytes 0)
+      | Stale part when is_saved_part database part -> mark_stale database part
+      | Owned owner -> Part_table.replace database.owned owner (Marshal.from_string bytes 0)
       | Value _ | Reads _ | Stale _ | Package _ | File _ -> ())
     entries
 
-let restore_namespaces pipeline =
+let restore_namespaces database =
   List.iter
     (fun name ->
-      if List.mem name pipeline.project then begin
-        let _, implied = namespace_and_implied pipeline (Hashtbl.find pipeline.states name) in
-        let graph = call_graph pipeline name in
+      if List.mem name database.project then begin
+        let _, implied = namespace_and_implied database (Hashtbl.find database.states name) in
+        let graph = call_graph database name in
         List.iter
           (function
             | Part.Successors (root, _) -> ignore (Call_graph.add_root graph root) | _ -> ())
           implied
       end)
-    (in_dependency_order pipeline pipeline.project)
+    (in_dependency_order database database.project)
 
-let restore_references pipeline =
+let restore_references database =
   Part_table.iter
     (fun owner roots ->
       List.iter
         (fun root ->
-          Instance_table.replace pipeline.owners root
-            (owner :: Option.value (Instance_table.find_opt pipeline.owners root) ~default:[]);
-          ignore (References.add_root pipeline.references root))
+          Instance_table.replace database.owners root
+            (owner :: Option.value (Instance_table.find_opt database.owners root) ~default:[]);
+          ignore (References.add_root database.references root))
         roots)
-    pipeline.owned;
+    database.owned;
   let instances = Instance_table.create 1024 in
   let note key _ = Instance_table.replace instances key () in
-  Instance_table.iter note pipeline.ground_types;
-  Instance_table.iter note pipeline.lowered;
+  Instance_table.iter note database.ground_types;
+  Instance_table.iter note database.lowered;
   Instance_table.iter
     (fun key () ->
-      List.iter (hold pipeline key) (held_types pipeline key);
+      List.iter (hold database key) (held_types database key);
       ignore
-        (References.set_successors pipeline.references key (Some (instance_edges pipeline key))))
+        (References.set_successors database.references key (Some (instance_edges database key))))
     instances;
-  settle_references pipeline
+  settle_references database
 
 let restore ~loaded ~texts entries =
-  let pipeline = create ~loaded [] in
+  let database = create ~loaded [] in
   let entries =
     List.map (fun (key, value) -> ((Marshal.from_string key 0 : Entry.t), value)) entries
   in
-  restore_packages pipeline ~texts entries;
-  restore_parts pipeline entries;
-  restore_namespaces pipeline;
-  restore_references pipeline;
-  List.iter (update_groups pipeline) pipeline.project;
-  mark_saved pipeline;
-  pipeline
+  restore_packages database ~texts entries;
+  restore_parts database entries;
+  restore_namespaces database;
+  restore_references database;
+  List.iter (update_groups database) database.project;
+  mark_saved database;
+  database
 
 type stage = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
 
@@ -2281,8 +2281,8 @@ let failed table key =
   | Some (Failed diagnostics) -> diagnostics
   | Some (Value _ | Blocked) | None -> []
 
-let definition_diagnostics pipeline (key : Names.key) stage =
-  let owner = owner pipeline key.module_.package in
+let definition_diagnostics database (key : Names.key) stage =
+  let owner = owner database key.module_.package in
   match stage with
   | Resolve ->
       List.concat_map (fun section -> failed owner.resolved_names (key, section)) Resolve.sections
@@ -2301,20 +2301,20 @@ let by_span_and_code diagnostics =
       compare (left.span, left.code) (right.span, right.code))
     diagnostics
 
-let package_check pipeline package check =
-  Hashtbl.find_opt (owner pipeline package).package_checks check
+let package_check database package check =
+  Hashtbl.find_opt (owner database package).package_checks check
 
-let package_outcomes pipeline package =
+let package_outcomes database package =
   List.filter_map
     (fun check ->
-      match package_check pipeline package check with
+      match package_check database package check with
       | Some (Value outcome) -> Some outcome
       | Some (Failed _ | Blocked) | None -> None)
-    (Package_checks.checks ((names_lookups pipeline).package_declarations package))
+    (Package_checks.checks ((names_lookups database).package_declarations package))
 
-let stage_diagnostics pipeline (file : Path.file) stage =
-  let names = names_lookups pipeline in
-  let state = owner pipeline file.module_.package in
+let stage_diagnostics database (file : Path.file) stage =
+  let names = names_lookups database in
+  let state = owner database file.module_.package in
   let placed key diagnostics =
     match names.place key with
     | Some { file = home; base } when home = file ->
@@ -2323,8 +2323,8 @@ let stage_diagnostics pipeline (file : Path.file) stage =
   in
   let of_definitions () =
     List.concat_map
-      (fun key -> placed key (definition_diagnostics pipeline key stage))
-      (file_keys pipeline file)
+      (fun key -> placed key (definition_diagnostics database key stage))
+      (file_keys database file)
   in
   by_span_and_code
     (match stage with
@@ -2339,76 +2339,76 @@ let stage_diagnostics pipeline (file : Path.file) stage =
                     placed diagnostic.key [ diagnostic.diagnostic ])
                   diagnostics
             | Problems _ | Packages _ -> [])
-          (package_outcomes pipeline file.module_.package)
+          (package_outcomes database file.module_.package)
     | Interface | Infer | Patterns | Usage | Ownership -> of_definitions ())
 
 let stages = [ Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks ]
-let check pipeline packages = drain pipeline ~through:Package_checks packages
+let check database packages = drain database ~through:Package_checks packages
 
-let tables pipeline (key : Names.key) =
-  drain pipeline ~through:Checked_bodies [ key.module_.package ];
-  match Hashtbl.find_opt (owner pipeline key.module_.package).checked_bodies key with
+let tables database (key : Names.key) =
+  drain database ~through:Checked_bodies [ key.module_.package ];
+  match Hashtbl.find_opt (owner database key.module_.package).checked_bodies key with
   | Some (Value checked) -> Some checked.tables
   | Some (Failed _ | Blocked) | None -> None
 
-let file_diagnostics pipeline (file : Path.file) =
-  drain pipeline ~through:Package_checks [ file.module_.package ];
+let file_diagnostics database (file : Path.file) =
+  drain database ~through:Package_checks [ file.module_.package ];
   without_duplicates
-    ((parsed_file pipeline file).diagnostics
-    @ List.concat_map (stage_diagnostics pipeline file) stages)
+    ((parsed_file database file).diagnostics
+    @ List.concat_map (stage_diagnostics database file) stages)
 
-let manifest_problems pipeline package =
-  drain pipeline ~through:Package_checks [ package ];
+let manifest_problems database package =
+  drain database ~through:Package_checks [ package ];
   List.concat_map
     (function Package_checks.Problems problems -> problems | Placed _ | Packages _ -> [])
-    (package_outcomes pipeline package)
+    (package_outcomes database package)
 
-let code_packages pipeline package =
-  drain pipeline ~through:Package_checks [ package ];
-  match package_check pipeline package Code_packages with
+let code_packages database package =
+  drain database ~through:Package_checks [ package ];
+  match package_check database package Code_packages with
   | Some (Value (Packages packages)) -> Some packages
   | Some (Value (Placed _ | Problems _) | Failed _ | Blocked) | None -> None
 
-let state pipeline package =
-  drain pipeline ~through:Recursion_groups [ package ];
-  match Hashtbl.find_opt pipeline.states package with
+let state database package =
+  drain database ~through:Recursion_groups [ package ];
+  match Hashtbl.find_opt database.states package with
   | Some state -> state
   | None ->
-      Compiler_bug.bug ~stage:"Pipeline" "%s is not a package of the build"
+      Compiler_bug.bug ~stage:"Database" "%s is not a package of the build"
         (Path.show_package package)
 
-type proofs = { pipeline : t; keys : Names.key list }
+type proofs = { database : t; keys : Names.key list }
 
-let prove pipeline files =
+let prove database files =
   let packages =
     List.sort_uniq Path.compare_package
       (List.map (fun (file : Path.file) -> file.module_.package) files)
   in
-  drain pipeline ~through:Recursion_groups packages;
-  let names = names_lookups pipeline in
+  drain database ~through:Recursion_groups packages;
+  let names = names_lookups database in
   let keys =
     List.concat_map
       (fun file ->
-        List.filter (fun key -> Option.is_some (names.place key)) (file_keys pipeline file))
+        List.filter (fun key -> Option.is_some (names.place key)) (file_keys database file))
       files
   in
   List.iter
     (fun (key : Names.key) ->
       let part = Part.Proof key in
-      if is_stale pipeline part || not (Hashtbl.mem (owner pipeline key.module_.package).proofs key)
+      if is_stale database part || not (Hashtbl.mem (owner database key.module_.package).proofs key)
       then begin
-        unmark pipeline part;
-        compute_part pipeline part
+        unmark database part;
+        compute_part database part
       end
-      else own_template_checks pipeline key)
+      else own_template_checks database key)
     keys;
-  { pipeline; keys }
+  { database; keys }
 
 let proof proofs (key : Names.key) =
-  Hashtbl.find_opt (owner proofs.pipeline key.module_.package).proofs key
+  Hashtbl.find_opt (owner proofs.database key.module_.package).proofs key
 
 let holes proofs path =
-  let names = names_lookups proofs.pipeline in
+  let names = names_lookups proofs.database in
   match Option.bind (names.key path) (proof proofs) with
   | Some (Value (Obligations { holes; _ })) ->
       List.filter_map
@@ -2421,16 +2421,16 @@ let holes proofs path =
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
 
 let template_checks (proofs : proofs) =
-  let pipeline = proofs.pipeline in
-  match List.sort_uniq compare (List.concat_map (proof_template_checks pipeline) proofs.keys) with
+  let database = proofs.database in
+  match List.sort_uniq compare (List.concat_map (proof_template_checks database) proofs.keys) with
   | [] -> []
   | checks ->
-      drain pipeline ~through:Test_keys
+      drain database ~through:Test_keys
         (List.sort_uniq Path.compare_package
            (List.map (fun (key : Names.key) -> key.module_.package) proofs.keys));
       List.filter
         (fun check ->
-          match Instance_table.find_opt pipeline.test_keys (template_check_root check) with
+          match Instance_table.find_opt database.test_keys (template_check_root check) with
           | Some Blocked -> false
           | Some (Value _ | Failed _) | None -> true)
         checks
@@ -2443,19 +2443,19 @@ let list_proofs (proofs : proofs) =
       | Some (Failed _ | Blocked) | None -> None)
     proofs.keys
 
-let make_proof_lookups pipeline = proof_lookups pipeline ignore
+let make_proof_lookups database = proof_lookups database ignore
 
-let parsed pipeline (file : Path.file) =
-  drain pipeline ~through:Parse [ file.module_.package ];
-  parsed_file pipeline file
+let parsed database (file : Path.file) =
+  drain database ~through:Parse [ file.module_.package ];
+  parsed_file database file
 
-let names pipeline packages =
-  drain pipeline ~through:Namespaces packages;
-  names_lookups pipeline
+let names database packages =
+  drain database ~through:Namespaces packages;
+  names_lookups database
 
-let resolved pipeline (key : Names.key) =
-  drain pipeline ~through:Resolution [ key.module_.package ];
-  let owner = owner pipeline key.module_.package in
+let resolved database (key : Names.key) =
+  drain database ~through:Resolution [ key.module_.package ];
+  let owner = owner database key.module_.package in
   match
     List.filter
       (fun section ->
@@ -2465,23 +2465,23 @@ let resolved pipeline (key : Names.key) =
       Resolve.sections
   with
   | [] -> None
-  | sections -> Resolve.whole ~sections (resolved pipeline ignore) key
+  | sections -> Resolve.whole ~sections (resolved database ignore) key
 
-let request pipeline packages ~through ~needs keys =
-  drain pipeline ~through packages;
+let request database packages ~through ~needs keys =
+  drain database ~through packages;
   List.iter
     (fun key ->
-      if not (List.for_all (is_current pipeline) (needs key)) then
-        Compiler_bug.bug ~stage:"Pipeline" "%s is requested, and no root of lowering reaches it"
+      if not (List.for_all (is_current database) (needs key)) then
+        Compiler_bug.bug ~stage:"Database" "%s is requested, and no root of lowering reaches it"
           (Instance.to_string key))
     keys
 
-let laid_out pipeline key =
+let laid_out database key =
   let part = Part.Ground_types key in
   part
   ::
-  (if is_current pipeline part then
-     match Instance_table.find_opt pipeline.ground_types key with
+  (if is_current database part then
+     match Instance_table.find_opt database.ground_types key with
      | Some (Value { types; _ }) -> List.map (fun ty -> Part.Layout ty) types
      | Some (Failed _ | Blocked) | None -> []
    else [])
@@ -2490,30 +2490,30 @@ let requested table part key =
   match Instance_table.find_opt table key with
   | Some (Value value) -> value
   | Some (Failed _ | Blocked) ->
-      Compiler_bug.bug ~stage:"Pipeline" "%s is requested from code with errors" (Part.show part)
+      Compiler_bug.bug ~stage:"Database" "%s is requested from code with errors" (Part.show part)
   | None -> unchecked (Part.show part)
 
-let layouts pipeline packages keys =
-  request pipeline packages ~through:Lowered_code ~needs:(laid_out pipeline) keys;
+let layouts database packages keys =
+  request database packages ~through:Lowered_code ~needs:(laid_out database) keys;
   let ground_types = Type_table.create 256 in
   List.iter
     (fun key ->
       List.iter
         (fun ty -> Type_table.replace ground_types ty ())
-        (requested pipeline.ground_types (Ground_types key) key).types)
+        (requested database.ground_types (Ground_types key) key).types)
     keys;
   fun ty ->
     if not (Type_table.mem ground_types ty) then
-      Compiler_bug.bug ~stage:"Pipeline" "%s reads the layout of %s, which its ground types lack"
+      Compiler_bug.bug ~stage:"Database" "%s reads the layout of %s, which its ground types lack"
         (String.concat ", " (List.map Instance.to_string keys))
         (Ground.to_string ty);
-    layout pipeline ignore ty
+    layout database ignore ty
 
-let interface_lookups pipeline packages =
-  drain pipeline ~through:Signature_checks packages;
-  interface_lookups pipeline ignore ~is_checked:true
+let interface_lookups database packages =
+  drain database ~through:Signature_checks packages;
+  interface_lookups database ignore ~is_checked:true
 
-let check_calls pipeline interface viewers key = function
+let check_calls database interface viewers key = function
   | Ok lowered ->
       List.iter
         (fun viewer ->
@@ -2522,17 +2522,17 @@ let check_calls pipeline interface viewers key = function
               Compile.check_calls interface
                 ~successors:(fun path -> Option.join (Call_graph.successors graph path))
                 key lowered)
-            (Hashtbl.find_opt pipeline.graphs viewer))
+            (Hashtbl.find_opt database.graphs viewer))
         viewers
   | Error _ -> ()
 
-let reached_todo_types pipeline key =
+let reached_todo_types database key =
   let blocked = function Some Blocked -> true | Some (Value _ | Failed _) | None -> false in
   let is_blocked (part : Part.t) =
     match part with
-    | Test_key key -> blocked (Instance_table.find_opt pipeline.test_keys key)
-    | Lowered key -> blocked (Instance_table.find_opt pipeline.lowered key)
-    | Layout ty -> blocked (Type_table.find_opt pipeline.layouts ty)
+    | Test_key key -> blocked (Instance_table.find_opt database.test_keys key)
+    | Lowered key -> blocked (Instance_table.find_opt database.lowered key)
+    | Layout ty -> blocked (Type_table.find_opt database.layouts ty)
     | _ -> false
   in
   let visited = Part_table.create 16 in
@@ -2541,46 +2541,46 @@ let reached_todo_types pipeline key =
     else begin
       Part_table.replace visited part ();
       match part with
-      | Layout (Named { path; _ }) when (stored pipeline part).is_failed -> path :: todo_types
+      | Layout (Named { path; _ }) when (stored database part).is_failed -> path :: todo_types
       | _ when is_blocked part ->
           List.fold_left visit todo_types
-            (Option.value (Part_table.find_opt pipeline.reads part) ~default:[])
+            (Option.value (Part_table.find_opt database.reads part) ~default:[])
       | _ -> todo_types
     end
   in
   List.sort_uniq Path.compare (visit [] (Test_key key))
 
-let lowering_requests pipeline packages : Compile.requests =
-  let interface = interface_lookups pipeline packages in
+let lowering_requests database packages : Compile.requests =
+  let interface = interface_lookups database packages in
   {
-    settings = lowering_settings pipeline;
-    source = source pipeline;
+    settings = lowering_settings database;
+    source = source database;
     interface;
-    mir = mir_lookups pipeline ignore;
+    mir = mir_lookups database ignore;
     lowered =
       (fun key ->
-        request pipeline packages ~through:Lowered_code ~needs:(fun key -> [ Lowered key ]) [ key ];
-        let lowered = requested pipeline.lowered (Lowered key) key in
-        check_calls pipeline interface packages key lowered;
+        request database packages ~through:Lowered_code ~needs:(fun key -> [ Lowered key ]) [ key ];
+        let lowered = requested database.lowered (Lowered key) key in
+        check_calls database interface packages key lowered;
         lowered);
     test_key =
       (fun key ->
-        request pipeline packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
-        requested pipeline.test_keys (Test_key key) key);
+        request database packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
+        requested database.test_keys (Test_key key) key);
     reached_todo_types =
       (fun key ->
-        request pipeline packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
-        reached_todo_types pipeline key);
-    layouts = layouts pipeline packages;
+        request database packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
+        reached_todo_types database key);
+    layouts = layouts database packages;
   }
 
-let main pipeline package =
-  drain pipeline ~through:Namespaces [ package ];
-  entry_point (names_lookups pipeline) package
+let main database package =
+  drain database ~through:Namespaces [ package ];
+  entry_point (names_lookups database) package
 
-let callers pipeline ~viewer path =
-  drain pipeline ~through:Recursion_groups [ viewer ];
-  match Hashtbl.find_opt pipeline.graphs viewer with
+let callers database ~viewer path =
+  drain database ~through:Recursion_groups [ viewer ];
+  match Hashtbl.find_opt database.graphs viewer with
   | None -> []
   | Some graph ->
       let reached = Path_table.create 64 in
@@ -2604,7 +2604,7 @@ module For_testing = struct
     | Ownership
     | Package_checks
 
-  let diagnostics stages pipeline (file : Path.file) =
+  let diagnostics stages database (file : Path.file) =
     let through : Stage.t =
       if List.mem Package_checks stages then Package_checks
       else if List.exists (fun stage -> List.mem stage [ Patterns; Usage; Ownership ]) stages then
@@ -2613,58 +2613,58 @@ module For_testing = struct
       else if List.mem Interface stages then Signature_checks
       else Import_checks
     in
-    drain pipeline ~through [ file.module_.package ];
-    List.concat_map (stage_diagnostics pipeline file) stages
+    drain database ~through [ file.module_.package ];
+    List.concat_map (stage_diagnostics database file) stages
 
-  let checked_body pipeline (key : Names.key) =
-    drain pipeline ~through:Checked_bodies [ key.module_.package ];
-    match Hashtbl.find_opt (owner pipeline key.module_.package).checked_bodies key with
+  let checked_body database (key : Names.key) =
+    drain database ~through:Checked_bodies [ key.module_.package ];
+    match Hashtbl.find_opt (owner database key.module_.package).checked_bodies key with
     | Some (Value checked) -> Some checked
     | Some (Failed _ | Blocked) | None -> None
 
-  let derived pipeline path =
-    drain pipeline ~through:Derived_forms [ Path.package path ];
-    match Path_table.find_opt (owner pipeline (Path.package path)).derived_forms path with
+  let derived database path =
+    drain database ~through:Derived_forms [ Path.package path ];
+    match Path_table.find_opt (owner database (Path.package path)).derived_forms path with
     | Some (Value form) -> Some form
     | Some (Failed _ | Blocked) | None -> None
 
-  let core_of_path pipeline path =
-    drain pipeline ~through:Derived_forms [ Path.package path ];
-    Option.bind (form_origin pipeline ignore path) (fun (origin, substitution) ->
+  let core_of_path database path =
+    drain database ~through:Derived_forms [ Path.package path ];
+    Option.bind (form_origin database ignore path) (fun (origin, substitution) ->
         Option.map
           (fun form -> (form, substitution))
           (match origin with
           | Infer.Written key | Inherited key ->
-              Option.map (fun (checked : Infer.checked) -> checked.form) (checked_body pipeline key)
-          | Generated -> derived pipeline path))
+              Option.map (fun (checked : Infer.checked) -> checked.form) (checked_body database key)
+          | Generated -> derived database path))
 
-  let mir pipeline package =
-    drain pipeline ~through:Mir [ package ];
-    mir_lookups pipeline ignore
+  let mir database package =
+    drain database ~through:Mir [ package ];
+    mir_lookups database ignore
 
-  let reads pipeline shown =
+  let reads database shown =
     match
       Part_table.fold
         (fun part reads found -> if Part.show part = shown then Some reads else found)
-        pipeline.reads None
+        database.reads None
     with
     | Some reads -> List.sort compare (List.map Part.show reads)
-    | None -> Compiler_bug.bug ~stage:"Pipeline" "%s is not computed" shown
+    | None -> Compiler_bug.bug ~stage:"Database" "%s is not computed" shown
 
   let differences hot cold =
     let parts = Part_table.create 1024 in
     List.iter
-      (fun pipeline ->
-        Part_table.iter (fun part _ -> Part_table.replace parts part ()) pipeline.reads;
+      (fun database ->
+        Part_table.iter (fun part _ -> Part_table.replace parts part ()) database.reads;
         Hashtbl.iter
           (fun _ state ->
             Path_table.iter
               (fun path _ -> Part_table.replace parts (Recursion_group path) ())
               state.recursion_groups)
-          pipeline.states)
+          database.states)
       [ hot; cold ];
-    let reads pipeline part =
-      Option.map (List.sort compare) (Part_table.find_opt pipeline.reads part)
+    let reads database part =
+      Option.map (List.sort compare) (Part_table.find_opt database.reads part)
     in
     List.sort compare
       (Part_table.fold
@@ -2676,24 +2676,24 @@ module For_testing = struct
 
   type observed = { recomputed : string list; collected : string list }
 
-  let observe pipeline run =
+  let observe database run =
     let recomputed = ref [] and collected = ref [] in
-    pipeline.observe <-
+    database.observe <-
       (function
       | Computed part -> recomputed := Part.show part :: !recomputed
       | Collected part -> collected := Part.show part :: !collected);
-    Fun.protect ~finally:(fun () -> pipeline.observe <- ignore) run;
+    Fun.protect ~finally:(fun () -> database.observe <- ignore) run;
     {
       recomputed = List.sort_uniq compare !recomputed;
       collected = List.sort_uniq compare !collected;
     }
 
-  let root pipeline key =
-    own_roots pipeline Packages
-      (key :: Option.value (Part_table.find_opt pipeline.owned Packages) ~default:[])
+  let root database key =
+    own_roots database Packages
+      (key :: Option.value (Part_table.find_opt database.owned Packages) ~default:[])
 
-  let ownership pipeline (key : Names.key) =
-    match Hashtbl.find_opt (owner pipeline key.module_.package).ownership key with
+  let ownership database (key : Names.key) =
+    match Hashtbl.find_opt (owner database key.module_.package).ownership key with
     | Some part -> part
     | None -> unchecked (Part.show (Ownership key))
 end

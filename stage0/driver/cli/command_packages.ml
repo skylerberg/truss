@@ -65,13 +65,13 @@ let project_dependencies snapshot packages =
 
 let program_packages snapshot packages = packages @ project_dependencies snapshot packages
 
-let manifest_problems snapshot pipeline packages =
+let manifest_problems snapshot database packages =
   List.concat_map
     (fun (directory, name) ->
       if List.mem name packages then
         List.map
           (fun problem -> (Project.manifest_file directory, name, problem))
-          (Pipeline.manifest_problems pipeline name)
+          (Database.manifest_problems database name)
       else [])
     (Workspace.packages snapshot)
 

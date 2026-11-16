@@ -1,5 +1,5 @@
 val test : string -> (unit -> unit) -> unit
-val diagnostics : Pipeline.t -> Path.file -> Diagnostic.t list
+val diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val fail : ('a, unit, string, unit) format4 -> 'a
 val expect_string : expected:String.t -> String.t -> unit
 val contains : string -> string -> bool
@@ -92,19 +92,19 @@ val expect_status :
 
 val example : Path.module_
 val example_file : Path.file
-val pipeline : Project.package list -> Pipeline.t
+val database : Project.package list -> Database.t
 val example_package : (Path.file * string) list -> Project.package list
-val compile : ?results:Compile.results -> ?evaluation_time_limit_ms:int -> Pipeline.t -> Compile.t
+val compile : ?results:Compile.results -> ?evaluation_time_limit_ms:int -> Database.t -> Compile.t
 
 val load_files :
   ?results:Compile.results ->
   ?roots:Instance.key list ->
   (Path.file * string) list ->
-  Pipeline.t * Compile.t
+  Database.t * Compile.t
 
-val load : ?results:Compile.results -> ?roots:Instance.key list -> string -> Pipeline.t * Compile.t
-val tests_in : Pipeline.t -> Path.module_ -> Path.t list
-val tests_of : Pipeline.t -> Path.t list
+val load : ?results:Compile.results -> ?roots:Instance.key list -> string -> Database.t * Compile.t
+val tests_in : Database.t -> Path.module_ -> Path.t list
+val tests_of : Database.t -> Path.t list
 val run_source : string -> string
 val expect_output : string -> String.t -> unit
 val passes : string -> string -> unit

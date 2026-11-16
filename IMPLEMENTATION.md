@@ -239,9 +239,9 @@ Every stage of stage0 is tested the same way:
   `stage0/tools/` and are run by hand. Each problem a fuzzer finds becomes a
   focused test of its own.
 - **Tests share one checked standard library.** A test that needs the
-  standard library creates its pipeline over the standard library's stored
-  state, which a test executable loads once from the user's cache.
-  A test must not give a new pipeline the library's sources: that parses
+  standard library creates its database over the standard library's stored
+  package database, which a test executable loads once from the user's cache.
+  A test must not give a new database the library's sources: that parses
   and checks the whole library again, so every such test gets slower each
   time the library grows.
 - **A test run reuses the previous run's results.** Two results are

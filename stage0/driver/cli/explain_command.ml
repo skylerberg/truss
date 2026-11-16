@@ -21,13 +21,13 @@ let run ~position =
   with
   | None -> Outcome.cannot_run "%s is not a file of a package in this worktree." file
   | Some written -> (
-      let pipeline = Workspace.pipeline snapshot in
+      let database = Workspace.open_database snapshot in
       let offset =
         Source.offset Source.Scalar_values
           (Workspace.source snapshot written)
           ~line:(line - 1) ~column:(column - 1)
       in
-      let names = Pipeline.names pipeline packages in
+      let names = Database.names database packages in
       let symbol_at =
         List.find_map
           (fun (declaration : Names.declaration) ->
@@ -35,9 +35,9 @@ let run ~position =
             match (names.place key, names.text key) with
             | Some { base; _ }, Some text when base <= offset && offset <= base + String.length text
               -> (
-                match (names.definition key, names.spans key, Pipeline.resolved pipeline key) with
+                match (names.definition key, names.spans key, Database.resolved database key) with
                 | Some definition, Some spans, Some resolved ->
-                    let tables = Pipeline.tables pipeline key in
+                    let tables = Database.tables database key in
                     Inspect.explain_at ~path:key.path spans definition resolved tables ~text
                       (offset - base)
                 | _ -> None)

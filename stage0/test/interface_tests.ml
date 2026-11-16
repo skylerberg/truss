@@ -2,14 +2,14 @@ open Harness
 open Support
 
 let check packages =
-  Pipeline.For_testing.(diagnostics [ Resolve; Interface ]) (Support.pipeline packages)
+  Database.For_testing.(diagnostics [ Resolve; Interface ]) (Support.database packages)
 
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let app name : Path.t = Top { module_ = module_of "app::main"; name }
 
 let interface packages =
-  Pipeline.interface_lookups (Support.pipeline packages) [ (module_of "app::main").package ]
+  Database.interface_lookups (Support.database packages) [ (module_of "app::main").package ]
 
 let standard = Path.standard
 let int64 = Types.builtin Int64
@@ -24,7 +24,7 @@ let () =
           let source = Source.create ~path:(Path.show_file file) text in
           List.iter
             (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
-            (Pipeline.For_testing.(diagnostics [ Interface ]) (Support.pipeline packages) file)))
+            (Database.For_testing.(diagnostics [ Interface ]) (Support.database packages) file)))
     Standard_library.files
 
 let () =
@@ -455,8 +455,8 @@ let () =
         setup [ ("app::main", Fixtures.Interface.trait_whose_header_did_not_parse_satisfies_every) ]
       in
       match
-        Pipeline.For_testing.(diagnostics [ Interface ])
-          (Support.pipeline packages) (file_of "app::main")
+        Database.For_testing.(diagnostics [ Interface ])
+          (Support.database packages) (file_of "app::main")
       with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
@@ -491,8 +491,8 @@ let () =
         not
           (List.mem "types.arity"
              (codes
-                (Pipeline.For_testing.(diagnostics [ Interface ])
-                   (Support.pipeline packages) (file_of "app::main"))))
+                (Database.For_testing.(diagnostics [ Interface ])
+                   (Support.database packages) (file_of "app::main"))))
       then fail "accepted");
   test "any must fix every associated type" (fun () ->
       one_diagnostic "fn f(items: any Iterable) {}\n" "types.associated_type_not_fixed");

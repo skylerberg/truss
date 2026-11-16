@@ -1,11 +1,11 @@
 open Harness
 
-let checked pipeline file =
-  match Support.diagnostics pipeline file with
-  | [] -> Support.proof_diagnostics pipeline file
+let checked database file =
+  match Support.diagnostics database file with
+  | [] -> Support.proof_diagnostics database file
   | errors -> errors
 
-let check packages = checked (Support.pipeline packages)
+let check packages = checked (Support.database packages)
 let proven text = Support.no_diagnostics ~check [ ("app::main", text) ]
 let not_proven text code = Support.one_diagnostic ~check text code
 
@@ -113,7 +113,7 @@ let () =
         | Symbol _ | Integer _ | Boolean _ | Bits _ -> false
       in
       match
-        Support.proofs (Support.pipeline packages) (Support.file_of "app::main")
+        Support.proofs (Support.database packages) (Support.file_of "app::main")
           (Resolve.Names.key_of caller)
       with
       | Obligations { obligations = [ obligation ]; _ } ->
@@ -147,10 +147,10 @@ let () =
           ]
       in
       let main = Support.file_of "app::main" in
-      (match Support.codes (Support.diagnostics (Support.pipeline packages) main) with
+      (match Support.codes (Support.diagnostics (Support.database packages) main) with
       | [] -> ()
       | codes -> fail "the caller does not check: %s" (String.concat ", " codes));
-      (match Support.codes (Support.proof_diagnostics (Support.pipeline packages) main) with
+      (match Support.codes (Support.proof_diagnostics (Support.database packages) main) with
       | [] -> ()
       | codes -> fail "the blocked proof reports %s" (String.concat ", " codes));
       let caller =
@@ -160,8 +160,8 @@ let () =
           (Support.declarations packages (Support.module_of "app::main"))
       in
       match
-        Pipeline.proof
-          (Support.proven (Support.pipeline packages) main)
+        Database.proof
+          (Support.proven (Support.database packages) main)
           (Resolve.Names.key_of caller)
       with
       | Some Blocked -> ()
@@ -179,7 +179,7 @@ let () =
           ]
       in
       let main = Support.file_of "app::main" in
-      (match Support.codes (Support.proof_diagnostics (Support.pipeline packages) main) with
+      (match Support.codes (Support.proof_diagnostics (Support.database packages) main) with
       | [] -> ()
       | codes -> fail "the caller's proof reports %s" (String.concat ", " codes));
       let caller =
@@ -189,8 +189,8 @@ let () =
           (Support.declarations packages (Support.module_of "app::main"))
       in
       match
-        Pipeline.proof
-          (Support.proven (Support.pipeline packages) main)
+        Database.proof
+          (Support.proven (Support.database packages) main)
           (Resolve.Names.key_of caller)
       with
       | Some (Value (Obligations _)) -> ()
@@ -207,7 +207,7 @@ let () =
           ]
       in
       let main = Support.file_of "app::main" in
-      (match Support.codes (Support.proof_diagnostics (Support.pipeline packages) main) with
+      (match Support.codes (Support.proof_diagnostics (Support.database packages) main) with
       | [] -> ()
       | codes -> fail "the caller's proof reports %s" (String.concat ", " codes));
       let caller =
@@ -217,8 +217,8 @@ let () =
           (Support.declarations packages (Support.module_of "app::main"))
       in
       match
-        Pipeline.proof
-          (Support.proven (Support.pipeline packages) main)
+        Database.proof
+          (Support.proven (Support.database packages) main)
           (Resolve.Names.key_of caller)
       with
       | Some (Value (Obligations _)) -> ()
@@ -235,23 +235,23 @@ let () =
             ("app::main/measured", Fixtures.Prover.broken_method_of_a_trait_blocks_no_call_of_its_2);
           ]
       in
-      let pipeline = Support.pipeline packages in
+      let database = Support.database packages in
       let main = Support.file_of "app::main" in
       (match
-         Support.codes (Support.diagnostics pipeline (Support.file_of "app::main/measured"))
+         Support.codes (Support.diagnostics database (Support.file_of "app::main/measured"))
        with
       | [ "resolve.unknown_name" ] -> ()
       | codes -> fail "the trait reports %s" (String.concat ", " codes));
-      (match Support.codes (Support.diagnostics pipeline main) with
+      (match Support.codes (Support.diagnostics database main) with
       | [] -> ()
       | codes -> fail "a caller does not check: %s" (String.concat ", " codes));
-      (match Support.codes (Support.proof_diagnostics pipeline main) with
+      (match Support.codes (Support.proof_diagnostics database main) with
       | [] -> ()
       | codes -> fail "a caller's proof reports %s" (String.concat ", " codes));
-      let proofs = Support.proven pipeline main in
+      let proofs = Support.proven database main in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          match Pipeline.proof proofs (Resolve.Names.key_of declaration) with
+          match Database.proof proofs (Resolve.Names.key_of declaration) with
           | Some (Value (Obligations _)) -> ()
           | Some (Value (Unsupported _ | Not_proven_here)) ->
               fail "%s has no obligations" (Path.show declaration.path)
@@ -851,7 +851,7 @@ let () =
 
 let holes text =
   let packages = Support.setup [ ("app::main", text) ] in
-  let proof = Support.proofs (Support.pipeline packages) (Support.file_of "app::main") in
+  let proof = Support.proofs (Support.database packages) (Support.file_of "app::main") in
   List.fold_left
     (fun total declaration ->
       match proof (Resolve.Names.key_of declaration) with
@@ -1224,7 +1224,7 @@ let () =
       let packages =
         Support.setup [ ("app::main", Fixtures.Prover.files_proof_states_list_proven_and_unproven) ]
       in
-      let states = Support.proof_states (Support.pipeline packages) (Support.file_of "app::main") in
+      let states = Support.proof_states (Support.database packages) (Support.file_of "app::main") in
       let failed =
         List.filter (fun (state : Source.span Prover.state) -> state.failure <> None) states
       in
@@ -1383,7 +1383,7 @@ let () =
       in
       let key = List.hd (Support.declarations packages (Support.module_of "app::main")) in
       match
-        Support.proofs (Support.pipeline packages) (Support.file_of "app::main")
+        Support.proofs (Support.database packages) (Support.file_of "app::main")
           (Resolve.Names.key_of key)
       with
       | Obligations { obligations = [ obligation ]; _ } ->
@@ -1395,7 +1395,7 @@ let () =
         let packages = Support.setup [ ("app::main", text) ] in
         let key = List.hd (Support.declarations packages (Support.module_of "app::main")) in
         match
-          Support.proofs (Support.pipeline packages) (Support.file_of "app::main")
+          Support.proofs (Support.database packages) (Support.file_of "app::main")
             (Resolve.Names.key_of key)
         with
         | Obligations { obligations = [ obligation ]; _ } -> Solver.For_testing.key obligation.query
@@ -1447,7 +1447,7 @@ let () =
             (Support.declarations packages (Support.module_of "app::main"))
         in
         match
-          Support.proofs (Support.pipeline packages) (Support.file_of "app::main")
+          Support.proofs (Support.database packages) (Support.file_of "app::main")
             (Resolve.Names.key_of key)
         with
         | Obligations { obligations; _ } ->
@@ -1655,7 +1655,7 @@ let () =
 
 let in_standard text =
   checked
-    (Pipeline.create (Support.setup [ ("standard::probe", text) ]))
+    (Database.create (Support.setup [ ("standard::probe", text) ]))
     (Support.file_of "standard::probe")
 
 let proven_in_standard text =

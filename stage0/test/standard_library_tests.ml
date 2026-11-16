@@ -90,18 +90,18 @@ let processor_time () =
   let times = Unix.times () in
   times.tms_utime +. times.tms_stime +. times.tms_cutime +. times.tms_cstime
 
-let proven pipeline files =
+let proven database files =
   Prover.decide ~runs:[]
-    (Pipeline.make_proof_lookups pipeline)
+    (Database.make_proof_lookups database)
     solver
-    (Pipeline.list_proofs (Pipeline.prove pipeline files))
+    (Database.list_proofs (Database.prove database files))
 
-let check pipeline =
-  Pipeline.check pipeline [ Path.standard_package ];
-  pipeline
+let check database =
+  Database.check database [ Path.standard_package ];
+  database
 
-let measure pipeline ~is_measured =
-  let pipeline = check pipeline in
+let measure database ~is_measured =
+  let database = check database in
   let measured =
     List.map
       (fun (((module_ : Path.module_), files) as entry) ->
@@ -109,10 +109,10 @@ let measure pipeline ~is_measured =
         if is_measured name then begin
           let start = processor_time () in
           ignore
-            (proven pipeline
+            (proven database
                (List.filter_map
                   (fun (file, _) ->
-                    if Pipeline.file_diagnostics pipeline file = [] then Some file else None)
+                    if Database.file_diagnostics database file = [] then Some file else None)
                   files));
           let spent = int_of_float (Float.round ((processor_time () -. start) *. 100.)) in
           (name, max 1 spent, module_letters files)
@@ -137,25 +137,25 @@ let timed label work =
   result
 
 let () =
-  let pipeline () =
-    Pipeline.create
+  let database () =
+    Database.create
       [ { name = Path.standard_package; dependencies = []; files = Standard_library.files } ]
   in
   Option.iter
     (fun is_measured ->
-      measure (pipeline ()) ~is_measured;
+      measure (database ()) ~is_measured;
       exit 0)
     measured_modules;
-  let pipeline = timed "type checking" (fun () -> check (pipeline ())) in
+  let database = timed "type checking" (fun () -> check (database ())) in
   let checked =
     List.map
       (fun (module_, files) ->
-        (module_, List.map (fun (file, _) -> (file, Pipeline.file_diagnostics pipeline file)) files))
+        (module_, List.map (fun (file, _) -> (file, Database.file_diagnostics database file)) files))
       modules
   in
   let verdicts =
     timed "proving" (fun () ->
-        proven pipeline
+        proven database
           (List.concat_map
              (fun (_, files) ->
                List.filter_map (fun (file, errors) -> if errors = [] then Some file else None) files)

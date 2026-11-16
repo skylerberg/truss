@@ -2,8 +2,8 @@ open Harness
 open Support
 
 let check packages =
-  Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer; Patterns; Usage; Ownership ])
-    (Support.pipeline packages)
+  Database.For_testing.(diagnostics [ Resolve; Interface; Infer; Patterns; Usage; Ownership ])
+    (Support.database packages)
 
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
@@ -763,11 +763,11 @@ let () =
 let disjoint_obligations text =
   let packages = setup [ ("app::main", text) ] in
   let file = file_of "app::main" in
-  let pipeline = pipeline packages in
-  Pipeline.check pipeline [ file.module_.package ];
+  let database = database packages in
+  Database.check database [ file.module_.package ];
   List.fold_left
     (fun total declaration ->
-      match Pipeline.For_testing.ownership pipeline (Resolve.Names.key_of declaration) with
+      match Database.For_testing.ownership database (Resolve.Names.key_of declaration) with
       | Value must_be_disjoint -> total + List.length must_be_disjoint
       | Failed _ | Blocked -> total)
     0

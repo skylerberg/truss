@@ -1,9 +1,9 @@
 open Harness
 
 let check packages file =
-  let pipeline = Support.pipeline packages in
-  match Support.diagnostics pipeline file with
-  | [] -> Support.proof_diagnostics pipeline file
+  let database = Support.database packages in
+  match Support.diagnostics database file with
+  | [] -> Support.proof_diagnostics database file
   | errors -> errors
 
 let proven text = Support.no_diagnostics ~check [ ("app::main", text) ]

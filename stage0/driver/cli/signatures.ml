@@ -101,7 +101,7 @@ let labeled label signature =
          Printf.sprintf "    %s %s" (if line_index = 0 then label else indent) line)
        (String.split_on_char '\n' signature))
 
-let is_signature : Pipeline.Part.t -> bool = function
+let is_signature : Database.Part.t -> bool = function
   | Header _ | Trait_header _ | Constant_value _ | Interface _ | Derived_interface _ | Type_facts _
   | Signature_check _ | Contract _ | Contract_mir _ ->
       true

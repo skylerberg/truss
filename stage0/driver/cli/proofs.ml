@@ -12,7 +12,7 @@ let solver () =
   | Ok solver -> solver
   | Error message -> Outcome.cannot_run "%s" message
 
-type t = { proofs : Pipeline.proofs; verdicts : Prover.verdicts Lazy.t }
+type t = { proofs : Database.proofs; verdicts : Prover.verdicts Lazy.t }
 
 let run_template_checks compiler checks =
   List.map
@@ -20,22 +20,22 @@ let run_template_checks compiler checks =
       (check, Compile.run_template_check compiler ~from_template ~literals ~clauses))
     checks
 
-let runs pipeline snapshot packages proofs =
-  match Pipeline.template_checks proofs with
+let runs database snapshot packages proofs =
+  match Database.template_checks proofs with
   | [] -> []
-  | checks -> run_template_checks (Compiler.create pipeline snapshot packages Development) checks
+  | checks -> run_template_checks (Compiler.create database snapshot packages Development) checks
 
-let check pipeline snapshot packages files =
-  let proofs = Pipeline.prove pipeline files in
+let check database snapshot packages files =
+  let proofs = Database.prove database files in
   {
     proofs;
     verdicts =
       lazy
         (let solver = solver () in
          Prover.decide
-           ~runs:(runs pipeline snapshot packages proofs)
-           (Pipeline.make_proof_lookups pipeline)
-           solver (Pipeline.list_proofs proofs));
+           ~runs:(runs database snapshot packages proofs)
+           (Database.make_proof_lookups database)
+           solver (Database.list_proofs proofs));
   }
 
 let diagnostics checked file = Prover.list_diagnostics (Lazy.force checked.verdicts) file
@@ -47,4 +47,4 @@ let holes snapshot packages checked definition =
       let source = Command_packages.source snapshot packages file in
       let line, column = Source.position source offset in
       (Shown_path.shown (Source.path source), line, column))
-    (Pipeline.holes checked.proofs definition)
+    (Database.holes checked.proofs definition)

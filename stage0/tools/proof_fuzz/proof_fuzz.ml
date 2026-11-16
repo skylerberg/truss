@@ -2,8 +2,8 @@ let example : Path.module_ = { package = { owner = None; name = "example" }; mod
 let example_file : Path.file = { module_ = example; name = "main" }
 let standard_state = lazy (Workspace.For_testing.standard_state ())
 
-let example_pipeline text =
-  Pipeline.create
+let build_example_database text =
+  Database.create
     ~loaded:[ Lazy.force standard_state ]
     [ { name = example.package; dependencies = []; files = [ (example_file, text) ] } ]
 
@@ -18,15 +18,15 @@ let cache = lazy (Build.cache (Filename.concat (Filename.get_temp_dir_name ()) "
 let settings : Build.settings = { build = Development; optimization = O1; extra = [] }
 
 let load text =
-  let pipeline = example_pipeline text in
-  Pipeline.check pipeline [ example_file.module_.package ];
-  if Pipeline.file_diagnostics pipeline example_file <> [] then None
+  let database = build_example_database text in
+  Database.check database [ example_file.module_.package ];
+  if Database.file_diagnostics database example_file <> [] then None
   else
     Some
-      ( pipeline,
+      ( database,
         lazy
           (Compile.create ~evaluation_time_limit_ms:2000
-             (Pipeline.lowering_requests pipeline [ example.package ])
+             (Database.lowering_requests database [ example.package ])
              (Lazy.force compiler) (Lazy.force cache) settings) )
 
 let integer (ty : Types.ty) =
@@ -50,10 +50,10 @@ type candidate = {
   ranges : (int * bool) list;
 }
 
-let runnable pipeline =
-  let mir = Pipeline.For_testing.mir pipeline example.package in
-  let interface = Pipeline.interface_lookups pipeline [ example.package ] in
-  let lookups = Pipeline.make_proof_lookups pipeline in
+let runnable database =
+  let mir = Database.For_testing.mir database example.package in
+  let interface = Database.interface_lookups database [ example.package ] in
+  let lookups = Database.make_proof_lookups database in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.key_of declaration in
@@ -118,21 +118,21 @@ let runs = ref 0
 let run_mutant ~samples text =
   match load text with
   | None -> ()
-  | Some (pipeline, _) -> (
+  | Some (database, _) -> (
       incr checked;
       let states =
         Prover.list_states
           (Prover.decide ~runs:[]
-             (Pipeline.make_proof_lookups pipeline)
+             (Database.make_proof_lookups database)
              (Lazy.force solver)
-             (Pipeline.list_proofs (Pipeline.prove pipeline [ example_file ])))
+             (Database.list_proofs (Database.prove database [ example_file ])))
           example_file
       in
       let candidates =
         List.filter
           (fun candidate ->
-            proven (Pipeline.names pipeline [ example.package ]) candidate.key states)
-          (runnable pipeline)
+            proven (Database.names database [ example.package ]) candidate.key states)
+          (runnable database)
       in
       let with_admitting =
         text
@@ -149,7 +149,7 @@ let run_mutant ~samples text =
             (fun index candidate ->
               incr functions;
               let call function_ arguments =
-                Pipeline.For_testing.root running (Call_evaluation { function_; arguments });
+                Database.For_testing.root running (Call_evaluation { function_; arguments });
                 Compile.For_testing.evaluate_call (Lazy.force compile) ~function_ ~arguments
               in
               let admitted arguments =
@@ -241,21 +241,21 @@ let () =
                   diagnostics
             in
             match load text with
-            | Some (pipeline, _) ->
+            | Some (database, _) ->
                 let unproven =
                   Prover.list_diagnostics
                     (Prover.decide ~runs:[]
-                       (Pipeline.make_proof_lookups pipeline)
+                       (Database.make_proof_lookups database)
                        (Lazy.force solver)
-                       (Pipeline.list_proofs (Pipeline.prove pipeline [ example_file ])))
+                       (Database.list_proofs (Database.prove database [ example_file ])))
                     example_file
                 in
                 shown unproven;
                 unproven = []
             | None ->
-                let pipeline = example_pipeline text in
-                Pipeline.check pipeline [ example_file.module_.package ];
-                shown (Pipeline.file_diagnostics pipeline example_file);
+                let database = build_example_database text in
+                Database.check database [ example_file.module_.package ];
+                shown (Database.file_diagnostics database example_file);
                 false)
           (if Filename.check_suffix file ".md" then Documents.truss_blocks (File_system.read file)
            else [ File_system.read file ]))

@@ -24,8 +24,8 @@ let () =
               (Printf.sprintf "%s block %d checks and proves unless it is an excerpt" name
                  (index + 1))
               (fun () ->
-                let pipeline = Support.pipeline packages in
-                let diagnostics = Support.diagnostics pipeline file in
+                let database = Support.database packages in
+                let diagnostics = Support.diagnostics database file in
                 if
                   not
                     (List.exists
@@ -34,7 +34,7 @@ let () =
                 then
                   match diagnostics with
                   | [] -> (
-                      match Support.proof_diagnostics pipeline file with
+                      match Support.proof_diagnostics database file with
                       | [] -> ()
                       | unproven ->
                           fail "%s"

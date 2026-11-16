@@ -2,7 +2,7 @@ open Harness
 open Support
 
 let check packages =
-  Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ]) (Support.pipeline packages)
+  Database.For_testing.(diagnostics [ Resolve; Interface; Infer ]) (Support.database packages)
 
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
@@ -20,7 +20,7 @@ let expression_at text written occurrence =
           ( (Support.names packages key.module_.package).definition key,
             (Support.names packages key.module_.package).spans key,
             (Support.names packages key.module_.package).place key,
-            Pipeline.For_testing.checked_body (pipeline packages) key )
+            Database.For_testing.checked_body (database packages) key )
         with
         | Some definition, Some spans, Some { base; _ }, Some result ->
             let best = ref None in
@@ -527,7 +527,7 @@ let () =
           Resolve.Names.key_of
             (List.hd (Support.declarations packages (Support.module_of "app::main")))
         in
-        Pipeline.For_testing.checked_body (pipeline packages) key
+        Database.For_testing.checked_body (database packages) key
       in
       if type_check_result () <> type_check_result () then fail "different")
 
@@ -539,7 +539,7 @@ let () =
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
               match
-                Pipeline.For_testing.checked_body (pipeline packages)
+                Database.For_testing.checked_body (database packages)
                   (Resolve.Names.key_of declaration)
               with
               | Some { tables; _ } ->
@@ -585,8 +585,8 @@ let () =
       in
       Support.one_diagnostic ~setup:in_standard ~file:"standard::probe"
         ~check:(fun packages ->
-          Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ])
-            (Pipeline.create packages))
+          Database.For_testing.(diagnostics [ Resolve; Interface; Infer ])
+            (Database.create packages))
         Fixtures.Infer.storage_lengthen_rejects_an_element_type_with_a_drop
         "types.unsatisfied_bound");
   test "a type written in a body that is not a type is an error" (fun () ->

@@ -1,7 +1,7 @@
 open Harness
 open Support
 
-let mir_parts packages package = Pipeline.For_testing.mir (pipeline packages) package
+let mir_parts packages package = Database.For_testing.mir (database packages) package
 let app_parts packages = mir_parts packages (module_of "app::main").package
 let graph_of (parts : Mir.lookups) key = Mir.graph (parts.body_part key)
 let code_of (parts : Mir.lookups) key = Mir.code (parts.body_part key)

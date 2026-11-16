@@ -18,7 +18,7 @@ let diagnostics packages name =
   (match Support.parse_errors packages file with
   | [] -> ()
   | errors -> fail "the test input does not parse: %s" (String.concat " " errors));
-  Pipeline.For_testing.(diagnostics [ Resolve ]) (Pipeline.create packages) file
+  Database.For_testing.(diagnostics [ Resolve ]) (Database.create packages) file
 
 let codes = Support.codes
 
@@ -34,7 +34,7 @@ let no_diagnostics files =
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) reported)))
     files
 
-let check packages = Pipeline.For_testing.(diagnostics [ Resolve ]) (Pipeline.create packages)
+let check packages = Database.For_testing.(diagnostics [ Resolve ]) (Database.create packages)
 let one_diagnostic = Support.one_diagnostic ~setup:(fun files -> setup files) ~check
 
 let name_at packages name text occurrence =
@@ -50,7 +50,7 @@ let name_at packages name text occurrence =
           ( (Support.names packages key.module_.package).definition key,
             (Support.names packages key.module_.package).spans key,
             (Support.names packages key.module_.package).place key,
-            Pipeline.resolved (Support.pipeline packages) key )
+            Database.resolved (Support.database packages) key )
         with
         | Some definition, Some spans, Some { base; _ }, Some resolved ->
             Option.map
@@ -240,7 +240,7 @@ let bracket_of text written occurrence =
         ( (Support.names packages key.module_.package).definition key,
           (Support.names packages key.module_.package).spans key,
           (Support.names packages key.module_.package).place key,
-          Pipeline.resolved (Support.pipeline packages) key )
+          Database.resolved (Support.database packages) key )
       with
       | Some definition, Some spans, Some { base; _ }, Some resolved ->
           let bracket = ref None in
@@ -336,7 +336,7 @@ let () =
       in
       let file = file_of "app::main" in
       if Support.parse_errors packages file = [] then fail "parsed";
-      match Pipeline.For_testing.(diagnostics [ Resolve ]) (Pipeline.create packages) file with
+      match Database.For_testing.(diagnostics [ Resolve ]) (Database.create packages) file with
       | [] -> ()
       | reported -> fail "reported %s" (String.concat "; " (codes reported)));
   test "an import of a module that does not exist is an error" (fun () ->
@@ -386,7 +386,7 @@ let () =
       in
       let file = file_of "app::main" in
       if Support.parse_errors packages file = [] then fail "parsed";
-      match Pipeline.For_testing.(diagnostics [ Resolve ]) (Pipeline.create packages) file with
+      match Database.For_testing.(diagnostics [ Resolve ]) (Database.create packages) file with
       | [] -> ()
       | reported -> fail "resolved the broken body: %s" (String.concat "; " (codes reported)))
 
@@ -412,8 +412,8 @@ let () =
           ]
       in
       match
-        Pipeline.For_testing.(diagnostics [ Resolve ])
-          (Pipeline.create packages) (file_of "app::main")
+        Database.For_testing.(diagnostics [ Resolve ])
+          (Database.create packages) (file_of "app::main")
       with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
@@ -434,8 +434,8 @@ let () =
         setup [ ("app::main", Fixtures.Resolve.trait_whose_header_did_not_parse_is_not_resolved) ]
       in
       match
-        Pipeline.For_testing.(diagnostics [ Resolve ])
-          (Pipeline.create packages) (file_of "app::main")
+        Database.For_testing.(diagnostics [ Resolve ])
+          (Database.create packages) (file_of "app::main")
       with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)))

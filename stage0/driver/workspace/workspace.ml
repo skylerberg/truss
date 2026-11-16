@@ -35,7 +35,7 @@ let collect () =
       | () -> Cache.collect cache ~budget:(budget ())
       | exception Unix.Unix_error _ -> ())
 
-type loaded = { package : Path.package; hash : string; key : string; state : Pipeline.state }
+type loaded = { package : Path.package; hash : string; key : string; state : Database.state }
 
 let loaded_states : (string, loaded) Hashtbl.t = Hashtbl.create 8
 
@@ -71,7 +71,7 @@ let package_state (package : Project.package) ~hash ~visible =
   | None ->
       let stored () =
         Option.map
-          (fun bytes -> (Marshal.from_string bytes 0 : Pipeline.state))
+          (fun bytes -> (Marshal.from_string bytes 0 : Database.state))
           (Cache.find_result (open_cache ()) ~kind:Package_database ~key)
       in
       let state =
@@ -83,8 +83,8 @@ let package_state (package : Project.package) ~hash ~visible =
                 | Some state -> state
                 | None ->
                     let state =
-                      Pipeline.state
-                        (Pipeline.create
+                      Database.state
+                        (Database.create
                            ~loaded:(List.map (fun visible -> visible.state) visible)
                            [ package ])
                         package.name
@@ -111,11 +111,11 @@ let standard_state =
                  (fun (file, text) -> (Project.file_path ~directory:"" file, text))
                  Standard_library.files))
      in
-     let pipeline = Pipeline.create ~loaded:[ standard.state ] [] in
+     let database = Database.create ~loaded:[ standard.state ] [] in
      let rendered =
        List.concat_map
          (fun ((file : Path.file), text) ->
-           match Pipeline.file_diagnostics pipeline file with
+           match Database.file_diagnostics database file with
            | [] -> []
            | diagnostics ->
                let source = Source.create ~path:(Path.show_file file) text in
@@ -136,7 +136,7 @@ let states () =
 
 type kind =
   | Worktree of string
-  | Trial of { root : string; pipeline : Pipeline.t Lazy.t }
+  | Trial of { root : string; database : Database.t Lazy.t }
   | Published
 
 type snapshot = { kind : kind; files : (string * string) list; project : Project.t }
@@ -322,9 +322,9 @@ let layout snapshot =
 
 let pipeline_states loaded = List.map (fun (loaded : loaded) -> loaded.state) loaded
 
-let cold_pipeline ~checks snapshot =
+let build_cold_database ~checks snapshot =
   let loaded, packages = layout snapshot in
-  Pipeline.create ~checks ~loaded:(pipeline_states loaded) packages
+  Database.create ~checks ~loaded:(pipeline_states loaded) packages
 
 let database_directory = ".truss"
 let compiler_line = "compiler " ^ Compiler_version.digest
@@ -361,7 +361,7 @@ let saved_state ~(current : loaded list) key =
       | Some loaded -> Some loaded.state
       | None ->
           Option.map
-            (fun bytes -> (Marshal.from_string bytes 0 : Pipeline.state))
+            (fun bytes -> (Marshal.from_string bytes 0 : Database.state))
             (Cache.find_result (open_cache ()) ~kind:Package_database ~key))
 
 let saved_states segments ~current =
@@ -391,29 +391,29 @@ let restore_database segments snapshot =
   let loaded, packages = layout snapshot in
   let cold () =
     Segments.discard segments;
-    Pipeline.create ~loaded:(pipeline_states loaded) packages
+    Database.create ~loaded:(pipeline_states loaded) packages
   in
-  let pipeline =
+  let database =
     match saved_states segments ~current:loaded with
     | None -> cold ()
     | Some saved -> (
         match Segments.entries segments with
         | None -> cold ()
         | Some entries -> (
-            match Pipeline.restore ~loaded:saved ~texts:(project_texts snapshot) entries with
-            | pipeline ->
-                Pipeline.relayout pipeline ~loaded:(pipeline_states loaded) packages;
-                pipeline
+            match Database.restore ~loaded:saved ~texts:(project_texts snapshot) entries with
+            | database ->
+                Database.relayout database ~loaded:(pipeline_states loaded) packages;
+                database
             | exception (Failure _ | Invalid_argument _ | End_of_file) -> cold ()))
   in
-  (pipeline, loaded)
+  (database, loaded)
 
 type worktree = {
   root : string;
   watcher : Watcher.t option;
   segments : Segments.t;
   mutable snapshot : snapshot;
-  pipeline : Pipeline.t;
+  database : Database.t;
   mutable loaded : loaded list;
 }
 
@@ -422,10 +422,10 @@ let is_serving = ref false
 let log_bug bug = prerr_endline (Compiler_bug.to_string bug)
 
 let commit worktree =
-  match Pipeline.unsaved worktree.pipeline with
+  match Database.unsaved worktree.database with
   | entries -> (
       match Segments.commit worktree.segments ~header:(header worktree.loaded) entries with
-      | () -> Pipeline.mark_saved worktree.pipeline
+      | () -> Database.mark_saved worktree.database
       | exception ((Unix.Unix_error _ | Sys_error _) as failure) ->
           prerr_endline
             (Printf.sprintf "Cannot save the database in %s: %s."
@@ -468,27 +468,27 @@ let file_changes (before : snapshot) (after : snapshot) =
               if Hashtbl.mem current file then changes else (file, None) :: changes)
             previous []))
 
-let apply_changes pipeline (after : snapshot) = function
+let apply_changes database (after : snapshot) = function
   | Some changes ->
-      Pipeline.update pipeline changes;
+      Database.update database changes;
       None
   | None ->
       let loaded, packages = layout after in
-      Pipeline.relayout pipeline ~loaded:(pipeline_states loaded) packages;
+      Database.relayout database ~loaded:(pipeline_states loaded) packages;
       Some loaded
 
 let copy_database root (trial : snapshot) =
   match Hashtbl.find_opt worktrees root with
   | Some worktree ->
-      let pipeline = Pipeline.copy worktree.pipeline in
-      ignore (apply_changes pipeline trial (file_changes worktree.snapshot trial));
-      pipeline
-  | None -> cold_pipeline ~checks:true trial
+      let database = Database.copy worktree.database in
+      ignore (apply_changes database trial (file_changes worktree.snapshot trial));
+      database
+  | None -> build_cold_database ~checks:true trial
 
 let over (snapshot : snapshot) files =
   let root = root snapshot in
   let trial = with_files snapshot files in
-  { trial with kind = Trial { root; pipeline = lazy (copy_database root trial) } }
+  { trial with kind = Trial { root; database = lazy (copy_database root trial) } }
 
 let trial snapshot changes =
   over snapshot
@@ -565,14 +565,14 @@ let other_worktrees snapshot =
       | (Some _, Some _) as here -> List.filter (fun other -> place other = here) others
       | _ -> [])
 
-let pipeline ?(checks = true) snapshot =
+let open_database ?(checks = true) snapshot =
   match snapshot.kind with
   | Worktree root when checks -> (
       match Hashtbl.find_opt worktrees root with
-      | Some worktree when worktree.snapshot == snapshot -> worktree.pipeline
+      | Some worktree when worktree.snapshot == snapshot -> worktree.database
       | Some _ | None -> copy_database root snapshot)
-  | Trial { pipeline; _ } when checks -> Lazy.force pipeline
-  | Worktree _ | Trial _ | Published -> cold_pipeline ~checks snapshot
+  | Trial { database; _ } when checks -> Lazy.force database
+  | Worktree _ | Trial _ | Published -> build_cold_database ~checks snapshot
 
 let is_watched relative =
   List.for_all (fun part -> not (Registry.Content.skipped part)) (String.split_on_char '/' relative)
@@ -623,7 +623,7 @@ let refresh worktree =
       | changes ->
           Option.iter
             (fun loaded -> worktree.loaded <- loaded)
-            (apply_changes worktree.pipeline after changes);
+            (apply_changes worktree.database after changes);
           true)
 
 let open_worktree root =
@@ -646,8 +646,8 @@ let open_worktree root =
         let snapshot = snapshot_of_files (Worktree root) (Registry.Content.input_files root) in
         (snapshot, restore_database segments snapshot)
       with
-      | snapshot, (pipeline, loaded) ->
-          let worktree = { root; watcher; segments; snapshot; pipeline; loaded } in
+      | snapshot, (database, loaded) ->
+          let worktree = { root; watcher; segments; snapshot; database; loaded } in
           Hashtbl.replace worktrees root worktree;
           Ok worktree
       | exception failure ->
@@ -684,7 +684,7 @@ let propagate_changes descriptor =
   Hashtbl.iter
     (fun _ worktree ->
       if Option.map Watcher.descriptor worktree.watcher = Some descriptor then
-        match if refresh worktree then Pipeline.propagate ~on_bug:log_bug worktree.pipeline with
+        match if refresh worktree then Database.propagate ~on_bug:log_bug worktree.database with
         | () -> commit worktree
         | exception Compiler_bug.Bug bug ->
             log_bug bug;
@@ -856,7 +856,7 @@ let wait_until_ended = Server.wait_until_ended
 
 module For_testing = struct
   let standard_state () = (Lazy.force standard_state).state
-  let cold_pipeline = cold_pipeline ~checks:true
+  let build_cold_database = build_cold_database ~checks:true
   let collect_cache = collect
   let listen = Server.listen
 
@@ -864,7 +864,7 @@ module For_testing = struct
     match Hashtbl.find_opt worktrees root with
     | Some worktree ->
         Segments.For_testing.interrupted_commit worktree.segments ~header:(header worktree.loaded)
-          (Pipeline.unsaved worktree.pipeline);
+          (Database.unsaved worktree.database);
         close worktree
     | None -> Compiler_bug.bug ~stage:"Workspace" "%s has no open database" root
 end

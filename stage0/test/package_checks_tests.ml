@@ -1,7 +1,7 @@
 open Harness
 open Support
 
-let check packages = Support.diagnostics (Support.pipeline packages)
+let check packages = Support.diagnostics (Support.database packages)
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 

@@ -113,10 +113,10 @@ let modules (snapshot, packages) = Command_packages.modules snapshot packages
 let files (snapshot, packages) = Command_packages.files snapshot packages
 
 let gather ?proofs (snapshot, packages) =
-  Report.gather ?proofs (Workspace.pipeline snapshot) snapshot packages
+  Report.gather ?proofs (Workspace.open_database snapshot) snapshot packages
 
 let select (snapshot, packages) =
-  Test_command.select snapshot (Workspace.pipeline snapshot) packages
+  Test_command.select snapshot (Workspace.open_database snapshot) packages
 
 let mains (snapshot, packages) = Program_command.mains snapshot packages
 
@@ -573,7 +573,8 @@ let () =
       if List.mem "impl Display for Point {" geometry then
         fail "the geometry's Point showed %s" (String.concat "; " geometry))
 
-let lowering (snapshot, packages) = Compiler.lowering_only (Workspace.pipeline snapshot) packages
+let lowering (snapshot, packages) =
+  Compiler.lowering_only (Workspace.open_database snapshot) packages
 
 let () =
   test "a todo main can reach is refused, with the way from main to it" (fun () ->

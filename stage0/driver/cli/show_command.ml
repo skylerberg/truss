@@ -12,28 +12,28 @@ let find_module (names : Names.lookups) written : Path.module_ option =
   | Some module_ when names.module_exists module_ -> Some module_
   | Some _ | None -> None
 
-let list_module_declarations pipeline (module_ : Path.module_) =
-  (Pipeline.names pipeline [ module_.package ]).declarations module_
+let list_module_declarations database (module_ : Path.module_) =
+  (Database.names database [ module_.package ]).declarations module_
   |> List.filter (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
 
-let list_package_declarations pipeline package =
-  (Pipeline.names pipeline [ package ]).package_declarations package
+let list_package_declarations database package =
+  (Database.names database [ package ]).package_declarations package
   |> List.filter (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
 
 let is_visible packages (declaration : Names.declaration) =
   List.mem declaration.module_.package packages || Names.is_public declaration.visibility
 
-let resolve pipeline packages text =
-  let names = Pipeline.names pipeline packages in
+let resolve database packages text =
+  let names = Database.names database packages in
   let argument = Path_argument.parse text in
   let module_ = if argument.member = None then find_module names argument.names else None in
   match (names.split_module argument.names, module_, argument.member) with
   | Some { package; modules = [] }, _, None ->
       List.filter
         (fun (declaration : Names.declaration) -> Names.is_public declaration.visibility)
-        (list_package_declarations pipeline package)
+        (list_package_declarations database package)
   | _, Some module_, _ ->
-      List.filter (is_visible packages) (list_module_declarations pipeline module_)
+      List.filter (is_visible packages) (list_module_declarations database module_)
   | _, None, member -> (
       match (find_module names (Path_argument.prefix argument), List.rev argument.names) with
       | None, _ | _, [] -> []
@@ -44,13 +44,13 @@ let resolve pipeline packages text =
               match
                 List.filter
                   (fun (declaration : Names.declaration) -> Path.equal declaration.path path)
-                  (list_module_declarations pipeline module_)
+                  (list_module_declarations database module_)
               with
               | [ declaration ] when declaration.kind = Type ->
-                  let package_declarations = list_package_declarations pipeline module_.package in
+                  let package_declarations = list_package_declarations database module_.package in
                   let impls =
                     List.map snd
-                      ((Pipeline.names pipeline [ module_.package ]).impls_of_type module_.package
+                      ((Database.names database [ module_.package ]).impls_of_type module_.package
                          path)
                   in
                   declaration
@@ -69,7 +69,7 @@ let resolve pipeline packages text =
               | declarations -> List.filter (is_visible packages) declarations)
           | Some member ->
               let owner : Path.t = Top { module_; name = last } in
-              list_package_declarations pipeline module_.package
+              list_package_declarations database module_.package
               |> List.filter (fun (declaration : Names.declaration) ->
                   match declaration.path with
                   | Method { owner = owning_path; name; _ }
@@ -78,7 +78,7 @@ let resolve pipeline packages text =
                   | _ -> false)
               |> List.filter (is_visible packages)))
 
-let find snapshot pipeline packages ~body text =
+let find snapshot database packages ~body text =
   List.filter_map
     (fun (declaration : Names.declaration) ->
       let key = Names.key_of declaration in
@@ -86,7 +86,7 @@ let find snapshot pipeline packages ~body text =
         declaration.visibility = Public_opaque
         && not (List.mem declaration.module_.package packages)
       in
-      let names = Pipeline.names pipeline [ key.module_.package ] in
+      let names = Database.names database [ key.module_.package ] in
       match Signatures.text names ~body ~opaque key with
       | None -> None
       | Some signature ->
@@ -98,12 +98,12 @@ let find snapshot pipeline packages ~body text =
             | None -> ("", 0)
           in
           Some { declaration; file; line; text = signature })
-    (resolve pipeline packages text)
+    (resolve database packages text)
 
 let run ~paths ~body =
   let snapshot, packages = Command_packages.current () in
-  let pipeline = Workspace.pipeline snapshot in
-  let results = List.map (fun path -> (path, find snapshot pipeline packages ~body path)) paths in
+  let database = Workspace.open_database snapshot in
+  let results = List.map (fun path -> (path, find snapshot database packages ~body path)) paths in
   let missing = List.filter (fun (_, definitions) -> definitions = []) results in
   if Output.json () then
     Json.print

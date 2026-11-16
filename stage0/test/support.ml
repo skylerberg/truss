@@ -17,7 +17,7 @@ let file_of text : Path.file =
       { module_; name = (match List.rev module_.modules with last :: _ -> last | [] -> "main") }
 
 let standard_state = lazy (Workspace.For_testing.standard_state ())
-let pipeline packages = Pipeline.create ~loaded:[ Lazy.force standard_state ] packages
+let database packages = Database.create ~loaded:[ Lazy.force standard_state ] packages
 
 let setup ?(dependencies = []) files : Project.package list =
   let files = List.map (fun (name, text) -> (file_of name, text)) files in
@@ -57,9 +57,9 @@ let parse_errors packages file =
     (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
     (Parsed.parse (source packages file)).diagnostics
 
-let diagnostics pipeline (file : Path.file) =
-  Pipeline.check pipeline [ file.module_.package ];
-  Pipeline.file_diagnostics pipeline file
+let diagnostics database (file : Path.file) =
+  Database.check database [ file.module_.package ];
+  Database.file_diagnostics database file
 
 let codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
@@ -78,7 +78,7 @@ type core_nodes = {
 }
 
 let core_nodes packages (key : Resolve.Names.key) : core_nodes =
-  match Pipeline.For_testing.checked_body (pipeline packages) key with
+  match Database.For_testing.checked_body (database packages) key with
   | None -> failwith (Printf.sprintf "%s has no core form" (Resolve.Names.show_key key))
   | Some { form; _ } ->
       let expressions = ref [] and statements = ref [] and patterns = ref [] in
@@ -96,7 +96,7 @@ let core_nodes packages (key : Resolve.Names.key) : core_nodes =
         patterns = List.rev !patterns;
       }
 
-let names packages (package : Path.package) = Pipeline.names (pipeline packages) [ package ]
+let names packages (package : Path.package) = Database.names (database packages) [ package ]
 
 let declarations packages (module_ : Path.module_) =
   (names packages module_.package).declarations module_
@@ -108,7 +108,7 @@ let first_core_nodes text =
 
 let no_diagnostics ~check files =
   let packages = setup files in
-  let pipeline = pipeline packages in
+  let database = database packages in
   List.iter
     (fun (name, _) ->
       (match checked ~check packages name with
@@ -122,11 +122,11 @@ let no_diagnostics ~check files =
                   reported)));
       ignore
         (Core_lint.check_file
-           (Pipeline.interface_lookups pipeline [ (file_of name).module_.package ])
+           (Database.interface_lookups database [ (file_of name).module_.package ])
            ~core:(fun key ->
              Option.map
                (fun (checked : Infer.checked) -> checked.form)
-               (Pipeline.For_testing.checked_body pipeline key))
+               (Database.For_testing.checked_body database key))
            (file_of name)))
     files
 
@@ -169,21 +169,21 @@ let solver =
         prerr_endline message;
         exit 1)
 
-let proven pipeline file = Pipeline.prove pipeline [ file ]
+let proven database file = Database.prove database [ file ]
 
-let verdicts pipeline file =
+let verdicts database file =
   Prover.decide ~runs:[]
-    (Pipeline.make_proof_lookups pipeline)
+    (Database.make_proof_lookups database)
     (Lazy.force solver)
-    (Pipeline.list_proofs (proven pipeline file))
+    (Database.list_proofs (proven database file))
 
-let proof_diagnostics pipeline file = Prover.list_diagnostics (verdicts pipeline file) file
-let proof_states pipeline file = Prover.list_states (verdicts pipeline file) file
+let proof_diagnostics database file = Prover.list_diagnostics (verdicts database file) file
+let proof_states database file = Prover.list_states (verdicts database file) file
 
-let proofs pipeline file =
-  let proofs = proven pipeline file in
+let proofs database file =
+  let proofs = proven database file in
   fun key ->
-    match Pipeline.proof proofs key with
+    match Database.proof proofs key with
     | Some (Value proof) -> proof
     | Some (Failed _ | Blocked) ->
         failwith ("the proof of " ^ Resolve.Names.show_key key ^ " is blocked")

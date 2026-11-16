@@ -1,5 +1,5 @@
 module Names = Resolve.Names
-module Part = Pipeline.Part
+module Part = Database.Part
 
 type direction = Dependents | Dependencies
 
@@ -18,9 +18,9 @@ let matches name (path : Path.t) =
   | Method method_ -> ends_path name (Path.show (Method { method_ with receiver = Read }))
   | _ -> false
 
-let definitions snapshot pipeline name =
+let definitions snapshot database name =
   let packages = List.map snd (Workspace.packages snapshot) in
-  let names = Pipeline.names pipeline packages in
+  let names = Database.names database packages in
   List.sort_uniq Path.compare
     (List.concat_map
        (fun package ->
@@ -45,13 +45,13 @@ let grouped key value items =
     (fun group values groups -> (group, List.sort_uniq compare values) :: groups)
     groups []
 
-let lines (reads : Pipeline.read list) =
+let lines (reads : Database.read list) =
   let reader_kinds_by_read =
     grouped
       (fun (reader, read_kind, read, _) -> (reader, read_kind, read))
       (fun (_, _, _, reader_kind) -> reader_kind)
       (List.filter_map
-         (fun ({ dependent; dependency } : Pipeline.read) ->
+         (fun ({ dependent; dependency } : Database.read) ->
            match (Part.definition dependent, Part.definition dependency) with
            | Some reader, Some read ->
                Some (reader, Part.kind_name dependency, read, Part.kind_name dependent)
@@ -83,15 +83,15 @@ let to_json line =
 
 let run ~direction ~name =
   let snapshot, _ = Command_packages.current () in
-  let pipeline = Workspace.pipeline snapshot in
-  match definitions snapshot pipeline name with
+  let database = Workspace.open_database snapshot in
+  match definitions snapshot database name with
   | [] -> Outcome.cannot_run "No definition named %s in this worktree." name
   | targets ->
       let lines =
         lines
           (match direction with
-          | Dependents -> Pipeline.dependents pipeline targets
-          | Dependencies -> Pipeline.dependencies pipeline targets)
+          | Dependents -> Database.dependents database targets
+          | Dependencies -> Database.dependencies database targets)
       in
       if Output.json () then
         Json.print (Json.document ~diagnostics:[] [ ("reads", Json.List (List.map to_json lines)) ])

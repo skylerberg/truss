@@ -4,7 +4,7 @@ open Support
 let core_of packages key =
   Option.map
     (fun (checked : Infer.checked) -> checked.form)
-    (Pipeline.For_testing.checked_body (pipeline packages) key)
+    (Database.For_testing.checked_body (database packages) key)
 
 type form = { core : Core.t; names : (Core.local, string) Hashtbl.t }
 
@@ -77,8 +77,8 @@ let definition_form text name =
      List.map
        (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.span 0 0) message)
        (parse_errors packages file)
-     @ Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ])
-         (Support.pipeline packages) file
+     @ Database.For_testing.(diagnostics [ Resolve; Interface; Infer ])
+         (Support.database packages) file
    with
   | [] -> ()
   | reported ->
@@ -97,7 +97,7 @@ let definition_form text name =
   match definition with
   | Some (key, core) ->
       Core_lint.check
-        (Pipeline.interface_lookups (pipeline packages) [ key.module_.package ])
+        (Database.interface_lookups (database packages) [ key.module_.package ])
         key core;
       form_of core
   | None -> failwith (Printf.sprintf "`%s` has no core form" name)
@@ -160,8 +160,8 @@ let () =
       test (Printf.sprintf "`%s` on a hole has a core form" statement) (fun () ->
           no_diagnostics
             ~check:(fun packages module_ ->
-              Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ])
-                (Support.pipeline packages) module_)
+              Database.For_testing.(diagnostics [ Resolve; Interface; Infer ])
+                (Support.database packages) module_)
             [
               ( "app::main",
                 "type Config(port: Int64)\n\n\
@@ -378,8 +378,8 @@ let () =
   test "in a trait, `time(Self.method)` names the trait's own method" (fun () ->
       no_diagnostics
         ~check:(fun packages module_ ->
-          Pipeline.For_testing.(diagnostics [ Resolve; Interface; Infer ])
-            (Support.pipeline packages) module_)
+          Database.For_testing.(diagnostics [ Resolve; Interface; Infer ])
+            (Support.database packages) module_)
         [ ("app::main", Fixtures.Core.in_a_trait_time_self_method_names_the_traits_own) ])
 
 let () =
@@ -414,7 +414,7 @@ let () =
           forms :=
             !forms
             + Core_lint.check_file
-                (Pipeline.interface_lookups (pipeline packages) [ file.module_.package ])
+                (Database.interface_lookups (database packages) [ file.module_.package ])
                 ~core:(core_of packages) file))
     Standard_library.files;
   test "the standard library has core forms" (fun () ->
@@ -436,13 +436,13 @@ let () =
             receiver = Read;
           }
       in
-      if Pipeline.For_testing.derived (pipeline packages) path <> None then
+      if Database.For_testing.derived (database packages) path <> None then
         fail "it has a core form");
   test
     "every method of a derived impl in the standard library has a core form that satisfies the \
      invariants" (fun () ->
       let packages = setup [] in
-      let interface = Pipeline.interface_lookups (pipeline packages) [ Path.standard_package ] in
+      let interface = Database.interface_lookups (database packages) [ Path.standard_package ] in
       let derived =
         List.filter_map
           (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
@@ -468,7 +468,7 @@ let () =
               List.iter
                 (fun (name, receiver) ->
                   let path : Path.t = Method { owner = impl; name; receiver } in
-                  match Pipeline.For_testing.derived (pipeline packages) path with
+                  match Database.For_testing.derived (database packages) path with
                   | Some form -> (
                       match impl with
                       | Derived { type_ = Top { module_; _ }; _ } ->
@@ -500,7 +500,7 @@ let () =
     let owner =
       match
         Interface.Impls.implements
-          (Pipeline.interface_lookups (pipeline packages) [ both_package ])
+          (Database.interface_lookups (database packages) [ both_package ])
           ~bounds
           (Types.named both [ Types.Parameter parameter ])
           described
@@ -509,7 +509,7 @@ let () =
       | _ -> failwith "no impl"
     in
     match
-      Pipeline.For_testing.core_of_path (pipeline packages)
+      Database.For_testing.core_of_path (database packages)
         (Method { owner; name; receiver = Read })
     with
     | Some (form, substitution) ->
@@ -539,9 +539,9 @@ let () =
       let packages = setup [ ("app::main", text) ] in
       let owner : Path.t = Derived { type_ = both; trait = Well_known.path Equal } in
       match
-        ( Pipeline.For_testing.core_of_path (pipeline packages)
+        ( Database.For_testing.core_of_path (database packages)
             (Method { owner; name = "equal"; receiver = Read }),
-          Pipeline.For_testing.core_of_path (pipeline packages)
+          Database.For_testing.core_of_path (database packages)
             (Method { owner; name = "not_equal"; receiver = Read }) )
       with
       | Some (_, []), Some (_, [ _ ]) -> ()

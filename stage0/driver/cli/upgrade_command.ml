@@ -1,6 +1,6 @@
 module Lock = Registry.Lock
 module Version = Registry.Version
-module Part = Pipeline.Part
+module Part = Database.Part
 
 let wanted text =
   let written, version =
@@ -108,7 +108,7 @@ type signature = {
 }
 
 let signatures snapshot trial =
-  let pipeline = Workspace.pipeline snapshot and upgraded = Workspace.pipeline trial in
+  let database = Workspace.open_database snapshot and upgraded = Workspace.open_database trial in
   let own = List.map snd (Workspace.packages snapshot) in
   let is_own path = List.mem (Path.package path) own in
   let changed =
@@ -116,20 +116,20 @@ let signatures snapshot trial =
       (fun part ->
         Signatures.is_signature part
         && match Part.definition part with Some path -> not (is_own path) | None -> false)
-      (Pipeline.changes pipeline upgraded)
+      (Database.changes database upgraded)
   in
   let dependents = Hashtbl.create 16 in
   List.iter
-    (fun ({ dependent; dependency } : Pipeline.read) ->
+    (fun ({ dependent; dependency } : Database.read) ->
       match (Part.definition dependent, Part.definition dependency) with
       | Some reader, Some path when is_own reader && List.mem dependency changed ->
           Hashtbl.replace dependents path
             (reader :: Option.value (Hashtbl.find_opt dependents path) ~default:[])
       | _ -> ())
-    (Pipeline.dependents pipeline
+    (Database.dependents database
        (List.sort_uniq Path.compare (List.filter_map Part.definition changed)));
-  let text pipeline path =
-    Signatures.of_path (Pipeline.names pipeline [ Path.package path ]) path
+  let text database path =
+    Signatures.of_path (Database.names database [ Path.package path ]) path
   in
   List.sort
     (fun left right -> Path.compare left.path right.path)
@@ -137,7 +137,7 @@ let signatures snapshot trial =
        (fun path readers signatures ->
          {
            path;
-           before = text pipeline path;
+           before = text database path;
            after = text upgraded path;
            dependents = List.sort_uniq Path.compare readers;
          }
@@ -147,15 +147,15 @@ let signatures snapshot trial =
 let new_errors snapshot trial =
   let own = List.map snd (Workspace.packages snapshot) in
   let diagnostics (snapshot : Workspace.snapshot) =
-    let pipeline = Workspace.pipeline snapshot in
-    Pipeline.check pipeline own;
+    let database = Workspace.open_database snapshot in
+    Database.check database own;
     List.map Project.show_problem (Workspace.problems snapshot)
     @ List.concat_map
         (fun file ->
           List.map
             (fun (diagnostic : Diagnostic.t) ->
               Printf.sprintf "%s: %s" (Workspace.file_path snapshot file) diagnostic.message)
-            (Pipeline.file_diagnostics pipeline file))
+            (Database.file_diagnostics database file))
         (List.concat_map (Workspace.package_files snapshot) own)
   in
   let now = diagnostics snapshot in

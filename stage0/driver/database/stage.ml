@@ -61,7 +61,7 @@ let all =
 let position stage =
   match List.find_index (fun candidate -> candidate = stage) all with
   | Some position -> position
-  | None -> Compiler_bug.bug ~stage:"Pipeline" "a stage is missing from the order of stages"
+  | None -> Compiler_bug.bug ~stage:"Database" "a stage is missing from the order of stages"
 
 let precedes earlier later = position earlier <= position later
 

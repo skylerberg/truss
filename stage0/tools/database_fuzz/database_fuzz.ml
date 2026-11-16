@@ -13,8 +13,8 @@ type file = { name : string; text : string }
 let path_of file : Path.file = { module_ = example; name = file.name }
 
 let built files =
-  let pipeline =
-    Pipeline.create
+  let database =
+    Database.create
       ~loaded:[ Lazy.force standard_state ]
       [
         {
@@ -24,8 +24,8 @@ let built files =
         };
       ]
   in
-  Pipeline.propagate pipeline;
-  pipeline
+  Database.propagate database;
+  database
 
 let lines text =
   match List.rev (String.split_on_char '\n' text) with
@@ -241,13 +241,13 @@ let write_project root files =
     (fun file -> File_system.write (Filename.concat root (file.name ^ ".truss")) file.text)
     files
 
-let database root =
+let open_database root =
   match Workspace.take_snapshot root with
-  | Ok (snapshot, _) -> Workspace.pipeline snapshot
+  | Ok (snapshot, _) -> Workspace.open_database snapshot
   | Error message -> failwith message
 
 let checked_and_reopened root =
-  Pipeline.check (database root) [ example.package ];
+  Database.check (open_database root) [ example.package ];
   Workspace.flush ()
 
 let reopening root =
@@ -297,7 +297,7 @@ let () =
   let root = Filename.temp_dir "database-fuzz" "" in
   at_exit (fun () -> try File_system.remove root with Sys_error _ | Unix.Unix_error _ -> ());
   write_project root files;
-  Pipeline.propagate (database root);
+  Database.propagate (open_database root);
   let current = ref files in
   let failures = ref 0 and skipped = ref 0 in
   let report step (edit : edit) problem =
@@ -323,14 +323,14 @@ let () =
         end;
         let propagated =
           outcome (fun () ->
-              let hot = database root in
-              Pipeline.propagate hot;
+              let hot = open_database root in
+              Database.propagate hot;
               hot)
         in
         match (propagated, outcome (fun () -> built edit.files)) with
         | Ok hot, Ok cold -> (
             current := edit.files;
-            match Pipeline.For_testing.differences hot cold with
+            match Database.For_testing.differences hot cold with
             | [] -> (
                 match reopening root with
                 | Some (description, reopen) ->

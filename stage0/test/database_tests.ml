@@ -1,14 +1,14 @@
 open Harness
 
 let checked text =
-  let pipeline = Support.pipeline (Support.setup [ ("app::main", text) ]) in
-  (match Support.codes (Support.diagnostics pipeline (Support.file_of "app::main")) with
+  let database = Support.database (Support.setup [ ("app::main", text) ]) in
+  (match Support.codes (Support.diagnostics database (Support.file_of "app::main")) with
   | [] -> ()
   | codes -> fail "the program has diagnostics: %s" (String.concat ", " codes));
-  pipeline
+  database
 
-let expect_reads pipeline part ~includes ~excludes =
-  let reads = Pipeline.For_testing.reads pipeline part in
+let expect_reads database part ~includes ~excludes =
+  let reads = Database.For_testing.reads database part in
   List.iter
     (fun read ->
       if not (List.mem read reads) then
@@ -21,14 +21,14 @@ let ground_types name = "ground types app::main::" ^ name
 let test_key name = "test key app::main::" ^ name
 
 let built ?(roots = []) files =
-  let pipeline = Support.pipeline (Support.setup files) in
+  let database = Support.database (Support.setup files) in
   List.iter
     (fun name ->
-      Pipeline.For_testing.root pipeline
+      Database.For_testing.root database
         (Code { path = Top { module_ = Support.module_of "app::main"; name }; type_arguments = [] }))
     roots;
-  Pipeline.propagate pipeline;
-  pipeline
+  Database.propagate database;
+  database
 
 let changes ~before ~after =
   List.filter_map
@@ -44,11 +44,11 @@ let changes ~before ~after =
 
 let propagate ?roots hot ~before ~after =
   let observed =
-    Pipeline.For_testing.observe hot (fun () ->
-        Pipeline.update hot (changes ~before ~after);
-        Pipeline.propagate hot)
+    Database.For_testing.observe hot (fun () ->
+        Database.update hot (changes ~before ~after);
+        Database.propagate hot)
   in
-  (match Pipeline.For_testing.differences hot (built ?roots after) with
+  (match Database.For_testing.differences hot (built ?roots after) with
   | [] -> ()
   | parts ->
       fail "the propagated database differs from a cold build in %s" (String.concat ", " parts));
@@ -80,29 +80,29 @@ let expect_included recomputed ~parts =
 let standard = lazy (Workspace.For_testing.standard_state ())
 
 let settled loaded packages =
-  let pipeline = Pipeline.create ~loaded:(Lazy.force standard :: loaded) packages in
-  Pipeline.propagate pipeline;
-  pipeline
+  let database = Database.create ~loaded:(Lazy.force standard :: loaded) packages in
+  Database.propagate database;
+  database
 
 let relaid ?(loaded = ([], [])) ~before ~after () =
   let hot = settled (fst loaded) before in
   let observed =
-    Pipeline.For_testing.observe hot (fun () ->
-        Pipeline.relayout hot ~loaded:(Lazy.force standard :: snd loaded) after;
-        Pipeline.propagate hot)
+    Database.For_testing.observe hot (fun () ->
+        Database.relayout hot ~loaded:(Lazy.force standard :: snd loaded) after;
+        Database.propagate hot)
   in
-  (match Pipeline.For_testing.differences hot (settled (snd loaded) after) with
+  (match Database.For_testing.differences hot (settled (snd loaded) after) with
   | [] -> ()
   | parts -> fail "the relaid database differs from a cold build in %s" (String.concat ", " parts));
   observed.recomputed
 
 let loaded_package files =
   let packages = Support.setup files in
-  Pipeline.state (Pipeline.create ~loaded:[ Lazy.force standard ] packages) (List.hd packages).name
+  Database.state (Database.create ~loaded:[ Lazy.force standard ] packages) (List.hd packages).name
 
-let saved pipeline =
-  let entries = Pipeline.unsaved pipeline in
-  Pipeline.mark_saved pipeline;
+let saved database =
+  let entries = Database.unsaved database in
+  Database.mark_saved database;
   entries
 
 let committed log entries =
@@ -116,19 +116,19 @@ let reopened log files =
   let texts (file : Path.file) =
     List.find_map (fun (package : Project.package) -> List.assoc_opt file package.files) packages
   in
-  let pipeline = Pipeline.restore ~loaded:[ Lazy.force standard ] ~texts (live log) in
-  Pipeline.relayout pipeline ~loaded:[ Lazy.force standard ] packages;
-  pipeline
+  let database = Database.restore ~loaded:[ Lazy.force standard ] ~texts (live log) in
+  Database.relayout database ~loaded:[ Lazy.force standard ] packages;
+  database
 
-let expect_cold ?roots pipeline files =
-  match Pipeline.For_testing.differences pipeline (built ?roots files) with
+let expect_cold ?roots database files =
+  match Database.For_testing.differences database (built ?roots files) with
   | [] -> ()
   | parts -> fail "the reopened database differs from a cold build in %s" (String.concat ", " parts)
 
 let reopened_recomputes ?roots log files =
-  let pipeline = reopened log files in
-  let observed = Pipeline.For_testing.observe pipeline (fun () -> Pipeline.propagate pipeline) in
-  expect_cold ?roots pipeline files;
+  let database = reopened log files in
+  let observed = Database.For_testing.observe database (fun () -> Database.propagate database) in
+  expect_cold ?roots database files;
   observed
 
 let tool_user =
@@ -274,11 +274,11 @@ let () =
         ~includes:[ "interface app::main::Outer"; "type facts app::main::Inner" ]
         ~excludes:[ "signature check app::main::Outer"; "signature check app::main::Inner" ]);
   test "a caller's checked body and proof read no place or text of the callee" (fun () ->
-      let pipeline = checked callee_and_caller in
-      ignore (Pipeline.prove pipeline [ Support.file_of "app::main" ]);
+      let database = checked callee_and_caller in
+      ignore (Database.prove database [ Support.file_of "app::main" ]);
       List.iter
         (fun part ->
-          expect_reads pipeline part ~includes:[]
+          expect_reads database part ~includes:[]
             ~excludes:[ "place app::main::callee"; "text app::main::callee" ])
         [ "checked body app::main::caller"; "proof app::main::caller" ]);
   test "a package check reads no place" (fun () ->
@@ -675,11 +675,11 @@ let () =
       let after = lowered_program "kept() == 2" in
       let hot = built before in
       let log = committed [] (saved hot) in
-      Pipeline.update hot (changes ~before ~after);
-      Pipeline.check hot [ (Support.module_of "app::main").package ];
+      Database.update hot (changes ~before ~after);
+      Database.check hot [ (Support.module_of "app::main").package ];
       let log = committed log (saved hot) in
       let propagated =
-        (Pipeline.For_testing.observe hot (fun () -> Pipeline.propagate hot)).recomputed
+        (Database.For_testing.observe hot (fun () -> Database.propagate hot)).recomputed
       in
       expect_recomputed (reopened_recomputes log after).recomputed ~exactly:propagated);
   test "a database saved after a package is removed reopens without the package" (fun () ->
@@ -687,8 +687,8 @@ let () =
       let alone = [ ("app::main", "fn caller() -> Int64 { 1 }\n") ] in
       let hot = settled [] with_lib in
       let log = committed [] (saved hot) in
-      Pipeline.relayout hot ~loaded:[ Lazy.force standard ] (Support.setup alone);
-      Pipeline.propagate hot;
+      Database.relayout hot ~loaded:[ Lazy.force standard ] (Support.setup alone);
+      Database.propagate hot;
       let log = committed log (saved hot) in
       expect_recomputed (reopened_recomputes log alone).recomputed ~exactly:[])
 
@@ -706,11 +706,11 @@ let opened root =
 
 let settled_on_disk root =
   let snapshot = opened root in
-  let pipeline = Workspace.pipeline snapshot in
-  let observed = Pipeline.For_testing.observe pipeline (fun () -> Pipeline.propagate pipeline) in
-  let cold = Workspace.For_testing.cold_pipeline snapshot in
-  Pipeline.propagate cold;
-  (match Pipeline.For_testing.differences pipeline cold with
+  let database = Workspace.open_database snapshot in
+  let observed = Database.For_testing.observe database (fun () -> Database.propagate database) in
+  let cold = Workspace.For_testing.build_cold_database snapshot in
+  Database.propagate cold;
+  (match Database.For_testing.differences database cold with
   | [] -> ()
   | parts ->
       fail "the database in .truss differs from a cold build in %s" (String.concat ", " parts));
@@ -767,10 +767,10 @@ let () =
         ~parts:[ "namespace app"; "checked body app::main::caller" ];
       Workspace.flush ())
 
-let expect_cold pipeline snapshot =
-  let cold = Workspace.For_testing.cold_pipeline snapshot in
-  Pipeline.propagate cold;
-  match Pipeline.For_testing.differences pipeline cold with
+let expect_cold database snapshot =
+  let cold = Workspace.For_testing.build_cold_database snapshot in
+  Database.propagate cold;
+  match Database.For_testing.differences database cold with
   | [] -> ()
   | parts -> fail "the database differs from a cold build in %s" (String.concat ", " parts)
 
@@ -778,29 +778,29 @@ let () =
   test "a trial is a copy of the database, propagated with the files that differ" (fun () ->
       let root = project [ ("main/main", callee_and_caller) ] in
       let snapshot = opened root in
-      let worktree = Workspace.pipeline snapshot in
-      Pipeline.propagate worktree;
+      let worktree = Workspace.open_database snapshot in
+      Database.propagate worktree;
       let trial = Workspace.trial snapshot [ ("main/main.truss", Some edited_body) ] in
-      let pipeline = Workspace.pipeline trial in
+      let database = Workspace.open_database trial in
       let recomputed =
-        (Pipeline.For_testing.observe pipeline (fun () -> Pipeline.propagate pipeline)).recomputed
+        (Database.For_testing.observe database (fun () -> Database.propagate database)).recomputed
       in
       expect_included recomputed ~parts:[ "checked body app::main::callee" ];
       expect_untouched recomputed ~names:[ "app::main::caller" ];
-      expect_cold pipeline trial;
+      expect_cold database trial;
       expect_cold worktree snapshot;
       Workspace.flush ());
   test "a trial that renames the package leaves the worktree's database as it was" (fun () ->
       let root = project [ ("main/main", callee_and_caller) ] in
       let snapshot = opened root in
-      let worktree = Workspace.pipeline snapshot in
-      Pipeline.propagate worktree;
+      let worktree = Workspace.open_database snapshot in
+      Database.propagate worktree;
       let trial =
         Workspace.trial snapshot
           [ ("truss.toml", Some "[package]\nname = \"tool\"\ntruss = \"0.1\"\n") ]
       in
-      let pipeline = Workspace.pipeline trial in
-      Pipeline.propagate pipeline;
-      expect_cold pipeline trial;
+      let database = Workspace.open_database trial in
+      Database.propagate database;
+      expect_cold database trial;
       expect_cold worktree snapshot;
       Workspace.flush ())

@@ -1,6 +1,6 @@
 let rounds = 32
 
-let unused_dependencies snapshot pipeline packages =
+let unused_dependencies snapshot database packages =
   let root = Workspace.root snapshot in
   List.filter_map
     (fun (file, package, (problem : Package_checks.manifest_problem)) ->
@@ -17,7 +17,7 @@ let unused_dependencies snapshot pipeline packages =
                     ("message", Json.String (Package_checks.manifest_sentence ~package problem));
                   ]))
       | Not_a_capability _ -> None)
-    (Command_packages.manifest_problems snapshot pipeline packages)
+    (Command_packages.manifest_problems snapshot database packages)
 
 let lock_file snapshot =
   match Workspace.lock_fix snapshot with
@@ -36,12 +36,12 @@ let lock_file snapshot =
 
 let fix snapshot packages =
   let rec round snapshot number fixed =
-    let pipeline = Workspace.pipeline snapshot in
-    Pipeline.check pipeline packages;
+    let database = Workspace.open_database snapshot in
+    Database.check database packages;
     let applied =
       List.concat_map
         (fun file ->
-          let diagnostics = Pipeline.file_diagnostics pipeline file in
+          let diagnostics = Database.file_diagnostics database file in
           match Diagnostic.machine_applicable diagnostics with
           | [] -> []
           | chosen ->
@@ -57,7 +57,7 @@ let fix snapshot packages =
                 (Diagnostic.apply_edits (Source.text source) edits);
               List.map (fun diagnostic -> Diagnostic.to_json_object source diagnostic) chosen)
         (Command_packages.files snapshot packages)
-      @ unused_dependencies snapshot pipeline packages
+      @ unused_dependencies snapshot database packages
       @ lock_file snapshot
     in
     if applied = [] || number = rounds then (snapshot, List.rev fixed)
@@ -68,9 +68,9 @@ let fix snapshot packages =
 let run ~fix:fixing ~proofs =
   let snapshot, packages = Command_packages.current () in
   let snapshot, fixed = if fixing then fix snapshot packages else (snapshot, []) in
-  let pipeline = Workspace.pipeline snapshot in
-  let report = Report.gather ~proofs pipeline snapshot packages in
-  let overlaps = Overlap_command.with_other_worktrees snapshot pipeline in
+  let database = Workspace.open_database snapshot in
+  let report = Report.gather ~proofs database snapshot packages in
+  let overlaps = Overlap_command.with_other_worktrees snapshot database in
   if Output.json () then
     Json.print
       (Report.document report

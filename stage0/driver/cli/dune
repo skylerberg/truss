@@ -22,7 +22,7 @@
   emit_c
   unicode
   compile
-  pipeline
+  database
   solver
   prover
   workspace

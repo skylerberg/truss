@@ -13,7 +13,7 @@ val program_packages : Workspace.snapshot -> Path.package list -> Path.package l
 
 val manifest_problems :
   Workspace.snapshot ->
-  Pipeline.t ->
+  Database.t ->
   Path.package list ->
   (string * Path.package * Package_checks.manifest_problem) list
 

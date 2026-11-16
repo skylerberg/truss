@@ -15,6 +15,6 @@
   process
   standard_library
   compiler_version
-  pipeline
+  database
   registry
   watcher))

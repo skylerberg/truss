@@ -63,7 +63,7 @@
   logic
   solver
   prover
-  pipeline
+  database
   types
   intrinsic
   interface
