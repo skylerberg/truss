@@ -134,7 +134,9 @@ let find_concrete_impl (context : State.context) (trait : Types.trait_reference)
         || match context.current with Method { owner; _ } -> Path.equal owner impl | _ -> false
       in
       let bounds = compute_current_bounds context in
-      let packages = List.sort_uniq compare [ Path.package context.current; Path.package path ] in
+      let packages =
+        List.sort_uniq compare [ Path.locate_package context.current; Path.locate_package path ]
+      in
       List.find_map
         (fun package ->
           List.find_map
@@ -345,7 +347,7 @@ let arithmetic context (frame : State.frame) (site : Invocation.site) ty
     | Multiply -> (Logic.Operation ("*", [ left; right ]), false)
     | Divide -> (Logic.truncated_divide left right, true)
     | Remainder -> (Logic.truncated_remainder left right, true)
-    | _ -> Facts.bug "`%s` is not arithmetic" (Intrinsic.operation_name operation)
+    | _ -> Facts.bug "`%s` is not arithmetic" (Intrinsic.show_operation operation)
   in
   if is_division then
     Facts.oblige context frame Division location
@@ -482,7 +484,7 @@ let primitive_operation context (frame : State.frame) ~(site : Invocation.site)
     | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
     | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
     | Wrapping_multiply | Multiply_overflows -> Logic.Operation ("*", [ left; right ])
-    | _ -> Facts.bug "`%s` has no exact integer result" (Intrinsic.operation_name operation)
+    | _ -> Facts.bug "`%s` has no exact integer result" (Intrinsic.show_operation operation)
   in
   match (operation, types, operands) with
   | Add, _ :: _, [ left; right ] when is_float -> make_float_operation "fp.add" left right

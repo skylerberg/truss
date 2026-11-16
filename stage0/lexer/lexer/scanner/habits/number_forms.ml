@@ -241,8 +241,8 @@ let lex_trailing_point cursor ~start ~stop (checked : Numbers.checked) =
 let report_trailing_point (cursor : Cursor.t) ~start ~point =
   let written = String.sub cursor.text start (point + 1 - start) in
   Cursor.report cursor ~code:Number_missing_digits
-    ~fixes:(Cursor.list_code_fixes cursor (Source.span start (point + 1)) [ written ^ "0" ])
-    (Source.span point (point + 1))
+    ~fixes:(Cursor.list_code_fixes cursor (Source.make_span start (point + 1)) [ written ^ "0" ])
+    (Source.make_span point (point + 1))
     (Printf.sprintf "A float has a digit after its `.`: `%s0`." written)
 
 let lex_leading_dot (cursor : Cursor.t) =
@@ -257,12 +257,12 @@ let lex_leading_dot (cursor : Cursor.t) =
       let fixes, message =
         match checked.problem with
         | None ->
-            ( Cursor.list_code_fixes cursor (Source.span start stop) [ fixed ],
+            ( Cursor.list_code_fixes cursor (Source.make_span start stop) [ fixed ],
               Printf.sprintf "A float has a digit before its `.`: `%s`." fixed )
         | Some _ -> ([], "A float has a digit before its `.`.")
       in
       Cursor.report cursor ~code:Number_missing_digits ~fixes
-        (Source.span start (start + 1))
+        (Source.make_span start (start + 1))
         message;
       Some checked.value
   | _ -> None

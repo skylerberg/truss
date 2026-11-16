@@ -90,7 +90,7 @@ type state = {
 let add_diagnostic state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
   let diagnostic = Diagnostic.make ?notes ~fixes ~code:(Types code) span message in
   state.diagnostics <- diagnostic :: state.diagnostics;
-  Diagnostic.reported diagnostic
+  Diagnostic.make_reported diagnostic
 
 let report state ?fixes code span message = ignore (add_diagnostic state ?fixes code span message)
 let is_formula env = env.specification || env.in_quantifier
@@ -486,7 +486,7 @@ let convert_evidence = function
 let make_trait_reference ~arguments trait : Types.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }
 
-let string_type = Types.Named { path = Well_known.path String; arguments = [] }
+let string_type = Types.Named { path = Well_known.make_path String; arguments = [] }
 
 let make_undecided_type (undecided : undecided_literal) =
   Types.Literal (undecided.kind, undecided.index)
@@ -995,8 +995,8 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
               (fun (owned, view) ->
                 Path.equal actual_named.path owned && Path.equal wanted_named.path view)
               [
-                (Well_known.path List, Well_known.path Slice);
-                (Well_known.path String, Well_known.path String_slice);
+                (Well_known.make_path List, Well_known.make_path Slice);
+                (Well_known.make_path String, Well_known.make_path String_slice);
               ] ->
       if not (Unify.unify_arguments state.unifier wanted_named.arguments actual_named.arguments)
       then report_mismatch state span ~expected ~actual;

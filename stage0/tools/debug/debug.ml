@@ -37,7 +37,7 @@ let print_tokens source tokens =
   let rec print indent (tokens : Token.t array) =
     Array.iter
       (fun (token : Token.t) ->
-        let line, column = Source.position source token.span.start in
+        let line, column = Source.compute_position source token.span.start in
         let flags =
           (if token.line_break_before then " [line break]" else "")
           ^ if token.blank_line_before then " [blank line]" else ""
@@ -57,7 +57,7 @@ let print_tokens source tokens =
   print "" tokens
 
 let show_diagnostics ~json source diagnostics =
-  let shown = Diagnostic.shown diagnostics in
+  let shown = Diagnostic.select_shown diagnostics in
   if json then print_string (Diagnostic.to_json source shown)
   else List.iter (fun diagnostic -> prerr_string (Diagnostic.render source diagnostic)) shown;
   if diagnostics = [] then 0 else 1

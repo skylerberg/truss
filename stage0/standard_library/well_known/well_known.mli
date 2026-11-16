@@ -61,7 +61,7 @@ type t =
   | Text_copied_from
   | Run_tests
 
-val path : t -> Path.t
+val make_path : t -> Path.t
 val of_path : Path.t -> t option
 val is : t -> Path.t -> bool
 val specification : Path.module_

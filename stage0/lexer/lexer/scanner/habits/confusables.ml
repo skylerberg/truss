@@ -57,8 +57,9 @@ let scan (cursor : Cursor.t) ~value ~length =
     Cursor.report cursor ~code:Confusable_character
       ~fixes:
         (if follows_joining_confusable cursor start replacement then []
-         else Cursor.list_code_fixes cursor (Source.span start (start + length)) [ replacement ])
-      (Source.span start (start + length))
+         else
+           Cursor.list_code_fixes cursor (Source.make_span start (start + length)) [ replacement ])
+      (Source.make_span start (start + length))
       (Printf.sprintf "%s is not %s. Truss is written with ASCII punctuation."
          (Cursor.show_character cursor start)
          name);

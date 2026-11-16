@@ -38,7 +38,7 @@ let attach_lexer_errors tokens ~lexer_diagnostics ~nested piece
         List.map
           (fun (span : Source.span) ->
             Source.Definition_span.of_file ~base:item.base
-              (Source.span (max span.start item.base) (min span.stop item.stop)))
+              (Source.make_span (max span.start item.base) (min span.stop item.stop)))
           errors
       in
       ( {
@@ -119,13 +119,14 @@ let use_after_definition (tokens : Token.t array) piece (line : _ Syntax.item) ~
         [
           Diagnostic.fix "Move it up to the other `use` lines"
             [
-              Diagnostic.insert (Source.zero_width destination) (spelling ^ "\n");
-              Diagnostic.delete (Source.span line.base (compute_line_stop tokens piece));
+              Diagnostic.insert (Source.make_zero_width destination) (spelling ^ "\n");
+              Diagnostic.delete (Source.make_span line.base (compute_line_stop tokens piece));
             ];
         ]
     | None -> []
   in
-  Diagnostic.make ~code:(Parser Use_after_definition) (Source.span line.base line.stop)
+  Diagnostic.make ~code:(Parser Use_after_definition)
+    (Source.make_span line.base line.stop)
     "`use` lines come before every definition in a file." ~fixes
 
 let parse tokens ~lexer_diagnostics =

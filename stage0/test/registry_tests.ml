@@ -10,7 +10,7 @@ let () =
   Harness.test "a package's versions start with the number at the end of its name, or 1" (fun () ->
       List.iter
         (fun (name, major) ->
-          let actual = Registry.Version.major_of_name name in
+          let actual = Registry.Version.parse_major name in
           if actual <> major then Harness.fail "%s gives %d" (Path.show_package name) actual)
         [
           ({ owner = Some "acme"; name = "geometry" }, 1);
@@ -30,8 +30,8 @@ let () =
         Harness.fail "not 64 hexadecimal digits");
   Harness.test "a package's hash is the BLAKE3 hash of a line for each file, as PACKAGES.md defines"
     (fun () ->
-      let line path bytes = path ^ " " ^ Blake3.hex_digest bytes ^ "\n" in
-      let expected = Blake3.hex_digest (line "a.truss" "one" ^ line "b/c.truss" "two") in
+      let line path bytes = path ^ " " ^ Blake3.hash_to_hex bytes ^ "\n" in
+      let expected = Blake3.hash_to_hex (line "a.truss" "one" ^ line "b/c.truss" "two") in
       if Registry.Content.hash [ ("b/c.truss", "two"); ("a.truss", "one") ] <> expected then
         Harness.fail "another hash");
   Harness.test "a package's hash changes with a file's bytes, and with its path" (fun () ->
@@ -99,11 +99,11 @@ let fresh = Harness.scratch
 
 let at root =
   Unix.putenv Registry.Index.variable root;
-  Option.get (Registry.Index.current ())
+  Option.get (Registry.Index.find_current_registry ())
 
 let version_directory root (package : Path.package) version =
   List.fold_left Filename.concat root
-    (Path.package_parts package @ [ Registry.Version.show version ])
+    (Path.list_package_parts package @ [ Registry.Version.show version ])
 
 let () =
   let files = [ ("truss.toml", "[package]\nname = \"acme::geometry\"\n"); ("vector.truss", "") ] in
@@ -113,18 +113,20 @@ let () =
       Registry.Index.add registry
         { Path.owner = Some "acme"; name = "geometry" }
         (1, 1, 0) (("angle.truss", "") :: files);
-      (match Registry.Index.versions registry { Path.owner = Some "acme"; name = "geometry" } with
+      (match
+         Registry.Index.list_versions registry { Path.owner = Some "acme"; name = "geometry" }
+       with
       | [ ((1, 0, 0), first); ((1, 1, 0), second) ] ->
           if first <> Registry.Content.hash files || first = second then
             Harness.fail "the hashes are wrong"
       | _ -> Harness.fail "listed differently");
       if
         Option.map fst
-          (Registry.Index.newest registry { Path.owner = Some "acme"; name = "geometry" })
+          (Registry.Index.find_newest registry { Path.owner = Some "acme"; name = "geometry" })
         <> Some (1, 1, 0)
       then Harness.fail "the newest is not 1.1.0";
-      if Registry.Index.versions registry { Path.owner = Some "acme"; name = "nothing" } <> [] then
-        Harness.fail "a package it does not hold");
+      if Registry.Index.list_versions registry { Path.owner = Some "acme"; name = "nothing" } <> []
+      then Harness.fail "a package it does not hold");
   Harness.test "a version is fetched into a directory named by its hash, with every file" (fun () ->
       let registry = at (fresh "registry") and into = fresh "packages" in
       Registry.Index.add registry { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) files;
@@ -136,7 +138,7 @@ let () =
       with
       | Ok directory ->
           if Filename.basename directory <> hash then Harness.fail "in %s" directory;
-          if Registry.Content.hash (Registry.Content.all_files directory) <> hash then
+          if Registry.Content.hash (Registry.Content.list_all_files directory) <> hash then
             Harness.fail "other files"
       | Error reason -> Harness.fail "%s" reason);
   Harness.test "files that do not have the hash asked for are not kept" (fun () ->
@@ -205,7 +207,8 @@ let entry name version =
 
 let chosen (packages, problems) =
   if problems <> [] then
-    Harness.fail "problems: %s" (String.concat " " (List.map Registry.Selection.sentence problems));
+    Harness.fail "problems: %s"
+      (String.concat " " (List.map Registry.Selection.describe_problem problems));
   List.map
     (fun (actual : Registry.Selection.package) -> (Path.show_package actual.name, actual.version))
     packages
@@ -379,7 +382,7 @@ let () =
           { (entry "truss::http" (1, 0, 0)) with holds = [ "Clock" ] };
         ]
       and current = [ entry "acme::geometry" (1, 0, 0); entry "truss::http" (1, 0, 0) ] in
-      let actual = String.concat " " (Registry.Selection.differences ~written ~current) in
+      let actual = String.concat " " (Registry.Selection.list_differences ~written ~current) in
       List.iter
         (fun part ->
           if not (String.includes ~affix:part actual) then

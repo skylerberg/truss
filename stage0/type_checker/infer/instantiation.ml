@@ -4,7 +4,7 @@ let check_evidence_grants (state : State.state) (span : Source.Definition_span.t
       evidence
   in
   state.evidence_packages <-
-    List.map (fun (impl, _, _) -> Path.package impl) impls @ state.evidence_packages;
+    List.map (fun (impl, _, _) -> Path.locate_package impl) impls @ state.evidence_packages;
   List.iter
     (fun message ->
       state.diagnostics <-

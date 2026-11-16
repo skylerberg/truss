@@ -23,10 +23,10 @@ type builtin =
   | Shared
 
 val builtins : builtin list
-val builtin_name : builtin -> string
-val builtin_path : builtin -> Path.t
+val show_builtin : builtin -> string
+val make_builtin_path : builtin -> Path.t
 val builtin_of_path : Path.t -> builtin option
-val libc_builtin : Libc.scalar -> builtin
+val builtin_of_libc : Libc.scalar -> builtin
 
 type operation =
   | Add
@@ -120,8 +120,8 @@ type operation =
   | Libc_number of Libc.number
 
 val operations : operation list
-val primitive : operation -> bool
-val operation_name : operation -> string
-val operation_path : operation -> Path.t
+val is_primitive : operation -> bool
+val show_operation : operation -> string
+val make_operation_path : operation -> Path.t
 val operation_of_path : Path.t -> operation option
 val uses : operation -> Path.t list

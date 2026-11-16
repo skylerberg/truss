@@ -161,7 +161,7 @@ let () =
      that ends without a word" (fun () ->
       let _, compile =
         Codegen_support.load
-          ~roots:[ Code { path = Well_known.path Run_tests; type_arguments = [] } ]
+          ~roots:[ Code { path = Well_known.make_path Run_tests; type_arguments = [] } ]
           "fn suite() {\n}\n"
       in
       let site : Lowered.site =
@@ -210,7 +210,7 @@ let () =
                 [
                   Call
                     {
-                      target = Foreign (Libc.declaration Codegen_support.host Exit);
+                      target = Foreign (Libc.make_declaration Codegen_support.host Exit);
                       arguments = [ Codegen_support.constant_int32 3 ];
                       result = Discarded;
                     };

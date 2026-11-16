@@ -371,7 +371,7 @@ let () =
               {
                 tag = None;
                 form = Ordinary;
-                first = { value = ""; span = Source.zero_width 0 };
+                first = { value = ""; span = Source.make_zero_width 0 };
                 rest = [||];
               };
           ]

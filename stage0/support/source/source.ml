@@ -1,10 +1,10 @@
 type span = { start : int; stop : int }
 
-let span start stop =
+let make_span start stop =
   if start < 0 || stop < start then invalid_arg (Printf.sprintf "Source.span %d %d" start stop);
   { start; stop }
 
-let zero_width position = span position position
+let make_zero_width position = make_span position position
 
 module Definition_span = struct
   type t = { start : int; stop : int }
@@ -17,7 +17,7 @@ module Definition_span = struct
   let zero_width position = make position position
 
   let to_file ~base (definition_span : t) =
-    span (base + definition_span.start) (base + definition_span.stop)
+    make_span (base + definition_span.start) (base + definition_span.stop)
 
   let of_file ~base (file_span : span) = make (file_span.start - base) (file_span.stop - base)
 
@@ -98,7 +98,7 @@ let step units text at =
   | Utf_16_code_units ->
       ((if Uchar.to_int (Uchar.utf_decode_uchar decoded) >= 0x10000 then 2 else 1), width)
 
-let location units source offset =
+let compute_location units source offset =
   let offset = max 0 (min offset (String.length source.text)) in
   let index = line_index source offset in
   let rec count at column =
@@ -109,11 +109,11 @@ let location units source offset =
   in
   (index, count source.line_starts.(index) 0)
 
-let position source offset =
-  let line, column = location Scalar_values source offset in
+let compute_position source offset =
+  let line, column = compute_location Scalar_values source offset in
   (line + 1, column + 1)
 
-let offset units source ~line ~column =
+let compute_offset units source ~line ~column =
   if line >= Array.length source.line_starts then String.length source.text
   else
     let stop = line_end source source.line_starts.(line) in

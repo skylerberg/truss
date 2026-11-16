@@ -216,9 +216,10 @@ and lex_number cursor ~inline ~nesting =
            else
              List.map
                (fun (title, replacement) ->
-                 Diagnostic.fix title [ Diagnostic.replace (Source.span start stop) replacement ])
+                 Diagnostic.fix title
+                   [ Diagnostic.replace (Source.make_span start stop) replacement ])
                checked.fixes)
-        (Source.span (start + problem.start) (start + problem.stop))
+        (Source.make_span (start + problem.start) (start + problem.stop))
         problem.message
   | None -> ());
   let integer = make_token cursor ~inline ~start checked.value in
@@ -305,11 +306,11 @@ and lex_name cursor ~inline ~nesting =
                     [
                       Diagnostic.fix
                         ("Write `" ^ fixed ^ "`")
-                        [ Diagnostic.replace (Source.span start stop) fixed ];
+                        [ Diagnostic.replace (Source.make_span start stop) fixed ];
                     ]
                 | Some _ | None -> []
               in
-              Cursor.report cursor ~code ~fixes (Source.span start stop) message
+              Cursor.report cursor ~code ~fixes (Source.make_span start stop) message
           | None -> ());
           if checked.kind = Names.Upper then Upper checked.name else Lower checked.name
   in
@@ -317,7 +318,7 @@ and lex_name cursor ~inline ~nesting =
   | Upper tag
     when Cursor.is_at cursor stop '"'
          || (Cursor.is_at cursor stop '$' && Strings.opens_raw_string cursor stop) ->
-      lex_string cursor ~tag:(Some (tag, Source.span start stop)) ~inline ~nesting ~start
+      lex_string cursor ~tag:(Some (tag, Source.make_span start stop)) ~inline ~nesting ~start
   | kind -> (
       match Habits.String_forms.lex_after_name cursor ~scan ~nesting ~start kind with
       | Some (kind, ending) -> Token (make_token cursor ~inline ~start ~ending kind)
@@ -340,7 +341,7 @@ let rec lex_next cursor =
       Layout.Next
         {
           kind = token.kind;
-          span = Source.span token.start token.stop;
+          span = Source.make_span token.start token.stop;
           first_line_break = token.first_line_break;
           blank_line = token.blank_line;
           unterminated_string = token.ending = Unterminated;

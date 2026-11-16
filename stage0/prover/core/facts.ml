@@ -350,14 +350,15 @@ let make_constructor_symbol (ty : Types.ty) variant =
 
 let make_selector_symbol ty variant field = Logic.Symbol.Field { type_ = ty; variant; field }
 let is_standard_equal = Well_known.is Equal
-let equal_trait = Well_known.path Equal
+let equal_trait = Well_known.make_path Equal
 
 let find_visible_type (context : State.context) (ty : Types.ty) =
   match ty with
   | Named { path; arguments } when Types.find_builtin ty = None -> (
       match Interface.Definition.read_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface interface)
-        when (not interface.opaque) || Path.package path = Path.package context.current ->
+        when (not interface.opaque)
+             || Path.locate_package path = Path.locate_package context.current ->
           let substitution = Types.make_substitution interface.type_generics arguments in
           Some (interface, substitution)
       | _ -> None)
@@ -706,7 +707,8 @@ let merge context ?value_type ~condition
         Some
           (define "parts"
              (declare_sort context
-                (Types.Named { path = Well_known.path Sequence; arguments = [ Types.Type part ] }))
+                (Types.Named
+                   { path = Well_known.make_path Sequence; arguments = [ Types.Type part ] }))
              values)
     | _ -> first.yielded_so_far
   in

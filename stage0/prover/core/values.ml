@@ -11,7 +11,7 @@ let run_ghost_code (context : State.context) frame (code : Mir.t) =
         (Lambdas.run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_:Types.unit);
       Logic.disjunction context.unfinished)
 
-let finite_map_path : Path.t = Well_known.path Finite_map
+let finite_map_path : Path.t = Well_known.make_path Finite_map
 
 let assume_extensional context frame (ty : Types.ty) left right =
   match ty with
@@ -709,7 +709,7 @@ let copy_value ?literal (context : State.context) frame ty term =
               | None ->
                   Amounts.declare_trait_method_time context frame
                     (Path.Method
-                       { owner = Well_known.path Copyable; name = "copy"; receiver = Read })
+                       { owner = Well_known.make_path Copyable; name = "copy"; receiver = Read })
                     ~trait_arguments:[] ty
             in
             let copy_potential =

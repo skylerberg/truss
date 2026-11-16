@@ -143,7 +143,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
           in
           let text_argument text =
             Operands.build_argument Read
-              (node (Types.make_named (Well_known.path String_slice) []) (String text))
+              (node (Types.make_named (Well_known.make_path String_slice) []) (String text))
           in
           let count_argument count =
             Operands.build_argument Read
@@ -471,7 +471,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 let sink_argument : Core.argument =
                   Passed { mode = Mut; value = Place sink; mode_keyword = None }
                 in
-                let serializer = Well_known.path Serializer in
+                let serializer = Well_known.make_path Serializer in
                 let call name arguments =
                   statement
                     (Evaluate
@@ -521,13 +521,15 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 let source_argument mode : Core.argument =
                   Passed { mode; value = Place source; mode_keyword = None }
                 in
-                let deserializer = Well_known.path Deserializer in
+                let deserializer = Well_known.make_path Deserializer in
                 let error_type =
                   match result with
                   | Named { arguments = [ _; Type error ]; _ } -> error
                   | _ -> bug "`deserialize` returns a `Result`"
                 in
-                let result_of ok = Types.make_named (Well_known.path Result) [ ok; error_type ] in
+                let result_of ok =
+                  Types.make_named (Well_known.make_path Result) [ ok; error_type ]
+                in
                 let source_call name arguments type_ =
                   trait_call ~trait:deserializer ~name ~receiver:Mut ~self_type:source_type
                     ~evidence:Bound
@@ -615,7 +617,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                             callee =
                               Function
                                 {
-                                  path = Well_known.path function_;
+                                  path = Well_known.make_path function_;
                                   type_arguments =
                                     [ Types.Type field.field_type; Types.Type source_type ];
                                 };
@@ -753,7 +755,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                     List.map
                       (fun (field : Types.field) ->
                         let optional =
-                          Types.make_named (Well_known.path Option) [ field.field_type ]
+                          Types.make_named (Well_known.make_path Option) [ field.field_type ]
                         in
                         let present = local () in
                         statement
@@ -853,14 +855,18 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                     let body = fields_then_built None (record_fields ()) "end_record" in
                     { body with statements = begun "begin_record" :: body.statements }
                 | Some variants ->
-                    let string_type = Types.make_named (Well_known.path String) [] in
+                    let string_type = Types.make_named (Well_known.make_path String) [] in
                     let name = local () in
                     let name_place : Core.place =
                       Local { local = name; type_ = string_type; origin }
                     in
                     let equal =
                       let reference : Types.trait_reference =
-                        { trait = Well_known.path Equal; trait_arguments = []; associated = [] }
+                        {
+                          trait = Well_known.make_path Equal;
+                          trait_arguments = [];
+                          associated = [];
+                        }
                       in
                       match
                         Interface.Impls.implements lookups.interface ~bounds string_type reference
@@ -897,7 +903,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                            Function
                                                              {
                                                                path =
-                                                                 Well_known.path Unknown_variant;
+                                                                 Well_known.make_path
+                                                                   Unknown_variant;
                                                                type_arguments =
                                                                  [ Types.Type source_type ];
                                                              };

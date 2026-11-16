@@ -758,7 +758,7 @@ let () =
       Workspace.flush ();
       Harness.write_files root [ ("main/main.truss", edited_body) ];
       ignore (settled_on_disk root);
-      Workspace.For_testing.interrupt_commit (Workspace.root (opened root));
+      Workspace.For_testing.interrupt_commit (Workspace.locate_root (opened root));
       Harness.write_files root [ ("main/main.truss", callee_and_caller) ];
       expect_recomputed (settled_on_disk root) ~exactly:[];
       Workspace.flush ());

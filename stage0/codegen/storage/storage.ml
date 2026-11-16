@@ -1,5 +1,5 @@
 let make_named builtin element : Ground.ty =
-  Named { path = Intrinsic.builtin_path builtin; arguments = [ Type element ] }
+  Named { path = Intrinsic.make_builtin_path builtin; arguments = [ Type element ] }
 
 let make_storage_type element = make_named Storage element
 let make_view_type element = make_named View element

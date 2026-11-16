@@ -676,7 +676,7 @@ and plan_argument builder (argument : Core.argument) =
 and lower_call_value builder (node : Core.expression) (called : Core.call) =
   let origin = node.origin in
   match called.callee with
-  | Intrinsic { operation; type_arguments } when Intrinsic.primitive operation ->
+  | Intrinsic { operation; type_arguments } when Intrinsic.is_primitive operation ->
       let* operands =
         In_order.run builder
           (In_order.all

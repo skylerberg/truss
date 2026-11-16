@@ -123,13 +123,13 @@ let declare_libc_number context frame (number : Libc.number) =
   let term = Logic.Symbol symbol in
   Facts.assume context frame
     (Facts.make_in_range
-       (Types.make_builtin (Intrinsic.libc_builtin (Libc.number_type number)))
+       (Types.make_builtin (Intrinsic.builtin_of_libc (Libc.classify_number number)))
        term);
   term
 
 let make_buffer_capacity context element term =
   let ty =
-    Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
+    Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
   in
   let symbol = Logic.Symbol.Capacity ty in
   Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
@@ -137,7 +137,7 @@ let make_buffer_capacity context element term =
 
 let make_buffer_model context (builtin : Intrinsic.builtin) element term =
   let ty =
-    Types.Named { path = Intrinsic.builtin_path builtin; arguments = [ Types.Type element ] }
+    Types.Named { path = Intrinsic.make_builtin_path builtin; arguments = [ Types.Type element ] }
   in
   let symbol = Logic.Symbol.Model ty in
   Facts.declare context
@@ -149,7 +149,7 @@ let make_buffer_model context (builtin : Intrinsic.builtin) element term =
 
 let libc_call context frame ~(site : Invocation.site) (function_ : Libc.function_) operands ~changed
     known =
-  let { Libc.parameters; at_most; _ } = Libc.signature function_ in
+  let { Libc.parameters; at_most; _ } = Libc.make_signature function_ in
   let arguments =
     List.concat_map
       (fun (name, (passes : Libc.passes)) ->
@@ -185,7 +185,7 @@ let libc_call context frame ~(site : Invocation.site) (function_ : Libc.function
       ]
       condition
   in
-  let element_of scalar = Types.make_builtin (Intrinsic.libc_builtin scalar) in
+  let element_of scalar = Types.make_builtin (Intrinsic.builtin_of_libc scalar) in
   let length element sequence = Models.make_sequence_length context element sequence in
   List.iteri
     (fun position (_, passes) ->
@@ -698,7 +698,7 @@ let replace_element context frame element ~before ~after index part =
 
 let update_storage context frame element storage index part =
   let storage_type =
-    Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
+    Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
   in
   let updated = Facts.arrive context frame "changed" storage_type in
   replace_element context frame element

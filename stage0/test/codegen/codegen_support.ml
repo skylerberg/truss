@@ -308,7 +308,7 @@ let standard_context : Monomorphic.context =
   }
 
 let standard module_ name ?(arguments = []) () =
-  Ground.Named { path = Path.standard [ module_ ] name; arguments }
+  Ground.Named { path = Path.make_standard_path [ module_ ] name; arguments }
 
 let standard_layout ty =
   Memory_layout.For_testing.to_string

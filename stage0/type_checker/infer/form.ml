@@ -295,7 +295,8 @@ let find_capability_impls (state : State.state) (type_ : Types.ty) =
           else None)
         (List.concat_map
            (fun package -> Interface.Impls.list_impls_for_type state.lookups.interface path package)
-           (List.sort_uniq compare [ Path.package path; state.package; Path.standard_package ]))
+           (List.sort_uniq compare
+              [ Path.locate_package path; state.package; Path.standard_package ]))
   | _ -> []
 
 let build_provide state (implementations : Syntax.expression list) (body : Syntax.block) : Core.kind
@@ -318,7 +319,10 @@ let build_provide state (implementations : Syntax.expression list) (body : Synta
 
 let build_text_builder_callee name receiver : Core.callee =
   Function
-    { path = Method { owner = Well_known.path Text_builder; name; receiver }; type_arguments = [] }
+    {
+      path = Method { owner = Well_known.make_path Text_builder; name; receiver };
+      type_arguments = [];
+    }
 
 let read_template (state : State.state) (literal : Syntax.string_literal) =
   match state.tables.templates.(literal.id) with
@@ -333,7 +337,7 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
       let make_statement kind : Core.statement =
         { id = State.allocate_node_id state; origin; kind }
       in
-      let builder_type = Types.make_named (Well_known.path Text_builder) [] in
+      let builder_type = Types.make_named (Well_known.make_path Text_builder) [] in
       let builder = State.allocate_synthetic_local state in
       let builder_place : Core.place = Local { local = builder; type_ = builder_type; origin } in
       let make_call callee arguments : Core.kind =
@@ -373,7 +377,7 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
                              value =
                                Value
                                  (make
-                                    (Types.make_named (Well_known.path String_slice) [])
+                                    (Types.make_named (Well_known.make_path String_slice) [])
                                     (String written.value));
                              mode_keyword = None;
                            };
@@ -420,7 +424,7 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
   let make = State.make_synthetic_expression state ~origin in
   let make_statement kind : Core.statement = { id = State.allocate_node_id state; origin; kind } in
   let storage_type =
-    Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
+    Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
   in
   let storage = State.allocate_synthetic_local state in
   let make_intrinsic_call operation type_ arguments =
@@ -475,7 +479,7 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
       value =
         Some
           (make
-             (Types.make_named (Well_known.path List) [ element ])
+             (Types.make_named (Well_known.make_path List) [ element ])
              (Call
                 {
                   callee =
@@ -484,7 +488,7 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
                         path =
                           Method
                             {
-                              owner = Well_known.path List;
+                              owner = Well_known.make_path List;
                               name = "from_storage";
                               receiver = Static;
                             };
@@ -518,10 +522,10 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
   let make = State.make_synthetic_expression state ~origin:value.id in
   let make_list element elements =
     make
-      (Types.make_named (Well_known.path List) [ element ])
+      (Types.make_named (Well_known.make_path List) [ element ])
       (build_list_literal state ~origin:value.id element elements)
   in
-  let literal_type = Types.make_named (Well_known.path Literal) [] in
+  let literal_type = Types.make_named (Well_known.make_path Literal) [] in
   let texts =
     List.map
       (fun (written : Syntax.text) ->
@@ -529,7 +533,9 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
           (build_record
              [
                ( "text",
-                 make (Types.make_named (Well_known.path String_slice) []) (String written.value) );
+                 make
+                   (Types.make_named (Well_known.make_path String_slice) [])
+                   (String written.value) );
              ]))
       (literal.first :: List.map snd literal.rest)
   in
@@ -546,7 +552,7 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
   let texts = make_list literal_type texts in
   let template =
     make
-      (Types.make_named (Well_known.path Template) [ part ])
+      (Types.make_named (Well_known.make_path Template) [ part ])
       (build_record [ ("literals", texts); ("parts", make_list part parts) ])
   in
   Template
@@ -576,7 +582,7 @@ let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant
   let type_ = read_pattern_type state id in
   if is_built_in_scalar type_ then Literal value
   else
-    let equal = State.make_trait_reference ~arguments:[] (Well_known.path Equal) in
+    let equal = State.make_trait_reference ~arguments:[] (Well_known.make_path Equal) in
     match State.implements state type_ equal with
     | Some implementation ->
         Equal_to
@@ -952,7 +958,7 @@ let quantify_over_elements state (collection : Syntax.expression) ~count ~elemen
         }
 
 let build_cursor_next state (cursor : Types.ty) : Core.callee =
-  let trait = State.make_trait_reference ~arguments:[] (Well_known.path Cursor) in
+  let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
   match State.implements state cursor trait with
   | Some implementation ->
       Trait_method

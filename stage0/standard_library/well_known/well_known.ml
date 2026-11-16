@@ -126,7 +126,7 @@ let all =
     Run_tests;
   ]
 
-let modules_and_name = function
+let locate_known = function
   | Equal -> ([ "core" ], "Equal")
   | Ordered -> ([ "core" ], "Ordered")
   | Ordering -> ([ "core" ], "Ordering")
@@ -189,14 +189,14 @@ let modules_and_name = function
   | Text_copied_from -> ([ "system"; "calls" ], "text_copied_from")
   | Run_tests -> ([ "system"; "test_runner" ], "run")
 
-let path known =
-  let modules, name = modules_and_name known in
-  Path.standard modules name
+let make_path known =
+  let modules, name = locate_known known in
+  Path.make_standard_path modules name
 
-let by_path = Path.Map.of_seq (List.to_seq (List.map (fun known -> (path known, known)) all))
+let by_path = Path.Map.of_seq (List.to_seq (List.map (fun known -> (make_path known, known)) all))
 let of_path path = Path.Map.find_opt path by_path
 let is known path = of_path path = Some known
-let specification = Path.standard_module [ "specification" ]
+let specification = Path.make_standard_module [ "specification" ]
 
 let is_system_module (module_ : Path.module_) =
   module_.package = Path.standard_package

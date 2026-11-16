@@ -117,7 +117,7 @@ let find_closing_edits source tokens ~closers ~is_unterminated_string openers =
               else closer
             in
             edits position
-              (Diagnostic.insert (Source.zero_width position) replacement :: reversed)
+              (Diagnostic.insert (Source.make_zero_width position) replacement :: reversed)
               outer)
   in
   edits 0 [] openers
@@ -155,7 +155,7 @@ let run ~source ~diagnostics ~mode next_input =
   let insert_closer position =
     match !stack with
     | opener :: _ ->
-        pop (make_token (Punctuation (Close opener.bracket)) (Source.zero_width position))
+        pop (make_token (Punctuation (Close opener.bracket)) (Source.make_zero_width position))
     | [] -> ()
   in
   let close_silently position =
@@ -236,12 +236,14 @@ let run ~source ~diagnostics ~mode next_input =
     | File _, Some previous_kind when Token.can_end previous_kind ->
         emit
           (make_token Newline
-             (match first_line_break with Some span -> span | None -> Source.zero_width position))
+             (match first_line_break with
+             | Some span -> span
+             | None -> Source.make_zero_width position))
     | _ -> ());
     emit
       {
         kind = End_of_file;
-        span = Source.zero_width position;
+        span = Source.make_zero_width position;
         line_break_before = first_line_break <> None;
         blank_line_before = blank_line;
         is_inserted_closer = false;

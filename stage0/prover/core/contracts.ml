@@ -95,7 +95,7 @@ let law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_refer
       || List.exists
            (fun (law, ((proof : State.source), _)) ->
              law = name && Option.fold ~none:false ~some:(holds_todo lookups) proof.key)
-           (list_law_proofs lookups (Path.package impl) trait for_type)
+           (list_law_proofs lookups (Path.locate_package impl) trait for_type)
   | None -> false
 
 let make_contract (lookups : Lookups.t) path ~own ~others =

@@ -1,4 +1,4 @@
-val serving : unit -> string list
+val list_servers : unit -> string list
 val stop : unit -> unit
 val wait_until_ended : key:string -> unit
 val listen : key:string -> (Unix.file_descr, string) result

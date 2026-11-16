@@ -17,4 +17,4 @@ val terminal : unit -> bool
 val columns : unit -> int option
 val json : unit -> bool
 val set_json : bool -> unit
-val listed : string list -> string
+val show_list : string list -> string

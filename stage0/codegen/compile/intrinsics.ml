@@ -250,12 +250,13 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
         let integer =
           match
             classify_scalar env
-              (Ground.make_builtin (Intrinsic.libc_builtin (Libc.number_type number)))
+              (Ground.make_builtin (Intrinsic.builtin_of_libc (Libc.classify_number number)))
           with
           | Integer integer -> integer
           | _ -> bug "a number of the C library that is not an integer"
         in
-        Constant (Integer (integer, Z.of_int (Libc.value (Memory_layout.system env) number)))
+        Constant
+          (Integer (integer, Z.of_int (Libc.evaluate_number (Memory_layout.system env) number)))
       in
       let text_at address ~is_present =
         Emit_c.Builder.emit builder
@@ -630,7 +631,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           let array_ty : Ground.ty =
             Named
               {
-                path = Intrinsic.builtin_path Array;
+                path = Intrinsic.make_builtin_path Array;
                 arguments = [ Type (element ()); Value count ];
               }
           in
@@ -666,7 +667,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           let array_ty : Ground.ty =
             Named
               {
-                path = Intrinsic.builtin_path Array;
+                path = Intrinsic.make_builtin_path Array;
                 arguments = [ Type (element ()); Value count ];
               }
           in
@@ -716,7 +717,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           let array_ty : Ground.ty =
             Named
               {
-                path = Intrinsic.builtin_path Array;
+                path = Intrinsic.make_builtin_path Array;
                 arguments = [ Type (element ()); Value count ];
               }
           in
@@ -817,7 +818,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           set
             (Build
                {
-                 ty = Named { path = Intrinsic.builtin_path Shared; arguments = [ Type ty ] };
+                 ty = Named { path = Intrinsic.make_builtin_path Shared; arguments = [ Type ty ] };
                  variant = None;
                  fields = [ ("value", Copy (Lowered.make_local_place block)) ];
                })
@@ -828,7 +829,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       | Handle_release ->
           let released =
             Emit_c.Builder.allocate_local builder
-              (Value (Named { path = Intrinsic.builtin_path Handle; arguments = [] }))
+              (Value (Named { path = Intrinsic.make_builtin_path Handle; arguments = [] }))
           in
           Emit_c.Builder.emit builder (Assign (Lowered.make_local_place released, Use (value 0)));
           set
@@ -890,9 +891,9 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           Emit_c.Builder.finish builder (Goto test);
           Emit_c.Builder.start builder after;
           text_at entry ~is_present:(extract_place (argument 1))
-      | Libc function_ when not (Libc.available (Memory_layout.system env) function_) ->
+      | Libc function_ when not (Libc.is_available (Memory_layout.system env) function_) ->
           let message =
-            Printf.sprintf "this system's C library has no %s" (Libc.function_name function_)
+            Printf.sprintf "this system's C library has no %s" (Libc.show_function function_)
           in
           Emit_c.Builder.finish builder
             (Fail
@@ -907,9 +908,12 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       | Libc function_ -> (
           let ground scalar =
             Ground.Named
-              { path = Intrinsic.builtin_path (Intrinsic.libc_builtin scalar); arguments = [] }
+              {
+                path = Intrinsic.make_builtin_path (Intrinsic.builtin_of_libc scalar);
+                arguments = [];
+              }
           in
-          let { Libc.parameters; result; _ } = Libc.signature function_ in
+          let { Libc.parameters; result; _ } = Libc.make_signature function_ in
           let after = ref [] in
           let next = ref 0 in
           let next_argument () =
@@ -936,7 +940,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                         (Value
                            (Named
                               {
-                                path = Intrinsic.builtin_path Array;
+                                path = Intrinsic.make_builtin_path Array;
                                 arguments =
                                   [ Type (ground scalar); Value (Z.of_int (List.length names)) ];
                               }))
@@ -1066,9 +1070,11 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                 | Some (Value _ | Written _ | Always _ | Fixed _) | None -> ())
               passed
           end;
-          let target = Lowered.Foreign (Libc.declaration (Memory_layout.system env) function_) in
+          let target =
+            Lowered.Foreign (Libc.make_declaration (Memory_layout.system env) function_)
+          in
           let bracket intrinsic =
-            if Libc.blocks function_ then
+            if Libc.is_blocking function_ then
               Emit_c.Builder.emit builder
                 (Call { target = Intrinsic intrinsic; arguments = []; result = Discarded })
           in

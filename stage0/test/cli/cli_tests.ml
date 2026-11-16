@@ -41,11 +41,11 @@ let document arguments = Cli.Json.parse (snd (truss (arguments @ [ "--json" ])))
 let objects = function Cli.Json.List items -> items | _ -> []
 
 let text_field name value =
-  match Cli.Json.field name value with Cli.Json.String text -> text | _ -> ""
+  match Cli.Json.lookup_field name value with Cli.Json.String text -> text | _ -> ""
 
 let shown root path =
   List.map (text_field "text")
-    (objects (Cli.Json.field "definitions" (document [ "show"; "-C"; root; path ])))
+    (objects (Cli.Json.lookup_field "definitions" (document [ "show"; "-C"; root; path ])))
 
 let () = Unix.putenv "TRUSS_CACHE" (Harness.scratch "store")
 
@@ -79,7 +79,7 @@ let () =
           Unix.mkdir (Filename.concat root "skipped") 0o755;
           Out_channel.with_open_bin (Filename.concat root "src/main.truss") (fun out ->
               output_string out "fn main() {}\n");
-          match Watcher.changes watcher with
+          match Watcher.read_changes watcher with
           | Changed paths when List.mem "src/main.truss" paths -> ()
           | Changed paths -> fail "reported %s" (String.concat ", " paths)
           | Overflow -> fail "reported an overflow"))
@@ -125,8 +125,8 @@ let () =
           then fail "exited with %d: %s" status output))
 
 let names (_, packages) = List.sort compare (List.map Path.show_package packages)
-let modules (snapshot, packages) = Cli.Command_packages.modules snapshot packages
-let files (snapshot, packages) = Cli.Command_packages.files snapshot packages
+let modules (snapshot, packages) = Cli.Command_packages.list_modules snapshot packages
+let files (snapshot, packages) = Cli.Command_packages.list_files snapshot packages
 
 let gather ?proofs (snapshot, packages) =
   Cli.Report.gather ?proofs (Workspace.open_database snapshot) snapshot packages
@@ -134,7 +134,7 @@ let gather ?proofs (snapshot, packages) =
 let select (snapshot, packages) =
   Cli.Test_command.select snapshot (Workspace.open_database snapshot) packages
 
-let mains (snapshot, packages) = Cli.Program_command.mains snapshot packages
+let mains (snapshot, packages) = Cli.Program_command.list_mains snapshot packages
 
 let () =
   test "the package is found from a directory below its manifest" (fun () ->
@@ -285,14 +285,14 @@ let () =
         (List.map Path.show_module (modules (Cli.Command_packages.load root))));
   test "a path is shown relative to the directory it is read from" (fun () ->
       expect_string ~expected:"../weather/forecast.truss"
-        (Cli.Shown_path.relative ~from:"/code/app" "/code/weather/forecast.truss"))
+        (Cli.Shown_path.make_relative ~from:"/code/app" "/code/weather/forecast.truss"))
 
 let problems files =
   let project = Cli.Command_packages.load (directory files) in
   Workspace.problems (fst project)
 
 let report_problems report =
-  match Cli.Json.field "problems" (Cli.Report.document report []) with
+  match Cli.Json.lookup_field "problems" (Cli.Report.make_document report []) with
   | Cli.Json.List problems ->
       List.filter_map (function Cli.Json.String problem -> Some problem | _ -> None) problems
   | _ -> []
@@ -447,10 +447,10 @@ let () =
       | exception Manifest.Malformed { line = 4; _ } -> ()
       | _ -> fail "accepted")
 
-let edit start stop replacement = Diagnostic.replace (Source.span start stop) replacement
+let edit start stop replacement = Diagnostic.replace (Source.make_span start stop) replacement
 
 let diagnostic ~fixes start stop =
-  Diagnostic.make ~fixes ~code:(Usage Unused_variable) (Source.span start stop) "x."
+  Diagnostic.make ~fixes ~code:(Usage Unused_variable) (Source.make_span start stop) "x."
 
 let () =
   test "edits apply at the offsets of the text they were made for" (fun () ->
@@ -459,14 +459,14 @@ let () =
   test "a fix that overlaps an earlier one waits for the next round" (fun () ->
       let first = diagnostic ~fixes:[ Diagnostic.fix "one" [ edit 0 3 "x" ] ] 0 3 in
       let second = diagnostic ~fixes:[ Diagnostic.fix "two" [ edit 2 4 "y" ] ] 2 4 in
-      if Diagnostic.machine_applicable [ first; second ] <> [ first ] then fail "chose both");
+      if Diagnostic.list_machine_applicable [ first; second ] <> [ first ] then fail "chose both");
   test "a diagnostic with several fixes is left for the person or agent to choose" (fun () ->
       let choice =
         diagnostic
           ~fixes:[ Diagnostic.fix "one" [ edit 0 1 "x" ]; Diagnostic.fix "two" [ edit 0 1 "y" ] ]
           0 1
       in
-      if Diagnostic.machine_applicable [ choice ] <> [] then fail "chose one");
+      if Diagnostic.list_machine_applicable [ choice ] <> [] then fail "chose one");
   test "check --fix writes the only fix and leaves no diagnostic" (fun () ->
       let root = package [ ("main.truss", Fixtures.twice_with_one_fix) ] in
       let status = quietly [ "check"; "-C"; root; "--fix" ] in
@@ -581,7 +581,7 @@ let () =
         fail "the geometry's Point showed %s" (String.concat "; " geometry))
 
 let lowering (snapshot, packages) =
-  Cli.Compiler.lowering_only (Workspace.open_database snapshot) packages
+  Cli.Compiler.make_lowering_compiler (Workspace.open_database snapshot) packages
 
 let speaker_calling called =
   package
@@ -731,7 +731,8 @@ let rewrite root path text =
 let () =
   test "a position's line and column count characters, as diagnostics do" (fun () ->
       let source = Source.create ~path:"" "ab\ncé x" in
-      if Source.offset Source.Scalar_values source ~line:1 ~column:3 <> 7 then fail "wrong offset");
+      if Source.compute_offset Source.Scalar_values source ~line:1 ~column:3 <> 7 then
+        fail "wrong offset");
   test "explaining a name gives its meaning and the signature it refers to" (fun () ->
       let root = package [ ("main.truss", Fixtures.doubling) ] in
       let status, output =
@@ -778,7 +779,7 @@ let strings = function
   | _ -> []
 
 let reads command root name =
-  objects (Cli.Json.field "reads" (document [ command; "-C"; root; name ]))
+  objects (Cli.Json.lookup_field "reads" (document [ command; "-C"; root; name ]))
 
 let expect_read lines ~reader ~parts ~reads ~of_ =
   if
@@ -787,8 +788,10 @@ let expect_read lines ~reader ~parts ~reads ~of_ =
          (fun line ->
            text_field "reader" line = reader
            && text_field "of" line = of_
-           && List.mem reads (strings (Cli.Json.field "reads" line))
-           && List.for_all (fun part -> List.mem part (strings (Cli.Json.field "parts" line))) parts)
+           && List.mem reads (strings (Cli.Json.lookup_field "reads" line))
+           && List.for_all
+                (fun part -> List.mem part (strings (Cli.Json.lookup_field "parts" line)))
+                parts)
          lines)
   then
     fail "no line says that the %s of %s reads the %s of %s: [%s]" (String.concat ", " parts) reader
@@ -839,7 +842,7 @@ let () =
           if status <> 0 then fail "%s: status %d: %s" name status output)
         [ "Square.area"; "demo::Square.area"; "Shape.area" ])
 
-let holes root = objects (Cli.Json.field "holes" (document [ "holes"; "-C"; root ]))
+let holes root = objects (Cli.Json.lookup_field "holes" (document [ "holes"; "-C"; root ]))
 
 let () =
   test "a hole has the type it must have and the names in scope with theirs" (fun () ->
@@ -850,18 +853,18 @@ let () =
             ~expected:[ "count: Int64"; "header: String"; "title: String" ]
             (List.map
                (fun binding -> text_field "name" binding ^ ": " ^ text_field "type" binding)
-               (objects (Cli.Json.field "in_scope" hole)))
+               (objects (Cli.Json.lookup_field "in_scope" hole)))
       | found -> fail "found %d holes" (List.length found));
   test "a hole blocks the tests that can reach it, and only those" (fun () ->
       match holes (package [ ("main.truss", Fixtures.unfinished) ]) with
       | [ hole ] ->
           expect_strings ~expected:[ "test demo \"renders\"" ]
-            (strings (Cli.Json.field "blocks" hole))
+            (strings (Cli.Json.lookup_field "blocks" hole))
       | found -> fail "found %d holes" (List.length found));
   test "a hole in a capability's method blocks the tests and main that call the method" (fun () ->
       let blocks called =
         match holes (speaker_calling called) with
-        | [ hole ] -> strings (Cli.Json.field "blocks" hole)
+        | [ hole ] -> strings (Cli.Json.lookup_field "blocks" hole)
         | found -> failwith (Printf.sprintf "found %d holes" (List.length found))
       in
       expect_strings ~expected:[] (blocks "say");
@@ -871,16 +874,16 @@ let () =
       | [ session; greet ] ->
           expect_strings
             ~expected:[ "main"; "test demo \"greets\"" ]
-            (strings (Cli.Json.field "blocks" session));
+            (strings (Cli.Json.lookup_field "blocks" session));
           expect_strings
             ~expected:[ "main"; "test demo \"greets\"" ]
-            (strings (Cli.Json.field "blocks" greet))
+            (strings (Cli.Json.lookup_field "blocks" greet))
       | found -> fail "found %d holes" (List.length found));
   test "a hole blocks the tests that can reach it while other code has errors" (fun () ->
       match holes (package [ ("main.truss", Fixtures.hole_beside_an_error) ]) with
       | [ hole ] ->
           expect_strings ~expected:[ "test demo \"greets\"" ]
-            (strings (Cli.Json.field "blocks" hole))
+            (strings (Cli.Json.lookup_field "blocks" hole))
       | found -> fail "found %d holes" (List.length found));
   test "a hole whose type nothing fixes, such as one interpolated, is not decided yet" (fun () ->
       match holes (package [ ("main.truss", Fixtures.show_of_an_interpolated_todo) ]) with
@@ -897,7 +900,7 @@ let () =
       | [ hole ] ->
           expect_strings
             ~expected:[ "main"; "test demo \"reaches\"" ]
-            (strings (Cli.Json.field "blocks" hole))
+            (strings (Cli.Json.lookup_field "blocks" hole))
       | found -> fail "found %d holes" (List.length found));
   test "a test that reaches a type defined as todo is incomplete, and the others run" (fun () ->
       let outcomes =
@@ -905,11 +908,11 @@ let () =
           (fun test ->
             ( text_field "name" test,
               text_field "outcome" test,
-              match Cli.Json.field "message" test with
+              match Cli.Json.lookup_field "message" test with
               | Cli.Json.String message -> message
               | _ -> "" ))
           (objects
-             (Cli.Json.field "tests"
+             (Cli.Json.lookup_field "tests"
                 (document [ "test"; "-C"; package [ ("main.truss", Fixtures.unfinished_type) ] ])))
       in
       match outcomes with
@@ -955,11 +958,11 @@ let registry_root = ref ""
 let registry () =
   registry_root := directory [];
   Unix.putenv Registry.Index.variable !registry_root;
-  Option.get (Registry.Index.current ())
+  Option.get (Registry.Index.find_current_registry ())
 
 let version_directory (package : Path.package) version =
   List.fold_left Filename.concat !registry_root
-    (Path.package_parts package @ [ Registry.Version.show version ])
+    (Path.list_package_parts package @ [ Registry.Version.show version ])
 
 let publish registry name version ?(dependencies = []) ?(record = []) modules =
   let manifest =
@@ -1191,7 +1194,7 @@ let () =
       if
         not
           (List.mem "units/lengths/lengths.truss"
-             (List.map (Workspace.file_path (fst project)) (files project)))
+             (List.map (Workspace.locate_file (fst project)) (files project)))
       then fail "the project's package is not the one in the build")
 
 let upgrade root names = truss ([ "upgrade"; "-C"; root ] @ names)
@@ -1261,7 +1264,7 @@ let turn = Fixtures.turn
 let published registry name =
   List.map
     (fun (version, _) -> Registry.Version.show version)
-    (Registry.Index.versions registry name)
+    (Registry.Index.list_versions registry name)
 
 let expect_published registry name expected = expect_strings ~expected (published registry name)
 
@@ -1280,7 +1283,7 @@ let () =
         fail "said %s" output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ];
       let files =
-        Registry.Content.all_files
+        Registry.Content.list_all_files
           (version_directory { Path.owner = Some "acme"; name = "angles" } (1, 0, 0))
       in
       expect_strings ~expected:[ "degrees/degrees.truss"; "truss.toml" ] (List.map fst files));
@@ -1471,11 +1474,13 @@ let () =
   test "a command line is parsed and run as the client would run it" (fun () ->
       let root = package [ ("main.truss", Fixtures.doubling) ] in
       let status, _ =
-        captured (fun () -> Cli.Main.client [ "truss"; "--no-server"; "check"; "-C"; root ])
+        captured (fun () -> Cli.Main.run_client [ "truss"; "--no-server"; "check"; "-C"; root ])
       in
       if status <> 0 then fail "did not succeed");
   test "an unknown command is a bad argument" (fun () ->
-      let status, _ = captured (fun () -> Cli.Main.client [ "truss"; "--no-server"; "bogus" ]) in
+      let status, _ =
+        captured (fun () -> Cli.Main.run_client [ "truss"; "--no-server"; "bogus" ])
+      in
       if status <> 2 then fail "did not exit with 2")
 
 let () =
@@ -1492,7 +1497,7 @@ let () =
           ]
       in
       let status, output =
-        captured (fun () -> Cli.Main.client [ "truss"; "--no-server"; "check"; "-C"; root ])
+        captured (fun () -> Cli.Main.run_client [ "truss"; "--no-server"; "check"; "-C"; root ])
       in
       if status <> 0 then fail "did not succeed: %s" output);
   test "check rejects an HTML template that interpolates into an event handler or a script"
@@ -1512,7 +1517,7 @@ let () =
               ]
           in
           let status, output =
-            captured (fun () -> Cli.Main.client [ "truss"; "--no-server"; "check"; "-C"; root ])
+            captured (fun () -> Cli.Main.run_client [ "truss"; "--no-server"; "check"; "-C"; root ])
           in
           if status = 0 || not (String.includes ~affix:"is_valid_template" output) then
             fail "accepted %s: %s" template output)
@@ -1563,16 +1568,16 @@ let () =
       let answer =
         Cli.Json.parse (snd (truss [ "__check-buffers"; root; "utf-16"; uri; Fixtures.next_count ]))
       in
-      match Cli.Json.field "files" answer with
+      match Cli.Json.lookup_field "files" answer with
       | Cli.Json.List [ file ] -> (
-          match (Cli.Json.field "diagnostics" file, Cli.Json.field "states" file) with
+          match (Cli.Json.lookup_field "diagnostics" file, Cli.Json.lookup_field "states" file) with
           | Cli.Json.List [ diagnostic ], Cli.Json.List [ state ] ->
-              if Cli.Json.field "code" diagnostic <> Cli.Json.String "prover.overflow" then
+              if Cli.Json.lookup_field "code" diagnostic <> Cli.Json.String "prover.overflow" then
                 fail "diagnostic %s" (Cli.Json.to_string diagnostic);
-              if Cli.Json.field "proven" state <> Cli.Json.Bool false then
+              if Cli.Json.lookup_field "proven" state <> Cli.Json.Bool false then
                 fail "state %s" (Cli.Json.to_string state);
               if
-                Cli.Json.field "range" diagnostic
+                Cli.Json.lookup_field "range" diagnostic
                 <> Cli.Json.Object
                      [
                        ( "start",
@@ -1582,7 +1587,7 @@ let () =
                          Cli.Json.Object
                            [ ("line", Cli.Json.Int 1); ("character", Cli.Json.Int 11) ] );
                      ]
-              then fail "range %s" (Cli.Json.to_string (Cli.Json.field "range" diagnostic))
+              then fail "range %s" (Cli.Json.to_string (Cli.Json.lookup_field "range" diagnostic))
           | _ -> fail "%s" (Cli.Json.to_string file))
       | _ -> fail "%s" (Cli.Json.to_string answer));
   test "the server answers initialize, an unsupported request, and shutdown" (fun () ->

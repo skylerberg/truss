@@ -127,7 +127,7 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
       State.register_expression state value (fun () -> Yielded);
       match env.loop_element with
       | Some element ->
-          Types.Named { path = Well_known.path Sequence; arguments = [ Types.Type element ] }
+          Types.Named { path = Well_known.make_path Sequence; arguments = [ Types.Type element ] }
       | None -> State.bug "`visited` is named outside a loop's clauses")
   | Unknown report -> Types.Error report
   | Binding | Module _ -> State.bug "the name `%s` is not resolved" text
@@ -170,7 +170,7 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
   let unknown candidates =
     State.make_error_type state Unknown_member (State.read_span state member.id)
       ~fixes:
-        (match Diagnostic.closest member.text candidates with
+        (match Diagnostic.find_closest member.text candidates with
         | Some candidate ->
             [
               State.fix
@@ -580,7 +580,7 @@ and find_consuming_cursor state (span : Source.Definition_span.t) type_ =
   match find_method_version state span type_ "cursor" Own with
   | Some (callee, ({ parameters = []; output = Returns cursor; _ } as signature)) -> (
       let cursor = State.normalize state cursor in
-      let trait = State.make_trait_reference ~arguments:[] (Well_known.path Cursor) in
+      let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
       match State.implements state cursor trait with
       | Some _ ->
           Some

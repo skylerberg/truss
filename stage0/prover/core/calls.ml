@@ -867,7 +867,8 @@ let apply_call ?lent_final context (frame : State.frame) (site : Invocation.site
                    (Path.show impl));
             ]
             (Logic.Boolean false))
-      (Mir.Call_edges.list_impls_used context.lookups.interface (Path.package context.current)
+      (Mir.Call_edges.list_impls_used context.lookups.interface
+         (Path.locate_package context.current)
          invocation.callee)
   end;
   let with_contract ?(substitution_of = fun _ -> []) ?(instance = []) path = function

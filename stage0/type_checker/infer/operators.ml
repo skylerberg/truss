@@ -1,9 +1,9 @@
 let select_arithmetic_trait : Syntax.arithmetic -> Path.t * string = function
-  | Add -> (Well_known.path Add, "add")
-  | Subtract -> (Well_known.path Subtract, "subtract")
-  | Multiply -> (Well_known.path Multiply, "multiply")
-  | Divide -> (Well_known.path Divide, "divide")
-  | Remainder -> (Well_known.path Remainder, "remainder")
+  | Add -> (Well_known.make_path Add, "add")
+  | Subtract -> (Well_known.make_path Subtract, "subtract")
+  | Multiply -> (Well_known.make_path Multiply, "multiply")
+  | Divide -> (Well_known.make_path Divide, "divide")
+  | Remainder -> (Well_known.make_path Remainder, "remainder")
 
 let infer_integer_result state span type_ ~(describe : string -> string) =
   let is_integer resolved = State.is_integer_type state resolved || Types.is_error resolved in
@@ -232,7 +232,8 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
                     mode_keyword = None;
                   };
                 ]
-              state value ~trait:(Well_known.path Negate) ~method_:"negate" ~left:type_ ~right:None
+              state value ~trait:(Well_known.make_path Negate) ~method_:"negate" ~left:type_
+              ~right:None
           end)
 
 and check_operator_call ~operands state (value : Syntax.expression) ~trait ~method_ ~left ~right =
@@ -419,9 +420,11 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           ignore (add_operand_mismatch state value left right ~left_type ~right_type);
         let trait, method_, result =
           match comparison with
-          | Equal | Not_equal -> (Well_known.path Equal, "equal", Types.bool)
+          | Equal | Not_equal -> (Well_known.make_path Equal, "equal", Types.bool)
           | Less | Less_equal | Greater | Greater_equal ->
-              (Well_known.path Ordered, "compare", Types.make_named (Well_known.path Ordering) [])
+              ( Well_known.make_path Ordered,
+                "compare",
+                Types.make_named (Well_known.make_path Ordering) [] )
         in
         state.tables.calls.(value.id) <-
           Some
@@ -563,7 +566,7 @@ and add_operand_mismatch state (value : Syntax.expression) (left : Syntax.expres
   and right_type = State.normalize state right_type in
   if State.is_integer_type state left_type && State.is_integer_type state right_type then begin
     let from =
-      State.make_trait_reference ~arguments:[ Types.Type right_type ] (Well_known.path From)
+      State.make_trait_reference ~arguments:[ Types.Type right_type ] (Well_known.make_path From)
     in
     let fixes =
       if Option.is_some (State.implements state left_type from) then
@@ -579,7 +582,8 @@ and add_operand_mismatch state (value : Syntax.expression) (left : Syntax.expres
       else if
         Option.is_some
           (State.implements state right_type
-             (State.make_trait_reference ~arguments:[ Types.Type left_type ] (Well_known.path From)))
+             (State.make_trait_reference ~arguments:[ Types.Type left_type ]
+                (Well_known.make_path From)))
       then
         [
           State.fix

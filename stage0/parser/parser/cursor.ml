@@ -68,7 +68,7 @@ let make_end_token cursor =
   in
   {
     Token.kind = End_of_file;
-    span = Source.zero_width position;
+    span = Source.make_zero_width position;
     line_break_before = false;
     blank_line_before = false;
     is_inserted_closer = false;
@@ -84,7 +84,7 @@ let peek_ahead cursor count = (lookup_token cursor (cursor.index + count)).kind
 let record_recovery cursor ~index (span : Source.span) =
   let span =
     if span.start = span.stop && index > cursor.first then
-      Source.span (min span.start (lookup_token cursor (index - 1)).span.start) span.stop
+      Source.make_span (min span.start (lookup_token cursor (index - 1)).span.start) span.stop
     else span
   in
   cursor.recoveries := span :: !(cursor.recoveries)
@@ -141,7 +141,7 @@ let compute_previous_stop cursor =
 let make_span_from cursor start_index =
   let start = (lookup_token cursor start_index).span.start in
   let stop = max start (compute_previous_stop cursor) in
-  make_definition_span cursor (Source.span start stop)
+  make_definition_span cursor (Source.make_span start stop)
 
 let make_file_span cursor span = Source.Definition_span.to_file ~base:cursor.base span
 
@@ -333,7 +333,7 @@ let parse_bracketed cursor ~item ~recover =
           done;
           let span =
             make_definition_span cursor
-              (Source.span (lookup_token cursor start).span.start (peek cursor).span.start)
+              (Source.make_span (lookup_token cursor start).span.start (peek cursor).span.start)
           in
           if cursor.index < closer_index then advance cursor;
           gather (recover span :: items)

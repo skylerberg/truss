@@ -35,8 +35,10 @@ let sort_in_declared_order lookups path ~variant ~name fields =
   | None -> fields
 
 let make_builtin_shape builtin : Types.type_interface =
-  let element : Types.parameter = { owner = Intrinsic.builtin_path builtin; name = "Element" } in
-  let count : Types.parameter = { owner = Intrinsic.builtin_path builtin; name = "count" } in
+  let element : Types.parameter =
+    { owner = Intrinsic.make_builtin_path builtin; name = "Element" }
+  in
+  let count : Types.parameter = { owner = Intrinsic.make_builtin_path builtin; name = "count" } in
   let type_generics : Types.generic list =
     match builtin with
     | Array ->
@@ -44,11 +46,11 @@ let make_builtin_shape builtin : Types.type_interface =
     | Storage | View -> [ { generic = element; kind = Type_generic [] } ]
     | Shared ->
         let storable : Types.trait_reference =
-          { trait = Well_known.path Storable; trait_arguments = []; associated = [] }
+          { trait = Well_known.make_path Storable; trait_arguments = []; associated = [] }
         in
         [
           {
-            generic = { owner = Intrinsic.builtin_path builtin; name = "Value" };
+            generic = { owner = Intrinsic.make_builtin_path builtin; name = "Value" };
             kind = Type_generic [ storable ];
           };
         ]

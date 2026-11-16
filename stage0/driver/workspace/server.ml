@@ -1,17 +1,17 @@
-let executable () =
+let locate_executable () =
   try Unix.realpath Sys.executable_name with Unix.Unix_error _ -> Sys.executable_name
 
-let stamp path =
+let read_stamp path =
   match Unix.stat path with
   | stat -> Some (Printf.sprintf "%d %h %h %d" stat.st_size stat.st_mtime stat.st_ctime stat.st_ino)
   | exception Unix.Unix_error _ -> None
 
-let cache_root () = Result.bind (Cache.default_directory ()) Cache.make_root
+let make_cache_root () = Result.bind (Cache.locate_default_directory ()) Cache.make_root
 
-let executable_identity () =
-  let path = executable () in
-  let digest_executable () = Blake3.hex_digest (File_system.read path) in
-  match (stamp path, cache_root ()) with
+let compute_executable_identity () =
+  let path = locate_executable () in
+  let digest_executable () = Blake3.hash_to_hex (File_system.read path) in
+  match (read_stamp path, make_cache_root ()) with
   | None, _ -> "unknown"
   | Some _, Error _ -> digest_executable ()
   | Some current, Ok root -> (
@@ -31,7 +31,7 @@ let executable_identity () =
           let identity = digest_executable () in
           let existing =
             List.filter
-              (fun (known, known_stamp, _) -> known <> path && stamp known = Some known_stamp)
+              (fun (known, known_stamp, _) -> known <> path && read_stamp known = Some known_stamp)
               entries
           in
           (try
@@ -44,9 +44,9 @@ let executable_identity () =
            with Sys_error _ -> ());
           identity)
 
-let short identity = if String.length identity > 16 then String.sub identity 0 16 else identity
+let shorten identity = if String.length identity > 16 then String.sub identity 0 16 else identity
 
-let private_directory directory =
+let make_private_directory directory =
   (try Unix.mkdir directory 0o700 with Unix.Unix_error _ -> ());
   match Unix.lstat directory with
   | { st_kind = S_DIR; st_uid; st_perm; _ } when st_uid = Unix.getuid () && st_perm land 0o077 = 0
@@ -55,24 +55,25 @@ let private_directory directory =
   | _ | (exception Unix.Unix_error _) ->
       Error (directory ^ " is not a directory that only this user can use; try --no-server.")
 
-let servers_directory () =
-  Result.bind (cache_root ()) (fun root -> private_directory (Filename.concat root "servers"))
+let make_servers_directory () =
+  Result.bind (make_cache_root ()) (fun root ->
+      make_private_directory (Filename.concat root "servers"))
 
-let server_path directory identity key =
-  Filename.concat directory (short identity ^ "-" ^ Blake3.hex_digest ~digits:16 key)
+let make_server_path directory identity key =
+  Filename.concat directory (shorten identity ^ "-" ^ Blake3.hash_to_hex ~digits:16 key)
 
-let socket_path server_path =
+let make_socket_path server_path =
   let path = server_path ^ ".socket" in
   if String.length path < 100 then Ok path
   else
     Result.map
-      (fun directory -> Filename.concat directory (Blake3.hex_digest ~digits:16 path ^ ".socket"))
-      (private_directory (Printf.sprintf "/tmp/truss-%d" (Unix.getuid ())))
+      (fun directory -> Filename.concat directory (Blake3.hash_to_hex ~digits:16 path ^ ".socket"))
+      (make_private_directory (Printf.sprintf "/tmp/truss-%d" (Unix.getuid ())))
 
-let server_paths identity key =
-  Result.bind (servers_directory ()) (fun directory ->
-      let server_path = server_path directory identity key in
-      Result.map (fun path -> (directory, server_path, path)) (socket_path server_path))
+let make_server_paths identity key =
+  Result.bind (make_servers_directory ()) (fun directory ->
+      let server_path = make_server_path directory identity key in
+      Result.map (fun path -> (directory, server_path, path)) (make_socket_path server_path))
 
 let is_locked path =
   match Unix.openfile path [ O_RDWR; O_CLOEXEC ] 0 with
@@ -95,30 +96,31 @@ let with_lock path work =
 
 let served : string option ref = ref None
 
-let running key =
+let is_running key =
   !served = Some key
   ||
-  match servers_directory () with
-  | Ok directory -> is_locked (server_path directory (executable_identity ()) key ^ ".lock")
+  match make_servers_directory () with
+  | Ok directory ->
+      is_locked (make_server_path directory (compute_executable_identity ()) key ^ ".lock")
   | Error _ -> false
 
-let serving () =
-  match servers_directory () with
+let list_servers () =
+  match make_servers_directory () with
   | Error _ -> []
   | Ok directory ->
-      let prefix = short (executable_identity ()) ^ "-" in
+      let prefix = shorten (compute_executable_identity ()) ^ "-" in
       Array.to_list (Sys.readdir directory)
       |> List.filter_map (fun entry ->
           if String.starts_with ~prefix entry && Filename.check_suffix entry ".key" then
             let path = Filename.concat directory entry in
             match File_system.read path with
-            | key when running key -> Some key
+            | key when is_running key -> Some key
             | _ | (exception Sys_error _) -> None
           else None)
       |> List.sort compare
 
 let wait_until_ended ~key =
-  match server_paths (executable_identity ()) key with
+  match make_server_paths (compute_executable_identity ()) key with
   | Ok (_, server_path, _) -> with_lock (server_path ^ ".lock") ignore
   | Error _ -> ()
 
@@ -140,7 +142,7 @@ let bind server_path path =
 
 let listen ~key =
   Result.bind
-    (server_paths (executable_identity ()) key)
+    (make_server_paths (compute_executable_identity ()) key)
     (fun (_, server_path, path) ->
       with_lock (server_path ^ ".start") (fun () -> bind server_path path))
 
@@ -170,7 +172,7 @@ let serve_on ~key ~identity ~is_alive ~collect ~watcher_descriptors ~propagate ~
         let now = Unix.time () in
         if now -. !last_collection > 60. then begin
           last_collection := now;
-          if executable_identity () <> identity then stopping := true;
+          if compute_executable_identity () <> identity then stopping := true;
           collect ()
         end
     | ready, _, _ when not (List.mem socket ready) -> List.iter propagate ready
@@ -195,7 +197,7 @@ let serve_on ~key ~identity ~is_alive ~collect ~watcher_descriptors ~propagate ~
   (try Sys.remove (server_path ^ ".key") with Sys_error _ -> ());
   Unix.close lock
 
-let inherited_socket () =
+let find_inherited_socket () =
   match Unix.fstat Unix.stdin with
   | { st_kind = S_SOCK; _ } ->
       let socket = Unix.dup ~cloexec:true Unix.stdin in
@@ -207,8 +209,8 @@ let inherited_socket () =
 
 let serve ~key ~is_alive ~collect ~watcher_descriptors ~propagate ~handle ~save ~close =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-  let identity = executable_identity () in
-  match (server_paths identity key, inherited_socket ()) with
+  let identity = compute_executable_identity () in
+  match (make_server_paths identity key, find_inherited_socket ()) with
   | Error message, _ -> prerr_endline message
   | Ok _, None -> prerr_endline "The background process was started without its socket."
   | Ok (_, server_path, path), Some socket ->
@@ -263,7 +265,7 @@ let connect_or_start ~program ~key directory server_path path =
 let call_starting ~program ?(start_server = true) ~key ~progress request =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let ( let* ) = Result.bind in
-  let* directory, server_path, path = server_paths (executable_identity ()) key in
+  let* directory, server_path, path = make_server_paths (compute_executable_identity ()) key in
   let* socket =
     if start_server then connect_or_start ~program ~key directory server_path path
     else Option.to_result ~none:"No background process is running." (connect path)
@@ -291,7 +293,7 @@ let call_starting ~program ?(start_server = true) ~key ~progress request =
          directory."
 
 let call ?start_server ~key ~progress request =
-  call_starting ~program:(executable ()) ?start_server ~key ~progress request
+  call_starting ~program:(locate_executable ()) ?start_server ~key ~progress request
 
 module For_testing = struct
   let call = call_starting

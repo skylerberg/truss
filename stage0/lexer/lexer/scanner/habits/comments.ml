@@ -5,7 +5,7 @@ let lex_line_comment (cursor : Cursor.t) =
   let stop = Cursor.compute_end_of_line cursor start in
   cursor.position <- stop;
   cursor.line_is_blank <- false;
-  Cursor.report cursor ~code:Comment (Source.span start stop) comment_message
+  Cursor.report cursor ~code:Comment (Source.make_span start stop) comment_message
 
 let lex_block_comment (cursor : Cursor.t) =
   let start = cursor.position in
@@ -19,7 +19,7 @@ let lex_block_comment (cursor : Cursor.t) =
     else begin
       if Cursor.is_line_break (Cursor.lookup_char cursor position) && !first_line_break = None then
         first_line_break :=
-          Some (Source.span position (position + Cursor.measure_line_break cursor position));
+          Some (Source.make_span position (position + Cursor.measure_line_break cursor position));
       loop depth (position + 1)
     end
   in
@@ -31,7 +31,7 @@ let lex_block_comment (cursor : Cursor.t) =
   | Some line_break when cursor.first_line_break = None ->
       cursor.first_line_break <- Some line_break
   | _ -> ());
-  Cursor.report cursor ~code:Comment (Source.span start stop)
+  Cursor.report cursor ~code:Comment (Source.make_span start stop)
     (if closed then comment_message
      else comment_message ^ " This comment is never closed, so it runs to the end of the file.")
 
@@ -46,7 +46,7 @@ let report_semicolons (cursor : Cursor.t) ~line_break =
   | first :: _ as semicolons ->
       cursor.semicolons <- [];
       if line_break && cursor.first_line_break = None then
-        cursor.first_line_break <- Some (Source.span first (first + 1));
+        cursor.first_line_break <- Some (Source.make_span first (first + 1));
       List.iter
         (fun start ->
           Cursor.report cursor ~code:Semicolon
@@ -56,7 +56,7 @@ let report_semicolons (cursor : Cursor.t) ~line_break =
                   (if line_break then "Replace the `;` with a line break" else "Remove the `;`")
                   [ Source_text.remove_trivia cursor ~start ~stop:(start + 1) ~line_break ];
               ]
-            (Source.span start (start + 1))
+            (Source.make_span start (start + 1))
             "Statements end at a line break. Truss has no `;`.")
         semicolons
 
@@ -65,7 +65,7 @@ let lex_attribute (cursor : Cursor.t) =
   let stop = Cursor.compute_end_of_line cursor start in
   cursor.position <- stop;
   cursor.line_is_blank <- false;
-  Cursor.report cursor ~code:Attribute (Source.span start stop)
+  Cursor.report cursor ~code:Attribute (Source.make_span start stop)
     "Truss has no attributes. A type lists the traits it derives in a `derives` clause, and a test \
      is a `test` definition."
 

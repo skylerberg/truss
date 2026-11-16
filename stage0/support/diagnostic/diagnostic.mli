@@ -280,16 +280,16 @@ val replace : 'span -> string -> 'span edit
 val insert : 'span -> string -> 'span edit
 val delete : 'span -> 'span edit
 val edit_distance : string -> string -> int
-val closest : string -> string list -> string option
+val find_closest : string -> string list -> string option
 
 type reported
 
-val reported : _ diagnostic -> reported
-val recovered : _ -> reported
+val make_reported : _ diagnostic -> reported
+val make_recovered : _ -> reported
 val map_spans : ('a -> 'b) -> 'a diagnostic -> 'b diagnostic
 val apply_fix : string -> Source.span fix -> string
 val apply_edits : string -> Source.span edit list -> string
-val machine_applicable : t list -> t list
+val list_machine_applicable : t list -> t list
 
 module Collector : sig
   type diagnostic := t
@@ -300,11 +300,11 @@ module Collector : sig
   val to_list : t -> diagnostic list
 end
 
-val shown : t list -> t list
+val select_shown : t list -> t list
 val render : Source.t -> t -> string
 val to_json : Source.t -> t list -> string
 val to_json_object : Source.t -> t -> string
-val json_string : string -> string
+val encode_json_string : string -> string
 val quote : string -> string
 
 module For_testing : sig

@@ -1,4 +1,4 @@
-let module_ = Path.standard_module [ "intrinsic" ]
+let module_ = Path.make_standard_module [ "intrinsic" ]
 
 type builtin =
   | Int8
@@ -46,7 +46,7 @@ let builtins =
     Shared;
   ]
 
-let builtin_name = function
+let show_builtin = function
   | Int8 -> "Int8"
   | Int16 -> "Int16"
   | Int32 -> "Int32"
@@ -68,14 +68,14 @@ let builtin_name = function
   | Handle -> "Handle"
   | Shared -> "Shared"
 
-let builtin_path builtin = Path.Top { module_; name = builtin_name builtin }
+let make_builtin_path builtin = Path.Top { module_; name = show_builtin builtin }
 
 let builtin_of_path = function
   | Path.Top { module_ = path_module; name } when path_module = module_ ->
-      List.find_opt (fun builtin -> builtin_name builtin = name) builtins
+      List.find_opt (fun builtin -> show_builtin builtin = name) builtins
   | _ -> None
 
-let libc_builtin : Libc.scalar -> builtin = function
+let builtin_of_libc : Libc.scalar -> builtin = function
   | UInt8 -> UInt8
   | Int32 -> Int32
   | UInt32 -> UInt32
@@ -175,7 +175,7 @@ type operation =
   | Libc of Libc.function_
   | Libc_number of Libc.number
 
-let primitive = function
+let is_primitive = function
   | Add | Subtract | Multiply | Divide | Remainder | Negate | Wrapping_add | Wrapping_subtract
   | Wrapping_multiply | Add_overflows | Subtract_overflows | Multiply_overflows | Equal | Less
   | Ieee_equal | Ieee_less | Bit_and | Bit_or | Bit_xor | Complement | Shift_left | Shift_right
@@ -278,7 +278,7 @@ let operations =
   @ List.map (fun function_ -> Libc function_) Libc.functions
   @ List.map (fun number -> Libc_number number) Libc.numbers
 
-let operation_name = function
+let show_operation = function
   | Add -> "add"
   | Subtract -> "subtract"
   | Multiply -> "multiply"
@@ -370,19 +370,19 @@ let operation_name = function
   | System_is_architecture Arm64 -> "system_is_arm64"
   | Libc function_ ->
       (if Libc.is_runtime_function function_ then "runtime_" else "libc_")
-      ^ Libc.function_name function_
+      ^ Libc.show_function function_
   | Libc_number number ->
-      let name = Libc.number_name number in
+      let name = Libc.show_number number in
       let from = if String.starts_with ~prefix:"_" name then 1 else 0 in
       "libc_" ^ String.lowercase_ascii (String.sub name from (String.length name - from))
 
-let operation_path operation = Path.Top { module_; name = operation_name operation }
+let make_operation_path operation = Path.Top { module_; name = show_operation operation }
 
 let uses : operation -> Path.t list = function
-  | Shared_update | Shared_key -> [ Well_known.path Tasks ]
+  | Shared_update | Shared_key -> [ Well_known.make_path Tasks ]
   | _ -> []
 
 let operation_of_path = function
   | Path.Top { module_ = path_module; name } when path_module = module_ ->
-      List.find_opt (fun operation -> operation_name operation = name) operations
+      List.find_opt (fun operation -> show_operation operation = name) operations
   | _ -> None

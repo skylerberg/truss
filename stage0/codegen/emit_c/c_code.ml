@@ -181,7 +181,7 @@ let render_call context fc (target : Lowered.target) arguments =
         (String.concat ", " ((value ^ ".f_environment") :: List.map fst arguments))
   | Intrinsic intrinsic -> render_intrinsic context intrinsic arguments
   | Foreign declaration -> (
-      C_values.declare_prototype context declaration.symbol (Libc.prototype declaration);
+      C_values.declare_prototype context declaration.symbol (Libc.render_prototype declaration);
       let cast_arguments =
         try
           List.map2

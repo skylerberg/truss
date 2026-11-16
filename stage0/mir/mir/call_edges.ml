@@ -235,7 +235,7 @@ let list_path_edges (lookups : lookups) path =
     | Some { form = No_code; _ } | None -> []
   in
   List.sort_uniq Path.compare
-    (List.concat_map (list_edges lookups ~package:(Path.package path)) (code @ defaults))
+    (List.concat_map (list_edges lookups ~package:(Path.locate_package path)) (code @ defaults))
 
 let list_implementations (lookups : lookups) ~viewer (path : Path.t) =
   match path with

@@ -322,7 +322,7 @@ let check_machine_fixes_work text =
     let others = List.filter (fun diagnostic -> not (List.memq diagnostic applied)) diagnostics in
     adds_none ~before:others ~after:remaining
   in
-  match Diagnostic.machine_applicable diagnostics with
+  match Diagnostic.list_machine_applicable diagnostics with
   | [] -> ()
   | applied ->
       if not (applies_cleanly applied) then

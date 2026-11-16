@@ -2,16 +2,17 @@ type t = { root : string }
 
 let variable = "TRUSS_REGISTRY"
 
-let current () =
+let find_current_registry () =
   match Sys.getenv_opt variable with Some root when root <> "" -> Some { root } | _ -> None
 
-let package_directory registry name =
-  List.fold_left Filename.concat registry.root (Path.package_parts name)
+let make_package_directory registry name =
+  List.fold_left Filename.concat registry.root (Path.list_package_parts name)
 
-let versions_file registry name = Filename.concat (package_directory registry name) "versions"
+let make_versions_path registry name =
+  Filename.concat (make_package_directory registry name) "versions"
 
-let versions registry name =
-  match In_channel.with_open_bin (versions_file registry name) In_channel.input_lines with
+let list_versions registry name =
+  match In_channel.with_open_bin (make_versions_path registry name) In_channel.input_lines with
   | exception Sys_error _ -> []
   | lines ->
       List.filter_map
@@ -22,33 +23,33 @@ let versions registry name =
           | _ -> None)
         lines
 
-let newest registry name =
+let find_newest registry name =
   List.fold_left
     (fun newest (version, hash) ->
       match newest with
       | Some (other, _) when Version.compare other version >= 0 -> newest
       | _ -> Some (version, hash))
-    None (versions registry name)
+    None (list_versions registry name)
 
 let hash_of registry name version =
   List.find_map
     (fun (listed, hash) -> if Version.compare listed version = 0 then Some hash else None)
-    (versions registry name)
+    (list_versions registry name)
 
-let version_directory registry name version =
-  Filename.concat (package_directory registry name) (Version.show version)
+let make_version_directory registry name version =
+  Filename.concat (make_package_directory registry name) (Version.show version)
 
 let add registry name version files =
-  File_system.write_directory (version_directory registry name version) files;
-  Out_channel.with_open_gen [ Open_append; Open_creat; Open_binary ]
-    0o644 (versions_file registry name) (fun channel ->
+  File_system.write_directory (make_version_directory registry name version) files;
+  Out_channel.with_open_gen [ Open_append; Open_creat; Open_binary ] 0o644
+    (make_versions_path registry name) (fun channel ->
       Printf.fprintf channel "%s %s\n" (Version.show version) (Content.hash files))
 
 let fetch registry ~into name version ~hash =
   let target = Filename.concat into hash in
   if Sys.file_exists target then Ok target
   else
-    let files = Content.all_files (version_directory registry name version) in
+    let files = Content.list_all_files (make_version_directory registry name version) in
     if files = [] then
       Error
         (Printf.sprintf "the registry at %s has no `%s` %s" registry.root (Path.show_package name)
