@@ -110,6 +110,13 @@ let find_problem parent child ~right (operand : expression) =
   | _ when bitwise parent || bitwise child -> Some Mixed_bitwise
   | _ -> Some (Mixed "These operators need parentheses to say which applies first.")
 
+let wrapped cursor ?context (whole : expression) last edits =
+  match (context, last) with
+  | Some (outer, whole_is_right), Some last
+    when find_problem outer last ~right:whole_is_right whole <> None ->
+      edits @ parentheses cursor whole.id whole.id
+  | _ -> edits
+
 let grouping_fix cursor ?context ~(whole : expression) ~(operand : expression)
     (first_operator, second_operator, third_operator) ~parsed grouping =
   let edits =
@@ -118,18 +125,12 @@ let grouping_fix cursor ?context ~(whole : expression) ~(operand : expression)
     | Right_first -> parentheses cursor second_operator third_operator
   in
   let last = if grouping = parsed then group whole else group operand in
-  let wrap =
-    match (context, last) with
-    | Some (outer, right), Some last -> find_problem outer last ~right whole <> None
-    | _ -> false
-  in
   let fallback =
     match grouping with
     | Left_first -> "Group the first two operands"
     | Right_first -> "Group the last two operands"
   in
-  fix cursor ~fallback whole.id
-    (if wrap then edits @ parentheses cursor whole.id whole.id else edits)
+  fix cursor ~fallback whole.id (wrapped cursor ?context whole last edits)
 
 let rec first_operand (value : expression) =
   match value.kind with
@@ -216,11 +217,12 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
             | Some middle_spelling ->
                 [
                   fix cursor ~fallback:"Join the comparisons with `&&`" whole.id
-                    [
-                      Diagnostic.insert
-                        (Source.zero_width middle_span.stop)
-                        (" && " ^ middle_spelling);
-                    ];
+                    (wrapped cursor ?context whole (Some And_group)
+                       [
+                         Diagnostic.insert
+                           (Source.zero_width middle_span.stop)
+                           (" && " ^ middle_spelling);
+                       ]);
                 ]
             | None -> [])
         | _ -> []
