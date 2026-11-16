@@ -436,9 +436,7 @@ let rvalue builder (value : Mir.rvalue) : held =
                      Borrow_of { root = Local capture.local; steps = [] })
                    captures;
           })
-  | Function_value _ | Value_parameter _ | Conditional _ | Cases _ | Connective _ | Specification _
-    ->
-      nothing
+  | Function_value _ | Value_parameter _ | Specification _ -> nothing
 
 let bound_value builder (local : Mir.local) (core : Core.local) (value : Mir.rvalue) origin ~is_var
     =

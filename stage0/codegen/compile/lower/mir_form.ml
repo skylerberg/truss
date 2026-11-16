@@ -1076,7 +1076,7 @@ and lower_statement st (statement : Mir.Graph.statement) =
       call_into st call (place st destination) ~origin
   | Live _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ()
   | Dead locals -> List.iter (dead st) locals
-  | Assert { condition; _ } ->
+  | Assert condition ->
       let holds = value st condition in
       let failed = block st.builder and after = block st.builder in
       Emit_c.Builder.branch st.builder holds ~yes:after ~no:failed;
@@ -1218,9 +1218,7 @@ and reads (value : Mir.rvalue) local =
   | Construct { fields; _ } ->
       List.exists (fun (_, field) -> Option.fold ~none:false ~some:in_operand field) fields
   | Is_variant { place; _ } -> in_place place
-  | Function_value _ | Lambda _ | Value_parameter _ | Conditional _ | Cases _ | Connective _
-  | Specification _ ->
-      false
+  | Function_value _ | Lambda _ | Value_parameter _ | Specification _ -> false
 
 and alias st local (source : Lowered.place) ~writable =
   let ty = ground st (info st local).type_ in
@@ -1352,8 +1350,6 @@ and into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~or
             lambda.parameters parameter_places;
           lower_body inner (Option.get inner.frame.mir))
         destination
-  | Conditional _ | Cases _ | Connective _ ->
-      bug "a value that chooses between blocks, in a control-flow graph"
   | Specification _ -> bug "a specification's expression in code that runs"
 
 and field_default_place st ty ~variant ~field =

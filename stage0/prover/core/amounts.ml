@@ -22,7 +22,7 @@ let holds_specification (formula : Mir.formula) is_one =
   let holds = ref false in
   let visit (statement : Mir.statement) =
     match statement.kind with
-    | Assign { value = Specification value; _ } when is_one value -> holds := true
+    | Basic (Assign { value = Specification value; _ }) when is_one value -> holds := true
     | _ -> ()
   in
   Mir.iter_formula visit formula;

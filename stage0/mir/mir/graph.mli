@@ -3,8 +3,7 @@ open Tree
 type block = int
 type early_exit = { resume : block; returned : local option }
 type branch = { entry : block; blocks : block list }
-type in_graph = In_graph
-type statement = { kind : in_graph statement_kind; origin : Core.origin }
+type statement = { kind : basic; origin : Core.origin }
 
 type terminator =
   | Goto of block

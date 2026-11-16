@@ -147,20 +147,21 @@ let edges (lookups : lookups) ~package (code : Tree.t) =
   in
   let rec statement (locals : Tree.local_info array) (statement : Tree.statement) =
     match statement.kind with
-    | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
+    | Basic (Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ }) ->
         callee call.callee;
         invariant_checked call
     | For { iteration = Pull { next; _ }; _ } -> callee next
-    | Assign { value = Function_value { path; _ }; _ } -> add [ path ]
-    | Assign { value = To_any { value; trait; _ }; _ } ->
+    | Basic (Assign { value = Function_value { path; _ }; _ }) -> add [ path ]
+    | Basic (Assign { value = To_any { value; trait; _ }; _ }) ->
         uses_impls
           (impls_for (traits_with_required lookups.interface trait.trait) (Walk.operand_type value))
-    | Assign
-        {
-          target = { root = Local local; projections = [] };
-          value = Construct { variant; fields };
-          _;
-        } -> (
+    | Basic
+        (Assign
+           {
+             target = { root = Local local; projections = [] };
+             value = Construct { variant; fields };
+             _;
+           }) -> (
         match head_of locals.(local).type_ with
         | Some type_ ->
             let omitted =

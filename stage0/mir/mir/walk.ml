@@ -1,25 +1,26 @@
 open Tree
 
-let nested_blocks_of (type form) (kind : form statement_kind) : block list =
-  match kind with
-  | Assign { value = Specification (Quantified { matches; body; _ }); _ } -> [ matches; body ]
-  | Assign { value = Cases cases; _ } ->
+let choice_blocks = function
+  | Cases cases ->
       List.concat_map
         (fun (case : case) -> (case.tests :: Option.to_list case.guard) @ [ case.value ])
         cases
-  | Assign { value = Conditional { then_; else_; _ }; _ } -> [ then_; else_ ]
-  | Assign { value = Connective { right; _ }; _ } -> [ right ]
-  | Assert { bit_vector = Some { code; _ }; _ } -> [ code ]
+  | Conditional { then_; else_; _ } -> [ then_; else_ ]
+  | Connective { right; _ } -> [ right ]
+
+let nested_blocks_of (kind : statement_kind) : block list =
+  match kind with
+  | Basic (Assign { value = Specification (Quantified { matches; body; _ }); _ }) ->
+      [ matches; body ]
+  | Assert_by_bit_vector { code; _ } -> [ code ]
+  | Choose { choice; _ } -> choice_blocks choice
   | While { condition; body; failed; _ } ->
       [ condition; body; { statements = failed; value = None } ]
   | For { lent; body; _ } ->
       Option.to_list (Option.map (fun (lent : lent_element) -> lent.count) lent) @ [ body ]
   | Fork { branches; _ } -> branches
   | Resume { exits; _ } -> List.map (fun (exit : early_exit) -> exit.resumed) exits
-  | Assign _ | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
-  | Provide _ | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _
-  | Yield _ | Jump _ ->
-      []
+  | Basic _ | Yield _ | Jump _ -> []
 
 let nested_blocks (statement : statement) = nested_blocks_of statement.kind
 
@@ -75,9 +76,6 @@ let rvalue_places visit rvalue =
         | Over_collection collection -> operand collection)
   in
   match rvalue with
-  | Cases _ -> ()
-  | Conditional { condition; _ } -> operand condition
-  | Connective { left; _ } -> operand left
   | Operand value | Not value | Convert { value; _ } | To_any { value; _ } | Copy value ->
       operand value
   | Operation { operands; _ } | Array operands -> List.iter operand operands
@@ -94,17 +92,18 @@ let rec iter_places_read visit (block : block) =
   List.iter (fun (statement : statement) -> statement_places visit statement.kind) block.statements;
   Option.iter (operand_place visit) block.value
 
-and statement_places : type form. (place -> unit) -> form statement_kind -> unit =
- fun visit kind ->
+and statement_places visit (kind : statement_kind) =
   (match kind with
-  | Assign { value; _ } -> rvalue_places visit value
-  | Call { call; _ } | Lend { call; _ } | Template { call; _ } -> call_places visit call
-  | Slice { base; call; _ } ->
+  | Basic (Assign { value; _ }) -> rvalue_places visit value
+  | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ }) -> call_places visit call
+  | Basic (Slice { base; call; _ }) ->
       visit base;
       call_places visit call
-  | Assert { condition = value; _ } | Echo value | Loan_start { borrowed = value; _ } ->
+  | Basic (Assert value | Echo value | Loan_start { borrowed = value; _ })
+  | Assert_by_bit_vector { condition = value; _ }
+  | Choose { choice = Conditional { condition = value; _ } | Connective { left = value; _ }; _ } ->
       operand_place visit value
-  | Provide { provided; _ } ->
+  | Basic (Provide { provided; _ }) ->
       List.iter (fun (provided : provided) -> operand_place visit provided.value) provided
   | For { iteration; _ } -> iteration_places visit iteration
   | Yield { part; _ } -> yielded_places visit part
@@ -112,8 +111,9 @@ and statement_places : type form. (place -> unit) -> form statement_kind -> unit
   | Jump (Cancel { returned; _ }) ->
       Option.iter (fun (value, _) -> operand_place visit value) returned
   | Jump (Break | Continue | Unreachable | Written_unreachable | Todo)
-  | Live _ | Dead _ | Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ | While _
-  | Fork _ | Resume _ ->
+  | Basic (Live _ | Dead _ | Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _)
+  | Choose { choice = Cases _; _ }
+  | While _ | Fork _ | Resume _ ->
       ());
   List.iter (iter_places_read visit) (nested_blocks_of kind)
 
@@ -122,8 +122,8 @@ let rec visit_block visit locals (block : block) =
     (fun (statement : statement) ->
       visit locals statement;
       (match statement.kind with
-      | Ghost_assert { condition; _ } -> visit_formula visit condition
-      | Proof code -> visit_code visit code
+      | Basic (Ghost_assert { condition; _ }) -> visit_formula visit condition
+      | Basic (Proof code) -> visit_code visit code
       | While { loop; _ } | For { loop; _ } -> visit_loop visit loop
       | _ -> ());
       List.iter (visit_block visit locals) (nested_blocks statement))

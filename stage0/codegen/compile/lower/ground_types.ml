@@ -114,50 +114,23 @@ and walk_body walk substitution (body : Mir.Graph.body) =
       walk_terminator walk substitution basic.terminator)
     body.blocks
 
-and walk_statement : type form.
-    walk -> Types.substitution -> Mir.Graph.body -> form Mir.statement_kind -> unit =
- fun walk substitution body kind ->
-  let block = walk_block walk substitution body in
-  match kind with
+and walk_statement walk substitution body (basic : Mir.basic) =
+  match basic with
   | Assign { target; value; _ } -> walk_rvalue walk substitution body target value
   | Call { call; _ } | Slice { call; _ } | Template { call; _ } -> walk_call walk substitution call
   | Lend { call; _ } ->
       walk_call walk substitution call;
       walk_forwarded walk substitution call
-  | Assert { condition; bit_vector } ->
-      walk_operand walk substitution condition;
-      Option.iter (fun (asserted : Mir.asserted) -> block asserted.code) bit_vector
-  | Echo operand -> walk_operand walk substitution operand
+  | Assert condition | Echo condition -> walk_operand walk substitution condition
   | Provide { provided; _ } ->
       List.iter
         (fun (provided : Mir.provided) ->
           add_type walk substitution provided.type_;
           walk_operand walk substitution provided.value)
         provided
-  | While { condition; body = loop_body; failed; _ } ->
-      block condition;
-      block loop_body;
-      block { statements = failed; value = None }
-  | For { iteration; lent; body = loop_body; _ } ->
-      walk_iteration walk substitution iteration;
-      Option.iter (fun (lent : Mir.lent_element) -> block lent.count) lent;
-      block loop_body
-  | Fork { branches; _ } -> List.iter block branches
-  | Resume { exits; _ } -> List.iter (fun (exit : Mir.early_exit) -> block exit.resumed) exits
-  | Yield { part; _ } -> walk_yielded walk substitution part
-  | Jump (Return operand) -> Option.iter (walk_operand walk substitution) operand
-  | Jump (Cancel { returned; _ }) ->
-      Option.iter (fun (operand, _) -> walk_operand walk substitution operand) returned
-  | Jump (Break | Continue | Unreachable | Written_unreachable | Todo)
   | Live _ | Dead _ | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _
     ->
       ()
-
-and walk_block walk substitution body (block : Mir.block) =
-  List.iter
-    (fun (statement : Mir.statement) -> walk_statement walk substitution body statement.kind)
-    block.statements;
-  Option.iter (walk_operand walk substitution) block.value
 
 and walk_terminator walk substitution (terminator : Mir.Graph.terminator) =
   (match terminator with
@@ -200,7 +173,6 @@ and walk_operand walk substitution (operand : Mir.operand) =
   | Use _ | Borrow _ | Take _ | Constant _ -> ()
 
 and walk_rvalue walk substitution body (target : Mir.place) (value : Mir.rvalue) =
-  let block = walk_block walk substitution body in
   match value with
   | Operand operand | Not operand | Copy operand -> walk_operand walk substitution operand
   | Operation { operation; type_arguments; operands } ->
@@ -222,20 +194,6 @@ and walk_rvalue walk substitution body (target : Mir.place) (value : Mir.rvalue)
       walk_callee walk substitution (Function { path; type_arguments })
   | Lambda { captures; _ } ->
       List.iter (fun (capture : Mir.capture) -> add_type walk substitution capture.type_) captures
-  | Conditional { condition; then_; else_; _ } ->
-      walk_operand walk substitution condition;
-      block then_;
-      block else_
-  | Cases cases ->
-      List.iter
-        (fun (case : Mir.case) ->
-          block case.tests;
-          Option.iter block case.guard;
-          block case.value)
-        cases
-  | Connective { left; right; _ } ->
-      walk_operand walk substitution left;
-      block right
 
 and place_type walk substitution (body : Mir.Graph.body) (place : Mir.place) =
   let root =

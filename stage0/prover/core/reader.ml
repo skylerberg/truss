@@ -272,15 +272,15 @@ let changes ?(also = []) run frame (blocks : Mir.block list) : changed =
     List.iter
       (fun (statement : Mir.statement) ->
         (match statement.kind with
-        | Assign { target; value = Operand (Borrow { place; mode = Types.Mut; _ }); _ } ->
+        | Basic (Assign { target; value = Operand (Borrow { place; mode = Types.Mut; _ }); _ }) ->
             note target;
             note place
-        | Assign { target; _ } -> assigned target
-        | Call { destination; call } ->
+        | Basic (Assign { target; _ }) | Choose { target; _ } -> assigned target
+        | Basic (Call { destination; call }) ->
             Option.iter assigned destination;
             passed call
-        | Lend { call; _ } -> passed call
-        | Slice { destination; call; _ } | Template { destination; call; _ } ->
+        | Basic (Lend { call; _ }) -> passed call
+        | Basic (Slice { destination; call; _ } | Template { destination; call; _ }) ->
             assigned destination;
             passed call
         | For { iteration = Pull { cursor; _ }; _ } -> note cursor
@@ -763,8 +763,6 @@ let rec read_rvalue context frame run (value : Mir.rvalue) ~(site : Invocation.s
               }
       in
       quantifier_value context frame run ~span quantifier range ~parameter ~matches ~body
-  | Conditional _ | Cases _ | Connective _ ->
-      bug "a value that chooses between blocks, read as one that holds none"
 
 and quantifier_value context frame run ~span quantifier range ~parameter ~(matches : Mir.block)
     ~(body : Mir.block) =
@@ -827,8 +825,8 @@ and either context ~outer ~condition (entered, read) (entered_otherwise, otherwi
             (entered_otherwise, after_otherwise),
           Logic.ite condition value value_otherwise )
 
-and chosen_value context frame run (value : Mir.rvalue) =
-  match value with
+and chosen_value context frame run (choice : Mir.choice) =
+  match choice with
   | Conditional { condition; then_; else_; if_condition } ->
       let test = read_operand context frame run condition in
       (match if_condition with
@@ -886,150 +884,12 @@ and chosen_value context frame run (value : Mir.rvalue) =
               | Or -> Logic.( ||| ) left right
               | Implies -> Logic.( ==> ) left right )
       | None -> Some (restrict frame (Logic.not_ reads_right), Logic.Boolean (connective <> And)))
-  | _ -> bug "a value that holds no block, read as one that chooses between blocks"
 
 and read_statement context frame run (statement : Mir.statement) =
   let span = span_of frame.source statement.origin in
   match statement.kind with
-  | Assign
-      {
-        target = { root = Local local; projections = [] };
-        value = Operand (Borrow { place; mode = Mut; _ });
-        _;
-      } ->
-      let key = local_key run local in
-      Some
-        {
-          frame with
-          aliases = Locals.add key [ (Logic.Boolean true, place) ] frame.aliases;
-          types = Locals.add key (substituted context frame run.infos.(local).type_) frame.types;
-        }
-  | Assign { target; value = Lambda { is_argument = true; _ }; _ } ->
-      Some
-        (write_place context frame run target
-           (arrive context frame "lambda" (place_type context frame run target)))
-  | Assign { target; value; node } ->
-      let copied =
-        let values =
-          match value with
-          | Operand copied -> [ copied ]
-          | Conditional { then_; else_; _ } -> List.filter_map Fun.id [ then_.value; else_.value ]
-          | Cases cases -> List.filter_map (fun (case : Mir.case) -> case.value.value) cases
-          | _ -> []
-        in
-        match List.sort_uniq compare (List.map whole_local values) with
-        | [ Some source ] -> Some source
-        | _ -> None
-      in
-      let read =
-        match value with
-        | Conditional _ | Cases _ | Connective _ -> chosen_value context frame run value
-        | _ ->
-            Some
-              (read_rvalue context frame run value
-                 ~site:
-                   {
-                     id = Option.value node ~default:(-1);
-                     origin = statement.origin;
-                     type_ = target_type context frame run target;
-                   })
-      in
-      let* frame, term = read in
-      (match target.root with
-      | Local local -> (
-          match run.infos.(local).kind with
-          | Source { local = (Named _ | Synthetic _) as core; name = Some name; _ }
-            when frame.source.key = Some context.home ->
-              Hashtbl.replace context.local_names core name
-          | Source _ | Temporary | Lent _ -> ())
-      | Constant _ -> ());
-      let copied_slice =
-        Option.bind copied (fun source -> Locals.find_opt (local_key run source) frame.slices)
-      in
-      let written = write_place context frame run target term in
-      Some
-        (match target with
-        | { root = Local local; projections = [] } ->
-            let key = local_key run local in
-            {
-              written with
-              slices =
-                (match copied_slice with
-                | Some held -> Locals.add key held written.slices
-                | None when Types.is_well_known Slice run.infos.(local).type_ ->
-                    Locals.add key Unknown_slice written.slices
-                | None -> Locals.remove key written.slices);
-            }
-        | _ -> written)
-  | Call { destination; call } -> (
-      let result_type =
-        match destination with
-        | Some destination -> target_type context frame run destination
-        | None -> Types.unit
-      in
-      match read_call context frame run call ~result_type with
-      | Some (after, term) -> (
-          match destination with
-          | Some ({ root = Local local; projections = [] } as destination)
-            when Types.is_well_known Slice run.infos.(local).type_ ->
-              let written = write_place context after run destination term in
-              Some
-                {
-                  written with
-                  slices = Locals.add (local_key run local) Unknown_slice written.slices;
-                }
-          | Some destination -> Some (write_place context after run destination term)
-          | None -> Some after)
-      | None -> None)
-  | Live _ | Loan_start _ | Loan_end _ | Echo _ -> Some frame
-  | Dead locals ->
-      let frame =
-        List.fold_left
-          (fun (frame : frame) local ->
-            match Locals.find_opt (local_key run local) frame.lends with
-            | Some lent ->
-                let final =
-                  read_place context
-                    { frame with makes_obligations = false }
-                    run
-                    { root = Local local; projections = [] }
-                in
-                List.fold_left
-                  (fun frame (lent_on, write_back) ->
-                    match lent_on with
-                    | Logic.Boolean true -> write_back frame final
-                    | _ ->
-                        let lent = restrict frame lent_on
-                        and not_lent = restrict frame (Logic.not_ lent_on) in
-                        fst
-                          (merge context ~condition:frame.condition
-                             [
-                               (lent_on, write_back lent final, None);
-                               (Logic.not_ lent_on, not_lent, None);
-                             ]))
-                  frame lent
-            | None -> frame)
-          frame (List.rev locals)
-      in
-      let without map =
-        List.fold_left (fun map local -> Locals.remove (local_key run local) map) map locals
-      in
-      Some
-        {
-          frame with
-          locals = without frame.locals;
-          aliases = without frame.aliases;
-          slices = without frame.slices;
-          lends = without frame.lends;
-        }
-  | Lend { part; call } -> read_lend context frame run part call
-  | Assert { condition; bit_vector = None } ->
-      assertion context frame
-        ~origin:(Option.value (operand_origin condition) ~default:statement.origin)
-        ~bit_vector:None
-        (read_operand context frame run condition);
-      Some frame
-  | Assert { condition; bit_vector = Some { names; code } } ->
+  | Basic basic -> read_basic context frame run statement ~span basic
+  | Assert_by_bit_vector { condition; names; code } ->
       let named =
         List.map
           (fun local ->
@@ -1044,101 +904,14 @@ and read_statement context frame run (statement : Mir.statement) =
         ~bit_vector:(Some (named, fun isolated -> snd (read_value context isolated run code)))
         term;
       Some frame
-  | Ghost_assert { condition; by_bit_vector } ->
-      let frame, term = specification_value context frame condition in
-      let named () =
-        List.map
-          (fun parameter ->
-            match condition.locals.(parameter) with
-            | { kind = Source { local; _ }; type_; _ } -> (local, type_)
-            | { kind = Temporary | Lent _; _ } -> bug "an assertion's formula that takes no local")
-          condition.parameters
+  | Choose { target; choice } ->
+      let copied =
+        match choice with
+        | Conditional { then_; else_; _ } -> List.filter_map Fun.id [ then_.value; else_.value ]
+        | Cases cases -> List.filter_map (fun (case : Mir.case) -> case.value.value) cases
+        | Connective _ -> []
       in
-      assertion context frame ~origin:condition.origin
-        ~bit_vector:
-          (if by_bit_vector then
-             Some
-               ( named (),
-                 fun isolated -> snd (context.formula_term isolated condition ~arguments:[]) )
-           else None)
-        term;
-      Some frame
-  | Proof code -> Some (restrict frame (Logic.not_ (ghost_code context frame code)))
-  | Matched { patterns } ->
-      if frame.makes_obligations then
-        context.decisions <-
-          ( Printf.sprintf "the arm `%s` is taken"
-              (String.concat ", " (List.map (text_of frame.source) patterns)),
-            None,
-            frame.condition,
-            Logic.Boolean true )
-          :: context.decisions;
-      Some frame
-  | Slice { destination; base; call } ->
-      let values = call_values context frame run (invocation_of call ~lends:None) call.arguments in
-      let argument position =
-        Option.map
-          (fun (passed : passed) -> passed.term)
-          (List.find_opt (fun (passed : passed) -> passed.position = position) values)
-      in
-      let low = Option.value (argument 1) ~default:(Logic.int 0) in
-      let site : Invocation.site =
-        { id = call.node; origin = call.origin; type_ = target_type context frame run destination }
-      in
-      let base_type = place_type context frame run base in
-      let collection = read_place context frame run base in
-      let frame, viewed, low, high =
-        apply_slice context frame site ~base_type ~collection ~low ~high:(argument 2)
-      in
-      let collection = expanded frame run base in
-      let written = write_place context frame run destination viewed in
-      Some
-        (match destination with
-        | { root = Local local; projections = [] } ->
-            {
-              written with
-              slices =
-                Locals.add (local_key run local)
-                  (Slices
-                     [
-                       (Logic.Boolean true, { made_at = site; collection; start = low; stop = high });
-                     ])
-                  written.slices;
-            }
-        | _ -> written)
-  | Template { destination; literals; call } -> (
-      match (call.callee, call.arguments) with
-      | Trait_method { trait; name; receiver; evidence; _ }, [ Passed { value = template; _ } ] ->
-          let frame, tagged =
-            apply_template context frame
-              {
-                id = call.node;
-                origin = call.origin;
-                type_ = target_type context frame run destination;
-              }
-              ~trait ~name ~receiver ~evidence ~literals
-              (read_operand context frame run template)
-          in
-          Some (write_place context frame run destination tagged)
-      | _ -> unsupported span "a tagged template whose tag the prover cannot read")
-  | Provide { provided; _ } ->
-      Hashtbl.replace run.provides statement.origin provided;
-      Some frame
-  | Provide_end -> (
-      match Hashtbl.find_opt run.provides statement.origin with
-      | Some provided ->
-          Some
-            (List.fold_left
-               (fun frame (implementation : Mir.provided) ->
-                 match (implementation.mode, implementation.value) with
-                 | Types.Mut, Borrow { place; _ } ->
-                     let root = { (expanded frame run place) with Mir.projections = [] } in
-                     refreshed context frame
-                       (place_type context frame run root)
-                       (passed_place_of context run root)
-                 | _ -> frame)
-               frame provided)
-      | None -> Some frame)
+      write_assignment context run target ~copied (chosen_value context frame run choice)
   | Yield { mode; part } ->
       let origin = statement.origin in
       let frame, handed = yielded_value context frame run ~origin part in
@@ -1277,7 +1050,7 @@ and read_statement context frame run (statement : Mir.statement) =
               element,
               List.filter
                 (fun (statement : Mir.statement) ->
-                  match statement.kind with Lend _ -> false | _ -> true)
+                  match statement.kind with Basic (Lend _) -> false | _ -> true)
                 (from positioned bound) )
         | None, Range { start; stop; inclusive } ->
             ( Range_of_integers
@@ -1380,7 +1153,7 @@ and read_statement context frame run (statement : Mir.statement) =
                                   ~default:frame
                               in
                               match statement.kind with
-                              | Lend { part; _ } when part = lent.element -> frame
+                              | Basic (Lend { part; _ }) when part = lent.element -> frame
                               | _ -> lend frame rest)
                         in
                         without_costs context (fun () ->
@@ -1394,6 +1167,234 @@ and read_statement context frame run (statement : Mir.statement) =
         }
       in
       for_ context frame for_loop
+
+and read_basic context frame run (statement : Mir.statement) ~span (basic : Mir.basic) =
+  match basic with
+  | Assign
+      {
+        target = { root = Local local; projections = [] };
+        value = Operand (Borrow { place; mode = Mut; _ });
+        _;
+      } ->
+      let key = local_key run local in
+      Some
+        {
+          frame with
+          aliases = Locals.add key [ (Logic.Boolean true, place) ] frame.aliases;
+          types = Locals.add key (substituted context frame run.infos.(local).type_) frame.types;
+        }
+  | Assign { target; value = Lambda { is_argument = true; _ }; _ } ->
+      Some
+        (write_place context frame run target
+           (arrive context frame "lambda" (place_type context frame run target)))
+  | Assign { target; value; node } ->
+      write_assignment context run target
+        ~copied:(match value with Operand copied -> [ copied ] | _ -> [])
+        (Some
+           (read_rvalue context frame run value
+              ~site:
+                {
+                  id = Option.value node ~default:(-1);
+                  origin = statement.origin;
+                  type_ = target_type context frame run target;
+                }))
+  | Call { destination; call } -> (
+      let result_type =
+        match destination with
+        | Some destination -> target_type context frame run destination
+        | None -> Types.unit
+      in
+      match read_call context frame run call ~result_type with
+      | Some (after, term) -> (
+          match destination with
+          | Some ({ root = Local local; projections = [] } as destination)
+            when Types.is_well_known Slice run.infos.(local).type_ ->
+              let written = write_place context after run destination term in
+              Some
+                {
+                  written with
+                  slices = Locals.add (local_key run local) Unknown_slice written.slices;
+                }
+          | Some destination -> Some (write_place context after run destination term)
+          | None -> Some after)
+      | None -> None)
+  | Live _ | Loan_start _ | Loan_end _ | Echo _ -> Some frame
+  | Dead locals ->
+      let frame =
+        List.fold_left
+          (fun (frame : frame) local ->
+            match Locals.find_opt (local_key run local) frame.lends with
+            | Some lent ->
+                let final =
+                  read_place context
+                    { frame with makes_obligations = false }
+                    run
+                    { root = Local local; projections = [] }
+                in
+                List.fold_left
+                  (fun frame (lent_on, write_back) ->
+                    match lent_on with
+                    | Logic.Boolean true -> write_back frame final
+                    | _ ->
+                        let lent = restrict frame lent_on
+                        and not_lent = restrict frame (Logic.not_ lent_on) in
+                        fst
+                          (merge context ~condition:frame.condition
+                             [
+                               (lent_on, write_back lent final, None);
+                               (Logic.not_ lent_on, not_lent, None);
+                             ]))
+                  frame lent
+            | None -> frame)
+          frame (List.rev locals)
+      in
+      let without map =
+        List.fold_left (fun map local -> Locals.remove (local_key run local) map) map locals
+      in
+      Some
+        {
+          frame with
+          locals = without frame.locals;
+          aliases = without frame.aliases;
+          slices = without frame.slices;
+          lends = without frame.lends;
+        }
+  | Lend { part; call } -> read_lend context frame run part call
+  | Assert condition ->
+      assertion context frame
+        ~origin:(Option.value (operand_origin condition) ~default:statement.origin)
+        ~bit_vector:None
+        (read_operand context frame run condition);
+      Some frame
+  | Ghost_assert { condition; by_bit_vector } ->
+      let frame, term = specification_value context frame condition in
+      let named () =
+        List.map
+          (fun parameter ->
+            match condition.locals.(parameter) with
+            | { kind = Source { local; _ }; type_; _ } -> (local, type_)
+            | { kind = Temporary | Lent _; _ } -> bug "an assertion's formula that takes no local")
+          condition.parameters
+      in
+      assertion context frame ~origin:condition.origin
+        ~bit_vector:
+          (if by_bit_vector then
+             Some
+               ( named (),
+                 fun isolated -> snd (context.formula_term isolated condition ~arguments:[]) )
+           else None)
+        term;
+      Some frame
+  | Proof code -> Some (restrict frame (Logic.not_ (ghost_code context frame code)))
+  | Matched { patterns } ->
+      if frame.makes_obligations then
+        context.decisions <-
+          ( Printf.sprintf "the arm `%s` is taken"
+              (String.concat ", " (List.map (text_of frame.source) patterns)),
+            None,
+            frame.condition,
+            Logic.Boolean true )
+          :: context.decisions;
+      Some frame
+  | Slice { destination; base; call } ->
+      let values = call_values context frame run (invocation_of call ~lends:None) call.arguments in
+      let argument position =
+        Option.map
+          (fun (passed : passed) -> passed.term)
+          (List.find_opt (fun (passed : passed) -> passed.position = position) values)
+      in
+      let low = Option.value (argument 1) ~default:(Logic.int 0) in
+      let site : Invocation.site =
+        { id = call.node; origin = call.origin; type_ = target_type context frame run destination }
+      in
+      let base_type = place_type context frame run base in
+      let collection = read_place context frame run base in
+      let frame, viewed, low, high =
+        apply_slice context frame site ~base_type ~collection ~low ~high:(argument 2)
+      in
+      let collection = expanded frame run base in
+      let written = write_place context frame run destination viewed in
+      Some
+        (match destination with
+        | { root = Local local; projections = [] } ->
+            {
+              written with
+              slices =
+                Locals.add (local_key run local)
+                  (Slices
+                     [
+                       (Logic.Boolean true, { made_at = site; collection; start = low; stop = high });
+                     ])
+                  written.slices;
+            }
+        | _ -> written)
+  | Template { destination; literals; call } -> (
+      match (call.callee, call.arguments) with
+      | Trait_method { trait; name; receiver; evidence; _ }, [ Passed { value = template; _ } ] ->
+          let frame, tagged =
+            apply_template context frame
+              {
+                id = call.node;
+                origin = call.origin;
+                type_ = target_type context frame run destination;
+              }
+              ~trait ~name ~receiver ~evidence ~literals
+              (read_operand context frame run template)
+          in
+          Some (write_place context frame run destination tagged)
+      | _ -> unsupported span "a tagged template whose tag the prover cannot read")
+  | Provide { provided; _ } ->
+      Hashtbl.replace run.provides statement.origin provided;
+      Some frame
+  | Provide_end -> (
+      match Hashtbl.find_opt run.provides statement.origin with
+      | Some provided ->
+          Some
+            (List.fold_left
+               (fun frame (implementation : Mir.provided) ->
+                 match (implementation.mode, implementation.value) with
+                 | Types.Mut, Borrow { place; _ } ->
+                     let root = { (expanded frame run place) with Mir.projections = [] } in
+                     refreshed context frame
+                       (place_type context frame run root)
+                       (passed_place_of context run root)
+                 | _ -> frame)
+               frame provided)
+      | None -> Some frame)
+
+and write_assignment context run (target : Mir.place) ~(copied : Mir.operand list) read =
+  let copied =
+    match List.sort_uniq compare (List.map whole_local copied) with
+    | [ Some source ] -> Some source
+    | _ -> None
+  in
+  let* frame, term = read in
+  (match target.root with
+  | Local local -> (
+      match run.infos.(local).kind with
+      | Source { local = (Named _ | Synthetic _) as core; name = Some name; _ }
+        when frame.source.key = Some context.home ->
+          Hashtbl.replace context.local_names core name
+      | Source _ | Temporary | Lent _ -> ())
+  | Constant _ -> ());
+  let copied_slice =
+    Option.bind copied (fun source -> Locals.find_opt (local_key run source) frame.slices)
+  in
+  let written = write_place context frame run target term in
+  Some
+    (match target with
+    | { root = Local local; projections = [] } ->
+        let key = local_key run local in
+        {
+          written with
+          slices =
+            (match copied_slice with
+            | Some held -> Locals.add key held written.slices
+            | None when Types.is_well_known Slice run.infos.(local).type_ ->
+                Locals.add key Unknown_slice written.slices
+            | None -> Locals.remove key written.slices);
+        }
+    | _ -> written)
 
 let new_run ~in_formula ~locals ~lambdas =
   { infos = locals; lambdas; in_formula; provides = Hashtbl.create 2; loops = []; cancelled = [] }

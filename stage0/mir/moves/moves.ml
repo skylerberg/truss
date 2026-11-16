@@ -47,9 +47,7 @@ let rvalue_uses ~moving ~origin (rvalue : Mir.rvalue) =
   | Is_variant { place; _ } -> [ read ~origin place ]
   | Lambda { captures; _ } ->
       List.map (fun (capture : Mir.capture) -> read ~origin capture.place) captures
-  | Function_value _ | Value_parameter _ | Conditional _ | Cases _ | Connective _ | Specification _
-    ->
-      []
+  | Function_value _ | Value_parameter _ | Specification _ -> []
 
 let call_uses ~moving (call : Mir.call) =
   (match call.callee with
@@ -68,7 +66,7 @@ let uses ~moving (statement : Mir.Graph.statement) =
   | Assign { value; _ } -> rvalue_uses ~moving ~origin value
   | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
       call_uses ~moving call
-  | Assert { condition = operand; _ } | Echo operand -> operand_use ~moving ~by_value:false operand
+  | Assert operand | Echo operand -> operand_use ~moving ~by_value:false operand
   | Provide { provided; _ } ->
       List.concat_map
         (fun (provided : Mir.provided) -> operand_use ~moving ~by_value:false provided.value)

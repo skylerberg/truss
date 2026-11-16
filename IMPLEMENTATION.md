@@ -142,20 +142,21 @@ develop as well as make it easier to bootstrap the compiler in parts.
   prover, and code generation read no core expression.
 - **The MIR is a tree, and the builder lowers each expression once.** A
   body's code is a block: statements, and the block's value where control
-  reaches its end. An `if` is one `Conditional`, a `match` its `Cases`, and
-  a short-circuit operator one `Connective`, each with its operands as
-  blocks. A loop is one statement that holds its body. A `return`, a
-  `break`, and a `continue` are each a `Jump`, the last statement of its
-  block. A clause that can run is one formula. A quantifier that runs is
-  its loop, whose body holds the quantifier's body.
-- **A MIR part holds the control-flow graph beside the tree.** Ownership
-  and code generation read the graph, a `Mir.Graph.t`: blocks and
-  terminators. It is derived once for a definition, a default, and a
-  constant. No stage
-  builds a graph but the expansion, and no stage finds a loop in a
-  graph. Where a `Connective` or its negation decides a branch, control
-  goes straight to the branch's target, so a name that `is` binds is read
-  only where it is bound.
+  reaches its end. An `if`, a `match`, and a short-circuit operator are each
+  one `Choose` statement, of a `Conditional`, `Cases`, or a `Connective`,
+  with its operands as blocks. A loop is one statement that holds its body.
+  A `return`, a `break`, and a `continue` are each a `Jump`, the last
+  statement of its block. A clause that can run is one formula. A quantifier
+  that runs is its loop, whose body holds the quantifier's body.
+- **A MIR part holds the control-flow graph beside the tree.** Ownership and
+  code generation read the graph, a `Mir.Graph.t`: blocks and terminators. A
+  graph's block holds only `basic` statements, which run in sequence and
+  hold no jump, so no stage that reads a graph meets a choice or a loop. It
+  is derived once for a definition, a default, and a constant. No stage
+  builds a graph but the expansion, and no stage finds a loop in a graph.
+  Where a `Connective` or its negation decides a branch, control goes
+  straight to the branch's target, so a name that `is` binds is read only
+  where it is bound.
 - **The prover reads the tree by structural recursion.** The frame after
   an `if` is the merge of the frames after its two blocks, under the
   `if`'s condition and its negation. A jump takes its frame to the loop or
