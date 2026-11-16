@@ -86,7 +86,7 @@ It does not mean everyday vocabulary.
    value is, such as `found_type` against `expected_type`.
 
    Do not use a letter where the value has a name: write `builder`, not
-   `b`; `store`, not `t`; `Types.ty`, not `T.ty`. A letter in place of a
+   `b`; `cache`, not `t`; `Types.ty`, not `T.ty`. A letter in place of a
    name says nothing about the value, and the next author copies it.
 
    A letter is the right name where it is the convention, and a longer
@@ -96,7 +96,7 @@ It does not mean everyday vocabulary.
    |---|---|
    | Mathematics: coordinates, real arguments, counts in a formula | `x`, `y`, `n` |
    | An index in a quantifier or a short loop | `forall i in 0..n`, `i < j` |
-   | A module's main type, by the OCaml convention | `type t`, `Store.t` |
+   | A module's main type, by the OCaml convention | `type t`, `Cache.t` |
    | A type variable | `'a`, `'value` |
    | A name a published specification gives, so the code reads against it | SHA-2's `a` to `h` |
    | A test's program, where the name stands for nothing | `fn f(x: Int64)` |

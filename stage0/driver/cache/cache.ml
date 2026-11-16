@@ -49,8 +49,8 @@ type t = {
   used : (string, unit) Hashtbl.t;
 }
 
-let segments_directory store = Filename.concat store.root "segments"
-let directory store = store.root
+let segments_directory cache = Filename.concat cache.root "segments"
+let directory cache = cache.root
 
 let default_directory () =
   match Sys.getenv_opt "TRUSS_CACHE" with
@@ -167,9 +167,9 @@ let load_segment path =
   | _ | (exception Sys_error _) -> scan segment);
   segment
 
-let refresh store =
-  let directory = segments_directory store in
-  let own = Option.map (fun writer -> writer.segment.path) store.writer in
+let refresh cache =
+  let directory = segments_directory cache in
+  let own = Option.map (fun writer -> writer.segment.path) cache.writer in
   let present =
     match Sys.readdir directory with
     | entries ->
@@ -181,10 +181,10 @@ let refresh store =
   in
   let there = Hashtbl.create (List.length present) in
   List.iter (fun path -> Hashtbl.replace there path ()) present;
-  let known = List.filter (fun segment -> Hashtbl.mem there segment.path) store.segments in
+  let known = List.filter (fun segment -> Hashtbl.mem there segment.path) cache.segments in
   List.iter
     (fun segment -> if not (Hashtbl.mem there segment.path) then close_channel segment)
-    store.segments;
+    cache.segments;
   let had = Hashtbl.create (List.length known) in
   List.iter (fun segment -> Hashtbl.replace had segment.path ()) known;
   let fresh =
@@ -202,16 +202,16 @@ let refresh store =
           end
         else scan segment)
     known;
-  store.segments <- fresh @ known;
-  store.refreshed <- Unix.gettimeofday ()
+  cache.segments <- fresh @ known;
+  cache.refreshed <- Unix.gettimeofday ()
 
 let writer_name () =
   Random.self_init ();
   Printf.sprintf "%d-%d-%06x" (Unix.getpid ()) (int_of_float (Unix.time ())) (Random.bits ())
 
-let new_writer store =
-  File_system.make_directory (segments_directory store);
-  let path = Filename.concat (segments_directory store) (writer_name () ^ ".segment") in
+let new_writer cache =
+  File_system.make_directory (segments_directory cache);
+  let path = Filename.concat (segments_directory cache) (writer_name () ^ ".segment") in
   let descriptor = Unix.openfile path [ O_WRONLY; O_CREAT; O_EXCL; O_CLOEXEC ] 0o644 in
   Unix.lockf descriptor F_LOCK 0;
   File_system.write_all descriptor header;
@@ -252,34 +252,34 @@ let write_index segment =
 
 let writing : t list ref = ref []
 
-let seal store =
-  match store.writer with
+let seal cache =
+  match cache.writer with
   | None -> ()
   | Some writer ->
       drain writer;
       (try Unix.fsync writer.descriptor with Unix.Unix_error _ -> ());
       write_index writer.segment;
       Unix.close writer.descriptor;
-      store.writer <- None;
-      store.segments <- writer.segment :: store.segments;
-      writing := List.filter (fun other -> other != store) !writing
+      cache.writer <- None;
+      cache.segments <- writer.segment :: cache.segments;
+      writing := List.filter (fun other -> other != cache) !writing
 
 let () =
   at_exit (fun () ->
-      List.iter (fun store -> try seal store with Sys_error _ | Unix.Unix_error _ -> ()) !writing)
+      List.iter (fun cache -> try seal cache with Sys_error _ | Unix.Unix_error _ -> ()) !writing)
 
-let writer store =
-  match store.writer with
+let writer cache =
+  match cache.writer with
   | Some writer when writer.size < seal_size -> writer
   | full_writer ->
-      if Option.is_some full_writer then seal store;
-      let writer = new_writer store in
-      store.writer <- Some writer;
-      writing := store :: !writing;
+      if Option.is_some full_writer then seal cache;
+      let writer = new_writer cache in
+      cache.writer <- Some writer;
+      writing := cache :: !writing;
       writer
 
-let append_record store kind key value =
-  let writer = writer store in
+let append_record cache kind key value =
+  let writer = writer cache in
   let head = Bytes.create record_head_width in
   Bytes.set head 0 kind;
   Bytes.blit_string key 0 head kind_width key_width;
@@ -294,20 +294,20 @@ let append_record store kind key value =
 
 let open_ root =
   File_system.make_directory root;
-  let store = { root; segments = []; refreshed = 0.; writer = None; used = Hashtbl.create 64 } in
-  refresh store;
-  store
+  let cache = { root; segments = []; refreshed = 0.; writer = None; used = Hashtbl.create 64 } in
+  refresh cache;
+  cache
 
-let close store =
-  seal store;
-  List.iter close_channel store.segments
+let close cache =
+  seal cache;
+  List.iter close_channel cache.segments
 
-let flush store =
+let flush cache =
   Option.iter
     (fun writer ->
       drain writer;
       Unix.fsync writer.descriptor)
-    store.writer
+    cache.writer
 
 let read_from segment key location =
   match read_record (channel segment) ~offset:location.offset with
@@ -321,9 +321,9 @@ let read_own writer key location =
     Some (Buffer.sub writer.pending (location.offset - written + record_head_width) location.length)
   else read_from writer.segment key location
 
-let lookup_once store key =
+let lookup_once cache key =
   let own =
-    Option.bind store.writer (fun writer ->
+    Option.bind cache.writer (fun writer ->
         Option.bind (Hashtbl.find_opt writer.segment.table key) (read_own writer key))
   in
   match own with
@@ -331,62 +331,62 @@ let lookup_once store key =
   | None ->
       List.find_map
         (fun segment -> Option.bind (find_in segment key) (read_from segment key))
-        store.segments
+        cache.segments
 
 let refresh_interval = 0.02
 
-let lookup store key =
-  match lookup_once store key with
+let lookup cache key =
+  match lookup_once cache key with
   | Some value -> Some value
   | None ->
-      if Unix.gettimeofday () -. store.refreshed > refresh_interval then begin
-        refresh store;
-        lookup_once store key
+      if Unix.gettimeofday () -. cache.refreshed > refresh_interval then begin
+        refresh cache;
+        lookup_once cache key
       end
       else None
 
-let present store key =
-  (match store.writer with Some writer -> Hashtbl.mem writer.segment.table key | None -> false)
-  || List.exists (fun segment -> find_in segment key <> None) store.segments
+let present cache key =
+  (match cache.writer with Some writer -> Hashtbl.mem writer.segment.table key | None -> false)
+  || List.exists (fun segment -> find_in segment key <> None) cache.segments
 
 let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-12 store result"
 
-type result_kind = Package_state | Test_result | Solver_answer
+type result_kind = Package_database | Test_result | Solver_answer
 
 let result_tag = function
-  | Package_state -> "package"
+  | Package_database -> "package"
   | Test_result -> "tests"
   | Solver_answer -> "solver"
 
 let result_key ~kind ~key =
   derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text (result_tag kind); Cbor.Bytes key ]))
 
-let find_result store ~kind ~key =
+let find_result cache ~kind ~key =
   let name = result_key ~kind ~key in
-  match lookup store name with
+  match lookup cache name with
   | Some value ->
-      Hashtbl.replace store.used name ();
+      Hashtbl.replace cache.used name ();
       Some value
   | None -> None
 
-let add_result store ~kind ~key value =
+let add_result cache ~kind ~key value =
   let name = result_key ~kind ~key in
-  Hashtbl.replace store.used name ();
-  if not (present store name) then append_record store 'r' name value
+  Hashtbl.replace cache.used name ();
+  if not (present cache name) then append_record cache 'r' name value
 
-let files store name =
-  let path = Filename.concat store.root name in
+let files cache name =
+  let path = Filename.concat cache.root name in
   File_system.make_directory path;
   path
 
-let caches_directory store = Filename.concat store.root "caches"
+let caches_directory cache = Filename.concat cache.root "caches"
 
-let cache_files store name =
-  let path = Filename.concat (caches_directory store) name in
+let cache_files cache name =
+  let path = Filename.concat (caches_directory cache) name in
   File_system.make_directory path;
   path
 
-let files_in_caches store =
+let files_in_caches cache =
   let rec walk directory files =
     match Sys.readdir directory with
     | exception Sys_error _ -> files
@@ -401,15 +401,15 @@ let files_in_caches store =
             | exception Unix.Unix_error _ -> files)
           files names
   in
-  walk (caches_directory store) []
+  walk (caches_directory cache) []
 
 let file_size path = try (Unix.stat path).st_size with Unix.Unix_error _ -> 0
 
-let size store =
-  refresh store;
-  List.fold_left (fun total segment -> total + file_size segment.path) 0 store.segments
-  + List.fold_left (fun total (_, size, _) -> total + size) 0 (files_in_caches store)
-  + match store.writer with Some writer -> writer.size | None -> 0
+let size cache =
+  refresh cache;
+  List.fold_left (fun total segment -> total + file_size segment.path) 0 cache.segments
+  + List.fold_left (fun total (_, size, _) -> total + size) 0 (files_in_caches cache)
+  + match cache.writer with Some writer -> writer.size | None -> 0
 
 let abandoned segment =
   segment.index <> None
@@ -434,7 +434,7 @@ let entries segment =
           (String.sub index position key_width, entry_location index position))
   | None -> Hashtbl.fold (fun key location acc -> (key, location) :: acc) segment.table []
 
-let rewrite store candidates ~keep =
+let rewrite cache candidates ~keep =
   List.iter
     (fun segment ->
       List.iter
@@ -444,14 +444,14 @@ let rewrite store candidates ~keep =
               if
                 keep key
                 && not
-                     (match store.writer with
+                     (match cache.writer with
                      | Some writer -> Hashtbl.mem writer.segment.table key
                      | None -> false)
-              then append_record store kind key value
+              then append_record cache kind key value
           | Some _ | None | (exception Sys_error _) -> ())
         (entries segment))
     candidates;
-  flush store;
+  flush cache;
   List.iter
     (fun segment ->
       close_channel segment;
@@ -459,23 +459,23 @@ let rewrite store candidates ~keep =
         (fun path -> try Sys.remove path with Sys_error _ -> ())
         [ segment.path; index_path segment.path ])
     candidates;
-  store.segments <- List.filter (fun segment -> not (List.memq segment candidates)) store.segments
+  cache.segments <- List.filter (fun segment -> not (List.memq segment candidates)) cache.segments
 
 let modified path =
   match Unix.stat path with stat -> stat.st_mtime | exception Unix.Unix_error _ -> 0.
 
 type evictable = Segment of segment | Cache_file of string
 
-let collect store ~budget =
-  let excess = size store - budget in
+let collect cache ~budget =
+  let excess = size cache - budget in
   if excess > 0 then begin
     let entries =
       List.map
         (fun segment -> (modified segment.path, file_size segment.path, Segment segment))
-        (List.filter abandoned store.segments)
+        (List.filter abandoned cache.segments)
       @ List.map
           (fun (path, size, modified) -> (modified, size, Cache_file path))
-          (files_in_caches store)
+          (files_in_caches cache)
     in
     let rec least_recent freed = function
       | (_, size, entry) :: rest when freed < excess -> entry :: least_recent (freed + size) rest
@@ -485,9 +485,9 @@ let collect store ~budget =
       least_recent 0
         (List.sort (fun (left, _, _) (right, _, _) -> Float.compare left right) entries)
     in
-    rewrite store
+    rewrite cache
       (List.filter_map (function Segment segment -> Some segment | Cache_file _ -> None) evicted)
-      ~keep:(Hashtbl.mem store.used);
+      ~keep:(Hashtbl.mem cache.used);
     List.iter
       (function
         | Cache_file path -> ( try Sys.remove path with Sys_error _ -> ()) | Segment _ -> ())
@@ -497,9 +497,9 @@ let collect store ~budget =
 let small = 8 * 1024 * 1024
 let many = 32
 
-let compact store =
-  refresh store;
+let compact cache =
+  refresh cache;
   let candidates =
-    List.filter (fun segment -> file_size segment.path < small && abandoned segment) store.segments
+    List.filter (fun segment -> file_size segment.path < small && abandoned segment) cache.segments
   in
-  if List.length candidates >= many then rewrite store candidates ~keep:(fun _ -> true)
+  if List.length candidates >= many then rewrite cache candidates ~keep:(fun _ -> true)

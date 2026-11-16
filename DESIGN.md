@@ -2050,7 +2050,7 @@ or the contract, whichever holds its syntax.
 
 ### Caches
 
-Three results are cached in the user's store, each by its whole input:
+Three results are cached in the user's cache, each by its whole input:
 
 | Result | Key |
 |---|---|
@@ -2069,8 +2069,8 @@ compiler, and the tests are cache hits.
 | State | Place | Reason |
 |---|---|---|
 | A project's database | `.truss/` in the project's root, which git ignores | It is deleted with its worktree. `cp -r` gives a new worktree its start, and the first propagation brings it up to date with the files that differ. |
-| The caches | The user's store | They are keyed by content, so every worktree and CI share them. |
-| The database of the standard library and of each registry package | The user's store, keyed by the package's content hash, the content hashes of the versions selected for its dependencies, and the compiler | A package's facts are a function of its sources and its dependencies' sources. Nothing downstream adds to them: an `impl` lives with its trait or its type, and a call sees only the traits its own package can see. |
+| The caches | The user's cache | They are keyed by content, so every worktree and CI share them. |
+| The database of the standard library and of each registry package | The user's cache, keyed by the package's content hash, the content hashes of the versions selected for its dependencies, and the compiler | A package's facts are a function of its sources and its dependencies' sources. Nothing downstream adds to them: an `impl` lives with its trait or its type, and a call sees only the traits its own package can see. |
 
 | Rule | Reason |
 |---|---|

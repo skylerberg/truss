@@ -5,7 +5,7 @@
   compiler_bug
   blake3
   cbor
-  store
+  cache
   path
   source
   manifest

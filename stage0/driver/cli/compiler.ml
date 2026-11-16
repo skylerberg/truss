@@ -14,7 +14,7 @@ let requests pipeline packages =
   | None -> Outcome.cannot_run "Stage0 builds programs only for Linux and macOS."
 
 let results () : Compile.results =
-  let find, add = Database.results ~kind:Store.Test_result in
+  let find, add = Database.results ~kind:Cache.Test_result in
   { find; add }
 
 let development_settings () : Build.settings =

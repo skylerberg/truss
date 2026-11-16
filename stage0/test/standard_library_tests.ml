@@ -54,7 +54,7 @@ let modules =
       List.filter (fun entry -> List.memq entry mine) library
 
 let solver =
-  let find, add = Database.results ~kind:Store.Solver_answer in
+  let find, add = Database.results ~kind:Cache.Solver_answer in
   match Solver.find ~cache:{ find; add } () with
   | Ok solver -> solver
   | Error message ->
@@ -170,4 +170,4 @@ let () =
                     | errors -> errors))
                 files)))
     checked;
-  timed "collecting the store" Database.For_testing.collect_store
+  timed "collecting the cache" Database.For_testing.collect_cache

@@ -436,10 +436,10 @@ let wait_until_stopped answers =
     (fun (key, answer) -> if Result.is_ok answer then Database.wait_until_ended ~key)
     answers
 
-let clean_store () =
+let clean_cache () =
   wait_until_stopped (ask_running [ "stop" ]);
   Database.reset ();
-  let directory = Database.store_directory () in
+  let directory = Database.cache_directory () in
   match File_system.remove directory with
   | () -> 0
   | exception Unix.Unix_error (error, _, _) ->
@@ -486,7 +486,7 @@ let client argv =
     finish outcome
   in
   match command_of arguments with
-  | Some "clean" -> clean_store ()
+  | Some "clean" -> clean_cache ()
   | Some "lsp" -> language_server ~no_server
   | None | Some "new" -> local ()
   | _ when no_server -> local ()

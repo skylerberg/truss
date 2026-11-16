@@ -26,9 +26,9 @@ val other_worktrees : snapshot -> string list
 val published : Path.package -> Registry.Version.t -> (snapshot, string) result
 val objects_directory : unit -> string
 val programs_directory : unit -> string
-val results : kind:Store.result_kind -> (string -> string option) * (string -> string -> unit)
+val results : kind:Cache.result_kind -> (string -> string option) * (string -> string -> unit)
 val flush : unit -> unit
-val store_directory : unit -> string
+val cache_directory : unit -> string
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
 
@@ -57,7 +57,7 @@ val reset : unit -> unit
 module For_testing : sig
   val standard_state : unit -> Pipeline.state
   val cold_pipeline : snapshot -> Pipeline.t
-  val collect_store : unit -> unit
+  val collect_cache : unit -> unit
   val listen : key:string -> (Unix.file_descr, string) result
   val interrupt_commit : string -> unit
 end

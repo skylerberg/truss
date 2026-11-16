@@ -11,7 +11,7 @@ let executable_identity () =
   match stamp path with
   | None -> "unknown"
   | Some current -> (
-      let remembered = Filename.concat (Store.default_directory ()) "identities" in
+      let remembered = Filename.concat (Cache.default_directory ()) "identities" in
       let entries =
         (try In_channel.with_open_bin remembered In_channel.input_lines with Sys_error _ -> [])
         |> List.filter_map (fun line ->
@@ -53,7 +53,7 @@ let private_directory directory =
       Error (directory ^ " is not a directory that only this user can use; try --no-server.")
 
 let servers_directory () =
-  private_directory (Filename.concat (Store.default_directory ()) "servers")
+  private_directory (Filename.concat (Cache.default_directory ()) "servers")
 
 let server_path directory identity key =
   Filename.concat directory (short identity ^ "-" ^ Blake3.hex_digest ~digits:16 key)
@@ -285,5 +285,5 @@ let call ?program ?(start_server = true) ~key ~progress request =
   | exception _ ->
       (try Unix.close socket with Unix.Unix_error _ -> ());
       Error
-        "the background process ended while answering; see its log in the store's servers \
+        "the background process ended while answering; see its log in the cache's servers \
          directory."

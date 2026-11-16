@@ -1,5 +1,5 @@
 let solver () =
-  let find, add = Database.results ~kind:Store.Solver_answer in
+  let find, add = Database.results ~kind:Cache.Solver_answer in
   match Solver.find ~cache:{ find; add } () with
   | Ok solver -> solver
   | Error message -> Outcome.cannot_run "%s" message

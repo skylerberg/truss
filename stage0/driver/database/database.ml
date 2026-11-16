@@ -1,29 +1,29 @@
-let opened : Store.t option ref = ref None
+let opened_cache : Cache.t option ref = ref None
 
-let store () =
-  match !opened with
-  | Some store -> store
+let open_cache () =
+  match !opened_cache with
+  | Some cache -> cache
   | None ->
-      let store = Store.open_ (Store.default_directory ()) in
-      Store.compact store;
-      opened := Some store;
-      store
+      let cache = Cache.open_ (Cache.default_directory ()) in
+      Cache.compact cache;
+      opened_cache := Some cache;
+      cache
 
-let flush_store () = Option.iter Store.flush !opened
+let flush_cache () = Option.iter Cache.flush !opened_cache
 
 let reset () =
-  Option.iter Store.close !opened;
-  opened := None
+  Option.iter Cache.close !opened_cache;
+  opened_cache := None
 
-let objects_directory () = Store.cache_files (store ()) "objects"
-let programs_directory () = Store.files (store ()) "programs"
-let packages_directory () = Store.files (store ()) "packages"
-let store_directory = Store.default_directory
+let objects_directory () = Cache.cache_files (open_cache ()) "objects"
+let programs_directory () = Cache.files (open_cache ()) "programs"
+let packages_directory () = Cache.files (open_cache ()) "packages"
+let cache_directory = Cache.default_directory
 
 let results ~kind =
-  let store = store () in
-  ( (fun key -> Store.find_result store ~kind ~key),
-    fun key value -> Store.add_result store ~kind ~key value )
+  let cache = open_cache () in
+  ( (fun key -> Cache.find_result cache ~kind ~key),
+    fun key value -> Cache.add_result cache ~kind ~key value )
 
 let budget () =
   match Option.bind (Sys.getenv_opt "TRUSS_CACHE_SIZE") int_of_string_opt with
@@ -31,18 +31,18 @@ let budget () =
   | None -> 20 * 1024 * 1024 * 1024
 
 let collect () =
-  let store = store () in
-  Store.compact store;
+  let cache = open_cache () in
+  Cache.compact cache;
   let lock =
     Unix.openfile
-      (Filename.concat (Store.directory store) "collect.lock")
+      (Filename.concat (Cache.directory cache) "collect.lock")
       [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
   in
   Fun.protect
     ~finally:(fun () -> Unix.close lock)
     (fun () ->
       match Unix.lockf lock F_TLOCK 0 with
-      | () -> Store.collect store ~budget:(budget ())
+      | () -> Cache.collect cache ~budget:(budget ())
       | exception Unix.Unix_error _ -> ())
 
 type loaded = { package : Path.package; hash : string; key : string; state : Pipeline.state }
@@ -65,7 +65,7 @@ let state_key ~hash ~visible =
 let exclusively name work =
   let lock =
     Unix.openfile
-      (Filename.concat (Store.directory (store ())) name)
+      (Filename.concat (Cache.directory (open_cache ())) name)
       [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
   in
   Fun.protect
@@ -82,7 +82,7 @@ let package_state (package : Project.package) ~hash ~visible =
       let stored () =
         Option.map
           (fun bytes -> (Marshal.from_string bytes 0 : Pipeline.state))
-          (Store.find_result (store ()) ~kind:Package_state ~key)
+          (Cache.find_result (open_cache ()) ~kind:Package_database ~key)
       in
       let state =
         match stored () with
@@ -99,9 +99,9 @@ let package_state (package : Project.package) ~hash ~visible =
                            [ package ])
                         package.name
                     in
-                    Store.add_result (store ()) ~kind:Package_state ~key
+                    Cache.add_result (open_cache ()) ~kind:Package_database ~key
                       (Marshal.to_string state []);
-                    Store.flush (store ());
+                    Cache.flush (open_cache ());
                     state)
       in
       let loaded = { package = package.name; hash; key; state } in
@@ -372,7 +372,7 @@ let saved_state ~(current : loaded list) key =
       | None ->
           Option.map
             (fun bytes -> (Marshal.from_string bytes 0 : Pipeline.state))
-            (Store.find_result (store ()) ~kind:Package_state ~key))
+            (Cache.find_result (open_cache ()) ~kind:Package_database ~key))
 
 let saved_states segments ~current =
   match Segments.header segments with
@@ -397,7 +397,7 @@ let project_texts snapshot =
     snapshot.project.packages;
   Hashtbl.find_opt texts
 
-let opened segments snapshot =
+let restore_database segments snapshot =
   let loaded, packages = layout snapshot in
   let cold () =
     Segments.discard segments;
@@ -654,7 +654,7 @@ let open_worktree root =
       in
       match
         let snapshot = snapshot_of_files (Worktree root) (Registry.Content.input_files root) in
-        (snapshot, opened segments snapshot)
+        (snapshot, restore_database segments snapshot)
       with
       | snapshot, (pipeline, loaded) ->
           let worktree = { root; watcher; segments; snapshot; pipeline; loaded } in
@@ -835,7 +835,7 @@ let close_all () =
 
 let flush () =
   if !is_serving then Hashtbl.iter (fun _ worktree -> commit worktree) worktrees else close_all ();
-  flush_store ()
+  flush_cache ()
 
 let serve ~key ~handle =
   is_serving := true;
@@ -866,7 +866,7 @@ let wait_until_ended = Server.wait_until_ended
 module For_testing = struct
   let standard_state () = (Lazy.force standard_state).state
   let cold_pipeline = cold_pipeline ~checks:true
-  let collect_store = collect
+  let collect_cache = collect
   let listen = Server.listen
 
   let interrupt_commit root =
