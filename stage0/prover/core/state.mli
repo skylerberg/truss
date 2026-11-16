@@ -126,6 +126,7 @@ type context = {
   measures : Mir.formula list;
   mutable declarations : Logic.declaration list;
   declared : unit Tables.Symbol_table.t;
+  definitions : unit Tables.Symbol_table.t;
   datatypes : unit Tables.Type_table.t;
   stated : unit Tables.Stated_table.t;
   mutable facts : Logic.term list;

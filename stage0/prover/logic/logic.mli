@@ -12,6 +12,7 @@ module Symbol : sig
     | Named_term of 'term
     | Lambda of { sorts : sort list; definition : 'term }
     | Lifted of 'term t
+    | Unspecified of 'term t
     | Constructor of { type_ : Types.ty; variant : string option }
     | Field of { type_ : Types.ty; variant : string option; field : string }
     | Unit
@@ -64,6 +65,7 @@ and symbol = term Symbol.t
 type declaration =
   | Constant of symbol * sort
   | Function of symbol * sort list * sort
+  | Definition of { symbol : symbol; parameters : (symbol * sort) list; result : sort; body : term }
   | Datatype of Types.ty * (symbol * (symbol * sort) list) list
 
 type query = { declarations : declaration list; facts : term list; goal : term }

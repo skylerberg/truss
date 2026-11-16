@@ -36,6 +36,10 @@ let () =
       let actual = read_message Fixtures.Prover.increment_of_a_matched_count in
       if not (String.includes ~affix:"`count` is 255" actual) then Harness.fail "message %S" actual);
   Harness.test "a counterexample the solver misses is found in a model of few elements" (fun () ->
+      let actual = read_message Fixtures.Prover.addition_under_an_exists_in_a_forall in
+      if not (String.includes ~affix:"`value` is 9223372036854775807" actual) then
+        Harness.fail "message %S" actual);
+  Harness.test "a word count's counterexample names the count" (fun () ->
       let actual = read_message Fixtures.Prover.increment_of_a_word_count in
       if not (String.includes ~affix:"`count` is 9223372036854775807" actual) then
         Harness.fail "message %S" actual);
@@ -1606,7 +1610,8 @@ let () =
             Harness.fail "ran %d queries" (Solver.count_queries_run solver));
   Harness.test "a second request for a query solved in a small model runs one query" (fun () ->
       match
-        (find_obligation_query Fixtures.Prover.increment_of_a_word_count Overflow, Solver.find ())
+        ( find_obligation_query Fixtures.Prover.addition_under_an_exists_in_a_forall Overflow,
+          Solver.find () )
       with
       | None, _ -> Harness.fail "no obligation of the addition"
       | _, Error message -> Harness.fail "%s" message
@@ -1620,6 +1625,13 @@ let () =
               ignore (Solver.solve_all solver [ (second, query) ]);
               let queries_run = Solver.count_queries_run solver - queries_before in
               if queries_run <> 1 then Harness.fail "ran %d queries" queries_run));
+  Harness.test "a function defined by a quantified formula reaches the solver as a definition"
+    (fun () ->
+      match find_obligation_query Fixtures.Prover.increment_of_a_word_count Overflow with
+      | None -> Harness.fail "no obligation of the addition"
+      | Some query ->
+          let text = Logic.show_query query in
+          if not (String.includes ~affix:"(define-fun " text) then Harness.fail "query %s" text);
   Harness.test "a query's text names nothing by its Truss name" (fun () ->
       let packages = Support.setup [ ("app::main", Fixtures.Prover.addition_that_can_overflow) ] in
       let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
