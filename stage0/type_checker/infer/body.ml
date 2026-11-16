@@ -733,10 +733,11 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
         (Interface.Properties.list_known_bounds lookups.interface
            ~bounds:(State.lookup_bounds state) type_));
   check_definition state elaborated ~checks_body;
-  state.diagnostics <- !(context.diagnostics) @ state.diagnostics;
+  state.diagnostics <- Interface.Elaborator.list_diagnostics context @ state.diagnostics;
   state.diagnostics <-
     Interface.Check.list_bound_diagnostics lookups.interface ~package:state.package
-      ~bounds:(State.lookup_bounds state) ~spans !(context.named)
+      ~bounds:(State.lookup_bounds state) ~spans
+      (Interface.Elaborator.list_named_types context)
     @ state.diagnostics;
   finalize state;
   Exported_parts.check state;
