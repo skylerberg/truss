@@ -11,11 +11,11 @@ val files : Workspace.snapshot -> Path.package list -> Path.file list
 val modules : Workspace.snapshot -> Path.package list -> Path.module_ list
 val program_packages : Workspace.snapshot -> Path.package list -> Path.package list
 
-val manifest_problems :
+val list_manifest_problems :
   Workspace.snapshot ->
   Database.t ->
   Path.package list ->
-  (string * Path.package * Package_checks.manifest_problem) list
+  (string * Path.package * Database.manifest_problem) list
 
 val selected : Workspace.snapshot -> Path.package list -> string list -> Path.file list
 val source : Workspace.snapshot -> Path.package list -> Path.file -> Source.t

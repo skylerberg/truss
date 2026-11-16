@@ -1,22 +1,23 @@
-val grant : Lookups.t -> package:Path.package -> string list -> Environment.grant
+val resolve_grant : Lookups.t -> package:Path.package -> string list -> Environment.grant
+val describe_not_a_capability : dependency:Path.package -> string -> string
 
-val missing :
+val list_missing :
   Lookups.t -> package:Path.package -> of_:Path.package -> Types.capability_set -> Path.t list
 
-val message : subject:string -> of_:Path.package -> Path.t -> string
+val describe_missing : subject:string -> of_:Path.package -> Path.t -> string
 
-val evidence_uses :
+val list_evidence_uses :
   Lookups.t ->
   bounds:Impls.bounds ->
   ?depth:int ->
   Impls.evidence ->
   (Path.t * Types.impl_interface * Types.capability_set) list
 
-val messages :
+val describe_missing_in_impls :
   Lookups.t ->
   package:Path.package ->
   (Path.t * Types.impl_interface * Types.capability_set) list ->
   string list
 
-val evidence_messages :
+val describe_missing_in_evidence :
   Lookups.t -> package:Path.package -> bounds:Impls.bounds -> Impls.evidence -> string list

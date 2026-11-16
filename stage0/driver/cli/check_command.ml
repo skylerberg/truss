@@ -1,11 +1,11 @@
 let rounds = 32
 
-let unused_dependencies snapshot database packages =
+let remove_unused_dependencies snapshot database packages =
   let root = Workspace.root snapshot in
   List.filter_map
-    (fun (file, package, (problem : Package_checks.manifest_problem)) ->
+    (fun (file, package, (problem : Database.manifest_problem)) ->
       match problem with
-      | Unused dependency ->
+      | Unused_dependency dependency ->
           let path = Filename.concat root file in
           let text = In_channel.with_open_bin path In_channel.input_all in
           Command_packages.write_file path (Manifest.without_dependency text dependency);
@@ -14,10 +14,11 @@ let unused_dependencies snapshot database packages =
                (Json.Object
                   [
                     ("file", Json.String (Shown_path.shown path));
-                    ("message", Json.String (Package_checks.manifest_sentence ~package problem));
+                    ( "message",
+                      Json.String (Package_checks.describe_unused_dependency ~package dependency) );
                   ]))
       | Not_a_capability _ -> None)
-    (Command_packages.manifest_problems snapshot database packages)
+    (Command_packages.list_manifest_problems snapshot database packages)
 
 let lock_file snapshot =
   match Workspace.lock_fix snapshot with
@@ -57,7 +58,7 @@ let fix snapshot packages =
                 (Diagnostic.apply_edits (Source.text source) edits);
               List.map (fun diagnostic -> Diagnostic.to_json_object source diagnostic) chosen)
         (Command_packages.files snapshot packages)
-      @ unused_dependencies snapshot database packages
+      @ remove_unused_dependencies snapshot database packages
       @ lock_file snapshot
     in
     if applied = [] || number = rounds then (snapshot, List.rev fixed)

@@ -42,8 +42,9 @@ let no_capabilities description =
 let check_grant checking (origin : Core.origin) ~subject package (uses : Types.capability_set) =
   List.iter
     (fun capability ->
-      report checking Not_granted origin (Interface.Grants.message ~subject ~of_:package capability))
-    (Interface.Grants.missing checking.state.lookups.interface ~package:checking.state.package
+      report checking Not_granted origin
+        (Interface.Grants.describe_missing ~subject ~of_:package capability))
+    (Interface.Grants.list_missing checking.state.lookups.interface ~package:checking.state.package
        ~of_:package uses)
 
 let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =

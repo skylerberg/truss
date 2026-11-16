@@ -1,0 +1,9 @@
+use limits::bounds
+
+fn f(side: Int64) -> Int64 {
+  side.doubled()
+}
+
+test "the most is ten" {
+  assert bounds::most == 10
+}

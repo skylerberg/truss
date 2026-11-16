@@ -65,7 +65,7 @@ let project_dependencies snapshot packages =
 
 let program_packages snapshot packages = packages @ project_dependencies snapshot packages
 
-let manifest_problems snapshot database packages =
+let list_manifest_problems snapshot database packages =
   List.concat_map
     (fun (directory, name) ->
       if List.mem name packages then

@@ -251,7 +251,7 @@ let () =
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
       match problems packages with
-      | [ Unused { Path.owner = None; name = "clock_library" } ] -> ()
+      | [ Unused_dependency { Path.owner = None; name = "clock_library" } ] -> ()
       | _ -> fail "not reported");
   test "a dependency named in a path is used" (fun () ->
       let packages, _ =
@@ -282,7 +282,7 @@ let () =
       in
       expect_codes ~expected:[] (packages, actual);
       match problems packages with
-      | [ Unused { Path.owner = None; name = "clock_library" } ] -> ()
+      | [ Unused_dependency { Path.owner = None; name = "clock_library" } ] -> ()
       | _ -> fail "not reported");
   test "an unused dependency is not reported for a package with an error" (fun () ->
       let packages, _ =
@@ -293,7 +293,30 @@ let () =
           ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
-      if problems packages <> [] then fail "reported")
+      if problems packages <> [] then fail "reported");
+  test "a dependency that only a test uses is left out of the code's packages" (fun () ->
+      let shapes : Path.package = { owner = None; name = "shapes" }
+      and limits : Path.package = { owner = None; name = "limits" } in
+      let packages, actual =
+        codes_with_grants
+          [
+            ("app::main", Fixtures.Capabilities.dependency_that_only_a_test_uses_is_left_out);
+            ( "shapes::sizes",
+              Fixtures.Capabilities.dependency_whose_traits_method_is_called_with_a_sizes );
+            ( "limits::bounds",
+              Fixtures.Capabilities.dependency_that_only_a_test_uses_is_left_out_bounds );
+          ]
+          [ (shapes, []); (limits, []) ]
+      in
+      expect_codes ~expected:[] (packages, actual);
+      if problems packages <> [] then fail "a dependency is reported unused";
+      match Database.list_code_packages (database packages) { owner = None; name = "app" } with
+      | Some code_packages when List.mem shapes code_packages && not (List.mem limits code_packages)
+        ->
+          ()
+      | Some code_packages ->
+          fail "found [%s]" (String.concat "; " (List.map Path.show_package code_packages))
+      | None -> fail "the code's packages are not computed")
 
 let ticks = Fixtures.Capabilities.ticks
 

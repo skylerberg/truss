@@ -38,13 +38,18 @@ let gather ?(proofs = false) database snapshot packages =
     problems =
       Workspace.problems snapshot
       @ List.map
-          (fun (file, package, problem) ->
+          (fun (file, package, (problem : Database.manifest_problem)) ->
             {
               Project.file;
               line = None;
-              message = Package_checks.manifest_sentence ~package problem;
+              message =
+                (match problem with
+                | Not_a_capability { dependency; name } ->
+                    Interface.Grants.describe_not_a_capability ~dependency name
+                | Unused_dependency dependency ->
+                    Package_checks.describe_unused_dependency ~package dependency);
             })
-          (Command_packages.manifest_problems snapshot database packages);
+          (Command_packages.list_manifest_problems snapshot database packages);
   }
 
 let of_files files = { checked = files; proofs = None; proven = Lazy.from_val []; problems = [] }

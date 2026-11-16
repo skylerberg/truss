@@ -594,11 +594,9 @@ type check =
   | Type of Names.key
   | Instantiations
   | Tests
-  | Grants
   | Dependencies
-  | Code_packages
 
-let checks (declarations : Names.declaration list) =
+let list_checks (declarations : Names.declaration list) =
   List.concat_map
     (fun (declaration : Names.declaration) ->
       if declaration.ordinal <> 0 then []
@@ -608,9 +606,9 @@ let checks (declarations : Names.declaration list) =
         | Type -> [ Type (Names.key_of declaration) ]
         | _ -> [])
     declarations
-  @ [ Instantiations; Tests; Grants; Dependencies; Code_packages ]
+  @ [ Instantiations; Tests; Dependencies ]
 
-let used_packages (resolved : Resolve.resolved) ~evidence_packages (form : Core.t) =
+let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : Core.t) =
   let named =
     List.filter_map
       (function
@@ -631,51 +629,21 @@ let used_packages (resolved : Resolve.resolved) ~evidence_packages (form : Core.
     form.definition;
   List.sort_uniq compare (named @ !called)
 
-type manifest_problem =
-  | Not_a_capability of { dependency : Path.package; name : string }
-  | Unused of Path.package
+let describe_unused_dependency ~package dependency =
+  Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." (Path.show_package package)
+    (Path.show_package dependency)
 
-let manifest_sentence ~package = function
-  | Not_a_capability { dependency; name } ->
-      Printf.sprintf
-        "`%s`, in the entry for `%s`, names no capability. A grant names a capability of the \
-         prelude by its name, such as `Clock`, and any other by its full path."
-        name (Path.show_package dependency)
-  | Unused dependency ->
-      Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." (Path.show_package package)
-        (Path.show_package dependency)
-
-let grant_problems (lookups : Lookups.t) package =
-  List.concat_map
-    (fun dependency ->
-      match lookups.interface.granted package dependency with
-      | Some grant -> List.map (fun name -> Not_a_capability { dependency; name }) grant.unknown
-      | None -> [])
+let list_unused_dependencies (lookups : Lookups.t) package =
+  let used =
+    List.concat_map
+      (fun (declaration : Names.declaration) -> lookups.used_packages (Names.key_of declaration))
+      (lookups.interface.names.package_declarations package)
+  in
+  List.filter
+    (fun dependency -> not (List.mem dependency used))
     (lookups.interface.names.dependency_names package)
 
-let used_by_declarations (lookups : Lookups.t) package =
-  List.map
-    (fun (declaration : Names.declaration) ->
-      (declaration, lookups.used_packages (Names.key_of declaration)))
-    (lookups.interface.names.package_declarations package)
-
-let unused_dependencies (lookups : Lookups.t) package =
-  let used = List.concat_map snd (used_by_declarations lookups package) in
-  List.filter_map
-    (fun dependency -> if List.mem dependency used then None else Some (Unused dependency))
-    (lookups.interface.names.dependency_names package)
-
-let code_packages (lookups : Lookups.t) package =
-  List.sort_uniq compare
-    (List.concat_map
-       (fun ((declaration : Names.declaration), packages) ->
-         match declaration.path with Test _ -> [] | _ -> packages)
-       (used_by_declarations lookups package))
-
-type outcome =
-  | Placed of placed list
-  | Problems of manifest_problem list
-  | Packages of Path.package list
+type outcome = Placed of placed list | Unused_dependencies of Path.package list
 
 let run (lookups : Lookups.t) package check =
   let declared key =
@@ -690,6 +658,4 @@ let run (lookups : Lookups.t) package check =
   | Type key -> Placed (check_type lookups ~contained (declared key))
   | Instantiations -> Placed (check_instantiation lookups package)
   | Tests -> Placed (check_tests lookups package)
-  | Grants -> Problems (grant_problems lookups package)
-  | Dependencies -> Problems (unused_dependencies lookups package)
-  | Code_packages -> Packages (code_packages lookups package)
+  | Dependencies -> Unused_dependencies (list_unused_dependencies lookups package)

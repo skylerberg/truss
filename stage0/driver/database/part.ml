@@ -199,9 +199,7 @@ let show part =
         | Type declared -> "type " ^ key declared
         | Instantiations -> "instantiations"
         | Tests -> "tests"
-        | Grants -> "grants"
-        | Dependencies -> "dependencies"
-        | Code_packages -> "code packages")
+        | Dependencies -> "dependencies")
   | Successors (path, package) ->
       Printf.sprintf "successors %s %s" (Path.show_package package) (Path.show path)
   | Recursion_group path -> "recursion group " ^ Path.show path
@@ -234,7 +232,7 @@ let definition = function
   | Source _ | Parsed _ | Packages | Modules _ | Dependencies _ | Namespace _ | Entries _
   | Module_declarations _ | File_declarations _ | Package_declarations _ | Traits_declaring _
   | Impl_index _ | Grant _ | Import_check _
-  | Package_check (_, (Instantiations | Tests | Grants | Dependencies | Code_packages)) ->
+  | Package_check (_, (Instantiations | Tests | Dependencies)) ->
       None
   | Entry (module_, name) -> Some (Path.Top { module_; name })
   | Imports key
