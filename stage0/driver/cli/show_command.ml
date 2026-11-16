@@ -21,7 +21,6 @@ let list_package_declarations database package =
 let is_visible packages (declaration : Resolve.Names.declaration) =
   List.mem declaration.module_.package packages || Resolve.Names.is_public declaration.visibility
 
-(* No definition has a prelude name, so a bare prelude name means the prelude's. *)
 let qualify_prelude_name (argument : Path_argument.t) =
   match (argument.prefix, Resolve.Prelude.find_type argument.last) with
   | [], Some module_ -> { argument with prefix = Path.module_parts module_ }
