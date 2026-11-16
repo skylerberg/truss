@@ -1,2 +1,3 @@
 (library
- (name path))
+ (name path)
+ (libraries zarith))

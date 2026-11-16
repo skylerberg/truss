@@ -226,3 +226,33 @@ let () =
       expect name "public let name: String = \"cube\"\n"
         [ "breaks: lib::shapes::name changed its value" ];
       expect name "public let name: String = (\"square\")\n" [])
+
+let () =
+  test "an impl moved to another module of its package is no change" (fun () ->
+      let package : Path.package = { owner = None; name = "lib" } in
+      let square = "public type Square(side: Int64)\n" in
+      let moved =
+        "use lib::shapes\n\n\
+         impl Default for shapes::Square {\n\
+        \  fn default() -> shapes::Square {\n\
+        \    shapes::Square(1)\n\
+        \  }\n\
+         }\n"
+      in
+      let state files = pipeline (setup files) in
+      match
+        show
+          (Compatibility.compare
+             ~before:
+               (state
+                  [
+                    ( "lib::shapes",
+                      square ^ Fixtures.Compatibility.impl_that_is_taken_away_breaks_and_one_that_is
+                    );
+                    ("lib::extra", "");
+                  ])
+             ~after:(state [ ("lib::shapes", square); ("lib::extra", moved) ])
+             package)
+      with
+      | [] -> ()
+      | actual -> fail "found [%s]" (String.concat "; " actual))

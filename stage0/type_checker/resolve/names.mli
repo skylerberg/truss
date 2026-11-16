@@ -98,6 +98,13 @@ type generic_kind = Type_kind | Value_kind | Capability_kind
 val recovery_report : lookups -> key -> Parts.part -> Diagnostic.reported option
 val is_broken : lookups -> key -> Parts.part -> bool
 val generics_of : lookups -> Path.t -> (string * generic_kind) list option
+
+type name_lookup = Found_name of entry * Path.t | Hidden_name of entry | No_name
+
+val find_in :
+  lookups -> from:Path.module_ -> Path.module_ -> string -> is_kind:(named -> bool) -> name_lookup
+
+val find_bare_type : lookups -> from:Path.module_ -> string -> (entry * Path.t) option
 val kind_of : lookups -> Path.t -> named option
 
 type namespace

@@ -17,10 +17,6 @@ type file = { module_ : module_; name : string }
 val file_names : file -> string list
 val show_file : file -> string
 
-type type_head = { type_name : string; generics : string list }
-
-val show_type_head : type_head -> string
-
 type receiver = Static | Read | Mut | Own
 
 val show_receiver : receiver -> string
@@ -29,10 +25,20 @@ type t =
   | Top of { module_ : module_; name : string }
   | Method of { owner : t; name : string; receiver : receiver }
   | Member_constant of { owner : t; name : string }
-  | Impl of { module_ : module_; trait : string; for_type : type_head }
+  | Impl of { module_ : module_; trait : reference; for_type : t }
   | Derived of { type_ : t; trait : t }
   | Test of { module_ : module_; name : string }
-  | Law_proof of { module_ : module_; trait : string; law : string; for_type : type_head }
+  | Law_proof of { module_ : module_; trait : reference; law : string; for_type : t }
+  | Unresolved of { file : file; names : string list }
+
+and reference = { path : t; arguments : argument list; associated : (string * argument) list }
+
+and argument =
+  | Named of reference
+  | Parameter of string
+  | Any of reference
+  | Count of Z.t
+  | Constant of t
 
 val standard_package : package
 val standard_module : string list -> module_

@@ -188,9 +188,12 @@ let () =
   test "an operator chooses the impl by both operands" (fun () ->
       let text = Fixtures.Infer.operator_chooses_the_impl_by_both_operands in
       match core_call_at text "length + extra" 1 with
-      | { callee = Trait_method { evidence = Impl { impl; _ }; name = "add"; _ }; _ }, _ ->
-          let shown = Path.show impl in
-          if not (Substring.contains shown "Add[Int64]") then fail "the impl chosen is %s" shown
+      | { callee = Trait_method { evidence = Impl { impl; _ }; name = "add"; _ }; _ }, _ -> (
+          match impl with
+          | Impl { trait = { arguments = [ Named { path = Top { name = "Int64"; _ }; _ } ]; _ }; _ }
+            ->
+              ()
+          | _ -> fail "the impl chosen is %s" (Path.show impl))
       | _ -> fail "no impl recorded");
   test "an ordering on Self in a trait's law is its compare" (fun () ->
       let text = Fixtures.Infer.ordering_on_self_in_a_traits_law_is_its_compare in

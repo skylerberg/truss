@@ -549,7 +549,7 @@ let () =
           fail "expected the derived method with no substitution and the inherited method with one")
 
 let () =
-  expect ~definition:"proof Ordered.agrees_with_equal for Pair"
+  expect ~definition:"proof standard::core::Ordered.agrees_with_equal for app::main::Pair"
     "a law's proof has the law's parameters, with the proof's type for Self"
     (Fixtures.Core.pair_ordering
    ^ "proof Ordered.agrees_with_equal for Pair {\n  only_equal(first, second: second)\n}\n")
