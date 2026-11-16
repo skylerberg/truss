@@ -168,6 +168,7 @@ module Code = struct
     | Derives_inferred
     | Redeclared_method
     | Trait_cycle
+    | Recursion_limit
     | Missing_member
     | Extra_member
     | Signature_mismatch
@@ -422,6 +423,7 @@ module Code = struct
     | Derives_inferred -> "derives_inferred"
     | Redeclared_method -> "redeclared_method"
     | Trait_cycle -> "trait_cycle"
+    | Recursion_limit -> "recursion_limit"
     | Missing_member -> "missing_member"
     | Extra_member -> "extra_member"
     | Signature_mismatch -> "signature_mismatch"

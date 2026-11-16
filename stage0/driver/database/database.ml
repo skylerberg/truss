@@ -1593,10 +1593,15 @@ let list_component_parts = function
   | Type_fact_component paths -> List.map (fun path -> Part.Type_facts path) paths
   | Test_key_component keys -> List.map (fun key -> Part.Lowering (Test_key key)) keys
 
-let compute database = function
-  | Single part -> compute_part database part
-  | Type_fact_component paths -> compute_type_facts database paths
-  | Test_key_component keys -> compute_test_keys database keys
+let compute database unit =
+  try
+    match unit with
+    | Single part -> compute_part database part
+    | Type_fact_component paths -> compute_type_facts database paths
+    | Test_key_component keys -> compute_test_keys database keys
+  with Interface.Properties.Recursion_limit message ->
+    Compiler_bug.bug ~stage:"Database" "a stage after the checks reached a recursion limit: %s"
+      message
 
 let list_components database (stage : Stage.t) package parts =
   match stage with

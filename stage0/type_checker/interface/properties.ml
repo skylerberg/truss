@@ -101,7 +101,24 @@ let combine_conditions find_conditions types =
       | _ -> None)
     (Some []) types
 
-let limit = 64
+exception Recursion_limit of string
+
+let recursion_limit = 64
+let largest_condition = 64
+
+let show_property = function
+  | Copyable -> "is `Copyable`"
+  | Plain -> "is `Plain`"
+  | View -> "is a view"
+  | Holds_function -> "holds a function"
+
+let fail_at_recursion_limit query =
+  raise
+    (Recursion_limit
+       (Printf.sprintf
+          "%s needs more than %d nested types. The compiler stops there: an associated type that \
+           holds a larger type can grow a type forever."
+          query recursion_limit))
 
 let rec compute_conditions lookups ~facts_of ~resolve ~leaf ?(in_progress = []) property
     (type_ : Types.ty) =
@@ -140,7 +157,10 @@ let rec compute_conditions lookups ~facts_of ~resolve ~leaf ?(in_progress = []) 
           | None -> (
               match property with View | Holds_function -> Some [] | Copyable | Plain -> None)
           | Some _ when List.exists (Types.equal type_) in_progress -> Some []
-          | Some _ when List.length in_progress > limit -> None
+          | Some _ when List.length in_progress > recursion_limit ->
+              fail_at_recursion_limit
+                (Printf.sprintf "Deciding whether `%s` %s" (Types.show type_)
+                   (show_property property))
           | Some interface ->
               Option.bind
                 (find_stored_conditions (facts_of path) property)
@@ -189,8 +209,10 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
             with
             | Some (_, occurrence, defining), _ ->
                 recursions := { recursive = type_; occurrence; defining } :: !recursions
-            | None, Some ({ shape = Record _ | Sum _; _ } as interface)
-              when List.length enclosing <= limit ->
+            | None, Some ({ shape = Record _ | Sum _; _ } as interface) ->
+                if List.length enclosing > recursion_limit then
+                  fail_at_recursion_limit
+                    (Printf.sprintf "Listing the types that `%s` holds" (Types.show type_));
                 let substitution =
                   Option.value ~default:[]
                     (Types.make_substitution interface.type_generics arguments)
@@ -219,7 +241,7 @@ let count_nodes type_ =
   !count
 
 let compute_facts lookups ~facts_of (interface : Types.type_interface) : Environment.type_facts =
-  let is_small type_ = count_nodes type_ <= limit in
+  let is_small type_ = count_nodes type_ <= largest_condition in
   let find_conditions property types =
     Option.map (List.sort_uniq compare)
       (combine_conditions

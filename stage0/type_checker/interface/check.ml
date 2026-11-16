@@ -490,7 +490,9 @@ let list_diagnostics (lookups : Lookups.t) key =
       diagnostics = ref [];
     }
   in
-  check state;
+  (try check state
+   with Properties.Recursion_limit message ->
+     report state Recursion_limit state.spans.(state.definition.id) message);
   List.sort
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))

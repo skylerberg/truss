@@ -24,7 +24,15 @@ type checked = Body.checked = {
 
 let check lookups (key : Resolve.Names.key) ~checks_body =
   Compiler_bug.while_doing ~stage:"Infer" (Resolve.Names.show_key key) (fun () ->
-      Body.check lookups key ~checks_body)
+      try Body.check lookups key ~checks_body
+      with Interface.Properties.Recursion_limit message ->
+        let names = lookups.interface.names in
+        Error
+          [
+            Diagnostic.make ~code:(Types Recursion_limit)
+              (names.spans key).((names.definition key).id)
+              message;
+          ])
 
 let contract lookups key = check lookups key ~checks_body:false
 

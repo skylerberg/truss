@@ -168,6 +168,7 @@ module Code : sig
     | Derives_inferred
     | Redeclared_method
     | Trait_cycle
+    | Recursion_limit
     | Missing_member
     | Extra_member
     | Signature_mismatch
