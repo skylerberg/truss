@@ -87,8 +87,8 @@ let map_original_offset (placed : placed array) ~is_stop offset =
 let rec map_original_token placed (token : Token.t) =
   let span (span : Source.span) =
     let stop = map_original_offset placed ~is_stop:true span.stop in
-    if span.start = span.stop then Source.zero_width stop
-    else Source.span (map_original_offset placed ~is_stop:false span.start) stop
+    if span.start = span.stop then Source.make_zero_width stop
+    else Source.make_span (map_original_offset placed ~is_stop:false span.start) stop
   in
   let kind : Token.kind =
     match token.kind with
@@ -147,7 +147,7 @@ let lex source =
     List.concat_map
       (fun (diagnostic : Diagnostic.t) ->
         match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
-      (Diagnostic.machine_applicable diagnostics)
+      (Diagnostic.list_machine_applicable diagnostics)
   in
   match edits with
   | [] -> (mark_inserted_closers tokens, diagnostics)

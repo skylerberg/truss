@@ -83,7 +83,9 @@ let rec use_mutable_indexes (state : State.state) ~(report_with : Diagnostic.Cod
       | Some
           ({ callee = Trait_method ({ name = "at"; self_type; _ } as method_); arguments; _ } as
            call) -> (
-          let index_mut = State.make_trait_reference ~arguments:[] (Well_known.path Index_mut) in
+          let index_mut =
+            State.make_trait_reference ~arguments:[] (Well_known.make_path Index_mut)
+          in
           match State.implements state self_type index_mut with
           | Some evidence ->
               state.tables.calls.(value.id) <-
@@ -112,7 +114,8 @@ let rec use_mutable_indexes (state : State.state) ~(report_with : Diagnostic.Cod
                   let assigns =
                     Option.is_some
                       (State.implements state self_type
-                         (State.make_trait_reference ~arguments:[] (Well_known.path Index_assign)))
+                         (State.make_trait_reference ~arguments:[]
+                            (Well_known.make_path Index_assign)))
                   in
                   State.report state code (State.read_span state value.id)
                     (Printf.sprintf

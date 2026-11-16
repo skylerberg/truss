@@ -1,4 +1,4 @@
-let bodies ~opaque (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
+let list_bodies ~opaque (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
   let function_body (function_definition : Syntax.function_definition) =
     [ spans.(function_definition.body.id) ]
   in
@@ -52,7 +52,7 @@ let cut text spans =
   |> List.filter (( <> ) "")
   |> String.concat "\n"
 
-let text (names : Resolve.Names.lookups) ~body ~opaque (key : Resolve.Names.key) =
+let render_signature (names : Resolve.Names.lookups) ~body ~opaque (key : Resolve.Names.key) =
   let text = names.text key in
   if body then String.trim text
   else
@@ -65,12 +65,12 @@ let text (names : Resolve.Names.lookups) ~body ~opaque (key : Resolve.Names.key)
             (fun (span : Source.Definition_span.t) ->
               Source.Definition_span.of_file ~base
                 (Source.Definition_span.to_file ~base:member_base span))
-            (bodies ~opaque:false (names.spans member) (names.definition member)))
+            (list_bodies ~opaque:false (names.spans member) (names.definition member)))
         (names.contained key)
     in
-    cut text (bodies ~opaque (names.spans key) (names.definition key) @ contained)
+    cut text (list_bodies ~opaque (names.spans key) (names.definition key) @ contained)
 
-let kind_word : Resolve.Names.kind -> string = function
+let show_kind : Resolve.Names.kind -> string = function
   | Function -> "function"
   | Type -> "type"
   | Trait -> "trait"
@@ -83,10 +83,10 @@ let kind_word : Resolve.Names.kind -> string = function
   | Test -> "test"
   | Law_proof -> "law proof"
 
-let of_path (names : Resolve.Names.lookups) path =
-  Option.map (text names ~body:false ~opaque:false) (names.key path)
+let find_signature (names : Resolve.Names.lookups) path =
+  Option.map (render_signature names ~body:false ~opaque:false) (names.key path)
 
-let labeled label signature =
+let label_signature label signature =
   let indent = String.make (String.length label) ' ' in
   String.concat "\n"
     (List.mapi

@@ -120,7 +120,7 @@ let add_diagnostic state ?fixes code (span : Source.Definition_span.t) message =
   let diagnostic = Diagnostic.make ?fixes ~code:(Resolve code) span message in
   let names = lookup_current_names state in
   names.diagnostics <- diagnostic :: names.diagnostics;
-  Diagnostic.reported diagnostic
+  Diagnostic.make_reported diagnostic
 
 let report state ?fixes code span message = ignore (add_diagnostic state ?fixes code span message)
 
@@ -129,7 +129,7 @@ let set_target state (name : Syntax.name) target =
 
 let report_unknown state (name : Syntax.name) ~expected candidates =
   let fixes =
-    match Diagnostic.closest name.text candidates with
+    match Diagnostic.find_closest name.text candidates with
     | Some candidate ->
         [
           Diagnostic.fix

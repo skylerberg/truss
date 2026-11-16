@@ -75,7 +75,7 @@ let classify_receiver (parameters : Syntax.parameter list) : Path.receiver =
   | _ -> Static
 
 let extract_last_name (module_ : Path.module_) =
-  match List.rev (Path.module_parts module_) with last :: _ -> last | [] -> ""
+  match List.rev (Path.list_module_parts module_) with last :: _ -> last | [] -> ""
 
 type entry = { name : string; kind : named; visibility : Syntax.visibility; generic : bool }
 
@@ -275,7 +275,7 @@ let builtin_entries =
   List.map
     (fun builtin ->
       {
-        name = Intrinsic.builtin_name builtin;
+        name = Intrinsic.show_builtin builtin;
         kind = Type;
         visibility = Public;
         generic = (match builtin with Array | Storage | View | Shared -> true | _ -> false);
@@ -284,7 +284,7 @@ let builtin_entries =
   @ List.map
       (fun operation ->
         {
-          name = Intrinsic.operation_name operation;
+          name = Intrinsic.show_operation operation;
           kind = Function;
           visibility = Public;
           generic = true;
@@ -1009,7 +1009,7 @@ let of_namespaces ~(namespace : Path.package -> namespace) ~module_exists ~split
   in
   let members owner name =
     Option.value ~default:[]
-      (Member_map.find_opt (owner, name) (namespace (Path.package owner)).members)
+      (Member_map.find_opt (owner, name) (namespace (Path.locate_package owner)).members)
   in
   {
     find =

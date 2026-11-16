@@ -251,14 +251,14 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
   | Bracket (_, [ Item { kind = Range _; _ } ]), _ -> false
   | Bracket (base, [ Item key ]), (Some Index | None) -> (
       let base_type = State.normalize state (Hooks.check_expression state env base) in
-      let trait = State.make_trait_reference ~arguments:[] (Well_known.path Index_assign) in
+      let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Index_assign) in
       match
         ( State.implements state base_type trait,
           Members.find_trait_method state.lookups trait.trait "assign" Mut )
       with
       | ( Some ((Interface.Impls.From_impl _ | From_bound | From_any) as evidence_source),
           Some method_ ) ->
-          let index = State.make_trait_reference ~arguments:[] (Well_known.path Index) in
+          let index = State.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
           let parameter name type_ : Types.parameter_info =
             { name; mode = Own; type_; has_default = false }
           in
@@ -355,7 +355,7 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
       match type_ with
       | Types.Error _ | Types.Hole -> (type_, mode)
       | _ -> (
-          let cursor = State.make_trait_reference ~arguments:[] (Well_known.path Cursor) in
+          let cursor = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
           let by_position =
             if mode = Types.Own then None
             else

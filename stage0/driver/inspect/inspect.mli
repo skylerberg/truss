@@ -6,11 +6,11 @@ type unfinished = {
   span : Source.Definition_span.t;
 }
 
-val unfinished : Source.Definition_span.t array -> Syntax.definition -> unfinished list
+val list_unfinished : Source.Definition_span.t array -> Syntax.definition -> unfinished list
 
 type hole = { offset : int; expected : string option; scope : (string * string) list }
 
-val holes :
+val list_holes :
   Source.Definition_span.t array ->
   Syntax.definition ->
   Resolve.resolved ->

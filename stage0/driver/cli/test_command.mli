@@ -8,7 +8,7 @@ val select :
   match_:string option ->
   test list
 
-val label : test -> string
+val label_test : test -> string
 
 val run_tests :
   ?rerun:bool ->

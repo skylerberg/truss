@@ -109,7 +109,7 @@ let machine_fixed text =
     (List.concat_map
        (fun (diagnostic : Diagnostic.t) ->
          match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
-       (Diagnostic.machine_applicable (snd (lex text))))
+       (Diagnostic.list_machine_applicable (snd (lex text))))
 
 let () =
   Harness.test "two sources of the same text are equal" (fun () ->
@@ -122,7 +122,7 @@ let () =
   Harness.test "the first line starts after a byte order mark" (fun () ->
       let source = Source.create ~path:"test.truss" "\xEF\xBB\xBFab\ncd" in
       let shown offset =
-        let line, column = Source.position source offset in
+        let line, column = Source.compute_position source offset in
         Printf.sprintf "%d:%d" line column
       in
       equal_lists Fun.id "positions" [ "1:1"; "1:2"; "2:1" ] (List.map shown [ 3; 4; 6 ]);
@@ -700,9 +700,9 @@ let () =
 let () =
   Harness.test "at most 200 diagnostics are shown, then a count" (fun () ->
       let diagnostic offset =
-        Diagnostic.make ~code:(Lexer Semicolon) (Source.span offset (offset + 1)) "x"
+        Diagnostic.make ~code:(Lexer Semicolon) (Source.make_span offset (offset + 1)) "x"
       in
-      let shown = Diagnostic.shown (List.init 250 diagnostic) in
+      let shown = Diagnostic.select_shown (List.init 250 diagnostic) in
       if List.length shown <> Diagnostic.For_testing.limit + 1 then
         Harness.fail "%d shown" (List.length shown);
       match List.rev shown with
@@ -718,7 +718,7 @@ let () =
   Harness.test "overlapping edits are refused" (fun () ->
       let fix =
         Diagnostic.fix "x"
-          [ Diagnostic.delete (Source.span 0 2); Diagnostic.delete (Source.span 1 3) ]
+          [ Diagnostic.delete (Source.make_span 0 2); Diagnostic.delete (Source.make_span 1 3) ]
       in
       match Diagnostic.apply_fix "abc" fix with
       | _ -> Harness.fail "expected Invalid_argument"

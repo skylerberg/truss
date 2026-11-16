@@ -89,23 +89,23 @@ let find snapshot database packages ~body text =
       in
       let names = Database.make_name_lookups database [ key.module_.package ] in
       let ({ file = written; base } : Resolve.Names.place) = names.place key in
-      let source = Command_packages.source snapshot packages written in
+      let source = Command_packages.read_source snapshot packages written in
       {
         declaration;
         file = Source.path source;
-        line = fst (Source.position source base);
-        text = Signatures.text names ~body ~opaque key;
+        line = fst (Source.compute_position source base);
+        text = Signatures.render_signature names ~body ~opaque key;
       })
     (resolve database packages text)
 
 let run ~paths ~body =
-  let snapshot, packages = Command_packages.current () in
+  let snapshot, packages = Command_packages.load_current () in
   let database = Workspace.open_database snapshot in
   let results = List.map (fun path -> (path, find snapshot database packages ~body path)) paths in
   let missing = List.filter (fun (_, definitions) -> definitions = []) results in
   if Output.json () then
     Json.print
-      (Json.document ~diagnostics:[]
+      (Json.make_document ~diagnostics:[]
          [
            ( "definitions",
              Json.List
@@ -116,7 +116,7 @@ let run ~paths ~body =
                         Json.Object
                           [
                             ("path", Json.String (Path.show definition.declaration.path));
-                            ("kind", Json.String (Signatures.kind_word definition.declaration.kind));
+                            ("kind", Json.String (Signatures.show_kind definition.declaration.kind));
                             ("file", Json.String definition.file);
                             ("line", Json.Int definition.line);
                             ("text", Json.String definition.text);

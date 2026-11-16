@@ -89,8 +89,8 @@ let () =
       in
       match compiles (Libc.For_testing.check other) with
       | Ok () ->
-          Codegen_support.fail "the check takes the table of %s on %s" (Libc.system_name other)
-            (Libc.system_name Codegen_support.host)
+          Codegen_support.fail "the check takes the table of %s on %s" (Libc.show_system other)
+            (Libc.show_system Codegen_support.host)
       | Error _ -> ());
   Codegen_support.test
     "a function that only macOS has is held to its headers, and to no other system's" (fun () ->
@@ -134,14 +134,14 @@ let () =
   Codegen_support.test "a function that takes a structure is declared with no header" (fun () ->
       Codegen_support.expect_string
         ~expected:"struct timespec;\nint clock_gettime(int, struct timespec *);\n"
-        (Libc.prototype (Libc.declaration linux Clock_gettime)));
+        (Libc.render_prototype (Libc.make_declaration linux Clock_gettime)));
   Codegen_support.test "a function with arguments C passes through ... is declared so" (fun () ->
       Codegen_support.expect_string ~expected:"int open(const char *, int, ...);\n"
-        (Libc.prototype (Libc.declaration linux Open)));
+        (Libc.render_prototype (Libc.make_declaration linux Open)));
   Codegen_support.test "a number whose name in C starts with an underscore is named without it"
     (fun () ->
       Codegen_support.expect_string ~expected:"libc_sc_nprocessors_onln"
-        (Intrinsic.operation_name (Libc_number Sc_nprocessors_onln)));
+        (Intrinsic.show_operation (Libc_number Sc_nprocessors_onln)));
   Codegen_support.test "storage a function fills is passed mut, and a view it reads is not"
     (fun () ->
       let modes operation =
@@ -157,8 +157,8 @@ let () =
     (fun () ->
       List.iter
         (fun function_ ->
-          let { Libc.parameters; at_most; _ } = Libc.signature function_ in
-          let name = Libc.function_name function_ in
+          let { Libc.parameters; at_most; _ } = Libc.make_signature function_ in
+          let name = Libc.show_function function_ in
           let passed role parameter =
             match List.assoc_opt parameter parameters with
             | Some (Libc.Value UInt64) | Some (Written (UInt32, [ _ ])) -> ()
@@ -180,14 +180,14 @@ let () =
                       if count < 1 then
                         Codegen_support.fail "%s: `%s` has no elements" name parameter
                   | Number number ->
-                      if Libc.number_type number <> UInt64 then
+                      if Libc.classify_number number <> UInt64 then
                         Codegen_support.fail "%s: `%s` is counted by %s, which is no UInt64" name
-                          parameter (Libc.number_name number)
+                          parameter (Libc.show_number number)
                   | Through_zero -> ())
               | Value _ | Written _ | Always _ | Fixed _ -> ())
             parameters)
         Libc.functions;
-      let { Libc.parameters; at_most; _ } = Libc.signature Read in
+      let { Libc.parameters; at_most; _ } = Libc.make_signature Read in
       if
         List.assoc "buffer" parameters <> Room (UInt8, Counted { by = "count"; each = 1 })
         || at_most <> Some "count"
@@ -292,7 +292,7 @@ let () =
       Codegen_support.expect_int ~expected:0o600 (Unix.stat path).st_perm);
   Codegen_support.test "errno is the number at the address the C library returns" (fun () ->
       Codegen_support.expect_status ~extra
-        (Libc.value Codegen_support.host Enoent)
+        (Libc.evaluate_number Codegen_support.host Enoent)
         [
           built_entry (fun builder ->
               let name = view_of builder "/nonexistent/truss\000" in
@@ -671,7 +671,9 @@ let () =
             (Compile.For_testing.Intrinsics.lower env builder types (Libc Open) ~type_arguments:[]
                [
                  Place (Lowered.make_local_place name);
-                 Value (Codegen_support.constant_int32 (Libc.value Codegen_support.host O_rdonly));
+                 Value
+                   (Codegen_support.constant_int32
+                      (Libc.evaluate_number Codegen_support.host O_rdonly));
                  Value (Codegen_support.constant_int32 0);
                ]
                ~destination:(Some (Lowered.make_local_place descriptor))
@@ -805,7 +807,7 @@ let () =
   Codegen_support.test "a checked build passes a C library call whose arguments are large enough"
     (fun () ->
       Codegen_support.expect_status ~extra
-        (Libc.value Codegen_support.host Enoent)
+        (Libc.evaluate_number Codegen_support.host Enoent)
         [
           built_entry (fun builder ->
               let name = view_of builder "/nonexistent/truss\000" in

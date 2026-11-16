@@ -1251,8 +1251,8 @@ and parse_binding cursor ~is_var =
               [
                 Diagnostic.fix "Put the expression in parentheses"
                   [
-                    Diagnostic.insert (Source.zero_width span.start) "(";
-                    Diagnostic.insert (Source.zero_width span.stop) ")";
+                    Diagnostic.insert (Source.make_zero_width span.start) "(";
+                    Diagnostic.insert (Source.make_zero_width span.stop) ")";
                   ];
               ]
       | _ -> ());

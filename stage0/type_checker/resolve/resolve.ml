@@ -181,7 +181,7 @@ let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : S
   ignore
     (List.fold_left
        (fun seen (item : Syntax.path Syntax.item) ->
-         let span = Source.span item.base item.stop in
+         let span = Source.make_span item.base item.stop in
          let used_module = Names.resolve_used_module lookups ~from:module_ item.value in
          let last = Names.extract_last_name used_module in
          if used_module = Intrinsic.module_ && module_.package <> Path.standard_package then
@@ -206,7 +206,7 @@ let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : S
                  ~fixes:
                    [
                      Diagnostic.fix "Delete the `use`."
-                       [ Diagnostic.delete (Source.span item.base stop) ];
+                       [ Diagnostic.delete (Source.make_span item.base stop) ];
                    ]
                  (Printf.sprintf "Nothing in this file uses `%s`." (Path.show_module used_module))
            | Some _ | None -> ()

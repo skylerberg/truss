@@ -9,7 +9,7 @@ let interface packages =
   Database.make_interface_lookups (Support.database packages)
     [ (Support.module_of "app::main").package ]
 
-let standard = Path.standard
+let standard = Path.make_standard_path
 let int64 = Types.make_builtin Int64
 
 let () =
@@ -227,16 +227,16 @@ let () =
     Interface.Impls.is_plain;
   property "a List is Copyable" true "" (fun _ -> list int64) Interface.Impls.is_copyable;
   property "a handle is not Copyable" false ""
-    (fun _ -> Types.make_named (Intrinsic.builtin_path Handle) [])
+    (fun _ -> Types.make_named (Intrinsic.make_builtin_path Handle) [])
     Interface.Impls.is_copyable;
   property "a handle is not Plain" false ""
-    (fun _ -> Types.make_named (Intrinsic.builtin_path Handle) [])
+    (fun _ -> Types.make_named (Intrinsic.make_builtin_path Handle) [])
     Interface.Impls.is_plain;
   property "an Option of a handle is not Copyable" false ""
-    (fun _ -> option (Types.make_named (Intrinsic.builtin_path Handle) []))
+    (fun _ -> option (Types.make_named (Intrinsic.make_builtin_path Handle) []))
     Interface.Impls.is_copyable;
   property "an Option of a handle is not Plain" false ""
-    (fun _ -> option (Types.make_named (Intrinsic.builtin_path Handle) []))
+    (fun _ -> option (Types.make_named (Intrinsic.make_builtin_path Handle) []))
     Interface.Impls.is_plain;
   property "a List is not Plain" false "" (fun _ -> list int64) Interface.Impls.is_plain;
   property "an Option of a Slice is a view" true ""
@@ -584,13 +584,13 @@ let () =
       in
       List.iter
         (fun known ->
-          let path = Well_known.path known in
+          let path = Well_known.make_path known in
           if not (List.exists (Path.equal path) declared) then
             Harness.fail "the standard library has no `%s`" (Path.show path))
         Well_known.For_testing.all);
   Harness.test "a well-known definition is found by its path" (fun () ->
       List.iter
         (fun known ->
-          if Well_known.of_path (Well_known.path known) <> Some known then
-            Harness.fail "`%s` is not found by its path" (Path.show (Well_known.path known)))
+          if Well_known.of_path (Well_known.make_path known) <> Some known then
+            Harness.fail "`%s` is not found by its path" (Path.show (Well_known.make_path known)))
         Well_known.For_testing.all)

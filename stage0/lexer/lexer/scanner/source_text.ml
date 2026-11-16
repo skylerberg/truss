@@ -7,17 +7,17 @@ let remove_trivia cursor ~start ~stop ~line_break =
   let code_after = not (Cursor.is_end_of_line cursor after) in
   match (code_before, code_after) with
   | true, true ->
-      Diagnostic.replace (Source.span before after)
+      Diagnostic.replace (Source.make_span before after)
         (if line_break then "\n" ^ Cursor.extract_indentation cursor start else " ")
-  | true, false -> Diagnostic.delete (Source.span before after)
-  | false, true -> Diagnostic.delete (Source.span start after)
+  | true, false -> Diagnostic.delete (Source.make_span before after)
+  | false, true -> Diagnostic.delete (Source.make_span start after)
   | false, false ->
       let line_start = Source.line_start cursor.source start in
       let stop =
         if Cursor.is_at_end cursor after then after
         else after + Cursor.measure_line_break cursor after
       in
-      Diagnostic.delete (Source.span line_start stop)
+      Diagnostic.delete (Source.make_span line_start stop)
 
 let report_forbidden_run (cursor : Cursor.t) ~context =
   let start = cursor.position in
@@ -65,7 +65,7 @@ let report_forbidden_run (cursor : Cursor.t) ~context =
           [
             Diagnostic.fix
               ("Replace with `" ^ escapes ^ "`")
-              [ Diagnostic.replace (Source.span start stop) escapes ];
+              [ Diagnostic.replace (Source.make_span start stop) escapes ];
           ] )
     | Raw_string ->
         ( base
@@ -73,7 +73,7 @@ let report_forbidden_run (cursor : Cursor.t) ~context =
              character as an escape such as `\\u{200B}`.",
           [] )
   in
-  Cursor.report cursor ~fixes ~code:Forbidden_character (Source.span start stop) message
+  Cursor.report cursor ~fixes ~code:Forbidden_character (Source.make_span start stop) message
 
 let report_invalid_run (cursor : Cursor.t) =
   let start = cursor.position in
@@ -84,7 +84,7 @@ let report_invalid_run (cursor : Cursor.t) =
     cursor.position <- cursor.position + 1
   done;
   Cursor.report cursor ~code:Invalid_utf8
-    (Source.span start cursor.position)
+    (Source.make_span start cursor.position)
     "Source files must be UTF-8, and these bytes are not valid UTF-8."
 
 let copy_plain (cursor : Cursor.t) buffer ~special =
@@ -121,12 +121,12 @@ let consume_line_break (cursor : Cursor.t) =
       ~fixes:
         [
           Diagnostic.fix "Replace with a line feed"
-            [ Diagnostic.replace (Source.span start (start + 1)) "\n" ];
+            [ Diagnostic.replace (Source.make_span start (start + 1)) "\n" ];
         ]
-      (Source.span start (start + 1))
+      (Source.make_span start (start + 1))
       "A carriage return is a line break only before a line feed.";
   cursor.position <- start + length;
-  Source.span start cursor.position
+  Source.make_span start cursor.position
 
 let note_line_break (cursor : Cursor.t) line_break =
   if cursor.first_line_break <> None && cursor.line_is_blank then cursor.blank_line <- true;
@@ -137,4 +137,4 @@ let reject ?(code = Diagnostic.Code.Unexpected_character) (cursor : Cursor.t) ~l
   let start = cursor.position in
   cursor.position <- start + length;
   cursor.line_is_blank <- false;
-  Cursor.report cursor ~code (Source.span start (start + length)) message
+  Cursor.report cursor ~code (Source.make_span start (start + length)) message

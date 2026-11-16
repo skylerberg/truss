@@ -124,7 +124,7 @@ let has_only_spaces_before cursor offset =
   count_spaces_before cursor offset = Source.line_start cursor.source offset
 
 let describe_code_point value =
-  match Unicode.forbidden_name value with
+  match Unicode.find_forbidden_name value with
   | Some name -> Printf.sprintf "U+%04X %s" value name
   | None -> Printf.sprintf "U+%04X" value
 

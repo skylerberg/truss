@@ -4,7 +4,7 @@ let is_source name =
   name = "dune"
   || List.exists (Filename.check_suffix name) [ ".ml"; ".mli"; ".mly"; ".mll"; ".c"; ".h" ]
 
-let rec files directory relative sources =
+let rec list_files directory relative sources =
   let entries = Sys.readdir directory in
   Array.sort compare entries;
   Array.fold_left
@@ -13,7 +13,7 @@ let rec files directory relative sources =
       let relative = if relative = "" then entry else relative ^ "/" ^ entry in
       if Sys.is_directory path then
         if List.mem entry skipped_directories || entry.[0] = '.' then sources
-        else files path relative sources
+        else list_files path relative sources
       else if is_source entry then (relative, path) :: sources
       else sources)
     sources entries
@@ -32,7 +32,7 @@ let () =
         (fun (relative, path) ->
           add relative;
           add (In_channel.with_open_bin path In_channel.input_all))
-        (List.rev (files root "" []));
+        (List.rev (list_files root "" []));
       Printf.printf "let digest = %S\n"
         (Digest.BLAKE256.to_hex (Digest.BLAKE256.string (Buffer.contents buffer)))
   | _ ->

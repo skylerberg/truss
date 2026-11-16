@@ -16,4 +16,4 @@ val is_xid_continue : int -> bool
 val is_forbidden : int -> bool
 val is_bidi_control : int -> bool
 val is_control : int -> bool
-val forbidden_name : int -> string option
+val find_forbidden_name : int -> string option

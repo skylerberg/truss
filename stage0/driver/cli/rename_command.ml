@@ -6,15 +6,15 @@ type plan = {
 }
 
 let module_exists snapshot packages (module_ : Path.module_) =
-  List.mem module_ (Command_packages.modules snapshot packages)
+  List.mem module_ (Command_packages.list_modules snapshot packages)
 
-let moved_file plan (file : Path.file) =
+let compute_moved_file plan (file : Path.file) =
   match plan.moved with
   | Some (old_module, new_module) when file.module_ = old_module ->
       { file with module_ = new_module }
   | _ -> file
 
-let by_file edits =
+let group_by_file edits =
   List.map
     (fun file ->
       ( file,
@@ -23,7 +23,7 @@ let by_file edits =
           edits ))
     (List.sort_uniq compare (List.map fst edits))
 
-let in_package packages from_ =
+let locate_in_package packages from_ =
   let is_package package = List.mem package packages in
   let argument = Path_argument.parse from_ in
   match Path.split_module ~is_package (argument.prefix @ [ argument.last ]) with
@@ -33,8 +33,8 @@ let in_package packages from_ =
         "Only the definitions of this project's packages can be renamed, and `%s` is not in one."
         from_
 
-let target_of snapshot database packages from_ =
-  let { Path.package; modules = names }, member = in_package packages from_ in
+let resolve_target snapshot database packages from_ =
+  let { Path.package; modules = names }, member = locate_in_package packages from_ in
   let package_name = Path.show_package package in
   if member = None && module_exists snapshot packages { package; modules = names } then
     Module { package; modules = names }
@@ -51,7 +51,7 @@ let target_of snapshot database packages from_ =
                   Path.equal owner other_owner && name = other_name
               | candidate, path -> Path.equal candidate path)
             (List.concat_map (Database.make_name_lookups database packages).declarations
-               (Command_packages.modules snapshot packages))
+               (Command_packages.list_modules snapshot packages))
         in
         let path : Path.t =
           match member with
@@ -77,7 +77,7 @@ let new_name ~from_ to_ =
       from_owner;
   name
 
-let occurrences database snapshot packages =
+let list_occurrences database snapshot packages =
   let names = Database.make_name_lookups database packages in
   List.concat_map
     (fun file ->
@@ -95,11 +95,11 @@ let occurrences database snapshot packages =
               List.map
                 (fun ({ span; target } : Inspect.References.occurrence) ->
                   (file, Source.Definition_span.to_file ~base span, target))
-                (Inspect.References.occurrences ~path:key.path (names.spans key)
+                (Inspect.References.list_occurrences ~path:key.path (names.spans key)
                    (names.definition key) resolved tables)
           | None -> [])
         (names.declarations_in file))
-    (Command_packages.files snapshot packages)
+    (Command_packages.list_files snapshot packages)
 
 let plan_definition database snapshot packages path name =
   let edits =
@@ -108,14 +108,14 @@ let plan_definition database snapshot packages path name =
         if Inspect.References.names_definition path target then
           Some (file, Diagnostic.replace span name)
         else None)
-      (occurrences database snapshot packages)
+      (list_occurrences database snapshot packages)
   in
-  { edits = by_file edits; moved = None }
+  { edits = group_by_file edits; moved = None }
 
 let plan_module database snapshot packages (old_module : Path.module_) to_ =
   let package = old_module.package in
   let modules =
-    match in_package packages to_ with
+    match locate_in_package packages to_ with
     | { package = named; modules = _ :: _ as modules }, None when named = package -> modules
     | _ | (exception Outcome.Cannot_run _) ->
         let package = Path.show_package package in
@@ -124,7 +124,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
   in
   List.iter
     (fun name ->
-      if not (Manifest.valid_name name) then
+      if not (Manifest.is_valid_name name) then
         Outcome.cannot_run "`%s` is not a lower_snake_case name, which a module's must be." name)
     modules;
   let new_module : Path.module_ = { package; modules } in
@@ -136,11 +136,11 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
       (fun (file, (span : Source.span), (target : Inspect.References.target)) ->
         match target with
         | Module edit_module when edit_module = old_module ->
-            let text = Source.text (Workspace.source snapshot file) in
+            let text = Source.text (Workspace.read_source snapshot file) in
             let written = String.sub text span.start (span.stop - span.start) in
             Some (file, Diagnostic.replace span (if String.contains written ':' then full else last))
         | _ -> None)
-      (occurrences database snapshot packages)
+      (list_occurrences database snapshot packages)
     @ List.concat_map
         (fun (file : Path.file) ->
           List.filter_map
@@ -152,35 +152,35 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
                     (Database.make_name_lookups database packages)
                     ~from:file.module_)
                (Database.read_parsed database file).uses))
-        (Command_packages.files snapshot packages)
+        (Command_packages.list_files snapshot packages)
   in
-  { edits = by_file edits; moved = Some (old_module, new_module) }
+  { edits = group_by_file edits; moved = Some (old_module, new_module) }
 
-let text_of snapshot file = Source.text (Workspace.source snapshot file)
+let read_text snapshot file = Source.text (Workspace.read_source snapshot file)
 
-let applied snapshot packages plan =
+let apply_plan snapshot packages plan =
   List.map
     (fun file ->
       let text =
         match List.assoc_opt file plan.edits with
-        | Some edits -> Diagnostic.apply_edits (text_of snapshot file) edits
-        | None -> text_of snapshot file
+        | Some edits -> Diagnostic.apply_edits (read_text snapshot file) edits
+        | None -> read_text snapshot file
       in
-      (file, moved_file plan file, text))
-    (Command_packages.files snapshot packages)
+      (file, compute_moved_file plan file, text))
+    (Command_packages.list_files snapshot packages)
 
-let directory_of snapshot packages (module_ : Path.module_) =
+let locate_directory snapshot packages (module_ : Path.module_) =
   if List.mem module_.package packages then
     List.fold_left Filename.concat
-      (Command_packages.directory snapshot module_.package)
+      (Command_packages.locate_directory snapshot module_.package)
       module_.modules
   else Outcome.cannot_run "%s is not in this project." (Path.show_module module_)
 
-let path_of snapshot packages (file : Path.file) =
-  Filename.concat (directory_of snapshot packages file.module_) (file.name ^ ".truss")
+let locate_path snapshot packages (file : Path.file) =
+  Filename.concat (locate_directory snapshot packages file.module_) (file.name ^ ".truss")
 
-let trial snapshot after =
-  let path file = Workspace.file_path snapshot file in
+let make_trial_snapshot snapshot after =
+  let path file = Workspace.locate_file snapshot file in
   let written = List.map (fun (_, file, text) -> (path file, Some text)) after in
   let removed =
     List.filter_map
@@ -191,10 +191,10 @@ let trial snapshot after =
   in
   Workspace.make_trial snapshot (written @ removed)
 
-let edits_json snapshot packages plan =
+let encode_edits snapshot packages plan =
   List.concat_map
     (fun (file, edits) ->
-      let source = Command_packages.source snapshot packages file in
+      let source = Command_packages.read_source snapshot packages file in
       List.map
         (fun (edit : Source.span Diagnostic.edit) ->
           Json.Object
@@ -209,29 +209,31 @@ let edits_json snapshot packages plan =
 
 let run ~from_ ~to_ =
   let json = Output.json () in
-  let snapshot, packages = Command_packages.worktree () in
+  let snapshot, packages = Command_packages.load_worktree () in
   let database = Workspace.open_database snapshot in
   let report = Report.gather database snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
   let plan =
-    match target_of snapshot database packages from_ with
+    match resolve_target snapshot database packages from_ with
     | Definition path -> plan_definition database snapshot packages path (new_name ~from_ to_)
     | Module module_ -> plan_module database snapshot packages module_ to_
   in
-  let after = applied snapshot packages plan in
-  let database = Workspace.open_database (trial snapshot after) in
+  let after = apply_plan snapshot packages plan in
+  let database = Workspace.open_database (make_trial_snapshot snapshot after) in
   Database.check database packages;
   let caused =
     List.filter_map
       (fun (_, file, text) ->
-        match Diagnostic.shown (Database.list_file_diagnostics database file) with
+        match Diagnostic.select_shown (Database.list_file_diagnostics database file) with
         | [] -> None
         | diagnostics ->
             Some
               {
                 Report.file;
                 source =
-                  Source.create ~path:(Shown_path.shown (path_of snapshot packages file)) text;
+                  Source.create
+                    ~path:(Shown_path.show_path (locate_path snapshot packages file))
+                    text;
                 diagnostics;
               })
       after
@@ -239,40 +241,41 @@ let run ~from_ ~to_ =
   match caused with
   | _ :: _ ->
       let caused = Report.of_files caused in
-      if json then Json.print (Report.document caused [])
+      if json then Json.print (Report.make_document caused [])
       else begin
         Report.print caused;
         Output.eprintf "Renaming %s to %s would cause these, so nothing was changed.\n" from_ to_
       end;
       1
   | [] ->
-      let edits = edits_json snapshot packages plan in
+      let edits = encode_edits snapshot packages plan in
       List.iter
         (fun (old_file, file, text) ->
           if List.mem_assoc old_file plan.edits || old_file <> file then begin
-            let path = path_of snapshot packages file in
+            let path = locate_path snapshot packages file in
             File_system.make_directory (Filename.dirname path);
             Command_packages.write_file path text;
-            if old_file <> file then Sys.remove (Command_packages.path snapshot old_file)
+            if old_file <> file then Sys.remove (Command_packages.locate_file snapshot old_file)
           end)
         after;
       let count = List.length edits in
       if json then
         Json.print
-          (Json.document ~diagnostics:[]
+          (Json.make_document ~diagnostics:[]
              [
                ("edits", Json.List edits);
                ( "moved",
                  match plan.moved with
                  | Some (old_m, new_m) ->
                      let directory module_ =
-                       Json.String (Shown_path.shown (directory_of snapshot packages module_))
+                       Json.String
+                         (Shown_path.show_path (locate_directory snapshot packages module_))
                      in
                      Json.Object [ ("from", directory old_m); ("to", directory new_m) ]
                  | None -> Json.Null );
              ])
       else
         Output.printf "Renamed %s to %s: %s in %s.\n" from_ to_
-          (Report.plural count "edit" "edits")
-          (Report.plural (List.length plan.edits) "file" "files");
+          (Report.pluralize count "edit" "edits")
+          (Report.pluralize (List.length plan.edits) "file" "files");
       0

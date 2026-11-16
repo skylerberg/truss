@@ -63,7 +63,9 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
               let part_type = State.normalize state part_type in
               if Types.contains_unsolved part_type then false
               else begin
-                let display = State.make_trait_reference ~arguments:[] (Well_known.path Display) in
+                let display =
+                  State.make_trait_reference ~arguments:[] (Well_known.make_path Display)
+                in
                 (match State.implements state part_type display with
                 | Some evidence ->
                     set_part index
@@ -83,7 +85,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
         | Some expected -> Types.is_well_known String_slice expected
         | None -> false
       in
-      if is_view_expected then Types.make_named (Well_known.path String_slice) []
+      if is_view_expected then Types.make_named (Well_known.make_path String_slice) []
       else State.string_type
   | Some tag -> (
       match State.find_target state tag.last with
@@ -101,7 +103,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
           | Some expected -> ignore (State.unify state tag_type expected)
           | None -> ());
           let template_trait =
-            State.make_trait_reference ~arguments:[] (Well_known.path From_template)
+            State.make_trait_reference ~arguments:[] (Well_known.make_path From_template)
           in
           let part_type = ref None in
           State.register_expression state value (fun () ->
@@ -139,7 +141,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                         if not (Types.equal part_type part) then
                           let from =
                             State.make_trait_reference ~arguments:[ Types.Type part_type ]
-                              (Well_known.path From)
+                              (Well_known.make_path From)
                           in
                           match State.implements state part from with
                           | Some evidence ->
@@ -190,7 +192,7 @@ and list_literal state env ?expected (value : Syntax.expression) items =
         let element = State.make_fresh_type state in
         ( element,
           fun element ->
-            Types.Named { path = Well_known.path List; arguments = [ Types.Type element ] } )
+            Types.Named { path = Well_known.make_path List; arguments = [ Types.Type element ] } )
   in
   List.iter (fun item -> Hooks.check state env item element) items;
   List.iter (fun item -> Modes.check_owned state env item element) items;
@@ -209,8 +211,8 @@ and map_literal state env ?expected (value : Syntax.expression) entries =
   let map_type =
     match Option.map (State.normalize state) expected with
     | Some (Types.Named { path; _ }) when Well_known.is Finite_map path ->
-        Well_known.path Finite_map
-    | _ -> Well_known.path Map
+        Well_known.make_path Finite_map
+    | _ -> Well_known.make_path Map
   in
   List.iter
     (fun (entry_key, entry_value) ->

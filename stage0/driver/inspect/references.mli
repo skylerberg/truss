@@ -1,9 +1,9 @@
 type target = Definition of Path.t | Module of Path.module_
 type occurrence = { span : Source.Definition_span.t; target : target }
 
-val declared_name : Syntax.definition -> Syntax.name option
+val find_declared_name : Syntax.definition -> Syntax.name option
 
-val occurrences :
+val list_occurrences :
   path:Path.t ->
   Source.Definition_span.t array ->
   Syntax.definition ->

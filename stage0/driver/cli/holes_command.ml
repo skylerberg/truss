@@ -10,16 +10,16 @@ type hole = {
   blocks : string list;
 }
 
-let of_declaration snapshot packages database (names : Resolve.Names.lookups)
+let list_holes snapshot packages database (names : Resolve.Names.lookups)
     (declaration : Resolve.Names.declaration) =
   let key = Resolve.Names.make_key declaration in
   match Database.read_resolved database key with
   | Some resolved ->
       let ({ file; base } : Resolve.Names.place) = names.place key in
-      let source = Command_packages.source snapshot packages file in
+      let source = Command_packages.read_source snapshot packages file in
       List.map
         (fun (hole : Inspect.hole) ->
-          let line, column = Source.position source (base + hole.offset) in
+          let line, column = Source.compute_position source (base + hole.offset) in
           {
             definition = declaration.path;
             file = Source.path source;
@@ -29,7 +29,7 @@ let of_declaration snapshot packages database (names : Resolve.Names.lookups)
             in_scope = hole.scope;
             blocks = [];
           })
-        (Inspect.holes (names.spans key) (names.definition key) resolved
+        (Inspect.list_holes (names.spans key) (names.definition key) resolved
            (Option.map
               (fun (checked : Infer.checked) -> checked.tables)
               (Database.read_checked_body database key)))
@@ -41,20 +41,21 @@ let gather snapshot packages database paths =
     (fun file ->
       List.concat_map
         (fun (declaration : Resolve.Names.declaration) ->
-          if declaration.ordinal = 0 then
-            of_declaration snapshot packages database names declaration
+          if declaration.ordinal = 0 then list_holes snapshot packages database names declaration
           else [])
         (names.declarations_in file))
-    (Command_packages.selected snapshot packages paths)
+    (Command_packages.select_files snapshot packages paths)
 
-let with_blocks snapshot packages database holes =
+let attach_blocks snapshot packages database holes =
   let roots =
-    (match Program_command.mains snapshot packages with [ main ] -> [ ("main", main) ] | _ -> [])
+    (match Program_command.list_mains snapshot packages with
+      | [ main ] -> [ ("main", main) ]
+      | _ -> [])
     @ List.map
-        (fun (test : Test_command.test) -> ("test " ^ Test_command.label test, test.path))
+        (fun (test : Test_command.test) -> ("test " ^ Test_command.label_test test, test.path))
         (Test_command.select snapshot database packages ~paths:[] ~match_:None)
   in
-  let compile = lazy (Compiler.lowering_only database packages) in
+  let compile = lazy (Compiler.make_lowering_compiler database packages) in
   let read_memoized table list_reached root =
     match Path_table.find_opt table root with
     | Some reached -> reached
@@ -89,7 +90,7 @@ let to_json hole =
       ("line", Json.Int hole.line);
       ("column", Json.Int hole.column);
       ("kind", Json.String (if hole.type_ = None then "type" else "value"));
-      ("type", Json.option (fun type_text -> Json.String type_text) hole.type_);
+      ("type", Json.encode_option (fun type_text -> Json.String type_text) hole.type_);
       ( "in_scope",
         Json.List
           (List.map
@@ -111,16 +112,16 @@ let print hole =
   if hole.blocks <> [] then Output.printf "    blocks: %s\n" (String.concat "; " hole.blocks)
 
 let run ~paths =
-  let snapshot, packages = Command_packages.current () in
+  let snapshot, packages = Command_packages.load_current () in
   let database = Workspace.open_database snapshot in
   let report = Report.gather database snapshot packages in
   let holes =
     match gather snapshot packages database paths with
     | [] -> []
-    | holes -> with_blocks snapshot packages database holes
+    | holes -> attach_blocks snapshot packages database holes
   in
   if Output.json () then
-    Json.print (Report.document report [ ("holes", Json.List (List.map to_json holes)) ])
+    Json.print (Report.make_document report [ ("holes", Json.List (List.map to_json holes)) ])
   else begin
     Report.print report;
     List.iter print holes;

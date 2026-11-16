@@ -8,7 +8,7 @@ let report cursor code (span : Source.span) message fix_title edits =
     ~fixes:(if List.exists joins edits then [] else [ Diagnostic.fix fix_title edits ])
 
 let extend_with_trailing_space (token : Token.t) ~(next : Token.t) =
-  Source.span token.span.start next.span.start
+  Source.make_span token.span.start next.span.start
 
 let increment cursor ~(target : Syntax.expression) ~(operator : Token.t) =
   let replacement, sign =
@@ -30,7 +30,7 @@ let report_double_negation cursor ~(operator : Token.t) ~(operand : Syntax.expre
     "Write `-(-x)`"
     [
       Diagnostic.replace operator.span "-(-";
-      Diagnostic.insert (Source.zero_width operand_span.stop) ")";
+      Diagnostic.insert (Source.make_zero_width operand_span.stop) ")";
     ]
 
 let match_arm_comma cursor ~(comma : Token.t) =
@@ -46,16 +46,16 @@ let report_conditional cursor ~(condition : Syntax.expression) ~(then_ : Syntax.
   report cursor Conditional_operator question.span
     "Truss has no conditional operator; write `if x { a } else { b }`." "Write an `if` expression"
     [
-      Diagnostic.insert (Source.zero_width condition.start) "if ";
-      Diagnostic.replace (Source.span condition.stop then_.start) " { ";
-      Diagnostic.replace (Source.span then_.stop else_.start) " } else { ";
-      Diagnostic.insert (Source.zero_width else_.stop) " }";
+      Diagnostic.insert (Source.make_zero_width condition.start) "if ";
+      Diagnostic.replace (Source.make_span condition.stop then_.start) " { ";
+      Diagnostic.replace (Source.make_span then_.stop else_.start) " } else { ";
+      Diagnostic.insert (Source.make_zero_width else_.stop) " }";
     ]
 
 let report_let_mut cursor ~(let_token : Token.t) ~(mut_token : Token.t) =
   report cursor Let_mut mut_token.span "A mutable variable is declared with `var`, not `let mut`."
     "Write `var`"
-    [ Diagnostic.replace (Source.span let_token.span.start mut_token.span.stop) "var" ]
+    [ Diagnostic.replace (Source.make_span let_token.span.start mut_token.span.stop) "var" ]
 
 let report_address_of cursor ~(before : Token.t option) ~(ampersand : Token.t) ~(next : Token.t) =
   let written = match next.kind with Keyword Mut -> "`mut x`" | _ -> "`x`" in
@@ -79,11 +79,11 @@ let report_closure_bars cursor ~(opening : Token.t) ~(closing : Token.t) ~(body 
   let body_span = Cursor.read_file_span cursor body.id in
   let edits =
     if opening.kind = Punctuation Or_or then
-      [ Diagnostic.replace (Source.span opening.span.start body_span.start) "fn() " ]
+      [ Diagnostic.replace (Source.make_span opening.span.start body_span.start) "fn() " ]
     else
       [
         Diagnostic.replace opening.span "fn(";
-        Diagnostic.replace (Source.span closing.span.start body_span.start) ") ";
+        Diagnostic.replace (Source.make_span closing.span.start body_span.start) ") ";
       ]
   in
   let edits =
@@ -92,14 +92,14 @@ let report_closure_bars cursor ~(opening : Token.t) ~(closing : Token.t) ~(body 
     | _ ->
         edits
         @ [
-            Diagnostic.insert (Source.zero_width body_span.start) "{ ";
-            Diagnostic.insert (Source.zero_width body_span.stop) " }";
+            Diagnostic.insert (Source.make_zero_width body_span.start) "{ ";
+            Diagnostic.insert (Source.make_zero_width body_span.stop) " }";
           ]
   in
   let edits =
     if is_before_else then
-      (Diagnostic.insert (Source.zero_width opening.span.start) "(" :: edits)
-      @ [ Diagnostic.insert (Source.zero_width body_span.stop) ")" ]
+      (Diagnostic.insert (Source.make_zero_width opening.span.start) "(" :: edits)
+      @ [ Diagnostic.insert (Source.make_zero_width body_span.stop) ")" ]
     else edits
   in
   report cursor Closure_bars opening.span "A lambda is written `fn(x) { x + 1 }`."
@@ -110,15 +110,15 @@ let report_brace_record cursor ~(name_stop : int) ~(opening : Token.t) ~(first :
   report cursor Brace_record opening.span
     "Records are built with parentheses: `Point(x: 1.0, y: 2.0)`." "Use parentheses"
     [
-      Diagnostic.replace (Source.span name_stop first.span.start) "(";
-      Diagnostic.replace (Source.span last_stop closing.span.stop) ")";
+      Diagnostic.replace (Source.make_span name_stop first.span.start) "(";
+      Diagnostic.replace (Source.make_span last_stop closing.span.stop) ")";
     ]
 
 let report_turbofish cursor ~(colons : Token.t) ~(less : Token.t) ~(greater : Token.t) =
   report cursor Turbofish less.span "Type arguments go in square brackets: `parse[Int64](text)`."
     "Use square brackets"
     [
-      Diagnostic.replace (Source.span colons.span.start less.span.stop) "[";
+      Diagnostic.replace (Source.make_span colons.span.start less.span.stop) "[";
       Diagnostic.replace greater.span "]";
     ]
 
@@ -146,13 +146,13 @@ let report_path_separator cursor ~(separator : Token.t) =
 let report_qualified_variant cursor ~qualifier_start ~(variant : Syntax.name) =
   let variant_start = (Cursor.read_file_span cursor variant.id).start in
   report cursor Qualified_variant
-    (Source.span qualifier_start variant_start)
+    (Source.make_span qualifier_start variant_start)
     (Printf.sprintf
        "A pattern names a variant alone: `%s`. The type of the scrutinee says which type's variant \
         it is."
        variant.text)
     "Remove the qualifier"
-    [ Diagnostic.delete (Source.span qualifier_start variant_start) ]
+    [ Diagnostic.delete (Source.make_span qualifier_start variant_start) ]
 
 let show_macro_advice = function
   | "println" | "print" | "eprintln" | "eprint" ->
@@ -175,7 +175,7 @@ let report_macro_call cursor ~(name : Syntax.name) ~(bang : Token.t) ~(opening :
       report cursor Macro_call bang.span message "Write a list"
         [
           Diagnostic.delete
-            (Source.span (Cursor.read_file_span cursor name.id).start bang.span.stop);
+            (Source.make_span (Cursor.read_file_span cursor name.id).start bang.span.stop);
         ]
   | _ -> Cursor.report cursor Macro_call bang.span message
 
@@ -184,7 +184,7 @@ let report_keyword_macro cursor ~(bang : Token.t) ~(closing : Token.t) ~has_argu
   if has_arguments then Cursor.report cursor Macro_call bang.span message
   else
     report cursor Macro_call bang.span message "Remove `!()`"
-      [ Diagnostic.delete (Source.span bang.span.start closing.span.stop) ]
+      [ Diagnostic.delete (Source.make_span bang.span.start closing.span.stop) ]
 
 let no_tuples =
   "Truss has no tuples. Values that belong together go in a record, whose fields have names, such \
@@ -212,7 +212,7 @@ let report_short_declaration cursor ~(target : Syntax.expression) ~(operator : T
       report cursor Short_declaration operator.span message "Declare the name with `let`"
         [
           Diagnostic.insert
-            (Source.zero_width (Cursor.read_file_span cursor target.id).start)
+            (Source.make_zero_width (Cursor.read_file_span cursor target.id).start)
             "let ";
           Diagnostic.replace operator.span "=";
         ]
@@ -233,24 +233,24 @@ let pipe_operator cursor ~(value : Syntax.expression) ~(operator : Token.t)
       and callee = Cursor.read_file_span cursor callee.id in
       report cursor Pipe_operator operator.span message "Write the call"
         [
-          Diagnostic.insert (Source.zero_width value.start) (callee_spelling ^ "(");
-          Diagnostic.replace (Source.span value.stop callee.stop) ")";
+          Diagnostic.insert (Source.make_zero_width value.start) (callee_spelling ^ "(");
+          Diagnostic.replace (Source.make_span value.stop callee.stop) ")";
         ]
   | None -> Cursor.report cursor Pipe_operator operator.span message
 
 let report_lambda_annotation cursor ~from ~stop =
-  report cursor Lambda_annotation (Source.span from stop)
+  report cursor Lambda_annotation (Source.make_span from stop)
     "A lambda's parameters and result have no annotations. Their types are inferred from where the \
      lambda is passed."
     "Remove the annotation"
-    [ Diagnostic.delete (Source.span from stop) ]
+    [ Diagnostic.delete (Source.make_span from stop) ]
 
 let report_impl_parameters cursor ~(opening : Token.t) ~(closing : Token.t) ~has_bounds =
   let message =
     "An `impl` has no parameters of its own. The type after `for` declares them, with their \
      bounds: `impl Trait for Box[Item: Ordered]`."
   in
-  let span = Source.span opening.span.start closing.span.stop in
+  let span = Source.make_span opening.span.start closing.span.stop in
   if has_bounds then Cursor.report cursor Impl_parameters opening.span message
   else
     report cursor Impl_parameters opening.span message "Remove the parameters"
@@ -272,13 +272,13 @@ let report_null_coalescing cursor ~(value : Syntax.expression) ~(first : Token.t
         `option.unwrap_or(default)`."
        (match second.kind with Punctuation Colon -> "?:" | _ -> "??"))
     "Call `unwrap_or`"
-    ((if needs_parentheses then [ Diagnostic.insert (Source.zero_width value_span.start) "(" ]
+    ((if needs_parentheses then [ Diagnostic.insert (Source.make_zero_width value_span.start) "(" ]
       else [])
     @ [
         Diagnostic.replace
-          (Source.span value_span.stop default_span.start)
+          (Source.make_span value_span.stop default_span.start)
           (if needs_parentheses then ").unwrap_or(" else ".unwrap_or(");
-        Diagnostic.insert (Source.zero_width default_span.stop) ")";
+        Diagnostic.insert (Source.make_zero_width default_span.stop) ")";
       ])
 
 let singularize word =
@@ -311,9 +311,9 @@ let report_trailing_lambda cursor ~(callee : Syntax.expression) ~parameter ~(ope
        parameter)
     "Pass a lambda"
     (Diagnostic.replace
-       (Source.span callee_stop opening.span.start)
+       (Source.make_span callee_stop opening.span.start)
        (Printf.sprintf "(fn(%s) " parameter)
-    :: Diagnostic.insert (Source.zero_width closing.span.stop) ")"
+    :: Diagnostic.insert (Source.make_zero_width closing.span.stop) ")"
     :: List.map (fun (token : Token.t) -> Diagnostic.replace token.span parameter) uses)
 
 let report_as_conversion cursor ~(value : Syntax.expression) ~(as_token : Token.t)
@@ -326,9 +326,10 @@ let report_as_conversion cursor ~(value : Syntax.expression) ~(as_token : Token.
         Diagnostic.fix
           (Printf.sprintf "Write `%s.%s(...)`" target_spelling name)
           [
-            Diagnostic.insert (Source.zero_width value.start)
+            Diagnostic.insert
+              (Source.make_zero_width value.start)
               (Printf.sprintf "%s.%s(" target_spelling name);
-            Diagnostic.replace (Source.span value.stop target.stop) ")";
+            Diagnostic.replace (Source.make_span value.stop target.stop) ")";
           ]
       in
       Cursor.report cursor As_conversion as_token.span
@@ -344,7 +345,7 @@ let report_as_conversion cursor ~(value : Syntax.expression) ~(as_token : Token.
 
 let report_elif cursor ~(previous_stop : int) ~(elif_token : Token.t) =
   report cursor Elif elif_token.span "Truss writes `else if`, not `elif`." "Write `else if`"
-    [ Diagnostic.replace (Source.span previous_stop elif_token.span.stop) " else if" ]
+    [ Diagnostic.replace (Source.make_span previous_stop elif_token.span.stop) " else if" ]
 
 let report_loop cursor ~(loop_token : Token.t) =
   report cursor Reserved_word loop_token.span "Truss has no `loop`; write `while true`."

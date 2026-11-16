@@ -12,7 +12,7 @@ type t =
 let int value = Integer (Z.of_int value)
 let two_64 = Z.shift_left Z.one 64
 
-let head buffer major (argument : Z.t) =
+let write_head buffer major (argument : Z.t) =
   let major = major lsl 5 in
   let bytes count =
     for index = count - 1 downto 0 do
@@ -35,9 +35,9 @@ let head buffer major (argument : Z.t) =
     Buffer.add_char buffer (Char.chr (major lor 27));
     bytes 8)
 
-let head_int buffer major argument = head buffer major (Z.of_int argument)
+let write_head_int buffer major argument = write_head buffer major (Z.of_int argument)
 
-let magnitude value =
+let encode_magnitude value =
   let rec bytes value acc =
     if Z.equal value Z.zero then acc
     else bytes (Z.shift_right value 8) (Char.chr (Z.to_int (Z.logand value (Z.of_int 0xff))) :: acc)
@@ -45,7 +45,7 @@ let magnitude value =
   let list = bytes value [] in
   String.init (List.length list) (List.nth list)
 
-let half_bits value =
+let find_half_bits value =
   let magnitude = Float.abs value in
   let sign = if Float.sign_bit value then 0x8000 else 0 in
   if magnitude = 0.0 then Some sign
@@ -63,7 +63,7 @@ let half_bits value =
         Some (sign lor ((exponent + 15) lsl 10) lor (int_of_float significand - 0x400))
       else None
 
-let float buffer value =
+let write_float buffer value =
   let add_bits count bits =
     for index = count - 1 downto 0 do
       Buffer.add_char buffer
@@ -72,7 +72,7 @@ let float buffer value =
   in
   if Float.is_nan value then Buffer.add_string buffer "\xf9\x7e\x00"
   else
-    match half_bits value with
+    match find_half_bits value with
     | Some bits ->
         Buffer.add_char buffer '\xf9';
         add_bits 2 (Int64.of_int bits)
@@ -86,23 +86,23 @@ let float buffer value =
           add_bits 8 (Int64.bits_of_float value))
 
 let rec write buffer = function
-  | Integer value when Z.sign value >= 0 && Z.lt value two_64 -> head buffer 0 value
+  | Integer value when Z.sign value >= 0 && Z.lt value two_64 -> write_head buffer 0 value
   | Integer value when Z.sign value < 0 && Z.leq (Z.neg value) two_64 ->
-      head buffer 1 (Z.sub (Z.neg value) Z.one)
+      write_head buffer 1 (Z.sub (Z.neg value) Z.one)
   | Integer value ->
       let tag, argument =
         if Z.sign value >= 0 then (2, value) else (3, Z.sub (Z.neg value) Z.one)
       in
-      head_int buffer 6 tag;
-      write buffer (Bytes (magnitude argument))
+      write_head_int buffer 6 tag;
+      write buffer (Bytes (encode_magnitude argument))
   | Bytes bytes ->
-      head_int buffer 2 (String.length bytes);
+      write_head_int buffer 2 (String.length bytes);
       Buffer.add_string buffer bytes
   | Text text ->
-      head_int buffer 3 (String.length text);
+      write_head_int buffer 3 (String.length text);
       Buffer.add_string buffer text
   | Array items ->
-      head_int buffer 4 (List.length items);
+      write_head_int buffer 4 (List.length items);
       List.iter (write buffer) items
   | Map entries ->
       let encoded = List.map (fun (key, value) -> (encode key, value)) entries in
@@ -114,7 +114,7 @@ let rec write buffer = function
         | _ -> ()
       in
       check sorted;
-      head_int buffer 5 (List.length sorted);
+      write_head_int buffer 5 (List.length sorted);
       List.iter
         (fun (key, value) ->
           Buffer.add_string buffer key;
@@ -122,12 +122,12 @@ let rec write buffer = function
         sorted
   | Tag (tag, _) when tag < 0 -> invalid_arg "Cbor.encode: a negative tag"
   | Tag (tag, value) ->
-      head_int buffer 6 tag;
+      write_head_int buffer 6 tag;
       write buffer value
   | Bool false -> Buffer.add_char buffer '\xf4'
   | Bool true -> Buffer.add_char buffer '\xf5'
   | Null -> Buffer.add_char buffer '\xf6'
-  | Float value -> float buffer value
+  | Float value -> write_float buffer value
 
 and encode value =
   let buffer = Buffer.create 64 in

@@ -533,7 +533,7 @@ let declare_elements_so_far context (head : State.frame) ~element ~collection ~c
           (Projection
              {
                base = collection_type;
-               trait = { trait = Well_known.path Model; trait_arguments = []; associated = [] };
+               trait = { trait = Well_known.make_path Model; trait_arguments = []; associated = [] };
                name = "Value";
              })
       in
@@ -595,8 +595,8 @@ let receiving_loop ~each_iteration ~most ~(for_loop : for_loop) context frame ~e
        (fun (exit_frame : State.frame) -> { exit_frame with yielded = frame.yielded })
        (exit_ :: left))
 
-let cursor_trait : Path.t = Well_known.path Cursor
-let option_path : Path.t = Well_known.path Option
+let cursor_trait : Path.t = Well_known.make_path Cursor
+let option_path : Path.t = Well_known.make_path Option
 
 let declare_some_parts context frame element =
   let parts =

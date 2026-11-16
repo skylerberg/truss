@@ -110,7 +110,7 @@ let drop context ty =
       Emit_c.Builder.emit builder
         (Call
            {
-             target = Foreign (Libc.declaration (Memory_layout.system context.env) Close);
+             target = Foreign (Libc.make_declaration (Memory_layout.system context.env) Close);
              arguments = [ Copy (Lowered.project value (Field "descriptor")) ];
              result = Discarded;
            })

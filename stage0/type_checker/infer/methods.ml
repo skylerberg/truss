@@ -45,9 +45,9 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           ignore (Hooks.check_expression state env argument.value);
           let part = State.normalize state part in
           let parts : Types.ty =
-            Named { path = Well_known.path Sequence; arguments = [ Types.Type part ] }
+            Named { path = Well_known.make_path Sequence; arguments = [ Types.Type part ] }
           in
-          let index = State.make_trait_reference ~arguments:[] (Well_known.path Index) in
+          let index = State.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
           let evidence =
             match State.implements state parts index with
             | Some evidence -> Form.convert_evidence (State.convert_evidence evidence)
@@ -592,7 +592,7 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
           Calls.check_arguments_alone state env arguments
             (State.make_error_type state Unknown_member (State.read_span state member.id)
                ~fixes:
-                 (match Diagnostic.closest member.text candidates with
+                 (match Diagnostic.find_closest member.text candidates with
                  | Some candidate ->
                      [
                        State.fix

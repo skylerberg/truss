@@ -248,10 +248,11 @@ let rec implements lookups ~(bounds : bounds) ?(depth = 0) ?(checks_conditions =
     | Types.Named { path; _ } ->
         let packages =
           List.sort_uniq compare
-            (Path.package wanted.trait :: Path.package path
+            (Path.locate_package wanted.trait :: Path.locate_package path
             :: List.filter_map
                  (function
-                   | Types.Type (Types.Named { path; _ }) -> Some (Path.package path) | _ -> None)
+                   | Types.Type (Types.Named { path; _ }) -> Some (Path.locate_package path)
+                   | _ -> None)
                  wanted.trait_arguments)
         in
         let candidates =

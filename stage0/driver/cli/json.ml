@@ -11,7 +11,7 @@ let rec write buffer = function
   | Null -> Buffer.add_string buffer "null"
   | Bool value -> Buffer.add_string buffer (if value then "true" else "false")
   | Int value -> Buffer.add_string buffer (string_of_int value)
-  | String value -> Buffer.add_string buffer (Diagnostic.json_string value)
+  | String value -> Buffer.add_string buffer (Diagnostic.encode_json_string value)
   | Raw text -> Buffer.add_string buffer text
   | List values ->
       Buffer.add_char buffer '[';
@@ -26,7 +26,7 @@ let rec write buffer = function
       List.iteri
         (fun index (name, value) ->
           if index > 0 then Buffer.add_char buffer ',';
-          Buffer.add_string buffer (Diagnostic.json_string name);
+          Buffer.add_string buffer (Diagnostic.encode_json_string name);
           Buffer.add_char buffer ':';
           write buffer value)
         fields;
@@ -37,9 +37,9 @@ let to_string value =
   write buffer value;
   Buffer.contents buffer
 
-let option encode = function Some value -> encode value | None -> Null
+let encode_option encode = function Some value -> encode value | None -> Null
 
-let document ~diagnostics fields =
+let make_document ~diagnostics fields =
   Object (("format", Int 1) :: ("diagnostics", List diagnostics) :: fields)
 
 let print value = Output.print_line (to_string value)
@@ -200,6 +200,6 @@ let parse text =
   if !position <> length then raise Malformed;
   result
 
-let field name = function
+let lookup_field name = function
   | Object fields -> Option.value ~default:Null (List.assoc_opt name fields)
   | _ -> Null

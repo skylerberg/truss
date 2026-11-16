@@ -28,7 +28,7 @@ let locate_site st (origin : Core.origin) =
 let find_reported_site (st : Lowering.state) : Lowered.operand option =
   match st.frame.mir with
   | Some { lending = Some { site; _ }; _ }
-    when Path.package st.frame.code.definition = Path.standard_package ->
+    when Path.locate_package st.frame.code.definition = Path.standard_package ->
       Some site
   | _ -> None
 
@@ -764,7 +764,7 @@ let read_field_default (st : Lowering.state) (ty : Ground.ty) ~variant ~field :
 
 let make_tasks_call (st : Lowering.state) name ?result (places : Lowered.place list) :
     Lowered.statement =
-  let capability = Well_known.path Tasks in
+  let capability = Well_known.make_path Tasks in
   let slot, signature = Targets.lookup_capability_method st.context capability name in
   let c_signature, convention = Targets.make_entry_signature st.context signature in
   Call
@@ -813,7 +813,9 @@ let with_group st (f : Lowered.place -> unit) =
   Lowering.close_scope st scope
 
 let compute_task_function_type (st : Lowering.state) : Lowered.ty =
-  let _, signature = Targets.lookup_capability_method st.context (Well_known.path Tasks) "spawn" in
+  let _, signature =
+    Targets.lookup_capability_method st.context (Well_known.make_path Tasks) "spawn"
+  in
   match signature.parameters with
   | [ _; work; _ ] -> Value (Monomorphic.ground st.context.monomorphic [] work.type_)
   | _ -> Definitions.bug "Tasks.spawn does not take a group, a function, and an item"
@@ -1022,7 +1024,7 @@ let emit_mark (st : Lowering.state) (intrinsic : Lowered.intrinsic) (call : Lowe
 
 let find_forwarded_call st (call : Mir.call) : Forwarded.t option =
   match resolve_callee st call.callee with
-  | Some (path, type_arguments) when Path.package path = Path.standard_package ->
+  | Some (path, type_arguments) when Path.locate_package path = Path.standard_package ->
       let frame = require_mir_frame st in
       let fresh () =
         frame.forwarded_locals <- frame.forwarded_locals + 1;
@@ -1246,7 +1248,7 @@ and provide st (provided : Mir.provided list) ~can_use_tasks =
                implementation.provides) ))
       provided
   in
-  let is_tasks (capability, _) = Path.equal capability (Well_known.path Tasks) in
+  let is_tasks (capability, _) = Path.equal capability (Well_known.make_path Tasks) in
   let tasks =
     if can_use_tasks then
       Option.map snd (List.find_opt is_tasks (List.concat_map snd implementations @ enclosing))

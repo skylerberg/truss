@@ -42,7 +42,7 @@ let translate_impl_laws (lookups : Lookups.t) (key : Resolve.Names.key) source =
         Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
           ~for_type:interface.for_type
           ~proofs:
-            (Contracts.list_law_proofs lookups (Path.package key.path) interface.implements
+            (Contracts.list_law_proofs lookups (Path.locate_package key.path) interface.implements
                interface.for_type)
           ~at:Whole_definition;
       ]
@@ -81,7 +81,7 @@ let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
                   ( shown
                     @ [
                         Printf.sprintf "`%s` is `%s`" parameter.name
-                          (Intrinsic.builtin_name builtin);
+                          (Intrinsic.show_builtin builtin);
                       ],
                     (parameter, Types.Type (Types.make_builtin builtin)) :: substitution ))
                 builtins)
@@ -101,7 +101,7 @@ let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
   let path =
     Path.Method
       {
-        owner = Derived { type_ = key.path; trait = Well_known.path Default };
+        owner = Derived { type_ = key.path; trait = Well_known.make_path Default };
         name = "default";
         receiver = Static;
       }
@@ -622,7 +622,7 @@ let file_states { lookups; verdicts } file =
             | Some ((place : Resolve.Names.place), span) when place.file <> file -> (
                 match lookups.source place.file with
                 | source ->
-                    let line, _ = Source.position source span.start in
+                    let line, _ = Source.compute_position source span.start in
                     Printf.sprintf " The clause that must hold is at `%s:%d`." (Source.path source)
                       line
                 | exception Not_found -> "")

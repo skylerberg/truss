@@ -29,12 +29,12 @@ let report_misplaced_visibility cursor code (tokens : Token.t list) message =
   | first :: _ ->
       let last = List.nth tokens (List.length tokens - 1) in
       let next = Cursor.peek cursor in
-      let span = Source.span first.span.start last.span.stop in
+      let span = Source.make_span first.span.start last.span.stop in
       Cursor.report cursor code span message
         ~fixes:
           [
             Diagnostic.fix "Remove it"
-              [ Diagnostic.delete (Source.span first.span.start next.span.start) ];
+              [ Diagnostic.delete (Source.make_span first.span.start next.span.start) ];
           ]
 
 let parse_type_head cursor : Syntax.type_head =
@@ -109,7 +109,9 @@ let parse_result cursor =
         ~fixes:
           [
             Diagnostic.fix "Remove `own`"
-              [ Diagnostic.delete (Source.span own.span.start (Cursor.peek cursor).span.start) ];
+              [
+                Diagnostic.delete (Source.make_span own.span.start (Cursor.peek cursor).span.start);
+              ];
           ];
     Some (Lends (mode, Parse_expression.parse_type_expression cursor))
   end
@@ -171,17 +173,17 @@ let parse_body cursor =
       in
       if ends_member && not (Cursor.is_after_inserted_closer cursor) then begin
         let has_earlier_error = Cursor.has_reported cursor in
-        Cursor.report cursor Missing_body (Source.zero_width stop)
+        Cursor.report cursor Missing_body (Source.make_zero_width stop)
           "A function needs a body; write `{ todo }` for one that is not written yet."
           ~fixes:
             (match Cursor.find_previous_token cursor with
             | Some previous when Token.can_end previous.kind && not has_earlier_error ->
                 [
                   Diagnostic.fix "Add `{ todo }`"
-                    [ Diagnostic.insert (Source.zero_width stop) " { todo }" ];
+                    [ Diagnostic.insert (Source.make_zero_width stop) " { todo }" ];
                 ]
             | Some _ | None -> []);
-        let at = Cursor.make_definition_span cursor (Source.zero_width stop) in
+        let at = Cursor.make_definition_span cursor (Source.make_zero_width stop) in
         {
           statements = [ { kind = Statement_error; id = Cursor.allocate_id cursor at } ];
           id = Cursor.allocate_id cursor at;
@@ -466,7 +468,7 @@ let parse_top_level cursor ~function_ =
           ~fixes:
             [
               Diagnostic.fix "Remove `opaque`"
-                [ Diagnostic.delete (Source.span public.span.stop opaque.span.stop) ];
+                [ Diagnostic.delete (Source.make_span public.span.stop opaque.span.stop) ];
             ]);
     if not (Cursor.is_at_end cursor) then Cursor.fail cursor "a line break after the definition";
     kind

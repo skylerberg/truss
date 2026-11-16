@@ -12,7 +12,10 @@ let make_builder start = { buffer = Buffer.create 32; text_start = start; pairs 
 
 let take_text builder stop =
   let text =
-    { Token.value = Buffer.contents builder.buffer; span = Source.span builder.text_start stop }
+    {
+      Token.value = Buffer.contents builder.buffer;
+      span = Source.make_span builder.text_start stop;
+    }
   in
   Buffer.clear builder.buffer;
   text
@@ -47,7 +50,7 @@ let make_next_input kind start stop ~ending =
   Layout.Next
     {
       kind;
-      span = Source.span start stop;
+      span = Source.make_span start stop;
       first_line_break = None;
       blank_line = false;
       unterminated_string = ending = Cursor.Unterminated;
@@ -66,10 +69,10 @@ let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length 
   let start = cursor.position in
   if nesting + 1 > maximum_nesting then begin
     Cursor.report cursor ~code:Interpolation_too_deep
-      (Source.span start (start + delimiter_length))
+      (Source.make_span start (start + delimiter_length))
       (Printf.sprintf "Interpolations can nest at most %d deep." maximum_nesting);
     cursor.position <- Cursor.compute_end_of_line cursor start;
-    let end_of_input = Source.zero_width cursor.position in
+    let end_of_input = Source.make_zero_width cursor.position in
     ( {
         Token.tokens =
           [|
@@ -81,7 +84,7 @@ let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length 
               is_inserted_closer = false;
             };
           |];
-        span = Source.span start cursor.position;
+        span = Source.make_span start cursor.position;
         is_closed = false;
       },
       Cursor.Unterminated )
@@ -106,7 +109,7 @@ let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length 
         match scan cursor ~inline:true ~nesting:(nesting + 1) with
         | Cursor.Line_end | End ->
             Cursor.report cursor ~code:Line_break_in_interpolation
-              (Source.span start cursor.position)
+              (Source.make_span start cursor.position)
               "An interpolation cannot contain a line break. Move the expression into a `let` \
                before the string.";
             finished := true;
@@ -131,7 +134,7 @@ let rec scan_interpolation (cursor : Cursor.t) ~scan ~nesting ~delimiter_length 
     let tokens =
       Layout.lex_interpolation ~source:cursor.source ~diagnostics:cursor.diagnostics next_input
     in
-    let interpolation_span = Source.span start cursor.position in
+    let interpolation_span = Source.make_span start cursor.position in
     if !closed && !count = 0 then begin
       let rec is_blank position =
         position >= cursor.position - 1
@@ -161,7 +164,7 @@ and scan_string (cursor : Cursor.t) ~scan ~tag ~nesting =
         {
           tag;
           form = Ordinary;
-          first = { value = ""; span = Source.span (start + 1) (start + 1) };
+          first = { value = ""; span = Source.make_span (start + 1) (start + 1) };
           rest = [||];
         },
       Cursor.Closed )
@@ -191,14 +194,16 @@ and scan_ordinary ?(closing = '"') cursor ~scan ~tag ~nesting =
              else
                [
                  Diagnostic.fix "Close the string"
-                   [ Diagnostic.insert (Source.zero_width position) "\"" ];
+                   [ Diagnostic.insert (Source.make_zero_width position) "\"" ];
                ])
-          (Source.span literal_start position)
+          (Source.make_span literal_start position)
           message;
         (Cursor.Unterminated, position)
       end
       else begin
-        Cursor.report cursor ~code:Unterminated_string (Source.span literal_start position) message;
+        Cursor.report cursor ~code:Unterminated_string
+          (Source.make_span literal_start position)
+          message;
         (Unterminated, position)
       end
     end
@@ -236,7 +241,7 @@ and scan_escape cursor buffer =
     `Continue
   in
   let problem stop message =
-    Cursor.report cursor ~code:Invalid_escape (Source.span start stop) message;
+    Cursor.report cursor ~code:Invalid_escape (Source.make_span start stop) message;
     cursor.position <- stop;
     `Continue
   in
@@ -259,7 +264,7 @@ and scan_escape cursor buffer =
   in
   if Cursor.is_end_of_line cursor (start + 1) then begin
     Cursor.report cursor ~code:Invalid_escape
-      (Source.span start (start + 1))
+      (Source.make_span start (start + 1))
       "A `\\` at the end of a line does not continue the string. Text that spans lines goes in a \
        raw string, between `\"\"\"`s.";
     cursor.position <- start + 1;
@@ -323,7 +328,7 @@ and scan_raw cursor ~scan ~tag ~nesting ~dollars ~quotes =
   end
   else if nesting > 0 then begin
     Cursor.report cursor ~code:Line_break_in_interpolation
-      (Source.span literal_start line_end)
+      (Source.make_span literal_start line_end)
       "An interpolation cannot contain a line break, so it cannot hold a multi-line string. Move \
        the expression into a `let` before the string.";
     cursor.position <- line_end;
@@ -355,7 +360,7 @@ and lex_raw_dollars (cursor : Cursor.t) builder ~scan ~dollars ~nesting =
 
 and report_too_many_quotes cursor ~start ~run ~quotes ~multi_line =
   Cursor.report cursor ~code:Raw_string_quotes
-    (Source.span start (start + run))
+    (Source.make_span start (start + run))
     (Printf.sprintf "A run of %d `\"`s is longer than this string's delimiter of %d.%s" run quotes
        (if multi_line then " Open the string with a longer delimiter."
         else
@@ -378,12 +383,12 @@ and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~
           [
             Diagnostic.fix
               ("Close the string with `" ^ delimiter ^ "`")
-              [ Diagnostic.insert (Source.zero_width position) delimiter ];
+              [ Diagnostic.insert (Source.make_zero_width position) delimiter ];
           ]
         else []
       in
       Cursor.report cursor ~code:Unterminated_string ~fixes
-        (Source.span literal_start position)
+        (Source.make_span literal_start position)
         (Printf.sprintf
            "This raw string is not closed on its line. A raw string with text after its opening \
             `%s` is a one-line string. For several lines, start the text on the line after the \
@@ -428,7 +433,7 @@ and scan_multi_line_raw cursor ~scan ~tag ~form ~literal_start ~dollars ~quotes 
         (match guess_raw_string_end cursor ~literal_start ~line_end with
           | Some line_start ->
               [
-                ( Source.zero_width line_start,
+                ( Source.make_zero_width line_start,
                   Printf.sprintf "The string may have been meant to end with `%s` before this line."
                     delimiter );
               ]
@@ -436,13 +441,13 @@ and scan_multi_line_raw cursor ~scan ~tag ~form ~literal_start ~dollars ~quotes 
         @
         if quotes = 6 && dollars = 0 then
           [
-            ( Source.span (delimiter_stop - quotes) delimiter_stop,
+            ( Source.make_span (delimiter_stop - quotes) delimiter_stop,
               "For an empty string, write `\"\"`." );
           ]
         else []
       in
       Cursor.report cursor ~code:Unterminated_string ~notes
-        (Source.span literal_start delimiter_stop)
+        (Source.make_span literal_start delimiter_stop)
         (Printf.sprintf
            "This raw string is never closed, so it runs to the end of the file. Close it with `%s` \
             on a line of its own."
@@ -566,9 +571,9 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
           ~fixes:
             [
               Diagnostic.fix "Move the closing delimiter to its own line"
-                [ Diagnostic.insert (Source.zero_width start) ("\n" ^ indentation) ];
+                [ Diagnostic.insert (Source.make_zero_width start) ("\n" ^ indentation) ];
             ]
-          (Source.span start (start + quotes))
+          (Source.make_span start (start + quotes))
           "The closing delimiter of a multi-line raw string goes on a line of its own.";
         (indentation, start)
     | `Unterminated position -> (compute_common_indentation lines, position)
@@ -625,9 +630,13 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
             ~fixes:
               [
                 Diagnostic.fix "Indent the line like the closing delimiter"
-                  [ Diagnostic.replace (Source.span first.span.start whitespace_stop) indentation ];
+                  [
+                    Diagnostic.replace
+                      (Source.make_span first.span.start whitespace_stop)
+                      indentation;
+                  ];
               ]
-            (Source.span source_at (source_at + 1))
+            (Source.make_span source_at (source_at + 1))
             (Printf.sprintf
                "Every line of a multi-line raw string starts with the indentation of its closing \
                 delimiter, which is %s. This line starts with %s."

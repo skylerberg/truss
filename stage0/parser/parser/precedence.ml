@@ -77,8 +77,8 @@ let fix cursor ~fallback whole edits =
 
 let make_parentheses cursor first last =
   [
-    Diagnostic.insert (Source.zero_width (Cursor.read_file_span cursor first).start) "(";
-    Diagnostic.insert (Source.zero_width (Cursor.read_file_span cursor last).stop) ")";
+    Diagnostic.insert (Source.make_zero_width (Cursor.read_file_span cursor first).start) "(";
+    Diagnostic.insert (Source.make_zero_width (Cursor.read_file_span cursor last).stop) ")";
   ]
 
 let is_name_or_literal (value : Syntax.expression) =
@@ -222,7 +222,7 @@ let report_problem cursor ?context (whole : Syntax.expression) (operand : Syntax
                     (wrap_edits cursor ?context whole (Some And_group)
                        [
                          Diagnostic.insert
-                           (Source.zero_width middle_span.stop)
+                           (Source.make_zero_width middle_span.stop)
                            (" && " ^ middle_spelling);
                        ]);
                 ]
@@ -253,8 +253,8 @@ let rec check_expression_with_context ?context cursor (value : Syntax.expression
             [
               fix cursor ~fallback:"Negate the test" value.id
                 [
-                  Diagnostic.insert (Source.zero_width (whole.start + 1)) "(";
-                  Diagnostic.insert (Source.zero_width whole.stop) ")";
+                  Diagnostic.insert (Source.make_zero_width (whole.start + 1)) "(";
+                  Diagnostic.insert (Source.make_zero_width whole.stop) ")";
                 ];
               fix cursor ~fallback:"Negate the value" value.id
                 (make_parentheses cursor left.id left.id);

@@ -1,7 +1,7 @@
 type package = { owner : string option; name : string }
 
-let package_parts package = Option.to_list package.owner @ [ package.name ]
-let show_package package = String.concat "::" (package_parts package)
+let list_package_parts package = Option.to_list package.owner @ [ package.name ]
+let show_package package = String.concat "::" (list_package_parts package)
 let compare_package left right = String.compare (show_package left) (show_package right)
 
 let package_of_parts = function
@@ -21,8 +21,8 @@ let parse_package text = Option.bind (parse_names text) package_of_parts
 
 type module_ = { package : package; modules : string list }
 
-let module_parts module_ = package_parts module_.package @ module_.modules
-let show_module module_ = String.concat "::" (module_parts module_)
+let list_module_parts module_ = list_package_parts module_.package @ module_.modules
+let show_module module_ = String.concat "::" (list_module_parts module_)
 
 let split_module ~is_package = function
   | owner :: name :: modules when is_package { owner = Some owner; name } ->
@@ -33,8 +33,10 @@ let split_module ~is_package = function
 
 type file = { module_ : module_; name : string }
 
-let file_names file = file.module_.modules @ [ file.name ^ ".truss" ]
-let show_file file = String.concat "/" (package_parts file.module_.package @ file_names file)
+let list_file_names file = file.module_.modules @ [ file.name ^ ".truss" ]
+
+let show_file file =
+  String.concat "/" (list_package_parts file.module_.package @ list_file_names file)
 
 type receiver = Static | Read | Mut | Own
 
@@ -58,14 +60,14 @@ and argument =
   | Constant of t
 
 let standard_package = { owner = None; name = "standard" }
-let standard_module modules = { package = standard_package; modules }
-let standard modules name = Top { module_ = standard_module modules; name }
+let make_standard_module modules = { package = standard_package; modules }
+let make_standard_path modules name = Top { module_ = make_standard_module modules; name }
 
-let rec package = function
+let rec locate_package = function
   | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ } ->
       module_.package
-  | Method { owner; _ } | Member_constant { owner; _ } -> package owner
-  | Derived { type_; _ } -> package type_
+  | Method { owner; _ } | Member_constant { owner; _ } -> locate_package owner
+  | Derived { type_; _ } -> locate_package type_
   | Unresolved { file; _ } -> file.module_.package
 
 let show_receiver = function

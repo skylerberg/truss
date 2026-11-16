@@ -139,7 +139,9 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
   Emit_c.Builder.emit builder
     (Assign (mutex, Convert (Copy (Lowered.make_local_place address), Integer UInt64)));
   let tasks_call name =
-    let slot, signature = Targets.lookup_capability_method context (Well_known.path Tasks) name in
+    let slot, signature =
+      Targets.lookup_capability_method context (Well_known.make_path Tasks) name
+    in
     Emit_c.Builder.emit builder
       (Call
          {
@@ -147,7 +149,7 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
              Evidence_call
                {
                  evidence = tasks;
-                 capability = Well_known.path Tasks;
+                 capability = Well_known.make_path Tasks;
                  slot;
                  signature = fst (Targets.make_entry_signature context signature);
                };
@@ -274,7 +276,7 @@ let list_real_implementations (st : Lowering.state) ~user capabilities =
       (capability, Targets.lower_implementation_evidence st ~impl ~type_arguments:[] ~implementation))
     capabilities
 
-let text_copied_from = Well_known.path Text_copied_from
+let text_copied_from = Well_known.make_path Text_copied_from
 
 let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.instance =
   let st = make_generated_state context ~key ~definition:main_path ~substitution:[] in

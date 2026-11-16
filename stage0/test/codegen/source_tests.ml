@@ -80,7 +80,7 @@ let () =
                     Derived
                       {
                         type_ = Top { module_ = Codegen_support.example; name = "Both" };
-                        trait = Well_known.path Equal;
+                        trait = Well_known.make_path Equal;
                       };
                   name = "equal";
                   receiver = Read;

@@ -588,7 +588,7 @@ let () =
       let key =
         Instance.Code
           {
-            path = Method { owner = Well_known.path List; name = "each"; receiver = Read };
+            path = Method { owner = Well_known.make_path List; name = "each"; receiver = Read };
             type_arguments = [ Type Codegen_support.int64 ];
           }
       in
@@ -637,7 +637,7 @@ let () =
     "storage with room is pushed onto, and inserts, removes, swaps, and pops in place" (fun () ->
       let storage_ty =
         Ground.Named
-          { path = Intrinsic.builtin_path Storage; arguments = [ Type Codegen_support.int32 ] }
+          { path = Intrinsic.make_builtin_path Storage; arguments = [ Type Codegen_support.int32 ] }
       in
       Codegen_support.expect_status 171
         [
@@ -768,12 +768,12 @@ let () =
   Codegen_support.test "an array's elements are moved into new storage, in order" (fun () ->
       let storage_ty =
         Ground.Named
-          { path = Intrinsic.builtin_path Storage; arguments = [ Type Codegen_support.int32 ] }
+          { path = Intrinsic.make_builtin_path Storage; arguments = [ Type Codegen_support.int32 ] }
       in
       let array_ty =
         Ground.Named
           {
-            path = Intrinsic.builtin_path Array;
+            path = Intrinsic.make_builtin_path Array;
             arguments = [ Type Codegen_support.int32; Value (Z.of_int 3) ];
           }
       in
@@ -860,13 +860,13 @@ let () =
       let array_ty =
         Ground.Named
           {
-            path = Intrinsic.builtin_path Array;
+            path = Intrinsic.make_builtin_path Array;
             arguments = [ Type Codegen_support.int32; Value (Z.of_int 3) ];
           }
       in
       let view_ty =
         Ground.Named
-          { path = Intrinsic.builtin_path View; arguments = [ Type Codegen_support.int32 ] }
+          { path = Intrinsic.make_builtin_path View; arguments = [ Type Codegen_support.int32 ] }
       in
       let extra =
         [
@@ -956,7 +956,7 @@ let () =
       let array_ty =
         Ground.Named
           {
-            path = Intrinsic.builtin_path Array;
+            path = Intrinsic.make_builtin_path Array;
             arguments = [ Type Codegen_support.int32; Value (Z.of_int 3) ];
           }
       in
@@ -1161,7 +1161,7 @@ let () =
       let storage_ty = Storage.make_storage_type Codegen_support.uint8 in
       let view_ty =
         Ground.Named
-          { path = Intrinsic.builtin_path View; arguments = [ Type Codegen_support.uint8 ] }
+          { path = Intrinsic.make_builtin_path View; arguments = [ Type Codegen_support.uint8 ] }
       in
       let extra =
         [
@@ -1297,7 +1297,7 @@ let () =
       let array_of count : Ground.ty =
         Named
           {
-            path = Intrinsic.builtin_path Array;
+            path = Intrinsic.make_builtin_path Array;
             arguments = [ Type Codegen_support.int32; Value (Z.of_int count) ];
           }
       in
