@@ -140,8 +140,8 @@ let compute_returned_type context frame (body : Mir.body) =
       (fun (statement : Mir.statement) ->
         match statement.kind with
         | Jump (Return (Some value)) ->
-            Some (Facts.substitute_type context frame (Mir.operand_type value))
-        | _ -> List.find_map returned (Mir.nested_blocks statement))
+            Some (Facts.substitute_type context frame (Mir.extract_operand_type value))
+        | _ -> List.find_map returned (Mir.list_nested_blocks statement))
       block.statements
   in
   Option.value ~default:Types.unit (returned body.code)
@@ -304,7 +304,7 @@ let list_loop_counters locals (body : Mir.body) =
     List.iter
       (fun (statement : Mir.statement) ->
         (match statement.kind with While { loop; _ } | For { loop; _ } -> note loop | _ -> ());
-        List.iter visit (Mir.nested_blocks statement))
+        List.iter visit (Mir.list_nested_blocks statement))
       block.statements
   in
   visit body.code;

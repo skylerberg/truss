@@ -1,10 +1,11 @@
 type held_views = (Place.root * Actions.view list) list
 type state = { views : held_views; loans : (int * Actions.loan list) list }
 
-let views_held_by (held_views : held_views) (holder : Place.root) = List.assoc_opt holder held_views
+let find_views_held_by (held_views : held_views) (holder : Place.root) =
+  List.assoc_opt holder held_views
 
 let add_views (held_views : held_views) holder views : held_views =
-  let known = Option.value ~default:[] (views_held_by held_views holder) in
+  let known = Option.value ~default:[] (find_views_held_by held_views holder) in
   let added = List.filter (fun view -> not (List.mem view known)) views in
   (holder, known @ added) :: List.remove_assoc holder held_views
 
@@ -13,14 +14,14 @@ let aliases_place (context : Context.context) (root : Place.root) =
   | Local local ->
       local <> Self
       && (not (List.mem local context.parameters))
-      && Context.binding_mode context root <> Own
+      && Context.classify_binding_mode context root <> Own
   | Temporary _ | Constant _ | Environment -> false
 
 let resolve context (held_views : held_views) (views : Actions.view list) : Actions.view list =
   List.concat_map
     (fun (view : Actions.view) ->
-      let place = Actions.viewed_place view in
-      match (views_held_by held_views place.root, view) with
+      let place = Actions.extract_viewed_place view in
+      match (find_views_held_by held_views place.root, view) with
       | Some known, Copy_of_view_in _ -> known
       | Some known, Borrow_of _ when aliases_place context place.root -> known
       | Some known, Borrow_of _ -> known @ [ view ]
@@ -68,7 +69,7 @@ let join (after : state) ~(into : state) =
   let views =
     List.filter
       (fun (holder, places) ->
-        match views_held_by into.views holder with
+        match find_views_held_by into.views holder with
         | Some known -> List.exists (fun place -> not (List.mem place known)) places
         | None -> true)
       after.views
@@ -114,7 +115,7 @@ let forward context (actions : Actions.t) =
                 entries.(successor) <- Some merged;
                 Queue.add successor pending
             | None -> ()))
-      (Mir.Graph.block_successors actions.body block)
+      (Mir.Graph.list_block_successors actions.body block)
   done;
   Array.mapi
     (fun block entry ->

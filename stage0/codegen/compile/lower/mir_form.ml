@@ -4,13 +4,13 @@ let require_mir_frame (st : Lowering.state) =
   | None -> Definitions.bug "MIR lowering outside a MIR frame"
 
 let read_mir_graph (context : Definitions.context) path : Mir.Graph.t =
-  match Mir.graph_of_path context.lookups.mir path with
+  match Mir.read_graph context.lookups.mir path with
   | Some { form; _ } -> form
   | None -> Definitions.bug "%s has no MIR" (Path.show path)
 
 let read_parameter_defaults (context : Definitions.context) path :
     (int * Mir.Graph.t) list Mir.sourced =
-  match Mir.default_graphs_of_path context.lookups.mir path with
+  match Mir.read_default_graphs context.lookups.mir path with
   | Some { source; form = Parameter_defaults defaults } -> { source; form = defaults }
   | Some { form = Field_defaults _; _ } | None ->
       Definitions.bug "%s is not a function" (Path.show path)
@@ -152,7 +152,7 @@ let make_body_frame (st : Lowering.state) ?owner ?returns_into ?lending
   let rec reach block =
     if not after_lend.(block) then begin
       after_lend.(block) <- true;
-      List.iter reach (Mir.Graph.block_successors body block)
+      List.iter reach (Mir.Graph.list_block_successors body block)
     end
   in
   Array.iter
@@ -190,8 +190,8 @@ let make_body_frame (st : Lowering.state) ?owner ?returns_into ?lending
           ( path,
             Lowered.make_local_place
               (Emit_c.Builder.allocate_local st.builder ~name:"owned" ~is_zeroed:true (Raw Bool)) ))
-        (Moves.flagged moves);
-    state = Moves.entry moves 0;
+        (Moves.list_flagged moves);
+    state = Moves.copy_entry_state moves 0;
     lending;
     called_parts =
       statements_where
@@ -204,7 +204,7 @@ let make_body_frame (st : Lowering.state) ?owner ?returns_into ?lending
     lent_calls = Hashtbl.create 4;
     placed_parts = Hashtbl.create 4;
     forwarded_locals = 0;
-    ended_after_lend = statements_where (fun block -> after_lend.(block)) Moves.ended_by;
+    ended_after_lend = statements_where (fun block -> after_lend.(block)) Moves.list_ended;
     after_lend;
     block = 0;
   }
@@ -312,7 +312,7 @@ let take_place st (written : Mir.place) =
   frame.taken <- written :: frame.taken;
   lower_owned_place st written
 
-let compute_operand_type st operand = Lowering.ground st (Mir.operand_type operand)
+let compute_operand_type st operand = Lowering.ground st (Mir.extract_operand_type operand)
 
 let lower_constant st ty (value : Mir.constant) : Lowered.operand =
   match value with
@@ -445,7 +445,7 @@ let lower_path_place st (path : Moves.path) =
 
 let rec drop_path st (path : Moves.path) =
   let frame = require_mir_frame st in
-  match Moves.status frame.moves frame.state path with
+  match Moves.find_status frame.moves frame.state path with
   | None -> (
       let place = lower_path_place st path in
       match Lowering.find_place_type st place with
@@ -473,8 +473,8 @@ and drop_held st (path : Moves.path) =
   let frame = require_mir_frame st in
   if
     List.for_all
-      (fun inner -> Moves.status frame.moves frame.state inner = Some Holds)
-      (Moves.inside frame.moves path)
+      (fun inner -> Moves.find_status frame.moves frame.state inner = Some Holds)
+      (Moves.list_inside frame.moves path)
   then Emit_c.Builder.emit st.builder (Drop (lower_path_place st path))
   else drop_parts st path
 
@@ -497,7 +497,7 @@ and drop_parts st (path : Moves.path) =
       List.iter (fun (field : Memory_layout.field) -> child (Field field.name)) fields
   | Tagged _ | Niche_encoded _ -> (
       let depth = List.length path.projections in
-      let inside = Moves.inside frame.moves path in
+      let inside = Moves.list_inside frame.moves path in
       let variants =
         List.sort_uniq compare
           (List.filter_map
@@ -522,7 +522,8 @@ and drop_parts st (path : Moves.path) =
           (fun (inner : Moves.path) ->
             match List.nth_opt inner.projections depth with
             | Some (Variant_field { variant = inner_variant; _ }) ->
-                inner_variant = variant && Moves.status frame.moves frame.state inner = Some Empty
+                inner_variant = variant
+                && Moves.find_status frame.moves frame.state inner = Some Empty
             | _ -> false)
           inside
       in
@@ -553,7 +554,7 @@ let drop_local st local =
   let path : Moves.path = { local; projections = [] } in
   if
     Moves.owns (require_mir_frame st).moves local
-    && Moves.status (require_mir_frame st).moves (require_mir_frame st).state path <> None
+    && Moves.find_status (require_mir_frame st).moves (require_mir_frame st).state path <> None
   then drop_path st path
 
 let update_flags st ~before =
@@ -562,14 +563,14 @@ let update_flags st ~before =
     (fun ((path : Moves.path), holds) ->
       Emit_c.Builder.emit st.builder
         (Assign (List.assoc path frame.flags, Use (Constant (Bool holds)))))
-    (Moves.changed frame.moves ~before ~after:frame.state)
+    (Moves.list_changed frame.moves ~before ~after:frame.state)
 
 let drop_parameters st = List.iter (drop_local st) (require_mir_frame st).body.parameters
 
 let drop_overwritten st (target : Mir.place) (destination : Lowered.place) ty =
   match Moves.path_of_place target with
   | Some path
-    when Moves.status (require_mir_frame st).moves (require_mir_frame st).state
+    when Moves.find_status (require_mir_frame st).moves (require_mir_frame st).state
            { path with projections = [] }
          <> None ->
       drop_path st path
@@ -735,7 +736,7 @@ let read_field_default (st : Lowering.state) (ty : Ground.ty) ~variant ~field :
     | Named { path; _ } -> path
     | _ -> Definitions.bug "defaults of %s" (Ground.to_string ty)
   in
-  match Mir.default_graphs_of_path st.context.lookups.mir path with
+  match Mir.read_default_graphs st.context.lookups.mir path with
   | Some { source; form = Field_defaults defaults } -> (
       match
         List.find_opt
@@ -1061,7 +1062,7 @@ let rec lower_body (st : Lowering.state) (frame : Lowering.mir_frame) =
     (fun path ->
       Emit_c.Builder.emit st.builder
         (Assign (List.assoc path frame.flags, Use (Constant (Bool true)))))
-    (Moves.held_at_entry frame.moves);
+    (Moves.list_held_at_entry frame.moves);
   run_region st (make_region st) ~entry:(0, 0)
 
 and run_region st region ~entry:(block, index) =
@@ -1092,13 +1093,13 @@ and lower_from st region block index =
   st.frame <- region.region_frame;
   let frame = require_mir_frame st in
   frame.block <- block;
-  frame.state <- Moves.entry frame.moves block;
+  frame.state <- Moves.copy_entry_state frame.moves block;
   if index = 0 then
     List.iter
       (fun path ->
         Emit_c.Builder.emit st.builder
           (Assign (List.assoc path frame.flags, Use (Constant (Bool true)))))
-      (Moves.given_on_entry frame.moves block);
+      (Moves.list_given_on_entry frame.moves block);
   List.iteri
     (fun position (statement : Mir.Graph.statement) ->
       if position >= index then begin
@@ -1394,7 +1395,7 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
   | To_any { value = inner; trait; evidence } ->
       let impl, type_arguments =
         Targets.resolve_impl st.context st.frame.code.substitution ~trait
-          ~self_type:(Mir.operand_type inner) ~evidence
+          ~self_type:(Mir.extract_operand_type inner) ~evidence
       in
       Targets.lower_any_into st ~any_ty:ty ~inner_ty:(compute_operand_type st inner) ~impl
         ~type_arguments ~value:(lower_operand_place st inner) destination
@@ -1624,13 +1625,13 @@ and holds_invariant st ~value ~clause ~destination =
     | ty -> Definitions.bug "holds_invariant of %s, which has no invariant" (Ground.to_string ty)
   in
   let ({ source; form = clauses } : Mir.type_clauses Mir.sourced) =
-    match Mir.type_clauses_of_path st.context.lookups.mir path with
+    match Mir.read_type_clauses st.context.lookups.mir path with
     | Some clauses -> clauses
     | None -> Definitions.bug "%s has no clauses" (Path.show path)
   in
   let invariant =
     match List.nth_opt clauses.invariants index with
-    | Some { clause; is_executable = true; _ } -> Mir.code_of_formula clause
+    | Some { clause; is_executable = true; _ } -> Mir.expand_formula clause
     | Some { is_executable = false; _ } | None ->
         Definitions.bug "%s has no clause %d that runs" (Path.show path) index
   in

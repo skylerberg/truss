@@ -197,13 +197,13 @@ let make_c_signature context substitution ~(parameters : (Types.mode * Types.ty)
   (Convention.make_signature ~returns (written @ mask @ evidence @ lending) result_ty, result_ty)
 
 let list_template_clauses context from_template clauses =
-  match Mir.contract_of_path context.lookups.mir from_template with
+  match Mir.read_contract context.lookups.mir from_template with
   | Some { form = contract; _ } ->
       List.map
         (fun position ->
           match List.nth_opt contract.requires position with
           | Some ({ clause; is_executable = true; _ } : Mir.requirement) ->
-              Mir.code_of_formula clause
+              Mir.expand_formula clause
           | Some { is_executable = false; _ } | None ->
               bug "clause %d of %s cannot be run" position (Path.show from_template))
         clauses

@@ -134,7 +134,7 @@ let fold_literal_value (st : Lowering.state) ty text =
 
 let make_constant_state (context : Definitions.context) path =
   let ({ source; form = mir } : Mir.Graph.t Mir.sourced) =
-    match Mir.initializer_graph_of_path context.lookups.mir path with
+    match Mir.read_initializer_graph context.lookups.mir path with
     | Some graph -> graph
     | None -> Definitions.bug "%s is not a constant" (Path.show path)
   in
@@ -251,7 +251,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
             Some ()
         | _ -> None)
     | Function { path; type_arguments }, arguments when depth > 0 ->
-        let* { form = callee_mir; _ } = Mir.graph_of_path st.context.lookups.mir path in
+        let* { form = callee_mir; _ } = Mir.read_graph st.context.lookups.mir path in
         let type_arguments =
           List.map
             (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)

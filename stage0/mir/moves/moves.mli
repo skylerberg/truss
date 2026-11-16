@@ -13,7 +13,7 @@ val analyse :
   t
 
 val owns : t -> Mir.local -> bool
-val lent_mut : t -> Mir.local -> bool
+val is_lent_mut : t -> Mir.local -> bool
 
 type use = {
   place : Mir.place;
@@ -23,28 +23,28 @@ type use = {
   passed : Types.mode option;
 }
 
-val statement_uses : t -> Mir.Graph.statement -> use list
-val terminator_uses : t -> Mir.Graph.basic_block -> use list
-val given_by : Mir.Graph.statement -> path list
-val ended_by : Mir.Graph.statement -> Mir.local list
+val list_statement_uses : t -> Mir.Graph.statement -> use list
+val list_terminator_uses : t -> Mir.Graph.basic_block -> use list
+val list_given_by : Mir.Graph.statement -> path list
+val list_ended : Mir.Graph.statement -> Mir.local list
 
 type state
 
-val entry : t -> Mir.Graph.block -> state
+val copy_entry_state : t -> Mir.Graph.block -> state
 val apply : t -> state -> Mir.Graph.statement -> unit
 val apply_moves : t -> state -> Mir.Graph.statement -> unit
 val apply_terminator_moves : t -> state -> Mir.Graph.basic_block -> unit
 val copy : state -> state
 val move_out : t -> state -> Mir.place -> origin:Core.origin -> unit
-val moved_at : t -> state -> path -> Core.origin list
+val list_moved_at : t -> state -> path -> Core.origin list
 
 type status = Holds | Empty | Maybe
 
-val status : t -> state -> path -> status option
+val find_status : t -> state -> path -> status option
 val may_be_empty : t -> state -> path -> path option
-val inside : t -> path -> path list
-val flagged : t -> path list
-val changed : t -> before:state -> after:state -> (path * bool) list
-val held_at_entry : t -> path list
-val given_on_entry : t -> Mir.Graph.block -> path list
-val live_after : t -> Mir.Graph.body -> Mir.Graph.block -> int -> Mir.local -> bool
+val list_inside : t -> path -> path list
+val list_flagged : t -> path list
+val list_changed : t -> before:state -> after:state -> (path * bool) list
+val list_held_at_entry : t -> path list
+val list_given_on_entry : t -> Mir.Graph.block -> path list
+val compute_live_after : t -> Mir.Graph.body -> Mir.Graph.block -> int -> Mir.local -> bool

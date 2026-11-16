@@ -50,7 +50,7 @@ type body = {
 
 type t = { body : body; lambdas : body array }
 
-let successors = function
+let list_successors = function
   | Goto block -> [ block ]
   | Branch { yes; no; _ } -> [ yes; no ]
   | For { body; after; _ } -> [ body; after ]
@@ -62,12 +62,12 @@ let successors = function
   | Resume { exits; next; _ } -> List.map (fun exit -> exit.resume) exits @ [ next ]
   | Iteration_end _ | Return _ | Unreachable | Written_unreachable | Todo -> []
 
-let canonical (blocks : basic_block array) =
+let canonicalize (blocks : basic_block array) =
   let visited = Array.make (Array.length blocks) false and order = ref [] in
   let rec visit block =
     if not visited.(block) then begin
       visited.(block) <- true;
-      List.iter visit (successors blocks.(block).terminator);
+      List.iter visit (list_successors blocks.(block).terminator);
       order := block :: !order
     end
   in
@@ -147,15 +147,17 @@ let canonical (blocks : basic_block array) =
          { (blocks.(block)) with terminator = renumber block blocks.(block).terminator })
        !order)
 
-let iteration_loop = function Iteration_end { loop } -> Some loop | _ -> None
+let find_iteration_loop = function Iteration_end { loop } -> Some loop | _ -> None
 
-let block_successors (body : body) block =
+let list_block_successors (body : body) block =
   let terminator = body.blocks.(block).terminator in
-  (match Option.map (fun loop -> body.blocks.(loop).terminator) (iteration_loop terminator) with
+  (match
+     Option.map (fun loop -> body.blocks.(loop).terminator) (find_iteration_loop terminator)
+   with
     | Some (For { body = first; after; _ }) -> [ first; after ]
     | _ -> [])
-  @ successors terminator
+  @ list_successors terminator
 
 module For_testing = struct
-  let successors = successors
+  let successors = list_successors
 end

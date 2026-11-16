@@ -1,4 +1,4 @@
-let choice_blocks = function
+let list_choice_blocks = function
   | Tree.Cases cases ->
       List.concat_map
         (fun (case : Tree.case) -> (case.tests :: Option.to_list case.guard) @ [ case.value ])
@@ -6,12 +6,12 @@ let choice_blocks = function
   | Conditional { then_; else_; _ } -> [ then_; else_ ]
   | Connective { right; _ } -> [ right ]
 
-let nested_blocks_of (kind : Tree.statement_kind) : Tree.block list =
+let list_nested_blocks_of_kind (kind : Tree.statement_kind) : Tree.block list =
   match kind with
   | Basic (Assign { value = Specification (Quantified { matches; body; _ }); _ }) ->
       [ matches; body ]
   | Assert_by_bit_vector { code; _ } -> [ code ]
-  | Choose { choice; _ } -> choice_blocks choice
+  | Choose { choice; _ } -> list_choice_blocks choice
   | While { condition; body; failed; _ } ->
       [ condition; body; { statements = failed; value = None } ]
   | For { lent; body; _ } ->
@@ -20,37 +20,37 @@ let nested_blocks_of (kind : Tree.statement_kind) : Tree.block list =
   | Resume { exits; _ } -> List.map (fun (exit : Tree.early_exit) -> exit.resumed) exits
   | Basic _ | Yield _ | Jump _ -> []
 
-let nested_blocks (statement : Tree.statement) = nested_blocks_of statement.kind
+let list_nested_blocks (statement : Tree.statement) = list_nested_blocks_of_kind statement.kind
 
-let operand_place visit = function
+let visit_operand_places visit = function
   | Tree.Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> visit place
   | Constant _ -> ()
 
-let callee_places visit : Tree.callee -> unit = function
-  | Indirect callee -> operand_place visit callee
+let visit_callee_places visit : Tree.callee -> unit = function
+  | Indirect callee -> visit_operand_places visit callee
   | _ -> ()
 
-let call_places visit (call : Tree.call) =
-  callee_places visit call.callee;
+let visit_call_places visit (call : Tree.call) =
+  visit_callee_places visit call.callee;
   List.iter
-    (function Tree.Passed { value; _ } -> operand_place visit value | Default -> ())
+    (function Tree.Passed { value; _ } -> visit_operand_places visit value | Default -> ())
     call.arguments
 
-let iteration_places visit = function
+let visit_iteration_places visit = function
   | Tree.Range { start; stop; _ } ->
-      operand_place visit start;
-      operand_place visit stop
+      visit_operand_places visit start;
+      visit_operand_places visit stop
   | Pull { cursor; next } ->
       visit cursor;
-      callee_places visit next
+      visit_callee_places visit next
 
-let rec yielded_places visit = function
-  | Tree.Part part -> operand_place visit part
+let rec visit_yielded_places visit = function
+  | Tree.Part part -> visit_operand_places visit part
   | Built { fields; _ } ->
-      List.iter (fun (_, field) -> Option.iter (yielded_places visit) field) fields
+      List.iter (fun (_, field) -> Option.iter (visit_yielded_places visit) field) fields
 
-let rvalue_places visit rvalue =
-  let operand = operand_place visit in
+let visit_rvalue_places visit rvalue =
+  let operand = visit_operand_places visit in
   let specification = function
     | Tree.Result | Yielded -> ()
     | Entry local -> visit { root = Local local; projections = [] }
@@ -58,7 +58,7 @@ let rvalue_places visit rvalue =
         operand first;
         operand second
     | Applied { arguments; _ } -> List.iter operand arguments
-    | Method_time method_ -> callee_places visit method_
+    | Method_time method_ -> visit_callee_places visit method_
     | Map entries ->
         List.iter
           (fun (key, value) ->
@@ -89,34 +89,37 @@ let rvalue_places visit rvalue =
 
 let rec iter_places_read visit (block : Tree.block) =
   List.iter
-    (fun (statement : Tree.statement) -> statement_places visit statement.kind)
+    (fun (statement : Tree.statement) -> visit_statement_places visit statement.kind)
     block.statements;
-  Option.iter (operand_place visit) block.value
+  Option.iter (visit_operand_places visit) block.value
 
-and statement_places visit (kind : Tree.statement_kind) =
+and visit_statement_places visit (kind : Tree.statement_kind) =
   (match kind with
-  | Basic (Assign { value; _ }) -> rvalue_places visit value
-  | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ }) -> call_places visit call
+  | Basic (Assign { value; _ }) -> visit_rvalue_places visit value
+  | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ }) ->
+      visit_call_places visit call
   | Basic (Slice { base; call; _ }) ->
       visit base;
-      call_places visit call
+      visit_call_places visit call
   | Basic (Assert value | Echo value | Loan_start { borrowed = value; _ })
   | Assert_by_bit_vector { condition = value; _ }
   | Choose { choice = Conditional { condition = value; _ } | Connective { left = value; _ }; _ } ->
-      operand_place visit value
+      visit_operand_places visit value
   | Basic (Provide { provided; _ }) ->
-      List.iter (fun (provided : Tree.provided) -> operand_place visit provided.value) provided
-  | For { iteration; _ } -> iteration_places visit iteration
-  | Yield { part; _ } -> yielded_places visit part
-  | Jump (Return returned) -> Option.iter (operand_place visit) returned
+      List.iter
+        (fun (provided : Tree.provided) -> visit_operand_places visit provided.value)
+        provided
+  | For { iteration; _ } -> visit_iteration_places visit iteration
+  | Yield { part; _ } -> visit_yielded_places visit part
+  | Jump (Return returned) -> Option.iter (visit_operand_places visit) returned
   | Jump (Cancel { returned; _ }) ->
-      Option.iter (fun (value, _) -> operand_place visit value) returned
+      Option.iter (fun (value, _) -> visit_operand_places visit value) returned
   | Jump (Break | Continue | Unreachable | Written_unreachable | Todo)
   | Basic (Live _ | Dead _ | Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _)
   | Choose { choice = Cases _; _ }
   | While _ | Fork _ | Resume _ ->
       ());
-  List.iter (iter_places_read visit) (nested_blocks_of kind)
+  List.iter (iter_places_read visit) (list_nested_blocks_of_kind kind)
 
 let rec visit_block visit locals (block : Tree.block) =
   List.iter
@@ -127,7 +130,7 @@ let rec visit_block visit locals (block : Tree.block) =
       | Basic (Proof code) -> visit_code visit code
       | While { loop; _ } | For { loop; _ } -> visit_loop visit loop
       | _ -> ());
-      List.iter (visit_block visit locals) (nested_blocks statement))
+      List.iter (visit_block visit locals) (list_nested_blocks statement))
     block.statements
 
 and visit_formula visit (formula : Tree.formula) =
@@ -155,5 +158,5 @@ let iter_formula visit formula = visit_formula (fun _ statement -> visit stateme
 let iter_code_with_locals = visit_code
 let iter_formula_with_locals = visit_formula
 
-let operand_type : Tree.operand -> Types.ty = function
+let extract_operand_type : Tree.operand -> Types.ty = function
   | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Constant { type_; _ } -> type_

@@ -89,7 +89,7 @@ let find_type_clauses context (ty : Types.ty) =
   | Types.Named { path; _ }, Some source ->
       Option.map
         (fun ({ form; _ } : Mir.type_clauses Mir.sourced) -> (source, form))
-        (Mir.type_clauses_of_path context.lookups.mir path)
+        (Mir.read_type_clauses context.lookups.mir path)
   | _ -> None
 
 let list_invariants (clauses : Mir.loop_clause list) =
