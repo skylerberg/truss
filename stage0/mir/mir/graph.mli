@@ -8,7 +8,6 @@ type loop_head = {
   part : Tree.local;
   lent : Tree.lent_element option;
   body : block;
-  binding_count : int;
   blocks : block list;
   after : block;
   loop : Tree.loop;
