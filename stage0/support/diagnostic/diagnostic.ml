@@ -75,6 +75,7 @@ module Code = struct
     | Trailing_lambda
     | As_conversion
     | Elif
+    | Let_condition
     | Angle_brackets
     | Path_separator
     | Qualified_variant
@@ -329,6 +330,7 @@ module Code = struct
     | Trailing_lambda -> "trailing_lambda"
     | As_conversion -> "as_conversion"
     | Elif -> "elif"
+    | Let_condition -> "let_condition"
     | Angle_brackets -> "angle_brackets"
     | Path_separator -> "path_separator"
     | Qualified_variant -> "qualified_variant"

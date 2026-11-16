@@ -581,4 +581,37 @@ let () =
         ~fixed:"let pi: Float64 = 3.14");
   Harness.test "elif" (fun () ->
       Parse_support.expect_body_error "if a {\n  f()\n}\nelif b {\n  g()\n}" ~code:Elif ~at:"elif"
-        ~fixed:"if a {\n  f()\n} else if b {\n  g()\n}")
+        ~fixed:"if a {\n  f()\n} else if b {\n  g()\n}");
+  Harness.test "while let" (fun () ->
+      Parse_support.expect_body_error "while let Some(task) = queue.pop() {\n  run(task)\n}"
+        ~code:Let_condition ~at:"let" ~fixed:"while queue.pop() is Some(task) {\n  run(task)\n}");
+  Harness.test "if let and else if let" (fun () ->
+      Parse_support.expect_body_error "if let Ok(body) = response {\n  render(body)\n}"
+        ~code:Let_condition ~at:"let" ~fixed:"if response is Ok(body) {\n  render(body)\n}";
+      Parse_support.expect_body_error "if ready {\n  f()\n} else if let Some(x) = next {\n  g(x)\n}"
+        ~code:Let_condition ~at:"let"
+        ~fixed:"if ready {\n  f()\n} else if next is Some(x) {\n  g(x)\n}");
+  Harness.test "a let chain" (fun () ->
+      Parse_support.expect_body_error "if let Some(x) = first && x > 0 {\n  f(x)\n}"
+        ~code:Let_condition ~at:"let" ~fixed:"if first is Some(x) && x > 0 {\n  f(x)\n}";
+      Parse_support.expect_body_error "while ready && let Some(x) = next() {\n  f(x)\n}"
+        ~code:Let_condition ~at:"let" ~fixed:"while ready && next() is Some(x) {\n  f(x)\n}");
+  Harness.test "if let in a match guard" (fun () ->
+      Parse_support.expect_body_error
+        "match value {\n  Some(x) if let Ok(y) = parse(x) => y\n  _ => 0\n}" ~code:Let_condition
+        ~at:"let" ~fixed:"match value {\n  Some(x) if parse(x) is Ok(y) => y\n  _ => 0\n}");
+  Harness.test "if let with a scrutinee that needs parentheses before is" (fun () ->
+      Parse_support.expect_body_error "if let 0 = flags & mask {\n  f()\n}" ~code:Let_condition
+        ~at:"let" ~fixed:"if (flags & mask) is 0 {\n  f()\n}";
+      Parse_support.expect_body_error "if let true = !done {\n  f()\n}" ~code:Let_condition
+        ~at:"let" ~fixed:"if (!done) is true {\n  f()\n}");
+  Harness.test "Swift's if let unwraps an Option" (fun () ->
+      Parse_support.expect_body_error "if let user = find(id) {\n  greet(user)\n}"
+        ~code:Let_condition ~at:"let" ~fixed:"if find(id) is Some(user) {\n  greet(user)\n}");
+  Harness.test "Swift's if let shorthand has no fix" (fun () ->
+      Parse_support.expect_body_error "if let user {\n  greet(user)\n}" ~code:Let_condition
+        ~at:"let";
+      Parse_support.expect_body_error "if let user && ready {\n  greet(user)\n}" ~code:Let_condition
+        ~at:"let");
+  Harness.test "a let outside a condition has no fix" (fun () ->
+      Parse_support.expect_body_error "f(let x = 1)" ~code:Let_condition ~at:"let")

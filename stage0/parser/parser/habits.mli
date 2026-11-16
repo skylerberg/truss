@@ -76,3 +76,13 @@ val report_as_conversion :
 val report_elif : Cursor.t -> previous_stop:int -> elif_token:Token.t -> unit
 val report_loop : Cursor.t -> loop_token:Token.t -> unit
 val report_constant_keyword : Cursor.t -> token:Token.t -> reserved:Token.reserved -> unit
+
+val report_let_condition :
+  Cursor.t ->
+  let_token:Token.t ->
+  pattern:Syntax.pattern ->
+  scrutinee:Syntax.expression ->
+  is_condition:bool ->
+  unit
+
+val report_let_shorthand : Cursor.t -> let_token:Token.t -> name:Syntax.name -> unit

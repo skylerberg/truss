@@ -75,6 +75,7 @@ module Code : sig
     | Trailing_lambda
     | As_conversion
     | Elif
+    | Let_condition
     | Angle_brackets
     | Path_separator
     | Qualified_variant

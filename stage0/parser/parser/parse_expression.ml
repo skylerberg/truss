@@ -811,7 +811,26 @@ and parse_primary cursor : Syntax.expression =
       let implementations = parse_expression_list cursor in
       Atoms.make_expression_node cursor start
         (Provide { implementations; body = parse_body cursor })
+  | Keyword Let -> parse_let_condition cursor
   | _ -> Cursor.fail cursor "an expression"
+
+and parse_let_condition cursor =
+  let start = Cursor.index cursor in
+  let let_token = Cursor.take cursor in
+  let pattern = Parse_pattern.parse_pattern cursor in
+  (match pattern.kind with
+  | Binding name when ends_condition cursor -> Habits.report_let_shorthand cursor ~let_token ~name
+  | _ ->
+      Cursor.expect_punctuation cursor Equal;
+      let scrutinee =
+        parse_binary cursor ~level:(rank_binary (Connective And) + 1) ~open_range:false
+      in
+      Habits.report_let_condition cursor ~let_token ~pattern ~scrutinee
+        ~is_condition:(ends_condition cursor));
+  Atoms.make_error_expression cursor start
+
+and ends_condition cursor =
+  opens_body cursor || List.exists (Cursor.is_punctuation cursor) [ And_and; Or_or; Fat_arrow ]
 
 and parse_name_expression cursor start =
   let modules = Atoms.parse_module_prefix cursor in

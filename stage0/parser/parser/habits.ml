@@ -358,3 +358,41 @@ let report_constant_keyword cursor ~(token : Token.t) ~reserved =
     (Printf.sprintf "Truss has no `%s`; a constant is a `let` at the top level." word)
     "Write `let`"
     [ Diagnostic.replace token.span "let" ]
+
+let needs_parentheses_before_is (value : Syntax.expression) =
+  match value.kind with
+  | Binary { operator = Operation (Arithmetic _); _ } -> false
+  | Binary _ | Is _ | Prefix (Not, _) | Quantified _ | Echo _ | Return _ -> true
+  | _ -> false
+
+let report_let_condition cursor ~(let_token : Token.t) ~(pattern : Syntax.pattern)
+    ~(scrutinee : Syntax.expression) ~is_condition =
+  let is_unwrap = match pattern.kind with Binding _ -> true | _ -> false in
+  let message =
+    if is_unwrap then "An `Option` is unwrapped with `value is Some(name)`, not `let name = value`."
+    else "A pattern is tested with `value is pattern`, not `let pattern = value`."
+  in
+  match (is_condition, spell_node cursor pattern.id) with
+  | true, Some pattern_spelling ->
+      let tested =
+        if is_unwrap then Printf.sprintf "Some(%s)" pattern_spelling else pattern_spelling
+      and scrutinee_span = Cursor.read_file_span cursor scrutinee.id
+      and opening, closing =
+        if needs_parentheses_before_is scrutinee then ("(", ")") else ("", "")
+      in
+      report cursor Let_condition let_token.span message
+        (Printf.sprintf "Write `is %s`" tested)
+        [
+          Diagnostic.replace (Source.make_span let_token.span.start scrutinee_span.start) opening;
+          Diagnostic.insert
+            (Source.make_zero_width scrutinee_span.stop)
+            (Printf.sprintf "%s is %s" closing tested);
+        ]
+  | _ -> Cursor.report cursor Let_condition let_token.span message
+
+let report_let_shorthand cursor ~(let_token : Token.t) ~(name : Syntax.name) =
+  Cursor.report cursor Let_condition let_token.span
+    (Printf.sprintf
+       "An `Option` is unwrapped with `%s is Some(name)`, not `let %s`. The new name must differ \
+        from `%s`, because a local cannot shadow another local or a parameter."
+       name.text name.text name.text)
