@@ -213,3 +213,10 @@ let () =
     (fun () ->
       expect_threaded ~expected:"run: cancelled\ntimed out\n"
         Fixtures.Concurrent.captured_sleep_with_a_time_out)
+
+let () =
+  Codegen_support.test
+    "a child that a task starts has no signal blocked, and SIGPIPE at its default action" (fun () ->
+      expect_with_each_thread_count
+        ~expected:"ended by SIGTERM, ended by SIGTERM\nended by signal 13, ended by signal 13\n"
+        Fixtures.Concurrent.children_signalling_themselves_from_tasks)

@@ -594,7 +594,6 @@ let describe function_ =
           ( "file_actions",
             Elements (UInt8, Number Spawn_file_actions_size),
             make_portable_type (Pointer (Const Void)) );
-          ("attributes", Always 0, make_portable_type (Pointer (Const Void)));
           ( "arguments",
             Elements (UInt64, Through_zero),
             make_portable_type (Pointer (Const (Pointer (Named "char")))) );
@@ -602,11 +601,8 @@ let describe function_ =
             Elements (UInt64, Through_zero),
             make_portable_type (Pointer (Const (Pointer (Named "char")))) );
         ]
-        ~named:
-          [
-            ("file_actions", Pointer (Const (Named "posix_spawn_file_actions_t")));
-            ("attributes", Pointer (Const (Named "posix_spawnattr_t")));
-          ]
+        ~named:[ ("file_actions", Pointer (Const (Named "posix_spawn_file_actions_t"))) ]
+        ~symbol:(make_portable_type "t_runtime_posix_spawnp")
         ~headers:[ "spawn.h" ]
         ~layout:[ "sizeof(char *) == sizeof(__SIZE_TYPE__)" ]
   | Waitpid ->
