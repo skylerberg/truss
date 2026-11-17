@@ -1810,7 +1810,7 @@ as every source of randomness is a capability.
 | Convention | Reason |
 |---|---|
 | Each module is one subject, one level below `standard`. | Code writes a name with its module, so the name of a type does not repeat the module: `json::Value`. A category above the module, as in Go's `encoding/json`, is not written at the use site, so it only adds something to remember. |
-| Every method of a view type also exists on the owning type. | `mut names.sort()` works without `names[..]`. Truss converts an owning collection to its view only at a parameter, so the library declares the methods on both. |
+| A method that needs no ownership of the storage is declared once, on the view type. | A `String`, a `List`, and an `Array` have the methods of their views ([Method lookup](#method-lookup)), so `mut names.sort()` works without `names[..]`, and a second declaration on the owning type would only forward. The owning type declares a method of that name where it uses its storage: `List.reverse` keeps the list's capacity. |
 | A method that works on any collection is a provided method of `Iterable`. | A user's collection gets the method by implementing `count` and `element`. |
 | A collection method takes a pure callback. A method of `Option` or `Result` takes a callback that may use capabilities. | `map` and `sort_by` may later run their callback in parallel. `Option.map` calls its callback at most once, in place of an `if`. |
 | A lookup that can miss lends an `Option`. | Nothing is copied, whatever the element type. |
