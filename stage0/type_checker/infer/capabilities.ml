@@ -393,18 +393,32 @@ let require_divergence_of_unmeasured_loop checking scope (origin : Core.origin)
         (Printf.sprintf "This loop may not terminate, since %s" (explain_missing_measure ())))
     (Types.make_capability_set [ Types.unconditional_divergence ])
 
+let describe_lambda_termination_demand (lambda_uses : Types.capability_set) =
+  match
+    List.filter_map
+      (function
+        | Types.Divergence (Of_parameter parameter) -> Some (Printf.sprintf "`%s`" parameter.name)
+        | _ -> None)
+      (lambda_uses :> Types.capability list)
+  with
+  | [] -> "the function type that this lambda is passed as promises that the lambda terminates"
+  | capability_parameters ->
+      Printf.sprintf
+        "the function type that this lambda is passed as takes only a function that terminates if \
+         the functions passed for %s do"
+        (String.concat " and " capability_parameters)
+
 let rec check_expression checking scope (node : Core.expression) =
   match node.kind with
   | Lambda { body; _ } ->
+      let available =
+        match node.type_ with Types.Function { uses; _ } -> uses | _ -> Types.no_capabilities
+      in
       check_block checking
         {
-          available =
-            (match node.type_ with
-            | Types.Function { uses; _ } -> uses
-            | _ -> Types.no_capabilities);
+          available;
           kind = Lambda_body node.origin;
-          termination_demand =
-            "the function type that this lambda is passed as promises that the lambda terminates";
+          termination_demand = describe_lambda_termination_demand available;
           inferred_lambda = Some node.id;
         }
         body

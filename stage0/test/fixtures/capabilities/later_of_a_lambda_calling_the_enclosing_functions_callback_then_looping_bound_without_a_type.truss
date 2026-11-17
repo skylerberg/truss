@@ -1,0 +1,9 @@
+fn run[capability Mine](work: (fn() -> Instant uses Mine)) -> Instant
+  uses Mine
+{
+  let again = later(fn() {
+    let _ = work()
+    while true {}
+  })
+  again()
+}

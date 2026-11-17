@@ -963,6 +963,11 @@ capabilities it uses, and whether it terminates.
 - A call infers `Granted` from the functions it passes. Where the type of
   `visit` has no `time` clause and the function passed may not terminate,
   `Granted` records that, and so the call may not terminate.
+- In the body of `for_each`, `(fn(Item) uses Granted)` takes only a function
+  that terminates if the functions passed for `Granted` do. No function type
+  states that a function uses `Granted` and may not terminate. A lambda that
+  does both is passed in a call, which infers a capability parameter of its
+  callee from the lambda.
 - `(fn(Item) uses Granted cost time finite)` takes only functions that
   terminate, whatever capabilities they use.
 - A `time` clause follows a function parameter only through its bound.
@@ -1341,7 +1346,9 @@ mut scores.update_each(fn(score) { score = score / 2 })
 - A lambda's capabilities are inferred from its body, and so is whether it
   terminates: a lambda may not terminate when its body makes a call that may
   not, or holds a loop without a measure. Such a call or loop is an error
-  where the lambda's function type promises that the lambda terminates.
+  where the lambda's function type takes only a function that terminates,
+  or one that terminates if the functions passed for a capability parameter
+  do.
 - `return` and `?` exit the lambda. `break` and `continue` do not reach a
   loop outside it.
 - A lambda is always passed inside the call's parentheses.
@@ -1402,7 +1409,9 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   that method's value.
 - **A loop without a measure may not terminate.** A function with a `time`
   clause therefore holds none, and neither does a lambda whose function type
-  promises that the lambda terminates (see [Termination](#termination)). In
+  takes only a function that terminates, or one that terminates if the
+  functions passed for a capability parameter do (see
+  [Termination](#termination)). In
   both, each `while` loop and each `for` loop over a cursor has a measure,
   which is proven to decrease. A `for` loop over a range or over a
   collection's elements always terminates.

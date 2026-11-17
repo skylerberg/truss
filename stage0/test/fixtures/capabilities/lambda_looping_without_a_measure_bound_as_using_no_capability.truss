@@ -1,0 +1,8 @@
+fn run[capability Mine](work: (fn() uses Mine))
+  uses Mine
+{
+  let again: fn() = fn() {
+    while true {}
+  }
+  again()
+}
