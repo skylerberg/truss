@@ -88,7 +88,6 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
                 callee = Indirect;
                 arguments = checked;
                 omitted_defaults = [];
-                uses = function_type.uses;
                 callee_result = result;
               };
           Form.register_call ~function_value:callee state value;
@@ -453,7 +452,6 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
                 callee = Constructor { type_ = type_path; variant; type_arguments };
                 arguments = checked;
                 omitted_defaults = left_out;
-                uses = Types.no_capabilities;
                 callee_result = type_;
               };
           Form.register_call state value;

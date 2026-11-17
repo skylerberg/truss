@@ -33,7 +33,11 @@ let make_fresh_value unifier =
 
 let make_fresh_capability_variable unifier =
   unifier.capability_variable_count <- unifier.capability_variable_count + 1;
-  Types.make_capability_set [ Types.Capability_variable unifier.capability_variable_count ]
+  Types.make_capability_set
+    [
+      Types.Capability_variable unifier.capability_variable_count;
+      Types.Divergence (Of_variable unifier.capability_variable_count);
+    ]
 
 let unify_capabilities unifier (left : Types.capability_set) right =
   left = right

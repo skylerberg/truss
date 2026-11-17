@@ -60,25 +60,23 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
               let first =
                 make part
                   (Call
-                     {
-                       callee =
-                         Trait_method
-                           {
-                             trait = index;
-                             name = "at";
-                             receiver = Read;
-                             self_type = parts;
-                             type_arguments = [];
-                             evidence;
-                           };
-                       arguments =
-                         [
-                           build_read_argument (make parts Yielded);
-                           build_read_argument (make Types.Integer (Integer Z.zero));
-                         ];
-                       lends = Some Read;
-                       uses = Types.no_capabilities;
-                     })
+                     (State.make_call state
+                        ~callee:
+                          (Trait_method
+                             {
+                               trait = index;
+                               name = "at";
+                               receiver = Read;
+                               self_type = parts;
+                               type_arguments = [];
+                               evidence;
+                             })
+                        ~arguments:
+                          [
+                            build_read_argument (make parts Yielded);
+                            build_read_argument (make Types.Integer (Integer Z.zero));
+                          ]
+                        ~lends:(Some Read)))
               in
               Use (Lent first));
           part
@@ -450,7 +448,6 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
                 };
             arguments = receiver_argument @ checked;
             omitted_defaults = left_out;
-            uses = instance.signature.uses;
             callee_result = result;
           };
       Form.register_call state value;
@@ -509,7 +506,6 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
                 callee = Capability_method { capability; name = member.text };
                 arguments = checked;
                 omitted_defaults = left_out;
-                uses = Types.make_capability_set [ Types.Capability capability ];
                 callee_result = result;
               };
           Form.register_call state value;
@@ -788,7 +784,6 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                         };
                     arguments = receiver_argument :: checked;
                     omitted_defaults = left_out;
-                    uses = instance.signature.uses;
                     callee_result = result;
                   };
               Form.register_call state value;

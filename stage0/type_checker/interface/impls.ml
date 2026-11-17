@@ -541,19 +541,36 @@ let read_signature lookups (path : Path.t) =
           ~list_bounds:(Types.list_bounds signature.generics)
           impl
       in
+      let uses = normalize_capabilities signature.uses in
+      let declared_by_trait =
+        Option.map
+          (fun implemented ->
+            let declared = read_trait_signature lookups implemented in
+            let rename =
+              if List.length declared.generics = List.length own.generics then
+                Types.substitute_capabilities
+                  (Types.make_substitution declared.generics
+                     (Types.list_generic_arguments own.generics))
+              else Fun.id
+            in
+            (rename (Types.list_divergence declared.uses), declared.costs))
+          implemented
+      in
       Some
         {
           (Types.map_signature
              (Types.map ~map_capabilities:normalize_capabilities (fun _ -> None))
              signature)
           with
-          uses = normalize_capabilities signature.uses;
-          terminates =
-            (signature.terminates
-            ||
-            match implemented with
-            | Some implemented -> (read_trait_signature lookups implemented).terminates
-            | None -> false);
+          uses =
+            (match declared_by_trait with
+            | Some (divergence, _) when not (Types.terminates uses) ->
+                Types.union_capabilities (Types.remove_divergence uses) divergence
+            | Some _ | None -> uses);
+          costs =
+            (match declared_by_trait with
+            | Some (_, costs) -> List.sort_uniq compare (signature.costs @ costs)
+            | None -> signature.costs);
         }
   | Top _ | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _
     ->

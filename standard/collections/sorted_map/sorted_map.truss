@@ -377,7 +377,7 @@ public fn collections::SortedMap[Key: Ordered, Value].update[capability Granted]
   mut self,
   key: own Key,
   default: own Value,
-  change: (fn(mut Value) uses Granted cost time finite),
+  change: (fn(mut Value) uses Granted),
 )
   uses Granted
   ensures self.contains(key)
@@ -577,10 +577,11 @@ public fn collections::SortedMap[Key: Ordered, Value].in_range(self, range: Rang
   if first < end { self.entries[first..end] } else { self.entries[first..first] }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].retain(
+public fn collections::SortedMap[Key: Ordered, Value].retain[capability Granted](
   mut self,
-  keep: (fn(map::Entry[Key, Value]) -> Bool cost time finite),
+  keep: (fn(map::Entry[Key, Value]) -> Bool uses Granted),
 )
+  uses Granted
   ensures self.length() <= old(self.length())
   cost time O(old(self.length()) * time(keep))
 {
@@ -739,7 +740,7 @@ public fn collections::SortedMap[Key: Ordered, Value].value_at(mut self, positio
 
 public fn collections::SortedMap[Key: Ordered, Value].update_values[capability Granted](
   mut self,
-  change: (fn(mut Value) uses Granted cost time finite),
+  change: (fn(mut Value) uses Granted),
 )
   uses Granted
   ensures self.length() == old(self.length())

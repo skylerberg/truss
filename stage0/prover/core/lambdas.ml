@@ -99,8 +99,7 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
   end
 
 let is_in_the_logic (function_type : Types.function_type) =
-  Types.terminates function_type
-  && function_type.uses = Types.no_capabilities
+  function_type.uses = Types.no_capabilities
   && List.for_all (fun (mode, _) -> mode <> Types.Mut) function_type.inputs
 
 let make_parameter_symbols context (frame : State.frame) (function_type : Types.function_type) =
@@ -350,7 +349,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
           | Order_of -> Some Units
           | No_more_than (Some _) -> Some At_most
           | Exactly_cost (Some _) -> Some Exactly
-          | Finite_cost | No_more_than None | Exactly_cost None -> None
+          | No_more_than None | Exactly_cost None -> None
         in
         let resource : Costs.resource option =
           match cost.resource with
@@ -389,7 +388,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let ended = ref [] in
   let saved_returns = context.returns and saved_terminates = context.terminates in
   context.returns <- [];
-  context.terminates <- Types.terminates function_type;
+  context.terminates <- Types.terminates function_type.uses;
   let pending =
     Fun.protect
       ~finally:(fun () ->

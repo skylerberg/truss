@@ -57,11 +57,14 @@ let make_uses_more : Types.capability -> change = function
   | Capability path -> Breaks (Printf.sprintf "now uses `%s`" (Path.show path))
   | (Capability_parameter _ | Capability_projection _) as capability ->
       Breaks (Printf.sprintf "now uses `%s`" (Types.show_capability capability))
-  | Capability_variable _ ->
+  | Capability_variable _ | Divergence (Of_variable _) ->
       Compiler_bug.raise_bug ~stage:"Compatibility"
         "a signature holds an unknown set of capabilities"
   | Capability_error _ ->
       Compiler_bug.raise_bug ~stage:"Compatibility" "a signature holds a capability with an error"
+  | Divergence Always -> Breaks "no longer promises to terminate"
+  | Divergence (Of_parameter { name; _ }) ->
+      Breaks (Printf.sprintf "may not terminate where `%s` may not" name)
 
 let compare_signatures ~(before : Types.signature) ~(after : Types.signature) =
   let same_parameters =
@@ -90,12 +93,13 @@ let compare_signatures ~(before : Types.signature) ~(after : Types.signature) =
          && before.capture_free_parameters = after.capture_free_parameters
        then []
        else [ Breaks "changed its parameters or its result" ]);
-      (if before.terminates && not after.terminates then
-         [ Breaks "no longer promises to terminate" ]
-       else if after.terminates && not before.terminates then [ Grows "promises to terminate" ]
-       else []);
       List.map make_uses_more (more :> Types.capability list);
-      (if fewer <> Types.no_capabilities then [ Grows "uses fewer capabilities" ] else []);
+      (if Types.list_divergence fewer <> Types.no_capabilities then
+         [ Grows "promises to terminate" ]
+       else []);
+      (if Types.remove_divergence fewer <> Types.no_capabilities then
+         [ Grows "uses fewer capabilities" ]
+       else []);
       (if gained_default then [ Grows "gained a default" ] else []);
     ]
 

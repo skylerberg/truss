@@ -130,48 +130,6 @@ and list_extended_by_base (base : Core.place) =
   | Field { base; _ } -> list_extended_by_base base
   | Local _ | Constant _ | Lent _ -> []
 
-let is_functional walk =
-  let fine = ref true in
-  let rec visit =
-    {
-      Core_walk.ignore_all with
-      expression =
-        (fun (node : Core.expression) ->
-          match node.kind with
-          | Return _ | Break | Continue | Todo | Echo _ | Provide _ | Unreachable -> fine := false
-          | _ when diverges node.type_ -> fine := false
-          | Call { arguments; _ } ->
-              if
-                List.exists
-                  (function
-                    | Core.Passed { mode = Types.Mut; _ } -> true
-                    | Core.Passed _ | Core.Default -> false)
-                  arguments
-              then fine := false;
-              Core_walk.walk_expression_children visit node
-          | _ -> Core_walk.walk_expression_children visit node);
-      statement =
-        (fun (node : Core.statement) ->
-          match node.kind with
-          | Let { pattern; else_ = None; _ } when not (binds_variable pattern) ->
-              Core_walk.walk_statement_children visit node
-          | Evaluate _ -> Core_walk.walk_statement_children visit node
-          | _ -> fine := false);
-      pattern = (fun node -> Core_walk.walk_pattern_children visit node);
-    }
-  and binds_variable (pattern : Core.pattern) =
-    let child_binds = ref false in
-    Core_walk.walk_pattern_children
-      {
-        Core_walk.ignore_all with
-        pattern = (fun inner -> if binds_variable inner then child_binds := true);
-      }
-      pattern;
-    !child_binds || match pattern.kind with Bind { is_var; _ } -> is_var | _ -> false
-  in
-  walk visit;
-  !fine
-
 let list_names (written : Core.expression) =
   let names = ref [] in
   Core_walk.walk_expression
@@ -1203,7 +1161,7 @@ and lower_statement builder (node : Core.statement) =
           | Some _, Some lowered -> (
               let compared =
                 match (tested.kind, List.rev condition.statements) with
-                | ( Compare { left; right; _ },
+                | ( Compare _,
                     {
                       kind =
                         Basic
@@ -1211,8 +1169,7 @@ and lower_statement builder (node : Core.statement) =
                       _;
                     }
                     :: _ )
-                  when is_functional (fun visit -> Core_walk.walk_expression visit left)
-                       && is_functional (fun visit -> Core_walk.walk_expression visit right) ->
+                  when Core_walk.has_implicit_measure tested ->
                     Some { Tree.comparison; left = low; right = high }
                 | _ -> None
               in
@@ -1532,7 +1489,7 @@ and lower_lambda builder (parameters : Core.pattern list) (captures : Core.captu
   in
   let body =
     Emitter.finish inner ~parameters:parameter_locals ~captures:capture_locals
-      ~is_functional:(is_functional (fun visit -> Core_walk.walk_block visit body))
+      ~is_functional:(Core_walk.is_functional (fun visit -> Core_walk.walk_block visit body))
       ?value_type:(Option.map compute_unconverted_type body.value)
   in
   Emitter.add_lambda builder body

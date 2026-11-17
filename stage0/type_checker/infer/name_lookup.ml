@@ -326,14 +326,7 @@ and finish_call (state : State.state) env (value : Syntax.expression) path calle
     (instance : Instantiation.instance) arguments left_out =
   let result = Types.extract_result_type instance.signature.output in
   state.tables.calls.(value.id) <-
-    Some
-      {
-        callee;
-        arguments;
-        omitted_defaults = left_out;
-        uses = instance.signature.uses;
-        callee_result = result;
-      };
+    Some { callee; arguments; omitted_defaults = left_out; callee_result = result };
   Modes.note_lending state value instance.signature.output;
   Form.register_call state value;
   Option.value (reject_specification_call state env value path instance.signature) ~default:result
@@ -573,8 +566,8 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
           instance.signature )
   | Some (View_overload _) | None -> None
 
-and make_argumentless_call callee (signature : Types.signature) result : Tables.call =
-  { callee; arguments = []; omitted_defaults = []; uses = signature.uses; callee_result = result }
+and make_argumentless_call callee result : Tables.call =
+  { callee; arguments = []; omitted_defaults = []; callee_result = result }
 
 and find_elements_calls state (span : Source.Definition_span.t) type_ (mode : Types.mode) =
   let receiver : Path.receiver = match mode with Read -> Read | Mut -> Mut | Own -> Own in
@@ -591,8 +584,8 @@ and find_elements_calls state (span : Source.Definition_span.t) type_ (mode : Ty
           Some
             ( Tables.Elements
                 {
-                  count = make_argumentless_call count counted (Types.make_builtin UInt64);
-                  element = make_argumentless_call element lent part;
+                  count = make_argumentless_call count (Types.make_builtin UInt64);
+                  element = make_argumentless_call element part;
                   lends;
                 },
               part,
@@ -602,7 +595,7 @@ and find_elements_calls state (span : Source.Definition_span.t) type_ (mode : Ty
 
 and find_consuming_cursor state (span : Source.Definition_span.t) type_ =
   match find_method_version state span type_ "cursor" Own with
-  | Some (callee, ({ parameters = []; output = Returns cursor; _ } as signature)) -> (
+  | Some (callee, { parameters = []; output = Returns cursor; _ }) -> (
       let cursor = State.normalize state cursor in
       let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
       match State.find_evidence state cursor trait with
@@ -611,7 +604,7 @@ and find_consuming_cursor state (span : Source.Definition_span.t) type_ =
             ( Tables.Pulled
                 {
                   cursor;
-                  cursor_call = Some (make_argumentless_call callee signature cursor);
+                  cursor_call = Some (make_argumentless_call callee cursor);
                   remaining = find_remaining_call state span cursor;
                 },
               State.resolve_associated_type state cursor trait "Element" ~at:span )
@@ -620,7 +613,7 @@ and find_consuming_cursor state (span : Source.Definition_span.t) type_ =
 
 and find_remaining_call state (span : Source.Definition_span.t) cursor =
   match find_method_version state span cursor "remaining" Read with
-  | Some (callee, ({ parameters = []; output = Returns bound; _ } as signature))
+  | Some (callee, { parameters = []; output = Returns bound; _ })
     when Types.is_builtin UInt64 (State.normalize state bound) ->
-      Some (make_argumentless_call callee signature (Types.make_builtin UInt64))
+      Some (make_argumentless_call callee (Types.make_builtin UInt64))
   | _ -> None
