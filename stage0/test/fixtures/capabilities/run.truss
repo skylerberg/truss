@@ -1,0 +1,6 @@
+fn run[capability Granted](action: (fn() -> Int64 uses Granted)) -> Int64
+  uses Granted
+{
+  action()
+}
+

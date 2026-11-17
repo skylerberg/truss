@@ -100,7 +100,7 @@ let leave_divergence_to_parameters (uses : capability_set) : capability_set =
     | [] -> [ unconditional_divergence ]
     | parameters -> List.map (fun parameter -> Divergence (Of_parameter parameter)) parameters)
 
-let intersect_divergence (sets : capability_set list) : capability_set =
+let intersect_capabilities (sets : capability_set list) : capability_set =
   make_capability_set
     (List.filter
        (fun capability ->

@@ -1814,8 +1814,9 @@ fn total_score(players: Slice[Player]) -> Int64
   scope after the block.
 - **Branches cannot race.** Any branch may read any place, and a place that
   one branch mutates is used by no other branch.
-- Branches use no capability but `Panic`, so a function that contains
-  `parallel` is still pure.
+- A branch uses no capability except `Panic`, and uses `Panic` only where
+  the enclosing function has it, so a function that contains `parallel` is
+  still pure.
 - A branch cannot exit the block with `return`, `break`, `continue`, or `?`.
 - A `parallel` block has the result of running its branches in order, and
   its `time` is the sum of theirs.
