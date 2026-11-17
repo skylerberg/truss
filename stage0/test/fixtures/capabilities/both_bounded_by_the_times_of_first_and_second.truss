@@ -1,0 +1,11 @@
+fn both[capability Granted](
+  value: Int64,
+  first: (fn(Int64) -> Int64 uses Granted),
+  second: (fn(Int64) -> Int64 uses Granted),
+) -> Int64
+  uses Granted
+  cost time O(time(first) + time(second))
+{
+  second(first(value))
+}
+
