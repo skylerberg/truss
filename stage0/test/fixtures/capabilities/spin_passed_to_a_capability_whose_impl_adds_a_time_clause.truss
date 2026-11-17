@@ -1,0 +1,23 @@
+capability Runner {
+  fn run(work: fn(Int64))
+    cost time finite
+}
+
+type Direct()
+
+impl Runner for Direct {
+  fn run(self, work: (fn(Int64) cost time finite)) {
+    work(1)
+  }
+}
+
+fn spin(value: Int64) {
+  spin(value)
+}
+
+fn f()
+  uses Runner
+  cost time finite
+{
+  Runner.run(spin)
+}

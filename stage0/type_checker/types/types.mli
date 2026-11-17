@@ -83,6 +83,7 @@ val remove_divergence : capability_set -> capability_set
 val terminates : capability_set -> bool
 val leave_divergence_to_parameters : capability_set -> capability_set
 val intersect_divergence : capability_set list -> capability_set
+val has_capability_error : capability_set -> bool
 val is_capability_subset : capability_set -> capability_set -> bool
 val subtract_capabilities : capability_set -> capability_set -> capability_set
 

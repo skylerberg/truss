@@ -517,7 +517,9 @@ and show_function (function_type : function_type) =
             | Exactly_cost (Some value) -> "== " ^ Z.to_string value
             | Exactly_cost None -> "== ..."
           in
-          "cost " ^ show_resource cost.resource ^ " " ^ bound)
+          Printf.sprintf "cost %s%s %s"
+            (if cost.amortized then "amortized " else "")
+            (show_resource cost.resource) bound)
         function_type.costs
   in
   match (uses, costs) with

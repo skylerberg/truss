@@ -571,12 +571,10 @@ and normalize_capabilities_in_impl lookups ~list_bounds (impl : Types.impl_inter
                && Path.equal (read_declaring_capability_trait lookups ~base projected name).trait
                     impl.implements.trait ->
             Option.value ~default:Types.no_capabilities (List.assoc_opt name impl.capability_sets)
-        | capability ->
-            normalize_capabilities lookups
-              ~list_bounds:(list_impl_bounds impl ~list_bounds)
-              (Types.make_capability_set [ capability ])
+        | capability -> Types.make_capability_set [ capability ]
       in
-      (set :> Types.capability list))
+      (normalize_capabilities lookups ~list_bounds:(list_impl_bounds impl ~list_bounds) set
+        :> Types.capability list))
     capabilities
 
 and normalize_signature_in_impl lookups ~list_bounds ?missing_associated
