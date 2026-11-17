@@ -16,6 +16,11 @@ let make_operand_counter (metric : Metric.t) =
     amortized = false;
   }
 
+let make_one_call_counter (enclosing : counter) =
+  match enclosing.resource with
+  | Metric metric -> make_operand_counter metric
+  | Calls _ -> { enclosing with amortized = false }
+
 let list_stated_bounds (costs : Types.cost list) (metric : Metric.t) =
   List.filter_map
     (fun (cost : Types.cost) ->
@@ -63,6 +68,16 @@ let times left right =
 
 let at_most left right = Logic.Operation ("<=", [ left; right ])
 
+type amount = Exact of Logic.term | Within of Logic.term | Unknown
+
+let multiply left right =
+  match (left, right) with
+  | (Exact factor | Within factor), _ when factor = zero -> Exact zero
+  | _, (Exact factor | Within factor) when factor = zero -> Exact zero
+  | Exact left, Exact right -> Exact (times left right)
+  | (Exact left | Within left), (Exact right | Within right) -> Within (times left right)
+  | Unknown, _ | _, Unknown -> Unknown
+
 let at_least_zero term =
   match term with
   | Logic.Integer value -> Logic.Integer (Z.max value Z.zero)
@@ -73,6 +88,12 @@ let larger left right =
   | Logic.Integer x, Logic.Integer y -> Logic.Integer (Z.max x y)
   | _ when left = right -> left
   | _ -> Logic.ite (Logic.Operation (">=", [ left; right ])) left right
+
+let choose condition left right =
+  match (left, right) with
+  | Exact left, Exact right -> Exact (Logic.ite condition left right)
+  | (Exact left | Within left), (Exact right | Within right) -> Within (larger left right)
+  | Unknown, _ | _, Unknown -> Unknown
 
 let units amount = plus (at_least_zero amount) (Logic.int 1)
 

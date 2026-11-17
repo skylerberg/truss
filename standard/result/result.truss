@@ -40,6 +40,7 @@ public fn Result[Value, Error].map[Output](
   transform: (fn(own Value) -> Output uses generic Granted),
 ) -> Result[Output, Error]
   uses generic Granted
+  cost calls(transform) <= 1
   cost time O(time(transform))
   cost allocations <= allocations(transform)
   cost allocated_bytes <= allocated_bytes(transform)
@@ -55,6 +56,7 @@ public fn Result[Value, Error].map_error[Other](
   transform: (fn(own Error) -> Other uses generic Granted),
 ) -> Result[Value, Other]
   uses generic Granted
+  cost calls(transform) <= 1
   cost time O(time(transform))
   cost allocations <= allocations(transform)
   cost allocated_bytes <= allocated_bytes(transform)
@@ -70,6 +72,7 @@ public fn Result[Value, Error].and_then[Output](
   next: (fn(own Value) -> Result[Output, Error] uses generic Granted),
 ) -> Result[Output, Error]
   uses generic Granted
+  cost calls(next) <= 1
   cost time O(time(next))
   cost allocations <= allocations(next)
   cost allocated_bytes <= allocated_bytes(next)
@@ -85,6 +88,7 @@ public fn Result[Value, Error].or_else[Other](
   recover: (fn(own Error) -> Result[Value, Other] uses generic Granted),
 ) -> Result[Value, Other]
   uses generic Granted
+  cost calls(recover) <= 1
   cost time O(time(recover))
   cost allocations <= allocations(recover)
   cost allocated_bytes <= allocated_bytes(recover)
@@ -111,6 +115,7 @@ public fn Result[Value, Error].unwrap_or_else(
   recover: (fn(own Error) -> Value uses generic Granted),
 ) -> Value
   uses generic Granted
+  cost calls(recover) <= 1
   cost time O(time(recover))
   cost allocations <= allocations(recover)
   cost allocated_bytes <= allocated_bytes(recover)

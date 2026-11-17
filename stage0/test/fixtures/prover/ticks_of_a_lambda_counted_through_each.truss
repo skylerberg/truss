@@ -1,0 +1,41 @@
+fn once(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == items.length()
+{
+  each(items, visit: fn(_) { Meter.tick() })
+}
+
+fn at_most_once(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) <= items.length()
+{
+  each(items, visit: fn(_) { Meter.tick() })
+}
+
+fn twice(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == 2 * items.length()
+{
+  each(items, visit: fn(_) {
+    Meter.tick()
+    Meter.tick()
+  })
+}
+
+fn thrice_in_a_loop(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == 3 * items.length()
+{
+  each(items, visit: fn(_) {
+    for _ in 0..3 {
+      Meter.tick()
+    }
+  })
+}
+
+fn never(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == 0
+{
+  each(items, visit: fn(_) { Meter.tock() })
+}

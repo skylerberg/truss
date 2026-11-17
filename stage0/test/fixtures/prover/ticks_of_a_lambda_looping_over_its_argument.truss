@@ -1,0 +1,19 @@
+fn each_count(counts: List[UInt32], visit: (fn(UInt32) uses generic Granted))
+  uses generic Granted
+  cost calls(visit) == counts.length()
+{
+  for count in counts {
+    visit(count)
+  }
+}
+
+fn f(counts: List[UInt32])
+  uses Meter
+  cost calls(Meter.tick) <= counts.length()
+{
+  each_count(counts, visit: fn(count) {
+    for _ in 0..count {
+      Meter.tick()
+    }
+  })
+}

@@ -1,0 +1,30 @@
+fn tick_once(item: Int64)
+  uses Meter
+  cost calls(Meter.tick) == 1
+{
+  let _ = item
+  Meter.tick()
+}
+
+fn tick_if_positive(item: Int64)
+  uses Meter
+  cost calls(Meter.tick) <= 1
+{
+  if item > 0 {
+    Meter.tick()
+  }
+}
+
+fn exactly(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == items.length()
+{
+  each(items, visit: tick_once)
+}
+
+fn at_most(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) <= items.length()
+{
+  each(items, visit: tick_if_positive)
+}

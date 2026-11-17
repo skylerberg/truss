@@ -220,7 +220,7 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
             callee_clauses.ensures;
           let frame =
             Operations.spend context frame
-              (Amounts.compute_callee_amount context frame ~path
+              (Amounts.compute_callee_amount context frame ~location ~path
                  ~clauses:(Contracts.list_declared_clauses contract)
                  ~bind_frame:(fun clauses ->
                    {

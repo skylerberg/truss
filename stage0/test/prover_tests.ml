@@ -931,7 +931,8 @@ let () =
       expect_not_proven Fixtures.Prover.branching_ping_and_pong "prover.cost");
   Harness.test "a callback's time is not free" (fun () ->
       expect_not_proven Fixtures.Prover.each_visiting_a_finite_callback "prover.cost");
-  Harness.test "calls through a lambda that captures the function value are not known" (fun () ->
+  Harness.test "a lambda that calls the function value twice for each element is not once"
+    (fun () ->
       expect_not_proven Fixtures.Prover.each_visiting_through_a_capturing_lambda "prover.cost");
   Harness.test "a quantifier over a costly body is not linear" (fun () ->
       expect_not_proven Fixtures.Prover.quantifier_over_a_spinning_body "prover.cost");
@@ -950,6 +951,125 @@ let () =
       expect_proven (constant_step ^ Fixtures.Prover.list_loop_with_a_cost_clause));
   Harness.test "an impl's method keeps its trait's cost" (fun () ->
       expect_not_proven Fixtures.Prover.sized_impl_with_the_traits_cost "prover.cost")
+
+let () =
+  let callees = Fixtures.Prover.meter_and_each in
+  let expect_proven_with_callees text = expect_proven (callees ^ text) in
+  let expect_cost_not_proven ?says text =
+    Support.expect_one_diagnostic ~check ?says (callees ^ text) "prover.cost"
+  in
+  Harness.test "the calls that a lambda makes are counted once for each call through the parameter"
+    (fun () -> expect_proven_with_callees Fixtures.Prover.ticks_of_a_lambda_counted_through_each);
+  Harness.test "a lambda that calls the target on one branch gives an upper bound" (fun () ->
+      expect_proven_with_callees Fixtures.Prover.tick_on_one_branch_bounded_through_each);
+  Harness.test "a lambda that calls the target on one branch gives no exact count" (fun () ->
+      expect_cost_not_proven Fixtures.Prover.tick_on_one_branch_counted_exactly_through_each
+        ~says:
+          "The prover cannot show that every call of this lambda makes the same number of calls of \
+           `Meter.tick`, which an `==` bound here relies on.");
+  Harness.test "a callee that bounds the calls through its parameter above gives an upper bound"
+    (fun () ->
+      expect_proven_with_callees Fixtures.Prover.ticks_bounded_through_a_callee_bounded_above);
+  Harness.test "a callee that bounds the calls through its parameter above gives no exact count"
+    (fun () ->
+      expect_cost_not_proven Fixtures.Prover.ticks_counted_exactly_through_a_callee_bounded_above
+        ~says:
+          "Only an upper bound is known for the calls of `Meter.tick` that this call to \
+           `app::main::each_until_negative` makes through `visit`, which may be fewer, so no `==` \
+           bound can count them. State the cost with `<=`, or give \
+           `app::main::each_until_negative` an `==` bound on `calls(visit)`.");
+  Harness.test "a callee that states no bound on the calls through its parameter gives no count"
+    (fun () ->
+      expect_cost_not_proven Fixtures.Prover.ticks_through_a_callee_without_a_calls_clause
+        ~says:
+          "`app::main::each_unstated` states no bound on the calls through `visit`, so the calls \
+           of `Meter.tick` that this call makes through the function passed for it have no bound. \
+           Give `app::main::each_unstated` a `cost calls(visit)` clause.";
+      expect_cost_not_proven Fixtures.Prover.calls_of_visit_through_a_callee_without_a_calls_clause
+        ~says:
+          "`app::main::each_unstated` states no bound on the calls through `visit`, so the calls \
+           through `visit` that this call makes through the function passed for it have no bound.");
+  Harness.test "a function passed that never calls the target needs no bound from the callee"
+    (fun () ->
+      expect_proven_with_callees Fixtures.Prover.tocks_through_a_callee_without_a_calls_clause);
+  Harness.test "a callee that calls its callback once for each element is not within half as many"
+    (fun () -> expect_cost_not_proven Fixtures.Prover.ticks_through_each_bounded_by_half);
+  Harness.test "the calls through a parameter that a lambda makes are counted" (fun () ->
+      expect_proven_with_callees Fixtures.Prover.calls_of_visit_counted_through_a_lambda);
+  Harness.test "a callee that passes its callback on proves its own count" (fun () ->
+      expect_proven_with_callees Fixtures.Prover.ticks_counted_through_a_relay;
+      expect_cost_not_proven Fixtures.Prover.relay_visiting_twice_counted_as_once);
+  Harness.test "a named function passed for a callback makes the calls that its clause states"
+    (fun () ->
+      expect_proven_with_callees Fixtures.Prover.ticks_of_a_named_function_counted_through_each);
+  Harness.test "a named function whose clause is an upper bound gives no exact count" (fun () ->
+      expect_cost_not_proven Fixtures.Prover.ticks_of_a_named_function_bounded_above_counted_exactly
+        ~says:
+          "Only an upper bound is known for the calls of `Meter.tick` that this call to \
+           `app::main::each` makes through `visit`, which may be fewer, so no `==` bound can count \
+           them. State the cost with `<=`, or pass a function that makes the same number of them \
+           in every call.");
+  Harness.test "a named function without a `calls` clause gives no count" (fun () ->
+      expect_cost_not_proven Fixtures.Prover.ticks_of_a_named_function_without_a_calls_clause);
+  Harness.test "a parameter passed on that may use the capability gives no count" (fun () ->
+      expect_cost_not_proven Fixtures.Prover.ticks_of_a_forwarded_parameter);
+  Harness.test "a lambda whose calls depend on its argument gives no count" (fun () ->
+      expect_cost_not_proven Fixtures.Prover.ticks_of_a_lambda_looping_over_its_argument);
+  Harness.test "a call of another method of the capability is not counted" (fun () ->
+      expect_cost_not_proven Fixtures.Prover.tocks_counted_as_ticks_through_each);
+  Harness.test "the calls of a whole capability count each of its methods" (fun () ->
+      expect_proven_with_callees Fixtures.Prover.calls_of_a_whole_capability_counted_through_each;
+      expect_cost_not_proven Fixtures.Prover.calls_of_a_whole_capability_counted_as_one_method);
+  Harness.test "a lambda bound to a name is counted at each call that passes or calls it" (fun () ->
+      expect_proven_with_callees Fixtures.Prover.ticks_of_a_lambda_bound_to_a_name);
+  Harness.test "a lambda called once that calls the target on one branch gives no exact count"
+    (fun () ->
+      expect_cost_not_proven Fixtures.Prover.tick_on_one_branch_of_a_lambda_called_once
+        ~says:
+          "The prover cannot show that every call of this lambda makes the same number of calls of \
+           `Meter.tick`, which an `==` bound here relies on.");
+  Harness.test "an order bound on the calls through a parameter counts under an order bound"
+    (fun () ->
+      expect_proven_with_callees Fixtures.Prover.ticks_of_the_order_of_the_calls_through_a_callee;
+      expect_cost_not_proven Fixtures.Prover.ticks_bounded_through_a_callee_of_the_order);
+  Harness.test "a callee's own calls of the target are added to those through its callback"
+    (fun () ->
+      expect_proven_with_callees Fixtures.Prover.ticks_of_a_callee_that_ticks_and_calls_no_callback);
+  Harness.test "a callee that uses the capability and states no `calls` clause gives no count"
+    (fun () ->
+      expect_cost_not_proven Fixtures.Prover.ticks_through_a_callee_that_ticks_without_a_clause)
+
+let () =
+  let callee = Fixtures.Prover.meter_and_first_then_second in
+  Harness.test "each callback of a callee is counted by the clause on its own parameter" (fun () ->
+      expect_proven (callee ^ Fixtures.Prover.ticks_of_two_callbacks_counted);
+      expect_not_proven
+        (callee ^ Fixtures.Prover.ticks_of_the_first_callback_counted_as_the_second)
+        "prover.cost";
+      expect_not_proven
+        (callee ^ Fixtures.Prover.ticks_of_the_second_callback_counted_as_the_first)
+        "prover.cost");
+  let recursive = Fixtures.Prover.meter_and_each ^ Fixtures.Prover.each_from_visiting_the_rest in
+  Harness.test "a recursive callee's clause counts the calls through its parameter" (fun () ->
+      expect_proven (recursive ^ Fixtures.Prover.ticks_counted_through_a_recursive_callee);
+      expect_not_proven
+        (recursive ^ Fixtures.Prover.ticks_through_a_recursive_callee_counted_as_none)
+        "prover.cost";
+      expect_not_proven
+        (Fixtures.Prover.meter_and_each
+       ^ Fixtures.Prover.each_from_visiting_the_rest_counted_as_none)
+        "prover.cost");
+  Harness.test "two lambdas with one value are counted each by its own body" (fun () ->
+      expect_not_proven Fixtures.Prover.calls_of_visit_through_one_of_two_lambdas_with_one_value
+        "prover.cost");
+  Harness.test "a lambda chosen by a condition is counted on the path that chooses it" (fun () ->
+      expect_not_proven Fixtures.Prover.calls_of_visit_through_a_lambda_chosen_by_a_condition
+        "prover.cost");
+  Harness.test "the standard combinators count the calls of the lambda they are passed" (fun () ->
+      expect_proven Fixtures.Prover.standard_combinators_counting_calls;
+      Support.expect_one_diagnostic ~check Fixtures.Prover.standard_map_of_an_option_counted_exactly
+        "prover.cost"
+        ~says:"Only an upper bound is known for the calls of `Random.next` that this call to")
 
 let meter = Fixtures.Prover.meter
 

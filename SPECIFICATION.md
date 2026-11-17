@@ -986,6 +986,61 @@ fn halved(value: Option[Int64]) -> Option[Int64]
 }
 ```
 
+#### Calls through a callback
+
+```truss
+fn for_each(items: List[String], visit: (fn(String) uses generic Granted))
+  uses generic Granted
+  cost calls(visit) == items.length()
+{
+  for item in items {
+    visit(item)
+  }
+}
+
+fn announce_each(names: List[String])
+  uses Console
+  cost calls(Console.print_line) == names.length()
+{
+  for_each(names, visit: fn(name) { Console.print_line(name) })
+}
+```
+
+`for_each` cannot name the capabilities that `visit` uses, so no clause of
+`for_each` counts the calls of `Console.print_line`. The caller counts them.
+The calls of a target that a call makes through a callback are the callee's
+count of calls through the parameter, times the target's calls in one call
+of the function passed.
+
+| The callee's `calls(visit)` clause | The target's calls in one call of the function passed | The target's calls through `visit` |
+|---|---|---|
+| `== n` | The same number `k` in every call | Exactly `n * k` |
+| `== n` | At most `k` | At most `n * k` |
+| `<= n` | The same number `k` in every call, or at most `k` | At most `n * k` |
+| Any clause, or none | Zero | Zero |
+| None | Not zero | Unknown |
+| `== n` or `<= n` | No bound | Unknown |
+
+The function passed gives the second factor:
+
+| The function passed | The target's calls in one call |
+|---|---|
+| A lambda | The count of its body. It is the same number in every call where every path through the body makes that number of calls for every argument. Otherwise it is an upper bound, the largest count of a path. There is no bound where no number bounds the count for every argument, as for a loop over an argument. |
+| A named function, for a target of a capability | `n` in every call where its clause is `calls(target) == n` for a literal `n`, and at most `n` where its clause is `<= n`. Zero where it does not use the target's capability, and no bound otherwise. |
+| A parameter of the caller, for a target of a capability | Zero where its type uses neither the target's capability nor a capability parameter, and no bound otherwise |
+| The parameter of the caller that is the target | One |
+| Any other function, for a target that is a function parameter | Zero, or at most one where it has the function type of that parameter and so may be the same function |
+
+- An `==` bound is proven only from an exact count. A `<=` bound is proven
+  from an exact count or an upper bound. An unknown count proves no bound.
+- Under an `O(...)` bound of the caller, the callee's clause can also be
+  `calls(visit) O(n)`. An `O(n)` clause gives no count under `<=` or `==`.
+- The callee's own calls of the target are added. A callee that uses the
+  target's capability states them in a `calls(target)` clause, and makes an
+  unknown number where it states none.
+- A call of a function value makes the target's calls of one call of that
+  function.
+
 #### Amortized costs
 
 ```truss

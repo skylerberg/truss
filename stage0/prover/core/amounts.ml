@@ -73,9 +73,32 @@ let compute_amount_within context frame (counter : Costs.counter) bound =
   | Units -> bound
   | At_most | Exactly -> declare_bounded_amount context frame bound
 
-let compute_promised_amount context frame (counter : Costs.counter) (bound : Mir.bound) ~evaluate
-    ~is_recursive_call ~exact_target ~change =
-  match (bound, counter.counting) with
+let declare_amount context frame (counter : Costs.counter) : Costs.amount -> Logic.term = function
+  | Exact amount -> amount
+  | Within bound when bound = Costs.zero -> Costs.zero
+  | Within bound -> declare_bounded_amount context frame bound
+  | Unknown -> Operations.declare_unknown_amount context frame counter
+
+let declare_counted_amount (context : State.context) frame ~location ~describe_upper_bound
+    (counter : Costs.counter) (amount : Costs.amount) =
+  match amount with
+  | Within bound
+    when counter.counting = Exactly && bound <> Costs.zero
+         && List.mem counter context.promised_counters ->
+      Facts.oblige context frame Cost location
+        [ Text (describe_upper_bound ()) ]
+        (Logic.equal bound Costs.zero);
+      bound
+  | Exact _ | Within _ | Unknown -> declare_amount context frame counter amount
+
+let is_exact_target (cost : Mir.cost) (counter : Costs.counter) =
+  match (cost.resource, counter.resource) with
+  | Calls (Capability _), Calls (Capability_method _) -> false
+  | _ -> true
+
+let compute_promised_amount (counter : Costs.counter) (cost : Mir.cost) ~evaluate ~is_recursive_call
+    ~change : Costs.amount =
+  match (cost.bound, counter.counting) with
   | Order_of amount, Units ->
       let amount = evaluate amount in
       let amount =
@@ -84,15 +107,14 @@ let compute_promised_amount context frame (counter : Costs.counter) (bound : Mir
           if counter.resource = Metric Time then Costs.plus hypothesis (Logic.int 1) else hypothesis
         else Costs.units amount
       in
-      Costs.minus amount change
+      Exact (Costs.minus amount change)
   | (At_most amount | Exactly amount), Units ->
-      Costs.at_least_zero (Costs.minus (evaluate amount) change)
-  | At_most amount, (At_most | Exactly) ->
-      declare_bounded_amount context frame (Costs.minus (evaluate amount) change)
-  | Exactly amount, (At_most | Exactly) ->
-      let amount = Costs.minus (evaluate amount) change in
-      if exact_target then amount else declare_bounded_amount context frame amount
-  | (Order_of _ | Finite), _ -> Operations.declare_unknown_amount context frame counter
+      Exact (Costs.at_least_zero (Costs.minus (evaluate amount) change))
+  | Exactly amount, (At_most | Exactly) when is_exact_target cost counter ->
+      Exact (Costs.minus (evaluate amount) change)
+  | (At_most amount | Exactly amount), (At_most | Exactly) ->
+      Within (Costs.minus (evaluate amount) change)
+  | (Order_of _ | Finite), _ -> Unknown
 
 let compute_growth compute_change =
   try Costs.at_least_zero (compute_change ()) with Facts.Unsupported _ -> Costs.zero
@@ -109,130 +131,260 @@ let make_may_be_target (context : State.context) frame term ty target =
         | _ -> Logic.Boolean false)
     | None -> Logic.Boolean false
 
-let lambda_captures_target (context : State.context) lambda target =
-  match
-    (List.assoc_opt lambda context.lambda_captures, List.assoc_opt target context.call_targets)
-  with
-  | Some captured, Some local -> List.mem local captured
-  | _ -> false
-
-let make_reach_formula context frame uses (values : State.passed list) (target : Costs.target) =
-  match target with
-  | Through term ->
-      Logic.disjunction
-        (List.map
-           (fun (passed : State.passed) ->
-             if lambda_captures_target context passed.term term then Logic.Boolean true
-             else make_may_be_target context frame passed.term passed.type_ term)
-           values)
-  | Capability path | Capability_method (path, _) ->
-      Logic.Boolean
-        (List.exists
-           (function
-             | Types.Capability used -> Path.equal used path
-             | Types.Capability_parameter _ | Types.Capability_projection _
-             | Types.Capability_variable _ ->
-                 true
-             | Types.Divergence _ -> false
-             | Types.Capability_error _ ->
-                 Facts.raise_bug "the prover reads a capability with an error")
-           uses)
-
 let make_conditional_amount condition amount =
   match condition with
   | Logic.Boolean true -> amount
   | Logic.Boolean false -> Costs.zero
   | condition -> Logic.ite condition amount Costs.zero
 
+let may_use (uses : Types.capability list) capability =
+  List.exists
+    (function
+      | Types.Capability used -> Path.equal used capability
+      | Types.Capability_parameter _ | Types.Capability_projection _ | Types.Capability_variable _
+        ->
+          true
+      | Types.Divergence _ -> false
+      | Types.Capability_error _ -> Facts.raise_bug "the prover reads a capability with an error")
+    uses
+
+let make_is_zero : Costs.amount -> Logic.term = function
+  | Exact amount | Within amount -> Logic.equal amount Costs.zero
+  | Unknown -> Logic.Boolean false
+
+let find_lambda_cost (context : State.context) counter term =
+  List.assoc_opt (term, Costs.make_one_call_counter counter) context.lambda_costs
+
+let rec rely_on_lambda_costs (context : State.context) counter function_term =
+  match function_term with
+  | Logic.Operation ("ite", [ _; chosen; otherwise ]) ->
+      rely_on_lambda_costs context counter chosen;
+      rely_on_lambda_costs context counter otherwise
+  | _ ->
+      Option.iter
+        (fun (cost : State.lambda_cost) ->
+          context.obligations <- List.rev_append cost.showing context.obligations;
+          cost.showing <- [])
+        (find_lambda_cost context counter function_term)
+
+let count_stated_calls (context : State.context) (counter : Costs.counter) callee : Costs.amount =
+  let find_literal_amount (cost : Mir.cost) =
+    if cost.amortized || not (is_same_resource cost ~locals:Locals.empty counter) then None
+    else
+      match cost.bound with
+      | Order_of amount | At_most amount | Exactly amount ->
+          Option.map
+            (fun literal ->
+              compute_promised_amount counter cost
+                ~evaluate:(fun _ -> Logic.Integer literal)
+                ~is_recursive_call:false ~change:Costs.zero)
+            (Contracts.find_integer_literal amount)
+      | Finite -> None
+  in
+  match Contracts.find_function_contract context.lookups callee with
+  | Some contract when not (Facts.is_in_recursion_group context callee) ->
+      Option.value ~default:Costs.Unknown
+        (List.find_map
+           (fun (clauses : State.clauses) -> List.find_map find_literal_amount clauses.costs)
+           (Contracts.list_declared_clauses contract))
+  | Some _ | None -> Unknown
+
+let rec count_calls_in_one_call (context : State.context) frame (counter : Costs.counter)
+    (target : Costs.target) (function_type : Types.function_type) function_term : Costs.amount =
+  match function_term with
+  | Logic.Operation ("ite", [ condition; chosen; otherwise ]) ->
+      Costs.choose condition
+        (count_calls_in_one_call context frame counter target function_type chosen)
+        (count_calls_in_one_call context frame counter target function_type otherwise)
+  | _ -> (
+      match (find_lambda_cost context counter function_term, target, function_term) with
+      | Some cost, _, _ -> cost.in_one_call
+      | None, Through counted, _ ->
+          Exact
+            (make_conditional_amount
+               (make_may_be_target context frame function_term (Types.Function function_type)
+                  counted)
+               (Logic.int 1))
+      | None, (Capability capability | Capability_method (capability, _)), _
+        when not (may_use (function_type.uses :> Types.capability list) capability) ->
+          Exact Costs.zero
+      | None, (Capability _ | Capability_method _), Logic.Symbol (Function_value { callee; _ }) ->
+          count_stated_calls context counter callee
+      | None, (Capability _ | Capability_method _), _ -> Unknown)
+
+let uses_capability_itself (context : State.context) callee capability =
+  match Interface.Impls.read_signature context.lookups.interface callee with
+  | Some (signature : Types.signature) ->
+      let is_granted_by_callbacks (granted : Types.parameter) =
+        let without_granted =
+          Types.make_capability_substitution [ granted ] [ (granted.name, Types.no_capabilities) ]
+        in
+        let names_granted ty = not (Types.equal ty (Types.substitute without_granted ty)) in
+        List.for_all
+          (fun (ty : Types.ty) ->
+            match ty with
+            | Function function_type ->
+                not (names_granted (Function { function_type with uses = Types.no_capabilities }))
+            | ty -> not (names_granted ty))
+          (List.map (fun (parameter : Types.parameter_info) -> parameter.type_) signature.parameters
+          @ List.map snd (Option.to_list signature.receiver))
+      in
+      List.exists
+        (function
+          | Types.Capability used -> Path.equal used capability
+          | Types.Capability_parameter granted -> not (is_granted_by_callbacks granted)
+          | Types.Capability_projection _ | Types.Capability_variable _ -> true
+          | Types.Divergence _ -> false
+          | Types.Capability_error _ ->
+              Facts.raise_bug "the prover reads a capability with an error")
+        (signature.uses :> Types.capability list)
+  | None -> true
+
+let find_first_costs (frames : (State.clauses * State.frame Lazy.t) list) ~amortized_first
+    is_counted =
+  List.find_map
+    (fun ((clauses : State.clauses), frame) ->
+      match List.filter (is_counted clauses) clauses.costs with
+      | [] -> None
+      | costs ->
+          let amortized, plain = List.partition (fun (cost : Mir.cost) -> cost.amortized) costs in
+          Some (Lazy.force frame, if amortized_first then amortized @ plain else plain @ amortized))
+    frames
+
 let compute_callee_amount ?(method_cost : (Metric.t -> Logic.term) option) (context : State.context)
-    after ~path ~clauses:(declared_clauses : State.clauses list)
+    after ~location ~path ~clauses:(declared_clauses : State.clauses list)
     ~(bind_frame : State.clauses -> State.frame) ~uses ~(values : State.passed list) ~change
     (counter : Costs.counter) =
-  let is_recursive_call =
-    counter.counting = Units
-    && List.mem counter context.bounded_counters
-    && Facts.is_in_recursion_group context path
+  let frames = List.map (fun clauses -> (clauses, lazy (bind_frame clauses))) declared_clauses in
+  let find_first_costs =
+    find_first_costs frames ~amortized_first:(Option.is_some change && counter.amortized)
   in
-  let list_matching_costs (clauses : State.clauses) =
-    let frame = bind_frame clauses in
-    List.filter_map
-      (fun (cost : Mir.cost) ->
-        if is_same_resource cost ~locals:frame.locals counter then Some (clauses, frame, cost)
-        else None)
-      clauses.costs
-  in
-  let compute_amount (_, (frame : State.frame), (cost : Mir.cost)) =
-    let exact_target =
-      match (cost.resource, counter.resource) with
-      | Calls (Capability _), Calls (Capability_method _) -> false
-      | _ -> true
-    in
+  let compute_cost_amount (frame : State.frame) (cost : Mir.cost) : Costs.amount =
     match (cost.amortized, change) with
-    | true, None -> Operations.declare_unknown_amount context after counter
+    | true, None -> Unknown
     | _ ->
-        compute_promised_amount context after counter cost.bound
+        compute_promised_amount counter cost
           ~evaluate:(fun amount -> snd (Validity.read_specification context frame amount))
-          ~is_recursive_call ~exact_target
+          ~is_recursive_call:
+            (counter.counting = Units
+            && List.mem counter context.promised_counters
+            && Facts.is_in_recursion_group context path)
           ~change:
             (match (cost.amortized, change) with
             | true, Some compute_change -> compute_change ()
             | _ -> Costs.zero)
   in
-  let find_first_clauses () =
-    let amortized_first = Option.is_some change && counter.amortized in
-    List.find_map
-      (fun clauses ->
-        match list_matching_costs clauses with
-        | [] -> None
-        | costs ->
-            let amortized, plain =
-              List.partition (fun (_, _, (cost : Mir.cost)) -> cost.amortized) costs
-            in
-            Some (if amortized_first then amortized @ plain else plain @ amortized))
-      declared_clauses
+  let find_stated_costs () =
+    find_first_costs (fun clauses cost ->
+        is_same_resource cost ~locals:(Lazy.force (List.assq clauses frames)).locals counter)
+  in
+  let count_calls_through position =
+    Option.map
+      (fun (frame, costs) ->
+        let promised = List.map (compute_cost_amount frame) costs in
+        let is_exact = function Costs.Exact _ -> true | Within _ | Unknown -> false
+        and is_bounded = function Costs.Within _ -> true | Exact _ | Unknown -> false in
+        match (List.find_opt is_exact promised, List.find_opt is_bounded promised) with
+        | Some tightest, _ | None, Some tightest -> tightest
+        | None, None -> Unknown)
+      (find_first_costs (fun clauses cost ->
+           match (cost.resource, List.nth_opt clauses.parameters position) with
+           | Calls (Function_parameter counted), Some parameter -> counted = parameter.local
+           | _ -> false))
+  in
+  let count_calls_through_callback target (passed : State.passed) function_type =
+    let in_one_call =
+      count_calls_in_one_call context after counter target function_type passed.term
+    in
+    if in_one_call = Exact Costs.zero then Costs.zero
+    else
+      let through = count_calls_through passed.position in
+      let parameter =
+        match List.nth_opt (List.hd declared_clauses).parameters passed.position with
+        | Some parameter -> Facts.read_parameter_name parameter
+        | None -> Facts.raise_bug "an argument of `%s` with no parameter" (Path.show path)
+      in
+      match Costs.multiply (Option.value through ~default:Unknown) in_one_call with
+      | Unknown ->
+          let unbounded =
+            make_conditional_amount
+              (Logic.not_ (make_is_zero in_one_call))
+              (Operations.declare_unknown_amount context after counter)
+          in
+          if Option.is_none through && List.mem counter context.promised_counters then
+            Facts.oblige context after Cost location
+              [
+                Text
+                  (Printf.sprintf
+                     "`%s` states no bound on the calls through `%s`, so the %s that this call \
+                      makes through the function passed for it have no bound. Give `%s` a `cost \
+                      calls(%s)` clause."
+                     (Path.show path) parameter
+                     (Operations.show_counted_calls context target)
+                     (Path.show path) parameter);
+              ]
+              (Logic.equal unbounded Costs.zero);
+          unbounded
+      | (Exact _ | Within _) as product ->
+          rely_on_lambda_costs context counter passed.term;
+          declare_counted_amount context after ~location counter product
+            ~describe_upper_bound:(fun () ->
+              Printf.sprintf
+                "Only an upper bound is known for the %s that this call to `%s` makes through \
+                 `%s`, which may be fewer, so no `==` bound can count them. State the cost with \
+                 `<=`, or %s."
+                (Operations.show_counted_calls context target)
+                (Path.show path) parameter
+                (match through with
+                | Some (Within _) ->
+                    Printf.sprintf "give `%s` an `==` bound on `calls(%s)`" (Path.show path)
+                      parameter
+                | Some (Exact _ | Unknown) | None ->
+                    "pass a function that makes the same number of them in every call"))
+  in
+  let count_calls_through_callbacks target =
+    List.fold_left
+      (fun total (passed : State.passed) ->
+        match passed.type_ with
+        | Types.Function function_type ->
+            Costs.plus total (count_calls_through_callback target passed function_type)
+        | _ -> total)
+      Costs.zero values
+  in
+  let compute_method_amount () =
+    match (method_cost, counter.resource, counter.counting) with
+    | Some compute_cost, Metric Time, Units ->
+        Costs.minus
+          (Costs.plus (compute_cost Time) (Logic.int 1))
+          (match change with
+          | Some compute_change -> compute_growth compute_change
+          | None -> Costs.zero)
+    | Some compute_cost, Metric ((Allocations | Allocated_bytes) as metric), _ ->
+        compute_amount_within context after counter (compute_cost metric)
+    | _ -> Operations.declare_unknown_amount context after counter
   in
   match counter.resource with
-  | Calls target when make_reach_formula context after uses values target = Logic.Boolean false ->
-      Costs.zero
-  | Calls (Through term) -> (
-      let reaches = make_reach_formula context after uses values (Through term) in
-      let receiving =
-        List.filter_map
-          (fun (passed : State.passed) -> if passed.term = term then Some passed.position else None)
-          values
-      in
-      let captured =
-        List.exists
-          (fun (passed : State.passed) -> lambda_captures_target context passed.term term)
-          values
-      in
-      match find_first_clauses () with
-      | Some clauses
-        when (not captured) && List.length clauses >= List.length receiving && receiving <> [] ->
-          List.fold_left
-            (fun total clause -> Costs.plus total (compute_amount clause))
-            Costs.zero clauses
-      | _ ->
-          make_conditional_amount reaches (Operations.declare_unknown_amount context after counter))
-  | _ -> (
-      let compute_method_amount () =
-        match (method_cost, counter.resource, counter.counting) with
-        | Some compute_cost, Metric Time, Units ->
-            Costs.minus
-              (Costs.plus (compute_cost Time) (Logic.int 1))
-              (match change with
-              | Some compute_change -> compute_growth compute_change
-              | None -> Costs.zero)
-        | Some compute_cost, Metric ((Allocations | Allocated_bytes) as metric), _ ->
-            compute_amount_within context after counter (compute_cost metric)
-        | _ -> Operations.declare_unknown_amount context after counter
-      in
-      match (find_first_clauses (), counter.resource, counter.counting) with
-      | Some ((_, _, { bound = Finite; _ }) :: _), Metric Time, Units
-        when Option.is_some method_cost ->
+  | Calls (Through _ as target) -> count_calls_through_callbacks target
+  | Calls ((Capability capability | Capability_method (capability, _)) as target) ->
+      if not (may_use uses capability) then Costs.zero
+      else
+        Costs.plus
+          (match find_stated_costs () with
+          | Some (frame, cost :: _) ->
+              declare_amount context after counter (compute_cost_amount frame cost)
+          | Some (_, []) | None ->
+              if uses_capability_itself context path capability then
+                Operations.declare_unknown_amount context after counter
+              else Costs.zero)
+          (count_calls_through_callbacks target)
+  | Metric _ -> (
+      match (find_stated_costs (), counter.counting) with
+      | Some (_, { bound = Finite; _ } :: _), Units
+        when counter.resource = Metric Time && Option.is_some method_cost ->
           compute_method_amount ()
-      | Some (clause :: _), _, _ -> compute_amount clause
-      | (Some [] | None), _, _ -> compute_method_amount ())
+      | Some (frame, cost :: _), _ ->
+          declare_amount context after counter (compute_cost_amount frame cost)
+      | (Some (_, []) | None), _ -> compute_method_amount ())
 
 let find_generic_argument context frame (operation : Intrinsic.operation) type_arguments name =
   let generics = (Intrinsic_signatures.make_signature operation).generics in
@@ -244,8 +396,8 @@ let find_generic_argument context frame (operation : Intrinsic.operation) type_a
       | _ -> None)
     (List.combine generics type_arguments)
 
-let compute_step_amount context frame (invocation : Invocation.t) (values : State.passed list)
-    (counter : Costs.counter) =
+let compute_step_amount context frame ~location (invocation : Invocation.t)
+    (values : State.passed list) (counter : Costs.counter) =
   match invocation.callee with
   | Intrinsic { operation; type_arguments } -> (
       let cost = Intrinsic_signatures.classify_cost operation in
@@ -309,7 +461,7 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
                        values)
                   ~substitution:Types.no_substitution
               in
-              compute_callee_amount context frame
+              compute_callee_amount context frame ~location
                 ~path:(Path.make_capability_method capability name)
                 ~clauses:[ capability_clauses ]
                 ~bind_frame:(fun _ -> inside)
@@ -318,13 +470,25 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
           | None -> Operations.declare_unknown_amount context frame counter))
   | Function _ | Trait_method _ | Indirect () -> (
       match counter.resource with
-      | Calls target ->
+      | Calls (Through _ as target) ->
           make_conditional_amount
-            (make_reach_formula context frame
-               (invocation.uses :> Types.capability list)
-               values target)
+            (Logic.disjunction
+               (List.map
+                  (fun (passed : State.passed) ->
+                    match passed.type_ with
+                    | Types.Function function_type ->
+                        Logic.not_
+                          (make_is_zero
+                             (count_calls_in_one_call context frame counter target function_type
+                                passed.term))
+                    | _ -> Logic.Boolean false)
+                  values))
             (Operations.declare_unknown_amount context frame counter)
-      | Metric _ -> Operations.declare_unknown_amount context frame counter)
+      | Calls (Capability capability | Capability_method (capability, _))
+        when not (may_use (invocation.uses :> Types.capability list) capability) ->
+          Costs.zero
+      | Calls (Capability _ | Capability_method _) | Metric _ ->
+          Operations.declare_unknown_amount context frame counter)
 
 let declare_held_symbol context ty term =
   let symbol = Logic.Symbol.Potential ty in

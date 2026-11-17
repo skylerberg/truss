@@ -1,0 +1,6 @@
+fn draw(value: Option[Int64]) -> Option[UInt64]
+  uses Random
+  cost calls(Random.next) == 1
+{
+  value.map(fn(_) { Random.next() })
+}

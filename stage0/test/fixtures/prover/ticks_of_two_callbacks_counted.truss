@@ -1,0 +1,23 @@
+fn through_the_first(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == items.length()
+{
+  first_then_second(items, first: fn(_) { Meter.tick() }, second: fn() { Meter.tock() })
+}
+
+fn through_the_second(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == 1
+{
+  first_then_second(items, first: fn(_) { Meter.tock() }, second: fn() { Meter.tick() })
+}
+
+fn through_both(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == items.length() + 2
+{
+  first_then_second(items, first: fn(_) { Meter.tick() }, second: fn() {
+    Meter.tick()
+    Meter.tick()
+  })
+}

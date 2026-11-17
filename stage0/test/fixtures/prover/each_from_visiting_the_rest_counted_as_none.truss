@@ -1,0 +1,10 @@
+fn each_from(items: List[Int64], start: UInt64, visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
+  requires start <= items.length()
+  cost calls(visit) == 0
+{
+  if start < items.length() {
+    visit(items[start])
+    each_from(items, start: start + 1, visit)
+  }
+}

@@ -7,6 +7,7 @@ type counter = { resource : resource; counting : counting; amortized : bool }
 
 val least_amount : resource -> Logic.term
 val make_operand_counter : Metric.t -> counter
+val make_one_call_counter : counter -> counter
 val list_stated_bounds : Types.cost list -> Metric.t -> Types.cost_bound list
 val find_stated_operand : Types.cost list -> Metric.t -> Logic.term option
 val bound : Logic.term -> Logic.term
@@ -14,6 +15,11 @@ val plus : Logic.term -> Logic.term -> Logic.term
 val minus : Logic.term -> Logic.term -> Logic.term
 val times : Logic.term -> Logic.term -> Logic.term
 val at_most : Logic.term -> Logic.term -> Logic.term
+
+type amount = Exact of Logic.term | Within of Logic.term | Unknown
+
+val multiply : amount -> amount -> amount
+val choose : Logic.term -> amount -> amount -> amount
 val at_least_zero : Logic.term -> Logic.term
 val larger : Logic.term -> Logic.term -> Logic.term
 val units : Logic.term -> Logic.term

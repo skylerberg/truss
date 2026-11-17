@@ -1,0 +1,10 @@
+fn f(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == items.length()
+{
+  each(items, visit: fn(item) {
+    if item > 0 {
+      Meter.tick()
+    }
+  })
+}

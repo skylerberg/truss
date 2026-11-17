@@ -1,0 +1,6 @@
+fn f(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) <= items.length()
+{
+  each_unstated(items, visit: fn(_) { Meter.tick() })
+}

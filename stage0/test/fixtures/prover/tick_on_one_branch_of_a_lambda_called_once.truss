@@ -1,0 +1,11 @@
+fn f(flag: Bool)
+  uses Meter
+  cost calls(Meter.tick) == 1
+{
+  let ticking: (fn(Bool) uses Meter) = fn(ticks) {
+    if ticks {
+      Meter.tick()
+    }
+  }
+  ticking(flag)
+}

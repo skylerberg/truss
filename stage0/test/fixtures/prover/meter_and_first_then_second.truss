@@ -1,0 +1,20 @@
+capability Meter {
+  fn tick()
+  fn tock()
+}
+
+fn first_then_second(
+  items: List[Int64],
+  first: (fn(Int64) uses generic First),
+  second: (fn() uses generic Second),
+)
+  uses generic First, generic Second
+  cost calls(first) == items.length()
+  cost calls(second) == 1
+{
+  for item in items {
+    first(item)
+  }
+  second()
+}
+

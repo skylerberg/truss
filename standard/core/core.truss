@@ -286,6 +286,7 @@ public trait Iterable {
     combine: (fn(own Total, Self.Element) -> Total uses generic Granted),
   ) -> Total
     uses generic Granted
+    cost calls(combine) == self.count()
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(combine)))
     cost allocations <= allocations(Self.count) + self.count() * (allocations(Self.element) + allocations(combine))
   {
@@ -298,6 +299,7 @@ public trait Iterable {
 
   fn map[Output](self, transform: (fn(Self.Element) -> Output uses generic Granted)) -> List[Output]
     uses generic Granted
+    cost calls(transform) == self.count()
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
     var outputs: List[Output] = List.with_capacity(self.count())
@@ -312,6 +314,7 @@ public trait Iterable {
     transform: (fn(Self.Element) -> Option[Output] uses generic Granted),
   ) -> List[Output]
     uses generic Granted
+    cost calls(transform) == self.count()
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
     var outputs: List[Output] = []
@@ -329,6 +332,7 @@ public trait Iterable {
     transform: (fn(Self.Element) -> List[Output] uses generic Granted),
   ) -> List[Output]
     uses generic Granted
+    cost calls(transform) == self.count()
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)) + result.length())
   {
     var results: List[Output] = []
@@ -342,6 +346,7 @@ public trait Iterable {
 
   fn count_where(self, predicate: (fn(Self.Element) -> Bool uses generic Granted)) -> UInt64
     uses generic Granted
+    cost calls(predicate) == self.count()
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(predicate)))
   {
     var count: UInt64 = 0
@@ -355,6 +360,7 @@ public trait Iterable {
 
   fn find(self, predicate: (fn(Self.Element) -> Bool uses generic Granted)) lends Option[Self.Element]
     uses generic Granted
+    cost calls(predicate) <= self.count()
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(predicate)))
     cost allocations <= allocations(Self.count) + self.count() * (allocations(Self.element) + allocations(predicate))
   {

@@ -1,0 +1,6 @@
+fn f(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == items.length()
+{
+  first_then_second(items, first: fn(_) { Meter.tock() }, second: fn() { Meter.tick() })
+}

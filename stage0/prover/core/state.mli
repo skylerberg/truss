@@ -103,6 +103,7 @@ type passed = {
 }
 
 type lambda_code = { code : Mir.body; lambdas : Mir.body array }
+type lambda_cost = { in_one_call : Costs.amount; mutable showing : obligation list }
 
 type call_argument =
   | Value_argument of passed
@@ -154,12 +155,11 @@ type context = {
   home : Resolve.Names.key;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   mutable counters : Costs.counter list;
-  mutable bounded_counters : Costs.counter list;
+  mutable promised_counters : Costs.counter list;
   fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
-  mutable lambda_costs : ((Logic.term * Metric.t) * (Logic.term * obligation list)) list;
-  mutable lambda_captures : (Logic.term * Core.local list) list;
+  mutable lambda_costs : ((Logic.term * Costs.counter) * lambda_cost) list;
   lambda_definitions : Logic.term Tables.Symbol_table.t;
   mutable potentials : Logic.term list;
   models : (Logic.term -> Logic.term) option Tables.Model_table.t;

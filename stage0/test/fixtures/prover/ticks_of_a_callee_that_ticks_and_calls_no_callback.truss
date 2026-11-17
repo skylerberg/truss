@@ -1,0 +1,16 @@
+fn tick_without_visiting(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+  uses generic Granted, Meter
+  cost calls(Meter.tick) == 1
+  cost calls(visit) == 0
+{
+  let _ = items
+  let _ = visit
+  Meter.tick()
+}
+
+fn f(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == 1
+{
+  tick_without_visiting(items, visit: fn(_) { Meter.tick() })
+}

@@ -48,6 +48,7 @@ public fn Option[Value].unwrap_or_else(
   make: (fn() -> Value uses generic Granted),
 ) -> Value
   uses generic Granted
+  cost calls(make) <= 1
   cost time O(time(make))
   cost allocations <= allocations(make)
   cost allocated_bytes <= allocated_bytes(make)
@@ -63,6 +64,7 @@ public fn Option[Value].map[Output](
   transform: (fn(own Value) -> Output uses generic Granted),
 ) -> Option[Output]
   uses generic Granted
+  cost calls(transform) <= 1
   cost time O(time(transform))
   cost allocations <= allocations(transform)
   cost allocated_bytes <= allocated_bytes(transform)
@@ -78,6 +80,7 @@ public fn Option[Value].map[Output](
   transform: (fn(Value) -> Output uses generic Granted),
 ) -> Option[Output]
   uses generic Granted
+  cost calls(transform) <= 1
   cost time O(time(transform))
   cost allocations <= allocations(transform)
   cost allocated_bytes <= allocated_bytes(transform)
@@ -93,6 +96,7 @@ public fn Option[Value].and_then[Output](
   next: (fn(own Value) -> Option[Output] uses generic Granted),
 ) -> Option[Output]
   uses generic Granted
+  cost calls(next) <= 1
   cost time O(time(next))
   cost allocations <= allocations(next)
   cost allocated_bytes <= allocated_bytes(next)
@@ -108,6 +112,7 @@ public fn Option[Value].and_then[Output](
   next: (fn(Value) -> Option[Output] uses generic Granted),
 ) -> Option[Output]
   uses generic Granted
+  cost calls(next) <= 1
   cost time O(time(next))
   cost allocations <= allocations(next)
   cost allocated_bytes <= allocated_bytes(next)
@@ -120,6 +125,7 @@ public fn Option[Value].and_then[Output](
 
 public fn Option[Value].filter(own self, keep: (fn(Value) -> Bool uses generic Granted)) -> Option[Value]
   uses generic Granted
+  cost calls(keep) <= 1
   cost time O(time(keep))
   cost allocations <= allocations(keep)
   cost allocated_bytes <= allocated_bytes(keep)
@@ -144,6 +150,7 @@ public fn Option[Value].or_else(
   make: (fn() -> Option[Value] uses generic Granted),
 ) -> Option[Value]
   uses generic Granted
+  cost calls(make) <= 1
   cost time O(time(make))
   cost allocations <= allocations(make)
   cost allocated_bytes <= allocated_bytes(make)
@@ -177,6 +184,7 @@ public fn Option[Value].ok_or_else[Error](
   make: (fn() -> Error uses generic Granted),
 ) -> Result[Value, Error]
   uses generic Granted
+  cost calls(make) <= 1
   cost time O(time(make))
   cost allocations <= allocations(make)
   cost allocated_bytes <= allocated_bytes(make)

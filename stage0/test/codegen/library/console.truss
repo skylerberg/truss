@@ -30,6 +30,24 @@ test "a captured console gives its lines in order and keeps its printed output" 
   assert same(captured.errors(), expected: "oops\n")
 }
 
+fn print_lines(lines: List[String]) -> UInt64
+  uses Console
+  cost calls(Console.print_line) == lines.length()
+{
+  lines.count_where(fn(line) {
+    Console.print_line(line)
+    line.length() > 0
+  })
+}
+
+test "a function that prints in a callback of `count_where` prints once for each element" {
+  var captured = console::CapturedConsole.new([])
+  provide mut captured {
+    assert print_lines(["first", "", "third"]) == 2
+  }
+  assert same(captured.output(), expected: "first\n\nthird\n")
+}
+
 test "a style wraps text in the codes that set it and the code that resets it" {
   assert console::Style().apply("plain") == "plain"
   assert console::Style(bold: true).apply("x") == "\u{1b}[0;1mx\u{1b}[0m"

@@ -1,0 +1,42 @@
+fn draw(value: Option[Int64]) -> Option[UInt64]
+  uses Random
+  cost calls(Random.next) <= 1
+{
+  value.map(fn(_) { Random.next() })
+}
+
+fn recover(value: Result[UInt64, Bool]) -> UInt64
+  uses Random
+  cost calls(Random.next) <= 1
+{
+  value.unwrap_or_else(fn(_) { Random.next() })
+}
+
+fn draw_each(items: List[Int64]) -> List[UInt64]
+  uses Random
+  cost calls(Random.next) == items.length()
+{
+  items.map(fn(_) { Random.next() })
+}
+
+fn mix(items: List[UInt64]) -> UInt64
+  uses Random
+  cost calls(Random.next) == items.length()
+{
+  let seed: UInt64 = 0
+  items.fold(seed, combine: fn(sum, item) { sum.wrapping_add(item).wrapping_add(Random.next()) })
+}
+
+fn count_draws(items: Slice[Int64]) -> UInt64
+  uses Random
+  cost calls(Random.next) == 2 * items.length()
+{
+  items.count_where(fn(_) { Random.next() > Random.next() })
+}
+
+fn redraw(items: mut Slice[UInt64])
+  uses Random
+  cost calls(Random.next) == items.length()
+{
+  mut items.update_each(fn(item) { item = Random.next() })
+}

@@ -1,0 +1,6 @@
+fn f(items: List[Int64], visit: (fn(Int64) uses Meter))
+  uses Meter
+  cost calls(Meter.tick) <= items.length()
+{
+  each(items, visit)
+}

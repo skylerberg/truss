@@ -1,0 +1,9 @@
+fn f(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == 2 * items.length() + 1
+{
+  let ticking: (fn(Int64) uses Meter) = fn(_) { Meter.tick() }
+  each(items, visit: ticking)
+  each(items, visit: ticking)
+  ticking(0)
+}

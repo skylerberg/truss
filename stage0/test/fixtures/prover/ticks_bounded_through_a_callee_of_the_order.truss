@@ -1,0 +1,15 @@
+fn each_of_the_order(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
+  cost calls(visit) O(items.length())
+{
+  for item in items {
+    visit(item)
+  }
+}
+
+fn f(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) <= 3 * items.length()
+{
+  each_of_the_order(items, visit: fn(_) { Meter.tick() })
+}

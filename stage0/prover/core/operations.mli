@@ -6,6 +6,7 @@ val convert_from_integer :
 
 val spend : State.context -> State.frame -> (Costs.counter -> Logic.term) -> State.frame
 val declare_unknown_amount : State.context -> State.frame -> Costs.counter -> Logic.term
+val show_counted_calls : State.context -> Costs.target -> string
 val convert_to_any : State.context -> State.frame -> Invocation.site -> State.frame * Logic.term
 val compute_current_bounds : State.context -> Interface.Impls.bounds
 

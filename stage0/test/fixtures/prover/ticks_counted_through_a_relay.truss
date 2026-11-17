@@ -1,0 +1,13 @@
+fn relay(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
+  cost calls(visit) == items.length()
+{
+  each(items, visit)
+}
+
+fn f(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == items.length()
+{
+  relay(items, visit: fn(_) { Meter.tick() })
+}

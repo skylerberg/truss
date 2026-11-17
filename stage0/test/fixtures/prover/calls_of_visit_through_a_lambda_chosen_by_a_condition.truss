@@ -1,0 +1,19 @@
+fn run(work: (fn() -> Int64 cost time finite))
+  cost calls(work) == 1
+{
+  let _ = work()
+}
+
+fn f(flag: Bool, visit: (fn(Int64) cost time finite))
+  cost calls(visit) == 0
+{
+  let chosen: (fn() -> Int64 cost time finite) = if flag {
+    fn() {
+      visit(1)
+      1
+    }
+  } else {
+    fn() { 2 }
+  }
+  run(chosen)
+}

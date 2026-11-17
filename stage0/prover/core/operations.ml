@@ -93,6 +93,17 @@ let declare_unknown_amount context frame (counter : Costs.counter) =
     (Logic.Operation ("<=", [ Costs.least_amount counter.resource; amount ]));
   amount
 
+let show_counted_calls context (target : Costs.target) =
+  match target with
+  | Through term -> (
+      match Facts.show_truss_value context term with
+      | Some parameter -> Printf.sprintf "calls through `%s`" parameter
+      | None -> "calls through the function value")
+  | Capability capability ->
+      Printf.sprintf "calls of `%s`" (Types.show_capability (Capability capability))
+  | Capability_method (capability, method_) ->
+      Printf.sprintf "calls of `%s.%s`" (Types.show_capability (Capability capability)) method_
+
 let convert_to_any context frame (site : Invocation.site) =
   let frame =
     spend context frame (fun (counter : Costs.counter) ->

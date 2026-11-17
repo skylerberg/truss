@@ -712,7 +712,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     Operations.spend context after (fun counter ->
         match (invocation.callee, counter.resource) with
         | Capability_method _, Calls _ ->
-            Amounts.compute_step_amount context after invocation values counter
+            Amounts.compute_step_amount context after ~location invocation values counter
         | _ ->
             let method_cost =
               if Laws.has_method_cost context invocation.callee path then
@@ -720,7 +720,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                   (fun metric -> Amounts.compute_method_cost context frame metric invocation.callee)
               else None
             in
-            Amounts.compute_callee_amount ?method_cost context after ~path
+            Amounts.compute_callee_amount ?method_cost context after ~location ~path
               ~clauses:(Contracts.list_declared_clauses contract)
               ~bind_frame:(fun clauses ->
                 {
@@ -758,62 +758,48 @@ let make_callback_cost (context : State.context) frame (metric : Metric.t) (ty :
                (fun (signature : Types.signature) ->
                  Costs.find_stated_operand signature.costs metric))
       | _ -> ());
-      (match List.assoc_opt (term, metric) context.lambda_costs with
-      | Some (bound, showing) ->
-          context.lambda_costs <- List.remove_assoc (term, metric) context.lambda_costs;
+      let lambda_cost_key = (term, Costs.make_operand_counter metric) in
+      (match List.assoc_opt lambda_cost_key context.lambda_costs with
+      | Some { in_one_call; showing } -> (
+          context.lambda_costs <- List.remove_assoc lambda_cost_key context.lambda_costs;
           context.obligations <- List.rev_append showing context.obligations;
-          state_value bound
+          match in_one_call with Exact bound | Within bound -> state_value bound | Unknown -> ())
       | None -> ());
       cost
 
 let compute_function_value_amount context frame ~location (function_type : Types.function_type)
     callee_term (counter : Costs.counter) =
-  let compute_call_amount metric =
-    let make_cost () =
-      make_callback_cost context frame metric (Types.Function function_type) callee_term
-    in
-    match (Costs.list_stated_bounds function_type.costs metric, counter.counting) with
-    | Order_of :: _, Units -> Logic.int 1
-    | Exactly_cost (Some amount) :: _, (At_most | Exactly) -> Logic.Integer amount
-    | _, (Units | At_most) -> Amounts.compute_amount_within context frame counter (make_cost ())
-    | _, Exactly ->
-        let cost = make_cost () in
-        if cost <> Costs.zero then
-          Facts.oblige context frame Cost location
-            [
-              Text
-                (Printf.sprintf
-                   "Only an upper bound is known for the `%s` of this call, which may spend less, \
-                    so no `==` bound can count it. State the cost with `<=`, or give the type of \
-                    the function called an `==` bound."
-                   (Metric.show metric));
-            ]
-            (Logic.equal cost Costs.zero);
-        cost
-  in
   match counter.resource with
-  | Metric metric -> compute_call_amount metric
-  | Calls (Through term) ->
-      if Amounts.lambda_captures_target context callee_term term then
-        Operations.declare_unknown_amount context frame counter
-      else
-        Amounts.make_conditional_amount
-          (Amounts.make_may_be_target context frame callee_term (Types.Function function_type) term)
-          (Logic.int 1)
-  | Calls (Capability path | Capability_method (path, _)) ->
-      if
-        List.exists
-          (function
-            | Types.Capability used -> Path.equal used path
-            | Types.Capability_parameter _ | Types.Capability_projection _
-            | Types.Capability_variable _ ->
-                true
-            | Types.Divergence _ -> false
-            | Types.Capability_error _ ->
-                Facts.raise_bug "the prover reads a capability with an error")
-          (function_type.uses :> Types.capability list)
-      then Operations.declare_unknown_amount context frame counter
-      else Costs.zero
+  | Metric metric -> (
+      let make_cost () =
+        make_callback_cost context frame metric (Types.Function function_type) callee_term
+      in
+      match (Costs.list_stated_bounds function_type.costs metric, counter.counting) with
+      | Order_of :: _, Units -> Logic.int 1
+      | Exactly_cost (Some amount) :: _, (At_most | Exactly) -> Logic.Integer amount
+      | _, Units -> make_cost ()
+      | _, (At_most | Exactly) ->
+          Amounts.declare_counted_amount context frame ~location counter
+            (Within (make_cost ()))
+            ~describe_upper_bound:(fun () ->
+              Printf.sprintf
+                "Only an upper bound is known for the `%s` of this call, which may spend less, so \
+                 no `==` bound can count it. State the cost with `<=`, or give the type of the \
+                 function called an `==` bound."
+                (Metric.show metric)))
+  | Calls target ->
+      let in_one_call =
+        Amounts.count_calls_in_one_call context frame counter target function_type callee_term
+      in
+      if in_one_call <> Exact Costs.zero then
+        Amounts.rely_on_lambda_costs context counter callee_term;
+      Amounts.declare_counted_amount context frame ~location counter in_one_call
+        ~describe_upper_bound:(fun () ->
+          Printf.sprintf
+            "Only an upper bound is known for the %s in this call, which may make fewer, so no \
+             `==` bound can count them. State the cost with `<=`, or call a function that makes \
+             the same number of them in every call."
+            (Operations.show_counted_calls context target))
 
 let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site)
     (invocation : Invocation.t) ~through (values : State.passed list) =
@@ -918,7 +904,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         let frame = havoc_mut frame in
         let frame =
           Operations.spend context frame
-            (Amounts.compute_step_amount context frame invocation values)
+            (Amounts.compute_step_amount context frame ~location invocation values)
         in
         Some (frame, Facts.arrive context frame "result" result_type)
   in
@@ -1068,6 +1054,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           result_type
       in
       let frame =
-        Operations.spend context frame (Amounts.compute_step_amount context frame invocation values)
+        Operations.spend context frame
+          (Amounts.compute_step_amount context frame ~location invocation values)
       in
       Some (frame, result)

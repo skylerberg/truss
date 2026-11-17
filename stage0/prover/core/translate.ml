@@ -40,12 +40,11 @@ let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures ~inh
       yield_ensures = None;
       callbacks = [];
       counters = [];
-      bounded_counters = [];
+      promised_counters = [];
       fresh_order = Tables.Symbol_table.create 64;
       logs = [];
       powers = [];
       lambda_costs = [];
-      lambda_captures = [];
       lambda_definitions = Tables.Symbol_table.create 8;
       potentials = [];
       models = Tables.Model_table.create 16;
@@ -125,8 +124,8 @@ let list_promises context (source : State.source) locals (costs : Mir.cost list)
               | Calls (Function_parameter local), Calls (Through term) ->
                   context.call_targets <- (term, local) :: context.call_targets
               | _ -> ());
-              if counter.counting = Units && not (List.mem counter context.bounded_counters) then
-                context.bounded_counters <- counter :: context.bounded_counters;
+              if not (List.mem counter context.promised_counters) then
+                context.promised_counters <- counter :: context.promised_counters;
               Some { counter; clause = cost; written_in = source; inherited }))
     costs
 

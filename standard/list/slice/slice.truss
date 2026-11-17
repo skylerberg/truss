@@ -162,6 +162,7 @@ public fn Slice[Element].find_index(self, predicate: (fn(Element) -> Bool cost t
       && (forall i in 0..index => !predicate(self.model()[i]))
     None => forall i in 0..self.length() => !predicate(self.model()[i])
   }
+  cost calls(predicate) <= self.length()
   cost time O(self.length() * time(predicate))
   cost allocations <= self.length() * allocations(predicate)
 {
@@ -170,6 +171,7 @@ public fn Slice[Element].find_index(self, predicate: (fn(Element) -> Bool cost t
     invariant index <= self.length()
     invariant forall i in 0..index => !predicate(self.model()[i])
     decreases self.length() - index
+    cost calls(predicate) <= index
     cost time O(index * time(predicate))
   {
     if predicate(self[index]) {

@@ -1,0 +1,7 @@
+fn relay(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
+  cost calls(visit) == items.length()
+{
+  each(items, visit)
+  each(items, visit)
+}

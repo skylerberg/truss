@@ -1,0 +1,34 @@
+capability Meter {
+  fn tick()
+  fn tock()
+}
+
+fn each(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
+  cost calls(visit) == items.length()
+{
+  for item in items {
+    visit(item)
+  }
+}
+
+fn each_until_negative(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
+  cost calls(visit) <= items.length()
+{
+  for item in items {
+    if item < 0 {
+      return
+    }
+    visit(item)
+  }
+}
+
+fn each_unstated(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
+{
+  for item in items {
+    visit(item)
+  }
+}
+

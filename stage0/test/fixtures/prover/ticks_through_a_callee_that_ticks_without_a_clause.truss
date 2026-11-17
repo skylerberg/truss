@@ -1,0 +1,16 @@
+fn each_ticking(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+  uses generic Granted, Meter
+  cost calls(visit) == items.length()
+{
+  for item in items {
+    visit(item)
+    Meter.tick()
+  }
+}
+
+fn f(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == items.length()
+{
+  each_ticking(items, visit: fn(_) { Meter.tick() })
+}

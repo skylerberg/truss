@@ -1,0 +1,27 @@
+fn twice(items: List[Int64], visit: (fn(Int64) uses generic Mine))
+  uses generic Mine
+  cost calls(visit) == 2 * items.length()
+{
+  each(items, visit: fn(item) {
+    visit(item)
+    visit(item)
+  })
+}
+
+fn at_most_once(items: List[Int64], visit: (fn(Int64) uses generic Mine))
+  uses generic Mine
+  cost calls(visit) <= items.length()
+{
+  each(items, visit: fn(item) {
+    if item > 0 {
+      visit(item)
+    }
+  })
+}
+
+fn relayed(items: List[Int64], visit: (fn(Int64) uses generic Mine))
+  uses generic Mine
+  cost calls(visit) == items.length()
+{
+  each(items, visit)
+}
