@@ -1,0 +1,13 @@
+fn f(pair: Array[Int64, 2], name: String, pairs: List[Array[Int64, 2]]) -> UInt64 {
+  let copied = pair
+  let viewed = name
+  var count: UInt64 = 0
+  for each in pairs {
+    count += 1
+  }
+  match pair {
+    matched => {}
+  }
+  let firsts = pairs.map(fn(given) { given[0] })
+  count + viewed.length() + firsts.length()
+}
