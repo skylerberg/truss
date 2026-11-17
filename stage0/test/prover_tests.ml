@@ -1135,6 +1135,55 @@ let () =
   Harness.test "a loop of pushed copies is amortized over the copies' time" (fun () ->
       expect_proven Fixtures.Prover.append_copies)
 
+let () =
+  Harness.test
+    "a loop that pushes a callback's values of a type parameter costs the callback's time"
+    (fun () -> expect_proven Fixtures.Prover.loop_pushing_values_of_a_type_parameter);
+  Harness.test "a loop that moves a cursor's values of a type parameter into a list is linear"
+    (fun () -> expect_proven Fixtures.Prover.loop_moving_values_of_a_type_parameter);
+  Harness.test "a loop that pushes lists of unknown length is linear in its iterations" (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_lists_of_unknown_length);
+  Harness.test "a loop that pushes a callback's values spends the callback's time in each iteration"
+    (fun () ->
+      expect_only_code
+        Fixtures.Prover.loop_pushing_values_of_a_type_parameter_with_a_small_cost_clause
+        "prover.cost");
+  Harness.test "a function that pushes a callback's values in a loop spends the loop's cost"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.loop_pushing_values_of_a_type_parameter_within_a_small_bound
+        "prover.cost");
+  Harness.test "a push onto a list that a callback returned spends the list's potential" (fun () ->
+      expect_not_proven Fixtures.Prover.loop_pushing_onto_a_list_that_a_callback_returns
+        "prover.cost");
+  Harness.test "a loop that pushes the values of a callback's options costs the callback's time"
+    (fun () -> expect_proven Fixtures.Prover.loop_pushing_the_values_of_a_callbacks_options);
+  Harness.test "a loop that appends a callback's lists costs their lengths and the callback's time"
+    (fun () -> expect_proven Fixtures.Prover.loop_appending_lists_that_a_callback_returns);
+  Harness.test "a loop that appends a callback's lists spends their lengths" (fun () ->
+      expect_not_proven
+        Fixtures.Prover.loop_appending_lists_that_a_callback_returns_without_their_lengths
+        "prover.cost");
+  Harness.test "nested loops that push lists of unknown length cost their iterations" (fun () ->
+      expect_proven Fixtures.Prover.nested_loops_pushing_lists_of_unknown_length);
+  Harness.test "an amortized bound pays for the potential of the values a loop pushes" (fun () ->
+      expect_not_proven Fixtures.Prover.amortized_loop_pushing_values_of_a_type_parameter
+        "prover.cost");
+  Harness.test "an amortized bound covers the potential of the lists a loop pushes" (fun () ->
+      expect_proven Fixtures.Prover.amortized_loop_pushing_lists_of_known_length);
+  Harness.test
+    "a loop without a cost clause that pushes a callback's values costs the callback's time"
+    (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_values_of_a_type_parameter_without_a_cost_clause);
+  Harness.test "a loop without a cost clause that moves a cursor's values into a list is linear"
+    (fun () ->
+      expect_proven Fixtures.Prover.loop_moving_values_of_a_type_parameter_without_a_cost_clause);
+  Harness.test
+    "a loop without a cost clause that pushes onto a list a callback returned spends its potential"
+    (fun () ->
+      expect_not_proven
+        Fixtures.Prover.loop_pushing_onto_a_list_that_a_callback_returns_without_a_cost_clause
+        "prover.cost")
+
 let check_across library program =
   let packages =
     Support.setup

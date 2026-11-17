@@ -293,15 +293,11 @@ public trait Iterable {
     uses Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
-    let count = self.count()
-    var outputs: intrinsic::Storage[Output] = intrinsic::storage_with_capacity(count)
-    for item in self
-      invariant intrinsic::storage_length(outputs) == visited.length()
-      invariant intrinsic::storage_capacity(outputs) == count
-    {
-      intrinsic::storage_push(mut outputs, value: transform(item))
+    var outputs: List[Output] = []
+    for item in self {
+      mut outputs.push(transform(item))
     }
-    List.from_storage(own outputs)
+    outputs
   }
 
   fn filter_map[Output, capability Granted](
@@ -311,32 +307,28 @@ public trait Iterable {
     uses Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
-    let count = self.count()
-    var outputs: intrinsic::Storage[Output] = intrinsic::storage_with_capacity(count)
-    for item in self
-      invariant intrinsic::storage_length(outputs) <= visited.length()
-      invariant intrinsic::storage_capacity(outputs) == count
-    {
+    var outputs: List[Output] = []
+    for item in self {
       match transform(item) {
-        Some(output) => intrinsic::storage_push(mut outputs, value: own output)
+        Some(output) => mut outputs.push(own output)
         None => {}
       }
     }
-    List.from_storage(own outputs)
+    outputs
   }
 
-  fn flat_map[Output](
+  fn flat_map[Output, capability Granted](
     self,
-    transform: (fn(Self.Element) -> List[Output] cost time finite),
+    transform: (fn(Self.Element) -> List[Output] uses Granted),
   ) -> List[Output]
-    cost time finite
+    uses Granted
+    cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)) + result.length())
   {
     var results: List[Output] = []
-    for item in self {
-      var outputs = transform(item)
-      for output in own outputs {
-        mut results.push(own output)
-      }
+    for item in self
+      cost time O(visited.length() * (time(Self.element) + time(transform)) + results.length())
+    {
+      mut results.append(transform(item))
     }
     results
   }

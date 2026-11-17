@@ -1,0 +1,18 @@
+fn f[Output, capability Granted](
+  source: List[Int64],
+  transform: (fn(Int64) -> Option[Output] uses Granted),
+) -> List[Output]
+  uses Granted
+  cost time O(source.length() * time(transform))
+{
+  var results: List[Output] = []
+  for index in 0..source.length()
+    cost time O(index * time(transform))
+  {
+    match transform(source[index]) {
+      Some(output) => mut results.push(own output)
+      None => {}
+    }
+  }
+  results
+}

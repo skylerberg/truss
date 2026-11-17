@@ -1,6 +1,10 @@
 type loop_rule =
   | Clause_bound of Mir.cost
-  | Per_iteration of { per : Logic.term; per_held : (Logic.term * Logic.term) option }
+  | Per_iteration of {
+      per : Logic.term;
+      per_held : (Logic.term * Logic.term) option;
+      per_held_without_elements : Logic.term option;
+    }
 
 type loop_cost = {
   counter : Costs.counter;
@@ -8,8 +12,10 @@ type loop_cost = {
   rule : loop_rule;
   held : (State.frame -> Logic.term) option;
   held_on_entry : Logic.term option;
+  measure_elements_gained : State.frame -> Logic.term;
   gained_at_head : Logic.term option;
   mutable counts_potential : bool;
+  mutable counts_elements : bool;
 }
 
 type received = {
@@ -58,7 +64,8 @@ type for_loop = {
   bind_parts : State.frame -> State.frame;
 }
 
-let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause list) ~held =
+let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause list) ~held
+    ~measure_held_elements =
   List.map
     (fun (counter : Costs.counter) ->
       let entry =
@@ -79,15 +86,22 @@ let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause lis
         match written with
         | Some cost -> Clause_bound cost
         | None ->
-            Per_iteration
-              {
-                per = Facts.declare_fresh context frame "per" Logic.Int;
-                per_held =
-                  Option.map
-                    (fun measure_held ->
-                      (Facts.declare_fresh context frame "per" Logic.Int, measure_held frame))
-                    held;
-              }
+            let per_held =
+              Option.map
+                (fun measure_held ->
+                  (Facts.declare_fresh context frame "per" Logic.Int, measure_held frame))
+                held
+            in
+            let per = Facts.declare_fresh context frame "per" Logic.Int in
+            let per_held_without_elements =
+              match held with
+              | Some _
+                when (not counter.amortized) && counter.counting <> Exactly
+                     && measure_held_elements frame <> Costs.zero ->
+                  Some (Facts.declare_fresh context frame "per" Logic.Int)
+              | _ -> None
+            in
+            Per_iteration { per; per_held; per_held_without_elements }
       in
       {
         counter;
@@ -95,12 +109,16 @@ let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause lis
         rule;
         held;
         held_on_entry = Option.map (fun measure_held -> measure_held frame) held;
+        measure_elements_gained =
+          (fun (at : State.frame) ->
+            Costs.minus (measure_held_elements at) (measure_held_elements frame));
         gained_at_head =
           (match (rule, held) with
           | Clause_bound _, Some _ when counter.counting <> Exactly ->
               Some (Facts.declare_fresh context frame "gained" Logic.Int)
           | _ -> None);
         counts_potential = false;
+        counts_elements = true;
       })
     context.counters
 
@@ -117,11 +135,16 @@ let loop_clause_holds context (at : State.frame) (counter : Costs.counter) (cost
   | Exactly -> Logic.equal since amount
   | At_most -> Costs.at_most since amount
 
-let compute_potential_gained (cost : loop_cost) (at : State.frame) =
+let measure_gained (cost : loop_cost) ~counts_elements (at : State.frame) =
   match (cost.held, cost.held_on_entry) with
-  | Some measure_held, Some on_entry when cost.counts_potential ->
-      Costs.minus (measure_held at) on_entry
+  | Some measure_held, Some on_entry ->
+      let gained = Costs.minus (measure_held at) on_entry in
+      if counts_elements then gained else Costs.minus gained (cost.measure_elements_gained at)
   | _ -> Costs.zero
+
+let compute_potential_gained (cost : loop_cost) (at : State.frame) =
+  if cost.counts_potential then measure_gained cost ~counts_elements:cost.counts_elements at
+  else Costs.zero
 
 let lookup_spent (frame : State.frame) key =
   match List.assoc_opt key frame.spent with Some spent_term -> spent_term | None -> Costs.zero
@@ -150,18 +173,25 @@ let enter_loop_head context head costs ~iterations =
                ~since:
                  (Costs.plus (Costs.minus at_head cost.entry)
                     (Option.value cost.gained_at_head ~default:Costs.zero)))
-      | Per_iteration { per; per_held } -> (
+      | Per_iteration { per; per_held; per_held_without_elements } ->
           Facts.assume context head
             (make_count_bound ~counter:cost.counter ~at:at_head
                ~bound:(Costs.plus cost.entry (Costs.times iterations per)));
-          match (per_held, cost.held) with
+          (match (per_held, cost.held) with
           | Some (per_held, on_entry), Some measure_held ->
               Facts.assume context head
                 (make_count_bound ~counter:cost.counter
                    ~at:(Costs.plus at_head (measure_held head))
                    ~bound:
                      (Costs.plus (Costs.plus cost.entry on_entry) (Costs.times iterations per_held)))
-          | _ -> ()))
+          | _ -> ());
+          Option.iter
+            (fun per_held_without_elements ->
+              Facts.assume context head
+                (make_count_bound ~counter:cost.counter
+                   ~at:(Costs.plus at_head (measure_gained cost ~counts_elements:false head))
+                   ~bound:(Costs.plus cost.entry (Costs.times iterations per_held_without_elements))))
+            per_held_without_elements)
     costs;
   head
 
@@ -187,18 +217,32 @@ let check_loop_entry context frame costs =
 
 let check_loop_iterations context loop_at (head : State.frame) costs ~mark ~facts ~ends ~breaks =
   let location = Facts.locate context head.source loop_at in
+  let frames = ends @ breaks in
   List.iter
     (fun cost ->
+      let measure_spent (frame : State.frame) =
+        Costs.since ~start:(lookup_spent head cost.counter) (lookup_spent frame cost.counter)
+      in
+      let measure_spent_and_gained measure_held =
+        let held_at_head = measure_held head in
+        fun (frame : State.frame) ->
+          Costs.normalize
+            (Costs.plus (measure_spent frame) (Costs.minus (measure_held frame) held_at_head))
+      in
       match cost.rule with
       | Clause_bound written_cost ->
           cost.counts_potential <-
             Option.is_some cost.gained_at_head
-            && List.exists
-                 (fun (frame : State.frame) ->
-                   Facts.mentions_potential
-                     (Costs.since ~start:(lookup_spent head cost.counter)
-                        (lookup_spent frame cost.counter)))
-                 (ends @ breaks);
+            && List.exists (fun frame -> Facts.mentions_potential (measure_spent frame)) frames;
+          cost.counts_elements <-
+            (match cost.held with
+            | Some measure_held when cost.counts_potential && not cost.counter.amortized ->
+                not
+                  (List.exists
+                     (fun frame ->
+                       Facts.mentions_potential (measure_spent_and_gained measure_held frame))
+                     frames)
+            | _ -> true);
           Option.iter
             (fun gained ->
               Facts.add_frame_fact context head
@@ -220,39 +264,49 @@ let check_loop_iterations context loop_at (head : State.frame) costs ~mark ~fact
                         (compute_potential_gained cost frame))))
             (List.map (fun exit_frame -> (exit_frame, "after an iteration")) ends
             @ List.map (fun exit_frame -> (exit_frame, "where the loop is left")) breaks)
-      | Per_iteration { per; per_held } -> (
-          let frames = ends @ breaks in
-          let measure_plain_spent (frame : State.frame) =
-            Costs.since ~start:(lookup_spent head cost.counter) (lookup_spent frame cost.counter)
+      | Per_iteration { per; per_held; per_held_without_elements } -> (
+          let spends_potential =
+            List.exists (fun frame -> Facts.mentions_potential (measure_spent frame)) frames
           in
           let held_rule =
             match (per_held, cost.held) with
-            | Some (per_held, _), Some measure_held
-              when List.exists
-                     (fun exit_frame -> Facts.mentions_potential (measure_plain_spent exit_frame))
-                     frames ->
+            | Some (per_held, _), Some measure_held when spends_potential ->
+                let measure_iteration = measure_spent_and_gained measure_held in
+                [ (per_held, measure_iteration, measure_iteration) ]
+            | _ -> []
+          in
+          let held_without_elements_rule =
+            match per_held_without_elements with
+            | Some per_held_without_elements when spends_potential ->
+                let gained_before = measure_gained cost ~counts_elements:false head in
                 [
-                  ( per_held,
-                    fun (frame : State.frame) ->
+                  ( per_held_without_elements,
+                    (fun (frame : State.frame) ->
                       Costs.normalize
-                        (Costs.plus (measure_plain_spent frame)
-                           (Costs.minus (measure_held frame) (measure_held head))) );
+                        (Costs.plus (measure_spent frame)
+                           (Costs.minus
+                              (measure_gained cost ~counts_elements:false frame)
+                              gained_before))),
+                    fun (frame : State.frame) ->
+                      Costs.normalize (Facts.take_potential_as_zero (measure_spent frame)) );
                 ]
             | _ -> []
           in
           let facts = facts @ List.map (fun (frame : State.frame) -> frame.condition) frames in
-          let find_bounded (per, measure_spent) =
-            let spent = List.map measure_spent frames in
+          let find_bounded (per, measure_iteration, measure_candidate) =
             let most =
-              match spent with
+              match List.map measure_candidate frames with
               | [] -> Costs.zero
               | first :: rest -> List.fold_left Costs.larger first rest
             in
             Option.map
-              (fun bound -> (per, spent, bound))
+              (fun bound -> (per, List.map measure_iteration frames, bound))
               (Costs.find_cost_bound ~varies:(Facts.mentions_fresh_after context mark) ~facts most)
           in
-          match List.find_map find_bounded (held_rule @ [ (per, measure_plain_spent) ]) with
+          match
+            List.find_map find_bounded
+              (held_rule @ [ (per, measure_spent, measure_spent) ] @ held_without_elements_rule)
+          with
           | Some (per, spent, bound) ->
               Facts.add_frame_fact context head (Logic.equal per bound);
               List.iter2
@@ -302,7 +356,7 @@ let exit_loop context (exit_ : State.frame) costs ~iterations ~most =
             in
             ( cost.counter,
               Costs.minus (Costs.plus cost.entry counted) (compute_potential_gained cost exit_) )
-        | Per_iteration { per; per_held } ->
+        | Per_iteration { per; per_held; per_held_without_elements } ->
             let assume_bounded ~at ~start per =
               if cost.counter.counting <> Exactly then
                 List.iter
@@ -326,6 +380,11 @@ let exit_loop context (exit_ : State.frame) costs ~iterations ~most =
                   ~at:(Costs.plus at (measure_held exit_))
                   ~start:(Costs.plus cost.entry on_entry) per_held
             | _ -> ());
+            Option.iter
+              (assume_bounded
+                 ~at:(Costs.plus at (measure_gained cost ~counts_elements:false exit_))
+                 ~start:cost.entry)
+              per_held_without_elements;
             (cost.counter, at))
       costs
   in
@@ -341,20 +400,22 @@ let compute_held_potential context (frame : State.frame) (changed : State.change
     | true, Some ty -> [ (`Self, ty) ]
     | _ -> []
   in
-  if not (List.exists (fun (_, ty) -> Amounts.has_potential context ty) typed) then None
-  else
-    Some
-      (fun (frame : State.frame) ->
-        List.fold_left
-          (fun total (place, ty) ->
-            match (place, frame.self) with
-            | `Local id, _ -> (
-                match Locals.find_opt id frame.locals with
-                | Some term -> Costs.plus total (Amounts.compute_potential context frame ty term)
-                | None -> total)
-            | `Self, Some self -> Costs.plus total (Amounts.compute_potential context frame ty self)
-            | `Self, None -> total)
-          Costs.zero typed)
+  let sum_held measure (frame : State.frame) =
+    List.fold_left
+      (fun total (place, ty) ->
+        match (place, frame.self) with
+        | `Local id, _ -> (
+            match Locals.find_opt id frame.locals with
+            | Some term -> Costs.plus total (measure frame ty term)
+            | None -> total)
+        | `Self, Some self -> Costs.plus total (measure frame ty self)
+        | `Self, None -> total)
+      Costs.zero typed
+  in
+  ( (if List.exists (fun (_, ty) -> Amounts.has_potential context ty) typed then
+       Some (sum_held (fun frame ty term -> Amounts.compute_potential context frame ty term))
+     else None),
+    sum_held (fun _ ty term -> Amounts.compute_elements_potential context ty term) )
 
 let havoc context frame (changed : State.changed) =
   let frame =
@@ -464,9 +525,8 @@ let find_measures (clauses : Mir.loop_clause list) =
 
 let enter_loop ?holds context frame ~entry clauses ~changed =
   let holds = Option.value holds ~default:changed in
-  let costs =
-    list_loop_costs context frame clauses ~held:(compute_held_potential context frame holds)
-  in
+  let held, measure_held_elements = compute_held_potential context frame holds in
+  let costs = list_loop_costs context frame clauses ~held ~measure_held_elements in
   check_loop_entry context entry costs;
   let fresh_mark = context.fresh and facts_mark = List.length context.facts in
   let preserved = list_validity_obligations context frame changed in

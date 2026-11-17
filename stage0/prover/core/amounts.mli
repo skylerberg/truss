@@ -34,6 +34,8 @@ val has_potential : State.context -> ?seen:Types.ty list -> Types.ty -> bool
 val compute_potential :
   State.context -> State.frame -> ?seen:Types.ty list -> Types.ty -> Logic.term -> Logic.term
 
+val compute_elements_potential : State.context -> Types.ty -> Logic.term -> Logic.term
+
 val declare_trait_method_time :
   State.context ->
   State.frame ->

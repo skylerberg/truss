@@ -1,0 +1,15 @@
+fn f[capability Granted](
+  source: List[Int64],
+  produce: (fn(Int64) -> List[Int64] uses Granted),
+) -> List[List[Int64]]
+  uses Granted
+  cost time O(source.length() * time(produce))
+{
+  var rows: List[List[Int64]] = []
+  for item in source {
+    var row = produce(item)
+    mut row.push(1)
+    mut rows.push(own row)
+  }
+  rows
+}

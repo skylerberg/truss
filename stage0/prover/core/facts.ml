@@ -527,13 +527,25 @@ let substitute_type (context : State.context) (frame : State.frame) ty =
 let find_local_type context frame local =
   Option.map (substitute_type context frame) (Locals.find_opt local frame.types)
 
+let is_potential = function
+  | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _)
+  | Logic.Apply (_, [ _; Logic.Symbol (Logic.Symbol.Potential_measure _) ]) ->
+      true
+  | _ -> false
+
 let mentions_potential term =
-  let rec walk = function
-    | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _) -> true
+  let rec walk term =
+    is_potential term
+    ||
+    match term with
     | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> walk body
     | term -> List.exists walk (Logic.list_arguments term)
   in
   walk term
+
+let rec take_potential_as_zero term =
+  if is_potential term then Logic.Integer Z.zero
+  else Logic.map_arguments take_potential_as_zero term
 
 let restrict (frame : State.frame) condition =
   { frame with State.condition = Logic.( &&& ) frame.condition condition }
