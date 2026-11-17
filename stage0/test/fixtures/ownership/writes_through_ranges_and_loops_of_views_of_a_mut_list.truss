@@ -1,0 +1,18 @@
+fn f(items: mut List[String]) {
+  var view = items[..]
+  mut view[..].reverse()
+  mut view[..][0].push("x")
+  for item in mut view[..] {
+    mut item.push("y")
+  }
+  for item in mut view {
+    item = "z"
+  }
+}
+
+fn g(view: mut Slice[String]) {
+  mut view[..].reverse()
+  for item in mut view {
+    mut item.push("x")
+  }
+}
