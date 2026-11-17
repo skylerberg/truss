@@ -53,22 +53,16 @@ let () =
   test "-C before the command is read as an option of the command" (fun () ->
       expect_strings
         ~expected:[ "truss"; "test"; "-C"; "dir"; "--rerun" ]
-        (Cli.Arguments.prepare [ "truss"; "-C"; "dir"; "test"; "--rerun" ]));
+        (Cli.Arguments.move_leading_options [ "truss"; "-C"; "dir"; "test"; "--rerun" ]));
   test "--no-server before the command is read as an option of the command" (fun () ->
       expect_strings
         ~expected:[ "truss"; "check"; "--no-server"; "-C"; "dir"; "--fix" ]
-        (Cli.Arguments.prepare [ "truss"; "--no-server"; "-C"; "dir"; "check"; "--fix" ]));
-  test "the first argument of run that is not one of its options starts the program's" (fun () ->
-      expect_strings
-        ~expected:[ "truss"; "run"; "--release"; "--"; "input.txt"; "-v" ]
-        (Cli.Arguments.prepare [ "truss"; "run"; "--release"; "input.txt"; "-v" ]));
-  test "a -- after run is kept as written" (fun () ->
-      expect_strings ~expected:[ "truss"; "run"; "--"; "-x" ]
-        (Cli.Arguments.prepare [ "truss"; "run"; "--"; "-x" ]));
-  test "--no-server after run is an option of run, not the program's" (fun () ->
-      expect_strings
-        ~expected:[ "truss"; "run"; "--no-server"; "--release"; "--"; "input.txt" ]
-        (Cli.Arguments.prepare [ "truss"; "run"; "--no-server"; "--release"; "input.txt" ]))
+        (Cli.Arguments.move_leading_options
+           [ "truss"; "--no-server"; "-C"; "dir"; "check"; "--fix" ]));
+  test "an option before -- is an option of run, not the program's" (fun () ->
+      let status, output = run_truss [ "run"; "input.txt"; "-v" ] in
+      if status <> 2 || not (String.includes ~affix:"-v" output) then
+        fail "exited with %d: %s" status output)
 
 let () =
   test "a file written in a watched directory is reported after a synchronization" (fun () ->

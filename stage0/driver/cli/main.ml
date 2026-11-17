@@ -1,6 +1,6 @@
 type command =
   | In_client of (unit -> Outcome.t)
-  | In_project of { directory : string; uses_server : bool; run : unit -> Outcome.t }
+  | In_project of { directory : string; has_no_server_flag : bool; run : unit -> Outcome.t }
 
 let directory_option =
   let make_absolute directory =
@@ -21,32 +21,40 @@ let json_flag =
           "Write one JSON document to standard output instead of the report for people, with every \
            diagnostic and the command's own fields.")
 
+let no_server_flag =
+  Cmdliner.Arg.(
+    value & flag
+    & info [ "no-server" ]
+        ~doc:"Run the command in this process, and not in the project's background process.")
+
 let no_server_variable = "TRUSS_NO_SERVER"
 
-let uses_server =
-  Cmdliner.Term.(
-    const (fun has_no_server_flag ->
-        (not has_no_server_flag) && Sys.getenv_opt no_server_variable <> Some "1")
-    $ Cmdliner.Arg.(
-        value & flag
-        & info [ "no-server" ]
-            ~doc:"Run the command in this process, and not in the project's background process."))
-
-let with_options directory json run () =
-  Sys.chdir directory;
-  Output.set_json json;
-  run ()
+let uses_server ~has_no_server_flag =
+  (not has_no_server_flag) && Sys.getenv_opt no_server_variable <> Some "1"
 
 let make_client_term run =
   Cmdliner.Term.(
-    const (fun directory json run -> In_client (with_options directory json run))
-    $ directory_option $ json_flag $ run)
+    const (fun directory run ->
+        In_client
+          (fun () ->
+            Sys.chdir directory;
+            run ()))
+    $ directory_option $ run)
 
 let make_project_term run =
   Cmdliner.Term.(
-    const (fun directory json uses_server run ->
-        In_project { directory; uses_server; run = with_options directory json run })
-    $ directory_option $ json_flag $ uses_server $ run)
+    const (fun directory json has_no_server_flag run ->
+        In_project
+          {
+            directory;
+            has_no_server_flag;
+            run =
+              (fun () ->
+                Sys.chdir directory;
+                Output.set_json json;
+                run ());
+          })
+    $ directory_option $ json_flag $ no_server_flag $ run)
 
 let make_paths_argument items =
   Cmdliner.Arg.(
@@ -130,8 +138,8 @@ let run =
       [
         `S Cmdliner.Manpage.s_description;
         `P
-          "The first argument that is not an option starts the program's arguments, and $(b,--) \
-           marks the start when the first one begins with $(b,-).";
+          "Every argument after $(b,--) is the program's, as in $(b,truss run -- input.txt -v). \
+           Before $(b,--), an argument that begins with $(b,-) is an option of $(b,truss run).";
       ]
     (make_project_term
        Cmdliner.Term.(
@@ -500,12 +508,12 @@ let status =
                            exit_status)
                      0 keys))))
 
-let run_language_server ~uses_server =
+let run_language_server ~has_no_server_flag =
   let check ~root encoding buffers =
     let request = make_request ~directory:root (Check_buffers { root; encoding; buffers }) in
     let response =
       match Workspace.find_project_root root with
-      | Some project_root when uses_server ->
+      | Some project_root when uses_server ~has_no_server_flag ->
           Workspace.call ~key:project_root ~report_progress:ignore request
       | Some _ | None ->
           let response =
@@ -522,8 +530,9 @@ let lsp =
   make_command "lsp"
     ~doc:"Answer an editor's Language Server Protocol requests on standard input and output."
     Cmdliner.Term.(
-      const (fun uses_server -> In_client (fun () -> run_language_server ~uses_server))
-      $ uses_server)
+      const (fun has_no_server_flag ->
+          In_client (fun () -> run_language_server ~has_no_server_flag))
+      $ no_server_flag)
 
 let version =
   Printf.sprintf "stage0 (Truss %s, code generation %d, Unicode %s)" Manifest.truss_version
@@ -625,7 +634,7 @@ let finish (outcome : Outcome.t) =
         (fun () -> Process.run_attached program arguments)
 
 let run_client argv =
-  let arguments = List.tl (Arguments.prepare argv) in
+  let arguments = List.tl (Arguments.move_leading_options argv) in
   let run_here run =
     let outcome = execute ~doing:(describe_command_line arguments) run in
     Workspace.flush ();
@@ -635,9 +644,9 @@ let run_client argv =
     (match parse_command_line arguments with
     | Error status -> Outcome.Exit status
     | Ok (In_client run) -> run_here run
-    | Ok (In_project { directory; uses_server; run }) -> (
+    | Ok (In_project { directory; has_no_server_flag; run }) -> (
         match Workspace.find_project_root directory with
-        | Some root when uses_server -> (
+        | Some root when uses_server ~has_no_server_flag -> (
             match
               (Workspace.call ~key:root ~report_progress:Output.eprint
                  (make_request (Command_line arguments))
