@@ -420,87 +420,47 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
 let build_list_literal state ~origin (element : Types.ty) (elements : Core.expression list) :
     Core.kind =
   let make = State.make_synthetic_expression state ~origin in
-  let make_statement kind : Core.statement = { id = State.allocate_node_id state; origin; kind } in
   let storage_type =
     Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
   in
-  let storage = State.allocate_synthetic_local state in
-  let make_intrinsic_call operation type_ arguments =
-    make type_
+  let make_storage operation ~type_arguments arguments =
+    make storage_type
       (Call
          (State.make_call state
-            ~callee:(Intrinsic { operation; type_arguments = [ Types.Type element ] })
+            ~callee:(Intrinsic { operation; type_arguments })
             ~arguments ~lends:None))
   in
-  let capacity = make (Types.make_builtin UInt64) (Integer (Z.of_int (List.length elements))) in
-  let let_storage =
-    make_statement
-      (Let
-         {
-           pattern =
-             {
-               id = State.allocate_node_id state;
-               origin;
-               type_ = storage_type;
-               kind = Bind { local = storage; is_var = true; mode = Own };
-             };
-           value =
-             Operands.build Own
-               (make_intrinsic_call (Buffer Storage_with_capacity) storage_type
-                  [ Operands.build_argument Read capacity ]);
-           else_ = None;
-         })
+  let storage =
+    match elements with
+    | [] ->
+        make_storage (Buffer Storage_with_capacity) ~type_arguments:[ Types.Type element ]
+          [ Operands.build_argument Read (make (Types.make_builtin UInt64) (Integer Z.zero)) ]
+    | _ ->
+        let count = Types.Value (Known (Z.of_int (List.length elements))) in
+        let array =
+          make
+            (Types.Named
+               {
+                 path = Intrinsic.make_builtin_path Array;
+                 arguments = [ Types.Type element; count ];
+               })
+            (Collection_literal { elements; construction = Array })
+        in
+        make_storage (Buffer Storage_from_array) ~type_arguments:[ Types.Type element; count ]
+          [ Operands.build_argument Own array ]
   in
-  let pushes =
-    List.map
-      (fun element ->
-        make_statement
-          (Evaluate
-             (make_intrinsic_call (Buffer Storage_push) Types.unit
-                [
-                  Passed
-                    {
-                      mode = Mut;
-                      value = Place (Local { local = storage; type_ = storage_type; origin });
-                    };
-                  Operands.build_argument Own element;
-                ])))
-      elements
-  in
-  Block
-    {
-      statements = let_storage :: pushes;
-      value =
-        Some
-          (make
-             (Types.make_named (Well_known.make_path List) [ element ])
-             (Call
-                (State.make_call state
-                   ~callee:
-                     (Function
-                        {
-                          path =
-                            Method
-                              {
-                                owner = Well_known.make_path List;
-                                name = "from_storage";
-                                receiver = Static;
-                              };
-                          type_arguments = [ Types.Type element ];
-                        })
-                   ~arguments:
-                     [
-                       Passed
-                         {
-                           mode = Own;
-                           value =
-                             Value
-                               (make storage_type
-                                  (Use (Local { local = storage; type_ = storage_type; origin })));
-                         };
-                     ]
-                   ~lends:None)));
-    }
+  Call
+    (State.make_call state
+       ~callee:
+         (Function
+            {
+              path =
+                Method
+                  { owner = Well_known.make_path List; name = "from_storage"; receiver = Static };
+              type_arguments = [ Types.Type element ];
+            })
+       ~arguments:[ Passed { mode = Own; value = Value storage } ]
+       ~lends:None)
 
 let build_tagged_string state (value : Syntax.expression) (literal : Syntax.string_literal)
     ~(part : Types.ty) : Core.kind =
