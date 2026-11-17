@@ -1,0 +1,8 @@
+fn show(text: String) {}
+
+fn f(names: mut List[String]) {
+  if names[..][0..].get(0) is Some(name) {
+    mut names.clear()
+    show(name)
+  }
+}

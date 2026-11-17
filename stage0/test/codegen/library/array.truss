@@ -91,7 +91,9 @@ test "an array is made of copies of one value, or of a function's result for eac
   assert none[..].length() == 0
 }
 
-fn counted_square(index: UInt64) -> Int64 {
+fn counted_square(index: UInt64) -> Int64
+  cost time finite
+{
   var total = 0
   for _ in 0..index {
     for _ in 0..index {

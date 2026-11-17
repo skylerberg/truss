@@ -1,0 +1,10 @@
+fn show(text: String) {}
+
+fn make() -> List[String] { todo }
+
+fn f(names: mut List[String]) {
+  if make().get(0) is Some(name) {
+    mut names.clear()
+    show(name)
+  }
+}

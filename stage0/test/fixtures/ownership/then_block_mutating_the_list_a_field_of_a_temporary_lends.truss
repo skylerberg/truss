@@ -1,0 +1,10 @@
+type Shelf(names: Slice[String])
+
+fn show(text: String) {}
+
+fn f(names: mut List[String]) {
+  if Shelf(names: names[..]).names.get(0) is Some(name) {
+    mut names.clear()
+    show(name)
+  }
+}

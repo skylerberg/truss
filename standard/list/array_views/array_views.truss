@@ -340,7 +340,7 @@ public fn Array[Element: Copyable, count: UInt64].copy_from(mut self, source: Sl
 
 public fn Array[Element, count: UInt64].update_each[capability Granted](
   mut self,
-  change: (fn(mut Element) uses Granted cost time finite),
+  change: (fn(mut Element) uses Granted),
 )
   uses Granted
   ensures self.length() == old(self.length())
@@ -359,17 +359,19 @@ public fn Array[Element: Ordered, count: UInt64].sort(mut self)
   mut self[..].sort()
 }
 
-public fn Array[Element, count: UInt64].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))
+public fn Array[Element, count: UInt64].sort_by[capability Granted](mut self, compare: (fn(Element, Element) -> Ordering uses Granted))
+  uses Granted
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(compare))
 {
   mut self[..].sort_by(compare)
 }
 
-public fn Array[Element, count: UInt64].min_by(
+public fn Array[Element, count: UInt64].min_by[capability Granted](
   self,
-  compare: (fn(Element, Element) -> Ordering cost time finite),
+  compare: (fn(Element, Element) -> Ordering uses Granted),
 ) lends Option[Element]
+  uses Granted
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
 {
@@ -379,10 +381,11 @@ public fn Array[Element, count: UInt64].min_by(
   }
 }
 
-public fn Array[Element, count: UInt64].max_by(
+public fn Array[Element, count: UInt64].max_by[capability Granted](
   self,
-  compare: (fn(Element, Element) -> Ordering cost time finite),
+  compare: (fn(Element, Element) -> Ordering uses Granted),
 ) lends Option[Element]
+  uses Granted
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
 {
@@ -392,9 +395,10 @@ public fn Array[Element, count: UInt64].max_by(
   }
 }
 
-public fn Array[Element, count: UInt64].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))
+public fn Array[Element, count: UInt64].sort_by_key[Key: Ordered, capability Granted](mut self, key: (fn(Element) -> Key uses Granted))
+  uses Granted
   ensures self.length() == old(self.length())
-  cost time finite
+  cost time O(self.length() * log(self.length()) * (time(key) + time(Key.compare)))
 {
   mut self[..].sort_by_key(key)
 }

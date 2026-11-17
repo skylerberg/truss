@@ -1,0 +1,3 @@
+fn f(name: String) -> UInt64 {
+  name.width()
+}

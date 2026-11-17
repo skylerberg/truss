@@ -248,7 +248,6 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
             };
         arguments = operands;
         omitted_defaults = [];
-        uses = Types.no_capabilities;
         callee_result = result;
       };
   State.defer state (fun () ->
@@ -288,7 +287,6 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
                       };
                   arguments = operands;
                   omitted_defaults = [];
-                  uses = Types.no_capabilities;
                   callee_result = output;
                 }
         | None ->
@@ -326,7 +324,6 @@ and check_built_in_operator state (value : Syntax.expression) (operands : Syntax
               { Tables.expression = operand.id; core_argument_index = index; mode = Read })
             operands;
         omitted_defaults = [];
-        uses = Types.no_capabilities;
         callee_result = result;
       }
 
@@ -433,7 +430,6 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                   { expression = right.id; core_argument_index = 1; mode = Read };
                 ];
               omitted_defaults = [];
-              uses = Types.no_capabilities;
               callee_result = result;
             };
         Name_lookup.resolve_evidence state value left_type

@@ -394,7 +394,6 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                           { expression = key.id; core_argument_index = 1; mode = Read };
                         ];
                       omitted_defaults = [];
-                      uses = Types.no_capabilities;
                       callee_result = output;
                     };
                 Form.register_index state value;

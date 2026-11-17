@@ -1,0 +1,13 @@
+fn demand[capability Granted](
+  value: Int64,
+  change: (fn(Int64) -> Int64 uses Granted cost time finite),
+) -> Int64
+  uses Granted
+  cost time finite
+{
+  change(value)
+}
+
+fn f(value: Int64) -> Int64 {
+  demand(value, change: slow)
+}

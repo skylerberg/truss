@@ -151,7 +151,7 @@ public fn Array[Element, count: UInt64].element(mut self, position: UInt64) lend
 
 public fn Array[Element, count: UInt64].map_each[Output, capability Granted](
   own self,
-  transform: (fn(own Element) -> Output uses Granted cost time finite),
+  transform: (fn(own Element) -> Output uses Granted),
 ) -> Array[Output, count]
   uses Granted
   cost calls(transform) == count
