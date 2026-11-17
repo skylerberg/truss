@@ -1,0 +1,11 @@
+fn f(start: Countdown) -> UInt8
+  uses Meter
+  cost calls(Meter.tick) == 0
+{
+  var left = start
+  var last: UInt8 = 0
+  for value in left {
+    last = value
+  }
+  last
+}

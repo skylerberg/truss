@@ -156,7 +156,7 @@ and loop_mode = Sequential | Parallel_loop | Concurrent_loop
 and iteration =
   | Integer_range of { start : expression; stop : expression; inclusive : bool }
   | Elements of elements
-  | Cursor of { cursor : place; next : callee }
+  | Cursor of { cursor : place; next : callee; uses : Types.capability_set }
 
 and elements = { count : expression; position : pattern; element : place }
 and loop_clause = Invariant of expression | Decreases of expression list | Cost of cost

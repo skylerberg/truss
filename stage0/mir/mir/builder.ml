@@ -1134,8 +1134,8 @@ and lower_statement builder (node : Core.statement) =
               lower_elements_loop builder ~origin ~pattern ~elements
                 ~loop:(fun () -> loop)
                 ~each:(fun bind_part -> each ~bind_part)
-          | Cursor { cursor; next } ->
-              lower_cursor_loop builder ~origin ~pattern ~cursor ~next
+          | Cursor { cursor; next; uses } ->
+              lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~uses
                 ~loop:(fun () -> loop)
                 ~each:(fun bind_part -> each ~bind_part))
       | While { condition = tested; clauses; body; binds_lent_part } ->
@@ -1355,7 +1355,7 @@ and find_lent_place builder part =
       | _ -> None)
     (Emitter.emitted builder)
 
-and lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~loop ~each =
+and lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~uses ~loop ~each =
   match lower_place builder cursor with
   | None -> ()
   | Some place_ ->
@@ -1364,7 +1364,7 @@ and lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~loop ~each =
       Option.iter
         (fun next ->
           lower_for_loop ~cursor_type builder ~origin ~pattern
-            ~iteration:(Pull { cursor; next })
+            ~iteration:(Pull { cursor; next; uses })
             ~loop ~each)
         (lower_callee builder next)
 

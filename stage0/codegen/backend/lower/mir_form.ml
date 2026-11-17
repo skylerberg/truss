@@ -2100,7 +2100,7 @@ and lower_for_each st ~(schedule : Lowering.schedule) ~(iteration : Mir.iteratio
   match iteration with
   | Range { start = low; stop = high; inclusive } ->
       lower_range_loop st ~schedule ~low ~high ~inclusive ~each
-  | Pull { cursor; next } ->
+  | Pull { cursor; next; uses = _ } ->
       let cursor = lower_place st cursor in
       Targets.pull_loop st ~option:(compute_result_type st next)
         ~call_next:(fun destination -> lower_call_with_places st next [ cursor ] ~destination)

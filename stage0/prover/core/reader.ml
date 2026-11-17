@@ -1149,12 +1149,12 @@ and read_statement context frame run (statement : Mir.statement) =
         | Range { start; stop; inclusive } ->
             Loops.Over_range
               { low = translate_operand start; high = translate_operand stop; inclusive }
-        | Pull { cursor; next } ->
+        | Pull { cursor; next; uses } ->
             Over_cursor
               {
                 cursor = make_passed_place context run cursor;
                 cursor_type = compute_place_type context frame run cursor;
-                next = make_unit_callee next;
+                next = { callee = make_unit_callee next; lends = None; uses };
               }
       in
       let for_loop =

@@ -1529,10 +1529,14 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   `visited` proves, of such a cursor, that `next` returns the first value of
   the model and leaves the rest as the model, and that it returns `None`
   only when the model is empty.
-- A loop's `cost` bounds the loop's cost so far, at the start of every
-  iteration and when it ends. It is never `amortized` or `finite`. Its bound
-  can use the variables in scope at the loop, and `visited` or a range's
-  index:
+- A loop's `cost` bounds the loop's cost so far at the start of every
+  iteration and where the loop ends, each time before a `while` loop
+  evaluates its condition or a `for` loop over a cursor calls `next`. It
+  also holds where a `break` leaves the loop, with the iteration that the
+  `break` leaves counted as visited: a range's index is the index after it,
+  and `visited` holds its value. The clause is never `amortized` or
+  `finite`. Its bound can use the variables in scope at the loop, and
+  `visited` or a range's index:
 
   ```truss
   fn sum_all(rows: List[List[Int64]]) -> Int64
@@ -1547,6 +1551,32 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
       }
     }
     total
+  }
+  ```
+
+- **A loop's `cost` does not count the evaluation that ends the loop.** That
+  evaluation comes after the last point where the clause holds, and its cost
+  is added to the clause's bound to give the cost after the loop:
+
+  | Loop | Evaluated once more than the body runs |
+  |---|---|
+  | `while` | The condition, as far as `&&` and `\|\|` evaluate it |
+  | `for` over a cursor | `next`, which returns `None` |
+  | `for` over a range or over a collection's elements | Nothing: `count` is called once, before the loop |
+
+  ```truss
+  fn count_heads(limit: UInt32) -> UInt32
+    uses Random
+    cost calls(Random.next) == result + 1
+  {
+    var heads: UInt32 = 0
+    while Random.next() % 2 == 0 && heads < limit
+      invariant heads <= limit
+      cost calls(Random.next) == heads
+    {
+      heads = heads + 1
+    }
+    heads
   }
   ```
 

@@ -61,7 +61,7 @@ type task = Branch of { block : Core.origin; index : int } | Iteration of { loop
 
 type iteration =
   | Range of { start : operand; stop : operand; inclusive : bool }
-  | Pull of { cursor : place; next : callee }
+  | Pull of { cursor : place; next : callee; uses : Types.capability_set }
 
 type connective = And | Or | Implies
 
