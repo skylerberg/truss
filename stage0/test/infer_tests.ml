@@ -1384,3 +1384,35 @@ let () =
 let () =
   Harness.test "a bit-vector assertion names only integers and booleans" (fun () ->
       expect_one_diagnostic Fixtures.Infer.bit_vector_assertion_naming_a_list "types.not_bit_vector")
+
+let () =
+  let text = Fixtures.Infer.lambda_and_function_value_that_follow_a_ticker in
+  Harness.test "a function type that follows a method of a bound shows no time clause" (fun () ->
+      expect_fine text;
+      expect_type text "fn(source) { mut source.tick() }" "fn(mut Inner) -> UInt64";
+      expect_type text "advance" ~occurrence:2 "fn(mut Inner) -> UInt64");
+  Harness.test "the time of a method that no bound of the type declares is an error" (fun () ->
+      expect_one_diagnostic
+        "trait Ticker {\n\
+        \  fn tick(mut self) -> UInt64\n\
+         }\n\n\
+         fn f[Inner: Ticker](ticker: mut Inner) -> UInt64\n\
+        \  cost time O(time(Inner.tock))\n\
+         {\n\
+        \  mut ticker.tick()\n\
+         }\n"
+        "types.unknown_member"
+        ~says:"`Inner` has no method `tock`: no trait that bounds it declares one.");
+  Harness.test "the time of a method with two overloads that mutate or take `self` is ambiguous"
+    (fun () ->
+      expect_one_diagnostic
+        "trait Opened {\n\
+        \  fn open(mut self) -> UInt64\n\n\
+        \  fn open(own self) -> UInt64\n\
+         }\n\n\
+         fn f[Door: Opened](door: mut Door) -> UInt64\n\
+        \  cost time O(time(Door.open))\n\
+         {\n\
+        \  mut door.open()\n\
+         }\n"
+        "types.ambiguous_method" ~says:"`Door` has more than one method `open`")

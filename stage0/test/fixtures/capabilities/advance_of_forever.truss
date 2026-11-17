@@ -1,0 +1,3 @@
+fn f(ticker: mut Forever) -> UInt64 {
+  advance(mut ticker)
+}

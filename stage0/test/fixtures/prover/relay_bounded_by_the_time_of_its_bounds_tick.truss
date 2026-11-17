@@ -1,0 +1,9 @@
+type Relay[Inner: Ticker](inner: Inner)
+
+impl Ticker for Relay[Inner: Ticker] {
+  fn tick(mut self) -> UInt64
+    cost time O(time(Inner.tick))
+  {
+    mut self.inner.tick()
+  }
+}

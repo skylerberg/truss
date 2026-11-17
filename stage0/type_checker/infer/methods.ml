@@ -106,10 +106,10 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
   | Specification_function function_ -> (
       let bound_method =
         match (function_, arguments) with
-        | Time, [ { value = { kind = Member (base, member); _ }; _ } ] -> (
-            match Instantiation.find_static state base with
-            | Some (Static_type (Types.Parameter _ as type_)) -> Some (type_, member)
-            | _ -> None)
+        | Time, [ { value = { kind = Member (base, member); _ }; _ } ] ->
+            Option.map
+              (fun type_ -> (type_, member))
+              (Interface.Elaborator.find_bounded_type state.context base)
         | _ -> None
       in
       match bound_method with
@@ -162,47 +162,17 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
   | Binding | Module _ -> State.raise_bug "the name `%s` is not resolved" name.text
 
 and check_method_time state (value : Syntax.expression) (type_ : Types.ty) (member : Syntax.name) =
-  let overloads =
-    List.fold_left
-      (fun methods (bound : Types.trait_reference) ->
-        List.fold_left
-          (fun methods (method_ : Types.trait_method) ->
-            if
-              List.exists
-                (fun ((other : Types.trait_reference), (known : Types.trait_method)) ->
-                  Path.equal other.trait bound.trait
-                  && known.method_receiver = method_.method_receiver)
-                methods
-            then methods
-            else methods @ [ (bound, method_) ])
-          methods
-          (Members.list_trait_methods state.lookups bound.trait member.text))
-      []
-      (Interface.Properties.list_known_bounds state.lookups.interface
-         ~list_bounds:(State.lookup_bounds state) type_)
-  in
-  let chosen =
-    match overloads with
-    | [ only ] -> Some only
-    | several -> (
-        match
-          List.filter
-            (fun (_, (method_ : Types.trait_method)) -> method_.method_receiver = Read)
-            several
-        with
-        | [ read_only ] -> Some read_only
-        | _ -> None)
-  in
-  match (chosen, overloads) with
-  | Some (trait, method_), _ ->
+  let overloads = Interface.Elaborator.list_bound_methods state.context type_ member.text in
+  match (Interface.Elaborator.find_timed_method overloads, overloads) with
+  | Some { self_type; trait; name; receiver }, _ ->
       State.register_expression state value (fun () ->
           Method_time
             (Trait_method
                {
                  trait;
-                 name = member.text;
-                 receiver = method_.method_receiver;
-                 self_type = type_;
+                 name;
+                 receiver;
+                 self_type;
                  instantiation = Types.no_instantiation;
                  evidence = Bound;
                }));

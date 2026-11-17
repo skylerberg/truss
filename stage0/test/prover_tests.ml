@@ -2025,3 +2025,22 @@ let () =
     (fun () -> expect_proven (apply ^ Fixtures.Prover.apply_of_a_lambda_looping_without_a_measure));
   Harness.test "an operator on a bound type terminates" (fun () ->
       expect_proven Fixtures.Prover.sum_of_a_bound_type_under_a_time_clause)
+
+let () =
+  let ticker = Fixtures.Prover.ticker_without_a_time_clause in
+  let probe = Fixtures.Prover.probe_trait_without_a_time_clause in
+  Harness.test "a call through a bound of a method without a time clause spends the method's time"
+    (fun () ->
+      expect_proven (ticker ^ Fixtures.Prover.tick_thrice_bounded_by_the_time_of_tick);
+      expect_proven (ticker ^ Fixtures.Prover.relay_bounded_by_the_time_of_its_bounds_tick));
+  Harness.test "a loop of calls through a bound spends the method's time once for each call"
+    (fun () ->
+      expect_proven (probe ^ Fixtures.Prover.probe_each_bounded_by_the_count_times_the_time_of_probe);
+      expect_not_proven
+        (probe ^ Fixtures.Prover.probe_each_bounded_by_the_time_of_one_probe)
+        "prover.cost");
+  Harness.test "a call of a method of an associated type's bound spends the method's time"
+    (fun () ->
+      expect_proven (ticker ^ Fixtures.Prover.movement_ticked_twice_bounded_by_the_time_of_its_tick));
+  Harness.test "the time of a followed method is the time that the type argument's impl states"
+    (fun () -> expect_proven (ticker ^ Fixtures.Prover.tick_twice_of_a_countdown_in_constant_time))

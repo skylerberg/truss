@@ -439,33 +439,46 @@ public trait Cursor {
     None
   }
 
-  fn skip(own self, count: UInt64) -> cursors::Skip[Self] {
+  fn skip(own self, count: UInt64) -> cursors::Skip[Self]
+    cost time O(1)
+  {
     cursors::Skip(source: own self, left: count)
   }
 
-  fn take(own self, count: UInt64) -> cursors::Take[Self] {
+  fn take(own self, count: UInt64) -> cursors::Take[Self]
+    cost time O(1)
+  {
     cursors::Take(source: own self, left: count)
   }
 
   fn step_by(own self, step: UInt64) -> cursors::StepBy[Self]
     requires step > 0
+    cost time O(1)
   {
     cursors::StepBy(source: own self, step: step, started: false)
   }
 
-  fn chain[Other: Cursor[Element = Self.Element]](own self, other: own Other) -> cursors::Chain[Self, Other] {
+  fn chain[Other: Cursor[Element = Self.Element]](own self, other: own Other) -> cursors::Chain[Self, Other]
+    cost time O(1)
+  {
     cursors::Chain(first: own self, second: own other, first_ended: false)
   }
 
-  fn zip[Other: Cursor](own self, other: own Other) -> cursors::Zip[Self, Other] {
+  fn zip[Other: Cursor](own self, other: own Other) -> cursors::Zip[Self, Other]
+    cost time O(1)
+  {
     cursors::Zip(first: own self, second: own other)
   }
 
-  fn enumerate(own self) -> cursors::Enumerate[Self] {
+  fn enumerate(own self) -> cursors::Enumerate[Self]
+    cost time O(1)
+  {
     cursors::Enumerate(source: own self, index: 0)
   }
 
-  fn peekable(own self) -> cursors::Peekable[Self] {
+  fn peekable(own self) -> cursors::Peekable[Self]
+    cost time O(1)
+  {
     cursors::Peekable(source: own self, peeked: None)
   }
 }

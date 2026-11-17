@@ -431,10 +431,26 @@ and finalize_capabilities state capabilities =
           (function
             | Types.Capability_projection { base; trait; name } ->
                 [ Types.Capability_projection { base = finalize_type state base; trait; name } ]
+            | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
+                [
+                  Types.Divergence
+                    (Of_impl_method
+                       {
+                         self_type = finalize_type state self_type;
+                         trait =
+                           {
+                             trait with
+                             trait_arguments =
+                               List.map (finalize_argument state) trait.trait_arguments;
+                           };
+                         name;
+                         receiver;
+                       });
+                ]
             | capability -> [ capability ])
           capabilities))
 
-let finalize_argument state = function
+and finalize_argument state = function
   | Types.Type type_ -> Types.Type (finalize_type state type_)
   | Types.Value value -> (
       match Unify.resolve_value state.unifier value with
@@ -934,9 +950,27 @@ let add_mismatch state (span : Source.Definition_span.t) ~expected ~actual =
   | Types.Function found, Types.Function wanted
     when Types.subtract_capabilities (Types.list_divergence found.uses) wanted.uses
          <> Types.no_capabilities ->
+      let missing =
+        (Types.subtract_capabilities (Types.list_divergence found.uses) wanted.uses
+          :> Types.capability list)
+      in
+      let followed_methods =
+        List.filter_map
+          (function
+            | Types.Divergence (Of_impl_method { self_type; trait; name; _ }) ->
+                Some (Types.show_impl_method self_type trait name)
+            | _ -> None)
+          missing
+      in
       add_mismatch_diagnostic state Mismatch span ~sides
-        (Printf.sprintf "Expected %s, found %s, which may not terminate." (Types.describe expected)
-           (Types.describe actual))
+        (Printf.sprintf "Expected %s, found %s, which %s." (Types.describe expected)
+           (Types.describe actual)
+           (match followed_methods with
+           | [ followed ] when List.compare_length_with missing 1 = 0 ->
+               Printf.sprintf "terminates only if %s does" followed
+           | _ :: _ :: _ when List.compare_lengths followed_methods missing = 0 ->
+               Printf.sprintf "terminates only if %s do" (String.concat " and " followed_methods)
+           | _ -> "may not terminate"))
   | _ ->
       add_mismatch_diagnostic state Mismatch span ~sides
         (Printf.sprintf "Expected %s, found %s." (Types.describe expected) (Types.describe actual))

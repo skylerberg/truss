@@ -107,7 +107,8 @@ let make_contract (lookups : Lookups.t) path ~own ~others =
     | Some (signature : Types.signature) -> (
         List.for_all
           (function
-            | Types.Capability_parameter _ | Types.Divergence (Of_parameter _) -> true
+            | Types.Capability_parameter _ | Types.Divergence (Of_parameter _ | Of_impl_method _) ->
+                true
             | Types.Capability _ | Types.Capability_projection _ | Types.Capability_variable _
             | Types.Capability_error _
             | Types.Divergence (Always | Of_variable _) ->

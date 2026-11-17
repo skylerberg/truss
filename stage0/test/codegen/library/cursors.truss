@@ -147,6 +147,48 @@ test "the adapters and the trait's methods work on a list's cursor" {
   assert text.characters().skip(4).last() == Some(Character"o")
 }
 
+fn sum_after_the_first(items: own List[Int64], count: UInt64) -> Int64
+  cost time finite
+{
+  var cursor = own items.cursor().skip(1).take(count)
+  var total = 0
+  var pulled: UInt64 = 0
+  while pulled < count {
+    pulled += 1
+    match mut cursor.next() {
+      Some(item) => {
+        total = total.saturating_add(item)
+      }
+      None => {}
+    }
+  }
+  total
+}
+
+fn positions_of_the_first_two(items: own List[String]) -> List[UInt64]
+  cost time finite
+{
+  var cursor = own items.cursor().enumerate().take(2)
+  var positions: List[UInt64] = []
+  if mut cursor.next() is Some(first) {
+    mut positions.push(first.index)
+  }
+  if mut cursor.next() is Some(second) {
+    mut positions.push(second.index)
+  }
+  positions
+}
+
+test "a function with a time clause pulls the adapters over a list's cursor" {
+  assert sum_after_the_first([5, 7, 11, 13], count: 2) == 18
+  assert sum_after_the_first([5, 7, 11, 13], count: 9) == 31
+  assert sum_after_the_first([], count: 3) == 0
+  let both: List[UInt64] = [0, 1]
+  assert positions_of_the_first_two(["a", "b", "c"]) == both
+  let one: List[UInt64] = [0]
+  assert positions_of_the_first_two(["a"]) == one
+}
+
 type Typed(most: UInt64)
 
 type LineLengths(most: UInt64, read_count: UInt64)
