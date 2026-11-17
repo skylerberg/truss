@@ -18,12 +18,7 @@ type scope_kind =
   | Lambda_body of Core.origin
   | Restricted of string
 
-type scope = {
-  available : Types.capability_set;
-  kind : scope_kind;
-  termination_demand : string;
-  can_diverge : bool;
-}
+type scope = { available : Types.capability_set; kind : scope_kind; termination_demand : string }
 
 let allows_panic scope = List.mem panic (scope.available :> Types.capability list)
 
@@ -41,7 +36,6 @@ let make_panic_only_scope ~enclosing description =
         (Types.list_divergence enclosing.available);
     kind = Restricted description;
     termination_demand = enclosing.termination_demand;
-    can_diverge = enclosing.can_diverge;
   }
 
 let make_no_capabilities_scope description =
@@ -49,7 +43,6 @@ let make_no_capabilities_scope description =
     available = Types.no_capabilities;
     kind = Restricted description;
     termination_demand = Printf.sprintf "%s calls only functions that terminate" description;
-    can_diverge = false;
   }
 
 let make_quantifier_scope ~enclosing =
@@ -57,7 +50,6 @@ let make_quantifier_scope ~enclosing =
     available = Types.list_divergence enclosing.available;
     kind = Restricted "a quantifier's body";
     termination_demand = enclosing.termination_demand;
-    can_diverge = enclosing.can_diverge;
   }
 
 let check_grant checking (origin : Core.origin) ~subject package (uses : Types.capability_set) =
@@ -123,9 +115,7 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
       let reason, advice = explain_divergence () in
       report checking May_not_terminate origin
         (Printf.sprintf "%s, and %s.%s" reason scope.termination_demand
-           (match (advice, scope.kind) with
-           | Some advice, Function_body _ -> " " ^ advice
-           | Some _, (Lambda_body _ | Restricted _) | None, _ -> ""))
+           (match advice with Some advice -> " " ^ advice | None -> ""))
     end;
     List.iter
       (fun capability ->
@@ -241,7 +231,7 @@ let list_parameter_names (state : State.state) (callee : Core.callee) =
         (Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name ~receiver)
   | Capability_method _ | Intrinsic _ | Indirect _ -> []
 
-let explain_divergence checking (call : Core.call) () =
+let explain_call_divergence checking scope (call : Core.call) () =
   let state = checking.state in
   let may_not_terminate type_ =
     match type_ with
@@ -287,9 +277,12 @@ let explain_divergence checking (call : Core.call) () =
       | Some name, false ->
           ( Printf.sprintf "This call may not terminate, since the function passed for `%s` may not"
               name,
-            Some
-              (Printf.sprintf "A `time` clause follows `%s` where its bound names `time(%s)`." name
-                 name) )
+            match scope.kind with
+            | Function_body _ ->
+                Some
+                  (Printf.sprintf "A `time` clause follows `%s` where its bound names `time(%s)`."
+                     name name)
+            | Lambda_body _ | Restricted _ -> None )
       | None, _ ->
           ( "This call may not terminate, since the type of the function it calls has no `time` \
              clause",
@@ -311,64 +304,26 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
   | Intrinsic { operation; _ } -> require_intrinsic_uses checking scope origin operation
   | Function _ | Trait_method _ | Capability_method _ | Indirect _ -> ()
 
-exception Unmeasured_loop
-
-let has_unmeasured_loop (body : Core.block) =
-  let states_measure =
-    List.exists (function Core.Decreases _ -> true | Core.Invariant _ | Core.Cost _ -> false)
-  in
-  let rec visit_expression (node : Core.expression) =
-    match node.kind with
-    | Lambda _ -> ()
-    | _ -> Core_walk.walk_expression_children (make_visit ()) node
-  and visit_statement (node : Core.statement) =
-    (match node.kind with
-    | While { condition; clauses; _ }
-      when not (states_measure clauses || Core_walk.has_implicit_measure condition) ->
-        raise Unmeasured_loop
-    | For { iteration = Cursor _; clauses; _ } when not (states_measure clauses) ->
-        raise Unmeasured_loop
-    | _ -> ());
-    Core_walk.walk_statement_children (make_visit ()) node
-  and make_visit () : Core_walk.visit =
-    {
-      Core_walk.ignore_all with
-      expression = visit_expression;
-      statement = visit_statement;
-      pattern = (fun node -> Core_walk.walk_pattern_children (make_visit ()) node);
-    }
-  in
-  match Core_walk.walk_block (make_visit ()) body with
-  | () -> false
-  | exception Unmeasured_loop -> true
+let require_divergence_of_unmeasured_loop checking scope (origin : Core.origin)
+    ~explain_missing_measure =
+  require_available checking scope origin
+    ~explain_divergence:(fun () ->
+      ( Printf.sprintf "This loop may not terminate, since %s" (explain_missing_measure ()),
+        Some "Give the loop a `decreases` clause." ))
+    (Types.make_capability_set [ Types.unconditional_divergence ])
 
 let rec check_expression checking scope (node : Core.expression) =
   match node.kind with
   | Lambda { body; _ } ->
-      let uses =
-        match node.type_ with Types.Function { uses; _ } -> uses | _ -> Types.no_capabilities
-      in
-      let follows_its_body =
-        List.exists
-          (function Types.Divergence (Of_variable _) -> true | _ -> false)
-          (uses :> Types.capability list)
-      in
-      let can_diverge = scope.can_diverge && (follows_its_body || not (Types.terminates uses)) in
-      if can_diverge && follows_its_body && has_unmeasured_loop body then
-        checking.state.capability_constraints <-
-          {
-            subset = Types.make_capability_set [ Types.unconditional_divergence ];
-            superset = uses;
-            report_missing = ignore;
-          }
-          :: checking.state.capability_constraints;
       check_block checking
         {
-          available = uses;
+          available =
+            (match node.type_ with
+            | Types.Function { uses; _ } -> uses
+            | _ -> Types.no_capabilities);
           kind = Lambda_body node.origin;
           termination_demand =
             "the function type that this lambda is passed as promises that the lambda terminates";
-          can_diverge;
         }
         body
   | Provide { implementations; body } -> check_provide checking scope implementations body
@@ -381,7 +336,7 @@ let rec check_expression checking scope (node : Core.expression) =
       check_callee_grants checking node.origin call.callee;
       require_available checking scope node.origin
         ~indirect_call:(match call.callee with Indirect _ -> true | _ -> false)
-        ~explain_divergence:(explain_divergence checking call)
+        ~explain_divergence:(explain_call_divergence checking scope call)
         call.uses;
       match call.callee with
       | Intrinsic { operation; _ } -> require_intrinsic_uses checking scope node.origin operation
@@ -436,7 +391,14 @@ and check_statement checking scope (statement : Core.statement) =
           Core_walk.walk_place
             { Core_walk.ignore_all with expression = check_expression checking scope }
             cursor;
-          require_callee_uses checking scope statement.origin next);
+          require_callee_uses checking scope statement.origin next;
+          if not (Core_walk.states_measure clauses) then
+            require_divergence_of_unmeasured_loop checking scope statement.origin
+              ~explain_missing_measure:(fun () ->
+                Printf.sprintf
+                  "`%s` has no `remaining(self) -> UInt64` method to give the loop a measure"
+                  (Types.show
+                     (State.finalize_type checking.state (Core_walk.compute_place_type cursor)))));
       check_children checking scope (`Pattern pattern);
       check_loop_clauses checking clauses;
       check_block checking
@@ -448,6 +410,9 @@ and check_statement checking scope (statement : Core.statement) =
             scope)
         body
   | While { condition; clauses; body; _ } ->
+      if not (Core_walk.states_measure clauses || Core_walk.has_implicit_measure condition) then
+        require_divergence_of_unmeasured_loop checking scope statement.origin
+          ~explain_missing_measure:(fun () -> "it has no measure");
       check_expression checking scope condition;
       check_loop_clauses checking clauses;
       check_block checking scope body
@@ -735,7 +700,6 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
     {
       available;
       termination_demand = "this function has a `time` clause";
-      can_diverge = not (Types.terminates available);
       kind =
         Function_body
           {

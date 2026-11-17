@@ -5,6 +5,13 @@ let check packages =
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
 
+let list_core_expressions text ~of_function =
+  let module_ = Support.parse_module "app::main" in
+  (Support.collect_core_nodes
+     (Support.setup [ ("app::main", text) ])
+     { module_; path = Top { module_; name = of_function }; ordinal = 0 })
+    .expressions
+
 let expect_not_available text ~message =
   match check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main") with
   | [ diagnostic ]
@@ -85,15 +92,6 @@ let () =
   Harness.test "provide makes a capability available in its block" (fun () ->
       expect_fine Fixtures.Capabilities.provide_of_a_fixed_clock);
   Harness.test "provide records each capability's impl with its generic arguments" (fun () ->
-      let text = Fixtures.Capabilities.provide_of_a_generic_fixed_clock in
-      let packages = Support.setup [ ("app::main", text) ] in
-      let key : Resolve.Names.key =
-        {
-          module_ = Support.parse_module "app::main";
-          path = Top { module_ = Support.parse_module "app::main"; name = "f" };
-          ordinal = 0;
-        }
-      in
       match
         List.filter_map
           (fun (node : Core.expression) ->
@@ -104,7 +102,8 @@ let () =
                      (fun (implementation : Core.implementation) -> implementation.provides)
                      implementations)
             | _ -> None)
-          (Support.collect_core_nodes packages key).expressions
+          (list_core_expressions Fixtures.Capabilities.provide_of_a_generic_fixed_clock
+             ~of_function:"f")
       with
       | [ [ [ { capability; impl = Impl _; arguments = [ (_, Type tag) ] } ] ] ]
         when Path.equal capability (Support.make_top_path "standard::capabilities" "Clock")
@@ -631,3 +630,69 @@ let () =
   Harness.test "an impl's time clause follows no callback that its trait's does not" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.visit_impl_naming_the_time_of_its_callback
         "types.impl_uses")
+
+let () =
+  let apply = Fixtures.Capabilities.apply_bounded_by_the_time_of_change in
+  Harness.test "a function with a time clause holds no `while` loop without a measure" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.while_loop_without_a_measure_under_a_time_clause
+        "capabilities.may_not_terminate"
+        ~says:
+          "This loop may not terminate, since it has no measure, and this function has a `time` \
+           clause. Give the loop a `decreases` clause."
+        ~at:("while", 1));
+  Harness.test "a `while` condition that passes an argument mut gives its loop no measure"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.while_loop_taking_a_count_under_a_time_clause
+        "capabilities.may_not_terminate" ~says:"since it has no measure" ~at:("while", 1));
+  Harness.test "a function with a time clause holds no loop over a cursor without a measure"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.countdown_cursor_loop_under_a_time_clause
+        "capabilities.may_not_terminate"
+        ~says:
+          "This loop may not terminate, since `Countdown` has no `remaining(self) -> UInt64` \
+           method to give the loop a measure, and this function has a `time` clause. Give the loop \
+           a `decreases` clause."
+        ~at:("for value", 1));
+  Harness.test "a function without a time clause holds loops without a measure" (fun () ->
+      expect_fine Fixtures.Capabilities.loops_without_a_measure_and_without_a_time_clause);
+  Harness.test "a parallel branch holds a loop without a measure where its function does" (fun () ->
+      expect_fine Fixtures.Capabilities.while_loop_without_a_measure_in_a_parallel_branch;
+      expect_one_diagnostic
+        Fixtures.Capabilities.while_loop_without_a_measure_in_a_parallel_branch_under_a_time_clause
+        "capabilities.may_not_terminate" ~at:("while", 1));
+  Harness.test "a lambda that holds a loop without a measure may not terminate" (fun () ->
+      let text = apply ^ Fixtures.Capabilities.apply_of_a_lambda_looping_without_a_measure in
+      expect_fine text;
+      match
+        List.filter_map
+          (fun (node : Core.expression) ->
+            match (node.kind, node.type_) with
+            | Lambda _, Function { uses; _ } -> Some (Types.terminates uses)
+            | Call { callee = Function { path; _ }; uses; _ }, _
+              when Path.equal path (Support.make_top_path "app::main" "apply") ->
+                Some (Types.terminates uses)
+            | _ -> None)
+          (list_core_expressions text ~of_function:"f")
+      with
+      | [ false; false ] -> ()
+      | _ -> Harness.fail "the lambda or the call that passes it terminates");
+  Harness.test
+    "a call that passes a lambda with a loop without a measure may not terminate under a time \
+     clause" (fun () ->
+      expect_one_diagnostic
+        (apply
+       ^ Fixtures.Capabilities.apply_of_a_lambda_looping_without_a_measure_under_a_time_clause)
+        "capabilities.may_not_terminate"
+        ~says:
+          "This call may not terminate, since the lambda passed for `change` may not, and this \
+           function has a `time` clause."
+        ~at:("apply(value", 1));
+  Harness.test "a lambda whose function type has a time clause holds no loop without a measure"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.lambda_looping_without_a_measure_passed_as_finite
+        "capabilities.may_not_terminate"
+        ~says:
+          "This loop may not terminate, since it has no measure, and the function type that this \
+           lambda is passed as promises that the lambda terminates. Give the loop a `decreases` \
+           clause."
+        ~at:("while", 1))

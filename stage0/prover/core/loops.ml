@@ -650,13 +650,7 @@ let prove_own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   let pulling : Invocation.site = { origin = for_loop.for_at; type_ = option_type } in
   let measures = find_measures clauses in
   if context.terminates && measures = None then
-    Facts.oblige context frame Termination location
-      [
-        Text
-          "This loop may not end: a cursor of a type's own promises no end, so give the loop a \
-           `decreases` clause.";
-      ]
-      (Logic.Boolean false);
+    Facts.raise_bug "a loop over a cursor has no measure in a body that terminates";
   let find_measured (at : State.frame) =
     Option.map
       (List.map (fun measure ->
@@ -913,9 +907,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
   in
   let start_measures = if context.terminates then measure_terms inside else None in
   if context.terminates && start_measures = None then
-    Facts.oblige context inside Termination location
-      [ Text "This loop may not end: give it a `decreases` clause." ]
-      (Logic.Boolean false);
+    Facts.raise_bug "a `while` loop has no measure in a body that terminates";
   let most =
     match (start_measures, measure_terms frame, iterations) with
     | Some [ at_head ], Some [ on_entry ], Some iterations ->

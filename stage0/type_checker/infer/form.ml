@@ -987,7 +987,6 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
                     ~lends:None))
       in
       let next = build_cursor_next state cursor in
-      let states_measure = List.exists (function Core.Decreases _ -> true | _ -> false) clauses in
       let make_cursor_loop ?remaining (place : Core.place) : Core.statement_kind =
         let measure =
           Option.map
@@ -1012,7 +1011,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
             mode;
           }
       in
-      match (pulled.kind, if states_measure then None else remaining) with
+      match (pulled.kind, if Core_walk.states_measure clauses then None else remaining) with
       | Use place, remaining when is_fixed_place place -> make_cursor_loop ?remaining place
       | _, None -> make_cursor_loop (State.make_place pulled)
       | _, Some remaining ->

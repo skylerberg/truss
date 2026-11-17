@@ -768,7 +768,8 @@ terminate.
 | A function type with a `time` clause takes only functions that terminate, even where its `uses` names a capability parameter. | A written clause holds. If the parameter could carry a function that may not terminate into such a type, `cost time finite` there would promise nothing. |
 | A `time` clause follows a function parameter only where its bound names `time(parameter)`. `finite` names none, so it promises termination whatever is passed. | The bound is true as written: it is unbounded exactly where the parameter's time is. A `finite` that followed its callbacks would be a condition that the signature does not show. |
 | No parameter passes on termination alone. A callback that may not terminate is taken through a capability parameter, which also takes its capabilities. | A callee needs a callback without capabilities only to apply it in a contract, and there the callback must terminate too. One mechanism then covers both. |
-| A lambda may not terminate when it calls a function that may not, or holds a loop without a measure. | Its capabilities are inferred from its body, and so is this. A lambda with neither stays in the logic, so a proof can reason about a call that passes it. |
+| A loop without a measure may not terminate, so it stands only where that is allowed, as a call that may not terminate does. | The capability check then covers the loop in every body, as it covers a call. The alternative is an obligation of the prover for each loop in a function with a `time` clause, which states the same fact a second time and leaves a lambda's loop to a rule of its own. |
+| A lambda may not terminate when its body makes a call that may not, or holds a loop without a measure. | Its capabilities are inferred from its body, and so is this. A lambda with neither stays in the logic, so a proof can reason about a call that passes it. |
 
 ### Cost clauses
 
