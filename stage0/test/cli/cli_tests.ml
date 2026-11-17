@@ -1551,12 +1551,13 @@ let () =
       if not (String.includes ~affix:"`acme::units` would hold Clock, which it did not" output) then
         fail "said %s" output)
 
-let publish_from root = run_truss [ "publish"; "-C"; root ]
+let publish_from root ~version = run_truss [ "publish"; version; "-C"; root ]
 
 let make_angles_package text =
   make_directory [ ("truss.toml", make_manifest "acme::angles"); ("degrees/degrees.truss", text) ]
 
 let turn = Fixtures.turn
+let angles = { Path.owner = Some "acme"; name = "angles" }
 
 let list_published registry name =
   List.map
@@ -1567,95 +1568,65 @@ let expect_published registry name expected =
   expect_strings ~expected (list_published registry name)
 
 let expect_refused root part =
-  let status, output = publish_from root in
+  let status, output = publish_from root ~version:"1.0.0" in
   if status <> 1 then fail "status %d: %s" status output;
   if not (String.includes ~affix:part output) then fail "said %s" output
 
+let expect_cannot_publish root ~version part =
+  let status, output = publish_from root ~version in
+  if status <> 2 then fail "status %d: %s" status output;
+  if not (String.includes ~affix:part output) then fail "said %s" output
+
 let () =
-  test "a package's first version is 1.0.0, and holds its files" (fun () ->
+  test "a package is published at the version it is given, and holds its files" (fun () ->
       let registry = make_registry () in
       let root = make_angles_package turn in
-      let status, output = publish_from root in
+      let status, output = publish_from root ~version:"1.0.0" in
       if status <> 0 then fail "status %d: %s" status output;
       if not (String.includes ~affix:"Published `acme::angles` 1.0.0" output) then
         fail "said %s" output;
-      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ];
-      let files =
-        Registry.Content.list_all_files
-          (make_version_directory { Path.owner = Some "acme"; name = "angles" } (1, 0, 0))
-      in
+      expect_published registry angles [ "1.0.0" ];
+      let files = Registry.Content.list_all_files (make_version_directory angles (1, 0, 0)) in
       expect_strings ~expected:[ "degrees/degrees.truss"; "truss.toml" ] (List.map fst files));
-  test "a package whose name ends in _v2 starts at 2.0.0" (fun () ->
+  test "a version that is not three numbers is not published" (fun () ->
       let registry = make_registry () in
+      expect_cannot_publish (make_angles_package turn) ~version:"1.0"
+        "`1.0` is not a version, which is three numbers";
+      expect_published registry angles []);
+  test "a version whose first number is not the one at the end of the name is not published"
+    (fun () ->
+      let registry = make_registry () in
+      expect_cannot_publish (make_angles_package turn) ~version:"2.0.0"
+        "A version of `acme::angles` starts with 1";
+      expect_cannot_publish (make_angles_package turn) ~version:"2.0.0"
+        "published under another name, such as `acme::angles_v2`";
       let root =
         make_directory
           [ ("truss.toml", make_manifest "acme::angles_v2"); ("degrees/degrees.truss", turn) ]
       in
-      ignore (publish_from root);
+      expect_cannot_publish root ~version:"1.0.0" "A version of `acme::angles_v2` starts with 2";
+      let status, output = publish_from root ~version:"2.0.0" in
+      if status <> 0 then fail "status %d: %s" status output;
+      expect_published registry angles [];
       expect_published registry { Path.owner = Some "acme"; name = "angles_v2" } [ "2.0.0" ]);
-  test "a release that changes only a body gets the next patch number" (fun () ->
+  test "a release needs a version higher than the newest release's" (fun () ->
       let registry = make_registry () in
       let root = make_angles_package turn in
-      ignore (publish_from root);
+      ignore (publish_from root ~version:"1.1.0");
       rewrite root "degrees/degrees.truss" Fixtures.turn_of_a_sum;
-      let status, output = publish_from root in
-      if status <> 0 then fail "status %d: %s" status output;
-      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.0.1" ]);
-  test "a release that adds a public definition gets the next minor number, and lists the additions"
-    (fun () ->
-      let registry = make_registry () in
-      let root = make_angles_package turn in
-      ignore (publish_from root);
-      rewrite root "degrees/degrees.truss" (turn ^ Fixtures.public_half);
-      let status, output = publish_from root in
-      if status <> 0 then fail "status %d: %s" status output;
-      if not (String.includes ~affix:"acme::angles::degrees::half is new" output) then
-        fail "said %s" output;
-      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.1.0" ]);
-  test "files that are a version already are not published again" (fun () ->
-      let registry = make_registry () in
-      let root = make_angles_package turn in
-      ignore (publish_from root);
-      let status, output = publish_from root in
-      if
-        status <> 0
-        || not (String.includes ~affix:"`acme::angles` 1.0.0 already has these files" output)
-      then fail "status %d: %s" status output;
-      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ]);
-  test "a release that changes a public signature is refused, with the signature as it was and is"
-    (fun () ->
-      let registry = make_registry () in
-      let root = make_angles_package turn in
-      ignore (publish_from root);
-      rewrite root "degrees/degrees.truss" Fixtures.turn_with_a_times_parameter;
-      expect_refused root "acme::angles::degrees::turn changed its parameters or its result";
-      let _, output = publish_from root in
       List.iter
-        (fun part ->
-          if not (String.includes ~affix:part output) then fail "%s is not in: %s" part output)
-        [
-          "was: public fn turn() -> Int64";
-          "now: public fn turn(times: Int64) -> Int64";
-          "Publish it under a new name, such as `acme::angles_v2`";
-        ];
-      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ]);
-  test "a release that takes a public definition away is refused" (fun () ->
-      let _ = make_registry () in
-      let root = make_angles_package (turn ^ Fixtures.public_half) in
-      ignore (publish_from root);
-      rewrite root "degrees/degrees.truss" turn;
-      expect_refused root "acme::angles::degrees::half was removed or is no longer public");
-  test "a private definition can change freely" (fun () ->
-      let registry = make_registry () in
-      let root = make_angles_package (turn ^ Fixtures.private_half) in
-      ignore (publish_from root);
-      rewrite root "degrees/degrees.truss" (turn ^ Fixtures.private_third);
-      let status, output = publish_from root in
+        (fun version ->
+          expect_cannot_publish root ~version
+            "The newest release of `acme::angles` is 1.1.0, so this release needs a higher version")
+        [ "1.1.0"; "1.0.5" ];
+      let status, output = publish_from root ~version:"1.1.1" in
       if status <> 0 then fail "status %d: %s" status output;
-      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.0.1" ]);
+      expect_published registry angles [ "1.1.0"; "1.1.1" ]);
   test "a package with no owner in its name is not published" (fun () ->
       let _ = make_registry () in
-      let status, output = publish_from (make_package [ ("degrees/degrees.truss", turn) ]) in
+      let status, output =
+        publish_from (make_package [ ("degrees/degrees.truss", turn) ]) ~version:"1.0.0"
+      in
       if status <> 2 || not (String.includes ~affix:"has no owner in its name" output) then
         fail "status %d: %s" status output);
   test "a package with an error is not published" (fun () ->
@@ -1668,18 +1639,18 @@ let () =
       expect_refused root "degrees.truss:6:3: `echo` is not finished code";
       expect_refused root "degrees.truss:10:13: `echo` is not finished code";
       expect_refused root "degrees.truss:13:13: `todo` is not finished code";
-      expect_published registry { Path.owner = Some "acme"; name = "angles" } []);
+      expect_published registry angles []);
   test "a package whose test fails is not published" (fun () ->
       let registry = make_registry () in
       let root = make_angles_package (turn ^ Fixtures.turn_test_of_a_right_angle) in
       expect_refused root "Cannot publish a package whose tests fail";
-      expect_published registry { Path.owner = Some "acme"; name = "angles" } []);
+      expect_published registry angles []);
   test "a package whose tests pass is published" (fun () ->
       let registry = make_registry () in
       let root = make_angles_package (turn ^ Fixtures.turn_test_of_a_whole_turn) in
-      let status, output = publish_from root in
+      let status, output = publish_from root ~version:"1.0.0" in
       if status <> 0 then fail "status %d: %s" status output;
-      expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ])
+      expect_published registry angles [ "1.0.0" ])
 
 let () =
   test "a package is published with the versions of the packages its code uses" (fun () ->
@@ -1692,7 +1663,7 @@ let () =
           ]
       in
       ignore (add root [ "acme::geometry" ]);
-      let status, output = publish_from root in
+      let status, output = publish_from root ~version:"1.0.0" in
       if status <> 0 then fail "status %d: %s" status output;
       let record =
         Registry.Lock.parse
@@ -1720,7 +1691,7 @@ let () =
           ]
       in
       ignore (add walls [ "acme::geometry" ]);
-      ignore (publish_from walls);
+      ignore (publish_from walls ~version:"1.0.0");
       let root = make_package [ ("main.truss", Fixtures.tall_through_walls) ] in
       if add root [ "acme::walls" ] <> 0 then fail "not added";
       expect_versions root
@@ -1737,7 +1708,7 @@ let () =
           ]
       in
       ignore (add root [ "acme::units@1.0.0" ]);
-      let status, output = publish_from root in
+      let status, output = publish_from root ~version:"1.0.0" in
       if status <> 0 then fail "status %d: %s" status output;
       if
         Sys.file_exists
@@ -1765,8 +1736,8 @@ let () =
       in
       let walls = Filename.concat root "walls" in
       expect_refused walls "publish `acme::angles` first";
-      ignore (publish_from (Filename.concat root "angles"));
-      let status, output = publish_from walls in
+      ignore (publish_from (Filename.concat root "angles") ~version:"1.0.0");
+      let status, output = publish_from walls ~version:"1.0.0" in
       if status <> 0 then fail "status %d: %s" status output)
 
 let () =
