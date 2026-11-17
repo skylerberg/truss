@@ -461,6 +461,41 @@ let () =
         ~fixed:Fixtures.Infer.push_without_mut_fixed)
 
 let () =
+  let shapes = Fixtures.Infer.others_shape_with_private_members in
+  let others = [ ("app::shapes", shapes) ] in
+  List.iter
+    (fun (use, fixture) ->
+      Harness.test (Printf.sprintf "another module's private %s is not visible" use) (fun () ->
+          expect_one_diagnostic ~others fixture "types.member_not_visible"
+            ~says:"private to its module"))
+    [
+      ("method, called with a dot,", Fixtures.Infer.call_of_another_modules_private_method);
+      ("method, called in full,", Fixtures.Infer.call_in_full_of_another_modules_private_method);
+      ("static method", Fixtures.Infer.call_of_another_modules_private_static_method);
+      ("member constant", Fixtures.Infer.read_of_another_modules_private_member_constant);
+      ("method, used as a value,", Fixtures.Infer.another_modules_private_method_as_a_value);
+    ];
+  Harness.test "an internal method and a public method of another module are visible" (fun () ->
+      expect_no_diagnostics
+        [
+          ("app::main", Fixtures.Infer.calls_of_another_modules_internal_and_public_methods);
+          ("app::shapes", shapes);
+        ]);
+  Harness.test "an internal method of another package is not visible" (fun () ->
+      expect_one_diagnostic
+        ~setup:(Support.setup ~dependencies:[ ("app", "tools") ])
+        ~others:[ ("tools::shapes", shapes) ]
+        Fixtures.Infer.call_of_another_packages_internal_method "types.member_not_visible"
+        ~says:"internal to its package");
+  Harness.test "a call with a dot does not find a method of another module's private trait"
+    (fun () ->
+      expect_one_diagnostic ~others Fixtures.Infer.call_of_a_method_of_another_modules_private_trait
+        "types.unknown_member");
+  Harness.test "a loop does not use another module's private `count` and `element`" (fun () ->
+      expect_one_diagnostic ~others Fixtures.Infer.loop_over_a_type_with_a_private_loop_protocol
+        "types.not_indexable")
+
+let () =
   Harness.test "a statement's value must be used, with a fix that discards it" (fun () ->
       expect_one_diagnostic Fixtures.Infer.unused_length "types.unused_value"
         ~fixed:Fixtures.Infer.unused_length_fixed);

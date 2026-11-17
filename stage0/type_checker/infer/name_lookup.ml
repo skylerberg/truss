@@ -13,6 +13,30 @@ let describe_missing_method state type_ name =
         (State.show state type_) name (State.show state view)
   | None -> Printf.sprintf "`%s` has no method `%s`." (State.show state type_) name
 
+let find_hidden_visibility (state : State.state) path =
+  let names = state.lookups.interface.names in
+  Option.bind (names.find_key path) (fun key ->
+      let declaration = names.read_declaration key in
+      if Resolve.Names.is_visible ~from:state.key.module_ declaration.module_ declaration.visibility
+      then None
+      else Some declaration.visibility)
+
+let report_hidden_member state (member : Syntax.name) (path : Path.t) =
+  Option.map
+    (fun (visibility : Syntax.visibility) ->
+      State.make_error_type state Member_not_visible (State.read_span state member.id)
+        (Printf.sprintf "`%s.%s` is %s, so it cannot be used here."
+           (match path with
+           | Method { owner = Top { name; _ }; _ } | Member_constant { owner = Top { name; _ }; _ }
+             ->
+               name
+           | _ -> Path.show path)
+           member.text
+           (match visibility with
+           | Private -> "private to its module"
+           | Internal | Public | Public_opaque -> "internal to its package")))
+    (find_hidden_visibility state path)
+
 let rec coerce state env ?argument (value : Syntax.expression) ~actual ~expected =
   State.convert state env ?argument ~expression:value.id (State.read_span state value.id) ~actual
     ~expected
@@ -237,45 +261,56 @@ and check_function_value state (value : Syntax.expression) (signature : Types.si
 
 and check_static_member state (value : Syntax.expression) type_ (member : Syntax.name) =
   match type_ with
-  | Types.Named { path; arguments } ->
+  | Types.Named { path; arguments } -> (
       if State.is_variant_name member then
         check_variant_value state value path member.text ~arguments
       else
-        begin match Members.find_own_constant state.lookups path member.text with
-        | Some constant ->
-            state.tables.resolutions.(value.id) <-
-              Some (Global { path = constant; type_arguments = [] });
-            State.register_expression state value (fun () ->
-                Use (Form.build_constant_place state ~origin:value.id constant));
-            Interface.Definition.read_constant_type state.lookups.interface constant
-        | None -> (
-            match Members.list_own_methods state.lookups path member.text with
-            | (_, method_path) :: _ -> (
-                match Instantiation.find_function_signature state method_path with
-                | Some signature ->
-                    let instance =
-                      Instantiation.instantiate state (State.read_span state value.id) signature
-                    in
-                    (match instance.signature.receiver with
-                    | Some (_, receiver) -> ignore (State.unify state receiver type_)
-                    | None -> ());
-                    state.tables.resolutions.(value.id) <-
-                      Some (Global { path = method_path; type_arguments = instance.type_arguments });
-                    check_function_value state value instance.signature
-                | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path)
-                )
-            | [] ->
-                State.make_error_type state Unknown_member (State.read_span state member.id)
-                  (match Types.find_view type_ with
-                  | Some (Types.Named { path = Top { name; _ } as view; _ })
-                    when Members.list_own_methods state.lookups view member.text <> [] ->
-                      Printf.sprintf
-                        "`%s` has no member `%s` of its own. The method is its view's: `%s.%s`."
-                        (State.show state type_) member.text name member.text
-                  | _ ->
-                      Printf.sprintf "`%s` has no member `%s`." (State.show state type_) member.text)
-            )
-        end
+        let named =
+          match Members.find_own_constant state.lookups path member.text with
+          | Some constant -> Some constant
+          | None ->
+              Option.map snd
+                (List.nth_opt (Members.list_own_methods state.lookups path member.text) 0)
+        in
+        match Option.bind named (report_hidden_member state member) with
+        | Some hidden -> hidden
+        | None ->
+            begin match Members.find_own_constant state.lookups path member.text with
+            | Some constant ->
+                state.tables.resolutions.(value.id) <-
+                  Some (Global { path = constant; type_arguments = [] });
+                State.register_expression state value (fun () ->
+                    Use (Form.build_constant_place state ~origin:value.id constant));
+                Interface.Definition.read_constant_type state.lookups.interface constant
+            | None -> (
+                match Members.list_own_methods state.lookups path member.text with
+                | (_, method_path) :: _ -> (
+                    match Instantiation.find_function_signature state method_path with
+                    | Some signature ->
+                        let instance =
+                          Instantiation.instantiate state (State.read_span state value.id) signature
+                        in
+                        (match instance.signature.receiver with
+                        | Some (_, receiver) -> ignore (State.unify state receiver type_)
+                        | None -> ());
+                        state.tables.resolutions.(value.id) <-
+                          Some
+                            (Global { path = method_path; type_arguments = instance.type_arguments });
+                        check_function_value state value instance.signature
+                    | None ->
+                        State.raise_bug "the method `%s` has no signature" (Path.show method_path))
+                | [] ->
+                    State.make_error_type state Unknown_member (State.read_span state member.id)
+                      (match Types.find_view type_ with
+                      | Some (Types.Named { path = Top { name; _ } as view; _ })
+                        when Members.list_own_methods state.lookups view member.text <> [] ->
+                          Printf.sprintf
+                            "`%s` has no member `%s` of its own. The method is its view's: `%s.%s`."
+                            (State.show state type_) member.text name member.text
+                      | _ ->
+                          Printf.sprintf "`%s` has no member `%s`." (State.show state type_)
+                            member.text))
+            end)
   | Types.Error _ | Types.Hole -> type_
   | _ ->
       State.make_error_type state Unknown_member (State.read_span state member.id)
@@ -372,7 +407,7 @@ and list_trait_static_methods (state : State.state) path name receiver =
           match
             Interface.Definition.find_trait_method state.lookups.interface trait ~name ~receiver
           with
-          | Some method_ ->
+          | Some method_ when Option.is_none (find_hidden_visibility state trait) ->
               let reference = Instantiation.make_fresh_trait_reference state trait in
               if
                 Option.is_some
@@ -382,7 +417,7 @@ and list_trait_static_methods (state : State.state) path name receiver =
                      reference)
               then Some (reference, method_)
               else None
-          | None -> None)
+          | Some _ | None -> None)
         (state.lookups.interface.names.list_traits_declaring package name))
     (Resolve.Names.list_visible_packages state.lookups.interface.names state.package)
 
@@ -448,8 +483,10 @@ and list_trait_candidates (state : State.state) receiver_type name =
           List.filter_map
             (fun trait ->
               let reference = Instantiation.make_fresh_trait_reference state trait in
-              if Option.is_some (State.find_evidence state receiver_type reference) then
-                with_method reference
+              if
+                Option.is_none (find_hidden_visibility state trait)
+                && Option.is_some (State.find_evidence state receiver_type reference)
+              then with_method reference
               else None)
             (state.lookups.interface.names.list_traits_declaring package name))
         (Resolve.Names.list_visible_packages state.lookups.interface.names state.package)
@@ -529,6 +566,9 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
     (receiver : Path.receiver) : (Tables.callee * Types.signature) option =
   let found = match resolve_overloads state type_ name with Ok found -> found | Error _ -> [] in
   match List.assoc_opt receiver found with
+  | Some (Type_overload method_path) when Option.is_some (find_hidden_visibility state method_path)
+    ->
+      None
   | Some (Type_overload method_path) -> (
       match Instantiation.find_function_signature state method_path with
       | Some signature ->

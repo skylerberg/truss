@@ -1,0 +1,5 @@
+use app::shapes
+
+fn f() -> UInt64 {
+  shapes::Shape.private_default
+}
