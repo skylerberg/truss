@@ -133,7 +133,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
           Matches
             {
               value = Operands.build mode (State.build_expression state tested);
-              pattern = State.build_pattern state written;
+              pattern = State.build_scrutinee_pattern state written;
             });
       Types.bool
   | Range { start; stop; inclusive; _ } ->

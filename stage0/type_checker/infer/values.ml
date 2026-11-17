@@ -404,7 +404,7 @@ and match_ state env ?expected (value : Syntax.expression) scrutinees arms =
           arms =
             List.map
               (fun (arm : Syntax.arm) : Core.arm ->
-                let patterns = List.map (State.build_pattern state) arm.patterns in
+                let patterns = List.map (State.build_scrutinee_pattern state) arm.patterns in
                 let guard = Option.map (State.build_expression state) arm.guard in
                 {
                   patterns;

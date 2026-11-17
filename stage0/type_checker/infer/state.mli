@@ -122,6 +122,7 @@ val register_statement : state -> Syntax.statement -> (unit -> Core.statement_ki
 val build_statement : state -> Syntax.statement -> Core.statement
 val register_pattern : state -> Syntax.pattern -> (unit -> Core.pattern_kind) -> unit
 val build_pattern : state -> Syntax.pattern -> Core.pattern
+val build_scrutinee_pattern : state -> Syntax.pattern -> Core.pattern
 val alias_expression : state -> Syntax.expression -> Syntax.expression -> unit
 val mark_lent_tails : state -> Syntax.expression -> unit
 val make_place : Core.expression -> Core.place

@@ -10,6 +10,9 @@ let () =
   Codegen_support.expect_pass
     "an assignment through an index inserts a map's key or replaces its value"
     Fixtures.Feature.map_assignment_test;
+  Codegen_support.expect_pass
+    "a name bound to a `Plain` record, array, or part keeps its value when the original is assigned"
+    Fixtures.Feature.plain_bindings_keep_their_values;
   Codegen_support.expect_pass "a cursor gives each value and then None"
     Fixtures.Feature.count_to_cursor;
   Codegen_support.expect_pass "a cursor's next uses the implementation provided where it is called"

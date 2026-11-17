@@ -878,6 +878,32 @@ let () =
       with
       | [ (1, 5) ] -> ()
       | _ -> Harness.fail "the range pattern does not have the bounds 1 and 5");
+  Harness.test
+    "a `let` and a `match` arm copy a `Plain` value that they bind, and a loop variable, a lambda \
+     parameter, and a binding of another type do not" (fun () ->
+      let modes =
+        List.filter_map
+          (fun (node : Core.pattern) ->
+            match node.kind with
+            | Bind { local = Declared { name; _ }; mode; _ } -> Some (name, mode)
+            | _ -> None)
+          (Support.collect_first_core_nodes Fixtures.Infer.bindings_of_plain_and_other_values)
+            .patterns
+      in
+      List.iter
+        (fun (name, (expected : Types.mode)) ->
+          match List.assoc_opt name modes with
+          | Some mode when mode = expected -> ()
+          | Some _ -> Harness.fail "`%s` is bound in another mode" name
+          | None -> Harness.fail "`%s` is not bound" name)
+        [
+          ("copied", Own);
+          ("matched", Own);
+          ("viewed", Read);
+          ("each", Read);
+          ("given", Read);
+          ("count", Own);
+        ]);
   Harness.test "a range pattern on a type that is not an integer or Character is an error"
     (fun () -> expect_one_diagnostic Fixtures.Infer.bool_range_arm "types.mismatch");
   Harness.test "an integer range on a type that is not ordered is one error" (fun () ->

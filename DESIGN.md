@@ -431,6 +431,7 @@ change to its API.
 
 | Rule | Reason |
 |---|---|
+| A name bound to a `Plain` value is a copy, not a view. | A `Plain` value is copied wherever it is moved: into a `var`, an `own` parameter, or a field. If a `let` viewed it, `point.x = 7` would be an error while a `let` of `point` is live, where the same code on an integer is accepted. |
 | A handle is not `Copyable`. | Copying one would duplicate an operating-system handle, which can fail, and `copy()` cannot fail. |
 | Generic code copies only under a `Copyable` bound. | An unbounded type parameter then accepts every type, handles included. |
 | A copy has the original's capacity. | The prover treats a copy as the same value, and a storage's capacity and its potential are functions of the value. A copy shrunk to its length would make `items.copy().capacity() == items.capacity()` false at run time, and give the copy a potential other than the one `copy()` paid for. |
