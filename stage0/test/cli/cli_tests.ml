@@ -53,18 +53,16 @@ let () =
   test "-C before the command is read as an option of the command" (fun () ->
       expect_strings
         ~expected:[ "truss"; "test"; "-C"; "dir"; "--rerun" ]
-        (Cli.Arguments.prepare [ "truss"; "-C"; "dir"; "test"; "--rerun" ]));
-  test "the first argument of run that is not one of its options starts the program's" (fun () ->
+        (Cli.Arguments.move_leading_options [ "truss"; "-C"; "dir"; "test"; "--rerun" ]));
+  test "--no-server before the command is read as an option of the command" (fun () ->
       expect_strings
-        ~expected:[ "truss"; "run"; "--release"; "--"; "input.txt"; "-v" ]
-        (Cli.Arguments.prepare [ "truss"; "run"; "--release"; "input.txt"; "-v" ]));
-  test "a -- after run is kept as written" (fun () ->
-      expect_strings ~expected:[ "truss"; "run"; "--"; "-x" ]
-        (Cli.Arguments.prepare [ "truss"; "run"; "--"; "-x" ]));
-  test "--no-server after run is an option of run, not the program's" (fun () ->
-      expect_strings
-        ~expected:[ "truss"; "run"; "--no-server"; "--release"; "--"; "input.txt" ]
-        (Cli.Arguments.prepare [ "truss"; "run"; "--no-server"; "--release"; "input.txt" ]))
+        ~expected:[ "truss"; "check"; "--no-server"; "-C"; "dir"; "--fix" ]
+        (Cli.Arguments.move_leading_options
+           [ "truss"; "--no-server"; "-C"; "dir"; "check"; "--fix" ]));
+  test "an option before -- is an option of run, not the program's" (fun () ->
+      let status, output = run_truss [ "run"; "input.txt"; "-v" ] in
+      if status <> 2 || not (String.includes ~affix:"-v" output) then
+        fail "exited with %d: %s" status output)
 
 let () =
   test "a file written in a watched directory is reported after a synchronization" (fun () ->
@@ -160,6 +158,12 @@ let () =
       if not (is_database_open_elsewhere other) then fail "stopped another project's process";
       ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "--all" ]));
       if is_database_open_elsewhere other then fail "--all left a background process running");
+  test "status lists the package databases that the background processes hold" (fun () ->
+      let root = make_package_served_by_other_build () in
+      let status, out, err = Process.run (Lazy.force other_build) [ "status" ] in
+      ignore (capture (fun () -> Cli.Main.run_client [ "truss"; "stop"; "-C"; root ]));
+      if status <> 0 || not (String.includes ~affix:"standard " out) then
+        fail "exited with %d: %s%s" status out err);
   test "stop outside any project asks for --all, and exits with 2" (fun () ->
       let directory = Harness.make_scratch_directory "no-project" in
       let status, output =
@@ -175,9 +179,17 @@ let with_fresh_cache work =
   Fun.protect ~finally:Workspace.reset (fun () -> work cache)
 
 let () =
-  test "the help lists clean" (fun () ->
+  test "the help lists clean and lsp" (fun () ->
       let status, output = capture (fun () -> Cli.Main.run_client [ "truss"; "--help=plain" ]) in
-      if status <> 0 || not (String.includes ~affix:"clean" output) then
+      if
+        status <> 0
+        || not (List.for_all (fun affix -> String.includes ~affix output) [ "clean"; "lsp" ])
+      then fail "exited with %d: %s" status output);
+  test "lsp --help shows the command's help" (fun () ->
+      let status, output =
+        capture (fun () -> Cli.Main.run_client [ "truss"; "lsp"; "--help=plain" ])
+      in
+      if status <> 0 || not (String.includes ~affix:"Language Server Protocol" output) then
         fail "exited with %d: %s" status output);
   test "clean --help shows the cache directory and deletes nothing" (fun () ->
       with_fresh_cache (fun cache ->
@@ -231,6 +243,33 @@ let () =
       match list_server_files_added ~before with
       | [] -> ()
       | added -> fail "started a background process: %s" (String.concat ", " added));
+  test "help and usage errors inside a project start no background process" (fun () ->
+      let root = make_package [ ("main.truss", "fn main() {}\n") ] in
+      let before = list_server_files () in
+      Unix.putenv "TRUSS_NO_SERVER" "";
+      List.iter
+        (fun (arguments, expected_status) ->
+          let status, out, err = Process.run (Lazy.force other_build) arguments in
+          if status <> expected_status then
+            fail "`truss %s` exited with %d: %s%s" (String.concat " " arguments) status out err)
+        [ ([ "check"; "-C"; root; "--help=plain" ], 0); ([ "chekc"; "-C"; root ], 2) ];
+      match list_server_files_added ~before with
+      | [] -> ()
+      | added -> fail "started a background process: %s" (String.concat ", " added));
+  test "--no-server after -- is an argument of the program" (fun () ->
+      let root =
+        make_package
+          [
+            ( "main.truss",
+              "fn main(arguments: List[String]) -> ExitCode {\n\
+              \  if arguments.length() == 2 { ExitCode.success } else { ExitCode.failure }\n\
+               }\n" );
+          ]
+      in
+      Unix.putenv "TRUSS_NO_SERVER" "1";
+      match Process.run (Lazy.force other_build) [ "run"; "-C"; root; "--"; "--no-server" ] with
+      | 0, _, _ -> ()
+      | status, out, err -> fail "exited with %d: %s%s" status out err);
   test "a background process whose project is deleted ends, and does not make the project again"
     (fun () ->
       let before = list_server_files () in
@@ -1824,8 +1863,7 @@ let () =
       let root = make_package [ ("main.truss", Fixtures.main_returning_success) ] in
       let uri = "file://" ^ Filename.concat root "main.truss" in
       let answer =
-        Cli.Json.parse
-          (snd (run_truss [ "__check-buffers"; root; "utf-16"; uri; Fixtures.next_count ]))
+        fst (capture (fun () -> Cli.Lsp_command.check ~root Utf_16 [ (uri, Fixtures.next_count) ]))
       in
       match Cli.Json.lookup_field "files" answer with
       | Cli.Json.List [ file ] -> (

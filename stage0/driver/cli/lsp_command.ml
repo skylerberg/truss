@@ -352,18 +352,6 @@ let serve ~input ~output ~check =
   in
   loop false
 
-let check_buffers = function
-  | root :: encoding :: rest ->
-      let rec pair_up = function uri :: text :: rest -> (uri, text) :: pair_up rest | _ -> [] in
-      let encoding = if encoding = "utf-8" then Utf_8 else Utf_16 in
-      Json.print (check ~root encoding (pair_up rest));
-      0
-  | _ -> 2
-
-let check_arguments ~root encoding buffers =
-  "__check-buffers" :: root :: show_encoding encoding
-  :: List.concat_map (fun (uri, text) -> [ uri; text ]) buffers
-
 module For_testing = struct
   let locate_position = locate_position
   let locate_offset = locate_offset
