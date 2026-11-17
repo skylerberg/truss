@@ -1,1 +1,1 @@
-val prepare : string list -> string list
+val move_leading_options : string list -> string list

@@ -251,6 +251,14 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
               (Static_storage { contents with elements = contents.elements @ [ element ] });
             Some ()
         | _ -> None)
+    | ( Intrinsic { operation = Buffer Storage_from_array; type_arguments = Type element :: _ },
+        [ Passed { value = array; _ } ] ) -> (
+        let* array = fold_operand array in
+        match array with
+        | Static_array elements ->
+            assign destination
+              (Lowered.Static_storage { element = Lowering.ground st element; elements })
+        | _ -> None)
     | Function { path; type_arguments }, arguments when depth > 0 ->
         let* { form = callee_mir; _ } = Mir.read_graph st.context.lookups.mir path in
         let type_arguments =

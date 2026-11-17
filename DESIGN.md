@@ -431,6 +431,7 @@ change to its API.
 
 | Rule | Reason |
 |---|---|
+| A name bound to a `Plain` value is a copy, not a view. | A `Plain` value is copied wherever it is moved: into a `var`, an `own` parameter, or a field. If a `let` viewed it, `point.x = 7` would be an error while a `let` of `point` is live, where the same code on an integer is accepted. |
 | A handle is not `Copyable`. | Copying one would duplicate an operating-system handle, which can fail, and `copy()` cannot fail. |
 | Generic code copies only under a `Copyable` bound. | An unbounded type parameter then accepts every type, handles included. |
 | A copy has the original's capacity. | The prover treats a copy as the same value, and a storage's capacity and its potential are functions of the value. A copy shrunk to its length would make `items.copy().capacity() == items.capacity()` false at run time, and give the copy a potential other than the one `copy()` paid for. |
@@ -479,6 +480,7 @@ rule excludes `Plain` arguments, such as indexes, so that case is rare.
 | Rule | Reason |
 |---|---|
 | Whether a type is a view is derived from its fields, and a record that holds a view is a view. | Nothing is declared, and a view cannot escape inside a record. |
+| A `Plain` argument lends nothing to the result of a call, unless it holds an `Array`. | A `Slice` views storage, and an integer or a record of integers has none to view, so a variable passed as an index can be assigned while the result is live. An array is stored in place: `values.slice()` views `values` itself, and assigning `values` while that view is live would change what the view reads. |
 | Generic code that keeps a value requires `Storable`. | A type parameter may stand for a view, and the bound stops generic code from storing one. |
 | An `any Trait` is a view unless `Trait` requires `Storable`. | `any` hides the type, so the compiler cannot see whether the value holds a view. |
 | `mut` access is never stored. | It lasts for one call, one iteration, or one `provide mut` block, so the ownership check tracks no mutable reference from one statement to the next. |
@@ -768,7 +770,8 @@ terminate.
 | A function type with a `time` clause takes only functions that terminate, even where its `uses` names a capability parameter. | A written clause holds. If the parameter could carry a function that may not terminate into such a type, `cost time finite` there would promise nothing. |
 | A `time` clause follows a function parameter only where its bound names `time(parameter)`. `finite` names none, so it promises termination whatever is passed. | The bound is true as written: it is unbounded exactly where the parameter's time is. A `finite` that followed its callbacks would be a condition that the signature does not show. |
 | No parameter passes on termination alone. A callback that may not terminate is taken through a capability parameter, which also takes its capabilities. | A callee needs a callback without capabilities only to apply it in a contract, and there the callback must terminate too. One mechanism then covers both. |
-| A lambda may not terminate when it calls a function that may not, or holds a loop without a measure. | Its capabilities are inferred from its body, and so is this. A lambda with neither stays in the logic, so a proof can reason about a call that passes it. |
+| A loop without a measure may not terminate, so it stands only where that is allowed, as a call that may not terminate does. | The capability check then covers the loop in every body, as it covers a call. The alternative is an obligation of the prover for each loop in a function with a `time` clause, which states the same fact a second time and leaves a lambda's loop to a rule of its own. |
+| A lambda may not terminate when its body makes a call that may not, or holds a loop without a measure. | Its capabilities are inferred from its body, and so is this. A lambda with neither stays in the logic, so a proof can reason about a call that passes it. |
 
 ### Cost clauses
 
@@ -1439,7 +1442,7 @@ Rules: [Method lookup](SPECIFICATION.md#method-lookup).
 | A trait method needs no import. | A forgotten import is a common error in the languages that need one. |
 | A method call finds only the traits of the standard library, of the calling package, and of the packages that its manifest lists. | An edit deep in the dependency graph cannot break a distant call. |
 | Two candidates for one name are an error, never a silent choice. | In Rust a type's own method wins over a trait's, so adding a method can silently change an existing call. In Truss an upgrade can break a call only with an error that names both candidates. A release that only adds names is still compatible, because otherwise no type could ever gain a method. |
-| A `String` has the methods of `StringSlice`, and a `List` those of `Slice`. | `self` is a parameter, and an argument of the owned type converts to its view. Without the rule, every method of a view needs a forwarding method on the owned type, whose contract is stated and proven a second time, and a view's method that has none cannot be called on the owned value. Rust reaches the methods of `str` from a `String` through `Deref`. |
+| A `String` has the methods of `StringSlice`, and a `List` and an `Array` those of `Slice`. | `self` is a parameter, and an argument of the owned type converts to its view. Without the rule, every method of a view needs a forwarding method on the owned type, whose contract is stated and proven a second time, and a view's method that has none cannot be called on the owned value. Rust reaches the methods of `str` from a `String` through `Deref`. |
 | A type's own method hides its view's method of the same name and mode. | The owned type can do better where it owns the storage: `String.to_bytes(own self)` hands over its buffer, and `StringSlice.to_bytes(self)` copies. Both are written in one package, so no other package can change which one a call reaches. |
 | An `impl` gives a type no method that its view has in that mode, and an `impl` in another package gives it none of that name. | Such a method would be found before the view's. A package added to a build could then capture a call that reached the view's method. |
 
@@ -1813,7 +1816,7 @@ as every source of randomness is a capability.
 | Convention | Reason |
 |---|---|
 | Each module is one subject, one level below `standard`. | Code writes a name with its module, so the name of a type does not repeat the module: `json::Value`. A category above the module, as in Go's `encoding/json`, is not written at the use site, so it only adds something to remember. |
-| Every method of a view type also exists on the owning type. | `mut names.sort()` works without `names[..]`. Truss converts an owning collection to its view only at a parameter, so the library declares the methods on both. |
+| A method that needs no ownership of the storage is declared once, on the view type. | A `String`, a `List`, and an `Array` have the methods of their views ([Method lookup](#method-lookup)), so `mut names.sort()` works without `names[..]`, and a second declaration on the owning type would only forward. The owning type declares a method of that name where it uses its storage: `List.reverse` keeps the list's capacity. |
 | A method that works on any collection is a provided method of `Iterable`. | A user's collection gets the method by implementing `count` and `element`. |
 | A collection that is made from its elements alone takes a literal and has no `new()`. | *One spelling.* A constructor is for a collection that needs more than its elements: a `Heap` needs an order, and an `LruCache` a capacity. |
 | A collection method takes a pure callback. A method of `Option` or `Result` takes a callback that may use capabilities. | `map` and `sort_by` may later run their callback in parallel. `Option.map` calls its callback at most once, in place of an `if`. |

@@ -129,6 +129,7 @@ module Code : sig
     | Unknown_member
     | Ambiguous_method
     | Private_field
+    | Member_not_visible
     | Not_callable
     | Not_a_value
     | No_impl

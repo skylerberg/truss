@@ -273,6 +273,11 @@ let is_functional walk =
   walk visit;
   !fine
 
+let states_measure (clauses : Core.loop_clause list) =
+  List.exists
+    (function Core.Decreases _ -> true | Core.Invariant _ | Core.Cost _ -> false)
+    clauses
+
 let has_implicit_measure (condition : Core.expression) =
   match condition.kind with
   | Compare { comparison = Less | Less_equal | Greater | Greater_equal; left; right } ->

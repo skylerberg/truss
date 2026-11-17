@@ -1,0 +1,5 @@
+fn f(values: mut Array[String, 3]) -> UInt64 {
+  let first = values[..1]
+  mut values.sort()
+  first.length()
+}

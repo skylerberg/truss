@@ -308,6 +308,24 @@ let () =
       match locate_core_call text "greet(name)" 1 with
       | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> Harness.fail "no conversion recorded");
+  Harness.test "an `Array` passed where a `Slice` is expected is viewed" (fun () ->
+      let text = Fixtures.Infer.sum_of_an_array_passed_as_a_slice in
+      match locate_core_call text "total(values)" 1 with
+      | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "an `Array` receiver finds a method of `Slice` and is viewed" (fun () ->
+      let text = Fixtures.Infer.contains_of_an_array in
+      match locate_core_call text "values.contains(1)" 1 with
+      | { arguments = [ receiver; _ ]; _ }, _ when is_view receiver -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "an `Array` receiver passed `mut` to a method of `Slice` is sliced whole" (fun () ->
+      let text = Fixtures.Infer.sort_of_a_mut_array in
+      match locate_core_call text "values.sort()" 1 with
+      | { arguments = [ Passed { mode = Mut; value = Value { kind = Slice _; _ } } ]; _ }, _ -> ()
+      | _ -> Harness.fail "the receiver is not a slice of the whole array");
+  Harness.test
+    "a type argument of a view's method is counted after the view's parameters, not the array's"
+    (fun () -> expect_fine Fixtures.Infer.zip_of_an_array_with_a_type_argument);
   Harness.test "a capability's method views a String argument too" (fun () ->
       let text = Fixtures.Infer.print_line_of_a_string in
       match locate_core_call text "Console.print_line(name)" 1 with
@@ -441,6 +459,41 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.push_without_mut "types.missing_mode"
         ~fixed:Fixtures.Infer.push_without_mut_fixed)
+
+let () =
+  let shapes = Fixtures.Infer.others_shape_with_private_members in
+  let others = [ ("app::shapes", shapes) ] in
+  List.iter
+    (fun (use, fixture) ->
+      Harness.test (Printf.sprintf "another module's private %s is not visible" use) (fun () ->
+          expect_one_diagnostic ~others fixture "types.member_not_visible"
+            ~says:"private to its module"))
+    [
+      ("method, called with a dot,", Fixtures.Infer.call_of_another_modules_private_method);
+      ("method, called in full,", Fixtures.Infer.call_in_full_of_another_modules_private_method);
+      ("static method", Fixtures.Infer.call_of_another_modules_private_static_method);
+      ("member constant", Fixtures.Infer.read_of_another_modules_private_member_constant);
+      ("method, used as a value,", Fixtures.Infer.another_modules_private_method_as_a_value);
+    ];
+  Harness.test "an internal method and a public method of another module are visible" (fun () ->
+      expect_no_diagnostics
+        [
+          ("app::main", Fixtures.Infer.calls_of_another_modules_internal_and_public_methods);
+          ("app::shapes", shapes);
+        ]);
+  Harness.test "an internal method of another package is not visible" (fun () ->
+      expect_one_diagnostic
+        ~setup:(Support.setup ~dependencies:[ ("app", "tools") ])
+        ~others:[ ("tools::shapes", shapes) ]
+        Fixtures.Infer.call_of_another_packages_internal_method "types.member_not_visible"
+        ~says:"internal to its package");
+  Harness.test "a call with a dot does not find a method of another module's private trait"
+    (fun () ->
+      expect_one_diagnostic ~others Fixtures.Infer.call_of_a_method_of_another_modules_private_trait
+        "types.unknown_member");
+  Harness.test "a loop does not use another module's private `count` and `element`" (fun () ->
+      expect_one_diagnostic ~others Fixtures.Infer.loop_over_a_type_with_a_private_loop_protocol
+        "types.not_indexable")
 
 let () =
   Harness.test "a statement's value must be used, with a fix that discards it" (fun () ->
@@ -860,6 +913,32 @@ let () =
       with
       | [ (1, 5) ] -> ()
       | _ -> Harness.fail "the range pattern does not have the bounds 1 and 5");
+  Harness.test
+    "a `let` and a `match` arm copy a `Plain` value that they bind, and a loop variable, a lambda \
+     parameter, and a binding of another type do not" (fun () ->
+      let modes =
+        List.filter_map
+          (fun (node : Core.pattern) ->
+            match node.kind with
+            | Bind { local = Declared { name; _ }; mode; _ } -> Some (name, mode)
+            | _ -> None)
+          (Support.collect_first_core_nodes Fixtures.Infer.bindings_of_plain_and_other_values)
+            .patterns
+      in
+      List.iter
+        (fun (name, (expected : Types.mode)) ->
+          match List.assoc_opt name modes with
+          | Some mode when mode = expected -> ()
+          | Some _ -> Harness.fail "`%s` is bound in another mode" name
+          | None -> Harness.fail "`%s` is not bound" name)
+        [
+          ("copied", Own);
+          ("matched", Own);
+          ("viewed", Read);
+          ("each", Read);
+          ("given", Read);
+          ("count", Own);
+        ]);
   Harness.test "a range pattern on a type that is not an integer or Character is an error"
     (fun () -> expect_one_diagnostic Fixtures.Infer.bool_range_arm "types.mismatch");
   Harness.test "an integer range on a type that is not ordered is one error" (fun () ->

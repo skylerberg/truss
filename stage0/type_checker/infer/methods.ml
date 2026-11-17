@@ -285,34 +285,37 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
         List.assoc_opt Path.Static (Members.list_own_methods state.lookups path member.text)
       with
       | Some method_path -> (
-          match Instantiation.find_function_signature state method_path with
-          | Some signature -> (
-              let instance =
-                Instantiation.instantiate state (State.read_span state value.id) signature
-              in
-              let head =
-                List.take
-                  (List.length
-                     (match type_ with Types.Named { arguments; _ } -> arguments | _ -> []))
-                  instance.type_arguments
-              in
-              ignore
-                (Unify.unify_arguments state.unifier head
-                   (match type_ with Types.Named { arguments; _ } -> arguments | _ -> []));
-              (match (expected, instance.signature.output) with
-              | Some expected, Returns output -> State.unify_as_hint state output expected
-              | _ -> ());
-              match
-                Calls.check_arguments state env value instance.signature.parameters arguments
-                  ~has_receiver:false
-              with
-              | Error error -> error
-              | Ok (checked, left_out) ->
-                  Name_lookup.finish_call state env value method_path
-                    (Tables.Function
-                       { path = method_path; type_arguments = instance.type_arguments })
-                    instance checked left_out)
-          | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))
+          match Name_lookup.report_hidden_member state member method_path with
+          | Some hidden -> Calls.check_arguments_alone state env arguments hidden
+          | None -> (
+              match Instantiation.find_function_signature state method_path with
+              | Some signature -> (
+                  let instance =
+                    Instantiation.instantiate state (State.read_span state value.id) signature
+                  in
+                  let head =
+                    List.take
+                      (List.length
+                         (match type_ with Types.Named { arguments; _ } -> arguments | _ -> []))
+                      instance.type_arguments
+                  in
+                  ignore
+                    (Unify.unify_arguments state.unifier head
+                       (match type_ with Types.Named { arguments; _ } -> arguments | _ -> []));
+                  (match (expected, instance.signature.output) with
+                  | Some expected, Returns output -> State.unify_as_hint state output expected
+                  | _ -> ());
+                  match
+                    Calls.check_arguments state env value instance.signature.parameters arguments
+                      ~has_receiver:false
+                  with
+                  | Error error -> error
+                  | Ok (checked, left_out) ->
+                      Name_lookup.finish_call state env value method_path
+                        (Tables.Function
+                           { path = method_path; type_arguments = instance.type_arguments })
+                        instance checked left_out)
+              | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path)))
       | None -> (
           match Name_lookup.list_trait_static_methods state path member.text Static with
           | [ (trait, method_) ] ->
@@ -353,8 +356,8 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                       Modes.check_mode state env receiver.value
                         { name = "self"; mode; type_; has_default = false }
                         receiver_type;
-                      check_method_with_receiver state env ?expected value ~receiver:receiver.value
-                        ~receiver_type method_path rest
+                      check_method_with_receiver state env ?expected value ~member
+                        ~receiver:receiver.value ~receiver_type method_path rest
                   | _ :: _, Some (Trait_overload (trait, method_)) ->
                       check_trait_method_through_type state env ?expected value type_ trait method_
                         arguments
@@ -647,8 +650,8 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
           match choose_temporary overloads with
           | None -> report_missing_receiver_mode overloads
           | Some (_, (Type_overload method_path | View_overload method_path)) ->
-              check_method_with_receiver state env ?expected ~type_arguments value ~receiver:base
-                ~receiver_type method_path arguments
+              check_method_with_receiver state env ?expected ~type_arguments value ~member
+                ~receiver:base ~receiver_type method_path arguments
           | Some (_, Trait_overload (trait, method_)) ->
               check_trait_method_with_receiver state env value ~receiver:base ~receiver_type trait
                 method_ ~type_arguments arguments)
@@ -686,17 +689,21 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
                (State.show state receiver_type) member.text))
 
 and check_method_with_receiver state env ?expected ?(type_arguments = [])
-    (value : Syntax.expression) ~(receiver : Syntax.expression) ~receiver_type method_path arguments
-    =
-  match Instantiation.find_function_signature state method_path with
-  | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path)
-  | Some signature -> (
+    (value : Syntax.expression) ~(member : Syntax.name) ~(receiver : Syntax.expression)
+    ~receiver_type method_path arguments =
+  match
+    ( Name_lookup.report_hidden_member state member method_path,
+      Instantiation.find_function_signature state method_path )
+  with
+  | Some hidden, _ -> Calls.check_arguments_alone state env arguments hidden
+  | None, None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path)
+  | None, Some signature -> (
       let instance = Instantiation.instantiate state (State.read_span state value.id) signature in
       match
         Name_lookup.check_explicit_type_arguments
           ~head:
-            (match receiver_type with
-            | Types.Named { arguments; _ } -> List.length arguments
+            (match instance.signature.receiver with
+            | Some (_, Types.Named { arguments; _ }) -> List.length arguments
             | _ -> 0)
           state value instance type_arguments
       with

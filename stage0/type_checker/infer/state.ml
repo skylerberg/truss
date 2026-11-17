@@ -502,6 +502,20 @@ let is_view state type_ =
   Interface.Impls.is_view state.lookups.interface ~list_bounds:(lookup_bounds state)
     (zonk state type_)
 
+let rec copy_plain_bindings state (pattern : Core.pattern) : Core.pattern =
+  let copy_fields = List.map (fun (field, inner) -> (field, copy_plain_bindings state inner)) in
+  match pattern.kind with
+  | Bind ({ mode = Read; _ } as bound) when is_plain state pattern.type_ ->
+      { pattern with kind = Bind { bound with mode = Own } }
+  | Variant { variant; fields } ->
+      { pattern with kind = Variant { variant; fields = copy_fields fields } }
+  | Record fields -> { pattern with kind = Record (copy_fields fields) }
+  | Alternatives alternatives ->
+      { pattern with kind = Alternatives (List.map (copy_plain_bindings state) alternatives) }
+  | Bind _ | Wildcard | Literal _ | Range _ | Equal_to _ -> pattern
+
+let build_scrutinee_pattern state written = copy_plain_bindings state (build_pattern state written)
+
 let resolve_associated_type state type_ (trait : Types.trait_reference) name
     ~(at : Source.Definition_span.t) =
   let type_ = normalize state type_ and trait = normalize_trait state trait in
@@ -1072,7 +1086,9 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                   if Types.equal inner.type_ expected then inner else convert Widen
               | To_integer -> convert To_integer
               | From_integer -> convert From_integer
-              | Owned_to_view when argument = Some Types.Mut && Types.is_well_known List inner.type_
+              | Owned_to_view
+                when argument = Some Types.Mut
+                     && (Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_)
                 ->
                   let base : Core.place =
                     match inner.kind with Use place -> place | _ -> Temporary inner

@@ -6,8 +6,7 @@ val serve :
   check:(root:string -> encoding -> (string * string) list -> string option) ->
   int
 
-val check_buffers : string list -> int
-val check_arguments : root:string -> encoding -> (string * string) list -> string list
+val check : root:string -> encoding -> (string * string) list -> Json.t
 
 module For_testing : sig
   val locate_position : encoding -> Source.t -> int -> int * int

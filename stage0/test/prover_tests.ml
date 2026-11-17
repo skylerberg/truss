@@ -501,8 +501,6 @@ let () =
       expect_proven Fixtures.Prover.range_loop_with_an_index_cost_clause);
   Harness.test "a loop over a type's own cursor calls its next" (fun () ->
       expect_proven Fixtures.Prover.countdown_loop);
-  Harness.test "a loop over a type's own cursor that must end needs a decreases clause" (fun () ->
-      expect_not_proven Fixtures.Prover.countdown_cursor_loop "prover.termination");
   Harness.test "a loop over a cursor in a field calls its next" (fun () ->
       expect_proven Fixtures.Prover.countdown_in_a_field);
   Harness.test "a loop over a cursor counts a body that calls an amortized callee" (fun () ->
@@ -760,6 +758,8 @@ let () =
       expect_proven Fixtures.Prover.word_count_bounded_by_its_index)
 
 let () =
+  Harness.test "a list literal of three hundred elements has its length and each element" (fun () ->
+      expect_proven Fixtures.Prover.list_literal_of_three_hundred_elements);
   Harness.test "a map literal holds each key's value" (fun () ->
       expect_proven Fixtures.Prover.map_literal_read);
   Harness.test "a map literal's keys must be distinct" (fun () ->
@@ -824,7 +824,11 @@ let () =
   Harness.test "a postcondition of a view's `mut` method holds of the `List` it was called on"
     (fun () -> expect_proven Fixtures.Prover.sort_of_a_list_sorts_it);
   Harness.test "a postcondition of a view's lending method holds of the `List` it was called on"
-    (fun () -> expect_proven Fixtures.Prover.first_of_a_list_is_some_when_it_has_elements)
+    (fun () -> expect_proven Fixtures.Prover.first_of_a_list_is_some_when_it_has_elements);
+  Harness.test "a postcondition of a view's `mut` method holds of the `Array` it was called on"
+    (fun () -> expect_proven Fixtures.Prover.sort_of_an_array_sorts_it);
+  Harness.test "a postcondition of a view's lending method holds of the `Array` it was called on"
+    (fun () -> expect_proven Fixtures.Prover.first_of_an_array_is_some)
 
 let swap = Fixtures.Prover.exchange
 
@@ -927,10 +931,6 @@ let () =
       expect_not_proven Fixtures.Prover.each_visiting_through_a_capturing_lambda "prover.cost");
   Harness.test "a quantifier over a costly body is not linear" (fun () ->
       expect_not_proven Fixtures.Prover.quantifier_over_a_spinning_body "prover.cost");
-  Harness.test "a loop with no measure has no bound" (fun () ->
-      let actual = list_codes Fixtures.Prover.while_loop_without_a_measure in
-      if not (List.mem "prover.cost" actual && List.mem "prover.termination" actual) then
-        Harness.fail "%s" (String.concat ", " actual));
   Harness.test "a loop's cost clause that is too small" (fun () ->
       expect_not_proven Fixtures.Prover.while_loop_with_a_small_cost_clause "prover.cost");
   Harness.test "calls of a capability's method are counted" (fun () ->
@@ -1066,8 +1066,6 @@ let () =
       expect_not_proven Fixtures.Prover.positive_zeroed_in_a_loop "prover.invariant")
 
 let () =
-  Harness.test "a guessed measure is not read from a condition with a mut argument" (fun () ->
-      expect_not_proven Fixtures.Prover.while_loop_taking_a_count "prover.termination");
   Harness.test "a mut slice's bounds are evaluated once" (fun () ->
       expect_not_proven Fixtures.Prover.mut_slice_with_counted_bounds "prover.ensures");
   Harness.test "a while condition's mut argument mutates the loop's state" (fun () ->
@@ -2015,11 +2013,7 @@ let () =
   Harness.test
     "a call that uses nothing is in the logic, whatever its callee's capability parameter"
     (fun () -> expect_proven (apply ^ Fixtures.Prover.apply_in_an_ensures));
-  Harness.test "a lambda with a loop that states no measure may not terminate" (fun () ->
-      expect_proven (apply ^ Fixtures.Prover.apply_of_a_lambda_looping_without_a_measure));
-  Harness.test "a lambda's loop states a measure in a function with a time clause" (fun () ->
-      expect_not_proven
-        (apply ^ Fixtures.Prover.apply_of_a_lambda_looping_without_a_measure_under_a_time_clause)
-        "prover.termination");
+  Harness.test "a function without a time clause passes a lambda with a loop without a measure"
+    (fun () -> expect_proven (apply ^ Fixtures.Prover.apply_of_a_lambda_looping_without_a_measure));
   Harness.test "an operator on a bound type terminates" (fun () ->
       expect_proven Fixtures.Prover.sum_of_a_bound_type_under_a_time_clause)

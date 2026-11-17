@@ -1,0 +1,9 @@
+trait Searched {
+  fn contains(self, item: Int64) -> Bool
+}
+
+impl Searched for Array[Element, count: UInt64] {
+  fn contains(self, item: Int64) -> Bool {
+    false
+  }
+}

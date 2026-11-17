@@ -21,6 +21,31 @@ let () =
     ];
   Harness.test "a `var` and a `mut` parameter can be written through a slice" (fun () ->
       expect_fine (bump ^ Fixtures.Ownership.writes_through_slices_of_a_var_and_a_mut_parameter));
+  List.iter
+    (fun (written, fixture) ->
+      Harness.test (Printf.sprintf "a read-only parameter cannot be written through %s" written)
+        (fun () -> expect_one_diagnostic fixture "ownership.read_only_view"))
+    [
+      ("a range of a view of it", Fixtures.Ownership.range_of_a_view_of_a_read_only_list_sorted);
+      ( "a range of a range of a view of it",
+        Fixtures.Ownership.range_of_a_range_of_a_view_of_a_read_only_list_sorted );
+      ( "an assigned element of a range of a view of it",
+        Fixtures.Ownership.element_of_a_range_of_a_view_of_a_read_only_list_assigned );
+      ( "an element of a range of a view of it passed `mut`",
+        Fixtures.Ownership.element_of_a_range_of_a_view_of_a_read_only_list_passed_mut );
+      ( "the variable of a `mut` loop over a view of it",
+        Fixtures.Ownership.loop_variable_over_a_view_of_a_read_only_list_passed_mut );
+      ( "the assigned variable of a `mut` loop over a view of it",
+        Fixtures.Ownership.loop_variable_over_a_view_of_a_read_only_list_assigned );
+      ( "the variable of a `mut` loop over a range of a view of it",
+        Fixtures.Ownership.loop_variable_over_a_range_of_a_view_of_a_read_only_list_passed_mut );
+      ( "a name that a `match` binds to an element of a view of it",
+        Fixtures.Ownership.match_binding_of_an_element_of_a_view_of_a_read_only_list_passed_mut );
+    ];
+  Harness.test
+    "a `mut` parameter can be written through ranges of, and `mut` loops over, a view of it"
+    (fun () ->
+      expect_fine Fixtures.Ownership.writes_through_ranges_and_loops_of_views_of_a_mut_list);
   Harness.test "a read-only `Slice` parameter cannot be written through" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.read_only_slice_written "types.not_assignable")
 
@@ -856,7 +881,40 @@ let () =
   Harness.test "a `List` cannot be passed `mut` to a method of `Slice` while a range of it is live"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.list_sorted_while_a_range_of_it_is_live
+        "ownership.mutated_while_viewed");
+  Harness.test
+    "an `Array` cannot be assigned while a name aliases a part that a method of `Slice` lent"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Ownership.array_of_strings_assigned_while_a_part_it_lent_is_aliased
+        "ownership.mutated_while_viewed");
+  Harness.test
+    "an `Array` cannot be passed `mut` to a method of `Slice` while a range of it is live"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.array_sorted_while_a_range_of_it_is_live
         "ownership.mutated_while_viewed")
+
+let () =
+  List.iter
+    (fun (lender, fixture) ->
+      Harness.test
+        (Printf.sprintf "%s cannot be assigned while a view that a call returned of it is live"
+           lender) (fun () -> expect_one_diagnostic fixture "ownership.mutated_while_viewed"))
+    [
+      ("a `Plain` array", Fixtures.Ownership.plain_array_assigned_while_its_slice_is_live);
+      ( "a `Plain` array passed to a function",
+        Fixtures.Ownership.plain_array_assigned_while_a_view_a_call_returned_is_live );
+      ( "a `Plain` record that holds an array",
+        Fixtures.Ownership.record_holding_an_array_assigned_while_a_view_of_it_is_live );
+    ];
+  Harness.test "a view of a temporary `Plain` array cannot outlive the temporary" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.slice_of_a_temporary_plain_array_kept
+        "ownership.views_temporary");
+  Harness.test "a `Plain` array can be assigned after the last use of a view of it" (fun () ->
+      expect_fine Fixtures.Ownership.plain_array_assigned_after_the_last_use_of_its_slice);
+  Harness.test "a `Plain` record that holds no array lends nothing to a view that a call returns"
+    (fun () ->
+      expect_fine Fixtures.Ownership.plain_record_assigned_while_a_view_a_call_returned_is_live)
 
 let () =
   let make = Fixtures.Ownership.make_an_option_of_a_string in

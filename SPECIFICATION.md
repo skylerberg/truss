@@ -559,6 +559,11 @@ fn Option[Value].take(mut self) -> Option[Value] {
 - **`Plain` types copy implicitly.** A type made only of fixed-size data with
   nothing on the heap, such as the integers, floats, `Bool`, `Character`,
   and records, sum types, and `Array`s built only from those, is `Plain`.
+- **A name bound to a `Plain` value is a copy.** A `let`, or a pattern of a
+  `match` or an `is`, that binds a `Plain` value without `mut` copies it, so
+  the place it was bound from can be assigned while the name is live. The
+  variable of a `for` loop is not copied: the loop lends its collection for
+  the body.
 - **`Copyable` types have `copy()`.** An implicit copy never allocates.
 - A copy has the original's capacity.
 - **Handles are not `Copyable`,** nor is a type that holds one.
@@ -599,8 +604,9 @@ it. The compiler checks this within each function.
   list makes that a view.
 - **A function returns a view only of the places its parameters view, or of
   the parameters themselves.** The caller treats the result as viewing
-  everything that its read-only and view arguments view. Arguments that are
-  `Plain` lend nothing.
+  everything that its read-only and view arguments view. An argument that
+  is `Plain` lends nothing, unless it holds an `Array`: an array is stored
+  in place, so a `Slice` of it views the argument.
 - **A function stores only the views it is given.** To store a view of an
   argument in a `mut` parameter or in `mut self`, the function takes that
   argument as a `Slice`, a `StringSlice`, or a function. A value cannot
@@ -621,8 +627,9 @@ it. The compiler checks this within each function.
   long as `middle` can be used. A `let` keeps no other temporary, such as the
   receiver in `let part = make_list().slice()`. A view cannot be used after
   the temporary or the local that it views is dropped.
-- **The one implicit conversion** is a `List` passed to a `Slice` parameter,
-  or a `String` to a `StringSlice` parameter, which becomes a view of it.
+- **The one implicit conversion** is a `List` or an `Array` passed to a
+  `Slice` parameter, or a `String` to a `StringSlice` parameter, which
+  becomes a view of it.
   `self` is such a parameter, so `StringSlice.trim(name)` takes a `String`.
 
 ## Constants
@@ -786,6 +793,8 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
   terminate for a parameter whose type takes one. The one exception is a
   call through the function's own parameter, where its bound names that
   parameter's `time` (see [Capability parameters](#capability-parameters)).
+- A loop without a measure may not terminate either, so a function with a
+  `time` clause holds none (see [Loops](#loops)).
 - A recursive call on a part of a parameter needs nothing written. A part is
   a field taken out by a pattern, or an element of a collection that is
   itself a part:
@@ -1330,9 +1339,9 @@ mut scores.update_each(fn(score) { score = score / 2 })
   lambda that captures a variable is a view; one that captures none can be
   returned, stored, and moved.
 - A lambda's capabilities are inferred from its body, and so is whether it
-  terminates: a lambda may not terminate when it calls a function that may
-  not, or holds a loop without a measure. Such a lambda is an error where
-  its function type promises that it terminates.
+  terminates: a lambda may not terminate when its body makes a call that may
+  not, or holds a loop without a measure. Such a call or loop is an error
+  where the lambda's function type promises that the lambda terminates.
 - `return` and `?` exit the lambda. `break` and `continue` do not reach a
   loop outside it.
 - A lambda is always passed inside the call's parentheses.
@@ -1386,12 +1395,17 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   exits, has type `Never`.
 - `invariant` holds at the start of every iteration and when the loop ends.
 - `decreases` names a measure that every iteration makes smaller and that
-  never goes below zero. A `while` loop in a function with a `time` clause is
-  proven to terminate, and so is a `for` loop over a cursor. Where a loop
-  states no measure, a `while` loop whose condition is `<`, `<=`, `>`, or
-  `>=` has the distance between the two sides as its measure, and a `for`
+  never goes below zero. Where a loop states no measure, a `while` loop
+  whose condition compares two sides that mutate nothing with `<`, `<=`,
+  `>`, or `>=` has the distance between them as its measure, and a `for`
   loop over a cursor whose type has a `remaining(self) -> UInt64` method has
   that method's value.
+- **A loop without a measure may not terminate.** A function with a `time`
+  clause therefore holds none, and neither does a lambda whose function type
+  promises that the lambda terminates (see [Termination](#termination)). In
+  both, each `while` loop and each `for` loop over a cursor has a measure,
+  which is proven to decrease. A `for` loop over a range or over a
+  collection's elements always terminates.
 - In the clauses of a loop over a range, the loop variable is the index of
   the next iteration: in `for i in start..end`, `i` is `start` on entry and
   `end` where the loop ends, and `end + 1` after `start..=end`.
@@ -2099,9 +2113,9 @@ type Priority =
 - A call with a dot finds the type's own methods, and the methods of the
   traits it implements from the standard library, the calling package, and
   the packages the calling package's manifest lists. No trait is imported.
-- A `String` has the methods of `StringSlice` too, and a `List` those of
-  `Slice`, in each mode of `self` that its own methods and its traits'
-  methods do not take. The receiver becomes a view of itself, so
+- A `String` has the methods of `StringSlice` too, and a `List` and an
+  `Array` those of `Slice`, in each mode of `self` that its own methods and
+  its traits' methods do not take. The receiver becomes a view of itself, so
   `name.trim()` and `String.trim(name)` are `StringSlice.trim(name)`. A
   method as a value is named through the view: `StringSlice.trim`. In the
   rules below, the methods a type has from its view count as its own.
