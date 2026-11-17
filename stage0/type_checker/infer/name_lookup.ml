@@ -1,9 +1,17 @@
 type overload =
   | Type_overload of Path.t
+  | View_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
 
 let classify_receiver (receiver : Syntax.expression) : Path.receiver =
   match receiver.kind with Mode (Mut, _) -> Mut | Mode (Own, _) -> Own | _ -> Read
+
+let describe_missing_method state type_ name =
+  match Types.find_view (State.normalize state type_) with
+  | Some view ->
+      Printf.sprintf "`%s` has no method `%s`, and neither has its view `%s`."
+        (State.show state type_) name (State.show state view)
+  | None -> Printf.sprintf "`%s` has no method `%s`." (State.show state type_) name
 
 let rec coerce state env ?argument (value : Syntax.expression) ~actual ~expected =
   State.convert state env ?argument ~expression:value.id (State.read_span state value.id) ~actual
@@ -258,7 +266,15 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
                 )
             | [] ->
                 State.make_error_type state Unknown_member (State.read_span state member.id)
-                  (Printf.sprintf "`%s` has no member `%s`." (State.show state type_) member.text))
+                  (match Types.find_view type_ with
+                  | Some (Types.Named { path = Top { name; _ } as view; _ })
+                    when Members.list_own_methods state.lookups view member.text <> [] ->
+                      Printf.sprintf
+                        "`%s` has no member `%s` of its own. The method is its view's: `%s.%s`."
+                        (State.show state type_) member.text name member.text
+                  | _ ->
+                      Printf.sprintf "`%s` has no member `%s`." (State.show state type_) member.text)
+            )
         end
   | Types.Error _ | Types.Hole -> type_
   | _ ->
@@ -476,14 +492,21 @@ and resolve_overloads state receiver_type name :
   let candidates = list_trait_candidates state receiver_type name in
   if not (is_one_family state (List.map fst candidates)) then Error (List.map fst candidates)
   else
-    let own =
-      match receiver_type with
-      | Types.Named { path; _ } ->
-          List.filter_map
-            (fun (receiver, method_path) ->
-              if receiver = Path.Static then None else Some (receiver, Type_overload method_path))
+    let list_own_methods = function
+      | Some (Types.Named { path; _ }) ->
+          List.filter
+            (fun (receiver, _) -> receiver <> Path.Static)
             (Members.list_own_methods state.lookups path name)
       | _ -> []
+    in
+    let own =
+      List.map
+        (fun (receiver, method_path) -> (receiver, Type_overload method_path))
+        (list_own_methods (Some receiver_type))
+    and of_view =
+      List.map
+        (fun (receiver, method_path) -> (receiver, View_overload method_path))
+        (list_own_methods (Types.find_view receiver_type))
     in
     let from_traits =
       List.concat_map
@@ -499,7 +522,7 @@ and resolve_overloads state receiver_type name :
          (fun (receiver : Path.receiver) ->
            Option.map
              (fun overload -> (receiver, overload))
-             (List.assoc_opt receiver (own @ from_traits)))
+             (List.assoc_opt receiver (own @ from_traits @ of_view)))
          [ Read; Mut; Own ])
 
 and find_method_version state (span : Source.Definition_span.t) type_ name
@@ -541,7 +564,7 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
                     | None -> Built_in));
             },
           instance.signature )
-  | None -> None
+  | Some (View_overload _) | None -> None
 
 and make_argumentless_call callee result : Tables.call =
   { callee; arguments = []; omitted_defaults = []; callee_result = result }
