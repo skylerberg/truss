@@ -1,0 +1,13 @@
+type Row[Item](item: Item)
+
+fn Row[Item].each[capability Granted](self, visit: (fn(Item) uses Granted))
+  uses Granted
+{
+  todo
+}
+
+fn ignore(value: Int64) {}
+
+fn f(row: Row[Int64]) {
+  row.each[Int64](ignore)
+}

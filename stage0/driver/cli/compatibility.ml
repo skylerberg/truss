@@ -179,25 +179,11 @@ let compare_signatures ~is_trait_method ~added_generics ~(before : Types.signatu
         parameter_changes;
     ]
 
-let accepts_type_arguments (path : Path.t) (signature : Types.signature) =
-  match (path, signature.receiver) with
-  | Method { receiver = Static; _ }, _ -> false
-  | _, Some (_, Named { arguments; _ }) ->
-      List.compare_length_with signature.generics (List.length arguments) > 0
-  | _, _ -> signature.generics <> []
-
-let compare_function_signatures path ~(before : Types.signature) ~(after : Types.signature) =
+let compare_function_signatures ~(before : Types.signature) ~(after : Types.signature) =
   let added_generics = list_added_capability_generics ~before ~after in
-  let breaks_written_type_arguments = accepts_type_arguments path before in
   List.map
     (fun (generic : Types.generic) ->
-      if breaks_written_type_arguments then
-        Breaks
-          (Printf.sprintf
-             "gained the capability parameter `%s`, and a call that writes type arguments then \
-              gives too few"
-             generic.generic.name)
-      else Grows (Printf.sprintf "gained the capability parameter `%s`" generic.generic.name))
+      Grows (Printf.sprintf "gained the capability parameter `%s`" generic.generic.name))
     added_generics
   @ compare_signatures ~is_trait_method:false ~added_generics ~before ~after
 
@@ -375,7 +361,7 @@ let compare ~before ~after package =
                with
               | ( Some (Function_interface _ | Theorem_interface _),
                   Some (Function_interface _ | Theorem_interface _) ) ->
-                  compare_function_signatures path
+                  compare_function_signatures
                     ~before:(read_effective_signature before path)
                     ~after:(read_effective_signature after path)
                   @ compare_contracts ~before:(read_contract before before_key)

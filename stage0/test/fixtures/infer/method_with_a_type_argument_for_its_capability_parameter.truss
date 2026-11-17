@@ -1,0 +1,13 @@
+type Row[Item](item: Item)
+
+fn Row[Item].tagged[Tag, capability Granted](self, visit: (fn(Item) uses Granted)) -> Option[Tag]
+  uses Granted
+{
+  todo
+}
+
+fn ignore(value: Int64) {}
+
+fn f(row: Row[Int64]) {
+  let _ = row.tagged[String, Int64](ignore)
+}

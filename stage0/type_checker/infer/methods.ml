@@ -667,7 +667,7 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
       let instance = Instantiation.instantiate state (State.read_span state value.id) signature in
       match
         Name_lookup.check_explicit_type_arguments
-          ~head:
+          ~receiver_argument_count:
             (match instance.signature.receiver with
             | Some (_, Types.Named { arguments; _ }) -> List.length arguments
             | _ -> 0)

@@ -23,7 +23,7 @@ val check_field : State.state -> Syntax.expression -> Types.ty -> Syntax.name ->
 val check_static_member : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
 
 val check_explicit_type_arguments :
-  ?head:int ->
+  ?receiver_argument_count:int ->
   State.state ->
   Syntax.expression ->
   Instantiation.instance ->

@@ -316,31 +316,35 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
       State.make_error_type state Unknown_member (State.read_span state member.id)
         (Printf.sprintf "`%s` has no member `%s`." (State.show state type_) member.text)
 
-and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) instance items :
-    (unit, Types.ty) result =
+and check_explicit_type_arguments ?(receiver_argument_count = 0) state (value : Syntax.expression)
+    (instance : Instantiation.instance) items : (unit, Types.ty) result =
   if items = [] then Ok ()
   else
     match Instantiation.check_written_arguments state items with
     | Error error -> Error error
     | Ok written -> (
-        let own = List.drop head instance.type_arguments in
-        if List.length written <> List.length own then
+        let expected =
+          List.filter
+            (function Types.Type _ | Types.Value _ -> true | Types.Capabilities _ -> false)
+            (List.drop receiver_argument_count instance.type_arguments)
+        in
+        if List.length written <> List.length expected then
           Error
             (State.make_error_type state Arity (State.read_span state value.id)
                (Printf.sprintf "This takes %s, and %s given."
-                  (Diagnostic.show_count (List.length own) "type argument" "type arguments")
+                  (Diagnostic.show_count (List.length expected) "type argument" "type arguments")
                   (Diagnostic.show_count (List.length written) "is" "are")))
         else
           let errors =
             List.concat
               (List.map2
-                 (fun written own ->
-                   match (written, own) with
-                   | Types.Type written, Types.Type own ->
-                       ignore (State.unify state written own);
+                 (fun written expected ->
+                   match (written, expected) with
+                   | Types.Type written, Types.Type expected ->
+                       ignore (State.unify state written expected);
                        []
-                   | Types.Value written, Types.Value own ->
-                       ignore (Unify.unify_value state.unifier written own);
+                   | Types.Value written, Types.Value expected ->
+                       ignore (Unify.unify_value state.unifier written expected);
                        []
                    | Types.Type _, Types.Value _ ->
                        [
@@ -352,8 +356,10 @@ and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) 
                          State.make_error_type state Argument_kind (State.read_span state value.id)
                            "A `UInt64` value is given where a type argument is expected.";
                        ]
-                   | _ -> [])
-                 written own)
+                   | Types.Capabilities _, _ | _, Types.Capabilities _ ->
+                       State.raise_bug
+                         "a written type argument is paired with a set of capabilities")
+                 written expected)
           in
           match errors with [] -> Ok () | error :: _ -> Error error)
 

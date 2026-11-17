@@ -34,7 +34,12 @@ val extract_signature_name : Syntax.signature -> Syntax.name
 val classify_receiver : Syntax.parameter list -> Path.receiver
 val extract_last_name : Path.module_ -> string
 
-type entry = { name : string; kind : named; visibility : Syntax.visibility; generic : bool }
+type entry = {
+  name : string;
+  kind : named;
+  visibility : Syntax.visibility;
+  takes_type_arguments : bool;
+}
 
 module String_map : Map.S with type key = String.t
 

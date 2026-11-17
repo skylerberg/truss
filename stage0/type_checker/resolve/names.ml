@@ -77,7 +77,12 @@ let classify_receiver (parameters : Syntax.parameter list) : Path.receiver =
 let extract_last_name (module_ : Path.module_) =
   match List.rev (Path.list_module_parts module_) with last :: _ -> last | [] -> ""
 
-type entry = { name : string; kind : named; visibility : Syntax.visibility; generic : bool }
+type entry = {
+  name : string;
+  kind : named;
+  visibility : Syntax.visibility;
+  takes_type_arguments : bool;
+}
 
 module String_map = Map.Make (String)
 
@@ -252,23 +257,38 @@ let convert_intended : Syntax.intended_kind -> named = function
   | Intended_capability -> Capability
   | Intended_theorem -> Theorem
 
+let takes_type_arguments (generics : Syntax.generic_parameter list) =
+  List.exists
+    (fun (generic : Syntax.generic_parameter) ->
+      match generic.kind with
+      | Type_parameter _ | Value_parameter _ | Generic_error -> true
+      | Capability_parameter _ -> false)
+    generics
+
 let list_file_entries (top_levels : Syntax.top_level list) =
   List.concat_map
     (fun (top_level : Syntax.top_level) ->
       let definition = top_level.definition.value in
-      let make_plain_entries name kind generic =
-        [ { name; kind; visibility = definition.visibility; generic } ]
+      let make_plain_entries name kind generics =
+        [
+          {
+            name;
+            kind;
+            visibility = definition.visibility;
+            takes_type_arguments = takes_type_arguments generics;
+          };
+        ]
       in
       match definition.kind with
       | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
-          make_plain_entries name.text Function (generics <> [])
-      | Type_definition { name; generics; _ } -> make_plain_entries name.text Type (generics <> [])
-      | Trait { name; generics; _ } -> make_plain_entries name.text Trait (generics <> [])
-      | Capability { name; _ } -> make_plain_entries name.text Capability false
-      | Constant { name = Plain_name name; _ } -> make_plain_entries name.text Constant false
-      | Theorem { name; generics; _ } -> make_plain_entries name.text Theorem (generics <> [])
+          make_plain_entries name.text Function generics
+      | Type_definition { name; generics; _ } -> make_plain_entries name.text Type generics
+      | Trait { name; generics; _ } -> make_plain_entries name.text Trait generics
+      | Capability { name; _ } -> make_plain_entries name.text Capability []
+      | Constant { name = Plain_name name; _ } -> make_plain_entries name.text Constant []
+      | Theorem { name; generics; _ } -> make_plain_entries name.text Theorem generics
       | Definition_error { name = Some (Plain_name name); intended = Some intended } ->
-          make_plain_entries name.text (convert_intended intended) false
+          make_plain_entries name.text (convert_intended intended) []
       | Function _ | Method_declaration _ | Constant _ | Impl _ | Test _ | Law_proof _
       | Definition_error _ ->
           [])
@@ -281,7 +301,8 @@ let builtin_entries =
         name = Intrinsic.show_builtin builtin;
         kind = Type;
         visibility = Public;
-        generic = (match builtin with Array | Storage | View | Shared -> true | _ -> false);
+        takes_type_arguments =
+          (match builtin with Array | Storage | View | Shared -> true | _ -> false);
       })
     Intrinsic.builtins
   @ List.map
@@ -290,7 +311,7 @@ let builtin_entries =
           name = Intrinsic.show_operation operation;
           kind = Function;
           visibility = Public;
-          generic = true;
+          takes_type_arguments = true;
         })
       Intrinsic.operations
 

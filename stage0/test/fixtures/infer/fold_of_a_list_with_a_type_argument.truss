@@ -1,0 +1,7 @@
+fn add(total: own Int64, item: Int64) -> Int64 {
+  total + item
+}
+
+fn f(items: List[Int64]) -> Int64 {
+  items.fold[Int64](0, combine: add)
+}

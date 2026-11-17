@@ -283,7 +283,7 @@ let () =
           "grows: lib::shapes::each takes more functions for `visit`";
         ]);
   Harness.test
-    "a capability parameter added to a method breaks only beside the method's own generics"
+    "a capability parameter added to a method grows, beside the method's own generics too"
     (fun () ->
       expect Fixtures.Compatibility.row_methods_taking_functions_that_terminate
         Fixtures.Compatibility.row_methods_taking_functions_that_use_granted
@@ -292,18 +292,14 @@ let () =
           "grows: lib::shapes::Row.each takes more functions for `visit`";
           "grows: lib::shapes::Row.single gained the capability parameter `Granted`";
           "grows: lib::shapes::Row.single takes more functions for `make`";
-          "breaks: lib::shapes::Row.tagged gained the capability parameter `Granted`, and a call \
-           that writes type arguments then gives too few";
+          "grows: lib::shapes::Row.tagged gained the capability parameter `Granted`";
           "grows: lib::shapes::Row.tagged takes more functions for `visit`";
         ]);
-  Harness.test
-    "a capability parameter added after a type parameter breaks calls that write type arguments"
-    (fun () ->
+  Harness.test "a capability parameter added after a type parameter grows" (fun () ->
       expect Fixtures.Compatibility.convert_taking_a_function_that_terminates
         Fixtures.Compatibility.convert_taking_a_function_that_uses_granted
         [
-          "breaks: lib::shapes::convert gained the capability parameter `Granted`, and a call that \
-           writes type arguments then gives too few";
+          "grows: lib::shapes::convert gained the capability parameter `Granted`";
           "grows: lib::shapes::convert takes more functions for `change`";
         ]);
   Harness.test "an added capability parameter counts as the capabilities the callback's type listed"

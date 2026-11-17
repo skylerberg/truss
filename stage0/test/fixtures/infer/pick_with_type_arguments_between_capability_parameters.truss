@@ -1,0 +1,15 @@
+fn pick[capability Granted, First, capability Allowed, Second](
+  first: First,
+  visit: (fn(First) uses Granted),
+  check: (fn(First) uses Allowed),
+) -> Option[Second]
+  uses Granted, Allowed
+{
+  todo
+}
+
+fn ignore(value: Int64) {}
+
+fn f() {
+  let _ = pick[Int64, String](1, visit: ignore, check: ignore)
+}

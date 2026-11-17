@@ -1,0 +1,11 @@
+fn make[Other, capability Granted](visit: (fn(Int64) uses Granted)) -> Option[Other]
+  uses Granted
+{
+  todo
+}
+
+fn ignore(value: Int64) {}
+
+fn f() {
+  let _ = make[String, Int64](ignore)
+}

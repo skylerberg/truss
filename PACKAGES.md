@@ -144,10 +144,7 @@ compatible with the one before when:
   old types of its parameters are an instance of the new ones: a call and a
   use of the function as a value both infer such a parameter. In the
   function's own `uses`, the parameter counts as that instance's
-  capabilities. A call that writes type arguments gives one for every
-  generic parameter, so a function gains none if it has a generic
-  parameter, and a method with `self` gains none if it has a generic
-  parameter of its own
+  capabilities
 - a method of a trait or of a capability keeps its generic parameters and
   the type of each parameter, because every `impl` defines the method with
   them

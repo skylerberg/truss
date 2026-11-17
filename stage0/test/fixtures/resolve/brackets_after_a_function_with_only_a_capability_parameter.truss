@@ -1,0 +1,11 @@
+fn apply[capability Granted](visit: (fn(Int64) uses Granted))
+  uses Granted
+{
+  visit(1)
+}
+
+fn ignore(value: Int64) {}
+
+fn f() {
+  apply[Int64](ignore)
+}

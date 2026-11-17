@@ -928,6 +928,41 @@ let () =
       expect_one_diagnostic Fixtures.Infer.uint8_let_of_minus_one "types.negated_unsigned");
   Harness.test "explicit type arguments give exactly the function's own" (fun () ->
       expect_one_diagnostic Fixtures.Infer.pick_with_one_type_argument "types.arity");
+  Harness.test "a written type argument gives the type parameter before a capability parameter"
+    (fun () ->
+      let text = Fixtures.Infer.make_with_a_type_argument_before_a_capability_parameter in
+      expect_fine text;
+      expect_type text "make[String](ignore)" "Option[String]");
+  Harness.test "a capability parameter takes no written type argument" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.make_with_a_type_argument_for_its_capability_parameter
+        "types.arity" ~says:"This takes 1 type argument, and 2 are given.");
+  Harness.test "written type arguments skip the capability parameters before and between them"
+    (fun () ->
+      let text = Fixtures.Infer.pick_with_type_arguments_between_capability_parameters in
+      expect_fine text;
+      expect_type text "pick[Int64, String](1, visit: ignore, check: ignore)" "Option[String]");
+  Harness.test
+    "a method's written type argument gives its own type parameter before a capability parameter"
+    (fun () ->
+      let text = Fixtures.Infer.method_with_a_type_argument_before_a_capability_parameter in
+      expect_fine text;
+      expect_type text "row.tagged[String](ignore)" "Option[String]");
+  Harness.test "a method's capability parameter takes no written type argument" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.method_with_a_type_argument_for_its_capability_parameter
+        "types.arity" ~says:"This takes 1 type argument, and 2 are given.");
+  Harness.test "a method with only a capability parameter takes no written type arguments"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Infer.method_with_only_a_capability_parameter_given_a_type_argument "types.arity"
+        ~says:"This takes 0 type arguments, and 1 is given.");
+  Harness.test
+    "a trait method's written type argument gives its type parameter before a capability parameter"
+    (fun () ->
+      let text = Fixtures.Infer.trait_method_with_a_type_argument_before_a_capability_parameter in
+      expect_fine text;
+      expect_type text "walker.convert[String](ignore)" "Option[String]");
+  Harness.test "`fold` of a list takes the type of its total as its one written type argument"
+    (fun () -> expect_fine Fixtures.Infer.fold_of_a_list_with_a_type_argument);
   Harness.test "a type given too few arguments is one error, not a mismatch for each field"
     (fun () -> expect_one_diagnostic Fixtures.Infer.pair_built_with_one_type_argument "types.arity");
   Harness.test "an associated type that a supertrait fixes to Self is Self" (fun () ->

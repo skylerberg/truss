@@ -1,0 +1,10 @@
+trait Walk {
+  fn convert[Other, capability Granted](self, visit: (fn(Int64) uses Granted)) -> Option[Other]
+    uses Granted
+}
+
+fn ignore(value: Int64) {}
+
+fn f[Walker: Walk](walker: Walker) {
+  let _ = walker.convert[String](ignore)
+}

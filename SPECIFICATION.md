@@ -740,6 +740,13 @@ arguments or an index (see
 [Constructs resolved after parsing](#constructs-resolved-after-parsing)), and
 a diagnostic about `f[X]` says which reading applied.
 
+- The written arguments give every type parameter and `UInt64` generic
+  parameter declared after the function's name, in order.
+- A capability parameter is always inferred and takes no position among the
+  written arguments: `for_each[Item, capability Granted]` takes one, as in
+  `for_each[String](names, visit: greet)`. A function whose only generic
+  parameters are capability parameters takes no type arguments.
+
 ### Clauses
 
 ```ebnf
@@ -960,9 +967,10 @@ public fn for_each[Item, capability Granted](
 A capability parameter passes on whatever a callback may do: the
 capabilities it uses, and whether it terminates.
 
-- A call infers `Granted` from the functions it passes. Where the type of
-  `visit` has no `time` clause and the function passed may not terminate,
-  `Granted` records that, and so the call may not terminate.
+- A call infers `Granted` from the functions it passes, and writes no type
+  argument for it (see [Explicit type arguments](#explicit-type-arguments)).
+  Where the type of `visit` has no `time` clause and the function passed may
+  not terminate, `Granted` records that, and so the call may not terminate.
 - `(fn(Item) uses Granted cost time finite)` takes only functions that
   terminate, whatever capabilities they use.
 - A `time` clause follows a function parameter only through its bound.
@@ -2419,7 +2427,7 @@ library reaches the operating system, through the compiler.
 
 | Construct | Decided by | How |
 |---|---|---|
-| `name[...]` | Name resolution | Type arguments if `name` is a generic function, a type, or a trait; otherwise an index. For a method, type checking decides. |
+| `name[...]` | Name resolution | Type arguments if `name` is a function with a type parameter or a `UInt64` generic parameter, a type, or a trait; otherwise an index. For a method, type checking decides. |
 | A bare argument after the first | Type checking | Names a parameter or field of the callee |
 | Whether an expression after `mut` or `own` starts with a place | Name resolution | It starts with a variable, a parameter, `self`, or a constant |
 | A variant in a pattern | Type checking | Looked up in the type of the scrutinee |

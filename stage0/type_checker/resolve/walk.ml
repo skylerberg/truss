@@ -421,14 +421,16 @@ and resolve_bracket state scope (value : Syntax.expression) base items =
         | Some (Type_parameter _ | Capability_parameter _) ->
             Type_arguments
         | Some (Definition ((Function | Theorem), Top { module_; name })) ->
-            let generic =
-              match state.lookups.find module_ name with Some item -> item.generic | None -> false
+            let takes_type_arguments =
+              match state.lookups.find module_ name with
+              | Some item -> item.takes_type_arguments
+              | None -> false
             in
-            if not generic then
+            if not takes_type_arguments then
               report state Not_generic (read_span state value.id)
                 (Printf.sprintf
-                   "`%s` is a function without generic parameters, so `[...]` cannot give it type \
-                    arguments, and a function cannot be indexed."
+                   "`%s` is a function without a type parameter or a `UInt64` generic parameter, \
+                    so `[...]` cannot give it type arguments, and a function cannot be indexed."
                    name);
             Type_arguments
         | _ -> Index)

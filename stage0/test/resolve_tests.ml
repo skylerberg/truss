@@ -295,7 +295,11 @@ let () =
       | Some Resolve.Method_bracket -> ()
       | _ -> Harness.fail "decided");
   Harness.test "brackets after a function without generic parameters are an error" (fun () ->
-      expect_one_diagnostic Fixtures.Resolve.brackets_after_a_plain_function "resolve.not_generic")
+      expect_one_diagnostic Fixtures.Resolve.brackets_after_a_plain_function "resolve.not_generic");
+  Harness.test "brackets after a function with only a capability parameter are an error" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Resolve.brackets_after_a_function_with_only_a_capability_parameter
+        "resolve.not_generic" ~says:"`[...]` cannot give it type arguments")
 
 let () =
   Harness.test "mut before a call to a function is an error with a fix that removes it" (fun () ->
