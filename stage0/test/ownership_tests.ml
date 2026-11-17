@@ -845,6 +845,17 @@ let () =
   Harness.test "a `String` cannot be mutated while a view that its view's method returned is live"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.string_mutated_while_its_trimmed_view_is_live
+        "ownership.mutated_while_viewed");
+  Harness.test "a `List` lends a part through a lending method of `Slice`" (fun () ->
+      expect_fine Fixtures.Ownership.then_block_reading_a_part_that_a_list_lends);
+  Harness.test
+    "a `List` cannot be mutated while a name aliases a part that a method of `Slice` lent"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.then_block_mutating_the_list_that_lends
+        "ownership.mutated_while_viewed");
+  Harness.test "a `List` cannot be passed `mut` to a method of `Slice` while a range of it is live"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.list_sorted_while_a_range_of_it_is_live
         "ownership.mutated_while_viewed")
 
 let () =
