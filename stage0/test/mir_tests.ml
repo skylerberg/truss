@@ -102,7 +102,7 @@ and collect_effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local l
   | Slice { destination; base; call; _ } ->
       let read, given = list_written destination in
       (list_call_locals call @ list_place_locals base @ read, given, [])
-  | Template { destination; call; _ } ->
+  | Checked_literal { destination; call; _ } ->
       let read, given = list_written destination in
       (list_call_locals call @ read, given, [])
   | Live locals -> ([], locals, [])

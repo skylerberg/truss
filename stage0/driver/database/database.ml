@@ -991,24 +991,34 @@ let read_lowering_settings database =
   | Some settings -> settings
   | None -> Compiler_bug.raise_bug ~stage:"Database" "this host has no lowering settings"
 
-let list_proof_template_checks : Prover.proof part -> _ = function
+let list_proof_literal_checks : Prover.proof part -> _ = function
   | Value (Obligations { obligations; _ }) ->
       List.filter_map
         (fun (obligation : Prover.State.obligation) ->
           Option.map
-            (fun (template_clause : Prover.State.template_clause) -> template_clause.check)
-            obligation.template_clause)
+            (fun (literal_clause : Prover.State.literal_clause) -> literal_clause.check)
+            obligation.literal_clause)
         obligations
   | Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked -> []
 
-let make_template_check_root ({ from_template; literals; clauses } : Prover.State.template_check) =
-  Instance.Template_check { from_template; literals; clauses }
+let convert_literal_check ({ method_; subject; clauses } : Prover.State.literal_check) :
+    Instance.literal_check =
+  {
+    method_;
+    subject =
+      (match subject with
+      | Template_text literals -> Template_text literals
+      | Constant_argument { definition; origin } -> Constant_argument { definition; origin });
+    clauses;
+  }
 
-let claim_template_check_roots database (key : Resolve.Names.key) =
+let make_literal_check_root check = Instance.Literal_check (convert_literal_check check)
+
+let claim_literal_check_roots database (key : Resolve.Names.key) =
   if Option.is_some database.lowering then
     claim_roots database (Stored (Any (Proof key)))
-      (List.map make_template_check_root
-         (list_proof_template_checks (read_stored database (Proof key))))
+      (List.map make_literal_check_root
+         (list_proof_literal_checks (read_stored database (Proof key))))
 
 let find_entry_point (names : Resolve.Names.lookups) package =
   List.find_map
@@ -1344,7 +1354,7 @@ let compute_part database (Part.Any typed as part) =
   | Proof key ->
       compute_value (Proof key) (fun note ->
           make_part (Prover.prove (make_recording_proof_lookups database note)) key);
-      claim_template_check_roots database key
+      claim_literal_check_roots database key
   | Lowered key ->
       compute_value (Lowered key) (fun note ->
           match
@@ -2108,7 +2118,7 @@ let prove database files =
         unmark database part;
         compute_part database part
       end
-      else claim_template_check_roots database key)
+      else claim_literal_check_roots database key)
     keys;
   { database; keys }
 
@@ -2127,13 +2137,13 @@ let list_holes proofs path =
         holes
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
 
-let list_template_checks (proofs : proofs) =
+let list_literal_checks (proofs : proofs) =
   let database = proofs.database in
   let note = note_untracked_read database in
   match
     List.sort_uniq compare
       (List.concat_map
-         (fun key -> list_proof_template_checks (read_part database note (Proof key)))
+         (fun key -> list_proof_literal_checks (read_part database note (Proof key)))
          proofs.keys)
   with
   | [] -> []
@@ -2143,7 +2153,7 @@ let list_template_checks (proofs : proofs) =
            (List.map (fun (key : Resolve.Names.key) -> key.module_.package) proofs.keys));
       List.filter
         (fun check ->
-          match find_part database note (Test_key (make_template_check_root check)) with
+          match find_part database note (Test_key (make_literal_check_root check)) with
           | Some Blocked -> false
           | Some (Value _ | Failed _) | None -> true)
         checks

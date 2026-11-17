@@ -1436,9 +1436,16 @@ let pending: Stack[Int64] = [1, 2, 3]
 - Such a literal is a call of `from_elements` with the `List` of its
   elements, or of `from_entries` with a `List` of one `map::Entry` for each
   key and value, in the order written. It costs that list and that call.
-- `from_entries` requires keys that are pairwise distinct by `==`, so a map
-  literal's keys are proven distinct. An `impl` for a type that holds a key
-  more than once states a weaker `requires`.
+- `from_entries` requires `map::has_distinct_keys(entries)`, which holds for
+  keys that are pairwise distinct by `==`, so a map literal's keys are proven
+  distinct. An `impl` for a type that holds a key more than once states a
+  weaker `requires`.
+- A literal of such a type whose elements are all constant expressions is
+  known when the code is compiled. The compiler proves each `requires` of its
+  `from_elements` or `from_entries` that can be evaluated at run time by
+  running it on the literal, as compiled code, as it does for a tagged
+  template. A check that panics, reaches `todo`, or runs past the time limit
+  is an error.
 - A list literal may repeat an element, and `from_elements` decides which of
   two equal elements a collection keeps.
 

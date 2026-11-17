@@ -1,8 +1,8 @@
 let is_bookkeeping (statement : Mir.Graph.statement) =
   match statement.kind with
   | Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> true
-  | Assign _ | Call _ | Lend _ | Slice _ | Template _ | Assert _ | Echo _ | Provide _ | Provide_end
-    ->
+  | Assign _ | Call _ | Lend _ | Slice _ | Checked_literal _ | Assert _ | Echo _ | Provide _
+  | Provide_end ->
       false
 
 let rec only_returns (body : Mir.Graph.body) block ~seen =

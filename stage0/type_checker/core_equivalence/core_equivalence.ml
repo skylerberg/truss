@@ -90,9 +90,8 @@ and is_equivalent_kind renaming (before : Core.kind) (after : Core.kind) =
   | Float before, Float after -> Float.equal before after
   | Boolean before, Boolean after -> Bool.equal before after
   | String before, String after -> String.equal before after
-  | Template { literals; call }, Template after ->
-      List.equal String.equal literals after.literals
-      && is_equivalent_expression renaming call after.call
+  | Checked_literal { subject; call }, Checked_literal after ->
+      subject = after.subject && is_equivalent_expression renaming call after.call
   | Use before, Use after -> is_equivalent_place renaming before after
   | Copy before, Copy after -> is_equivalent_operand renaming before after
   | Function_value { path; type_arguments }, Function_value after ->
@@ -183,10 +182,10 @@ and is_equivalent_kind renaming (before : Core.kind) (after : Core.kind) =
       function_ = after.function_
       && List.equal (is_equivalent_expression renaming) arguments after.arguments
   | Method_time before, Method_time after -> is_equivalent_callee renaming before after
-  | ( ( Integer _ | Float _ | Boolean _ | String _ | Template _ | Use _ | Copy _ | Function_value _
-      | Value_parameter _ | Lambda _ | Construct _ | Collection_literal _ | Map_literal _
-      | Record_update _ | Slice _ | Call _ | Operator _ | Compare _ | Not _ | And _ | Or _
-      | Implies _ | Matches _ | Convert _ | To_any _ | If _ | Match _ | Block _ | Provide _
+  | ( ( Integer _ | Float _ | Boolean _ | String _ | Checked_literal _ | Use _ | Copy _
+      | Function_value _ | Value_parameter _ | Lambda _ | Construct _ | Collection_literal _
+      | Map_literal _ | Record_update _ | Slice _ | Call _ | Operator _ | Compare _ | Not _ | And _
+      | Or _ | Implies _ | Matches _ | Convert _ | To_any _ | If _ | Match _ | Block _ | Provide _
       | Return _ | Break | Continue | Todo | Unreachable | Echo _ | Result | Old _ | Current_target
       | Quantified _ | Yielded | Identical _ | Specification_function _ | Method_time _ ),
       _ ) ->

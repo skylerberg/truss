@@ -37,6 +37,8 @@ let rec find_offending_expression (state : State.state) (value : Syntax.expressi
   | Map entries -> find_first (List.concat_map (fun (key, item) -> [ key; item ]) entries)
   | _ -> Some value
 
+let is_constant_expression state value = Option.is_none (find_offending_expression state value)
+
 let rec check_arithmetic (state : State.state) (value : Syntax.expression) =
   let evaluate part =
     Interface.Constants.evaluate_expression state.lookups.interface ~visiting:[] state.resolved part

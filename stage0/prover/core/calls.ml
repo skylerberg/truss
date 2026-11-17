@@ -105,9 +105,9 @@ let list_structural_parameters context (frame : State.frame) (part : State.part)
              | _ -> []))
        part.parameters)
 
-let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
-    path (contract : State.contract) (values : State.passed list) ~lent_final ~havoc_mut
-    ~substitution_of ~instance =
+let call_contract ?(is_constant_literal = false) context (frame : State.frame)
+    (site : Invocation.site) (invocation : Invocation.t) path (contract : State.contract)
+    (values : State.passed list) ~lent_final ~havoc_mut ~substitution_of ~instance =
   let values =
     if contract.is_logic_function then
       List.map
@@ -264,13 +264,34 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let is_checked =
     Mir.is_index_call invocation.callee && Mir.list_checked_requires context.lookups.mir path <> []
   in
+  let literal_check =
+    match (requiring, caller.key) with
+    | [ part ], Some key when is_constant_literal ->
+        Some
+          {
+            State.method_ = path;
+            subject = Constant_argument { definition = key.path; origin = site.origin };
+            clauses =
+              List.filter_map Fun.id
+                (List.mapi
+                   (fun index (requirement : Mir.requirement) ->
+                     if requirement.is_executable then Some index else None)
+                   part.requires);
+          }
+    | _ -> None
+  in
   let required =
     List.concat_map
       (fun (part : State.part) ->
         let entry = read_entry_frame part in
-        List.map
-          (fun (requirement : Mir.requirement) ->
+        List.mapi
+          (fun index (requirement : Mir.requirement) ->
             let clause = requirement.clause in
+            let literal_clause =
+              Option.bind literal_check (fun (check : State.literal_check) ->
+                  if List.mem index check.clauses then Some { State.check; clause = index }
+                  else None)
+            in
             let _, term = Validity.read_specification context entry clause in
             let cited = Option.map (fun key -> (key, clause.origin)) part.callee.key in
             let fixes = list_required_fixes context frame part requirement term values in
@@ -283,7 +304,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             in
             if is_checked then
               Facts.oblige_safe_operation context frame Requires location ?cited ~fixes message term
-            else Facts.oblige context frame Requires location ?cited ~fixes message term;
+            else
+              Facts.oblige ?literal_clause context frame Requires location ?cited ~fixes message
+                term;
             term)
           part.requires)
       requiring
@@ -796,8 +819,8 @@ let compute_function_value_amount context frame (function_type : Types.function_
       then Operations.declare_unknown_amount context frame counter
       else Costs.zero
 
-let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site)
-    (invocation : Invocation.t) ~through (values : State.passed list) =
+let apply_call ?leave_lent ?is_constant_literal context (frame : State.frame)
+    (site : Invocation.site) (invocation : Invocation.t) ~through (values : State.passed list) =
   let location = Facts.locate context frame.source site.origin in
   List.iter
     (fun (passed : State.passed) ->
@@ -928,8 +951,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
   let with_contract ?(substitution_of = fun _ -> []) ?(instance = []) path = function
     | Some contract ->
         Some
-          (call_contract ~lent_final:leave_lent context frame site invocation path contract values
-             ~havoc_mut ~substitution_of ~instance)
+          (call_contract ?is_constant_literal ~lent_final:leave_lent context frame site invocation
+             path contract values ~havoc_mut ~substitution_of ~instance)
     | None ->
         let frame = havoc_mut frame in
         let frame =

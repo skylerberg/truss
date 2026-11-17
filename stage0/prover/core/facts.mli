@@ -28,7 +28,7 @@ val add_requires : State.context -> State.frame -> State.message -> State.fix li
 val show_truss_value : State.context -> Logic.term -> string option
 
 val oblige :
-  ?template_clause:State.template_clause ->
+  ?literal_clause:State.literal_clause ->
   ?cited:Resolve.Names.key * Core.origin ->
   ?fixes:State.fix list ->
   State.context ->
@@ -51,7 +51,7 @@ val oblige_safe_operation :
   unit
 
 val make_closed_obligation :
-  ?template_clause:State.template_clause ->
+  ?literal_clause:State.literal_clause ->
   State.context ->
   State.frame ->
   Diagnostic.Code.prover ->
@@ -61,7 +61,7 @@ val make_closed_obligation :
   State.obligation option
 
 val make_obligation :
-  ?template_clause:State.template_clause ->
+  ?literal_clause:State.literal_clause ->
   State.context ->
   State.frame ->
   Diagnostic.Code.prover ->

@@ -156,13 +156,14 @@ and lent_element = { element : local; collection : place; count : block }
 and compared = { comparison : Core.comparison; left : operand; right : operand }
 and early_exit = { resumed : block; returned : local option }
 and statement = { kind : statement_kind; origin : Core.origin }
+and literal_subject = Template_text of string list | Constant_argument of formula
 
 and basic =
   | Assign of { target : place; value : rvalue }
   | Call of { destination : place option; call : call }
   | Lend of { part : local; call : call }
   | Slice of { destination : place; base : place; base_type : Types.ty; call : call }
-  | Template of { destination : place; literals : string list; call : call }
+  | Checked_literal of { destination : place; subject : literal_subject; call : call }
   | Live of local list
   | Dead of local list
   | Assert of operand

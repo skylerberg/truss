@@ -8,13 +8,20 @@ public opaque type Map[Key: Hash + Ordered, Value](entries: List[Entry[Key, Valu
 
 public type Entry[Key, Value](key: Key, value: Value)
 
+public fn has_distinct_keys[Key: Equal, Value](entries: List[Entry[Key, Value]]) -> Bool
+  ensures result == (forall i in 0..entries.length() => forall j in 0..entries.length() =>
+    i < j ==> !(entries.model()[i].key == entries.model()[j].key))
+  cost time finite
+{
+  forall i in 0..entries.length() => forall j in 0..i => !(entries[j].key == entries[i].key)
+}
+
 public trait FromEntries {
   type Key: Equal
   type Value
 
   fn from_entries(entries: own List[Entry[Self.Key, Self.Value]]) -> Self
-    requires forall i in 0..entries.length() => forall j in 0..entries.length() =>
-      i < j ==> !(entries.model()[i].key == entries.model()[j].key)
+    requires has_distinct_keys(entries)
     cost time finite
 }
 
@@ -651,8 +658,7 @@ impl FromEntries for Map[Key: Hash + Ordered, Value] {
   type Value = Value
 
   fn from_entries(entries: own List[Entry[Key, Value]]) -> Map[Key, Value]
-    requires forall i in 0..entries.length() => forall j in 0..entries.length() =>
-      i < j ==> !(entries.model()[i].key == entries.model()[j].key)
+    requires has_distinct_keys(entries)
     ensures result.length() == entries.length()
     ensures forall i in 0..entries.length() =>
       result.model().contains_key(entries.model()[i].key)

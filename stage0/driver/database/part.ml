@@ -100,7 +100,7 @@ let locate_instance_package : Instance.key -> Path.package = function
   | Code { path; _ }
   | Constant path
   | Evaluator path
-  | Template_check { from_template = path; _ }
+  | Literal_check { method_ = path; _ }
   | Call_evaluation { function_ = path; _ }
   | Generated
       (Locked_entry { capability = path; _ } | Adapter { function_ = path; _ } | Program_main path)
@@ -251,7 +251,7 @@ let find_instance_definition : Instance.key -> Path.t option = function
   | Code { path; _ }
   | Constant path
   | Evaluator path
-  | Template_check { from_template = path; _ }
+  | Literal_check { method_ = path; _ }
   | Call_evaluation { function_ = path; _ }
   | Generated
       (Locked_entry { capability = path; _ } | Adapter { function_ = path; _ } | Program_main path)

@@ -73,14 +73,7 @@ val list_reached_definitions : t -> Path.t -> Path.t list
 val list_reached_todo_types : t -> Path.t -> Path.t list
 val make_program_path : t -> string
 val build_program : t -> main:Path.t -> output:string -> (unit, string) result
-
-val run_template_check :
-  t ->
-  from_template:Path.t ->
-  literals:string list ->
-  clauses:int list ->
-  (bool list, string) result
-
+val run_literal_check : t -> Instance.literal_check -> (bool list, string) result
 val list_roots : tests:Path.t list -> mains:Path.t list -> Instance.key list
 val lower : Lookups.settings -> Lookups.t -> Instance.key -> (lowered, unsupported) result
 val list_references : lowered -> Instance.key list

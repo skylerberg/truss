@@ -557,12 +557,13 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
       (Types.make_named (Well_known.make_path Template) [ part ])
       (build_record [ ("literals", texts); ("parts", make_list part parts) ])
   in
-  Template
+  Checked_literal
     {
-      literals =
-        List.map
-          (fun (written : Syntax.text) -> written.value)
-          (literal.first :: List.map snd literal.rest);
+      subject =
+        Template_text
+          (List.map
+             (fun (written : Syntax.text) -> written.value)
+             (literal.first :: List.map snd literal.rest));
       call =
         make from_template.callee_result
           (Call
@@ -1208,7 +1209,19 @@ let build_collection_literal state (value : Syntax.expression) (elements : Core.
       Collection_literal { elements; construction = Specification_only }
   | type_ -> State.raise_bug "a collection literal of type `%s`" (Types.show type_)
 
-let build_converted_literal state (value : Syntax.expression) ~(element : Types.ty)
+let names_no_parameter (type_ : Types.ty) =
+  let names_one = ref false in
+  ignore
+    (Types.map
+       (function
+         | Types.Parameter _ | Types.Projection _ ->
+             names_one := true;
+             None
+         | _ -> None)
+       type_);
+  not !names_one
+
+let build_converted_literal state (value : Syntax.expression) ~(element : Types.ty) ~is_constant
     (elements : Core.expression list) : Core.kind =
   let recorded = read_call state value.id in
   let list =
@@ -1216,18 +1229,30 @@ let build_converted_literal state (value : Syntax.expression) ~(element : Types.
       (Types.make_named (Well_known.make_path List) [ element ])
       (build_list_literal state ~origin:value.id element elements)
   in
-  Call
-    {
-      callee = convert_callee recorded.callee;
-      arguments = [ Operands.build_argument Own list ];
-      lends = None;
-      uses = recorded.uses;
-    }
+  let call : Core.kind =
+    Call
+      {
+        callee = convert_callee recorded.callee;
+        arguments = [ Operands.build_argument Own list ];
+        lends = None;
+        uses = recorded.uses;
+      }
+  in
+  match recorded.callee with
+  | Trait_method { evidence = Impl _; self_type; _ }
+    when is_constant && elements <> [] && names_no_parameter self_type ->
+      Checked_literal
+        {
+          subject = Constant_elements;
+          call = State.make_synthetic_expression state ~origin:value.id recorded.callee_result call;
+        }
+  | _ -> call
 
 let build_converted_map_literal state (value : Syntax.expression) ~(key : Types.ty)
-    ~(value_type : Types.ty) (entries : (Core.expression * Core.expression) list) : Core.kind =
+    ~(value_type : Types.ty) ~is_constant (entries : (Core.expression * Core.expression) list) :
+    Core.kind =
   let entry = Types.make_named (Well_known.make_path Entry) [ key; value_type ] in
-  build_converted_literal state value ~element:entry
+  build_converted_literal state value ~element:entry ~is_constant
     (List.map
        (fun (entry_key, entry_value) ->
          State.make_synthetic_expression state ~origin:value.id entry

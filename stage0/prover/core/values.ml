@@ -181,10 +181,10 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
                 requirement.is_executable && reads_only_literals parameter.local requirement.clause
             | _ -> false
           in
-          let template_check =
+          let literal_check =
             {
-              State.from_template = path;
-              literals;
+              State.method_ = path;
+              subject = Template_text literals;
               clauses =
                 List.filter_map Fun.id
                   (List.mapi
@@ -195,12 +195,12 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
           in
           List.iteri
             (fun index (requirement : Mir.requirement) ->
-              let template_clause =
-                if List.mem index template_check.clauses then
-                  Some { State.check = template_check; clause = index }
+              let literal_clause =
+                if List.mem index literal_check.clauses then
+                  Some { State.check = literal_check; clause = index }
                 else None
               in
-              Facts.oblige ?template_clause context frame Requires location
+              Facts.oblige ?literal_clause context frame Requires location
                 [
                   Text "This template may not meet `";
                   Facts.quote own.callee requirement.clause.origin;

@@ -937,6 +937,7 @@ Rules: [Ranges](SPECIFICATION.md#ranges),
 | A non-empty list literal counts as one allocation. | A `cost` clause does not depend on whether an optimization keeps the list in static memory. |
 | A literal of another collection costs its list and its call of `from_elements` or `from_entries`. | A `cost` clause is checked against the code that runs. |
 | Distinct keys are the `requires` of `from_entries`. | A duplicate key is a failed proof for every map type. Letting the last key win would hide a mistake. A repeated element of a set drops nothing, so `from_elements` requires nothing. |
+| A constant literal's `requires` are proven by running them. | The solver must show every pair of keys distinct, and it gives up on a large table. The compiled check compares the keys themselves. A tagged template's `requires` is proven the same way, so the rule adds no mechanism. |
 | A string cannot be indexed. | In UTF-8, byte `i` and character `i` differ, so code says which one it means. |
 
 ## Expressions

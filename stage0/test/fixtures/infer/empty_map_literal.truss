@@ -1,0 +1,3 @@
+fn f() -> Map[String, Int64] {
+  [:]
+}

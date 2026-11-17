@@ -8,10 +8,16 @@ type key =
   | Any_copy of Ground.ty
   | Encode of Ground.ty
   | Evaluator of Path.t
-  | Template_check of { from_template : Path.t; literals : string list; clauses : int list }
+  | Literal_check of literal_check
   | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
   | Generated of generated
   | Table of table
+
+and literal_check = { method_ : Path.t; subject : literal_subject; clauses : int list }
+
+and literal_subject =
+  | Template_text of string list
+  | Constant_argument of { definition : Path.t; origin : int }
 
 and generated =
   | Entry of impl_method

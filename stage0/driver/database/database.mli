@@ -48,7 +48,8 @@ type proofs
 
 val prove : t -> Path.file list -> proofs
 val list_holes : proofs -> Path.t -> (Path.file * int) list
-val list_template_checks : proofs -> Prover.State.template_check list
+val list_literal_checks : proofs -> Prover.State.literal_check list
+val convert_literal_check : Prover.State.literal_check -> Instance.literal_check
 val list_proofs : proofs -> (Resolve.Names.key * Prover.proof) list
 val make_proof_lookups : t -> Prover.Lookups.t
 

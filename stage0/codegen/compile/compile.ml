@@ -43,8 +43,7 @@ let make (context : Lower.context) (key : Instance.key) : lowered =
   | Debug ty -> emit_code (Debug_output.build_debug env ty)
   | Encode ty -> emit_code (Encoding.encode env ty)
   | Evaluator path -> emit_code (Lower.lower_evaluator context path)
-  | Template_check { from_template; literals; clauses } ->
-      emit_code (Lower.lower_template_check context ~from_template ~literals ~clauses)
+  | Literal_check check -> emit_code (Lower.lower_literal_check context check)
   | Call_evaluation { function_; arguments } ->
       emit_code (Lower.lower_call_evaluation context ~function_ ~arguments)
 
@@ -811,16 +810,14 @@ let build_program compiler ~main ~output =
 let list_reached_todo_types compiler root =
   compiler.requests.list_reached_todo_types (make_root_key root)
 
-let run_template_check compiler ~from_template ~literals ~clauses =
+let run_literal_check compiler (check : Instance.literal_check) =
   let ran =
     capture_failure compiler @@ fun () ->
-    run_while_compiling compiler
-      (Instance.Template_check { from_template; literals; clauses })
-      ~read:(fun output ->
+    run_while_compiling compiler (Instance.Literal_check check) ~read:(fun output ->
         let holds = Encoding.decode_booleans output in
-        if List.length holds <> List.length clauses then
-          raise_bug "checking a template of %s wrote %d results for %d clauses"
-            (Path.show from_template) (List.length holds) (List.length clauses);
+        if List.length holds <> List.length check.clauses then
+          raise_bug "checking a literal of %s wrote %d results for %d clauses"
+            (Path.show check.method_) (List.length holds) (List.length check.clauses);
         holds)
   in
   match ran with

@@ -52,6 +52,12 @@ let has_integer text value =
       match node.kind with Integer actual -> Z.equal actual (Z.of_int value) | _ -> false)
     (Support.collect_first_core_nodes text).expressions
 
+let has_constant_literal text =
+  List.exists
+    (fun (node : Core.expression) ->
+      match node.kind with Checked_literal { subject = Constant_elements; _ } -> true | _ -> false)
+    (Support.collect_first_core_nodes text).expressions
+
 let list_core_at text written occurrence =
   let value, (result : Infer.checked) = locate_expression text written occurrence in
   let form = result.form in
@@ -578,6 +584,18 @@ let () =
   Harness.test "a list literal needs the conditions of the collection's impl" (fun () ->
       expect_one_diagnostic Fixtures.Infer.list_literal_as_a_type_whose_impl_needs_more
         "types.no_impl" ~says:"`Ranked[Point]` does not implement `FromElements`.");
+  Harness.test "a literal of constant elements has its requires decided by running" (fun () ->
+      if not (has_constant_literal Fixtures.Infer.map_literal_of_constants) then
+        Harness.fail "the literal is a plain call");
+  Harness.test "a literal with an element that is not constant is a plain call" (fun () ->
+      if has_constant_literal Fixtures.Infer.map_literal_of_a_parameter then
+        Harness.fail "the literal is checked by running");
+  Harness.test "an empty literal is a plain call" (fun () ->
+      if has_constant_literal Fixtures.Infer.empty_map_literal then
+        Harness.fail "the literal is checked by running");
+  Harness.test "a constant literal of a type parameter is a plain call" (fun () ->
+      if has_constant_literal Fixtures.Infer.list_literal_as_a_bounded_type_parameter then
+        Harness.fail "the literal is checked by running");
   Harness.test "a list literal is not a type that implements no literal trait" (fun () ->
       expect_one_diagnostic Fixtures.Infer.list_literal_as_a_heap "types.mismatch");
   Harness.test "new on a type that takes a list literal names the literal" (fun () ->

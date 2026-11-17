@@ -213,16 +213,27 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
     | Float value -> Some (Constant { value = Float value; type_ = node.type_ })
     | Boolean value -> Some (Constant { value = Boolean value; type_ = node.type_ })
     | String text -> hold (Copy (read_literal text node.type_ origin))
-    | Template { literals; call = { kind = Call called; _ } } ->
+    | Checked_literal { subject; call = { kind = Call called; _ } } ->
+        let subject : Tree.literal_subject =
+          match (subject, called.arguments) with
+          | Template_text literals, _ -> Template_text literals
+          | Constant_elements, [ Passed { value = Value elements; _ } ] ->
+              let constant = Emitter.create ~is_specification:false ~entry_locals:[] () in
+              Constant_argument
+                (Emitter.build_formula constant ~origin:elements.origin ~type_:elements.type_
+                   (fun () -> ([], lower_expression constant elements)))
+          | Constant_elements, _ ->
+              raise_bug "a constant literal that does not pass one list of its elements"
+        in
         let* call = lower_call builder called ~node:node.id ~origin:node.origin in
         let local = Emitter.allocate_temporary builder node.type_ origin in
         Emitter.emit builder
-          (Basic (Template { destination = Emitter.make_local_place local; literals; call }))
+          (Basic (Checked_literal { destination = Emitter.make_local_place local; subject; call }))
           origin;
         Some
           (Tree.Use
              { place = Emitter.make_local_place local; type_ = node.type_; origin = node.origin })
-    | Template _ -> raise_bug "a tagged template whose value is not a call"
+    | Checked_literal _ -> raise_bug "a checked literal whose value is not a call"
     | Use place_ ->
         let* place_ = lower_place builder place_ in
         Some (Tree.Use { place = place_; type_ = node.type_; origin = node.origin })

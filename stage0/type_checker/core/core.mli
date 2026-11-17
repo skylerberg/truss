@@ -59,7 +59,7 @@ and kind =
   | Float of float
   | Boolean of bool
   | String of string
-  | Template of { literals : string list; call : expression }
+  | Checked_literal of { subject : literal_subject; call : expression }
   | Use of place
   | Copy of operand
   | Function_value of { path : Path.t; type_arguments : Types.argument list }
@@ -108,6 +108,7 @@ and capture = { local : local; type_ : Types.ty }
 and specification_function = Log | Power | Time | Calls
 and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
 and construction = Array | Specification_only
+and literal_subject = Template_text of string list | Constant_elements
 and conversion = Widen | To_integer | From_integer
 
 and binder =

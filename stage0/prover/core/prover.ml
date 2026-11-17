@@ -7,8 +7,8 @@ module Key_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Resolve.Names.key
 end))
 
-module Template_check_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = State.template_check
+module Literal_check_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = State.literal_check
 end))
 
 type proof =
@@ -426,6 +426,11 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
                 " It can also be checked first with an `if`, or " ^ show_stopping clause ^ "."
             | _, None -> ""
           in
+          let checked =
+            match obligation.literal_clause with
+            | Some { check = { subject = Constant_argument _; _ }; _ } -> "this literal"
+            | Some { check = { subject = Template_text _; _ }; _ } | None -> "this template's text"
+          in
           let find_failure explained =
             Some
               {
@@ -440,10 +445,12 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
               failure =
                 (match answer with
                 | Solved Proven | Ran true -> None
-                | Ran false -> find_failure " Running it on this template's text gives `false`."
+                | Ran false ->
+                    find_failure (Printf.sprintf " Running it on %s gives `false`." checked)
                 | Run_failed report ->
                     find_failure
-                      (" Running it on this template's text failed, so it is not known: " ^ report)
+                      (Printf.sprintf " Running it on %s failed, so it is not known: %s" checked
+                         report)
                 | Solved (Counterexample values) ->
                     find_failure
                       (show_counterexample (Logic.list_members obligation.query) obligation values)
@@ -475,19 +482,19 @@ let make_request (obligation : State.obligation) =
 
 type question = Decided of answer | Asked of (Solver.request * Logic.query)
 
-let run_answer runs ({ check; clause } : State.template_clause) =
+let run_answer runs ({ check; clause } : State.literal_clause) =
   Option.map
     (function
       | Ok holds -> Ran (List.assoc clause (List.combine check.clauses holds))
       | Error report -> Run_failed report)
-    (Template_check_table.find_opt runs check)
+    (Literal_check_table.find_opt runs check)
 
 type verdicts = { lookups : Lookups.t; verdicts : verdict Key_table.t }
 
 let decide ~runs lookups solver proofs =
-  let runs = Template_check_table.of_seq (List.to_seq runs) in
+  let runs = Literal_check_table.of_seq (List.to_seq runs) in
   let make_question (obligation : State.obligation) =
-    match Option.bind obligation.template_clause (run_answer runs) with
+    match Option.bind obligation.literal_clause (run_answer runs) with
     | Some answer -> Decided answer
     | None -> Asked (make_request obligation)
   in

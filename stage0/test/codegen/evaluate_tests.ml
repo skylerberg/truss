@@ -1,16 +1,15 @@
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
-let run_template_checks compile checks =
+let run_literal_checks compile checks =
   List.map
-    (fun ({ from_template; literals; clauses } as check : Prover.State.template_check) ->
-      (check, Compile.run_template_check compile ~from_template ~literals ~clauses))
+    (fun check -> (check, Compile.run_literal_check compile (Database.convert_literal_check check)))
     checks
 
 let compute_verdicts compile database =
   let proofs = Database.prove database [ Codegen_support.example_file ] in
   Prover.decide
-    ~runs:(run_template_checks compile (Database.list_template_checks proofs))
+    ~runs:(run_literal_checks compile (Database.list_literal_checks proofs))
     (Database.make_proof_lookups database)
     (Lazy.force solver) (Database.list_proofs proofs)
 
@@ -55,7 +54,7 @@ let () =
         Codegen_support.load Fixtures.Evaluate.count_template_reading_its_parts
       in
       (match
-         Database.list_template_checks (Database.prove database [ Codegen_support.example_file ])
+         Database.list_literal_checks (Database.prove database [ Codegen_support.example_file ])
        with
       | [] -> ()
       | checks -> Codegen_support.fail "%d template checks" (List.length checks));
@@ -67,11 +66,41 @@ let () =
              [ (Codegen_support.example_file, Fixtures.Evaluate.shout_with_an_ill_typed_check) ])
       in
       let proofs = Database.prove database [ Codegen_support.example_file ] in
-      match Database.list_template_checks proofs with
+      match Database.list_literal_checks proofs with
       | [] ->
           expect_failure_saying "which its tag requires."
             (list_diagnostics (Codegen_support.compile database) database)
       | checks -> Codegen_support.fail "%d template checks" (List.length checks))
+
+let () =
+  Codegen_support.test "a constant map literal's distinct keys are proven by running the check"
+    (fun () -> expect_proven (prove_with_running Fixtures.Evaluate.map_literal_of_forty_eight_keys));
+  Codegen_support.test "a constant map literal with a repeated key fails, saying it ran" (fun () ->
+      expect_failure_saying "Running it on this literal gives `false`."
+        (prove_with_running Fixtures.Evaluate.map_literal_with_a_repeated_constant_key);
+      expect_failure_saying "Running it on this literal gives `false`."
+        (prove_with_running Fixtures.Evaluate.sorted_map_literal_with_a_repeated_constant_key));
+  Codegen_support.test
+    "a constant literal in a field's default, a constant, and a lambda is proven by running"
+    (fun () ->
+      expect_proven
+        (prove_with_running Fixtures.Evaluate.map_literals_in_a_default_a_constant_and_a_lambda));
+  Codegen_support.test "a literal's check is done again when its keys have changed" (fun () ->
+      let results = make_results () in
+      expect_failure_saying "gives `false`"
+        (prove_with_running ~results Fixtures.Evaluate.map_literal_with_a_repeated_constant_key);
+      expect_proven
+        (prove_with_running ~results Fixtures.Evaluate.map_literal_with_distinct_constant_keys));
+  Codegen_support.test "a map literal with a value that is not constant is not run" (fun () ->
+      let database, compile =
+        Codegen_support.load Fixtures.Evaluate.map_literal_with_a_value_that_is_not_constant
+      in
+      (match
+         Database.list_literal_checks (Database.prove database [ Codegen_support.example_file ])
+       with
+      | [] -> ()
+      | checks -> Codegen_support.fail "%d literal checks" (List.length checks));
+      expect_proven (list_diagnostics compile database))
 
 let () =
   Codegen_support.test "a template's check is done again when the code it runs has changed"

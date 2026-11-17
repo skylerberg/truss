@@ -785,8 +785,7 @@ impl FromEntries for collections::SortedMap[Key: Ordered, Value] {
   type Value = Value
 
   fn from_entries(entries: own List[map::Entry[Key, Value]]) -> collections::SortedMap[Key, Value]
-    requires forall i in 0..entries.length() => forall j in 0..entries.length() =>
-      i < j ==> !(entries.model()[i].key == entries.model()[j].key)
+    requires map::has_distinct_keys(entries)
     ensures result.length() <= entries.length()
     cost time O(entries.length() * (entries.length() + time(Key.compare)))
   {

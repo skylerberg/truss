@@ -1,5 +1,9 @@
-type template_check = { from_template : Path.t; literals : string list; clauses : int list }
-type template_clause = { check : template_check; clause : int }
+type literal_subject =
+  | Template_text of string list
+  | Constant_argument of { definition : Path.t; origin : Core.origin }
+
+type literal_check = { method_ : Path.t; subject : literal_subject; clauses : int list }
+type literal_clause = { check : literal_check; clause : int }
 
 type piece =
   | Text of string
@@ -24,7 +28,7 @@ type obligation = {
   query : Logic.query;
   values : (Logic.symbol * string) list;
   locals : (Logic.term * string) list;
-  template_clause : template_clause option;
+  literal_clause : literal_clause option;
   decisions : (string * string option * Logic.term * Logic.term) list;
   panic_clause : Interface.Impls.declaring_clause option;
 }

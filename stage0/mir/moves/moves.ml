@@ -68,7 +68,7 @@ let list_uses ~is_moving (statement : Mir.Graph.statement) =
   let origin = statement.origin in
   match statement.kind with
   | Assign { value; _ } -> list_rvalue_uses ~is_moving ~origin value
-  | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
+  | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Checked_literal { call; _ } ->
       list_call_uses ~is_moving call
   | Assert operand | Echo operand -> list_operand_uses ~is_moving ~by_value:false operand
   | Provide { provided; _ } ->
@@ -119,7 +119,7 @@ let list_inits (statement : Mir.Graph.statement) : Mir.place list =
   | Assign { target; _ } -> [ target ]
   | Call { destination; _ } -> Option.to_list destination
   | Lend { part; _ } -> [ { root = Local part; projections = [] } ]
-  | Slice { destination; _ } | Template { destination; _ } -> [ destination ]
+  | Slice { destination; _ } | Checked_literal { destination; _ } -> [ destination ]
   | Live _ | Dead _ | Assert _ | Echo _ | Provide _ | Provide_end | Loan_start _ | Loan_end _
   | Ghost_assert _ | Matched _ | Proof _ ->
       []

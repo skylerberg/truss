@@ -14,16 +14,16 @@ let make_solver () =
 
 type t = { proofs : Database.proofs; verdicts : Prover.verdicts Lazy.t }
 
-let run_template_checks compiler checks =
+let run_literal_checks compiler checks =
   List.map
-    (fun ({ from_template; literals; clauses } as check : Prover.State.template_check) ->
-      (check, Compile.run_template_check compiler ~from_template ~literals ~clauses))
+    (fun check ->
+      (check, Compile.run_literal_check compiler (Database.convert_literal_check check)))
     checks
 
 let list_runs database snapshot packages proofs =
-  match Database.list_template_checks proofs with
+  match Database.list_literal_checks proofs with
   | [] -> []
-  | checks -> run_template_checks (Compiler.create database snapshot packages Development) checks
+  | checks -> run_literal_checks (Compiler.create database snapshot packages Development) checks
 
 let check database snapshot packages files =
   let proofs = Database.prove database files in

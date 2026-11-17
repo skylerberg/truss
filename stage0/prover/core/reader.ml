@@ -287,7 +287,7 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
             Option.iter note_assigned destination;
             note_passed call
         | Basic (Lend { call; _ }) -> note_passed call
-        | Basic (Slice { destination; call; _ } | Template { destination; call; _ }) ->
+        | Basic (Slice { destination; call; _ } | Checked_literal { destination; call; _ }) ->
             note_assigned destination;
             note_passed call
         | Basic (Provide { provided; _ }) -> List.iter note (list_mut_provided_places provided)
@@ -465,7 +465,7 @@ let evaluate_call_values context frame run (invocation : Invocation.t)
             | Default -> [])
           arguments))
 
-let read_call context frame run (call : Mir.call) ~result_type =
+let read_call ?(is_constant_literal = false) context frame run (call : Mir.call) ~result_type =
   let invocation = make_invocation call ~lends:None in
   match (invocation.callee, call.arguments) with
   | ( Trait_method { trait; name = "equal"; _ },
@@ -494,7 +494,7 @@ let read_call context frame run (call : Mir.call) ~result_type =
         | _ -> None
       in
       let values = evaluate_call_values context frame run invocation call.arguments in
-      Calls.apply_call context frame
+      Calls.apply_call ~is_constant_literal context frame
         { origin = call.origin; type_ = result_type }
         invocation ~through values
 
@@ -1377,7 +1377,14 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
                   written.slices;
             }
         | _ -> written)
-  | Template { destination; literals; call } -> (
+  | Checked_literal { destination; subject = Constant_argument _; call } -> (
+      match
+        read_call context frame run call ~is_constant_literal:true
+          ~result_type:(compute_target_type context frame run destination)
+      with
+      | Some (after, term) -> Some (write_place context after run destination term)
+      | None -> None)
+  | Checked_literal { destination; subject = Template_text literals; call } -> (
       match (call.callee, call.arguments) with
       | Trait_method { trait; name; receiver; evidence; _ }, [ Passed { value = template; _ } ] ->
           let frame, tagged =

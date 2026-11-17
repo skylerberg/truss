@@ -238,6 +238,9 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
       State.register_expression state value (fun () ->
           Form.build_converted_literal state value
             ~element:(State.finalize_type state element)
+            ~is_constant:
+              ((not (State.is_formula env))
+              && List.for_all (Constant.is_constant_expression state) items)
             (List.map (State.build_expression state) items));
       collection
   | _ ->
@@ -286,6 +289,13 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
       State.register_expression state value (fun () ->
           Form.build_converted_map_literal state value ~key:(State.finalize_type state key)
             ~value_type:(State.finalize_type state value_type)
+            ~is_constant:
+              ((not (State.is_formula env))
+              && List.for_all
+                   (fun (entry_key, entry_value) ->
+                     Constant.is_constant_expression state entry_key
+                     && Constant.is_constant_expression state entry_value)
+                   entries)
             (build_entries ()));
       map
 

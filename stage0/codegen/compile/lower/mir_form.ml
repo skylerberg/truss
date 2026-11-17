@@ -268,12 +268,13 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
               | (_, holds_view) :: _ -> holds_view
               | [] -> false );
           ]
-      | (Call { destination = Some target; call } | Template { destination = target; call; _ })
+      | Call { destination = Some target; call }
+      | Checked_literal { destination = target; call; _ }
         when is_local target ->
           if holds_view then list_viewed_by call else raise Made
-      | Assign _ | Lend _ | Slice _ | Call _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
-      | Provide _ | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _
-        ->
+      | Assign _ | Lend _ | Slice _ | Call _ | Checked_literal _ | Live _ | Dead _ | Assert _
+      | Echo _ | Provide _ | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _
+      | Proof _ ->
           []
     in
     try
@@ -1200,7 +1201,7 @@ and lower_statement st (statement : Mir.Graph.statement) =
   | Lend { part; call } -> lend st part call ~origin
   | Slice { destination; call; _ } ->
       lower_call_into ~failure:"slice out of bounds" st call (lower_place st destination) ~origin
-  | Template { destination; call; _ } ->
+  | Checked_literal { destination; call; _ } ->
       lower_call_into st call (lower_place st destination) ~origin
   | Live _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ()
   | Dead locals -> List.iter (end_local st) locals

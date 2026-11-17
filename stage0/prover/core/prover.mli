@@ -24,7 +24,7 @@ type 'span state = {
 type verdicts
 
 val decide :
-  runs:(State.template_check * (bool list, string) result) list ->
+  runs:(State.literal_check * (bool list, string) result) list ->
   Lookups.t ->
   Solver.t ->
   (Resolve.Names.key * proof) list ->

@@ -28,8 +28,9 @@ let list_nested_blocks_of_kind (kind : Tree.statement_kind) : Tree.block list =
                   (Result | Entry _ | Yielded | Identical _ | Applied _ | Method_time _ | Map _) );
             _;
           }
-      | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Provide _
-      | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ )
+      | Call _ | Lend _ | Slice _ | Checked_literal _ | Live _ | Dead _ | Assert _ | Echo _
+      | Provide _ | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _
+        )
   | Yield _
   | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo) ->
       []
@@ -109,7 +110,7 @@ let rec iter_places_read visit (block : Tree.block) =
 and visit_statement_places visit (kind : Tree.statement_kind) =
   (match kind with
   | Basic (Assign { value; _ }) -> visit_rvalue_places visit value
-  | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ }) ->
+  | Basic (Call { call; _ } | Lend { call; _ } | Checked_literal { call; _ }) ->
       visit_call_places visit call
   | Basic (Slice { base; call; _ }) ->
       visit base;
@@ -143,8 +144,8 @@ let rec visit_block visit (block : Tree.block) =
       | Basic (Proof code) -> visit_code visit code
       | While { loop; _ } | For { loop; _ } -> visit_loop visit loop
       | Basic
-          ( Assign _ | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
-          | Provide _ | Provide_end | Loan_start _ | Loan_end _ | Matched _ )
+          ( Assign _ | Call _ | Lend _ | Slice _ | Checked_literal _ | Live _ | Dead _ | Assert _
+          | Echo _ | Provide _ | Provide_end | Loan_start _ | Loan_end _ | Matched _ )
       | Choose _ | Assert_by_bit_vector _ | Fork _ | Resume _ | Yield _ | Jump _ ->
           ());
       List.iter (visit_block visit) (list_nested_blocks statement))

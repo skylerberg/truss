@@ -1,4 +1,5 @@
 val call_contract :
+  ?is_constant_literal:bool ->
   State.context ->
   State.frame ->
   Invocation.site ->
@@ -16,6 +17,7 @@ val make_time_term : State.context -> State.frame -> Types.ty -> Logic.term -> L
 
 val apply_call :
   ?leave_lent:(Logic.term -> Logic.term) ->
+  ?is_constant_literal:bool ->
   State.context ->
   State.frame ->
   Invocation.site ->

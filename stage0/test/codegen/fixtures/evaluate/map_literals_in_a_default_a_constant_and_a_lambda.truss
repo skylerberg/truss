@@ -1,0 +1,7 @@
+type Palette(colors: Map[String, Int64] = ["red": 1, "green": 2])
+
+let weights: Map[String, Int64] = ["light": 1, "heavy": 9]
+
+fn f(items: List[Int64]) -> List[Map[String, Int64]] {
+  items.map(fn(_) { ["one": 1, "two": 2] })
+}

@@ -270,11 +270,11 @@ let add_requires context (frame : State.frame) (required : State.message) =
             ((State.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ State.Text ")" ])
       | None -> make_requires_fix context required)
 
-let rec make_closed_obligation ?template_clause context (frame : State.frame) code location message
+let rec make_closed_obligation ?literal_clause context (frame : State.frame) code location message
     goal =
   if not frame.makes_obligations then None
   else if not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition) then
-    Some (make_obligation ?template_clause context frame code location message goal)
+    Some (make_obligation ?literal_clause context frame code location message goal)
   else
     let names = List.map (fun (name, _, _) -> name) frame.binders in
     let goal =
@@ -285,12 +285,12 @@ let rec make_closed_obligation ?template_clause context (frame : State.frame) co
     match close_over_binders frame (Logic.( ==> ) frame.condition goal) with
     | Some closed ->
         Some
-          (make_obligation ?template_clause context
+          (make_obligation ?literal_clause context
              { frame with condition = Logic.Boolean true }
              code location message closed)
     | None -> None
 
-and make_obligation ?template_clause (context : State.context) (frame : State.frame) code location
+and make_obligation ?literal_clause (context : State.context) (frame : State.frame) code location
     message goal : State.obligation =
   let query =
     Logic.prune
@@ -324,14 +324,14 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
          (match frame.result with
          | Some term when not (is_parameter term) -> [ (term, "result") ]
          | _ -> []));
-    template_clause;
+    literal_clause;
     panic_clause = None;
   }
 
-let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (frame : State.frame)
-    code location message goal =
+let record_obligation ?literal_clause ?cited ~fixes ~panic_clause context (frame : State.frame) code
+    location message goal =
   match
-    make_closed_obligation ?template_clause context frame code location message
+    make_closed_obligation ?literal_clause context frame code location message
       (add_quantifier_facts
          ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
          context goal)
@@ -349,8 +349,8 @@ let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (fram
       assume context frame goal
   | None -> ()
 
-let oblige ?template_clause ?cited ?(fixes = []) context frame code location message goal =
-  record_obligation ?template_clause ?cited ~fixes ~panic_clause:None context frame code location
+let oblige ?literal_clause ?cited ?(fixes = []) context frame code location message goal =
+  record_obligation ?literal_clause ?cited ~fixes ~panic_clause:None context frame code location
     message goal
 
 let oblige_safe_operation ?cited ?(fixes = []) (context : State.context) (frame : State.frame) code

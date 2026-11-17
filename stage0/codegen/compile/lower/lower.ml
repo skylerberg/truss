@@ -66,36 +66,114 @@ let make_code_state context ~key path =
       (Lowering.make_frame code),
     code )
 
-let lower_template_check context ~from_template ~literals ~clauses : Emit_c.Builder.instance =
-  let key = Instance.Template_check { from_template; literals; clauses } in
-  let st, _ = make_code_state context ~key from_template in
-  let template_type =
-    match
-      Definitions.list_interface_parameters (Definitions.read_signature context from_template)
-    with
-    | [ (_, template_type) ] -> template_type
-    | _ -> Definitions.raise_bug "%s does not take one template" (Path.show from_template)
+let find_constant_literal (context : Definitions.context) ~definition ~origin =
+  let list_sourced = function
+    | Some ({ source; form } : Mir.Graph.t Mir.sourced) -> [ (source, form) ]
+    | None -> []
   in
-  Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
-  Lowering.run_in_scope st (fun () ->
-      let template =
-        Targets.lower_template_value st
-          (Lowering.ground st template_type)
-          literals
-          ~site:{ definition = st.frame.code.definition; offset = 0 }
-          ~parts:[]
+  let graphs =
+    list_sourced (Mir.read_graph context.lookups.mir definition)
+    @ list_sourced (Mir.read_initializer_graph context.lookups.mir definition)
+    @
+    match Mir.read_default_graphs context.lookups.mir definition with
+    | Some { source; form = Parameter_defaults defaults } ->
+        List.map (fun (_, graph) -> (source, graph)) defaults
+    | Some { source; form = Field_defaults defaults } ->
+        List.map (fun (default : Mir.Graph.t Mir.field_default) -> (source, default.value)) defaults
+    | None -> []
+  in
+  let find_in (body : Mir.Graph.body) =
+    Array.find_map
+      (fun (block : Mir.Graph.basic_block) ->
+        List.find_map
+          (fun (statement : Mir.Graph.statement) ->
+            match statement.kind with
+            | Checked_literal { subject = Constant_argument argument; call; _ }
+              when statement.origin = origin ->
+                Some (call, argument)
+            | _ -> None)
+          block.statements)
+      body.blocks
+  in
+  match
+    List.find_map
+      (fun (source, (graph : Mir.Graph.t)) ->
+        Option.map
+          (fun (call, argument) -> (source, call, argument))
+          (List.find_map find_in (graph.body :: Array.to_list graph.lambdas)))
+      graphs
+  with
+  | Some literal -> literal
+  | None ->
+      Definitions.raise_bug "%s has no constant literal at node %d" (Path.show definition) origin
+
+let lower_literal_check context (check : Instance.literal_check) : Emit_c.Builder.instance =
+  let key = Instance.Literal_check check in
+  let subject_type =
+    match
+      Definitions.list_interface_parameters (Definitions.read_signature context check.method_)
+    with
+    | [ (_, subject_type) ] -> subject_type
+    | _ -> Definitions.raise_bug "%s does not take one value" (Path.show check.method_)
+  in
+  let run_clauses (st : Lowering.state) subject =
+    let output = Targets.begin_output st in
+    List.iter
+      (fun clause ->
+        let holds = Lowering.allocate_temporary st context.bool in
+        Mir_form.lower_mir_into ~arguments:[ subject ] st clause holds;
+        Encoding.encode_call context.env st.builder
+          ~output:(Address { place = output; writable = true })
+          context.bool holds)
+      (Definitions.list_runnable_requires context check.method_ check.clauses);
+    Constants.write_output st output
+  in
+  match check.subject with
+  | Template_text literals ->
+      let st, _ = make_code_state context ~key check.method_ in
+      Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
+      Lowering.run_in_scope st (fun () ->
+          run_clauses st
+            (Targets.lower_template_value st (Lowering.ground st subject_type) literals
+               ~site:{ definition = st.frame.code.definition; offset = 0 }
+               ~parts:[]));
+      Lowering.finish_instance st ~rest:[] ()
+  | Constant_argument { definition; origin } ->
+      let source, call, argument = find_constant_literal context ~definition ~origin in
+      let type_arguments =
+        match call.callee with
+        | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } -> (
+            match
+              Targets.make_trait_method_key context [] ~trait ~name ~receiver ~self_type
+                ~type_arguments ~evidence
+            with
+            | Code { type_arguments; _ } -> type_arguments
+            | _ -> Definitions.raise_bug "%s is not code" (Path.show check.method_))
+        | _ ->
+            Definitions.raise_bug "the constant literal at node %d of %s calls no trait method"
+              origin (Path.show definition)
       in
-      let output = Targets.begin_output st in
-      List.iter
-        (fun clause ->
-          let holds = Lowering.allocate_temporary st context.bool in
-          Mir_form.lower_mir_into ~arguments:[ template ] st clause holds;
-          Encoding.encode_call context.env st.builder
-            ~output:(Address { place = output; writable = true })
-            context.bool holds)
-        (Definitions.list_template_clauses context from_template clauses);
-      Constants.write_output st output);
-  Lowering.finish_instance st ~rest:[] ()
+      let st =
+        Lowering.enter context
+          ~builder:(Emit_c.Builder.create context.env ~key)
+          (Lowering.make_frame (Definitions.make_code context check.method_ type_arguments))
+      in
+      let literal_state =
+        Lowering.enter context ~builder:st.builder
+          (Lowering.make_frame
+             {
+               (Definitions.make_unwritten_code ~definition:source.path ~substitution:[]
+                  ~result:(Returns Types.unit))
+               with
+               written = Some (Definitions.read_written context source);
+             })
+      in
+      Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
+      Lowering.run_in_scope st (fun () ->
+          let elements = Lowering.allocate_temporary st (Lowering.ground st subject_type) in
+          Mir_form.lower_mir_into literal_state (Mir.expand_formula argument) elements;
+          run_clauses st elements);
+      Lowering.finish_instance st ~rest:[] ()
 
 let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.instance =
   let key = Instance.Call_evaluation { function_; arguments } in

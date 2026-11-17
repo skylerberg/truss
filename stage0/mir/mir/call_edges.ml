@@ -136,7 +136,7 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
   in
   let rec visit_statement (statement : Tree.statement) =
     match statement.kind with
-    | Basic (Call { call; _ } | Template { call; _ }) ->
+    | Basic (Call { call; _ } | Checked_literal { call; _ }) ->
         add_callee call.callee;
         add_invariant_check call
     | Basic (Lend { call; _ }) -> (

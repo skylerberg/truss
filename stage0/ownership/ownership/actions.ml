@@ -637,7 +637,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
       Option.iter
         (fun destination -> hold builder destination (make_call_result builder called))
         destination
-  | Template { destination; call = called; _ } ->
+  | Checked_literal { destination; call = called; _ } ->
       read_uses builder uses;
       emit_call builder called origin;
       hold builder destination (make_call_result builder called)

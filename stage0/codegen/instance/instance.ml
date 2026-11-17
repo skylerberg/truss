@@ -8,10 +8,16 @@ type key =
   | Any_copy of Ground.ty
   | Encode of Ground.ty
   | Evaluator of Path.t
-  | Template_check of { from_template : Path.t; literals : string list; clauses : int list }
+  | Literal_check of literal_check
   | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
   | Generated of generated
   | Table of table
+
+and literal_check = { method_ : Path.t; subject : literal_subject; clauses : int list }
+
+and literal_subject =
+  | Template_text of string list
+  | Constant_argument of { definition : Path.t; origin : int }
 
 and generated =
   | Entry of impl_method
@@ -175,12 +181,17 @@ let rec mangle = function
   | Any_drop ty -> render_marker "AnyDrop" ^ mangle_ty ty
   | Any_copy ty -> render_marker "AnyCopy" ^ mangle_ty ty
   | Evaluator instance_path -> render_marker "Evaluator" ^ mangle_path instance_path
-  | Template_check { from_template; literals; clauses } ->
-      render_marker "Check" ^ mangle_path from_template
-      ^ String.concat ""
-          (List.map
-             (fun literal -> render_marker "Text" ^ mangle_text literal ^ render_marker "End")
-             literals)
+  | Literal_check { method_; subject; clauses } ->
+      render_marker "Check" ^ mangle_path method_
+      ^ (match subject with
+        | Template_text literals ->
+            String.concat ""
+              (List.map
+                 (fun literal -> render_marker "Text" ^ mangle_text literal ^ render_marker "End")
+                 literals)
+        | Constant_argument { definition; origin } ->
+            render_marker "At" ^ mangle_path definition ^ render_marker "Node"
+            ^ string_of_int origin)
       ^ String.concat ""
           (List.map (fun clause -> render_marker "Clause" ^ string_of_int clause) clauses)
       ^ render_marker "End"
@@ -228,9 +239,12 @@ let rec to_string = function
   | Any_drop ty -> "any drop " ^ Ground.to_string ty
   | Any_copy ty -> "any copy " ^ Ground.to_string ty
   | Evaluator path -> "evaluator " ^ Path.show path
-  | Template_check { from_template; literals; clauses } ->
-      "template check " ^ Path.show from_template ^ " of "
-      ^ String.concat ", " (List.map (Printf.sprintf "%S") literals)
+  | Literal_check { method_; subject; clauses } ->
+      "literal check " ^ Path.show method_ ^ " of "
+      ^ (match subject with
+        | Template_text literals -> String.concat ", " (List.map (Printf.sprintf "%S") literals)
+        | Constant_argument { definition; origin } ->
+            Printf.sprintf "node %d of %s" origin (Path.show definition))
       ^ " for clauses "
       ^ String.concat ", " (List.map string_of_int clauses)
   | Call_evaluation { function_; arguments } ->
