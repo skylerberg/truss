@@ -1072,7 +1072,9 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                   if Types.equal inner.type_ expected then inner else convert Widen
               | To_integer -> convert To_integer
               | From_integer -> convert From_integer
-              | Owned_to_view when argument = Some Types.Mut && Types.is_well_known List inner.type_
+              | Owned_to_view
+                when argument = Some Types.Mut
+                     && (Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_)
                 ->
                   let base : Core.place =
                     match inner.kind with Use place -> place | _ -> Temporary inner

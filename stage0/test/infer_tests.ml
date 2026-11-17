@@ -308,6 +308,24 @@ let () =
       match locate_core_call text "greet(name)" 1 with
       | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> Harness.fail "no conversion recorded");
+  Harness.test "an `Array` passed where a `Slice` is expected is viewed" (fun () ->
+      let text = Fixtures.Infer.sum_of_an_array_passed_as_a_slice in
+      match locate_core_call text "total(values)" 1 with
+      | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "an `Array` receiver finds a method of `Slice` and is viewed" (fun () ->
+      let text = Fixtures.Infer.contains_of_an_array in
+      match locate_core_call text "values.contains(1)" 1 with
+      | { arguments = [ receiver; _ ]; _ }, _ when is_view receiver -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "an `Array` receiver passed `mut` to a method of `Slice` is sliced whole" (fun () ->
+      let text = Fixtures.Infer.sort_of_a_mut_array in
+      match locate_core_call text "values.sort()" 1 with
+      | { arguments = [ Passed { mode = Mut; value = Value { kind = Slice _; _ } } ]; _ }, _ -> ()
+      | _ -> Harness.fail "the receiver is not a slice of the whole array");
+  Harness.test
+    "a type argument of a view's method is counted after the view's parameters, not the array's"
+    (fun () -> expect_fine Fixtures.Infer.zip_of_an_array_with_a_type_argument);
   Harness.test "a capability's method views a String argument too" (fun () ->
       let text = Fixtures.Infer.print_line_of_a_string in
       match locate_core_call text "Console.print_line(name)" 1 with

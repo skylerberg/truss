@@ -1,0 +1,3 @@
+fn f(values: Array[Int64, 3]) -> Bool {
+  values.contains(1)
+}

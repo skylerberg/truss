@@ -856,6 +856,17 @@ let () =
   Harness.test "a `List` cannot be passed `mut` to a method of `Slice` while a range of it is live"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.list_sorted_while_a_range_of_it_is_live
+        "ownership.mutated_while_viewed");
+  Harness.test
+    "an `Array` cannot be assigned while a name aliases a part that a method of `Slice` lent"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Ownership.array_of_strings_assigned_while_a_part_it_lent_is_aliased
+        "ownership.mutated_while_viewed");
+  Harness.test
+    "an `Array` cannot be passed `mut` to a method of `Slice` while a range of it is live"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.array_sorted_while_a_range_of_it_is_live
         "ownership.mutated_while_viewed")
 
 let () =
