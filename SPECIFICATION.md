@@ -788,6 +788,8 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
   terminate for a parameter whose type takes one. The one exception is a
   call through the function's own parameter, where its bound names that
   parameter's `time` (see [Capability parameters](#capability-parameters)).
+- A loop without a measure may not terminate either, so a function with a
+  `time` clause holds none (see [Loops](#loops)).
 - A recursive call on a part of a parameter needs nothing written. A part is
   a field taken out by a pattern, or an element of a collection that is
   itself a part:
@@ -1332,9 +1334,9 @@ mut scores.update_each(fn(score) { score = score / 2 })
   lambda that captures a variable is a view; one that captures none can be
   returned, stored, and moved.
 - A lambda's capabilities are inferred from its body, and so is whether it
-  terminates: a lambda may not terminate when it calls a function that may
-  not, or holds a loop without a measure. Such a lambda is an error where
-  its function type promises that it terminates.
+  terminates: a lambda may not terminate when its body makes a call that may
+  not, or holds a loop without a measure. Such a call or loop is an error
+  where the lambda's function type promises that the lambda terminates.
 - `return` and `?` exit the lambda. `break` and `continue` do not reach a
   loop outside it.
 - A lambda is always passed inside the call's parentheses.
@@ -1388,12 +1390,17 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   exits, has type `Never`.
 - `invariant` holds at the start of every iteration and when the loop ends.
 - `decreases` names a measure that every iteration makes smaller and that
-  never goes below zero. A `while` loop in a function with a `time` clause is
-  proven to terminate, and so is a `for` loop over a cursor. Where a loop
-  states no measure, a `while` loop whose condition is `<`, `<=`, `>`, or
-  `>=` has the distance between the two sides as its measure, and a `for`
+  never goes below zero. Where a loop states no measure, a `while` loop
+  whose condition compares two sides that mutate nothing with `<`, `<=`,
+  `>`, or `>=` has the distance between them as its measure, and a `for`
   loop over a cursor whose type has a `remaining(self) -> UInt64` method has
   that method's value.
+- **A loop without a measure may not terminate.** A function with a `time`
+  clause therefore holds none, and neither does a lambda whose function type
+  promises that the lambda terminates (see [Termination](#termination)). In
+  both, each `while` loop and each `for` loop over a cursor has a measure,
+  which is proven to decrease. A `for` loop over a range or over a
+  collection's elements always terminates.
 - In the clauses of a loop over a range, the loop variable is the index of
   the next iteration: in `for i in start..end`, `i` is `start` on entry and
   `end` where the loop ends, and `end + 1` after `start..=end`.
