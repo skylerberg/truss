@@ -766,6 +766,10 @@ let () =
       expect_not_proven Fixtures.Prover.map_literal_with_a_repeated_key "prover.requires");
   Harness.test "a set literal contains its listed elements and nothing else" (fun () ->
       expect_proven Fixtures.Prover.set_literal_contains);
+  Harness.test "a set literal of sixteen elements has its members and its length" (fun () ->
+      expect_proven Fixtures.Prover.set_literal_of_sixteen_elements);
+  Harness.test "a map literal of one hundred keys has distinct keys" (fun () ->
+      expect_proven Fixtures.Prover.map_literal_of_one_hundred_keys);
   Harness.test "a set literal may repeat an element" (fun () ->
       expect_proven Fixtures.Prover.set_literal_with_a_repeated_element);
   Harness.test "a sorted map literal's keys must be distinct" (fun () ->
