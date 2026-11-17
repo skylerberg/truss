@@ -66,3 +66,7 @@ let find_form_origin (interface : Interface.Lookups.t) ~is_derived (path : Path.
             (fun key -> (Inherited key, implemented.implementation.substitution))
             (interface.names.find_key implemented.declaration))
   | None, _ -> None
+
+module For_testing = struct
+  let compute_callee_uses = Callee_uses.compute
+end

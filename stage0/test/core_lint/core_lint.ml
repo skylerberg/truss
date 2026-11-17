@@ -9,6 +9,14 @@ let show_callee : Core.callee -> string = function
   | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.show_operation operation
   | Indirect _ -> "a function value"
 
+let show_capability_set (set : Types.capability_set) =
+  let show_capability : Types.capability -> string = function
+    | Divergence (Of_parameter parameter) ->
+        Printf.sprintf "may not terminate where %s may not" parameter.name
+    | capability -> Types.show_capability capability
+  in
+  "{" ^ String.concat ", " (List.map show_capability (set :> Types.capability list)) ^ "}"
+
 let find_method_signature interface owner name receiver =
   Interface.Definition.find_declared_signature interface (Method { owner; name; receiver })
 
@@ -22,7 +30,7 @@ let find_declared_variants interface path arguments =
 
 type context = {
   interface : Interface.Lookups.t;
-  wrong : 'a. ('a, unit, string, unit) format4 -> 'a;
+  report : 'a. ('a, unit, string, unit) format4 -> 'a;
   at : Core.origin option ref;
   bounds : Interface.Impls.bounds;
 }
@@ -64,7 +72,7 @@ let fits context ~expected ~found =
 let make_substitution context generics arguments ~subject =
   if List.length generics = List.length arguments then Types.make_substitution generics arguments
   else begin
-    context.wrong "%s has %d type arguments for %d generic parameters" subject
+    context.report "%s has %d type arguments for %d generic parameters" subject
       (List.length arguments) (List.length generics);
     []
   end
@@ -126,7 +134,7 @@ let check_call_types context (node : Core.expression) (call : Core.call) =
             | Passed { value; _ } ->
                 let found = read_operand_type value in
                 if not (fits context ~expected ~found) then
-                  context.wrong
+                  context.report
                     "argument %d of a call of `%s` has the type `%s`, and its parameter `%s`"
                     position callee (Types.show found) (Types.show expected)
             | Default -> ())
@@ -139,7 +147,7 @@ let check_call_types context (node : Core.expression) (call : Core.call) =
               (fits context ~expected:node.type_ ~found:result
               || fits context ~expected:result ~found:node.type_)
           then
-            context.wrong "a call of `%s` has the type `%s`, and its callee returns `%s`" callee
+            context.report "a call of `%s` has the type `%s`, and its callee returns `%s`" callee
               (Types.show node.type_) (Types.show result))
         result
 
@@ -161,7 +169,7 @@ let is_built_in context (ty : Types.ty) =
 
 let check_operator_types context (node : Core.expression) (operation : Intrinsic.scalar) arguments =
   if not (is_built_in context node.type_) then
-    context.wrong "an operator has the type `%s`, which is not built in" (Types.show node.type_);
+    context.report "an operator has the type `%s`, which is not built in" (Types.show node.type_);
   let operands =
     match (operation, arguments) with
     | ( ( Add | Subtract | Multiply | Divide | Remainder | Wrapping_add | Wrapping_subtract
@@ -175,7 +183,7 @@ let check_operator_types context (node : Core.expression) (operation : Intrinsic
   List.iter
     (fun (operand : Core.expression) ->
       if not (fits context ~expected:node.type_ ~found:operand.type_) then
-        context.wrong "an operand of `%s` has the type `%s`, and the operator `%s`"
+        context.report "an operand of `%s` has the type `%s`, and the operator `%s`"
           (Intrinsic.show_operation (Scalar operation))
           (Types.show operand.type_) (Types.show node.type_))
     operands
@@ -186,10 +194,10 @@ let compare_types context (left : Core.expression) (right : Core.expression) =
       (fits context ~expected:left.type_ ~found:right.type_
       || fits context ~expected:right.type_ ~found:left.type_)
   then
-    context.wrong "a comparison compares the type `%s` with `%s`" (Types.show left.type_)
+    context.report "a comparison compares the type `%s` with `%s`" (Types.show left.type_)
       (Types.show right.type_)
   else if not (is_built_in context left.type_ && is_built_in context right.type_) then
-    context.wrong "a `Compare` compares the type `%s`, which is not built in"
+    context.report "a `Compare` compares the type `%s`, which is not built in"
       (Types.show left.type_)
 
 let construct_fields context (node : Core.expression) variant fields =
@@ -208,14 +216,14 @@ let construct_fields context (node : Core.expression) variant fields =
       let type_name = Types.show node.type_ in
       match declared with
       | None when fields = [] && Option.is_some (Types.find_builtin node.type_) -> ()
-      | None -> context.wrong "a construct of `%s` names no record or variant" type_name
+      | None -> context.report "a construct of `%s` names no record or variant" type_name
       | Some declared ->
           let names = List.map fst fields in
           if
             List.sort compare names
             <> List.sort compare (List.map (fun (field : Types.field) -> field.field_name) declared)
           then
-            context.wrong "a construct of `%s` lists the fields %s" type_name
+            context.report "a construct of `%s` lists the fields %s" type_name
               (String.concat ", " names);
           let rec is_given_then_omitted = function
             | (_, None) :: (_, Some _) :: _ -> false
@@ -223,7 +231,7 @@ let construct_fields context (node : Core.expression) variant fields =
             | [] -> true
           in
           if not (is_given_then_omitted fields) then
-            context.wrong "a construct of `%s` lists an omitted field before a given one" type_name;
+            context.report "a construct of `%s` lists an omitted field before a given one" type_name;
           List.iter
             (fun (name, (operand : Core.operand option)) ->
               match
@@ -233,18 +241,18 @@ let construct_fields context (node : Core.expression) variant fields =
               | Some field, Some operand ->
                   let found = read_operand_type operand in
                   if not (fits context ~expected:field.field_type ~found) then
-                    context.wrong
+                    context.report
                       "the field `%s` of a construct of `%s` has the type `%s`, and is declared \
                        `%s`"
                       name type_name (Types.show found) (Types.show field.field_type)
               | Some field, None ->
                   if not field.field_has_default then
-                    context.wrong "a construct of `%s` omits `%s`, which has no default" type_name
+                    context.report "a construct of `%s` omits `%s`, which has no default" type_name
                       name
               | None, _ -> ())
             fields)
   | _ ->
-      context.wrong "a construct has the type `%s`, which is not a named type"
+      context.report "a construct has the type `%s`, which is not a named type"
         (Types.show node.type_)
 
 let list_free_locals (parameters : Core.pattern list) (body : Core.block) =
@@ -302,7 +310,7 @@ let is_executable context (condition : Core.expression) =
 let check_semantics context (form : Core.t) =
   let check_executable subject (condition : Core.condition) =
     if condition.executable <> is_executable context condition.value then
-      context.wrong "%s is marked %sexecutable" subject
+      context.report "%s is marked %sexecutable" subject
         (if condition.executable then "" else "not ")
   in
   (match form.definition with
@@ -329,19 +337,19 @@ let check_semantics context (form : Core.t) =
                           (fun known -> Well_known.is known trait.trait)
                           [ Add; Subtract; Multiply; Divide; Remainder; Negate ]
                         && Option.is_some (Types.find_builtin self_type) ->
-                     context.wrong
+                     context.report
                        "an arithmetic operator on `%s` is a call of `%s`, not an Operator"
                        (Types.show self_type) (show_callee call.callee)
                  | Trait_method { self_type = Any _; evidence = Impl _ | Bound; _ } ->
-                     context.wrong "a call of `%s` on an `any` value is not dynamic"
+                     context.report "a call of `%s` on an `any` value is not dynamic"
                        (show_callee call.callee)
                  | Trait_method { self_type; evidence = Dynamic; _ }
                    when match self_type with Any _ -> false | _ -> true ->
-                     context.wrong "a call of `%s` on `%s` is dynamic" (show_callee call.callee)
+                     context.report "a call of `%s` on `%s` is dynamic" (show_callee call.callee)
                        (Types.show self_type)
                  | _ -> ())
              | To_any { evidence = Dynamic; _ } ->
-                 context.wrong "a conversion to `any` has dynamic evidence"
+                 context.report "a conversion to `any` has dynamic evidence"
              | Operator { operation; arguments } ->
                  check_operator_types context node operation arguments
              | Compare { left; right; _ } -> compare_types context left right
@@ -349,7 +357,7 @@ let check_semantics context (form : Core.t) =
              | Lambda { parameters; captures; body; _ } ->
                  let free = list_free_locals parameters body in
                  if List.map (fun (capture : Core.capture) -> capture.local) captures <> free then
-                   context.wrong
+                   context.report
                      "a lambda captures %d locals, and its body reads %d of the enclosing \
                       function's"
                      (List.length captures) (List.length free)
@@ -368,22 +376,27 @@ let check_semantics context (form : Core.t) =
                      | 2 -> ends ".slice_range"
                      | 1 -> ends ".slice_from"
                      | _ -> false)
-                 then context.wrong "a `Slice` with %d bounds calls `%s`" (List.length bounds) name
+                 then context.report "a `Slice` with %d bounds calls `%s`" (List.length bounds) name
              | _ -> ());
        })
     form.definition
 
-let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolve.Names.key option)
-    (form : Core.t) =
-  let list_bounds parameter =
-    let of_key key =
-      Option.value ~default:[]
-        (List.assoc_opt parameter (interface.read_elaborated_interface key).scope.bounds)
-    in
+let check_form (interface : Interface.Lookups.t) ~report_violation ~(path : Path.t)
+    ~(key : Resolve.Names.key option) (form : Core.t) =
+  let list_bounds : Interface.Impls.bounds =
     match key with
     | Some key ->
-        of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.find_container key)
-    | None -> []
+        let bounds = (interface.read_elaborated_interface key).scope.bounds in
+        fun parameter -> Option.value ~default:[] (List.assoc_opt parameter bounds)
+    | None -> (
+        let impl =
+          match path with
+          | Method { owner; _ } -> Interface.Definition.find_impl_interface interface owner
+          | _ -> None
+        in
+        match impl with
+        | Some impl -> Types.list_bounds impl.impl_generics
+        | None -> failwith (Printf.sprintf "`%s` is not a method of an impl" (Path.show path)))
   in
   let normalize = Interface.Impls.normalize interface ~list_bounds in
   let at = ref None in
@@ -399,8 +412,10 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         Printf.sprintf ", in `%s`" (excerpt (String.sub text span.start (span.stop - span.start)))
     | _ -> ""
   in
-  let raise_wrong format =
-    Printf.ksprintf (fun message -> Harness.fail "%s: %s%s" name message (quote ())) format
+  let report format =
+    Printf.ksprintf
+      (fun message -> report_violation (Printf.sprintf "%s: %s%s" name message (quote ())))
+      format
   in
   let own =
     let of_generics = List.map (fun (generic : Types.generic) -> generic.generic) in
@@ -426,7 +441,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   in
   let check_parameter subject (mentioned : Types.parameter) =
     if not (List.mem mentioned own) then
-      raise_wrong "%s mentions `%s`, a generic parameter of `%s`" subject mentioned.name
+      report "%s mentions `%s`, a generic parameter of `%s`" subject mentioned.name
         (Path.show mentioned.owner)
   in
   let rec check_capabilities subject (set : Types.capability_set) =
@@ -438,13 +453,12 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
             (match base with
             | Parameter _ | Projection _ -> ()
             | _ ->
-                raise_wrong "%s contains `%s.%s`, which is not normalized" subject (Types.show base)
-                  name);
+                report "%s contains `%s.%s`, which is not normalized" subject (Types.show base) name);
             check_type subject base;
             check_trait subject reference
         | Types.Capability_variable _ | Types.Divergence (Of_variable _) ->
-            raise_wrong "%s contains a capability inference variable" subject
-        | Types.Capability_error _ -> raise_wrong "%s contains a capability with an error" subject
+            report "%s contains a capability inference variable" subject
+        | Types.Capability_error _ -> report "%s contains a capability with an error" subject
         | Types.Divergence Always -> ()
         | Types.Divergence (Of_parameter mentioned) -> check_parameter subject mentioned)
       (set :> Types.capability list)
@@ -462,12 +476,12 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     | Any reference -> check_trait subject reference
     | Never | Integer -> ()
     | Variable _ | Literal _ | Hole | Error _ ->
-        raise_wrong "%s has the type `%s`, which is not fully inferred" subject (Types.show ty)
+        report "%s has the type `%s`, which is not fully inferred" subject (Types.show ty)
   and check_argument subject = function
     | Types.Type inner -> check_type subject inner
     | Types.Value (Value_parameter named) -> check_parameter subject named
     | Types.Value (Known _) -> ()
-    | Types.Value (Value_variable _) -> raise_wrong "%s contains a value inference variable" subject
+    | Types.Value (Value_variable _) -> report "%s contains a value inference variable" subject
     | Types.Capabilities set -> check_capabilities subject set
   and check_trait subject (reference : Types.trait_reference) =
     List.iter (check_argument subject) reference.trait_arguments;
@@ -475,7 +489,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   in
   let seen = Hashtbl.create 64 in
   let check_unique id =
-    if Hashtbl.mem seen id then raise_wrong "the node id %d is used twice" id;
+    if Hashtbl.mem seen id then report "the node id %d is used twice" id;
     Hashtbl.replace seen id ()
   in
   let task_origins = Hashtbl.create 4 in
@@ -483,7 +497,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     match node.kind with
     | Concurrent _ | For { mode = Concurrent_loop; _ } ->
         if Hashtbl.mem task_origins node.origin then
-          raise_wrong
+          report
             "two `concurrent` statements have the origin %d, so an early exit of a task of one \
              would end the tasks of the other"
             node.origin;
@@ -546,23 +560,28 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let check_arguments_fit (call : Core.call) =
     let callee = show_callee call.callee in
     match find_callee_parameters call.callee with
-    | None -> raise_wrong "a call of `%s` has a callee with no signature" callee
+    | None -> report "a call of `%s` has a callee with no signature" callee
     | Some parameters when List.length parameters <> List.length call.arguments ->
-        raise_wrong "a call of `%s` has %d arguments for %d parameters" callee
+        report "a call of `%s` has %d arguments for %d parameters" callee
           (List.length call.arguments) (List.length parameters)
     | Some parameters ->
         List.iteri
           (fun position ((mode, has_default), (argument : Core.argument)) ->
             match argument with
             | Passed { mode = passed; _ } when passed <> mode ->
-                raise_wrong
-                  "argument %d of a call of `%s` has the mode `%s`, and its parameter `%s`" position
-                  callee (Types.show_mode passed) (Types.show_mode mode)
+                report "argument %d of a call of `%s` has the mode `%s`, and its parameter `%s`"
+                  position callee (Types.show_mode passed) (Types.show_mode mode)
             | Default when not has_default ->
-                raise_wrong "a call of `%s` omits argument %d, whose parameter has no default"
-                  callee position
+                report "a call of `%s` omits argument %d, whose parameter has no default" callee
+                  position
             | Passed _ | Default -> ())
           (List.combine parameters call.arguments)
+  in
+  let check_call_uses (call : Core.call) =
+    let callee_uses = Infer.For_testing.compute_callee_uses interface ~list_bounds call.callee in
+    if call.uses <> callee_uses then
+      report "a call of `%s` has the `uses` `%s`, and its callee gives `%s`"
+        (show_callee call.callee) (show_capability_set call.uses) (show_capability_set callee_uses)
   in
   let compound_assignments = ref 0 and current_targets = ref 0 in
   let local_types : Types.ty Local_table.t = Local_table.create 16 in
@@ -597,12 +616,12 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         check_type "a local" used;
         match Local_table.find_opt local_types local with
         | Some bound when not (Types.equal (normalize bound) (normalize used)) ->
-            raise_wrong "a local is used with the type `%s` and bound with the type `%s`"
+            report "a local is used with the type `%s` and bound with the type `%s`"
               (Types.show used) (Types.show bound)
         | _ -> ())
     | Constant { type_ = constant; _ } -> check_type "a constant" constant
     | Lent { kind = Call { lends = Some _; _ }; _ } | Temporary _ -> ()
-    | Lent _ -> raise_wrong "a `Lent` place is not a call of a lending method"
+    | Lent _ -> report "a `Lent` place is not a call of a lending method"
     | Field { base; type_ = field; _ } ->
         check_type "a field" field;
         check_place base
@@ -614,10 +633,10 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     check_place core_place;
     match core_place with
     | Local _ | Temporary _ -> ()
-    | Constant { path; _ } -> raise_wrong "%s mutates the constant `%s`" subject (Path.show path)
+    | Constant { path; _ } -> report "%s mutates the constant `%s`" subject (Path.show path)
     | Field { base; _ } -> check_mutable_place subject base
     | Lent { kind = Call { lends = Some Mut; _ }; _ } -> ()
-    | Lent _ -> raise_wrong "%s mutates a place that is lent read-only" subject
+    | Lent _ -> report "%s mutates a place that is lent read-only" subject
   in
   let yielded = Hashtbl.create 8 in
   let rec check_yielded_operand (mode : Types.mode) (part : Core.operand) =
@@ -654,7 +673,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     match value with
     | Value _ ->
         if List.exists (fun (_, _, mode) -> mode <> Types.Own) (list_bindings pattern) then
-          raise_wrong "%s on a value binds a name that is not `own`" subject
+          report "%s on a value binds a name that is not `own`" subject
     | Place _ -> ()
   in
   Core_walk.walk_definition
@@ -671,7 +690,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                    (fun (_, (field : Core.operand option)) ->
                      match field with
                      | Some (Place _) when not (Hashtbl.mem yielded node.id) ->
-                         raise_wrong "a construct that no `Yield` lends has a field that is a place"
+                         report "a construct that no `Yield` lends has a field that is a place"
                      | _ -> ())
                    fields
              | Slice { base; callee = sliced; bounds } ->
@@ -689,7 +708,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  List.iter
                    (fun (arm : Core.arm) ->
                      if List.length arm.patterns <> List.length scrutinees then
-                       raise_wrong "a `match` arm does not have one pattern per scrutinee";
+                       report "a `match` arm does not have one pattern per scrutinee";
                      List.iter2 (check_binds_own "a `match`") scrutinees arm.patterns)
                    arms
              | Function_value { type_arguments; _ } ->
@@ -716,6 +735,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  check_arguments_fit call;
                  check_callee call.callee;
                  check_capabilities "a call's `uses`" call.uses;
+                 check_call_uses call;
                  (match call.callee with
                  | Indirect function_value -> check_operand function_value
                  | _ -> ());
@@ -725,13 +745,13 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                        ->
                          check_mutable_place "a slice passed `mut`" base
                      | Core.Passed { mode = Mut; value = Value _; _ } ->
-                         raise_wrong "a `mut` parameter receives a value that is not a slice"
+                         report "a `mut` parameter receives a value that is not a slice"
                      | Passed { mode = Mut; value = Place core_place; _ } ->
                          check_mutable_place "a `mut` argument" core_place
                      | Passed { mode = Own; value = Place _; _ } ->
-                         raise_wrong "an `own` parameter receives a place"
+                         report "an `own` parameter receives a place"
                      | Passed { mode = Read; value = Value { kind = Use _; _ }; _ } ->
-                         raise_wrong
+                         report
                            "a read-only parameter of `%s` receives a `Use`, which moves or copies \
                             the place"
                            (show_callee call.callee)
@@ -757,28 +777,26 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                      } ->
                      ()
                  | _ ->
-                     raise_wrong
+                     report
                        "a compound assignment's new value is not an operation on `Current_target`")
              | Let { pattern; value; _ } -> (
                  check_binds_own "a `let`" value pattern;
                  match (pattern.kind, value) with
                  | Bind { is_var = true; _ }, Place _ ->
-                     raise_wrong "a `let` that binds a mutable local receives a place"
+                     report "a `let` that binds a mutable local receives a place"
                  | _ -> ())
              | For { iteration = Cursor { cursor; _ }; _ } ->
                  check_mutable_place "a `for` loop" cursor
              | For { iteration = Elements { count; position; element }; _ } -> (
                  (match count.kind with
                  | Call _ -> ()
-                 | _ -> raise_wrong "the count of an `Elements` loop is not a call");
+                 | _ -> report "the count of an `Elements` loop is not a call");
                  (match position.kind with
                  | Bind _ -> ()
-                 | _ -> raise_wrong "the position of an `Elements` loop is not a `Bind`");
+                 | _ -> report "the position of an `Elements` loop is not a `Bind`");
                  match element with
                  | Lent { kind = Call _; _ } -> ()
-                 | _ ->
-                     raise_wrong "the element of an `Elements` loop is not the lent place of a call"
-                 )
+                 | _ -> report "the element of an `Elements` loop is not the lent place of a call")
              | _ -> ());
          pattern =
            (fun (node : Core.pattern) ->
@@ -789,7 +807,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  let list_bound alternative = List.sort compare (list_bindings alternative) in
                  let expected = list_bound first in
                  if List.exists (fun alternative -> list_bound alternative <> expected) rest then
-                   raise_wrong "the alternatives of a pattern do not bind the same locals"
+                   report "the alternatives of a pattern do not bind the same locals"
              | _ -> ());
          callee = check_callee;
          place = ignore;
@@ -797,15 +815,23 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     form.definition;
   at := None;
   if !current_targets <> !compound_assignments then
-    raise_wrong "`Current_target` appears %d times in %d compound assignments" !current_targets
+    report "`Current_target` appears %d times in %d compound assignments" !current_targets
       !compound_assignments;
   at := None;
-  check_semantics { interface; wrong = raise_wrong; at; bounds = list_bounds } form
+  check_semantics { interface; report; at; bounds = list_bounds } form
 
 let check interface (key : Resolve.Names.key) form =
-  check_form interface ~path:key.path ~key:(Some key) form
+  check_form interface ~report_violation:(Harness.fail "%s") ~path:key.path ~key:(Some key) form
 
-let check_derived interface path form = check_form interface ~path ~key:None form
+let check_derived interface path form =
+  check_form interface ~report_violation:(Harness.fail "%s") ~path ~key:None form
+
+let list_violations interface (key : Resolve.Names.key) form =
+  let violations = ref [] in
+  check_form interface
+    ~report_violation:(fun violation -> violations := violation :: !violations)
+    ~path:key.path ~key:(Some key) form;
+  List.rev !violations
 
 let check_file (interface : Interface.Lookups.t) ~find_core (file : Path.file) =
   List.fold_left

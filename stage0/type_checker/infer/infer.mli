@@ -44,3 +44,8 @@ val find_form_origin :
   is_derived:(Path.t -> bool) ->
   Path.t ->
   (form_origin * Types.substitution) option
+
+module For_testing : sig
+  val compute_callee_uses :
+    Interface.Lookups.t -> list_bounds:Interface.Impls.bounds -> Core.callee -> Types.capability_set
+end

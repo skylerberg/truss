@@ -66,7 +66,7 @@ and show_argument (passed : Core.argument) =
   | Passed { mode; value; _ } -> Types.show_mode mode ^ show_operand value
   | Default -> "default"
 
-let make_definition_form text (path : Path.t) =
+let read_definition_form text (path : Path.t) =
   let packages = Support.setup [ ("app::main", text) ] in
   let file = Support.parse_file "app::main" in
   (match
@@ -92,11 +92,15 @@ let make_definition_form text (path : Path.t) =
   in
   match definition with
   | Some (key, core) ->
-      Core_lint.check
-        (Database.make_interface_lookups (Support.make_database packages) [ key.module_.package ])
-        key core;
-      core
+      ( Database.make_interface_lookups (Support.make_database packages) [ key.module_.package ],
+        key,
+        core )
   | None -> failwith (Printf.sprintf "`%s` has no core form" (Path.show path))
+
+let make_definition_form text path =
+  let interface, key, core = read_definition_form text path in
+  Core_lint.check interface key core;
+  core
 
 let expect_observed expected observed =
   if observed <> expected then
@@ -489,6 +493,64 @@ let () =
                         (Compiler_bug.to_string bug))
                 impl_interface.impl_methods)
         derived)
+
+let () =
+  let list_violations_after change_uses =
+    let interface, key, form =
+      read_definition_form
+        (Fixtures.Core.apply ^ Fixtures.Core.named_function_passed_for_a_capability_generic)
+        (Support.make_top_path "app::main" "g")
+    in
+    match form.definition with
+    | Function
+        ({
+           body =
+             Some
+               {
+                 statements =
+                   [ ({ kind = Evaluate ({ kind = Call call; _ } as evaluated); _ } as statement) ];
+                 value = None;
+               };
+           _;
+         } as function_) ->
+        let evaluated : Core.expression =
+          { evaluated with kind = Call { call with uses = change_uses call.uses } }
+        in
+        Core_lint.list_violations interface key
+          {
+            definition =
+              Function
+                {
+                  function_ with
+                  body =
+                    Some
+                      {
+                        statements = [ { statement with kind = Evaluate evaluated } ];
+                        value = None;
+                      };
+                };
+          }
+    | _ -> failwith "the body of `g` is not one call"
+  in
+  Harness.test "a call with a smaller `uses` than its callee's does not satisfy the invariants"
+    (fun () ->
+      expect_observed
+        [
+          "app::main::g: a call of `app::main::apply` has the `uses` `{Console}`, and its callee \
+           gives `{Console, may not terminate}`, in `apply(shout)`";
+        ]
+        (list_violations_after Types.remove_divergence));
+  Harness.test "a call with a larger `uses` than its callee's does not satisfy the invariants"
+    (fun () ->
+      expect_observed
+        [
+          "app::main::g: a call of `app::main::apply` has the `uses` `{Clock, Console, may not \
+           terminate}`, and its callee gives `{Console, may not terminate}`, in `apply(shout)`";
+        ]
+        (list_violations_after
+           (Types.union_capabilities
+              (Types.make_capability_set
+                 [ Capability (Support.make_top_path "standard::capabilities" "Clock") ]))))
 
 let () =
   let text = Fixtures.Core.described_both in

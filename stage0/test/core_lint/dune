@@ -8,6 +8,7 @@
   types
   resolve
   interface
+  infer
   core
   core_walk
   intrinsic
