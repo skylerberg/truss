@@ -1,0 +1,6 @@
+fn make() -> Array[Int64, 4] { todo }
+
+fn f() -> UInt64 {
+  let view = make().slice()
+  view.length()
+}
