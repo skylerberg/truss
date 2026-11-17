@@ -1,5 +1,15 @@
+let show_generic (generic : Types.generic) =
+  match generic.kind with
+  | Type_generic [] -> generic.generic.name
+  | Type_generic bounds ->
+      generic.generic.name ^ ": " ^ String.concat " + " (List.map Types.show_trait bounds)
+  | Value_generic -> generic.generic.name ^ ": UInt64"
+
 let show_signature (signature : Types.signature) =
-  Printf.sprintf "(%s)%s"
+  Printf.sprintf "%s(%s)%s"
+    (match signature.generics with
+    | [] -> ""
+    | generics -> "[" ^ String.concat ", " (List.map show_generic generics) ^ "]")
     (String.concat ", "
        ((match signature.receiver with
           | Some (Read, _) -> [ "self" ]
@@ -16,14 +26,7 @@ let rec agrees (left : Types.ty) (right : Types.ty) =
   match (left, right) with
   | Types.Error _, _ | _, Types.Error _ -> true
   | Types.Named left, Types.Named right ->
-      Path.equal left.path right.path
-      && List.length left.arguments = List.length right.arguments
-      && List.for_all2
-           (fun left right ->
-             match (left, right) with
-             | Types.Type left, Types.Type right -> agrees left right
-             | left, right -> left = right)
-           left.arguments right.arguments
+      Path.equal left.path right.path && arguments_agree left.arguments right.arguments
   | Types.Function left, Types.Function right ->
       List.length left.inputs = List.length right.inputs
       && List.for_all2
@@ -36,12 +39,40 @@ let rec agrees (left : Types.ty) (right : Types.ty) =
          || Types.has_same_clauses left right)
   | _ -> Types.equal left right
 
-and results_agree (left : Types.result) (right : Types.result) =
+and arguments_agree (left : Types.argument list) (right : Types.argument list) =
+  List.compare_lengths left right = 0
+  && List.for_all2
+       (fun left right ->
+         match (left, right) with
+         | Types.Type left, Types.Type right -> agrees left right
+         | left, right -> left = right)
+       left right
+
+let results_agree (left : Types.result) (right : Types.result) =
   match (left, right) with
   | Returns left, Returns right -> agrees left right
   | Lends (left_mode, left), Lends (right_mode, right) ->
       left_mode = right_mode && agrees left right
   | _ -> false
+
+let traits_agree (left : Types.trait_reference) (right : Types.trait_reference) =
+  Path.equal left.trait right.trait
+  && arguments_agree left.trait_arguments right.trait_arguments
+  && List.compare_lengths left.associated right.associated = 0
+  && List.for_all2
+       (fun (left_name, left) (right_name, right) -> left_name = right_name && agrees left right)
+       left.associated right.associated
+
+let bounds_agree (left : Types.trait_reference list) (right : Types.trait_reference list) =
+  let is_among bounds bound = List.exists (traits_agree bound) bounds in
+  List.for_all (is_among right) left && List.for_all (is_among left) right
+
+let rename_generic renaming (generic : Types.generic) =
+  match (generic.kind, Types.find_argument generic.generic renaming) with
+  | Type_generic _, Some (Type (Parameter written))
+  | Value_generic, Some (Value (Value_parameter written)) ->
+      { generic with generic = written }
+  | (Type_generic _ | Value_generic), _ -> generic
 
 type conformance = {
   implementation : Impls.implementation;
@@ -237,17 +268,19 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
               Types.make_capability_substitution declared.capability_parameters
                 (Types.list_capability_arguments written.capability_parameters)
             in
+            let renaming =
+              if List.length declared.generics = List.length written_generics then
+                Types.combine_substitutions
+                  (Types.make_substitution declared.generics written_generics)
+                  capability_renaming
+              else capability_renaming
+            in
+            let renamed = Types.substitute_signature renaming declared in
             let expected =
               normalize_function_types
                 (Impls.normalize_signature_in_impl state.lookups ~list_bounds ~missing_associated
                    implementation
-                   (Types.substitute_signature
-                      (if List.length declared.generics = List.length written_generics then
-                         Types.combine_substitutions
-                           (Types.make_substitution declared.generics written_generics)
-                           capability_renaming
-                       else capability_renaming)
-                      declared))
+                   { renamed with generics = List.map (rename_generic renaming) renamed.generics })
             in
             let expected =
               if trait.is_capability then { expected with receiver = written.receiver }
@@ -269,17 +302,12 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
             let generics_agree =
               List.length expected.generics = List.length written.generics
               && List.for_all2
-                   (fun (expected_generic : Types.generic) (given_generic : Types.generic) ->
-                     match (expected_generic.kind, given_generic.kind) with
-                     | Type_generic expected_bounds, Type_generic given_bounds ->
-                         List.for_all
-                           (fun (bound : Types.trait_reference) ->
-                             List.exists
-                               (fun (allowed : Types.trait_reference) ->
-                                 Path.equal allowed.trait bound.trait)
-                               expected_bounds)
-                           given_bounds
-                     | left, right -> left = right)
+                   (fun (expected_generic : Types.generic) (written_generic : Types.generic) ->
+                     match (expected_generic.kind, written_generic.kind) with
+                     | Type_generic expected_bounds, Type_generic written_bounds ->
+                         bounds_agree expected_bounds written_bounds
+                     | Value_generic, Value_generic -> true
+                     | (Type_generic _ | Value_generic), _ -> false)
                    expected.generics written.generics
             in
             let list_names (parameters : Types.parameter list) =

@@ -294,10 +294,10 @@ let () =
   Harness.test "a trait may add an overload of a method of a trait it requires" (fun () ->
       expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_overloading_element) ])
 
+let expect_signature_mismatch text ~declared =
+  expect_one_diagnostic text "types.signature_mismatch" ~says:declared
+
 let () =
-  let expect_signature_mismatch text ~declared =
-    expect_one_diagnostic text "types.signature_mismatch" ~says:declared
-  in
   Harness.test "an impl's callback type cannot add a time clause to its trait's" (fun () ->
       expect_signature_mismatch Fixtures.Interface.walk_impl_adding_a_time_clause_to_its_callback
         ~declared:
@@ -375,6 +375,75 @@ let () =
       expect_signature_mismatch
         Fixtures.Interface.chooses_impl_dropping_the_time_clause_of_its_result
         ~declared:"`choose(self) -> (fn(Int64) -> Int64 cost time finite)`")
+
+let () =
+  let feed = "`feed[Item: Convert[Int64]](self, item: Item) -> UInt64`" in
+  Harness.test "an impl's method cannot write its trait's bound with another type argument"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.feeds_impl_bounding_its_item_by_another_trait_argument
+        ~declared:
+          "`feed` must have the signature `feed[Item: Convert[Int64]](self, item: Item) -> UInt64` \
+           that `Feeds` declares.");
+  Harness.test "an impl's method cannot write its trait's bound with another constraint" (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.feeds_impl_bounding_its_item_under_another_constraint
+        ~declared:"`feed[Item: Cursor[Element = Int64]](self, item: Item) -> UInt64`");
+  Harness.test "an impl's method cannot add a bound to its trait's type parameter" (fun () ->
+      expect_signature_mismatch Fixtures.Interface.feeds_impl_adding_a_bound_to_its_item
+        ~declared:feed;
+      expect_signature_mismatch
+        Fixtures.Interface.feeds_impl_adding_a_bound_of_the_same_trait_to_its_item ~declared:feed);
+  Harness.test "an impl's method cannot drop a bound of its trait's type parameter" (fun () ->
+      expect_signature_mismatch Fixtures.Interface.feeds_impl_dropping_the_bound_of_its_item
+        ~declared:"`feed[Item: Display](self, item: Item) -> UInt64`");
+  Harness.test "an impl's method may write its trait's bounds in another order" (fun () ->
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.feeds_impl_reordering_the_bounds_of_its_item) ]);
+  Harness.test
+    "an impl's method may write a bound that names `Self.Element` with the type its impl chooses"
+    (fun () ->
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.feeds_impls_bounding_an_item_by_their_element) ]);
+  Harness.test
+    "a signature mismatch shows a bound that names `Self.Element` with the type the impl chooses"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.feeds_impl_bounding_its_item_by_a_type_other_than_its_element
+        ~declared:"`feed[Item: Convert[Int64]](self, item: Item) -> Int64`");
+  Harness.test "an impl's method may rename a type parameter and keep its trait's bounds" (fun () ->
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.feeds_impl_renaming_its_bounded_items) ]);
+  Harness.test
+    "a signature mismatch shows the trait's bounds under the impl's name for a type parameter"
+    (fun () ->
+      expect_signature_mismatch Fixtures.Interface.feeds_impl_renaming_its_item_under_another_bound
+        ~declared:"`feed[Morsel: Convert[Int64]](self, item: Morsel) -> UInt64`");
+  Harness.test
+    "a signature mismatch shows a type parameter's bounds beside a capability parameter at its use"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.feeds_impl_with_another_bound_beside_a_capability_parameter
+        ~declared:
+          "`feed_each[Morsel: Convert[Int64]](self, item: Morsel, visit: (fn(Morsel) uses generic \
+           Granted))`");
+  Harness.test
+    "a capability's implementation cannot write its capability's bound with another type argument"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.feeds_capability_impl_bounding_its_item_by_another_trait_argument
+        ~declared:feed);
+  Harness.test
+    "an impl's method cannot take a type parameter for its trait's `UInt64` generic parameter"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.filler_impl_taking_a_type_parameter_for_a_value_parameter
+        ~declared:"`fill[count: UInt64](self) -> Array[Int64, count]`");
+  Harness.test "a method that an impl must give is shown with its generic parameters" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.feeds_impl_without_feed "types.missing_member"
+        ~says:
+          "This `impl` must give `feed[Item: Convert[Int64] + Display](self, item: Item, visit: \
+           (fn(Item) uses generic Granted)) -> UInt64`, which `Feeds` declares.")
 
 let expect_property name expected text make_type check =
   Harness.test name (fun () ->

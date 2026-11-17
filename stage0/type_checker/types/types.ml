@@ -618,9 +618,30 @@ let make_signature_substitution (signature : signature) instantiation =
     (make_substitution signature.generics instantiation.type_arguments)
     (make_capability_substitution signature.capability_parameters instantiation.capability_arguments)
 
+let map_bounds transform generics =
+  List.map
+    (fun generic ->
+      match generic.kind with
+      | Type_generic bounds -> { generic with kind = Type_generic (List.map transform bounds) }
+      | Value_generic -> generic)
+    generics
+
 let map_signature transform (signature : signature) =
+  let transform_argument = function
+    | Type type_ -> Type (transform type_)
+    | Value _ as value -> value
+  in
   {
     signature with
+    generics =
+      map_bounds
+        (fun (bound : trait_reference) ->
+          {
+            bound with
+            trait_arguments = List.map transform_argument bound.trait_arguments;
+            associated = List.map (fun (name, type_) -> (name, transform type_)) bound.associated;
+          })
+        signature.generics;
     receiver = Option.map (fun (receiver, type_) -> (receiver, transform type_)) signature.receiver;
     parameters =
       List.map
@@ -633,17 +654,9 @@ let map_signature transform (signature : signature) =
   }
 
 let substitute_signature substitution (signature : signature) =
-  let signature = map_signature (substitute substitution) signature in
   {
-    signature with
-    generics =
-      List.map
-        (fun (generic : generic) ->
-          match generic.kind with
-          | Type_generic bounds ->
-              { generic with kind = Type_generic (List.map (substitute_trait substitution) bounds) }
-          | Value_generic -> generic)
-        signature.generics;
+    (map_signature (substitute substitution) signature) with
+    generics = map_bounds (substitute_trait substitution) signature.generics;
     uses = substitute_capabilities substitution signature.uses;
   }
 

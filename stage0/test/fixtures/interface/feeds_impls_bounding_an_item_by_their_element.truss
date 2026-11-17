@@ -1,0 +1,33 @@
+trait Convert[Target] {
+  fn convert(self) -> Target
+}
+
+trait Feeds {
+  type Element
+
+  fn feed[Item: Convert[Self.Element]](self, item: Item) -> Self.Element
+}
+
+type Reader()
+
+impl Feeds for Reader {
+  type Element = Int64
+
+  fn feed[Item: Convert[Int64]](self, item: Item) -> Int64 { todo }
+}
+
+type Scanner()
+
+impl Feeds for Scanner {
+  type Element = String
+
+  fn feed[Item: Convert[Self.Element]](self, item: Item) -> Self.Element { todo }
+}
+
+type Relay[Inner](inner: Inner)
+
+impl Feeds for Relay[Inner: Feeds] {
+  type Element = Inner.Element
+
+  fn feed[Item: Convert[Inner.Element]](self, item: Item) -> Inner.Element { todo }
+}

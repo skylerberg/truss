@@ -1395,6 +1395,7 @@ it is.
 | A trait can require other traits. | A law can then span traits. `Hash` requires `Equal`, so its law, that equal values hash equally, is stated and proven. In Rust, `Hash` does not require `Eq`, and that law is only a comment. |
 | A type has one `impl` of each trait. | Two traits that both require `Equal` share that `impl`, so there is no diamond problem. |
 | An `impl`'s method takes exactly the functions its trait's method takes: a callback's type has the trait's `uses` and `cost` clauses. | A call's arguments are checked against the trait's method, and a call known to reach the `impl` terminates if the `impl`'s method does, so the two must describe the same parameters. An `impl` whose callback took only functions that terminate would let a function with a `time` clause pass one that never terminates. |
+| An `impl`'s method bounds each type parameter exactly as its trait's method does. | A call's type arguments are checked against the trait's bounds, and the body of the `impl`'s method against its own. With a bound that the trait's method lacks, such as `Convert[String]` where the trait writes `Convert[Int64]`, the body would call a method of a trait that the type argument does not implement. Dropping a bound is safe, and is rejected as every other difference from the trait's signature is, so that an `impl`'s method reads as its trait's. |
 
 ### Implementations
 

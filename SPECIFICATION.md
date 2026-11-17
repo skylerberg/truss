@@ -2151,7 +2151,13 @@ trait Ordered: Equal {
   `uses` and `cost` clauses, so the `impl`'s method takes the same functions
   as the trait's. The method's generic parameters may have other names, and
   its capability parameters have the trait's names (see
-  [Capability parameters](#capability-parameters)).
+  [Capability parameters](#capability-parameters)). Each generic parameter
+  is a type parameter or a `UInt64` generic parameter, as the trait's
+  parameter in the same position is. A type parameter has exactly that
+  parameter's bounds, in any order: the same traits with the same arguments
+  and constraints, again with `Self` and the associated types as the `impl`
+  gives them. So the `impl`'s method takes the same type arguments as the
+  trait's.
 - **An `impl`'s method may promise more than its trait.** Its contract is
   the trait method's, with the method's own `ensures` and `cost` clauses
   added, and its own `requires`, if it has any, in place of the trait's.
