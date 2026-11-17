@@ -1,0 +1,3 @@
+public trait Walk {
+  fn each(self, visit: (fn(Int64) cost time finite))
+}

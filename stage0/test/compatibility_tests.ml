@@ -240,6 +240,121 @@ let () =
         [ "breaks: lib::shapes::name changed its value" ];
       expect name "public let name: String = (\"square\")\n" [])
 
+let make_apply_source ?(generics = "") ?(clauses = "") visit_type =
+  Printf.sprintf "public fn apply%s(visit: %s)\n%s{\n  visit(1)\n}\n" generics visit_type clauses
+
+let () =
+  Harness.test "a callback type that drops its time clause breaks, and so does one that gains it"
+    (fun () ->
+      let terminating = make_apply_source "(fn(Int64) cost time finite)"
+      and any = make_apply_source "fn(Int64)" in
+      expect terminating any
+        [
+          "breaks: lib::shapes::apply takes more functions for `visit`, and so has another type \
+           where it is named as a value";
+        ];
+      expect any terminating [ "breaks: lib::shapes::apply changed its parameters or its result" ]);
+  Harness.test "a callback type that gains a capability breaks, and so does one that loses it"
+    (fun () ->
+      let clauses = "  uses Log\n" in
+      let pure = make_apply_source ~clauses "(fn(Int64) cost time finite)"
+      and logging = make_apply_source ~clauses "(fn(Int64) uses Log cost time finite)" in
+      expect pure logging
+        [
+          "breaks: lib::shapes::apply takes more functions for `visit`, and so has another type \
+           where it is named as a value";
+        ];
+      expect logging pure [ "breaks: lib::shapes::apply changed its parameters or its result" ]);
+  Harness.test "a callback type whose input changes breaks" (fun () ->
+      expect
+        (make_apply_source "(fn(Int64) cost time finite)")
+        (make_apply_source "(fn(UInt64) cost time finite)")
+        [ "breaks: lib::shapes::apply changed its parameters or its result" ]);
+  Harness.test "a callback type whose costs are written in another order is no change" (fun () ->
+      expect
+        (make_apply_source "(fn(Int64) cost time O(1) cost allocations O(1))")
+        (make_apply_source "(fn(Int64) cost allocations O(1) cost time O(1))")
+        []);
+  Harness.test "a capability parameter added for a callback's uses grows" (fun () ->
+      expect Fixtures.Compatibility.each_taking_a_function_that_terminates
+        Fixtures.Compatibility.each_taking_a_function_that_uses_granted
+        [
+          "grows: lib::shapes::each gained the capability parameter `Granted`";
+          "grows: lib::shapes::each takes more functions for `visit`";
+        ]);
+  Harness.test
+    "a capability parameter added to a method breaks only beside the method's own generics"
+    (fun () ->
+      expect Fixtures.Compatibility.row_methods_taking_functions_that_terminate
+        Fixtures.Compatibility.row_methods_taking_functions_that_use_granted
+        [
+          "grows: lib::shapes::Row.each gained the capability parameter `Granted`";
+          "grows: lib::shapes::Row.each takes more functions for `visit`";
+          "grows: lib::shapes::Row.single gained the capability parameter `Granted`";
+          "grows: lib::shapes::Row.single takes more functions for `make`";
+          "breaks: lib::shapes::Row.tagged gained the capability parameter `Granted`, and a call \
+           that writes type arguments then gives too few";
+          "grows: lib::shapes::Row.tagged takes more functions for `visit`";
+        ]);
+  Harness.test
+    "a capability parameter added after a type parameter breaks calls that write type arguments"
+    (fun () ->
+      expect Fixtures.Compatibility.convert_taking_a_function_that_terminates
+        Fixtures.Compatibility.convert_taking_a_function_that_uses_granted
+        [
+          "breaks: lib::shapes::convert gained the capability parameter `Granted`, and a call that \
+           writes type arguments then gives too few";
+          "grows: lib::shapes::convert takes more functions for `change`";
+        ]);
+  Harness.test "an added capability parameter counts as the capabilities the callback's type listed"
+    (fun () ->
+      expect Fixtures.Compatibility.hold_taking_a_function_that_uses_log
+        Fixtures.Compatibility.hold_taking_a_function_that_uses_granted
+        [
+          "grows: lib::shapes::hold gained the capability parameter `Granted`";
+          "breaks: lib::shapes::hold now uses `standard::capabilities::Log`";
+          "grows: lib::shapes::hold takes more functions for `job`";
+        ]);
+  Harness.test "a capability parameter added to a callback type that also drops a cost breaks"
+    (fun () ->
+      expect
+        (make_apply_source "(fn(Int64) cost time O(1))")
+        (make_apply_source ~generics:"[capability Granted]" ~clauses:"  uses Granted\n"
+           "(fn(Int64) uses Granted)")
+        [
+          "grows: lib::shapes::apply gained the capability parameter `Granted`";
+          "breaks: lib::shapes::apply takes more functions for `visit`, and so has another type \
+           where it is named as a value";
+        ]);
+  Harness.test "one capability parameter added for two callbacks of different uses breaks"
+    (fun () ->
+      expect Fixtures.Compatibility.both_taking_functions_that_use_log_and_clock
+        Fixtures.Compatibility.both_taking_functions_that_use_granted
+        [
+          "grows: lib::shapes::both gained the capability parameter `Granted`";
+          "breaks: lib::shapes::both takes more functions for `first`, and so has another type \
+           where it is named as a value";
+          "breaks: lib::shapes::both takes more functions for `second`, and so has another type \
+           where it is named as a value";
+        ]);
+  Harness.test "an added capability parameter stands for the capabilities a callback's type drops"
+    (fun () ->
+      expect Fixtures.Compatibility.both_taking_functions_that_use_log_and_one_clock
+        Fixtures.Compatibility.both_taking_functions_that_use_granted_and_one_clock
+        [
+          "grows: lib::shapes::both gained the capability parameter `Granted`";
+          "grows: lib::shapes::both takes more functions for `first`";
+          "grows: lib::shapes::both takes more functions for `second`";
+        ]);
+  Harness.test "a trait's method that takes more functions breaks the impls that define it"
+    (fun () ->
+      expect Fixtures.Compatibility.walk_trait_taking_a_function_that_terminates
+        Fixtures.Compatibility.walk_trait_taking_any_function
+        [
+          "breaks: lib::shapes::Walk its method `each` takes more functions for `visit`, which \
+           every `impl` that defines the method must then take";
+        ])
+
 let () =
   Harness.test "an impl moved to another module of its package is no change" (fun () ->
       let package : Path.package = { owner = None; name = "lib" } in

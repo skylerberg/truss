@@ -1,0 +1,5 @@
+public fn hold[capability Granted](job: (fn() uses Granted))
+  uses Granted
+{
+  job()
+}

@@ -3,7 +3,12 @@ module Local_table = Hashtbl.Make (Structural_key.Make (struct
 end))
 
 type parameters = Core.parameter list * Core.parameter list
-type renaming = { forward : Core.local Local_table.t; backward : Core.local Local_table.t }
+
+type renaming = {
+  forward : Core.local Local_table.t;
+  backward : Core.local Local_table.t;
+  retyped_parameters : (Types.ty * Types.ty) list;
+}
 
 let corresponds renaming before after =
   match
@@ -17,24 +22,44 @@ let corresponds renaming before after =
       true
 
 let copy renaming =
-  { forward = Local_table.copy renaming.forward; backward = Local_table.copy renaming.backward }
+  {
+    renaming with
+    forward = Local_table.copy renaming.forward;
+    backward = Local_table.copy renaming.backward;
+  }
 
-let rename_parameters ((before, after) : parameters) =
-  let renaming = { forward = Local_table.create 16; backward = Local_table.create 16 } in
-  ignore (corresponds renaming Self Self);
-  let rec pair = function
-    | (was : Core.parameter) :: before, (now : Core.parameter) :: after ->
-        ignore (corresponds renaming was.local now.local);
-        pair (before, after)
-    | _ -> ()
+let is_equivalent_type renaming before after =
+  Types.equal before after || List.mem (before, after) renaming.retyped_parameters
+
+let rec pair_parameters = function
+  | (was : Core.parameter) :: before, (now : Core.parameter) :: after ->
+      (was, now) :: pair_parameters (before, after)
+  | _ -> []
+
+let rename_parameters (parameters : parameters) =
+  let parameter_pairs = pair_parameters parameters in
+  let renaming =
+    {
+      forward = Local_table.create 16;
+      backward = Local_table.create 16;
+      retyped_parameters =
+        List.filter_map
+          (fun ((was : Core.parameter), (now : Core.parameter)) ->
+            if Types.equal was.type_ now.type_ then None else Some (was.type_, now.type_))
+          parameter_pairs;
+    }
   in
-  pair (before, after);
+  ignore (corresponds renaming Self Self);
+  List.iter
+    (fun ((was : Core.parameter), (now : Core.parameter)) ->
+      ignore (corresponds renaming was.local now.local))
+    parameter_pairs;
   renaming
 
 let rec is_equivalent_place renaming (before : Core.place) (after : Core.place) =
   match (before, after) with
   | Local { local; type_; origin = _ }, Local after ->
-      corresponds renaming local after.local && Types.equal type_ after.type_
+      corresponds renaming local after.local && is_equivalent_type renaming type_ after.type_
   | Constant { path; type_; origin = _ }, Constant after ->
       Path.equal path after.path && Types.equal type_ after.type_
   | Field { base; field; type_; origin = _ }, Field after ->
@@ -82,7 +107,7 @@ and is_equivalent_argument renaming (before : Core.argument) (after : Core.argum
 
 and is_equivalent_expression renaming ({ id = _; origin = _; type_; kind = form } : Core.expression)
     (after : Core.expression) =
-  Types.equal type_ after.type_ && is_equivalent_kind renaming form after.kind
+  is_equivalent_type renaming type_ after.type_ && is_equivalent_kind renaming form after.kind
 
 and is_equivalent_kind renaming (before : Core.kind) (after : Core.kind) =
   match (before, after) with
@@ -102,7 +127,7 @@ and is_equivalent_kind renaming (before : Core.kind) (after : Core.kind) =
       List.equal (is_equivalent_pattern renaming) parameters after.parameters
       && List.equal (is_equivalent_capture renaming) captures after.captures
       && is_equivalent_block renaming body after.body
-      && Types.equal result after.result
+      && is_equivalent_type renaming result after.result
   | Construct { variant; fields }, Construct after ->
       Option.equal String.equal variant after.variant
       && List.equal
@@ -193,7 +218,7 @@ and is_equivalent_kind renaming (before : Core.kind) (after : Core.kind) =
       false
 
 and is_equivalent_capture renaming ({ local; type_ } : Core.capture) (after : Core.capture) =
-  corresponds renaming local after.local && Types.equal type_ after.type_
+  corresponds renaming local after.local && is_equivalent_type renaming type_ after.type_
 
 and is_equivalent_binder renaming (before : Core.binder) (after : Core.binder) =
   match (before, after) with
@@ -325,7 +350,7 @@ and is_equivalent_arm renaming ({ patterns; guard; body; origin = _ } : Core.arm
 
 and is_equivalent_pattern renaming ({ id = _; origin = _; type_; kind = form } : Core.pattern)
     (after : Core.pattern) =
-  Types.equal type_ after.type_
+  is_equivalent_type renaming type_ after.type_
   &&
   match (form, after.kind) with
   | Wildcard, Wildcard -> true

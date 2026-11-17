@@ -139,6 +139,18 @@ compatible with the one before when:
 - a function, method, or theorem has the same parameters and result, no
   capability more in its `uses`, a `requires` that the old one implies, an
   `ensures` that implies the old one, and no cost greater than before
+- a function or method gains at most capability parameters that only the
+  `uses` of its parameters' function types and its own `uses` name, and the
+  old types of its parameters are an instance of the new ones: a call and a
+  use of the function as a value both infer such a parameter. In the
+  function's own `uses`, the parameter counts as that instance's
+  capabilities. A call that writes type arguments gives one for every
+  generic parameter, so a function gains none if it has a generic
+  parameter, and a method with `self` gains none if it has a generic
+  parameter of its own
+- a method of a trait or of a capability keeps its generic parameters and
+  the type of each parameter, because every `impl` defines the method with
+  them
 - a type that shows its fields has the same fields, variants, and invariant;
   an opaque type may change everything inside it
 - a trait or capability has the same methods, associated types, required

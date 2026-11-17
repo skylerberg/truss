@@ -66,42 +66,140 @@ let make_uses_more : Types.capability -> change = function
   | Divergence (Of_parameter { name; _ }) ->
       Breaks (Printf.sprintf "may not terminate where `%s` may not" name)
 
-let compare_signatures ~(before : Types.signature) ~(after : Types.signature) =
-  let same_parameters =
-    List.length before.parameters = List.length after.parameters
-    && List.for_all2
-         (fun (was : Types.parameter_info) (now : Types.parameter_info) ->
-           was.name = now.name && was.mode = now.mode && was.type_ = now.type_
-           && (now.has_default || not was.has_default))
-         before.parameters after.parameters
+let converts ~(actual : Types.function_type) ~(expected : Types.function_type) =
+  actual.inputs = expected.inputs
+  && Types.equal actual.output expected.output
+  && Types.subtract_capabilities actual.uses expected.uses = Types.no_capabilities
+  && Types.costs_imply ~provided:actual.costs ~required:expected.costs
+
+type parameter_change = Unchanged | Generalized of string | Widened of string | Incompatible
+
+let compare_parameter ~instantiate ((was : Types.parameter_info), (now : Types.parameter_info)) =
+  if was.name <> now.name || was.mode <> now.mode || (was.has_default && not now.has_default) then
+    Incompatible
+  else
+    match (was.type_, now.type_) with
+    | old_type, new_type when Types.equal old_type new_type -> Unchanged
+    | Function old_type, Function new_type ->
+        let instance = { new_type with uses = instantiate new_type.uses } in
+        if not (converts ~actual:old_type ~expected:instance) then Incompatible
+        else if converts ~actual:new_type ~expected:old_type then Unchanged
+        else if converts ~actual:instance ~expected:old_type then Generalized now.name
+        else Widened now.name
+    | _ -> Incompatible
+
+let list_added_capability_generics ~(before : Types.signature) ~(after : Types.signature) =
+  let old_count = List.length before.generics in
+  let added_generics = List.drop old_count after.generics in
+  if
+    List.take old_count after.generics = before.generics
+    && List.for_all
+         (fun (generic : Types.generic) -> generic.kind = Capability_generic)
+         added_generics
+  then added_generics
+  else []
+
+let names_generic (uses : Types.capability_set) (generic : Types.generic) =
+  List.exists
+    (function
+      | Types.Capability_parameter parameter | Divergence (Of_parameter parameter) ->
+          parameter = generic.generic
+      | _ -> false)
+    (uses :> Types.capability list)
+
+let infer_added_generics (added_generics : Types.generic list) parameters : Types.substitution =
+  List.map
+    (fun (generic : Types.generic) ->
+      ( generic.generic,
+        Types.Capabilities
+          (List.fold_left
+             (fun unlisted ((was : Types.parameter_info), (now : Types.parameter_info)) ->
+               match (was.type_, now.type_) with
+               | Function old_type, Function new_type when names_generic new_type.uses generic ->
+                   Types.union_capabilities unlisted
+                     (Types.subtract_capabilities old_type.uses new_type.uses)
+               | _ -> unlisted)
+             Types.no_capabilities parameters) ))
+    added_generics
+
+let compare_signatures ~is_trait_method ~added_generics ~(before : Types.signature)
+    ~(after : Types.signature) =
+  let has_same_arity = List.compare_lengths before.parameters after.parameters = 0 in
+  let parameters = if has_same_arity then List.combine before.parameters after.parameters else [] in
+  let instantiate =
+    Types.substitute_capabilities (infer_added_generics added_generics parameters)
   in
+  let parameter_changes = List.map (compare_parameter ~instantiate) parameters in
+  let same_parameters = has_same_arity && not (List.mem Incompatible parameter_changes) in
   let gained_default =
     same_parameters
-    && List.exists2
-         (fun (was : Types.parameter_info) (now : Types.parameter_info) ->
+    && List.exists
+         (fun ((was : Types.parameter_info), (now : Types.parameter_info)) ->
            now.has_default && not was.has_default)
-         before.parameters after.parameters
+         parameters
   in
-  let more = Types.subtract_capabilities after.uses before.uses
-  and fewer = Types.subtract_capabilities before.uses after.uses in
+  let new_uses = instantiate after.uses in
+  let added_uses = Types.subtract_capabilities new_uses before.uses
+  and removed_uses = Types.subtract_capabilities before.uses new_uses in
   List.concat
     [
       (if
-         before.generics = after.generics && before.receiver = after.receiver && same_parameters
-         && before.output = after.output
+         after.generics = before.generics @ added_generics
+         && before.receiver = after.receiver && same_parameters && before.output = after.output
          && before.specification_only = after.specification_only
          && before.capture_free_parameters = after.capture_free_parameters
        then []
        else [ Breaks "changed its parameters or its result" ]);
-      List.map make_uses_more (more :> Types.capability list);
-      (if Types.list_divergence fewer <> Types.no_capabilities then
+      List.map make_uses_more (added_uses :> Types.capability list);
+      (if Types.list_divergence removed_uses <> Types.no_capabilities then
          [ Grows "promises to terminate" ]
        else []);
-      (if Types.remove_divergence fewer <> Types.no_capabilities then
+      (if Types.remove_divergence removed_uses <> Types.no_capabilities then
          [ Grows "uses fewer capabilities" ]
        else []);
       (if gained_default then [ Grows "gained a default" ] else []);
+      List.filter_map
+        (function
+          | Generalized name -> Some (Grows (Printf.sprintf "takes more functions for `%s`" name))
+          | Widened name when is_trait_method ->
+              Some
+                (Breaks
+                   (Printf.sprintf
+                      "takes more functions for `%s`, which every `impl` that defines the method \
+                       must then take"
+                      name))
+          | Widened name ->
+              Some
+                (Breaks
+                   (Printf.sprintf
+                      "takes more functions for `%s`, and so has another type where it is named as \
+                       a value"
+                      name))
+          | Unchanged | Incompatible -> None)
+        parameter_changes;
     ]
+
+let accepts_type_arguments (path : Path.t) (signature : Types.signature) =
+  match (path, signature.receiver) with
+  | Method { receiver = Static; _ }, _ -> false
+  | _, Some (_, Named { arguments; _ }) ->
+      List.compare_length_with signature.generics (List.length arguments) > 0
+  | _, _ -> signature.generics <> []
+
+let compare_function_signatures path ~(before : Types.signature) ~(after : Types.signature) =
+  let added_generics = list_added_capability_generics ~before ~after in
+  let breaks_written_type_arguments = accepts_type_arguments path before in
+  List.map
+    (fun (generic : Types.generic) ->
+      if breaks_written_type_arguments then
+        Breaks
+          (Printf.sprintf
+             "gained the capability parameter `%s`, and a call that writes type arguments then \
+              gives too few"
+             generic.generic.name)
+      else Grows (Printf.sprintf "gained the capability parameter `%s`" generic.generic.name))
+    added_generics
+  @ compare_signatures ~is_trait_method:false ~added_generics ~before ~after
 
 let read_effective_signature (side : side) path =
   match Interface.Impls.read_signature side.lookups path with
@@ -172,8 +270,8 @@ let compare_traits ~(before : Types.trait_interface) ~(after : Types.trait_inter
         | None -> [ Breaks (Printf.sprintf "no longer has the method `%s`" was.method_name) ]
         | Some now ->
             List.map name_change
-              (compare_signatures ~before:(read_signature_before was)
-                 ~after:(read_signature_after now)
+              (compare_signatures ~is_trait_method:true ~added_generics:[]
+                 ~before:(read_signature_before was) ~after:(read_signature_after now)
               @ compare_contracts
                   ~before:(read_contract_before was.method_name was.method_receiver)
                   ~after:(read_contract_after now.method_name now.method_receiver)
@@ -277,7 +375,7 @@ let compare ~before ~after package =
                with
               | ( Some (Function_interface _ | Theorem_interface _),
                   Some (Function_interface _ | Theorem_interface _) ) ->
-                  compare_signatures
+                  compare_function_signatures path
                     ~before:(read_effective_signature before path)
                     ~after:(read_effective_signature after path)
                   @ compare_contracts ~before:(read_contract before before_key)

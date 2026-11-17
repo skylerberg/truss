@@ -1,0 +1,22 @@
+public type Row[Element](items: List[Element])
+
+public fn Row[Element].single(make: (fn() -> Element cost time finite)) -> Row[Element] {
+  Row([make()])
+}
+
+public fn Row[Element].each(self, visit: (fn(Element) cost time finite)) {
+  for item in self.items {
+    visit(item)
+  }
+}
+
+public fn Row[Element].tagged[Tag](
+  self,
+  tag: own Tag,
+  visit: (fn(Element) cost time finite),
+) -> Tag {
+  for item in self.items {
+    visit(item)
+  }
+  tag
+}

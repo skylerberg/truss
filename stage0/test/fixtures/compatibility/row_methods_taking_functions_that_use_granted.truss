@@ -1,0 +1,30 @@
+public type Row[Element](items: List[Element])
+
+public fn Row[Element].single[capability Granted](
+  make: (fn() -> Element uses Granted),
+) -> Row[Element]
+  uses Granted
+{
+  Row([make()])
+}
+
+public fn Row[Element].each[capability Granted](self, visit: (fn(Element) uses Granted))
+  uses Granted
+{
+  for item in self.items {
+    visit(item)
+  }
+}
+
+public fn Row[Element].tagged[Tag, capability Granted](
+  self,
+  tag: own Tag,
+  visit: (fn(Element) uses Granted),
+) -> Tag
+  uses Granted
+{
+  for item in self.items {
+    visit(item)
+  }
+  tag
+}

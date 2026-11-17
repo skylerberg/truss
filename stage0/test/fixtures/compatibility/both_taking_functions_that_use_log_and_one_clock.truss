@@ -1,0 +1,6 @@
+public fn both(first: (fn() uses Log, Clock), second: (fn() uses Log))
+  uses Log, Clock
+{
+  first()
+  second()
+}

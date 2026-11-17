@@ -1,0 +1,2 @@
+public fn hold(job: (fn() uses Log)) {
+}

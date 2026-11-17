@@ -1,0 +1,8 @@
+public fn convert[Other, capability Granted](
+  item: Int64,
+  change: (fn(Int64) -> Other uses Granted),
+) -> Other
+  uses Granted
+{
+  change(item)
+}

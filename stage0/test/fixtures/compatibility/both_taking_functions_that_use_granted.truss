@@ -1,0 +1,6 @@
+public fn both[capability Granted](first: (fn() uses Granted), second: (fn() uses Granted))
+  uses Granted
+{
+  first()
+  second()
+}

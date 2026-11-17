@@ -1,0 +1,3 @@
+public fn convert[Other](item: Int64, change: (fn(Int64) -> Other cost time finite)) -> Other {
+  change(item)
+}

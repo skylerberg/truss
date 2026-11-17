@@ -1,0 +1,6 @@
+public fn both[capability Granted](first: (fn() uses Granted, Clock), second: (fn() uses Granted))
+  uses Granted, Clock
+{
+  first()
+  second()
+}

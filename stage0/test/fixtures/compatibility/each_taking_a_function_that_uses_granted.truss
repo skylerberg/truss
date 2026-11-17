@@ -1,0 +1,8 @@
+public fn each[capability Granted](items: Slice[Int64], visit: (fn(Int64) uses Granted))
+  uses Granted
+  cost time O(items.length() * time(visit))
+{
+  for item in items {
+    visit(item)
+  }
+}
