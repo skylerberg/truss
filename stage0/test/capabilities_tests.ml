@@ -701,6 +701,22 @@ let () =
   Harness.test "a bound names the time of a callback only if the callback can terminate" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.time_of_a_callback_without_a_capability_parameter
         "types.unbounded_time");
+  Harness.test
+    "a bound that names the allocations of a callback does not make its function terminate"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.each_bounded_by_the_allocations_of_visit_called_under_a_time_clause
+        "capabilities.may_not_terminate"
+        ~says:"This call may not terminate, since `app::main::each` has no `time` clause");
+  Harness.test "a time clause does not follow a callback whose allocations another clause names"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.finite_each_bounded_by_the_allocations_of_visit
+        "capabilities.may_not_terminate"
+        ~says:"This call may not terminate, since the function passed for `visit` may not");
+  Harness.test "a function that terminates names the allocations of a callback that terminates"
+    (fun () ->
+      expect_fine
+        Fixtures.Capabilities.finite_each_of_a_visit_that_terminates_bounded_by_its_allocations);
   Harness.test "a specification calls only functions that terminate" (fun () ->
       expect_one_diagnostic
         (apply ^ Fixtures.Capabilities.ensures_calling_slow)

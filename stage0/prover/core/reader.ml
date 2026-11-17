@@ -790,8 +790,8 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       Values.apply_specification_function context frame ~location function_ values
         ~unconverted:(List.map (Facts.substitute_type context frame) unconverted)
         ~types:(List.map (compute_operand_type context frame) arguments)
-  | Specification (Method_time callee) ->
-      (frame, Amounts.compute_method_time context frame (make_unit_callee callee))
+  | Specification (Method_cost { metric; method_ }) ->
+      (frame, Amounts.compute_method_cost context frame metric (make_unit_callee method_))
   | Specification (Map entries) ->
       Values.apply_map_literal context frame ~ty ~location
         (List.map

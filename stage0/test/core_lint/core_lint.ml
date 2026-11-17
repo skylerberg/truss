@@ -312,7 +312,7 @@ let is_executable context (condition : Core.expression) =
          Types.equal node.type_ Integer
          ||
          match node.kind with
-         | Quantified _ | Old _ | Result | Specification_function _ | Method_time _ -> true
+         | Quantified _ | Old _ | Result | Specification_function _ | Method_cost _ -> true
          | Call { callee = Function { path; _ }; _ } -> (
              match Interface.Impls.read_signature context.interface path with
              | Some signature -> signature.specification_only
@@ -739,7 +739,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
              | Function_value { instantiation; _ } ->
                  check_instantiation "a function value" instantiation
              | Value_parameter named -> check_parameter "a value" named
-             | Method_time method_ -> check_callee method_
+             | Method_cost { method_; _ } -> check_callee method_
              | Lambda { result; captures; _ } ->
                  check_type "a lambda's result" result;
                  List.iter

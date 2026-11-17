@@ -1,14 +1,4 @@
-type t =
-  | Amortized
-  | Time
-  | Allocations
-  | Allocated_bytes
-  | Calls
-  | O
-  | Finite
-  | Potential
-  | By
-  | Bit_vector
+type t = Amortized | Metric of Metric.t | Calls | O | Finite | Potential | By | Bit_vector
 
 val spellings : (string * t) list
 val of_token : Token.kind -> t option

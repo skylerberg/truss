@@ -153,7 +153,7 @@ type context = {
   fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
-  mutable lambda_times : (Logic.term * (Logic.term * obligation list)) list;
+  mutable lambda_costs : ((Logic.term * Metric.t) * (Logic.term * obligation list)) list;
   mutable lambda_captures : (Logic.term * Core.local list) list;
   lambda_definitions : Logic.term Tables.Symbol_table.t;
   mutable potentials : Logic.term list;

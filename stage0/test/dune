@@ -29,6 +29,7 @@
   database_tests
   standard_package_loading_tests)
  (libraries
+  metric
   process
   lock_file
   harness

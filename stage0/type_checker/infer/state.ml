@@ -1027,6 +1027,14 @@ let note_mode_keyword state (written : Syntax.expression) (mode : Syntax.mode)
     }
     :: state.mode_keywords
 
+let find_local_type state (name : Syntax.name) =
+  match find_target state name with
+  | Some (Local id) ->
+      Option.map
+        (fun (local : local) -> resolve state local.type_)
+        (Hashtbl.find_opt state.locals id)
+  | _ -> None
+
 let check_resource state (resource : Syntax.resource) =
   let check_capability (path : Syntax.path_type) (method_ : Syntax.name option) =
     let shown = Interface.Elaborator.show_path path.path in
@@ -1044,29 +1052,73 @@ let check_resource state (resource : Syntax.resource) =
           (Printf.sprintf "`calls` counts the calls of a capability, and `%s` is not one." shown)
   in
   match resource with
-  | Time | Allocations | Allocated_bytes -> ()
+  | Metric _ -> ()
   | Calls (Call_capability path) -> check_capability path None
   | Calls (Call_method (path, method_)) -> check_capability path (Some method_)
   | Calls (Call_parameter name) -> (
-      match find_target state name with
-      | Some (Local id) -> (
-          match
-            Option.map
-              (fun (local : local) -> resolve state local.type_)
-              (Hashtbl.find_opt state.locals id)
-          with
-          | Some (Types.Function _ | Types.Error _ | Types.Hole) | None -> ()
-          | Some other ->
-              report state Not_callable (read_span state name.id)
-                (Printf.sprintf "`calls` counts the calls through a function, and `%s` is a `%s`."
-                   name.text (Types.show other)))
-      | Some (Unknown _) -> ()
+      match (find_target state name, find_local_type state name) with
+      | Some (Local _), (Some (Types.Function _ | Types.Error _ | Types.Hole) | None) -> ()
+      | Some (Local _), Some other ->
+          report state Not_callable (read_span state name.id)
+            (Printf.sprintf "`calls` counts the calls through a function, and `%s` is a `%s`."
+               name.text (Types.show other))
+      | Some (Unknown _), _ -> ()
       | _ ->
           report state Not_callable (read_span state name.id)
             (Printf.sprintf
                "`calls` counts the calls through a parameter that is a function, or of a \
                 capability, and `%s` is neither."
                name.text))
+
+let check_operand_clause state (cost : Syntax.cost) (operand : Interface.Elaborator.cost_operand) =
+  let span = read_span state operand.written.id in
+  let cost_function = operand.cost_function.text in
+  let callee =
+    match operand.callee with
+    | Function_parameter name -> name.text
+    | Bound_method { type_; method_ } -> (
+        match Interface.Elaborator.find_bounded_type state.context type_ with
+        | Some self_type -> Printf.sprintf "%s.%s" (Types.show self_type) method_.text
+        | None -> "...")
+    | Not_a_callee -> "..."
+  in
+  let shown = Printf.sprintf "%s(%s)" cost_function callee in
+  (match cost.resource with
+  | Metric bounded when bounded = operand.metric -> ()
+  | Metric bounded ->
+      let bounded = Metric.show bounded in
+      report state Cost_of_other_resource span
+        ~fixes:
+          [
+            fix
+              (Printf.sprintf "Write `%s`." bounded)
+              [ replace (read_span state operand.cost_function.id) bounded ];
+          ]
+        (Printf.sprintf
+           "`%s` bounds the `%s` of one call, not its `%s`, which this clause bounds. Write \
+            `%s(%s)`."
+           shown cost_function bounded bounded callee)
+  | Calls _ ->
+      report state Cost_of_other_resource span
+        (Printf.sprintf
+           "`%s` bounds the `%s` of one call, not the calls it makes, which this clause counts."
+           shown cost_function));
+  match cost.bound with
+  | Exactly _ ->
+      report state Upper_bound_in_exact_bound span
+        (Printf.sprintf
+           "`%s` is an upper bound on one call, and a call may spend less, so an exact amount that \
+            names it would be false for that call. State this bound with `<=` or `O(...)`."
+           shown)
+  | Big_o _ | At_most _ | Finite -> ()
+
+let check_cost state (cost : Syntax.cost) =
+  check_resource state cost.resource;
+  match cost.bound with
+  | Big_o value | At_most value | Exactly value ->
+      List.iter (check_operand_clause state cost)
+        (Interface.Elaborator.list_cost_operands state.context value)
+  | Finite -> ()
 
 let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let make = make_synthetic_expression state ~origin in

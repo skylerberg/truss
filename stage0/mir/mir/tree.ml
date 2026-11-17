@@ -113,7 +113,7 @@ and specification =
       arguments : operand list;
       unconverted : Types.ty list;
     }
-  | Method_time of callee
+  | Method_cost of { metric : Metric.t; method_ : callee }
   | Map of (operand * operand) list
   | Quantified of {
       quantifier : Core.quantifier;

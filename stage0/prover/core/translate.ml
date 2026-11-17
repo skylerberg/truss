@@ -44,7 +44,7 @@ let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures ~inh
       fresh_order = Tables.Symbol_table.create 64;
       logs = [];
       powers = [];
-      lambda_times = [];
+      lambda_costs = [];
       lambda_captures = [];
       lambda_definitions = Tables.Symbol_table.create 8;
       potentials = [];
@@ -106,7 +106,7 @@ let list_promises context (source : State.source) locals (costs : Mir.cost list)
   List.filter_map
     (fun (cost : Mir.cost) ->
       match cost with
-      | { resource = Time; bound = Finite; _ } -> None
+      | { resource = Metric Time; bound = Finite; _ } -> None
       | _ -> (
           match Contracts.find_resource cost ~locals with
           | None ->
@@ -155,15 +155,20 @@ let keep_promise context (frame : State.frame) (promise : promise) ~(at : State.
     | Exactly -> Logic.equal spent amount
     | At_most -> Costs.at_most spent amount
   in
+  let difference, verb =
+    match promise.counter.counting with
+    | Units | At_most -> ("more than", "allows")
+    | Exactly -> ("more or less than", "states")
+  in
   Facts.oblige context frame Cost location
     [
       Text
         (if promise.inherited then
-           Printf.sprintf "This method may spend more than its %s's `"
+           Printf.sprintf "This method may spend %s its %s's `" difference
              (show_promiser_kind context.lookups promise.written_in)
-         else "This may spend more than `");
+         else Printf.sprintf "This may spend %s `" difference);
       Facts.quote promise.written_in promise.clause.origin;
-      Text "` allows.";
+      Text (Printf.sprintf "` %s." verb);
     ]
     goal
 

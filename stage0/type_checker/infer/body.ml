@@ -92,7 +92,7 @@ let check_clauses state env (clauses : Syntax.clause list) =
   let env = { env with State.specification = true } in
   List.iter
     (fun (clause : Syntax.clause) ->
-      match clause.kind with Cost { resource; _ } -> State.check_resource state resource | _ -> ())
+      match clause.kind with Cost cost -> State.check_cost state cost | _ -> ())
     clauses;
   List.iter
     (fun ((value : Syntax.expression), kind) ->

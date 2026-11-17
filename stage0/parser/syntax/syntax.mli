@@ -65,7 +65,7 @@ and clause_kind =
   | Clause_error
 
 and cost = { amortized : bool; resource : resource; bound : bound }
-and resource = Time | Allocations | Allocated_bytes | Calls of call_target
+and resource = Metric of Metric.t | Calls of call_target
 
 and call_target =
   | Call_parameter of name

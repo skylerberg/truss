@@ -1,0 +1,6 @@
+fn f(source: Quiet) -> Bool
+  cost allocations <= 0
+  cost allocated_bytes <= 0
+{
+  probe_once(source)
+}

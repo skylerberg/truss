@@ -102,10 +102,10 @@ and kind =
   | Yielded
   | Identical of expression * expression
   | Specification_function of { function_ : specification_function; arguments : expression list }
-  | Method_time of callee
+  | Method_cost of { metric : Metric.t; method_ : callee }
 
 and capture = { local : local; type_ : Types.ty }
-and specification_function = Log | Power | Time | Calls
+and specification_function = Log | Power | Callback_cost of Metric.t | Calls
 and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
 and construction = Array | Specification_only
 and conversion = Widen | To_integer | From_integer
@@ -161,7 +161,7 @@ and iteration =
 and elements = { count : expression; position : pattern; element : place }
 and loop_clause = Invariant of expression | Decreases of expression list | Cost of cost
 and cost = { origin : origin; amortized : bool; resource : resource; bound : bound }
-and resource = Time | Allocations | Allocated_bytes | Calls of calls_target
+and resource = Metric of Metric.t | Calls of calls_target
 
 and calls_target =
   | Function_parameter of local

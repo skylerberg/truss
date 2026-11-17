@@ -54,13 +54,7 @@ and divergence =
 
 and capability_set = capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
-
-and resource =
-  | Time
-  | Allocations
-  | Allocated_bytes
-  | Calls of { capability : Path.t; method_ : string option }
-
+and resource = Metric of Metric.t | Calls of { capability : Path.t; method_ : string option }
 and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
 let is_divergence = function Divergence _ -> true | _ -> false
@@ -429,9 +423,7 @@ let costs_imply ~(provided : cost list) ~(required : cost list) =
 let show_path_name = function Path.Top { name; _ } -> name | path -> Path.show path
 
 let show_resource = function
-  | Time -> "time"
-  | Allocations -> "allocations"
-  | Allocated_bytes -> "allocated_bytes"
+  | Metric metric -> Metric.show metric
   | Calls { capability; method_ } ->
       Printf.sprintf "calls(%s%s)" (show_path_name capability)
         (match method_ with Some method_ -> "." ^ method_ | None -> "")
@@ -497,7 +489,7 @@ and show_function (function_type : function_type) =
   let uses = List.map show_capability (remove_divergence function_type.uses) in
   let is_finite =
     list_divergence function_type.uses = []
-    && not (List.exists (fun (cost : cost) -> cost.resource = Time) function_type.costs)
+    && not (List.exists (fun (cost : cost) -> cost.resource = Metric Time) function_type.costs)
   in
   let costs =
     (if is_finite then [ "cost time finite" ] else [])

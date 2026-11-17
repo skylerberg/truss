@@ -712,7 +712,7 @@ let is_executable state (condition : Core.expression) =
           if node.type_ = Types.Integer then executable := false;
           match node.kind with
           | Quantified _ | Result | Old _ | Yielded | Identical _ | Specification_function _
-          | Method_time _
+          | Method_cost _
           | Convert { conversion = To_integer | From_integer; _ } ->
               executable := false
           | Call { callee; _ } -> if is_specification_only callee then executable := false
@@ -1016,9 +1016,7 @@ let convert_resource state (written : Syntax.resource) : Core.resource =
     | _ -> State.raise_bug "`calls` names something that is not a capability"
   in
   match written with
-  | Time -> Time
-  | Allocations -> Allocations
-  | Allocated_bytes -> Allocated_bytes
+  | Metric metric -> Metric metric
   | Calls (Call_parameter name) -> (
       match State.find_target state name with
       | Some (Local id) -> Calls (Function_parameter (build_declared_local state id))

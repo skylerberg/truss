@@ -1,0 +1,8 @@
+fn f(value: Int64) -> Int64
+  cost allocations <= 1
+{
+  apply(value, change: fn(inner) {
+    let _ = Tree.Node(left: Tree.Leaf, right: Tree.Leaf)
+    inner
+  })
+}

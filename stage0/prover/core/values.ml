@@ -457,21 +457,6 @@ let translate_named_function (context : State.context) (frame : State.frame)
         (Logic.forall
            (parameters, Logic.equal (Lambdas.apply_function context function_type term inputs) value))
   | _ -> ());
-  let constant_time =
-    List.exists
-      (fun (part : State.part) ->
-        List.exists
-          (fun (cost : Mir.cost) ->
-            match cost with
-            | { resource = Time; bound = Order_of amount; amortized = false; _ } ->
-                Contracts.find_integer_literal amount <> None
-            | _ -> false)
-          part.costs)
-      contract.parts
-  in
-  (if constant_time then
-     let time = Calls.make_time_term context frame ty term in
-     Facts.add_frame_fact context frame (Logic.equal time (Logic.int 1)));
   term
 
 let translate_global_value (context : State.context) frame (site : Invocation.site) path
@@ -553,16 +538,16 @@ let is_indirect (context : State.context) (ty : Types.ty) variant =
 
 let construct_amount context frame (ty : Types.ty) variant (counter : Costs.counter) =
   match counter.resource with
-  | (Allocations | Allocated_bytes) when not (is_indirect context ty variant) -> Costs.zero
-  | Allocations -> Logic.int 1
-  | Allocated_bytes when counter.counting = Units -> Logic.int 1
-  | Allocated_bytes ->
+  | Metric (Allocations | Allocated_bytes) when not (is_indirect context ty variant) -> Costs.zero
+  | Metric Allocations -> Logic.int 1
+  | Metric Allocated_bytes when counter.counting = Units -> Logic.int 1
+  | Metric Allocated_bytes ->
       let symbol = Logic.Symbol.Block_bytes { type_ = ty; variant } in
       Facts.declare context (Logic.Constant (symbol, Logic.Int));
       Facts.add_frame_fact context frame
         (Logic.Operation ("<=", [ Logic.int 1; Logic.Symbol symbol ]));
       Logic.Symbol symbol
-  | Time | Calls _ -> Costs.zero
+  | Metric Time | Calls _ -> Costs.zero
 
 let apply_construct context frame (site : Invocation.site) variant
     (fields : (string * Logic.term option) list) =
@@ -680,8 +665,8 @@ let apply_specification_function context frame ~location (measure : Core.specifi
       | _ -> ());
       (frame, log)
   | Power, [ base; exponent ], _, _ -> (frame, Operations.declare_power context frame base exponent)
-  | Time, [ function_term ], _, [ function_type ] ->
-      (frame, Calls.make_time_term context frame function_type function_term)
+  | Callback_cost metric, [ function_term ], _, [ function_type ] ->
+      (frame, Calls.make_callback_cost context frame metric function_type function_term)
   | _ -> Facts.raise_unsupported location "this specification function"
 
 let copy_value ?literal (context : State.context) frame ty term =
@@ -693,25 +678,26 @@ let copy_value ?literal (context : State.context) frame ty term =
        && not (try Amounts.has_potential context ty with Facts.Unsupported _ -> true)
   then frame
   else
+    let declare_copy_cost metric =
+      Amounts.declare_method_cost context frame metric
+        (Path.Method { owner = Well_known.make_path Copyable; name = "copy"; receiver = Read })
+        ~trait_arguments:[] ty
+    in
     Operations.spend context frame (fun (counter : Costs.counter) ->
         match (literal, counter.resource, counter.counting) with
-        | _, Time, Units ->
-            let time =
-              match literal with
-              | Some _ -> Costs.zero
-              | None ->
-                  Amounts.declare_trait_method_time context frame
-                    (Path.Method
-                       { owner = Well_known.make_path Copyable; name = "copy"; receiver = Read })
-                    ~trait_arguments:[] ty
-            in
+        | _, Metric Time, Units ->
+            let time = match literal with Some _ -> Costs.zero | None -> declare_copy_cost Time in
             let copy_potential =
               try Amounts.compute_potential context frame ty term
               with Facts.Unsupported _ -> Costs.zero
             in
             Costs.minus (Costs.plus time (Logic.int 1)) copy_potential
-        | Some text, (Allocations | Allocated_bytes), Units | Some text, Allocations, _ ->
+        | Some text, Metric (Allocations | Allocated_bytes), Units
+        | Some text, Metric Allocations, _ ->
             Logic.int (if text = "" then 0 else 1)
-        | Some text, Allocated_bytes, (At_most | Exactly) -> Logic.int (String.length text)
+        | Some text, Metric Allocated_bytes, (At_most | Exactly) -> Logic.int (String.length text)
         | Some _, Calls _, _ -> Costs.zero
-        | _ -> Operations.declare_unknown_amount context frame counter)
+        | None, Metric ((Allocations | Allocated_bytes) as metric), _ ->
+            Amounts.compute_amount_within context frame counter (declare_copy_cost metric)
+        | _, Metric Time, (At_most | Exactly) | None, Calls _, _ ->
+            Operations.declare_unknown_amount context frame counter)

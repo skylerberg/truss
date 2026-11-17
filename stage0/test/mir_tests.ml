@@ -41,8 +41,8 @@ let rec list_rvalue_locals : Mir.rvalue -> Mir.local list = function
   | Specification (Identical (first, second)) ->
       list_operand_locals first @ list_operand_locals second
   | Specification (Applied { arguments; _ }) -> List.concat_map list_operand_locals arguments
-  | Specification (Method_time callee) -> (
-      match callee with Indirect callee -> list_operand_locals callee | _ -> [])
+  | Specification (Method_cost { method_; _ }) -> (
+      match method_ with Indirect callee -> list_operand_locals callee | _ -> [])
   | Specification (Map entries) ->
       List.concat_map
         (fun (key, value) -> list_operand_locals key @ list_operand_locals value)

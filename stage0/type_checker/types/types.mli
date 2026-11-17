@@ -54,13 +54,7 @@ and divergence =
 
 and capability_set = private capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
-
-and resource =
-  | Time
-  | Allocations
-  | Allocated_bytes
-  | Calls of { capability : Path.t; method_ : string option }
-
+and resource = Metric of Metric.t | Calls of { capability : Path.t; method_ : string option }
 and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
 val unit : ty

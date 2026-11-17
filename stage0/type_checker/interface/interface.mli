@@ -24,7 +24,21 @@ module Elaborator : sig
   }
 
   val list_bound_methods : t -> Types.ty -> string -> bound_method list
-  val find_timed_method : bound_method list -> bound_method option
+  val find_operand_method : bound_method list -> bound_method option
+
+  type operand_callee = Elaborator.operand_callee =
+    | Function_parameter of Syntax.name
+    | Bound_method of { type_ : Syntax.expression; method_ : Syntax.name }
+    | Not_a_callee
+
+  type cost_operand = Elaborator.cost_operand = {
+    written : Syntax.expression;
+    cost_function : Syntax.name;
+    metric : Metric.t;
+    callee : operand_callee;
+  }
+
+  val list_cost_operands : t -> Syntax.expression -> cost_operand list
 
   val elaborate_header :
     Lookups.t -> Resolve.Names.key -> (Environment.header, Diagnostic.in_definition list) result

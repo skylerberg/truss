@@ -141,6 +141,8 @@ module Code = struct
     | Negated_unsigned
     | Unused_value
     | Unbounded_time
+    | Upper_bound_in_exact_bound
+    | Cost_of_other_resource
     | Not_assignable
     | Wrong_try
     | Lambda_needs_type
@@ -401,6 +403,8 @@ module Code = struct
     | Negated_unsigned -> "negated_unsigned"
     | Unused_value -> "unused_value"
     | Unbounded_time -> "unbounded_time"
+    | Upper_bound_in_exact_bound -> "upper_bound_in_exact_bound"
+    | Cost_of_other_resource -> "cost_of_other_resource"
     | Not_assignable -> "not_assignable"
     | Wrong_try -> "wrong_try"
     | Lambda_needs_type -> "lambda_needs_type"

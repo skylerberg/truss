@@ -331,7 +331,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
         | Calls (Call_method (capability, name)) ->
             walk_path_type capability;
             on_name name
-        | Time | Allocations | Allocated_bytes -> ());
+        | Metric _ -> ());
         match cost.bound with
         | Big_o value | At_most value | Exactly value -> walk_expression value
         | Finite -> ())
