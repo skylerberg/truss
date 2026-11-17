@@ -809,7 +809,8 @@ public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, item
   }
 }
 
-public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool cost time finite))
+public fn List[Element].retain[capability Granted](mut self, keep: (fn(Element) -> Bool uses Granted))
+  uses Granted
   ensures self.length() <= old(self.length())
   cost time O(old(self.length()) * time(keep))
 {
@@ -827,7 +828,8 @@ public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool cost time fi
   mut self.truncate(retained_count)
 }
 
-public fn List[Element].filter(own self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
+public fn List[Element].filter[capability Granted](own self, keep: (fn(Element) -> Bool uses Granted)) -> List[Element]
+  uses Granted
   ensures result.length() <= self.length()
   cost time O(self.length() * time(keep))
 {

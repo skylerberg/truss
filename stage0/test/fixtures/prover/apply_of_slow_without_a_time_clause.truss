@@ -1,0 +1,7 @@
+fn named(value: Int64) -> Int64 {
+  apply(value, change: slow)
+}
+
+fn lambda(value: Int64) -> Int64 {
+  apply(value, change: fn(inner) { slow(inner) })
+}

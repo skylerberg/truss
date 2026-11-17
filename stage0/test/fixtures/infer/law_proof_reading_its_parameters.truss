@@ -1,7 +1,9 @@
 type Pair(first: UInt8, second: UInt8)
   derives Equal
 
-fn same(first: Pair, second: Pair) -> Bool {
+fn same(first: Pair, second: Pair) -> Bool
+  cost time finite
+{
   first == second
 }
 

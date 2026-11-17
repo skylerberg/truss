@@ -281,7 +281,7 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                 not
                   (Types.is_capability_subset
                      (Impls.normalize_capabilities_in_impl state.lookups ~list_bounds impl
-                        written.uses)
+                        (Types.remove_divergence written.uses))
                      allowed)
               then
                 Checking.report state Impl_uses state.spans.(name.id)
@@ -293,4 +293,14 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                    else
                      Printf.sprintf "`%s` can use only the capabilities `%s` declares for it."
                        name.text shown_trait)
+              else if
+                Types.terminates written.uses
+                && not
+                     (Types.is_capability_subset (Types.list_divergence written.uses) expected.uses)
+              then
+                Checking.report state Impl_uses state.spans.(name.id)
+                  (Printf.sprintf
+                     "The `time` clause of `%s` names a function that may not terminate, and `%s` \
+                      declares that `%s` terminates whatever it is passed."
+                     name.text shown_trait name.text)
           end)

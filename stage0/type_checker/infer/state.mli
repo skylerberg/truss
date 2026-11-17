@@ -161,6 +161,15 @@ val is_view : state -> Types.ty -> bool
 val resolve_associated_type :
   state -> Types.ty -> Types.trait_reference -> string -> at:Source.Definition_span.t -> Types.ty
 
+val compute_callee_uses : state -> Core.callee -> Types.capability_set
+
+val make_call :
+  state ->
+  callee:Core.callee ->
+  arguments:Core.argument list ->
+  lends:Types.mode option ->
+  Core.call
+
 val convert_evidence : Interface.Impls.evidence -> Tables.evidence
 val make_trait_reference : arguments:Types.argument list -> Path.t -> Types.trait_reference
 val string_type : Types.ty

@@ -219,7 +219,7 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
     | Types.Function ({ inputs; output; _ } as function_) ->
         List.iter
           (fun (_, input) ->
-            step_inside (if Types.terminates function_ then Function_input else Indirect) input)
+            step_inside (if Types.terminates function_.uses then Function_input else Indirect) input)
           inputs;
         step_inside Indirect output
     | Types.Any { trait_arguments; associated; _ } ->

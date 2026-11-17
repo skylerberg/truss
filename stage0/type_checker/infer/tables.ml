@@ -28,7 +28,6 @@ type call = {
   callee : callee;
   arguments : argument list;
   omitted_defaults : string list;
-  uses : Types.capability_set;
   callee_result : Types.ty;
 }
 

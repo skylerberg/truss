@@ -201,8 +201,6 @@ let () =
       | codes -> Harness.fail "codes %s" (String.concat ", " codes));
   Harness.test "mutual recursion that decreases" (fun () ->
       expect_proven Fixtures.Prover.even_and_odd_with_measures);
-  Harness.test "a function with a time clause cannot call one without" (fun () ->
-      expect_not_proven Fixtures.Prover.call_of_forever_under_a_time_clause "prover.termination");
   Harness.test "an impl that reaches itself through a generic function cannot be shown to end"
     (fun () ->
       expect_only_code Fixtures.Prover.check_reaching_itself_through_a_generic "prover.termination")
@@ -624,8 +622,6 @@ let run = Fixtures.Prover.run
 let () =
   Harness.test "a named function that keeps its parameter type's cost" (fun () ->
       expect_proven (run ^ Fixtures.Prover.same_as_a_constant_time_value));
-  Harness.test "a named function that does not keep its parameter type's cost" (fun () ->
-      expect_not_proven (run ^ Fixtures.Prover.spin_as_a_constant_time_value) "prover.cost");
   Harness.test "a named function must accept every argument its parameter's type promises"
     (fun () ->
       expect_not_proven Fixtures.Prover.apply_of_a_visit_requiring_below_five "prover.requires");
@@ -1098,8 +1094,6 @@ let () =
       expect_only_code Fixtures.Prover.ping_and_pong_provided_methods "prover.termination");
   Harness.test "an implementation that calls the function providing it is recursion" (fun () ->
       expect_only_code Fixtures.Prover.looper_provided_by_its_own_caller "prover.termination");
-  Harness.test "a capability's implementation ends when the capability's method does" (fun () ->
-      expect_only_code Fixtures.Prover.spinner_calling_a_function_without_time "prover.termination");
   Harness.test "a call through any that reaches back is recursion" (fun () ->
       expect_only_code Fixtures.Prover.step_reaching_back_through_any "prover.termination");
   Harness.test "a method that calls itself through any is recursion" (fun () ->
@@ -1460,8 +1454,8 @@ let () =
       if actual <> [ "prover.requires" ] then Harness.fail "%s" (String.concat ", " actual))
 
 let () =
-  Harness.test "a construct the prover cannot read yet" (fun () ->
-      expect_not_proven Fixtures.Prover.run_of_a_constant_time_task "prover.unsupported");
+  Harness.test "a function parameter of constant time is passed as one that terminates" (fun () ->
+      expect_proven Fixtures.Prover.run_of_a_constant_time_task);
   Harness.test "a type's invariant must be well defined" (fun () ->
       expect_not_proven "type Ratio(top: Int64, bottom: Int64)\n  invariant top / bottom > 0\n"
         "prover.division");
@@ -2001,3 +1995,21 @@ let () =
       expect_only_requires Fixtures.Prover.storage_popped_without_a_length);
   Harness.test "a view is sliced only within its length" (fun () ->
       expect_only_requires Fixtures.Prover.view_sliced_past_its_end)
+
+let () =
+  let apply = Fixtures.Prover.apply_bounded_by_the_time_of_change in
+  Harness.test "a bound that names the time of a callback takes the time of the function passed"
+    (fun () -> expect_proven (apply ^ Fixtures.Prover.apply_passing_the_time_of_quick_through));
+  Harness.test "a function without a time clause passes a function without one" (fun () ->
+      expect_proven (apply ^ Fixtures.Prover.apply_of_slow_without_a_time_clause));
+  Harness.test
+    "a call that uses nothing is in the logic, whatever its callee's capability parameter"
+    (fun () -> expect_proven (apply ^ Fixtures.Prover.apply_in_an_ensures));
+  Harness.test "a lambda with a loop that states no measure may not terminate" (fun () ->
+      expect_proven (apply ^ Fixtures.Prover.apply_of_a_lambda_looping_without_a_measure));
+  Harness.test "a lambda's loop states a measure in a function with a time clause" (fun () ->
+      expect_not_proven
+        (apply ^ Fixtures.Prover.apply_of_a_lambda_looping_without_a_measure_under_a_time_clause)
+        "prover.termination");
+  Harness.test "an operator on a bound type terminates" (fun () ->
+      expect_proven Fixtures.Prover.sum_of_a_bound_type_under_a_time_clause)

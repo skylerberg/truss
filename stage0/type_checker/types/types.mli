@@ -39,7 +39,9 @@ and capability =
   | Capability_projection of { base : ty; trait : trait_reference; name : string }
   | Capability_variable of int
   | Capability_error of Diagnostic.reported
+  | Divergence of divergence
 
+and divergence = Always | Of_parameter of parameter | Of_variable of int
 and capability_set = private capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
 
@@ -49,7 +51,7 @@ and resource =
   | Allocated_bytes
   | Calls of { capability : Path.t; method_ : string option }
 
-and cost_bound = Finite_cost | Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
+and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
 val unit : ty
 val bool : ty
@@ -71,6 +73,12 @@ val is_float_type : ty -> bool
 val make_capability_set : capability list -> capability_set
 val no_capabilities : capability_set
 val union_capabilities : capability_set -> capability_set -> capability_set
+val unconditional_divergence : capability
+val list_divergence : capability_set -> capability_set
+val remove_divergence : capability_set -> capability_set
+val terminates : capability_set -> bool
+val leave_divergence_to_parameters : capability_set -> capability_set
+val intersect_divergence : capability_set list -> capability_set
 val is_capability_subset : capability_set -> capability_set -> bool
 val subtract_capabilities : capability_set -> capability_set -> capability_set
 
@@ -99,7 +107,6 @@ val is_error : ty -> bool
 val is_open_type : ty -> bool
 val contains_unsolved : ty -> bool
 val is_unsolved_argument : argument -> bool
-val terminates : function_type -> bool
 val has_same_clauses : function_type -> function_type -> bool
 val costs_imply : provided:cost list -> required:cost list -> bool
 val show : ty -> string
@@ -124,7 +131,7 @@ type signature = {
   parameters : parameter_info list;
   output : result;
   uses : capability_set;
-  terminates : bool;
+  costs : cost list;
   specification_only : bool;
   capture_free_parameters : string list;
 }
