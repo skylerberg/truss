@@ -66,10 +66,8 @@ let list_references = function
 
 let resolve_call_node (interface : Interface.Lookups.t) (path : Path.t) =
   match path with
-  | Method { owner; name; receiver }
-    when not
-           (List.exists (Path.equal path)
-              (Mir.Call_edges.list_written_methods interface.names owner)) -> (
+  | Method { owner; name; receiver } when not (Mir.Call_edges.defines interface.names owner path)
+    -> (
       match Interface.Definition.find_impl_interface interface owner with
       | Some impl -> Path.Method { owner = impl.implements.trait; name; receiver }
       | None -> path)
@@ -116,32 +114,28 @@ let list_bound_methods (interface : Interface.Lookups.t) path type_arguments =
 let check_calls (interface : Interface.Lookups.t) ~find_call_edges (key : Instance.key) lowered =
   match (key, lowered) with
   | Code { path = caller; instantiation }, Compiled fragment -> (
-      match caller with
-      | Method { owner = Derived _; _ } -> ()
-      | _ -> (
-          match find_call_edges (resolve_call_node interface caller) with
-          | None -> ()
-          | Some call_edges ->
-              let allowed =
+      match find_call_edges (resolve_call_node interface caller) with
+      | None -> ()
+      | Some call_edges ->
+          let allowed =
+            call_edges
+            @ List.concat_map
+                (fun callee -> Option.value (find_call_edges callee) ~default:[])
                 call_edges
-                @ List.concat_map
-                    (fun callee -> Option.value (find_call_edges callee) ~default:[])
-                    call_edges
-                @ list_bound_methods interface caller instantiation.type_arguments
-              in
-              List.iter
-                (fun (called : Instance.key) ->
-                  match called with
-                  | Code { path = callee; _ }
-                    when not
-                           (is_runtime_call callee
-                           || List.exists (Path.equal callee) allowed
-                           || List.exists (Path.equal (resolve_call_node interface callee)) allowed
-                           ) ->
-                      raise_bug "%s calls %s, which is not among its call edges"
-                        (Instance.to_string key) (Instance.to_string called)
-                  | _ -> ())
-                (Emit_c.called fragment)))
+            @ list_bound_methods interface caller instantiation.type_arguments
+          in
+          List.iter
+            (fun (called : Instance.key) ->
+              match called with
+              | Code { path = callee; _ }
+                when not
+                       (is_runtime_call callee
+                       || List.exists (Path.equal callee) allowed
+                       || List.exists (Path.equal (resolve_call_node interface callee)) allowed) ->
+                  raise_bug "%s calls %s, which is not among its call edges"
+                    (Instance.to_string key) (Instance.to_string called)
+              | _ -> ())
+            (Emit_c.called fragment))
   | _ -> ()
 
 module Instance_table = Hashtbl.Make (Instance)

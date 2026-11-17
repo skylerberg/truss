@@ -640,7 +640,8 @@ let list_derived_methods (names : Resolve.Names.lookups) package =
           List.filter_map
             (fun (member : Resolve.Names.key) ->
               match member.path with
-              | Method { name; receiver; _ } -> Some (Path.Method { owner = impl; name; receiver })
+              | Method { name; receiver; _ } when Infer.derives trait name ->
+                  Some (Path.Method { owner = impl; name; receiver })
               | _ -> None)
             (names.list_contained trait_key)
       | _ -> [])
@@ -652,6 +653,7 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.a
   let paths =
     List.map (fun (declaration : Resolve.Names.declaration) -> declaration.path) declarations
   in
+  let derived_methods = list_derived_methods names package in
   let of_declaration (declaration : Resolve.Names.declaration) : Part.any list =
     let key = Resolve.Names.make_key declaration in
     List.map (fun section -> Part.Any (Resolved (key, section))) Resolve.sections
@@ -684,10 +686,10 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.a
         | _, Path.Derived { type_; trait } -> Some (Part.Any (Derived_interface { type_; trait }))
         | _ -> None)
       (names.list_impls package)
-  @ List.map (fun path -> Part.Any (Generated_mir path)) (list_derived_methods names package)
+  @ List.map (fun path -> Part.Any (Generated_mir path)) derived_methods
   @ List.concat_map
       (fun path -> [ Part.Any (Mir_call_edges path); Any (Call_edges (path, package)) ])
-      (List.sort_uniq Path.compare paths)
+      (List.sort_uniq Path.compare (paths @ derived_methods))
   @ List.map
       (fun dependency -> Part.Any (Grant (package, dependency)))
       (List.sort_uniq Path.compare_package (names.list_dependency_names package))
@@ -2094,6 +2096,27 @@ let list_package_diagnostics (package_database : package_database) = package_dat
 
 type proofs = { database : t; keys : Resolve.Names.key list }
 
+let has_diagnostics database package =
+  match find_package database package with
+  | Some package_database when List.mem package database.project ->
+      List.exists (fun file -> list_file_diagnostics database file <> []) package_database.files
+  | Some package_database -> package_database.diagnostics <> []
+  | None -> true
+
+let require_diagnostics_for_blocked_proofs database packages keys =
+  let is_blocked key =
+    match read_stored database (Proof key) with Value _ -> false | Failed _ | Blocked -> true
+  in
+  match List.find_opt is_blocked keys with
+  | Some key
+    when not (List.exists (has_diagnostics database) (sort_in_dependency_order database packages))
+    ->
+      Compiler_bug.raise_bug ~stage:"Database"
+        "the proof of %s is blocked, and no code of its package or of a package it depends on has \
+         a diagnostic"
+        (Resolve.Names.show_key key)
+  | Some _ | None -> ()
+
 let prove database files =
   let packages =
     List.sort_uniq Path.compare_package
@@ -2110,6 +2133,7 @@ let prove database files =
       end
       else claim_template_check_roots database key)
     keys;
+  require_diagnostics_for_blocked_proofs database packages keys;
   { database; keys }
 
 let find_proof proofs key =

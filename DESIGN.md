@@ -2083,6 +2083,7 @@ data, and not on the database.
 |---|---|
 | A program is built by following the references of its code. | A reference missing from a definition's output would leave a test's key unchanged by an edit to the code it calls. The program built from the same references fails to link, so the omission cannot go unnoticed. |
 | Lowering checks each call it emits against the caller's call edges. | A call edge missing from the termination check hides a recursive call, and the prover accepts a recursion that it never proved ends. The check makes the omission a compiler error at the first build. |
+| A derived method has call edges of its own, read from its generated MIR, and a call resolved to a derived method is an edge to that method. | An edge to the trait's method reaches every `impl` of the trait, so a written method that calls a derived method of the same trait would lie on a cycle with itself. A method without call edges blocks the recursion group of each function that reaches it, and the proof that reads the group is not run. |
 | A read that no part records, by a request or by the ordering of a stage, is checked. Reading a stale part is a compiler bug, and so is reading a name from a stale namespace. | No propagation corrects such a read. A request that drained too little would report a value that the files no longer give. |
 | Only a local that the code or a trait declares has a name, and the name is part of the local. A local that desugaring introduces has none, and a message that must mention it quotes the code it holds. The C that code generation writes names a local only after the Truss local it holds. | A name that the compiler invents reads as the program's own. A counterexample said "`position` is 0" of a variable that the loop never declared, and a debugger or an editor would list such locals among the program's variables. |
 
@@ -2131,6 +2132,7 @@ or the contract, whichever holds its syntax.
 | Rule | Reason |
 |---|---|
 | A part that reads a failed part is blocked, not computed against an error value. | One broken signature reports one error, not one in each of its callers. |
+| A blocked proof is a compiler bug where no code of its package or of a package it depends on has a diagnostic. | A blocked part reports nothing, so a proof blocked by anything but a failure would not be run, and its definition would pass as proven. |
 | The database keeps no earlier version of a failing part. | An earlier version would make the database depend on the order of the edits. A caller checked against an earlier signature would also report errors that the files do not hold. |
 | A build, a test run, or a template check requires that no definition it reaches has errors. A template check that reaches one, or a type defined as `todo`, is not run, and the solver proves its clauses. | No run executes code that the files do not hold, and a test whose code is correct runs while unrelated code is broken. |
 
