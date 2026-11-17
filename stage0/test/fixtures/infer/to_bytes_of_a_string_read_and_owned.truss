@@ -1,0 +1,7 @@
+fn f(name: String) -> List[UInt8] {
+  name.to_bytes()
+}
+
+fn g(name: own String) -> List[UInt8] {
+  own name.to_bytes()
+}

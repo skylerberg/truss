@@ -195,14 +195,6 @@ public fn List[Element].length(self) -> UInt64
   intrinsic::storage_length(self.storage)
 }
 
-public fn List[Element].is_empty(self) -> Bool
-  ensures result == (self.length() == 0)
-  cost time O(1)
-  cost allocations == 0
-{
-  self.length() == 0
-}
-
 public fn List[Element].push(mut self, item: own Element)
   ensures identical(self.model(), old(self.model()).append(item))
   cost amortized time O(1)
@@ -236,17 +228,6 @@ public fn List[Element].insert_at(mut self, position: UInt64, item: own Element)
 {
   growth::reserve(mut self.storage, additional: 1)
   intrinsic::storage_insert(mut self.storage, index: position, value: own item)
-}
-
-public fn List[Element].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> UInt64
-  requires forall i in 0..self.length() => forall j in i..self.length() =>
-    before(self.model()[j]) ==> before(self.model()[i])
-  ensures result <= self.length()
-  ensures forall i in 0..result => before(self.model()[i])
-  ensures forall i in result..self.length() => !before(self.model()[i])
-  cost time O(log(self.length()) * time(before))
-{
-  self.slice().partition_point(before)
 }
 
 public fn List[Element].slice(self) -> Slice[Element]
@@ -468,14 +449,6 @@ public fn Slice[Element: Plain].cursor(self) -> SliceCursor[Element]
   cost allocations == 0
 {
   SliceCursor(elements: self, offset: 0)
-}
-
-public fn List[Element: Plain].cursor(self) -> SliceCursor[Element]
-  ensures result.remaining() == self.length()
-  cost time O(1)
-  cost allocations == 0
-{
-  self.slice().cursor()
 }
 
 public fn Array[Element: Plain, count: UInt64].cursor(self) -> SliceCursor[Element]
@@ -851,7 +824,8 @@ public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, item
   }
 }
 
-public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool cost time finite))
+public fn List[Element].retain[capability Granted](mut self, keep: (fn(Element) -> Bool uses Granted))
+  uses Granted
   ensures self.length() <= old(self.length())
   cost time O(old(self.length()) * time(keep))
 {
@@ -869,7 +843,8 @@ public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool cost time fi
   mut self.truncate(retained_count)
 }
 
-public fn List[Element].filter(own self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
+public fn List[Element].filter[capability Granted](own self, keep: (fn(Element) -> Bool uses Granted)) -> List[Element]
+  uses Granted
   ensures result.length() <= self.length()
   cost time O(self.length() * time(keep))
 {

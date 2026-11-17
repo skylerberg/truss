@@ -1,0 +1,5 @@
+fn f(text: mut String) -> UInt64 {
+  let trimmed = text.trim()
+  mut text.push("more")
+  trimmed.length()
+}

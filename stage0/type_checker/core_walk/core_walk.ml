@@ -234,6 +234,52 @@ let walk_definition_children visit = function
 let walk_definition visit core_definition =
   walk_definition_children (make_deep_visitor visit) core_definition
 
+let is_functional walk =
+  let fine = ref true in
+  let rec visit =
+    {
+      ignore_all with
+      expression =
+        (fun (node : Core.expression) ->
+          match node.kind with
+          | Return _ | Break | Continue | Todo | Echo _ | Provide _ | Unreachable -> fine := false
+          | _ when node.type_ = Types.Never -> fine := false
+          | Call { arguments; _ } ->
+              if
+                List.exists
+                  (function
+                    | Core.Passed { mode = Types.Mut; _ } -> true
+                    | Core.Passed _ | Core.Default -> false)
+                  arguments
+              then fine := false;
+              walk_expression_children visit node
+          | _ -> walk_expression_children visit node);
+      statement =
+        (fun (node : Core.statement) ->
+          match node.kind with
+          | Let { pattern; else_ = None; _ } when not (binds_variable pattern) ->
+              walk_statement_children visit node
+          | Evaluate _ -> walk_statement_children visit node
+          | _ -> fine := false);
+      pattern = (fun node -> walk_pattern_children visit node);
+    }
+  and binds_variable (pattern : Core.pattern) =
+    let child_binds = ref false in
+    walk_pattern_children
+      { ignore_all with pattern = (fun inner -> if binds_variable inner then child_binds := true) }
+      pattern;
+    !child_binds || match pattern.kind with Bind { is_var; _ } -> is_var | _ -> false
+  in
+  walk visit;
+  !fine
+
+let has_implicit_measure (condition : Core.expression) =
+  match condition.kind with
+  | Compare { comparison = Less | Less_equal | Greater | Greater_equal; left; right } ->
+      is_functional (fun visit -> walk_expression visit left)
+      && is_functional (fun visit -> walk_expression visit right)
+  | _ -> false
+
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 
 let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Types.no_capabilities)
@@ -248,6 +294,7 @@ let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Ty
         List.iter mark_used (read_solved variable :> Types.capability list)
     | Capability_error _ ->
         Compiler_bug.raise_bug ~stage:"Core_walk" "a core form uses a capability with an error"
+    | Divergence _ -> ()
   in
   walk_block
     (make_deep_visitor

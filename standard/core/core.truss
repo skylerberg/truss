@@ -175,6 +175,7 @@ public trait Add[Right] {
 
   fn add(self, right: Right) -> Self.Output
     requires self.add_is_defined(right)
+    cost time finite
 }
 
 public trait Subtract[Right] {
@@ -185,6 +186,7 @@ public trait Subtract[Right] {
 
   fn subtract(self, right: Right) -> Self.Output
     requires self.subtract_is_defined(right)
+    cost time finite
 }
 
 public trait Multiply[Right] {
@@ -195,6 +197,7 @@ public trait Multiply[Right] {
 
   fn multiply(self, right: Right) -> Self.Output
     requires self.multiply_is_defined(right)
+    cost time finite
 }
 
 public trait Divide[Right] {
@@ -205,6 +208,7 @@ public trait Divide[Right] {
 
   fn divide(self, right: Right) -> Self.Output
     requires self.divide_is_defined(right)
+    cost time finite
 }
 
 public trait Remainder[Right] {
@@ -215,6 +219,7 @@ public trait Remainder[Right] {
 
   fn remainder(self, right: Right) -> Self.Output
     requires self.remainder_is_defined(right)
+    cost time finite
 }
 
 public trait Negate {
@@ -225,6 +230,7 @@ public trait Negate {
 
   fn negate(self) -> Self.Output
     requires self.negate_is_defined()
+    cost time finite
 }
 
 public trait Model {
@@ -268,12 +274,13 @@ public trait Iterable {
     requires position < self.count()
     cost time finite
 
-  fn fold[Total](
+  fn fold[Total, capability Granted](
     self,
     initial: own Total,
-    combine: (fn(own Total, Self.Element) -> Total cost time finite),
+    combine: (fn(own Total, Self.Element) -> Total uses Granted),
   ) -> Total
-    cost time finite
+    uses Granted
+    cost time O(time(Self.count) + self.count() * (time(Self.element) + time(combine)))
   {
     var total = own initial
     for item in self {
@@ -282,30 +289,40 @@ public trait Iterable {
     total
   }
 
-  fn map[Output](self, transform: (fn(Self.Element) -> Output cost time finite)) -> List[Output]
-    cost time finite
+  fn map[Output, capability Granted](self, transform: (fn(Self.Element) -> Output uses Granted)) -> List[Output]
+    uses Granted
+    cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
-    var results: List[Output] = []
-    for item in self {
-      mut results.push(transform(item))
+    let count = self.count()
+    var outputs: intrinsic::Storage[Output] = intrinsic::storage_with_capacity(count)
+    for item in self
+      invariant intrinsic::storage_length(outputs) == visited.length()
+      invariant intrinsic::storage_capacity(outputs) == count
+    {
+      intrinsic::storage_push(mut outputs, value: transform(item))
     }
-    results
+    List.from_storage(own outputs)
   }
 
-  fn filter_map[Output](
+  fn filter_map[Output, capability Granted](
     self,
-    transform: (fn(Self.Element) -> Option[Output] cost time finite),
+    transform: (fn(Self.Element) -> Option[Output] uses Granted),
   ) -> List[Output]
-    cost time finite
+    uses Granted
+    cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
-    var results: List[Output] = []
-    for item in self {
+    let count = self.count()
+    var outputs: intrinsic::Storage[Output] = intrinsic::storage_with_capacity(count)
+    for item in self
+      invariant intrinsic::storage_length(outputs) <= visited.length()
+      invariant intrinsic::storage_capacity(outputs) == count
+    {
       match transform(item) {
-        Some(output) => mut results.push(own output)
+        Some(output) => intrinsic::storage_push(mut outputs, value: own output)
         None => {}
       }
     }
-    results
+    List.from_storage(own outputs)
   }
 
   fn flat_map[Output](
@@ -324,8 +341,9 @@ public trait Iterable {
     results
   }
 
-  fn count_where(self, predicate: (fn(Self.Element) -> Bool cost time finite)) -> UInt64
-    cost time finite
+  fn count_where[capability Granted](self, predicate: (fn(Self.Element) -> Bool uses Granted)) -> UInt64
+    uses Granted
+    cost time O(time(Self.count) + self.count() * (time(Self.element) + time(predicate)))
   {
     var count: UInt64 = 0
     for item in self {
@@ -336,8 +354,9 @@ public trait Iterable {
     count
   }
 
-  fn find(self, predicate: (fn(Self.Element) -> Bool cost time finite)) lends Option[Self.Element]
-    cost time finite
+  fn find[capability Granted](self, predicate: (fn(Self.Element) -> Bool uses Granted)) lends Option[Self.Element]
+    uses Granted
+    cost time O(time(Self.count) + self.count() * (time(Self.element) + time(predicate)))
   {
     for item in self {
       if predicate(item) {

@@ -1,9 +1,17 @@
 type overload =
   | Type_overload of Path.t
+  | View_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
 
 let classify_receiver (receiver : Syntax.expression) : Path.receiver =
   match receiver.kind with Mode (Mut, _) -> Mut | Mode (Own, _) -> Own | _ -> Read
+
+let describe_missing_method state type_ name =
+  match Types.find_view (State.normalize state type_) with
+  | Some view ->
+      Printf.sprintf "`%s` has no method `%s`, and neither has its view `%s`."
+        (State.show state type_) name (State.show state view)
+  | None -> Printf.sprintf "`%s` has no method `%s`." (State.show state type_) name
 
 let rec coerce state env ?argument (value : Syntax.expression) ~actual ~expected =
   State.convert state env ?argument ~expression:value.id (State.read_span state value.id) ~actual
@@ -258,7 +266,15 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
                 )
             | [] ->
                 State.make_error_type state Unknown_member (State.read_span state member.id)
-                  (Printf.sprintf "`%s` has no member `%s`." (State.show state type_) member.text))
+                  (match Types.find_view type_ with
+                  | Some (Types.Named { path = Top { name; _ } as view; _ })
+                    when Members.list_own_methods state.lookups view member.text <> [] ->
+                      Printf.sprintf
+                        "`%s` has no member `%s` of its own. The method is its view's: `%s.%s`."
+                        (State.show state type_) member.text name member.text
+                  | _ ->
+                      Printf.sprintf "`%s` has no member `%s`." (State.show state type_) member.text)
+            )
         end
   | Types.Error _ | Types.Hole -> type_
   | _ ->
@@ -310,14 +326,7 @@ and finish_call (state : State.state) env (value : Syntax.expression) path calle
     (instance : Instantiation.instance) arguments left_out =
   let result = Types.extract_result_type instance.signature.output in
   state.tables.calls.(value.id) <-
-    Some
-      {
-        callee;
-        arguments;
-        omitted_defaults = left_out;
-        uses = instance.signature.uses;
-        callee_result = result;
-      };
+    Some { callee; arguments; omitted_defaults = left_out; callee_result = result };
   Modes.note_lending state value instance.signature.output;
   Form.register_call state value;
   Option.value (reject_specification_call state env value path instance.signature) ~default:result
@@ -483,14 +492,21 @@ and resolve_overloads state receiver_type name :
   let candidates = list_trait_candidates state receiver_type name in
   if not (is_one_family state (List.map fst candidates)) then Error (List.map fst candidates)
   else
-    let own =
-      match receiver_type with
-      | Types.Named { path; _ } ->
-          List.filter_map
-            (fun (receiver, method_path) ->
-              if receiver = Path.Static then None else Some (receiver, Type_overload method_path))
+    let list_own_methods = function
+      | Some (Types.Named { path; _ }) ->
+          List.filter
+            (fun (receiver, _) -> receiver <> Path.Static)
             (Members.list_own_methods state.lookups path name)
       | _ -> []
+    in
+    let own =
+      List.map
+        (fun (receiver, method_path) -> (receiver, Type_overload method_path))
+        (list_own_methods (Some receiver_type))
+    and of_view =
+      List.map
+        (fun (receiver, method_path) -> (receiver, View_overload method_path))
+        (list_own_methods (Types.find_view receiver_type))
     in
     let from_traits =
       List.concat_map
@@ -506,7 +522,7 @@ and resolve_overloads state receiver_type name :
          (fun (receiver : Path.receiver) ->
            Option.map
              (fun overload -> (receiver, overload))
-             (List.assoc_opt receiver (own @ from_traits)))
+             (List.assoc_opt receiver (own @ from_traits @ of_view)))
          [ Read; Mut; Own ])
 
 and find_method_version state (span : Source.Definition_span.t) type_ name
@@ -548,10 +564,10 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
                     | None -> Built_in));
             },
           instance.signature )
-  | None -> None
+  | Some (View_overload _) | None -> None
 
-and make_argumentless_call callee (signature : Types.signature) result : Tables.call =
-  { callee; arguments = []; omitted_defaults = []; uses = signature.uses; callee_result = result }
+and make_argumentless_call callee result : Tables.call =
+  { callee; arguments = []; omitted_defaults = []; callee_result = result }
 
 and find_elements_calls state (span : Source.Definition_span.t) type_ (mode : Types.mode) =
   let receiver : Path.receiver = match mode with Read -> Read | Mut -> Mut | Own -> Own in
@@ -568,8 +584,8 @@ and find_elements_calls state (span : Source.Definition_span.t) type_ (mode : Ty
           Some
             ( Tables.Elements
                 {
-                  count = make_argumentless_call count counted (Types.make_builtin UInt64);
-                  element = make_argumentless_call element lent part;
+                  count = make_argumentless_call count (Types.make_builtin UInt64);
+                  element = make_argumentless_call element part;
                   lends;
                 },
               part,
@@ -579,7 +595,7 @@ and find_elements_calls state (span : Source.Definition_span.t) type_ (mode : Ty
 
 and find_consuming_cursor state (span : Source.Definition_span.t) type_ =
   match find_method_version state span type_ "cursor" Own with
-  | Some (callee, ({ parameters = []; output = Returns cursor; _ } as signature)) -> (
+  | Some (callee, { parameters = []; output = Returns cursor; _ }) -> (
       let cursor = State.normalize state cursor in
       let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
       match State.find_evidence state cursor trait with
@@ -588,7 +604,7 @@ and find_consuming_cursor state (span : Source.Definition_span.t) type_ =
             ( Tables.Pulled
                 {
                   cursor;
-                  cursor_call = Some (make_argumentless_call callee signature cursor);
+                  cursor_call = Some (make_argumentless_call callee cursor);
                   remaining = find_remaining_call state span cursor;
                 },
               State.resolve_associated_type state cursor trait "Element" ~at:span )
@@ -597,7 +613,7 @@ and find_consuming_cursor state (span : Source.Definition_span.t) type_ =
 
 and find_remaining_call state (span : Source.Definition_span.t) cursor =
   match find_method_version state span cursor "remaining" Read with
-  | Some (callee, ({ parameters = []; output = Returns bound; _ } as signature))
+  | Some (callee, { parameters = []; output = Returns bound; _ })
     when Types.is_builtin UInt64 (State.normalize state bound) ->
-      Some (make_argumentless_call callee signature (Types.make_builtin UInt64))
+      Some (make_argumentless_call callee (Types.make_builtin UInt64))
   | _ -> None

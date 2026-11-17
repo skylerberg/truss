@@ -200,7 +200,10 @@ let list_part_views builder (operand : Mir.operand) =
 
 let list_operand_borrows builder (operand : Mir.operand) =
   match operand with
-  | Borrow { place; _ } -> Option.to_list (track_place builder place)
+  | Borrow { place; _ } -> (
+      match track_place builder place with
+      | Some tracked -> [ tracked ]
+      | None -> List.map extract_viewed_place (list_copy_views builder place))
   | Use { type_; _ } when Context.is_view builder.context type_ ->
       List.map extract_viewed_place (list_operand_views builder operand)
   | Use _ | Take _ | Constant _ -> []
@@ -643,30 +646,53 @@ let emit_statement builder (statement : Mir.Graph.statement) =
       hold builder destination (make_call_result builder called)
   | Lend { part; call = called } -> (
       let is_loop_element = List.mem part builder.loop_elements in
+      let select_element (collection : Place.t) =
+        { collection with steps = collection.steps @ [ Element { node = called.node; origin } ] }
+      in
       let find_element collection collection_type ~receiver =
         if is_untracked_lent_part builder collection then None
         else
           let collection_place = track_place builder collection in
           Some
-            ( Option.map
-                (fun (place : Place.t) ->
-                  { place with steps = place.steps @ [ Element { node = called.node; origin } ] })
-                collection_place,
+            ( Option.map select_element collection_place,
               (collection_place, collection_type),
               receiver )
       in
+      let indexes_storage =
+        match called.callee with
+        | Trait_method { trait; name = "at"; self_type; _ } ->
+            (Well_known.is Index trait.trait || Well_known.is Index_mut trait.trait)
+            && Place.is_storage_type self_type
+        | _ -> false
+      in
       let element =
         match (called.callee, called.arguments) with
-        | ( Trait_method { trait; name = "at"; self_type; _ },
+        | ( _,
             Passed
               {
                 value = Borrow { place = collection; type_ = collection_type; origin = receiver; _ };
                 _;
               }
             :: _ )
-          when (Well_known.is Index trait.trait || Well_known.is Index_mut trait.trait)
-               && Place.is_storage_type self_type ->
+          when indexes_storage ->
             find_element collection collection_type ~receiver
+        | ( _,
+            Passed
+              {
+                value =
+                  Use
+                    {
+                      place = { root = Local range; projections = [] };
+                      type_ = range_type;
+                      origin = receiver;
+                    };
+                _;
+              }
+            :: _ )
+          when indexes_storage ->
+            Option.map
+              (fun sliced -> (Some (select_element sliced), (None, range_type), receiver))
+              (lookup_held builder range).slice
         | ( ( Trait_method { name = "element"; _ }
             | Function { path = Method { name = "element"; _ }; _ } ),
             Passed
@@ -721,7 +747,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
   | Loan_start { loan; borrowed; mode; duration } ->
       let loans =
         match (duration, borrowed) with
-        | Rest_of_statement, Borrow { origin = receiver; _ }
+        | Rest_of_statement, (Borrow { origin = receiver; _ } | Use { origin = receiver; _ })
           when List.mem receiver builder.element_receivers ->
             []
         | _ -> list_loans builder borrowed mode duration

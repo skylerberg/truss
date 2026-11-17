@@ -1,0 +1,9 @@
+trait Consumed {
+  fn byte(own self, index: UInt64) -> UInt8
+}
+
+impl Consumed for String {
+  fn byte(own self, index: UInt64) -> UInt8 {
+    0
+  }
+}

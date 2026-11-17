@@ -1,0 +1,6 @@
+fn f(items: mut List[Int64])
+  ensures items.is_sorted()
+  ensures items.length() == old(items.length())
+{
+  mut items.sort()
+}

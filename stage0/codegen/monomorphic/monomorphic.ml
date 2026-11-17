@@ -22,8 +22,10 @@ let list_capabilities context substitution (set : Types.capability_set) : Path.t
          | Capability_projection { name; _ } ->
              raise_bug "the associated capability set %s is not normalized" name
          | Capability_variable _ -> raise_bug "a set of capabilities the checker left unsolved"
-         | Capability_error _ -> raise_bug "a capability with an error reached code generation")
-       (context.normalize_capabilities (Types.substitute_capabilities substitution set)
+         | Capability_error _ -> raise_bug "a capability with an error reached code generation"
+         | Divergence _ -> raise_bug "divergence is passed to compiled code as a capability")
+       (Types.remove_divergence
+          (context.normalize_capabilities (Types.substitute_capabilities substitution set))
          :> Types.capability list))
 
 let list_evidence context substitution uses =

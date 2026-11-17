@@ -1,0 +1,18 @@
+fn named(value: Int64) -> Int64
+  cost time O(1)
+{
+  apply(value, change: quick)
+}
+
+fn lambda(value: Int64) -> Int64
+  cost time O(1)
+{
+  apply(value, change: fn(inner) { quick(inner) })
+}
+
+fn forwarded[capability Mine](value: Int64, change: (fn(Int64) -> Int64 uses Mine)) -> Int64
+  uses Mine
+  cost time O(time(change))
+{
+  apply(value, change)
+}

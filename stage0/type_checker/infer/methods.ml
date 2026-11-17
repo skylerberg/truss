@@ -60,25 +60,23 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
               let first =
                 make part
                   (Call
-                     {
-                       callee =
-                         Trait_method
-                           {
-                             trait = index;
-                             name = "at";
-                             receiver = Read;
-                             self_type = parts;
-                             type_arguments = [];
-                             evidence;
-                           };
-                       arguments =
-                         [
-                           build_read_argument (make parts Yielded);
-                           build_read_argument (make Types.Integer (Integer Z.zero));
-                         ];
-                       lends = Some Read;
-                       uses = Types.no_capabilities;
-                     })
+                     (State.make_call state
+                        ~callee:
+                          (Trait_method
+                             {
+                               trait = index;
+                               name = "at";
+                               receiver = Read;
+                               self_type = parts;
+                               type_arguments = [];
+                               evidence;
+                             })
+                        ~arguments:
+                          [
+                            build_read_argument (make parts Yielded);
+                            build_read_argument (make Types.Integer (Integer Z.zero));
+                          ]
+                        ~lends:(Some Read)))
               in
               Use (Lent first));
           part
@@ -253,7 +251,7 @@ and report_unknown_static_method state ?expected (value : Syntax.expression) typ
            (State.show state type_) literal (State.show state type_))
   | None ->
       State.make_error_type state Unknown_member (State.read_span state member.id)
-        (Printf.sprintf "`%s` has no method `%s`." (State.show state type_) member.text)
+        (Name_lookup.describe_missing_method state type_ member.text)
 
 and check_static_call state env ?expected (value : Syntax.expression) type_ (member : Syntax.name)
     arguments =
@@ -326,7 +324,8 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
               | Error traits -> report_ambiguous traits
               | Ok overloads -> (
                   match (arguments, List.assoc_opt wanted overloads) with
-                  | receiver :: rest, Some (Type_overload method_path) ->
+                  | receiver :: rest, Some (Type_overload method_path | View_overload method_path)
+                    ->
                       let inner =
                         match receiver.value.kind with
                         | Mode (mode, inner) ->
@@ -339,7 +338,13 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                         State.record state receiver.value receiver_type;
                         State.alias_expression state receiver.value inner
                       end;
-                      if not (State.unify state receiver_type type_) then
+                      if
+                        not
+                          (State.unify state
+                             (Option.value ~default:receiver_type
+                                (State.find_view_as state ~owned:receiver_type ~view:type_))
+                             type_)
+                      then
                         State.report_mismatch state (State.read_span state inner.id) ~expected:type_
                           ~actual:receiver_type;
                       let mode : Types.mode =
@@ -391,7 +396,8 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
           | Some (Trait_overload (trait, method_)) ->
               check_trait_method_through_type state env ?expected value type_ trait method_
                 arguments
-          | Some (Type_overload _) -> State.raise_bug "a generic parameter has a method of its own"
+          | Some (Type_overload _ | View_overload _) ->
+              State.raise_bug "a generic parameter has a method of its own"
           | None when overloads <> [] -> report_wrong_receiver ()
           | None ->
               State.make_error_type state Unknown_member (State.read_span state member.id)
@@ -476,7 +482,6 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
                 };
             arguments = receiver_argument @ checked;
             omitted_defaults = left_out;
-            uses = instance.signature.uses;
             callee_result = result;
           };
       Form.register_call state value;
@@ -535,7 +540,6 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
                 callee = Capability_method { capability; name = member.text };
                 arguments = checked;
                 omitted_defaults = left_out;
-                uses = Types.make_capability_set [ Types.Capability capability ];
                 callee_result = result;
               };
           Form.register_call state value;
@@ -638,12 +642,11 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
                          [ State.replace (State.read_span state member.id) candidate ];
                      ]
                  | None -> [])
-               (Printf.sprintf "`%s` has no method `%s`." (State.show state receiver_type)
-                  member.text))
+               (Name_lookup.describe_missing_method state receiver_type member.text))
       | Ok overloads -> (
           match choose_temporary overloads with
           | None -> report_missing_receiver_mode overloads
-          | Some (_, Type_overload method_path) ->
+          | Some (_, (Type_overload method_path | View_overload method_path)) ->
               check_method_with_receiver state env ?expected ~type_arguments value ~receiver:base
                 ~receiver_type method_path arguments
           | Some (_, Trait_overload (trait, method_)) ->
@@ -700,11 +703,17 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
       | Error error -> Calls.check_arguments_alone state env arguments error
       | Ok () -> (
           (match instance.signature.receiver with
-          | Some (_, self_type) ->
-              if not (State.unify state self_type receiver_type) then
-                State.report_mismatch state
-                  (State.read_span state receiver.id)
-                  ~expected:self_type ~actual:receiver_type
+          | Some (mode, self_type) -> (
+              match State.find_view_as state ~owned:receiver_type ~view:self_type with
+              | Some _ ->
+                  Name_lookup.coerce state env
+                    ~argument:(match mode with Mut -> Mut | Own -> Own | Read | Static -> Read)
+                    receiver ~actual:receiver_type ~expected:self_type
+              | None ->
+                  if not (State.unify state self_type receiver_type) then
+                    State.report_mismatch state
+                      (State.read_span state receiver.id)
+                      ~expected:self_type ~actual:receiver_type)
           | None -> ());
           (match (expected, instance.signature.output) with
           | Some expected, Returns output -> State.unify_as_hint state output expected
@@ -809,7 +818,6 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                         };
                     arguments = receiver_argument :: checked;
                     omitted_defaults = left_out;
-                    uses = instance.signature.uses;
                     callee_result = result;
                   };
               Form.register_call state value;

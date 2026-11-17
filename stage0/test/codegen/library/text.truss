@@ -13,6 +13,16 @@ fn same(actual: StringSlice, expected: StringSlice) -> Bool {
   actual == expected
 }
 
+test "a string and a literal are receivers of the methods of a string slice" {
+  let name: String = "caf\u{e9}"
+  let copied = name.to_string()
+  assert copied == name
+  assert copied.length() == 5
+  assert "x".to_string() == "x"
+  assert name.byte(0) == 99
+  assert StringSlice.to_string(name) == name
+}
+
 test "is_ascii is true only when every byte is ASCII" {
   assert "hello".is_ascii()
   assert "".is_ascii()
