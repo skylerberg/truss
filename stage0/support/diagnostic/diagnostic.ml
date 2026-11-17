@@ -129,6 +129,7 @@ module Code = struct
     | Unknown_member
     | Ambiguous_method
     | Private_field
+    | Member_not_visible
     | Not_callable
     | Not_a_value
     | No_impl
@@ -388,6 +389,7 @@ module Code = struct
     | Unknown_member -> "unknown_member"
     | Ambiguous_method -> "ambiguous_method"
     | Private_field -> "private_field"
+    | Member_not_visible -> "member_not_visible"
     | Not_callable -> "not_callable"
     | Not_a_value -> "not_a_value"
     | No_impl -> "no_impl"
