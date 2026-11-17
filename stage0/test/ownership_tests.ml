@@ -21,6 +21,31 @@ let () =
     ];
   Harness.test "a `var` and a `mut` parameter can be written through a slice" (fun () ->
       expect_fine (bump ^ Fixtures.Ownership.writes_through_slices_of_a_var_and_a_mut_parameter));
+  List.iter
+    (fun (written, fixture) ->
+      Harness.test (Printf.sprintf "a read-only parameter cannot be written through %s" written)
+        (fun () -> expect_one_diagnostic fixture "ownership.read_only_view"))
+    [
+      ("a range of a view of it", Fixtures.Ownership.range_of_a_view_of_a_read_only_list_sorted);
+      ( "a range of a range of a view of it",
+        Fixtures.Ownership.range_of_a_range_of_a_view_of_a_read_only_list_sorted );
+      ( "an assigned element of a range of a view of it",
+        Fixtures.Ownership.element_of_a_range_of_a_view_of_a_read_only_list_assigned );
+      ( "an element of a range of a view of it passed `mut`",
+        Fixtures.Ownership.element_of_a_range_of_a_view_of_a_read_only_list_passed_mut );
+      ( "the variable of a `mut` loop over a view of it",
+        Fixtures.Ownership.loop_variable_over_a_view_of_a_read_only_list_passed_mut );
+      ( "the assigned variable of a `mut` loop over a view of it",
+        Fixtures.Ownership.loop_variable_over_a_view_of_a_read_only_list_assigned );
+      ( "the variable of a `mut` loop over a range of a view of it",
+        Fixtures.Ownership.loop_variable_over_a_range_of_a_view_of_a_read_only_list_passed_mut );
+      ( "a name that a `match` binds to an element of a view of it",
+        Fixtures.Ownership.match_binding_of_an_element_of_a_view_of_a_read_only_list_passed_mut );
+    ];
+  Harness.test
+    "a `mut` parameter can be written through ranges of, and `mut` loops over, a view of it"
+    (fun () ->
+      expect_fine Fixtures.Ownership.writes_through_ranges_and_loops_of_views_of_a_mut_list);
   Harness.test "a read-only `Slice` parameter cannot be written through" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.read_only_slice_written "types.not_assignable")
 

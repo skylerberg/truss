@@ -269,6 +269,7 @@ let borrow_mut builder (operand : Mir.operand) =
         origin;
       Option.iter (fun tracked -> emit builder (Mutate tracked) origin) (track_place builder place)
   | Use { place; origin; _ } -> (
+      emit_write_through builder (find_written_slice builder place) origin;
       match place.root with
       | Local local ->
           Option.iter
@@ -406,18 +407,19 @@ let compute_rvalue_held builder (value : Mir.rvalue) : held =
   | Operand operand ->
       let views = list_operand_views builder operand in
       let lent = list_lent_places builder operand in
-      let slice, owns_new_value =
+      let slice, collection, owns_new_value =
         match operand with
         | Use { place = { root = Local local; _ } as place; _ } when is_temporary builder place ->
-            ((lookup_held builder local).slice, (lookup_held builder local).owns_new_value)
-        | Use _ | Take _ | Borrow _ -> (None, false)
-        | Constant _ -> (None, false)
+            let copied = lookup_held builder local in
+            (copied.slice, copied.collection, copied.owns_new_value)
+        | Use _ | Take _ | Borrow _ | Constant _ -> (None, None, false)
       in
       {
         nothing with
         views;
         lent = (match operand with Borrow _ -> [] | _ -> lent);
         slice;
+        collection;
         owns_new_value;
       }
   | Operation _ | Compare _ -> nothing
@@ -469,6 +471,13 @@ let emit_bound_value builder (local : Mir.local) (core : Core.local) (value : Mi
             || Context.is_view builder.context part_type) ->
       builder.lent_part_bindings <-
         { binding = local; part; origin; scrutinee } :: builder.lent_part_bindings
+  | _ -> ());
+  (match value with
+  | Operand (Borrow { place = { root = Local part; _ }; _ }) -> (
+      match (lookup_held builder part).collection with
+      | Some _ as collection ->
+          hold builder { root = Local local; projections = [] } { nothing with collection }
+      | None -> ())
   | _ -> ());
   let views =
     match value with
@@ -691,7 +700,10 @@ let emit_statement builder (statement : Mir.Graph.statement) =
             :: _ )
           when indexes_storage ->
             Option.map
-              (fun sliced -> (Some (select_element sliced), (None, range_type), receiver))
+              (fun sliced ->
+                ( Some (select_element sliced),
+                  (find_written_slice builder { root = Local range; projections = [] }, range_type),
+                  receiver ))
               (lookup_held builder range).slice
         | ( ( Trait_method { name = "element"; _ }
             | Function { path = Method { name = "element"; _ }; _ } ),
@@ -724,11 +736,12 @@ let emit_statement builder (statement : Mir.Graph.statement) =
   | Slice { destination; base; base_type; call = called } ->
       read_uses builder uses;
       emit_call builder called origin;
+      let base_place = track_place builder base in
       let elements =
         Option.map
           (fun (place : Place.t) ->
             { place with steps = place.steps @ [ Element { node = called.node; origin } ] })
-          (track_place builder base)
+          base_place
       in
       let views =
         match elements with
@@ -736,7 +749,11 @@ let emit_statement builder (statement : Mir.Graph.statement) =
         | Some place -> [ Borrow_of place ]
         | None -> list_borrow_views builder base base_type
       in
-      hold builder destination { nothing with views; slice = elements }
+      let sliced =
+        match base_place with Some _ -> base_place | None -> find_written_slice builder base
+      in
+      hold builder destination
+        { nothing with views; slice = elements; collection = Some (sliced, base_type) }
   | Assert _ | Echo _ -> read_uses builder uses
   | Provide { provided; _ } ->
       read_uses builder uses;
