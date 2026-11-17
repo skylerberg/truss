@@ -1101,7 +1101,11 @@ let () =
   Harness.test "generic negation needs the trait method's precondition" (fun () ->
       expect_not_proven Fixtures.Prover.generic_negation "prover.requires");
   Harness.test "generic negation proves where the trait method's precondition holds" (fun () ->
-      expect_proven Fixtures.Prover.generic_negation_with_its_precondition)
+      expect_proven Fixtures.Prover.generic_negation_with_its_precondition);
+  Harness.test
+    "a function with a time clause converts, makes a default, and indexes through a bound"
+    (fun () ->
+      expect_proven Fixtures.Prover.conversions_and_indexing_through_bounds_under_a_time_clause)
 
 let () =
   Harness.test "two literals with the same text are the same value" (fun () ->

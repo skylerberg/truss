@@ -7,4 +7,5 @@ public trait Index {
 
   fn at(self, key: Self.Key) lends Self.Output
     requires self.contains_key(key)
+    cost time finite
 }

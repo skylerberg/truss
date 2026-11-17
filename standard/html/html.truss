@@ -15,7 +15,9 @@ public fn Html.text(self) -> StringSlice {
   self.text.slice()
 }
 
-public fn Html.joined(parts: Slice[Html], separator: StringSlice = "") -> Html {
+public fn Html.joined(parts: Slice[Html], separator: StringSlice = "") -> Html
+  cost time finite
+{
   var text = ""
   for index in 0..parts.length() {
     if index > 0 {

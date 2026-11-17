@@ -1494,6 +1494,8 @@ map_entry = expression ":" expression ;
   element that `IndexMut` lends, so the key is there.
 - A type that computes its elements, such as a `BitSet`, implements `Index`
   and `IndexAssign` and not `IndexMut`: it has no place to lend `mut`.
+- Each method of the three traits terminates: `contains_key`, `accepts_key`,
+  both overloads of `at`, and `assign` have `cost time finite`.
 - Strings cannot be indexed.
 
 ## Expressions
@@ -2017,6 +2019,7 @@ trait Index {
     cost time finite
   fn at(self, key: Self.Key) lends Self.Output
     requires self.contains_key(key)
+    cost time finite
 }
 ```
 
@@ -2384,6 +2387,9 @@ The prelude is in scope in every file, and all its names are
 
 No definition can have a prelude name, a project cannot change the prelude,
 and the prelude changes only with a language version.
+
+`From.from`, `TryFrom.try_from`, and `Default.default` terminate: each has
+`cost time finite`.
 
 ### Visibility
 
