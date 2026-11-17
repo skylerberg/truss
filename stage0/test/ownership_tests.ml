@@ -848,6 +848,28 @@ let () =
         "ownership.mutated_while_viewed")
 
 let () =
+  List.iter
+    (fun (lender, fixture) ->
+      Harness.test
+        (Printf.sprintf "%s cannot be assigned while a view that a call returned of it is live"
+           lender) (fun () -> expect_one_diagnostic fixture "ownership.mutated_while_viewed"))
+    [
+      ("a `Plain` array", Fixtures.Ownership.plain_array_assigned_while_its_slice_is_live);
+      ( "a `Plain` array passed to a function",
+        Fixtures.Ownership.plain_array_assigned_while_a_view_a_call_returned_is_live );
+      ( "a `Plain` record that holds an array",
+        Fixtures.Ownership.record_holding_an_array_assigned_while_a_view_of_it_is_live );
+    ];
+  Harness.test "a view of a temporary `Plain` array cannot outlive the temporary" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.slice_of_a_temporary_plain_array_kept
+        "ownership.views_temporary");
+  Harness.test "a `Plain` array can be assigned after the last use of a view of it" (fun () ->
+      expect_fine Fixtures.Ownership.plain_array_assigned_after_the_last_use_of_its_slice);
+  Harness.test "a `Plain` record that holds no array lends nothing to a view that a call returns"
+    (fun () ->
+      expect_fine Fixtures.Ownership.plain_record_assigned_while_a_view_a_call_returned_is_live)
+
+let () =
   let make = Fixtures.Ownership.make_an_option_of_a_string in
   Harness.test "a binding inside a loop is a new one each time, so it may be moved" (fun () ->
       expect_fine (make ^ Fixtures.Ownership.binding_moved_inside_a_loop));

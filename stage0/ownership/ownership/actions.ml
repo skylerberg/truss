@@ -166,13 +166,14 @@ let list_borrow_views builder (place : Mir.place) type_ =
   match track_place builder place with
   | Some place ->
       [
-        (if Context.is_plain builder.context type_ then Copy_of_view_in place else Borrow_of place);
+        (if Context.lends_nothing builder.context type_ then Copy_of_view_in place
+         else Borrow_of place);
       ]
   | None -> (
       match (place.root, find_temporary builder place) with
       | Local _, Some temporary
         when (lookup_held builder temporary).owns_new_value
-             && (not (Context.is_plain builder.context type_))
+             && (not (Context.lends_nothing builder.context type_))
              && not (Context.is_view builder.context type_) ->
           [ Borrow_of { root = Temporary temporary; steps = [] } ]
       | Local local, _ -> (lookup_held builder local).views
@@ -209,7 +210,7 @@ let list_operand_borrows builder (operand : Mir.operand) =
   | Use _ | Take _ | Constant _ -> []
 
 let result_may_view builder (mode : Types.mode) type_ =
-  (mode <> Own && not (Context.is_plain builder.context type_))
+  (mode <> Own && not (Context.lends_nothing builder.context type_))
   || Context.is_view builder.context type_
 
 let find_viewable_argument builder (argument : Mir.argument) =

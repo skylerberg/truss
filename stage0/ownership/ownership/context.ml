@@ -32,6 +32,28 @@ let is_view context type_ =
 let holds_function context type_ =
   Interface.Impls.holds_function context.lookups.interface ~list_bounds:context.list_bounds type_
 
+let rec holds_array context (type_ : Types.ty) =
+  match type_ with
+  | Named { path; arguments } -> (
+      Types.is_builtin Array type_
+      ||
+      match Interface.Definition.find_type_interface context.lookups.interface path with
+      | Some interface ->
+          let holds_array_in fields =
+            List.exists (fun (field : Types.field) -> holds_array context field.field_type) fields
+          in
+          Option.fold ~none:false ~some:holds_array_in
+            (Types.instantiate_fields interface arguments)
+          || List.exists
+               (fun (variant : Types.variant) ->
+                 Option.fold ~none:false ~some:holds_array_in variant.fields)
+               (Option.value ~default:[] (Types.instantiate_variants interface arguments))
+      | None -> false)
+  | Parameter _ | Projection _ -> true
+  | Function _ | Any _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> false
+
+let lends_nothing context type_ = is_plain context type_ && not (holds_array context type_)
+
 let list_callee_signatures context (callee : Mir.callee) : Types.signature list =
   let list_signatures path =
     Option.to_list (Interface.Impls.read_signature context.lookups.interface path)

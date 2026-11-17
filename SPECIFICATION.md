@@ -599,8 +599,9 @@ it. The compiler checks this within each function.
   list makes that a view.
 - **A function returns a view only of the places its parameters view, or of
   the parameters themselves.** The caller treats the result as viewing
-  everything that its read-only and view arguments view. Arguments that are
-  `Plain` lend nothing.
+  everything that its read-only and view arguments view. An argument that
+  is `Plain` lends nothing, unless it holds an `Array`: an array is stored
+  in place, so a `Slice` of it views the argument.
 - **A function stores only the views it is given.** To store a view of an
   argument in a `mut` parameter or in `mut self`, the function takes that
   argument as a `Slice`, a `StringSlice`, or a function. A value cannot

@@ -479,6 +479,7 @@ rule excludes `Plain` arguments, such as indexes, so that case is rare.
 | Rule | Reason |
 |---|---|
 | Whether a type is a view is derived from its fields, and a record that holds a view is a view. | Nothing is declared, and a view cannot escape inside a record. |
+| A `Plain` argument lends nothing to the result of a call, unless it holds an `Array`. | A `Slice` views storage, and an integer or a record of integers has none to view, so a variable passed as an index can be assigned while the result is live. An array is stored in place: `values.slice()` views `values` itself, and assigning `values` while that view is live would change what the view reads. |
 | Generic code that keeps a value requires `Storable`. | A type parameter may stand for a view, and the bound stops generic code from storing one. |
 | An `any Trait` is a view unless `Trait` requires `Storable`. | `any` hides the type, so the compiler cannot see whether the value holds a view. |
 | `mut` access is never stored. | It lasts for one call, one iteration, or one `provide mut` block, so the ownership check tracks no mutable reference from one statement to the next. |

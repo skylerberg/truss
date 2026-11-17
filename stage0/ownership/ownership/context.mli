@@ -22,6 +22,7 @@ val is_plain : context -> Types.ty -> bool
 val is_copyable : context -> Types.ty -> bool
 val is_view : context -> Types.ty -> bool
 val holds_function : context -> Types.ty -> bool
+val lends_nothing : context -> Types.ty -> bool
 val stores_function : context -> Mir.callee -> int -> bool
 val locate_origin : context -> Core.origin -> Source.Definition_span.t
 

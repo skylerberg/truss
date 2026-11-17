@@ -1,0 +1,11 @@
+type Matrix(rows: Array[Int64, 4])
+
+fn Matrix.row(self) -> Slice[Int64] {
+  self.rows[..]
+}
+
+fn f(matrix: mut Matrix) -> UInt64 {
+  let row = matrix.row()
+  matrix.rows[0] = 7
+  row.length()
+}
