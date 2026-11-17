@@ -34,7 +34,14 @@ val bind : Types.generic list -> Ground.argument list -> Types.substitution
 val read_impl_interface : context -> Path.t -> Types.impl_interface
 val read_trait_interface : context -> Path.t -> Types.trait_interface
 val read_signature : context -> Path.t -> Types.signature
-val make_code : context -> Path.t -> Ground.argument list -> code
+
+val make_code :
+  context ->
+  Path.t ->
+  type_arguments:Ground.argument list ->
+  capability_arguments:Path.t list list ->
+  code
+
 val list_template_clauses : context -> Path.t -> int list -> Mir.Graph.t list
 val panic_path : Path.t
 val list_evidence : context -> Types.substitution -> Types.capability_set -> Path.t list

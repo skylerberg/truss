@@ -20,13 +20,18 @@ type pattern_constant =
 type range_bound = Integer_bound of Z.t | Constant_bound of Path.t
 
 type 'indirect target =
-  | Function of { path : Path.t; type_arguments : Types.argument list }
+  | Function of {
+      path : Path.t;
+      type_arguments : Types.argument list;
+      capability_arguments : Types.capability_set list;
+    }
   | Trait_method of {
       trait : Types.trait_reference;
       name : string;
       receiver : Path.receiver;
       self_type : Types.ty;
       type_arguments : Types.argument list;
+      capability_arguments : Types.capability_set list;
       evidence : evidence;
     }
   | Capability_method of { capability : Path.t; name : string }
@@ -62,7 +67,11 @@ and kind =
   | Template of { literals : string list; call : expression }
   | Use of place
   | Copy of operand
-  | Function_value of { path : Path.t; type_arguments : Types.argument list }
+  | Function_value of {
+      path : Path.t;
+      type_arguments : Types.argument list;
+      capability_arguments : Types.capability_set list;
+    }
   | Value_parameter of Types.parameter
   | Lambda of {
       parameters : pattern list;

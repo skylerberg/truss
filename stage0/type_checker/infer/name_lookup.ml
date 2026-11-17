@@ -96,11 +96,18 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
           | Error error -> error
           | Ok () ->
               state.tables.resolutions.(value.id) <-
-                Some (Global { path; type_arguments = instance.type_arguments });
+                Some
+                  (Global
+                     {
+                       path;
+                       type_arguments = instance.type_arguments;
+                       capability_arguments = instance.capability_arguments;
+                     });
               check_function_value state value instance.signature)
       | None -> State.raise_bug "`%s` has no signature" (Path.show path))
   | Definition (Constant, path) ->
-      state.tables.resolutions.(value.id) <- Some (Global { path; type_arguments = [] });
+      state.tables.resolutions.(value.id) <-
+        Some (Global { path; type_arguments = []; capability_arguments = [] });
       State.register_expression state value (fun () ->
           Use (Form.build_constant_place state ~origin:value.id path));
       Interface.Definition.read_constant_type state.lookups.interface path
@@ -278,7 +285,7 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
             begin match Members.find_own_constant state.lookups path member.text with
             | Some constant ->
                 state.tables.resolutions.(value.id) <-
-                  Some (Global { path = constant; type_arguments = [] });
+                  Some (Global { path = constant; type_arguments = []; capability_arguments = [] });
                 State.register_expression state value (fun () ->
                     Use (Form.build_constant_place state ~origin:value.id constant));
                 Interface.Definition.read_constant_type state.lookups.interface constant
@@ -295,7 +302,12 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
                         | None -> ());
                         state.tables.resolutions.(value.id) <-
                           Some
-                            (Global { path = method_path; type_arguments = instance.type_arguments });
+                            (Global
+                               {
+                                 path = method_path;
+                                 type_arguments = instance.type_arguments;
+                                 capability_arguments = instance.capability_arguments;
+                               });
                         check_function_value state value instance.signature
                     | None ->
                         State.raise_bug "the method `%s` has no signature" (Path.show method_path))
@@ -351,8 +363,7 @@ and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) 
                        [
                          State.make_error_type state Argument_kind (State.read_span state value.id)
                            "A `UInt64` value is given where a type argument is expected.";
-                       ]
-                   | _ -> [])
+                       ])
                  written own)
           in
           match errors with [] -> Ok () | error :: _ -> Error error)
@@ -577,13 +588,21 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
           | Some (_, self_type) -> ignore (State.unify state self_type type_)
           | None -> ());
           Some
-            ( Function { path = method_path; type_arguments = instance.type_arguments },
+            ( Function
+                {
+                  path = method_path;
+                  type_arguments = instance.type_arguments;
+                  capability_arguments = instance.capability_arguments;
+                },
               instance.signature )
       | None -> None)
   | Some (Trait_overload (trait, method_)) ->
       let instance =
         Instantiation.instantiate state span
-          ~extra:[ (Types.make_self_parameter trait.trait, Types.Type type_) ]
+          ~extra:
+            (Types.bind_argument
+               (Types.make_self_parameter trait.trait)
+               (Types.Type type_) Types.no_substitution)
           (Members.read_method_signature state.lookups trait.trait method_)
       in
       Some
@@ -594,6 +613,7 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
               receiver;
               self_type = type_;
               type_arguments = [];
+              capability_arguments = [];
               evidence =
                 (match type_ with
                 | Types.Any _ -> Dynamic

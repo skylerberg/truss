@@ -202,8 +202,8 @@ public fn Set[Element: Hash + Ordered].reserve(mut self, additional: UInt64)
   mut self.elements.reserve(additional)
 }
 
-public fn Set[Element: Hash + Ordered].retain[capability Granted](mut self, keep: (fn(Element) -> Bool uses Granted))
-  uses Granted
+public fn Set[Element: Hash + Ordered].retain(mut self, keep: (fn(Element) -> Bool uses generic Granted))
+  uses generic Granted
   ensures self.length() <= old(self.length())
   cost time O(old(self.length()) * time(keep))
 {

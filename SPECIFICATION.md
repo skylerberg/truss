@@ -114,7 +114,7 @@ name resolution gives the rest their meaning:
 
 ```text
 amortized time allocations allocated_bytes calls O finite potential
-log power result old by bit_vector
+log power result old by bit_vector generic
 ```
 
 | Words | Meaning |
@@ -128,6 +128,7 @@ log power result old by bit_vector
 | `visited` | In a `for` loop's clauses, the `Sequence` of the values of the iterations before |
 | `final(result)` | In a lending method's `ensures`, the lent part as the caller left it |
 | `by`, `bit_vector` | After an `assert`'s condition: `assert condition by bit_vector` |
+| `generic` | In a `uses` list, before the name of a capability parameter |
 
 A parameter cannot be named `result`, a parameter of a lending method cannot
 be named `final`, and no function can be named `old` or `identical`.
@@ -443,16 +444,12 @@ type_argument  = type | INTEGER | LOWER_NAME | UPPER_NAME "=" type ;
 ```ebnf
 generics          = "[" generic_parameter { "," generic_parameter } [ "," ] "]" ;
 generic_parameter = UPPER_NAME [ ":" bound ]
-                  | LOWER_NAME ":" type
-                  | "capability" UPPER_NAME ;
+                  | LOWER_NAME ":" type ;
 bound             = path_type { "+" path_type } ;
 ```
 
 - A `LOWER_NAME` parameter has type `UInt64`, and its value is known when the
   code is compiled.
-- A `capability` parameter stands for a set of capabilities (see
-  [Capability parameters](#capability-parameters)). Only a function, a
-  method, or a theorem takes one.
 - Generic code is monomorphized: it is compiled once for each set of type
   arguments. So a generic function cannot call itself, or a function in a
   cycle with it, with a type argument built from its own type parameters, and
@@ -740,6 +737,11 @@ arguments or an index (see
 [Constructs resolved after parsing](#constructs-resolved-after-parsing)), and
 a diagnostic about `f[X]` says which reading applied.
 
+- The written arguments give the generic parameters in brackets, in order.
+- A capability parameter takes no type argument, since it is written at its
+  uses and not in brackets: `for_each[String](names, visit: greet)` gives
+  `Item` alone.
+
 ### Clauses
 
 ```ebnf
@@ -751,7 +753,8 @@ clause               = "uses" capability_list
 capability_list      = capability_reference { "," capability_reference } ;
 capability_reference = path_type
                      | "Self" "." UPPER_NAME
-                     | UPPER_NAME "." UPPER_NAME ;
+                     | UPPER_NAME "." UPPER_NAME
+                     | "generic" UPPER_NAME ;
 ```
 
 ```truss
@@ -948,11 +951,11 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
 ### Capability parameters
 
 ```truss
-public fn for_each[Item, capability Granted](
+public fn for_each[Item](
   items: List[Item],
-  visit: (fn(Item) uses Granted),
+  visit: (fn(Item) uses generic Granted),
 )
-  uses Granted
+  uses generic Granted
   cost calls(visit) == items.length()
   cost time O(items.length() * time(visit))
 ```
@@ -960,10 +963,34 @@ public fn for_each[Item, capability Granted](
 A capability parameter passes on whatever a callback may do: the
 capabilities it uses, and whether it terminates.
 
-- A call infers `Granted` from the functions it passes. Where the type of
-  `visit` has no `time` clause and the function passed may not terminate,
-  `Granted` records that, and so the call may not terminate.
-- `(fn(Item) uses Granted cost time finite)` takes only functions that
+- `generic Granted` names a capability parameter of the enclosing function,
+  method, or theorem, and is written at each use. Every `generic Granted` in
+  one signature names the same parameter, including one inside the type of
+  a parameter's parameter. Nothing else declares it.
+- A capability parameter is named only in `uses`, in the signature of a
+  function, a method, or a theorem, and in its body. A body names only the
+  capability parameters of its signature, and a type, a constant, an `impl`,
+  and a test name none.
+- A capability parameter named in the function's own `uses` is also named in
+  the type of a parameter or the result. Otherwise no argument gives it
+  capabilities, and the name is a misspelling.
+- A call infers `Granted` from the functions it passes, and writes no type
+  argument for it (see [Explicit type arguments](#explicit-type-arguments)).
+  Where the type of `visit` has no `time` clause and the function passed may
+  not terminate, `Granted` records that, and so the call may not terminate.
+- A function declares `uses generic Granted` only where it calls a function
+  that uses it. One that returns or stores such a function does not, and its
+  caller needs the capabilities only where it calls the result:
+
+  ```truss
+  fn later(run: (fn() uses generic Granted)) -> (fn() uses generic Granted) {
+    run
+  }
+  ```
+
+- An `impl`'s method names its capability parameters as its trait's method
+  does. Capability parameters have no order to rename them by.
+- `(fn(Item) uses generic Granted cost time finite)` takes only functions that
   terminate, whatever capabilities they use.
 - A `time` clause follows a function parameter only through its bound.
   `O(items.length() * time(visit))` is unbounded where `visit` may not
@@ -2039,9 +2066,9 @@ fn count[Source: Cursor](source: own Source) -> UInt64
 ```
 
 - `capability Uses` in a trait declares a set of capabilities that each
-  `impl` defines, as a list of capabilities, capability parameters, and the
-  sets of its type's parameters. An `impl` that leaves it out has the empty
-  set, and its methods use only the set's capabilities.
+  `impl` defines, as a list of capabilities and the sets of its type's
+  parameters. An `impl` that leaves it out has the empty set, and its
+  methods use only the set's capabilities.
 - `Self.Uses` and `Source.Uses` name the set in a `uses` clause. A call needs
   the set's capabilities for its type arguments. A function generic over a
   `Cursor` that advances it declares `uses Source.Uses`.
@@ -2122,7 +2149,7 @@ mut server.handlers.push(any HealthCheck())
   `any Cursor[Element = Int64]`, and each of its associated capability sets
   to the empty set.
 - A method can be called through `any` if it takes `self` in any mode, has no
-  generic parameters, and does not take or return `Self`.
+  generic or capability parameters, and does not take or return `Self`.
 - An `any` value cannot be converted back to its type.
 
 ## Tests

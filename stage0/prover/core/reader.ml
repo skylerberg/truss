@@ -15,9 +15,12 @@ type run = {
 }
 
 let make_unit_callee : _ Core.target -> Invocation.callee = function
-  | Function { path; type_arguments } -> Function { path; type_arguments }
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } ->
-      Trait_method { trait; name; receiver; self_type; type_arguments; evidence }
+  | Function { path; type_arguments; capability_arguments } ->
+      Function { path; type_arguments; capability_arguments }
+  | Trait_method
+      { trait; name; receiver; self_type; type_arguments; capability_arguments; evidence } ->
+      Trait_method
+        { trait; name; receiver; self_type; type_arguments; capability_arguments; evidence }
   | Capability_method { capability; name } -> Capability_method { capability; name }
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
   | Indirect _ -> Indirect ()
@@ -728,7 +731,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Convert { conversion = To_integer; value; _ } -> (frame, translate_operand value)
   | Convert { conversion = From_integer; value; _ } ->
       (frame, Operations.convert_from_integer context frame site (translate_operand value))
-  | Function_value { path; type_arguments; is_argument } ->
+  | Function_value { path; type_arguments; is_argument; _ } ->
       (frame, Values.translate_global_value context frame site path type_arguments ~is_argument)
   | To_any _ -> Operations.convert_to_any context frame site
   | Operation { operation; operands; type_arguments } ->

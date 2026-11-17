@@ -28,8 +28,8 @@ let make (context : Lower.context) (key : Instance.key) : lowered =
   let drop_and_copy = Lower.drop_and_copy context in
   let emit_code instance = emit (Code instance) in
   match key with
-  | Code { path; type_arguments } ->
-      emit_code (Lower.lower_source_code context ~path ~type_arguments)
+  | Code { path; type_arguments; capability_arguments } ->
+      emit_code (Lower.lower_source_code context ~path ~type_arguments ~capability_arguments)
   | Generated generated -> emit_code (Lower.lower_generated context generated)
   | Table table -> emit (Table (Lower.lower_table context table))
   | Constant path -> (
@@ -116,7 +116,7 @@ let list_bound_methods (interface : Interface.Lookups.t) path type_arguments =
 
 let check_calls (interface : Interface.Lookups.t) ~find_call_edges (key : Instance.key) lowered =
   match (key, lowered) with
-  | Code { path = caller; type_arguments }, Compiled fragment -> (
+  | Code { path = caller; type_arguments; _ }, Compiled fragment -> (
       match caller with
       | Method { owner = Derived _; _ } -> ()
       | _ -> (
@@ -314,8 +314,10 @@ let list_small_callees ~find ~is_worked_on fragment =
         (Emit_c.called fragment)
   | _ -> []
 
-let test_runner : Instance.key = Code { path = Well_known.make_path Run_tests; type_arguments = [] }
-let make_test_root path = Instance.Code { path; type_arguments = [] }
+let test_runner : Instance.key =
+  Code { path = Well_known.make_path Run_tests; type_arguments = []; capability_arguments = [] }
+
+let make_test_root path = Instance.Code { path; type_arguments = []; capability_arguments = [] }
 
 let list_roots ~tests ~mains =
   (if tests = [] then [] else test_runner :: List.map make_test_root tests)
@@ -833,7 +835,7 @@ let evaluate_call compiler ~function_ ~arguments =
   capture_failure compiler @@ fun () ->
   match Interface.Impls.read_signature compiler.requests.interface function_ with
   | Some { output = Returns result; _ } ->
-      let ty = Monomorphic.ground compiler.monomorphic [] result in
+      let ty = Monomorphic.ground compiler.monomorphic Types.no_substitution result in
       let key = Instance.Call_evaluation { function_; arguments } in
       run_while_compiling compiler key ~read:(fun encoded ->
           Encoding.decode (make_env compiler) ty encoded)

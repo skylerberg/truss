@@ -71,9 +71,16 @@ let substitute_trait substitution (trait : Types.trait_reference) : Types.trait_
 
 let substitute_callee substitution (callee : Mir.callee) : Mir.callee option =
   let substitute_arguments = List.map (Types.substitute_argument substitution) in
+  let substitute_capability_arguments = List.map (Types.substitute_capabilities substitution) in
   match callee with
-  | Function { path; type_arguments } ->
-      Some (Function { path; type_arguments = substitute_arguments type_arguments })
+  | Function { path; type_arguments; capability_arguments } ->
+      Some
+        (Function
+           {
+             path;
+             type_arguments = substitute_arguments type_arguments;
+             capability_arguments = substitute_capability_arguments capability_arguments;
+           })
   | Trait_method method_ ->
       Some
         (Trait_method
@@ -82,6 +89,7 @@ let substitute_callee substitution (callee : Mir.callee) : Mir.callee option =
              trait = substitute_trait substitution method_.trait;
              self_type = Types.substitute substitution method_.self_type;
              type_arguments = substitute_arguments method_.type_arguments;
+             capability_arguments = substitute_capability_arguments method_.capability_arguments;
              evidence =
                (match method_.evidence with
                | Impl { impl; arguments = impl_arguments } ->
@@ -89,10 +97,14 @@ let substitute_callee substitution (callee : Mir.callee) : Mir.callee option =
                      {
                        impl;
                        arguments =
-                         List.map
-                           (fun (parameter, argument) ->
-                             (parameter, Types.substitute_argument substitution argument))
-                           impl_arguments;
+                         {
+                           impl_arguments with
+                           arguments =
+                             List.map
+                               (fun (parameter, argument) ->
+                                 (parameter, Types.substitute_argument substitution argument))
+                               impl_arguments.arguments;
+                         };
                      }
                | (Bound | Dynamic) as evidence -> evidence);
            })

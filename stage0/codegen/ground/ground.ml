@@ -6,7 +6,7 @@ type ty =
   | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
   | Never
 
-and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
+and argument = Type of ty | Value of Z.t
 and function_type = { parameters : (mode * ty) list; result : ty; uses : Path.t list }
 
 let compare = Stdlib.compare
@@ -50,9 +50,5 @@ let rec to_string = function
       ^ if items = [] then "" else "[" ^ String.concat ", " items ^ "]"
   | Never -> "Never"
 
-and show_argument = function
-  | Type ty -> to_string ty
-  | Value value -> Z.to_string value
-  | Capabilities set -> "{" ^ String.concat ", " (List.map show_path_name set) ^ "}"
-
+and show_argument = function Type ty -> to_string ty | Value value -> Z.to_string value
 and show_arguments arguments = "[" ^ String.concat ", " (List.map show_argument arguments) ^ "]"

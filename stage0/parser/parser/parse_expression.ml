@@ -302,16 +302,19 @@ and parse_generics cursor : Syntax.generic_parameter list =
 and parse_generic_parameter cursor : Syntax.generic_parameter =
   let start = Cursor.index cursor in
   let kind =
-    match Cursor.peek_kind cursor with
-    | Keyword Capability ->
-        Cursor.advance cursor;
-        Syntax.Capability_parameter
-          (Atoms.parse_upper_name cursor "the name of a capability parameter")
-    | Upper text ->
+    match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
+    | Keyword Capability, Upper name ->
+        Cursor.report cursor Unexpected_token (Cursor.lookup_token cursor start).span
+          (Printf.sprintf
+             "A capability parameter is not declared among generic parameters. Write `generic %s` \
+              at each use instead, as in `uses generic %s`."
+             name name);
+        raise Cursor.Failed
+    | Upper text, _ ->
         let name = Atoms.make_name cursor (Cursor.take cursor) text in
-        Type_parameter
+        Syntax.Type_parameter
           (name, if Cursor.accept_punctuation cursor Colon then parse_bounds cursor else [])
-    | Lower text ->
+    | Lower text, _ ->
         let name = Atoms.make_name cursor (Cursor.take cursor) text in
         Cursor.expect_punctuation cursor Colon;
         Value_parameter (name, parse_type_expression cursor)
@@ -338,6 +341,9 @@ and parse_capability_reference cursor : Syntax.capability_reference =
         Cursor.advance cursor;
         Associated_capabilities
           (parameter, Atoms.parse_upper_name cursor "an associated capability set")
+    | Lower "generic", Upper _, _ ->
+        Cursor.advance cursor;
+        Generic_capability (Atoms.parse_upper_name cursor "the name of a capability parameter")
     | _ -> Capability_path (parse_path_type cursor)
   in
   { kind; id = Cursor.allocate_id_from cursor start }

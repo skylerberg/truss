@@ -16,10 +16,28 @@ let convert_evidence : Tables.evidence -> Core.evidence = function
 
 let convert_callee (callee : Tables.callee) : Core.callee =
   match callee with
-  | Function { path; type_arguments } -> Function { path; type_arguments }
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence = inferred } ->
+  | Function { path; type_arguments; capability_arguments } ->
+      Function { path; type_arguments; capability_arguments }
+  | Trait_method
+      {
+        trait;
+        name;
+        receiver;
+        self_type;
+        type_arguments;
+        capability_arguments;
+        evidence = inferred;
+      } ->
       Trait_method
-        { trait; name; receiver; self_type; type_arguments; evidence = convert_evidence inferred }
+        {
+          trait;
+          name;
+          receiver;
+          self_type;
+          type_arguments;
+          capability_arguments;
+          evidence = convert_evidence inferred;
+        }
   | Capability_method { capability; name } -> Capability_method { capability; name }
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
   | Constructor _ | Indirect | Built_in_operator -> State.raise_bug "this callee has no core callee"
@@ -175,7 +193,8 @@ let read_type (state : State.state) (value : Syntax.expression) =
 
 let build_function_value (state : State.state) (value : Syntax.expression) : Core.kind =
   match state.tables.resolutions.(value.id) with
-  | Some (Global { path; type_arguments }) -> Function_value { path; type_arguments }
+  | Some (Global { path; type_arguments; capability_arguments }) ->
+      Function_value { path; type_arguments; capability_arguments }
   | _ ->
       State.raise_bug "`%s` is not recorded as a function"
         (State.quote_span state (State.read_span state value.id))
@@ -324,6 +343,7 @@ let build_text_builder_callee name receiver : Core.callee =
     {
       path = Method { owner = Well_known.make_path Text_builder; name; receiver };
       type_arguments = [];
+      capability_arguments = [];
     }
 
 let read_template (state : State.state) (literal : Syntax.string_literal) =
@@ -487,6 +507,7 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
                                 receiver = Static;
                               };
                           type_arguments = [ Types.Type element ];
+                          capability_arguments = [];
                         })
                    ~arguments:
                      [
@@ -585,6 +606,7 @@ let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant
                   receiver = Read;
                   self_type = type_;
                   type_arguments = [];
+                  capability_arguments = [];
                   evidence = convert_evidence (State.convert_evidence implementation);
                 };
           }
@@ -946,6 +968,7 @@ let build_cursor_next state (cursor : Types.ty) : Core.callee =
           receiver = Mut;
           self_type = cursor;
           type_arguments = [];
+          capability_arguments = [];
           evidence = convert_evidence (State.convert_evidence implementation);
         }
   | None ->
@@ -1182,7 +1205,13 @@ let build_inserted_literal state ~origin (type_ : Types.ty) ~insert
     make result
       (Call
          (State.make_call state
-            ~callee:(Function { path = Method { owner = path; name; receiver }; type_arguments })
+            ~callee:
+              (Function
+                 {
+                   path = Method { owner = path; name; receiver };
+                   type_arguments;
+                   capability_arguments = [];
+                 })
             ~arguments ~lends:None))
   in
   let capacity = make (Types.make_builtin UInt64) (Integer (Z.of_int (List.length entries))) in

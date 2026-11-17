@@ -573,7 +573,8 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
 
 let finalize (state : State.state) =
   let finalize_type = State.finalize_type state
-  and finalize_argument = State.finalize_argument state in
+  and finalize_argument = State.finalize_argument state
+  and finalize_capabilities = State.finalize_capabilities state in
   let finalize_trait (reference : Types.trait_reference) =
     {
       reference with
@@ -587,7 +588,13 @@ let finalize (state : State.state) =
           {
             impl;
             arguments =
-              List.map (fun (parameter, value) -> (parameter, finalize_argument value)) arguments;
+              {
+                arguments with
+                arguments =
+                  List.map
+                    (fun (parameter, value) -> (parameter, finalize_argument value))
+                    arguments.arguments;
+              };
           }
     | other -> other
   in
@@ -596,8 +603,13 @@ let finalize (state : State.state) =
       written with
       callee =
         (match written.callee with
-        | Function { path; type_arguments } ->
-            Function { path; type_arguments = List.map finalize_argument type_arguments }
+        | Function { path; type_arguments; capability_arguments } ->
+            Function
+              {
+                path;
+                type_arguments = List.map finalize_argument type_arguments;
+                capability_arguments = List.map finalize_capabilities capability_arguments;
+              }
         | Trait_method method_ ->
             Trait_method
               {
@@ -605,6 +617,7 @@ let finalize (state : State.state) =
                 trait = finalize_trait method_.trait;
                 self_type = finalize_type method_.self_type;
                 type_arguments = List.map finalize_argument method_.type_arguments;
+                capability_arguments = List.map finalize_capabilities method_.capability_arguments;
                 evidence = finalize_evidence method_.evidence;
               }
         | Constructor constructor ->
@@ -632,8 +645,13 @@ let finalize (state : State.state) =
   update tables.scrutinee_types finalize_type;
   update tables.calls finalize_call;
   update tables.resolutions (function
-    | Tables.Global { path; type_arguments } ->
-        Tables.Global { path; type_arguments = List.map finalize_argument type_arguments }
+    | Tables.Global { path; type_arguments; capability_arguments } ->
+        Tables.Global
+          {
+            path;
+            type_arguments = List.map finalize_argument type_arguments;
+            capability_arguments = List.map finalize_capabilities capability_arguments;
+          }
     | Field_access { type_; field } -> Field_access { type_ = finalize_type type_; field }
     | Variant_value { type_; variant } -> Variant_value { type_ = finalize_type type_; variant }
     | Type_name type_ -> Type_name (finalize_type type_)

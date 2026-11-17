@@ -2,7 +2,11 @@ module Lookups = Lookups
 
 type resolution = Tables.resolution =
   | Local_value of Syntax.id
-  | Global of { path : Path.t; type_arguments : Types.argument list }
+  | Global of {
+      path : Path.t;
+      type_arguments : Types.argument list;
+      capability_arguments : Types.capability_set list;
+    }
   | Field_access of { type_ : Types.ty; field : string }
   | Variant_value of { type_ : Types.ty; variant : string }
   | Type_name of Types.ty
@@ -56,9 +60,11 @@ type form_origin =
 
 let find_form_origin (interface : Interface.Lookups.t) ~is_derived (path : Path.t) =
   match (interface.names.find_key path, path) with
-  | Some key, _ -> Some (Written key, [])
+  | Some key, _ -> Some (Written key, Types.no_substitution)
   | None, Method { owner = Derived { type_; _ }; _ } when is_derived path ->
-      Option.map (fun type_key -> (Derived type_key, [])) (interface.names.find_key type_)
+      Option.map
+        (fun type_key -> (Derived type_key, Types.no_substitution))
+        (interface.names.find_key type_)
   | None, Method { owner = Impl _ | Derived _; _ } ->
       Option.bind (Interface.Impls.find_implemented_method interface path)
         (fun (implemented : Interface.Impls.implemented_method) ->

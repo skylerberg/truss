@@ -560,8 +560,10 @@ and lower_function_expression builder (node : Core.expression) ~is_argument :
   let origin = node.origin in
   let hold value = Emitter.hold builder node.type_ origin value in
   match node.kind with
-  | Function_value { path; type_arguments } ->
-      let* value = hold (Function_value { path; type_arguments; is_argument }) in
+  | Function_value { path; type_arguments; capability_arguments } ->
+      let* value =
+        hold (Function_value { path; type_arguments; capability_arguments; is_argument })
+      in
       Some (value, Tree.Function_reference { path; origin })
   | Lambda { parameters; captures; body; _ } ->
       let index = lower_lambda builder parameters captures body in

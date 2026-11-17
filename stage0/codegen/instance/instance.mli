@@ -1,5 +1,9 @@
 type key =
-  | Code of { path : Path.t; type_arguments : Ground.argument list }
+  | Code of {
+      path : Path.t;
+      type_arguments : Ground.argument list;
+      capability_arguments : Path.t list list;
+    }
   | Constant of Path.t
   | Drop of Ground.ty
   | Copy of Ground.ty
@@ -20,6 +24,7 @@ and generated =
   | Adapter of {
       function_ : Path.t;
       type_arguments : Ground.argument list;
+      capability_arguments : Path.t list list;
       ty : Ground.function_type;
     }
   | Program_main of Path.t

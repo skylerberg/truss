@@ -1,5 +1,5 @@
-fn for_each[capability Granted](count: Int64, visit: (fn(Int64) uses Granted))
-  uses Granted
+fn for_each(count: Int64, visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
 {
   todo
 }

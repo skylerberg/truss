@@ -1,14 +1,14 @@
 trait Visited {
-  fn visit[capability Granted](self, each: (fn(Int64) uses Granted))
-    uses Granted
+  fn visit(self, each: (fn(Int64) uses generic Granted))
+    uses generic Granted
     cost time finite
 }
 
 type Single(value: Int64)
 
 impl Visited for Single {
-  fn visit[capability Granted](self, each: (fn(Int64) uses Granted))
-    uses Granted
+  fn visit(self, each: (fn(Int64) uses generic Granted))
+    uses generic Granted
     cost time O(time(each))
   {
     each(self.value)

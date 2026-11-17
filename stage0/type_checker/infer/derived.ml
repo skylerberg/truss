@@ -116,6 +116,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                            receiver;
                            self_type = of_type;
                            type_arguments;
+                           capability_arguments = [];
                            evidence;
                          })
                     ~arguments ~lends:None))
@@ -132,6 +133,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                            receiver;
                            self_type;
                            type_arguments = [];
+                           capability_arguments = [];
                            evidence;
                          })
                     ~arguments ~lends:None))
@@ -294,6 +296,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                          Method
                                            { owner = hasher_path; name = "write"; receiver = Mut };
                                        type_arguments = [];
+                                       capability_arguments = [];
                                      })
                                 ~arguments:
                                   [
@@ -598,6 +601,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                     path = Well_known.make_path function_;
                                     type_arguments =
                                       [ Types.Type field.field_type; Types.Type source_type ];
+                                    capability_arguments = [];
                                   })
                              ~arguments:[ make_source_argument Mut; text_argument field.field_name ]
                              ~lends:None)))
@@ -858,6 +862,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                               receiver = Read;
                               self_type = string_type;
                               type_arguments = [];
+                              capability_arguments = [];
                               evidence = Impl { impl; arguments = substitution };
                             }
                       | _ -> raise_bug "`String` has no `Equal`"
@@ -887,6 +892,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                                      Unknown_variant;
                                                                  type_arguments =
                                                                    [ Types.Type source_type ];
+                                                                 capability_arguments = [];
                                                                })
                                                           ~arguments:
                                                             [

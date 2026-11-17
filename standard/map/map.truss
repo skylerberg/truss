@@ -338,13 +338,13 @@ public fn Map[Key: Hash + Ordered, Value].get_or_insert(mut self, key: own Key, 
   mut self.entries[position].value
 }
 
-public fn Map[Key: Hash + Ordered, Value].update[capability Granted](
+public fn Map[Key: Hash + Ordered, Value].update(
   mut self,
   key: own Key,
   default: own Value,
-  change: (fn(mut Value) uses Granted),
+  change: (fn(mut Value) uses generic Granted),
 )
-  uses Granted
+  uses generic Granted
   ensures self.contains(key)
   cost calls(change) == 1
   cost time O(1 + old(self.length()) * (1 + time(Key.equal)) + time(change))
@@ -397,11 +397,11 @@ public fn Map[Key: Hash + Ordered, Value].reserve(mut self, additional: UInt64)
   mut self.entries.reserve(additional)
 }
 
-public fn Map[Key: Hash + Ordered, Value].retain[capability Granted](
+public fn Map[Key: Hash + Ordered, Value].retain(
   mut self,
-  keep: (fn(Entry[Key, Value]) -> Bool uses Granted),
+  keep: (fn(Entry[Key, Value]) -> Bool uses generic Granted),
 )
-  uses Granted
+  uses generic Granted
   ensures self.length() <= old(self.length())
   cost time O(old(self.length()) * time(keep))
 {
@@ -583,11 +583,11 @@ public fn Map[Key: Hash + Ordered, Value].value_at(mut self, position: UInt64) l
   mut self.entries[position].value
 }
 
-public fn Map[Key: Hash + Ordered, Value].update_values[capability Granted](
+public fn Map[Key: Hash + Ordered, Value].update_values(
   mut self,
-  change: (fn(mut Value) uses Granted),
+  change: (fn(mut Value) uses generic Granted),
 )
-  uses Granted
+  uses generic Granted
   ensures self.length() == old(self.length())
   cost calls(change) == self.length()
   cost time O(self.length() * time(change))

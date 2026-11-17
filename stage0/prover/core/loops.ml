@@ -631,10 +631,14 @@ let prove_own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     match evidence with
     | Impl { impl; arguments } ->
         ( impl,
-          List.map
-            (fun (parameter, argument) ->
-              (parameter, Types.substitute_argument frame.substitution argument))
-            arguments )
+          {
+            arguments with
+            arguments =
+              List.map
+                (fun (parameter, argument) ->
+                  (parameter, Types.substitute_argument frame.substitution argument))
+                arguments.arguments;
+          } )
     | _ -> Facts.raise_bug "a cursor's evidence is not an impl"
   in
   let contract =
@@ -723,7 +727,10 @@ let prove_own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
           ]
           ~havoc_mut
           ~substitution_of:(fun _ ->
-            impl_arguments @ [ (Types.make_self_parameter cursor_trait, Types.Type cursor_type) ])
+            Types.combine_substitutions impl_arguments
+              (Types.bind_argument
+                 (Types.make_self_parameter cursor_trait)
+                 (Types.Type cursor_type) Types.no_substitution))
           ~instance:[ Types.Type cursor_type ]
       in
       let has_another =

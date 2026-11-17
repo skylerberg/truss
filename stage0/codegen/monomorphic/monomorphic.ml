@@ -36,14 +36,15 @@ let list_evidence context substitution uses =
 let rec ground context substitution (ty : Types.ty) : Ground.ty =
   match context.normalize (Types.substitute substitution ty) with
   | Named { path; arguments } ->
-      Named { path; arguments = List.map (ground_argument context []) arguments }
-  | Function function_type -> Function (ground_function context [] function_type)
+      Named { path; arguments = List.map (ground_argument context Types.no_substitution) arguments }
+  | Function function_type -> Function (ground_function context Types.no_substitution function_type)
   | Any { trait; trait_arguments; associated } ->
       Any
         {
           trait;
-          arguments = List.map (ground_argument context []) trait_arguments;
-          associated = List.map (fun (name, ty) -> (name, ground context [] ty)) associated;
+          arguments = List.map (ground_argument context Types.no_substitution) trait_arguments;
+          associated =
+            List.map (fun (name, ty) -> (name, ground context Types.no_substitution ty)) associated;
         }
   | Never -> Never
   | Parameter parameter ->
@@ -57,12 +58,11 @@ let rec ground context substitution (ty : Types.ty) : Ground.ty =
 
 and ground_argument context substitution (argument : Types.argument) : Ground.argument =
   match Types.substitute_argument substitution argument with
-  | Type ty -> Type (ground context [] ty)
+  | Type ty -> Type (ground context Types.no_substitution ty)
   | Value (Known value) -> Value value
   | Value (Value_parameter parameter) ->
       raise_bug "the value parameter %s is not substituted" parameter.name
   | Value (Value_variable _) -> raise_bug "a value the checker left undecided"
-  | Capabilities set -> Capabilities (list_capabilities context [] set)
 
 and ground_function context substitution (function_type : Types.function_type) :
     Ground.function_type =
@@ -70,10 +70,10 @@ and ground_function context substitution (function_type : Types.function_type) :
   {
     parameters =
       List.map
-        (fun (yield_mode, ty) -> (ground_mode yield_mode, ground context [] ty))
+        (fun (yield_mode, ty) -> (ground_mode yield_mode, ground context Types.no_substitution ty))
         function_type.inputs;
-    result = ground context [] function_type.output;
-    uses = list_evidence context [] function_type.uses;
+    result = ground context Types.no_substitution function_type.output;
+    uses = list_evidence context Types.no_substitution function_type.uses;
   }
 
 let uint64 = Ground.make_builtin UInt64
@@ -106,16 +106,26 @@ let rec convert_ty : Ground.ty -> Types.ty = function
 and convert_argument : Ground.argument -> Types.argument = function
   | Type ty -> Type (convert_ty ty)
   | Value value -> Value (Known value)
-  | Capabilities set ->
-      Capabilities (Types.make_capability_set (List.map (fun path -> Types.Capability path) set))
+
+let convert_capabilities set =
+  Types.make_capability_set (List.map (fun path -> Types.Capability path) set)
 
 let make_substitution (generics : Types.generic list) arguments =
   if List.length generics <> List.length arguments then
     raise_bug "%d generic parameters for %d arguments" (List.length generics)
       (List.length arguments);
-  List.map2
-    (fun (generic : Types.generic) argument -> (generic.generic, convert_argument argument))
-    generics arguments
+  Types.make_substitution generics (List.map convert_argument arguments)
+
+let make_signature_substitution (signature : Types.signature) ~type_arguments ~capability_arguments
+    =
+  if List.length signature.capability_parameters <> List.length capability_arguments then
+    raise_bug "%d capability parameters for %d capability arguments"
+      (List.length signature.capability_parameters)
+      (List.length capability_arguments);
+  Types.combine_substitutions
+    (make_substitution signature.generics type_arguments)
+    (Types.make_capability_substitution signature.capability_parameters
+       (List.map convert_capabilities capability_arguments))
 
 let ground_fields context substitution (fields : Types.field list) =
   List.map

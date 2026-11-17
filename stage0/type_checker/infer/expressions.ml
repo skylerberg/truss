@@ -386,6 +386,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                             receiver = Read;
                             self_type = base_type;
                             type_arguments = [];
+                            capability_arguments = [];
                             evidence = State.convert_evidence evidence;
                           };
                       arguments =

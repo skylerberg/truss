@@ -207,13 +207,9 @@ let () =
     List.concat_map
       (fun (call : Core.call) ->
         match call.callee with
-        | Function { path; type_arguments }
+        | Function { path; capability_arguments; _ }
           when Path.equal path (Support.make_top_path "app::main" "apply") ->
-            List.concat_map
-              (function
-                | Types.Capabilities set -> list_capabilities set
-                | other -> [ Types.show_argument other ])
-              type_arguments
+            List.concat_map list_capabilities capability_arguments
         | _ -> [])
       (list_calls form)
   in
@@ -245,8 +241,7 @@ let () =
                         match node.kind with
                         | Call { callee = Function { path; _ }; uses; _ }
                           when Path.equal path (Support.make_top_path "app::main" "apply") ->
-                            actual :=
-                              ("needs " ^ Types.show_argument (Capabilities uses)) :: !actual
+                            actual := ("needs " ^ Types.show_capabilities uses) :: !actual
                         | Lambda _ -> actual := Types.show node.type_ :: !actual
                         | _ -> ());
                   }
@@ -525,7 +520,7 @@ let () =
           List.map
             (fun ((parameter : Types.parameter), argument) ->
               parameter.name ^ " = " ^ Types.show_argument argument)
-            substitution )
+            substitution.arguments )
     | None -> failwith "no core form"
   in
   let list_observed name =
@@ -552,7 +547,7 @@ let () =
           Database.For_testing.read_core (Support.make_database packages)
             (Method { owner; name = "not_equal"; receiver = Read }) )
       with
-      | Some (_, []), Some (_, [ _ ]) -> ()
+      | Some (_, { arguments = []; _ }), Some (_, { arguments = [ _ ]; _ }) -> ()
       | _ ->
           Harness.fail
             "expected the derived method with no substitution and the inherited method with one")

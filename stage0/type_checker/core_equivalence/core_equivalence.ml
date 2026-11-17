@@ -52,13 +52,17 @@ and is_equivalent_operand renaming (before : Core.operand) (after : Core.operand
 
 and is_equivalent_callee renaming (before : Core.callee) (after : Core.callee) =
   match (before, after) with
-  | Function { path; type_arguments }, Function after ->
-      Path.equal path after.path && type_arguments = after.type_arguments
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence }, Trait_method after
-    ->
+  | Function { path; type_arguments; capability_arguments }, Function after ->
+      Path.equal path after.path
+      && type_arguments = after.type_arguments
+      && capability_arguments = after.capability_arguments
+  | ( Trait_method
+        { trait; name; receiver; self_type; type_arguments; capability_arguments; evidence },
+      Trait_method after ) ->
       trait = after.trait && String.equal name after.name && receiver = after.receiver
       && Types.equal self_type after.self_type
       && type_arguments = after.type_arguments
+      && capability_arguments = after.capability_arguments
       && evidence = after.evidence
   | Capability_method { capability; name }, Capability_method after ->
       Path.equal capability after.capability && String.equal name after.name
@@ -95,8 +99,10 @@ and is_equivalent_kind renaming (before : Core.kind) (after : Core.kind) =
       && is_equivalent_expression renaming call after.call
   | Use before, Use after -> is_equivalent_place renaming before after
   | Copy before, Copy after -> is_equivalent_operand renaming before after
-  | Function_value { path; type_arguments }, Function_value after ->
-      Path.equal path after.path && type_arguments = after.type_arguments
+  | Function_value { path; type_arguments; capability_arguments }, Function_value after ->
+      Path.equal path after.path
+      && type_arguments = after.type_arguments
+      && capability_arguments = after.capability_arguments
   | Value_parameter before, Value_parameter after -> before = after
   | Lambda { parameters; captures; body; result }, Lambda after ->
       List.equal (is_equivalent_pattern renaming) parameters after.parameters

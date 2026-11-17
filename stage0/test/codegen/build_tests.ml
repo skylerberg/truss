@@ -168,7 +168,15 @@ let () =
      that ends without a word" (fun () ->
       let _, compile =
         Codegen_support.load
-          ~roots:[ Code { path = Well_known.make_path Run_tests; type_arguments = [] } ]
+          ~roots:
+            [
+              Code
+                {
+                  path = Well_known.make_path Run_tests;
+                  type_arguments = [];
+                  capability_arguments = [];
+                };
+            ]
           "fn suite() {\n}\n"
       in
       let site : Lowered.site =

@@ -1131,6 +1131,9 @@ narrowing limits the reach of one capability.
 | Rule | Reason |
 |---|---|
 | A callback uses capabilities only through a capability parameter. | One rule stays true: no `uses` means pure. A callback is pure by default, which is the safe default for a comparator and for code that runs in parallel. |
+| A capability parameter is written `generic Name` at each use and declared nowhere else. | No call writes a set of capabilities, so a position among written type arguments would hold only a placeholder. The marker at each use shows that the name is a variable. |
+| A capability parameter named only in a function's own `uses` is an error. | No argument can give it capabilities, so the name is a misspelling. |
+| An `impl`'s method names its capability parameters as its trait's method does. | Capability parameters have no declared order to rename them by. |
 | Providing a type provides every capability that the type implements. | A type that narrows both reading and writing cannot leave one of them unnarrowed by mistake. |
 | An `impl` of a capability can declare `uses`, and a `provide` of it requires those capabilities. | Capabilities layer instead of inheriting. `ReadDatabase` is implemented with `NetworkClient`, which is required where the implementation is provided. A dependency that is granted `ReadDatabase` alone never reaches the network. |
 

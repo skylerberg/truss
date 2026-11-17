@@ -77,7 +77,7 @@ let read_signature context (path : Path.t) =
   | Some signature -> signature
   | None -> raise_bug "no signature for %s" (Path.show path)
 
-let make_code context (path : Path.t) type_arguments : code =
+let make_code context (path : Path.t) ~type_arguments ~capability_arguments : code =
   let make_function_code ~enclosing_impl (key : Resolve.Names.key) ~(interface : Types.signature)
       ~substitution =
     {
@@ -99,16 +99,20 @@ let make_code context (path : Path.t) type_arguments : code =
       match Resolve.Names.find_definition context.lookups.interface.names path with
       | Some (key, { kind = Test _; _ }) ->
           {
-            (make_unwritten_code ~definition:path ~substitution:[] ~result:(Returns Types.unit)) with
+            (make_unwritten_code ~definition:path ~substitution:Types.no_substitution
+               ~result:(Returns Types.unit))
+            with
             written = Some (read_written context key);
             real =
-              Monomorphic.list_evidence context.monomorphic []
+              Monomorphic.list_evidence context.monomorphic Types.no_substitution
                 (Interface.Definition.read_test_uses context.lookups.interface path);
           }
       | _ -> raise_bug "%s is not a test" (Path.show path))
   | Top _ | Method _ -> (
       let interface = read_signature context path in
-      let substitution = bind interface.generics type_arguments in
+      let substitution =
+        Monomorphic.make_signature_substitution interface ~type_arguments ~capability_arguments
+      in
       let enclosing_impl =
         match path with
         | Method { owner = (Impl _ | Derived _) as impl; _ } -> Some impl
@@ -128,11 +132,18 @@ let make_code context (path : Path.t) type_arguments : code =
           let trait = impl_interface.implements.trait in
           let trait_signature = read_signature context provided.path in
           let count = List.length impl_interface.impl_generics in
-          let of_impl = List.take count substitution in
+          let of_impl =
+            { Types.no_substitution with arguments = List.take count substitution.arguments }
+          in
           let of_trait =
-            List.map
-              (fun (parameter, argument) -> (parameter, Types.substitute_argument of_impl argument))
-              trait_substitution
+            {
+              trait_substitution with
+              arguments =
+                List.map
+                  (fun (parameter, argument) ->
+                    (parameter, Types.substitute_argument of_impl argument))
+                  trait_substitution.arguments;
+            }
           in
           let own_generics =
             List.filter
@@ -141,7 +152,15 @@ let make_code context (path : Path.t) type_arguments : code =
           in
           let own = List.drop count type_arguments in
           make_function_code ~enclosing_impl provided ~interface:trait_signature
-            ~substitution:(of_trait @ bind own_generics own @ substitution)
+            ~substitution:
+              (Types.combine_substitutions of_trait
+                 (Types.combine_substitutions (bind own_generics own)
+                    (Types.combine_substitutions substitution
+                       (Types.transfer_capability_arguments
+                          ~declared:interface.capability_parameters
+                          ~arguments:
+                            (List.map Monomorphic.convert_capabilities capability_arguments)
+                          trait_signature.capability_parameters))))
       | Some (Inherited _, _), _ ->
           raise_bug "%s inherits a method outside an impl" (Path.show path)
       | None, _ -> raise_bug "%s is not a function" (Path.show path))

@@ -907,14 +907,14 @@ fn drain(admission: tasks::Cell[Admission], drained: tasks::Channel[Unit], outbo
   }
 }
 
-internal fn serve[Stream: streams::Duplex, capability Granted](
+internal fn serve[Stream: streams::Duplex](
   stream: Stream,
   inbox: own Inbox,
   header_limit: UInt64,
   stopping: tasks::Channel[Unit],
-  respond: (fn(own Arrival) uses Granted),
+  respond: (fn(own Arrival) uses generic Granted),
 )
-  uses Tasks, Handles, Clock, Granted
+  uses Tasks, Handles, Clock, generic Granted
 {
   var opened = own inbox
   let opening = match take_bytes(stream, inbox: mut opened, count: 24) {

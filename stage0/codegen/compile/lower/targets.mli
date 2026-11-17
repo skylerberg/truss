@@ -14,6 +14,7 @@ val make_trait_method_key :
   receiver:Path.receiver ->
   self_type:Types.ty ->
   type_arguments:Types.argument list ->
+  capability_arguments:Types.capability_set list ->
   evidence:Core.evidence ->
   Instance.key
 

@@ -69,6 +69,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
                                receiver = Read;
                                self_type = parts;
                                type_arguments = [];
+                               capability_arguments = [];
                                evidence;
                              })
                         ~arguments:
@@ -204,6 +205,7 @@ and check_method_time state (value : Syntax.expression) (type_ : Types.ty) (memb
                  receiver = method_.method_receiver;
                  self_type = type_;
                  type_arguments = [];
+                 capability_arguments = [];
                  evidence = Bound;
                }));
       Types.Integer
@@ -278,7 +280,11 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                   | Ok (checked, left_out) ->
                       Name_lookup.finish_call state env value method_path
                         (Tables.Function
-                           { path = method_path; type_arguments = instance.type_arguments })
+                           {
+                             path = method_path;
+                             type_arguments = instance.type_arguments;
+                             capability_arguments = instance.capability_arguments;
+                           })
                         instance checked left_out)
               | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path)))
       | None -> (
@@ -403,8 +409,10 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) arguments ~trait_generics
     ~trait_arguments =
   let extra =
-    (Types.make_self_parameter trait.trait, Types.Type self_type)
-    :: Types.make_substitution trait_generics trait_arguments
+    Types.bind_argument
+      (Types.make_self_parameter trait.trait)
+      (Types.Type self_type)
+      (Types.make_substitution trait_generics trait_arguments)
   in
   let signature = Members.read_method_signature state.lookups trait.trait method_ in
   let instance =
@@ -447,6 +455,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
                   receiver = method_.method_receiver;
                   self_type;
                   type_arguments = own_arguments;
+                  capability_arguments = instance.capability_arguments;
                   evidence = Built_in;
                 };
             arguments = receiver_argument @ checked;
@@ -709,7 +718,12 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
                 }
               in
               Name_lookup.finish_call state env value method_path
-                (Tables.Function { path = method_path; type_arguments = instance.type_arguments })
+                (Tables.Function
+                   {
+                     path = method_path;
+                     type_arguments = instance.type_arguments;
+                     capability_arguments = instance.capability_arguments;
+                   })
                 instance (receiver_argument :: checked) left_out))
 
 and check_trait_method_with_receiver state env (value : Syntax.expression)
@@ -721,8 +735,10 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
     | None -> []
   in
   let extra =
-    (Types.make_self_parameter trait.trait, Types.Type receiver_type)
-    :: Types.make_substitution trait_generics trait.trait_arguments
+    Types.bind_argument
+      (Types.make_self_parameter trait.trait)
+      (Types.Type receiver_type)
+      (Types.make_substitution trait_generics trait.trait_arguments)
   in
   let not_callable =
     match receiver_type with
@@ -735,9 +751,10 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
             Some
               (State.make_error_type state Not_callable (State.read_span state value.id)
                  (Printf.sprintf
-                    "`%s` has generic parameters of its own, so it cannot be called through `%s`: \
-                     an `any` value holds one instance of each method, and this one has an \
-                     instance for each set of arguments. Call it on a value whose type is known."
+                    "`%s` has generic or capability parameters of its own, so it cannot be called \
+                     through `%s`: an `any` value holds one instance of each method, and this one \
+                     has an instance for each set of arguments. Call it on a value whose type is \
+                     known."
                     method_.method_name (State.show state receiver_type)))
         | Names_self ->
             Some
@@ -787,6 +804,7 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                           receiver = method_.method_receiver;
                           self_type = receiver_type;
                           type_arguments = instance.type_arguments;
+                          capability_arguments = instance.capability_arguments;
                           evidence;
                         };
                     arguments = receiver_argument :: checked;

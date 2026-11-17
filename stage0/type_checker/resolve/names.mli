@@ -95,7 +95,7 @@ val lookup_module :
 val find_definition : lookups -> Path.t -> (key * Syntax.definition) option
 val find_law_parameters : lookups -> Path.t -> string -> string list option
 
-type generic_kind = Type_kind | Value_kind | Capability_kind
+type generic_kind = Type_kind | Value_kind
 
 val find_recovery_report : lookups -> key -> Parts.part -> Diagnostic.reported option
 val is_broken : lookups -> key -> Parts.part -> bool

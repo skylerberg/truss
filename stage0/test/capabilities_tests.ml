@@ -105,7 +105,7 @@ let () =
           (list_core_expressions Fixtures.Capabilities.provide_of_a_generic_fixed_clock
              ~of_function:"f")
       with
-      | [ [ [ { capability; impl = Impl _; arguments = [ (_, Type tag) ] } ] ] ]
+      | [ [ [ { capability; impl = Impl _; arguments = { arguments = [ (_, Type tag) ]; _ } } ] ] ]
         when Path.equal capability (Support.make_top_path "standard::capabilities" "Clock")
              && Types.show tag = "Bool" ->
           ()
@@ -436,12 +436,12 @@ let () =
     (fun () ->
       let repeat uses =
         ticks
-        ^ "fn repeat[capability Mine](action: (fn() -> Instant uses Mine), again: Bool) -> Instant\n\
-          \  uses " ^ uses
+        ^ "fn repeat(action: (fn() -> Instant uses generic Mine), again: Bool) -> Instant\n  uses "
+        ^ uses
         ^ "\n{\n  if again {\n    repeat(tick, again: false)\n  } else {\n    action()\n  }\n}\n"
       in
-      expect_one_diagnostic (repeat "Mine") "capabilities.not_available";
-      expect_fine (repeat "Mine, Clock"))
+      expect_one_diagnostic (repeat "generic Mine") "capabilities.not_available";
+      expect_fine (repeat "generic Mine, Clock"))
 
 let later = ticks ^ Fixtures.Capabilities.later
 
@@ -458,6 +458,14 @@ let () =
         (later ^ Fixtures.Capabilities.later_of_tick_bound_without_uses)
         "types.mismatch";
       expect_fine (later ^ Fixtures.Capabilities.later_of_tick_bound_using_clock));
+  Harness.test
+    "a call needs no capability that it passes for a capability parameter its callee only returns"
+    (fun () ->
+      let chosen = Fixtures.Capabilities.chosen in
+      expect_fine (chosen ^ Fixtures.Capabilities.chosen_kept_without_calling);
+      expect_one_diagnostic
+        (chosen ^ Fixtures.Capabilities.chosen_called_without_its_capability)
+        "capabilities.not_available");
   Harness.test "a call's result may widen to more `uses` without requiring them at the call"
     (fun () -> expect_fine (ticks ^ Fixtures.Capabilities.checked_result_widened));
   Harness.test "a variable that is assigned a second function has the capabilities of both"
@@ -466,12 +474,11 @@ let () =
         (later ^ Fixtures.Capabilities.held_still_then_tick_without_uses)
         "capabilities.not_available";
       expect_fine (later ^ Fixtures.Capabilities.held_still_then_tick_using_clock));
-  Harness.test "a type and a trait cannot take a capability parameter" (fun () ->
-      expect_one_diagnostic
-        "type Holder[capability Granted](action: (fn() -> Instant uses Granted))\n"
-        "types.misplaced_capability_parameter";
-      expect_one_diagnostic Fixtures.Capabilities.trait_with_a_capability_parameter
-        "types.misplaced_capability_parameter";
+  Harness.test "only a function, a method, or a theorem names a capability parameter" (fun () ->
+      expect_one_diagnostic "type Holder(action: (fn() -> Instant uses generic Granted))\n"
+        "resolve.misplaced_capability_parameter";
+      expect_one_diagnostic "test \"t\" uses generic Granted {}\n"
+        "resolve.misplaced_capability_parameter";
       expect_fine "type Holder(action: (fn() -> Instant uses Clock))\n")
 
 let () =
@@ -563,7 +570,7 @@ let () =
       expect_one_diagnostic Fixtures.Capabilities.set_of_an_unknown_name
         "resolve.not_a_generic_parameter";
       expect_one_diagnostic Fixtures.Capabilities.set_of_a_capability_parameter
-        "types.unknown_associated_type");
+        "resolve.not_a_generic_parameter");
   Harness.test "a trait's methods can use a set that a required trait declares" (fun () ->
       let rewind = Fixtures.Capabilities.rewind in
       expect_fine (feed ^ rewind ^ Fixtures.Capabilities.rewind_of_a_gauge_using_meter);
@@ -686,7 +693,7 @@ let () =
         ~says:
           "This call may not terminate, since the lambda passed for `change` may not, and this \
            function has a `time` clause."
-        ~at:("apply(value", 1));
+        ~at:("apply(value,", 1));
   Harness.test "a lambda whose function type has a time clause holds no loop without a measure"
     (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.lambda_looping_without_a_measure_passed_as_finite

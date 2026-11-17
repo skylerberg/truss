@@ -110,7 +110,11 @@ let () =
   Codegen_support.test "a compiler bug says which instance was being lowered" (fun () ->
       let not_code =
         Instance.Code
-          { path = Top { module_ = Codegen_support.example; name = "Point" }; type_arguments = [] }
+          {
+            path = Top { module_ = Codegen_support.example; name = "Point" };
+            type_arguments = [];
+            capability_arguments = [];
+          }
       in
       let _, compile = Codegen_support.load ~roots:[ not_code ] "type Point(x: Int64)\n" in
       expect_bug ~saying:"while lowering example::Point" (fun () ->

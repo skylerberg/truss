@@ -27,12 +27,13 @@ type instance = {
   signature : Types.signature;
   substitution : Types.substitution;
   type_arguments : Types.argument list;
+  capability_arguments : Types.capability_set list;
 }
 
 val instantiate :
   State.state ->
   Source.Definition_span.t ->
-  ?extra:(Types.parameter * Types.argument) list ->
+  ?extra:Types.substitution ->
   Types.signature ->
   instance
 

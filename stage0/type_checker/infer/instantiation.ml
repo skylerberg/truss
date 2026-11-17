@@ -78,9 +78,7 @@ let make_fresh_generic_arguments (state : State.state) (generics : Types.generic
     (fun (generic : Types.generic) ->
       match generic.kind with
       | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
-      | Type_generic _ -> Types.Type (State.make_fresh_type state)
-      | Capability_generic ->
-          Types.Capabilities (Unify.make_fresh_capability_variable state.unifier))
+      | Type_generic _ -> Types.Type (State.make_fresh_type state))
     generics
 
 let make_fresh_arguments (state : State.state) (path : Path.t) =
@@ -202,23 +200,30 @@ type instance = {
   signature : Types.signature;
   substitution : Types.substitution;
   type_arguments : Types.argument list;
+  capability_arguments : Types.capability_set list;
 }
 
-let instantiate (state : State.state) (span : Source.Definition_span.t) ?(extra = [])
-    (signature : Types.signature) =
+let instantiate (state : State.state) (span : Source.Definition_span.t)
+    ?(extra = Types.no_substitution) (signature : Types.signature) =
+  let type_arguments = make_fresh_generic_arguments state signature.generics in
+  let capability_arguments =
+    List.map
+      (fun _ -> Unify.make_fresh_capability_variable state.unifier)
+      signature.capability_parameters
+  in
   let substitution =
-    Types.make_substitution signature.generics
-      (make_fresh_generic_arguments state signature.generics)
-    @ extra
+    Types.combine_substitutions
+      (Types.combine_substitutions
+         (Types.make_substitution signature.generics type_arguments)
+         (Types.make_capability_substitution signature.capability_parameters capability_arguments))
+      extra
   in
   require_bounds state span signature.generics substitution;
   {
     signature = Types.substitute_signature substitution signature;
     substitution;
-    type_arguments =
-      List.map
-        (fun (generic : Types.generic) -> List.assoc generic.generic substitution)
-        signature.generics;
+    type_arguments;
+    capability_arguments;
   }
 
 let find_intrinsic_signature path =

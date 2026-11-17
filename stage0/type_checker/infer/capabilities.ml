@@ -179,28 +179,20 @@ let compute_operand_type : Core.operand -> Types.ty = function
   | Value value -> value.type_
 
 let diverges_whatever_it_is_passed (state : State.state) (callee : Core.callee) =
-  let empty =
-    List.map (function
-      | Types.Capabilities _ -> Types.Capabilities Types.no_capabilities
-      | argument -> argument)
-  in
+  let empty = List.map (fun _ -> Types.no_capabilities) in
   match callee with
-  | Function { path; type_arguments } ->
+  | Function function_ ->
       not
         (Types.terminates
            (State.compute_callee_uses state
-              (Function { path; type_arguments = empty type_arguments })))
+              (Function
+                 { function_ with capability_arguments = empty function_.capability_arguments })))
   | Trait_method method_ ->
       not
         (Types.terminates
            (State.compute_callee_uses state
               (Trait_method
-                 {
-                   method_ with
-                   trait =
-                     { method_.trait with trait_arguments = empty method_.trait.trait_arguments };
-                   type_arguments = empty method_.type_arguments;
-                 })))
+                 { method_ with capability_arguments = empty method_.capability_arguments })))
   | Capability_method _ -> not (Types.terminates (State.compute_callee_uses state callee))
   | Intrinsic _ | Indirect _ -> false
 
@@ -330,7 +322,8 @@ let rec check_expression checking scope (node : Core.expression) =
   | Quantified _ ->
       check_children checking (make_quantifier_scope ~enclosing:scope) (`Expression node)
   | Function_value { path; _ } ->
-      check_callee_grants checking node.origin (Function { path; type_arguments = [] })
+      check_callee_grants checking node.origin
+        (Function { path; type_arguments = []; capability_arguments = [] })
   | Call call -> (
       check_children checking scope (`Expression node);
       check_callee_grants checking node.origin call.callee;
@@ -583,7 +576,7 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
   let can_call_arguments =
     List.exists (function
       | Types.Type argument -> can_call_inside argument
-      | Types.Value _ | Types.Capabilities _ -> false)
+      | Types.Value _ -> false)
   in
   match type_ with
   | Types.Function { uses; inputs; output; _ } ->

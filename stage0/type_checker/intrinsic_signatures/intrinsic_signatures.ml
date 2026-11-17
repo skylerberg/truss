@@ -27,6 +27,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
   let make ?(generics = []) ?(output = Types.Returns Types.unit) parameters : Types.signature =
     {
       generics = List.map generic generics;
+      capability_parameters = [];
       receiver = None;
       parameters;
       output;

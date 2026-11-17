@@ -109,6 +109,8 @@ module Code : sig
     | Not_a_constant
     | Alternative_bindings
     | Not_a_generic_parameter
+    | Misplaced_capability_parameter
+    | Unconstrained_capability_parameter
     | Null
 
   type types =
@@ -155,7 +157,6 @@ module Code : sig
     | Not_a_type
     | Not_a_trait
     | Not_a_capability
-    | Misplaced_capability_parameter
     | Arity
     | Argument_kind
     | Unsatisfied_bound

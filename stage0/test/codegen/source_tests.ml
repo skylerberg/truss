@@ -96,6 +96,7 @@ let () =
                   receiver = Read;
                 };
             type_arguments = [];
+            capability_arguments = [];
           }
       in
       let _, compile =
@@ -129,7 +130,12 @@ let () =
         ]
       in
       let function_ name : Instance.key =
-        Code { path = Top { module_ = Codegen_support.example; name }; type_arguments = [] }
+        Code
+          {
+            path = Top { module_ = Codegen_support.example; name };
+            type_arguments = [];
+            capability_arguments = [];
+          }
       in
       let _, compile =
         Codegen_support.load ~roots:(List.map function_ names)
@@ -182,7 +188,12 @@ let () =
   Codegen_support.test "a C local is named after the Truss local it holds, and no other is named"
     (fun () ->
       let sum : Instance.key =
-        Code { path = Top { module_ = Codegen_support.example; name = "sum" }; type_arguments = [] }
+        Code
+          {
+            path = Top { module_ = Codegen_support.example; name = "sum" };
+            type_arguments = [];
+            capability_arguments = [];
+          }
       in
       let _, compile =
         Codegen_support.load ~roots:[ sum ]

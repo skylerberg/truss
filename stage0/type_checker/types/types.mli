@@ -15,7 +15,7 @@ type ty =
   | Hole
   | Error of Diagnostic.reported
 
-and argument = Type of ty | Value of value | Capabilities of capability_set
+and argument = Type of ty | Value of value
 and value = Known of Z.t | Value_parameter of parameter | Value_variable of int
 
 and trait_reference = {
@@ -87,8 +87,15 @@ val compute_missing_capabilities :
 
 val flat_map_capabilities : (capability -> capability list) -> capability_set -> capability_set
 
-type substitution = (parameter * argument) list
+type substitution = {
+  arguments : (parameter * argument) list;
+  capability_arguments : (parameter * capability_set) list;
+}
 
+val no_substitution : substitution
+val combine_substitutions : substitution -> substitution -> substitution
+val bind_argument : parameter -> argument -> substitution -> substitution
+val find_argument : parameter -> substitution -> argument option
 val substitute : substitution -> ty -> ty
 val substitute_argument : substitution -> argument -> argument
 val substitute_trait : substitution -> trait_reference -> trait_reference
@@ -98,6 +105,7 @@ val extract_result_type : result -> ty
 val show_mode : mode -> string
 val map : ?map_capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
 val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
+val list_capability_parameters : ty -> parameter list
 val find_specification_only_type : ty -> ty option
 val has_capability_variable : capability_set -> bool
 val may_panic : capability_set -> bool
@@ -114,19 +122,23 @@ val describe : ty -> string
 val show_capability : capability -> string
 val show_trait : trait_reference -> string
 val show_argument : argument -> string
+val show_capabilities : capability_set -> string
 val show_output : result -> string
 
-type generic_kind = Type_generic of trait_reference list | Value_generic | Capability_generic
+type generic_kind = Type_generic of trait_reference list | Value_generic
 type generic = { generic : parameter; kind : generic_kind }
 
 val list_generic_arguments : generic list -> argument list
+val list_capability_arguments : parameter list -> capability_set list
 val list_bounds : generic list -> parameter -> trait_reference list
 val make_substitution : generic list -> argument list -> substitution
+val make_capability_substitution : parameter list -> capability_set list -> substitution
 
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 
 type signature = {
   generics : generic list;
+  capability_parameters : parameter list;
   receiver : (Path.receiver * ty) option;
   parameters : parameter_info list;
   output : result;
@@ -135,6 +147,15 @@ type signature = {
   specification_only : bool;
   capture_free_parameters : string list;
 }
+
+val make_signature_substitution :
+  signature ->
+  type_arguments:argument list ->
+  capability_arguments:capability_set list ->
+  substitution
+
+val transfer_capability_arguments :
+  declared:parameter list -> arguments:capability_set list -> parameter list -> substitution
 
 val map_signature : (ty -> ty) -> signature -> signature
 val substitute_signature : substitution -> signature -> signature

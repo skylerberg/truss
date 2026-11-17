@@ -43,11 +43,11 @@ public fn Option[Value].unwrap_or(own self, default: own Value) -> Value
   }
 }
 
-public fn Option[Value].unwrap_or_else[capability Granted](
+public fn Option[Value].unwrap_or_else(
   own self,
-  make: (fn() -> Value uses Granted),
+  make: (fn() -> Value uses generic Granted),
 ) -> Value
-  uses Granted
+  uses generic Granted
   cost time O(time(make))
 {
   match own self {
@@ -56,11 +56,11 @@ public fn Option[Value].unwrap_or_else[capability Granted](
   }
 }
 
-public fn Option[Value].map[Output, capability Granted](
+public fn Option[Value].map[Output](
   own self,
-  transform: (fn(own Value) -> Output uses Granted),
+  transform: (fn(own Value) -> Output uses generic Granted),
 ) -> Option[Output]
-  uses Granted
+  uses generic Granted
   cost time O(time(transform))
 {
   match own self {
@@ -69,11 +69,11 @@ public fn Option[Value].map[Output, capability Granted](
   }
 }
 
-public fn Option[Value].map[Output, capability Granted](
+public fn Option[Value].map[Output](
   self,
-  transform: (fn(Value) -> Output uses Granted),
+  transform: (fn(Value) -> Output uses generic Granted),
 ) -> Option[Output]
-  uses Granted
+  uses generic Granted
   cost time O(time(transform))
 {
   match self {
@@ -82,11 +82,11 @@ public fn Option[Value].map[Output, capability Granted](
   }
 }
 
-public fn Option[Value].and_then[Output, capability Granted](
+public fn Option[Value].and_then[Output](
   own self,
-  next: (fn(own Value) -> Option[Output] uses Granted),
+  next: (fn(own Value) -> Option[Output] uses generic Granted),
 ) -> Option[Output]
-  uses Granted
+  uses generic Granted
   cost time O(time(next))
 {
   match own self {
@@ -95,11 +95,11 @@ public fn Option[Value].and_then[Output, capability Granted](
   }
 }
 
-public fn Option[Value].and_then[Output, capability Granted](
+public fn Option[Value].and_then[Output](
   self,
-  next: (fn(Value) -> Option[Output] uses Granted),
+  next: (fn(Value) -> Option[Output] uses generic Granted),
 ) -> Option[Output]
-  uses Granted
+  uses generic Granted
   cost time O(time(next))
 {
   match self {
@@ -108,8 +108,8 @@ public fn Option[Value].and_then[Output, capability Granted](
   }
 }
 
-public fn Option[Value].filter[capability Granted](own self, keep: (fn(Value) -> Bool uses Granted)) -> Option[Value]
-  uses Granted
+public fn Option[Value].filter(own self, keep: (fn(Value) -> Bool uses generic Granted)) -> Option[Value]
+  uses generic Granted
   cost time O(time(keep))
 {
   match own self {
@@ -127,11 +127,11 @@ public fn Option[Value].or(own self, other: own Option[Value]) -> Option[Value]
   }
 }
 
-public fn Option[Value].or_else[capability Granted](
+public fn Option[Value].or_else(
   own self,
-  make: (fn() -> Option[Value] uses Granted),
+  make: (fn() -> Option[Value] uses generic Granted),
 ) -> Option[Value]
-  uses Granted
+  uses generic Granted
   cost time O(time(make))
 {
   match own self {
@@ -158,11 +158,11 @@ public fn Option[Value].ok_or[Error](own self, error: own Error) -> Result[Value
   }
 }
 
-public fn Option[Value].ok_or_else[Error, capability Granted](
+public fn Option[Value].ok_or_else[Error](
   own self,
-  make: (fn() -> Error uses Granted),
+  make: (fn() -> Error uses generic Granted),
 ) -> Result[Value, Error]
-  uses Granted
+  uses generic Granted
   cost time O(time(make))
 {
   match own self {

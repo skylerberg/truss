@@ -440,7 +440,6 @@ let finalize_argument state = function
       match Unify.resolve_value state.unifier value with
       | Types.Value_variable _ -> Types.Type (make_unsolved_type state)
       | value -> Types.Value value)
-  | Types.Capabilities capabilities -> Types.Capabilities (finalize_capabilities state capabilities)
 
 let unify state left right =
   let normalize type_ =
@@ -577,8 +576,8 @@ let settle state frame =
           (Printf.sprintf
              "Two function types here must use the same capabilities, and one uses `%s` where the \
               other uses `%s`."
-             (Types.show_argument (Types.Capabilities (resolve_capabilities state left)))
-             (Types.show_argument (Types.Capabilities (resolve_capabilities state right))))
+             (Types.show_capabilities (resolve_capabilities state left))
+             (Types.show_capabilities (resolve_capabilities state right)))
       in
       state.capability_constraints <-
         { subset = left; superset = right; report_missing }
@@ -1035,7 +1034,12 @@ let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
     | type_ -> raise_bug "a slice of `%s`" (Types.show type_)
   in
   let make_callee name : Core.callee =
-    Function { path = Method { owner = path; name; receiver = Read }; type_arguments }
+    Function
+      {
+        path = Method { owner = path; name; receiver = Read };
+        type_arguments;
+        capability_arguments = [];
+      }
   in
   let build_read_argument = Operands.build_argument Read in
   let start = match start with Some start -> start | None -> make uint64 (Integer Z.zero) in
@@ -1106,6 +1110,7 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                                    {
                                      path = Method { owner = path; name = "slice"; receiver = Read };
                                      type_arguments = arguments;
+                                     capability_arguments = [];
                                    })
                               ~arguments:[ Operands.build_argument Read inner ]
                               ~lends:None))

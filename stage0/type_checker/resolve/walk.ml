@@ -41,6 +41,7 @@ type specification = {
 type scope = {
   values : (value * string) String_map.t;
   types : target String_map.t;
+  capability_parameters : target String_map.t option;
   specification : specification;
   is_lending_method : bool;
 }
@@ -275,10 +276,50 @@ and resolve_associated_base state scope (base : Syntax.name) (member : Syntax.na
 
 and resolve_capability_reference state scope (reference : Syntax.capability_reference) =
   match reference.kind with
+  | Capability_path { path = { modules = []; last }; arguments = []; _ }
+    when Option.fold ~none:false ~some:(String_map.mem last.text) scope.capability_parameters
+         && not (String_map.mem last.text scope.types) ->
+      let span = read_span state last.id in
+      set_target state last
+        (Unknown
+           (add_diagnostic state
+              ~fixes:
+                [
+                  Diagnostic.fix
+                    (Printf.sprintf "Write `generic %s`." last.text)
+                    [ Diagnostic.replace span ("generic " ^ last.text) ];
+                ]
+              Unknown_name span
+              (Printf.sprintf
+                 "`%s` is a capability parameter of this signature, which is written `generic %s` \
+                  at each use."
+                 last.text last.text)))
   | Capability_path path -> resolve_path_type state scope path
   | Self_capabilities _ -> ()
   | Associated_capabilities (base, member) ->
       resolve_associated_base state scope base member "capability set"
+  | Generic_capability name -> (
+      let span = read_span state reference.id in
+      match scope.capability_parameters with
+      | None ->
+          set_target state name
+            (Unknown
+               (add_diagnostic state Misplaced_capability_parameter span
+                  (Printf.sprintf
+                     "`generic %s` names a capability parameter, and only a function, a method, or \
+                      a theorem has one."
+                     name.text)))
+      | Some parameters -> (
+          match String_map.find_opt name.text parameters with
+          | Some target -> set_target state name target
+          | None ->
+              set_target state name
+                (Unknown
+                   (add_diagnostic state Unknown_name span
+                      (Printf.sprintf
+                         "The signature names no `generic %s`, and a body names only the \
+                          capability parameters of its signature."
+                         name.text)))))
 
 and resolve_path_type state scope (path : Syntax.path_type) =
   resolve_type_name state scope path.path;
@@ -417,8 +458,7 @@ and resolve_bracket state scope (value : Syntax.expression) base items =
     | Member _ -> Method_bracket
     | _ -> (
         match find_name_target state base with
-        | Some (Definition ((Type | Trait | Capability), _))
-        | Some (Type_parameter _ | Capability_parameter _) ->
+        | Some (Definition ((Type | Trait | Capability), _)) | Some (Type_parameter _) ->
             Type_arguments
         | Some (Definition ((Function | Theorem), Top { module_; name })) ->
             let generic =
@@ -789,20 +829,90 @@ and resolve_loop_clause ?(for_loop = false) ?(elements = []) state scope
   | Loop_decreases measures -> List.iter (resolve_expression state specification) measures
   | Loop_cost cost -> resolve_clause state scope { kind = Cost cost; id = written.id }
 
+let find_shadowed_type state scope text =
+  if String_map.mem text scope.types then Some "a generic parameter here"
+  else
+    match find_module_item state text with
+    | Some item when Names.is_type_kind item.kind ->
+        Some (Names.show_kind (Names.convert_named item.kind) ^ " of this module")
+    | _ -> if List.mem text Prelude.names then Some "a name in the prelude" else None
+
+let report_shadowing state (name : Syntax.name) existing =
+  add_diagnostic state Shadowed_name (read_span state name.id)
+    (Printf.sprintf "`%s` is already %s, and a name cannot shadow another. Choose another name."
+       name.text existing)
+
 let declare_type state scope (name : Syntax.name) target =
-  let check_shadowing existing =
-    report state Shadowed_name (read_span state name.id)
-      (Printf.sprintf "`%s` is already %s, and a name cannot shadow another. Choose another name."
-         name.text existing)
-  in
-  (if String_map.mem name.text scope.types then check_shadowing "a generic parameter here"
-   else
-     match find_module_item state name.text with
-     | Some item when Names.is_type_kind item.kind ->
-         check_shadowing (Names.show_kind (Names.convert_named item.kind) ^ " of this module")
-     | _ -> if List.mem name.text Prelude.names then check_shadowing "a name in the prelude");
+  Option.iter
+    (fun existing -> ignore (report_shadowing state name existing))
+    (find_shadowed_type state scope name.text);
   set_target state name Binding;
   { scope with types = String_map.add name.text target scope.types }
+
+let rec list_generic_capabilities (type_ : Syntax.type_expression) : Syntax.name list =
+  match type_.kind with
+  | Path_type path | Any_type path ->
+      List.concat_map
+        (function
+          | Syntax.Type_argument argument | Constraint (_, argument) ->
+              list_generic_capabilities argument
+          | Count _ | Count_name _ -> [])
+        path.arguments
+  | Function_type { inputs; output; clauses } ->
+      List.concat_map
+        (fun (input : Syntax.function_input) -> list_generic_capabilities input.type_)
+        inputs
+      @ Option.fold ~none:[] ~some:list_generic_capabilities output
+      @ list_used_generic_capabilities clauses
+  | Self_type _ | Associated _ | Type_error -> []
+
+and list_used_generic_capabilities (clauses : Syntax.clause list) =
+  List.concat_map
+    (fun (clause : Syntax.clause) ->
+      match clause.kind with
+      | Uses references ->
+          List.filter_map
+            (fun (reference : Syntax.capability_reference) ->
+              match reference.kind with Generic_capability name -> Some name | _ -> None)
+            references
+      | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
+    clauses
+
+let declare_capability_parameters state scope ~(owner : Path.t)
+    ~(types : Syntax.type_expression list) (clauses : Syntax.clause list) =
+  let constrained = List.concat_map list_generic_capabilities types in
+  let used = list_used_generic_capabilities clauses in
+  List.iter
+    (fun (name : Syntax.name) ->
+      if not (List.exists (fun (typed : Syntax.name) -> typed.text = name.text) constrained) then
+        report state Unconstrained_capability_parameter (read_span state name.id)
+          (Printf.sprintf
+             "`generic %s` appears only in the function's own `uses`, so no argument gives it \
+              capabilities, and it stands for none. Name it in the type of a parameter, as in \
+              `visit: (fn() uses generic %s)`."
+             name.text name.text))
+    used;
+  let parameters =
+    List.fold_left
+      (fun parameters (name : Syntax.name) ->
+        if String_map.mem name.text parameters then parameters
+        else
+          String_map.add name.text
+            (match find_shadowed_type state scope name.text with
+            | Some existing -> Unknown (report_shadowing state name existing)
+            | None -> Capability_parameter { owner; name = name.text })
+            parameters)
+      String_map.empty (constrained @ used)
+  in
+  { scope with capability_parameters = Some parameters }
+
+let list_parameter_types (parameters : Syntax.parameter list) =
+  List.filter_map
+    (fun (parameter : Syntax.parameter) ->
+      match parameter.kind with
+      | Named_parameter { type_; _ } -> Some type_
+      | Self_parameter _ | Parameter_error -> None)
+    parameters
 
 let resolve_generics state scope ~(owner : Path.t) (generics : Syntax.generic_parameter list) =
   let make_parameter (name : Syntax.name) : Types.parameter = { owner; name = name.text } in
@@ -812,8 +922,6 @@ let resolve_generics state scope ~(owner : Path.t) (generics : Syntax.generic_pa
         match generic.kind with
         | Type_parameter (name, _) ->
             declare_type state scope name (Type_parameter (make_parameter name))
-        | Capability_parameter name ->
-            declare_type state scope name (Capability_parameter (make_parameter name))
         | Value_parameter (name, _) ->
             let scope = declare_value state scope name in
             {
@@ -831,7 +939,7 @@ let resolve_generics state scope ~(owner : Path.t) (generics : Syntax.generic_pa
       match generic.kind with
       | Type_parameter (_, bounds) -> List.iter (resolve_path_type state scope) bounds
       | Value_parameter (_, type_) -> resolve_type_expression state scope type_
-      | Capability_parameter _ | Generic_error -> ())
+      | Generic_error -> ())
     generics;
   scope
 
@@ -857,6 +965,7 @@ let empty_scope =
   {
     values = String_map.empty;
     types = String_map.empty;
+    capability_parameters = None;
     specification = no_specification;
     is_lending_method = false;
   }
@@ -880,6 +989,16 @@ let resolve_signature state scope ~owner ~(broken : bool) (signature_ : Syntax.s
   if broken then None
   else begin
     let scope = resolve_generics state scope ~owner signature_.generics in
+    let scope =
+      declare_capability_parameters state scope ~owner
+        ~types:
+          (list_parameter_types signature_.parameters
+          @
+          match signature_.result with
+          | Some (Returns type_ | Lends (_, type_)) -> [ type_ ]
+          | None -> [])
+        signature_.clauses
+    in
     let scope = resolve_parameters state scope signature_.parameters in
     resolve_result state scope signature_.result;
     let scope =
@@ -919,7 +1038,6 @@ let resolve_inherited scope ~(owner : Path.t) (generics : Syntax.generic_paramet
       in
       match generic.kind with
       | Type_parameter (name, _) -> add_type name (Type_parameter (make_parameter name))
-      | Capability_parameter name -> add_type name (Capability_parameter (make_parameter name))
       | Value_parameter (name, _) ->
           {
             scope with
@@ -1045,6 +1163,11 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
           resolve_generics state
             { scope with specification = in_specification }
             ~owner:path generics_
+        in
+        let scope =
+          declare_capability_parameters state scope ~owner:path
+            ~types:(list_parameter_types parameters_)
+            clauses_
         in
         let scope = resolve_parameters state scope parameters_ in
         resolve_clauses state scope clauses_;

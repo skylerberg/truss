@@ -48,7 +48,7 @@ let list_impls_for interface package traits ty =
 
 let list_impls_used interface package (callee : _ Core.target) =
   match callee with
-  | Function { path; type_arguments } -> (
+  | Function { path; type_arguments; _ } -> (
       match Interface.Impls.read_signature interface path with
       | Some (signature : Types.signature) ->
           let rec pair_generics generics arguments =
@@ -68,7 +68,7 @@ let list_impls_used interface package (callee : _ Core.target) =
                          list_traits_with_required interface bound.trait)
                        bounds)
                     ty
-              | Value_generic | Capability_generic -> [])
+              | Value_generic -> [])
             (pair_generics signature.generics type_arguments)
       | None -> [])
   | _ -> []

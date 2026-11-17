@@ -326,9 +326,13 @@ let can_use_tasks (body : Core.block) : bool = compute_tasks_use body <> No_task
 
 let traverse_indirect (change : 'a -> 'b option) : 'a Core.target -> 'b Core.target option =
   function
-  | Function { path; type_arguments } -> Some (Function { path; type_arguments })
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } ->
-      Some (Trait_method { trait; name; receiver; self_type; type_arguments; evidence })
+  | Function { path; type_arguments; capability_arguments } ->
+      Some (Function { path; type_arguments; capability_arguments })
+  | Trait_method
+      { trait; name; receiver; self_type; type_arguments; capability_arguments; evidence } ->
+      Some
+        (Trait_method
+           { trait; name; receiver; self_type; type_arguments; capability_arguments; evidence })
   | Capability_method { capability; name } -> Some (Capability_method { capability; name })
   | Intrinsic { operation; type_arguments } -> Some (Intrinsic { operation; type_arguments })
   | Indirect value -> Option.map (fun value -> Core.Indirect value) (change value)
