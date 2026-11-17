@@ -290,6 +290,75 @@ let () =
   Harness.test "a trait may add an overload of a method of a trait it requires" (fun () ->
       expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_overloading_element) ])
 
+let () =
+  let expect_signature_mismatch text ~declared =
+    expect_one_diagnostic text "types.signature_mismatch" ~says:declared
+  in
+  Harness.test "an impl's callback type cannot add a time clause to its trait's" (fun () ->
+      expect_signature_mismatch Fixtures.Interface.walk_impl_adding_a_time_clause_to_its_callback
+        ~declared:
+          "`each` must have the signature `each(self, visit: fn(Int64))` that `Walk` declares.");
+  Harness.test "an impl's callback type cannot drop its trait's time clause" (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.walk_impl_dropping_the_time_clause_of_its_callback
+        ~declared:"`each(self, visit: (fn(Int64) cost time finite))`");
+  Harness.test "an impl's callback type cannot bound the time that its trait's leaves finite"
+    (fun () ->
+      expect_signature_mismatch Fixtures.Interface.walk_impl_bounding_the_time_of_its_callback
+        ~declared:"`each(self, visit: (fn(Int64) cost time finite))`");
+  Harness.test "an impl's callback type cannot drop `amortized` from its trait's cost" (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.walk_impl_dropping_amortized_from_the_cost_of_its_callback
+        ~declared:"`each(self, visit: (fn(Int64) cost amortized time O(...)))`");
+  Harness.test "an impl's callback type cannot use fewer capabilities than its trait's" (fun () ->
+      expect_signature_mismatch Fixtures.Interface.walk_impl_dropping_a_capability_of_its_callback
+        ~declared:"`each(self, visit: (fn(Int64) uses Log))`");
+  Harness.test "an impl's callback type cannot use more capabilities than its trait's" (fun () ->
+      expect_signature_mismatch Fixtures.Interface.walk_impl_adding_a_capability_to_its_callback
+        ~declared:"`each(self, visit: (fn(Int64) uses Log))`");
+  Harness.test "an impl's callback type cannot add a time clause beside a capability parameter"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.walk_impl_adding_a_time_clause_to_its_polymorphic_callback
+        ~declared:"`each(self, visit: (fn(Int64) uses Granted))`");
+  Harness.test "an impl may repeat its trait's polymorphic callback type and rename its parameter"
+    (fun () ->
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.walk_impls_repeating_a_polymorphic_callback) ]);
+  Harness.test "an impl's callback type may name its trait's capability set or list the set"
+    (fun () ->
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.walk_impls_naming_their_capability_set_in_a_callback) ]);
+  Harness.test "an impl may name the capability set of a parameter that a subtrait bounds"
+    (fun () ->
+      expect_no_diagnostics
+        [
+          ("app::main", Fixtures.Interface.walk_impl_naming_the_capability_set_of_a_subtrait_bound);
+        ]);
+  Harness.test "an impl's callback type cannot list a capability outside its trait's set" (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.walk_impl_listing_a_capability_outside_its_set_in_a_callback
+        ~declared:"`each(self, visit: (fn(Int64) uses Log))`");
+  Harness.test "an unknown capability in an impl's callback type is reported once" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Interface.walk_impl_naming_an_unknown_capability_in_its_callback
+        "resolve.unknown_name");
+  Harness.test "a capability's implementation cannot add a time clause to a callback type"
+    (fun () ->
+      expect_signature_mismatch Fixtures.Interface.runner_impl_adding_a_time_clause_to_its_callback
+        ~declared:
+          "`run` must have the signature `run(self, work: fn(Int64))` that `Runner` declares.");
+  Harness.test "an impl that overrides a provided method cannot add a time clause to its callback"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.walk_impl_overriding_each_with_a_time_clause_on_its_callback
+        ~declared:"`each(self, visit: fn(Int64))`");
+  Harness.test "an impl's result type cannot drop the time clause of its trait's function type"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.chooses_impl_dropping_the_time_clause_of_its_result
+        ~declared:"`choose(self) -> (fn(Int64) -> Int64 cost time finite)`")
+
 let expect_property name expected text make_type check =
   Harness.test name (fun () ->
       let packages = Support.setup [ ("app::main", text) ] in

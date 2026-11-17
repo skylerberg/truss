@@ -1,0 +1,35 @@
+trait Walk {
+  fn each[capability Granted](self, visit: (fn(Int64) uses Granted))
+    uses Granted
+
+  fn each_finite[capability Granted](self, visit: (fn(Int64) uses Granted cost time finite))
+    uses Granted
+}
+
+type Pair(first: Int64, second: Int64)
+
+impl Walk for Pair {
+  fn each[capability Granted](self, visit: (fn(Int64) uses Granted))
+    uses Granted
+  {
+  }
+
+  fn each_finite[capability Granted](self, visit: (fn(Int64) uses Granted cost time finite))
+    uses Granted
+  {
+  }
+}
+
+type Single(only: Int64)
+
+impl Walk for Single {
+  fn each[capability Allowed](self, visit: (fn(Int64) uses Allowed))
+    uses Allowed
+  {
+  }
+
+  fn each_finite[capability Allowed](self, visit: (fn(Int64) uses Allowed cost time finite))
+    uses Allowed
+  {
+  }
+}

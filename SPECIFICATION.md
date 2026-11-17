@@ -1973,6 +1973,11 @@ trait Ordered: Equal {
   its `requires`. It uses only methods with a `time` clause and no
   capabilities, and an `impl`'s method keeps its trait's `time` clause.
 - A trait's contracts and costs bind every `impl` and are proven for each.
+- **An `impl`'s method has the parameters and the result of its trait's
+  method:** the same names, modes, and types, with `Self` and the associated
+  types as the `impl` gives them. A function type among them has the trait's
+  `uses` and `cost` clauses, so the `impl`'s method takes the same functions
+  as the trait's. The method's generic parameters may have other names.
 - **An `impl`'s method may promise more than its trait:** `ensures` and
   `cost` clauses of its own, and a `requires` that the trait's implies. A
   call known to reach that `impl` is proven against the `impl`'s contract,

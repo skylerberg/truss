@@ -1,0 +1,13 @@
+trait Walk {
+  fn each[capability Granted](self, visit: (fn(Int64) uses Granted))
+    uses Granted
+}
+
+type Pair(first: Int64, second: Int64)
+
+impl Walk for Pair {
+  fn each[capability Granted](self, visit: (fn(Int64) uses Granted cost time finite))
+    uses Granted
+  {
+  }
+}

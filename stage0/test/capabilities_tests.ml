@@ -709,7 +709,21 @@ let () =
         "capabilities.may_not_terminate");
   Harness.test "an impl's time clause follows no callback that its trait's does not" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.visit_impl_naming_the_time_of_its_callback
-        "types.impl_uses")
+        "types.impl_uses");
+  Harness.test "an impl cannot take only the callbacks that terminate where its trait takes any"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.spin_passed_to_an_impl_whose_callback_adds_a_time_clause
+        "types.signature_mismatch" ~at:("each", 2));
+  Harness.test "a capability's implementation cannot take only the callbacks that terminate"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.spin_passed_to_a_capability_whose_impl_adds_a_time_clause
+        "types.signature_mismatch" ~at:("run", 2));
+  Harness.test "an impl cannot take only the callbacks that use no capability" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.note_passed_to_an_impl_whose_callback_drops_the_journal
+        "types.signature_mismatch" ~at:("each", 2))
 
 let () =
   let apply = Fixtures.Capabilities.apply_bounded_by_the_time_of_change in

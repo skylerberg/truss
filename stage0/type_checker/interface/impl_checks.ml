@@ -31,6 +31,9 @@ let rec agrees (left : Types.ty) (right : Types.ty) =
              left_mode = right_mode && agrees left right)
            left.inputs right.inputs
       && agrees left.output right.output
+      && (Types.has_capability_error left.uses
+         || Types.has_capability_error right.uses
+         || Types.has_same_clauses left right)
   | _ -> Types.equal left right
 
 and results_agree (left : Types.result) (right : Types.result) =
@@ -221,15 +224,24 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
               "A capability's implementation takes `self`, or `mut self` if it mutates its own \
                state."
           else begin
+            let normalize_capabilities =
+              Impls.normalize_capabilities_in_impl state.lookups ~list_bounds impl
+            in
+            let normalize_function_types =
+              Types.map_signature
+                (Types.map ~map_capabilities:normalize_capabilities (fun _ -> None))
+            in
+            let written = normalize_function_types written in
             let written_generics = Types.list_generic_arguments written.generics in
             let expected =
-              Impls.normalize_signature_in_impl state.lookups ~list_bounds ~missing_associated
-                implementation
-                (if List.length declared.generics = List.length written_generics then
-                   Types.substitute_signature
-                     (Types.make_substitution declared.generics written_generics)
-                     declared
-                 else declared)
+              normalize_function_types
+                (Impls.normalize_signature_in_impl state.lookups ~list_bounds ~missing_associated
+                   implementation
+                   (if List.length declared.generics = List.length written_generics then
+                      Types.substitute_signature
+                        (Types.make_substitution declared.generics written_generics)
+                        declared
+                    else declared))
             in
             let expected =
               if trait.is_capability then { expected with receiver = written.receiver }
@@ -238,9 +250,11 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
             let parameters_agree =
               List.length expected.parameters = List.length written.parameters
               && List.for_all2
-                   (fun (left : Types.parameter_info) (right : Types.parameter_info) ->
-                     left.name = right.name && left.mode = right.mode
-                     && agrees left.type_ right.type_)
+                   (fun (expected_parameter : Types.parameter_info)
+                        (written_parameter : Types.parameter_info) ->
+                     expected_parameter.name = written_parameter.name
+                     && expected_parameter.mode = written_parameter.mode
+                     && agrees expected_parameter.type_ written_parameter.type_)
                    expected.parameters written.parameters
             in
             let receivers_agree =
@@ -272,16 +286,12 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                    name.text (show_signature expected) shown_trait)
             else
               let allowed =
-                if trait.is_capability then
-                  Impls.normalize_capabilities_in_impl state.lookups ~list_bounds impl
-                    impl.impl_uses
-                else expected.uses
+                if trait.is_capability then normalize_capabilities impl.impl_uses else expected.uses
               in
               if
                 not
                   (Types.is_capability_subset
-                     (Impls.normalize_capabilities_in_impl state.lookups ~list_bounds impl
-                        (Types.remove_divergence written.uses))
+                     (normalize_capabilities (Types.remove_divergence written.uses))
                      allowed)
               then
                 Checking.report state Impl_uses state.spans.(name.id)
