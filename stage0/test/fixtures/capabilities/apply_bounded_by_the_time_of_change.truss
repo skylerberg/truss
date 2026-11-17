@@ -1,0 +1,17 @@
+fn slow(value: Int64) -> Int64 {
+  value
+}
+
+fn quick(value: Int64) -> Int64
+  cost time O(1)
+{
+  value
+}
+
+fn apply[capability Granted](value: Int64, change: (fn(Int64) -> Int64 uses Granted)) -> Int64
+  uses Granted
+  cost time O(time(change))
+{
+  change(value)
+}
+

@@ -20,6 +20,8 @@ val walk_pattern_children : visit -> Core.pattern -> unit
 val make_deep_visitor : visit -> visit
 val walk_expression : visit -> Core.expression -> unit
 val walk_definition : visit -> Core.definition -> unit
+val is_functional : (visit -> unit) -> bool
+val has_implicit_measure : Core.expression -> bool
 
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 

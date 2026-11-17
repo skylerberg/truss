@@ -1,0 +1,7 @@
+fn total(values: Slice[Int64]) -> UInt64 {
+  values.length()
+}
+
+fn f(values: Array[Int64, 3]) -> UInt64 {
+  total(values)
+}

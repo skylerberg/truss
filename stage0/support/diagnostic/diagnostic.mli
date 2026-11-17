@@ -129,6 +129,7 @@ module Code : sig
     | Unknown_member
     | Ambiguous_method
     | Private_field
+    | Member_not_visible
     | Not_callable
     | Not_a_value
     | No_impl
@@ -138,6 +139,7 @@ module Code : sig
     | Integer_for_float
     | Negated_unsigned
     | Unused_value
+    | Unbounded_time
     | Not_assignable
     | Wrong_try
     | Lambda_needs_type
@@ -204,6 +206,7 @@ module Code : sig
 
   type capabilities =
     | Not_available
+    | May_not_terminate
     | Lambda_uses
     | Not_granted
     | Provide_mode

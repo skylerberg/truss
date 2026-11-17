@@ -1,0 +1,11 @@
+fn show(text: String) {}
+
+fn f(names: mut List[String]) -> UInt64 {
+  if names[..].get(0) is Some(name) {
+    show(name)
+    names.length()
+  } else {
+    mut names.clear()
+    0
+  }
+}

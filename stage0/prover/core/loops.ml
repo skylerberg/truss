@@ -649,14 +649,6 @@ let prove_own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   let invocation : Invocation.t = { callee = next; lends = None; uses = Types.no_capabilities } in
   let pulling : Invocation.site = { origin = for_loop.for_at; type_ = option_type } in
   let measures = find_measures clauses in
-  if context.terminates && not (Laws.signature_terminates context path) then
-    Facts.oblige context frame Termination location
-      [
-        Text
-          (Printf.sprintf "This loop may not end: `%s`'s `next` has no `time` clause."
-             (Types.show cursor_type));
-      ]
-      (Logic.Boolean false);
   if context.terminates && measures = None then
     Facts.oblige context frame Termination location
       [
@@ -917,7 +909,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
         | Less_equal -> Some [ through (distance left right) ]
         | Greater -> Some [ distance right left ]
         | Greater_equal -> Some [ through (distance right left) ]
-        | Equal | Not_equal -> None)
+        | Equal | Not_equal -> Facts.raise_bug "an equality gives a loop its measure")
     | None, None -> None
   in
   let start_measures = if context.terminates then measure_terms inside else None in

@@ -457,9 +457,18 @@ and elaborate_function_type context (written : Syntax.function_type) :
     match written.output with Some output -> elaborate_type context output | None -> Types.unit
   in
   let uses = elaborate_uses context written.clauses in
+  let uses =
+    if states_time written.clauses then uses else Types.leave_divergence_to_parameters uses
+  in
   match elaborate_costs context written.clauses with
   | Ok costs -> Ok { inputs; output; uses; costs }
   | Error report -> Error report
+
+and states_time (clauses : Syntax.clause list) =
+  List.exists
+    (fun (clause : Syntax.clause) ->
+      match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
+    clauses
 
 and elaborate_uses context clauses =
   elaborate_capabilities context
@@ -515,17 +524,19 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
             let evaluate_constant (value : Syntax.expression) =
               match value.kind with Integer value -> Some value | _ -> None
             in
-            let bound : Types.cost_bound =
+            let bound : Types.cost_bound option =
               match cost.bound with
-              | Finite -> Finite_cost
-              | Big_o _ -> Order_of
-              | At_most value -> No_more_than (evaluate_constant value)
-              | Exactly value -> Exactly_cost (evaluate_constant value)
+              | Finite -> None
+              | Big_o _ -> Some Order_of
+              | At_most value -> Some (No_more_than (evaluate_constant value))
+              | Exactly value -> Some (Exactly_cost (evaluate_constant value))
             in
-            Some
-              (Result.map
-                 (fun resource -> { Types.amortized = cost.amortized; resource; bound })
-                 resource)
+            Option.map
+              (fun bound ->
+                Result.map
+                  (fun resource -> { Types.amortized = cost.amortized; resource; bound })
+                  resource)
+              bound
         | _ -> None)
       clauses
   in
@@ -561,11 +572,81 @@ let elaborate_generics context owner (written : Syntax.generic_parameter list) :
 let mentions_specification_only_type type_ =
   Option.is_some (Types.find_specification_only_type type_)
 
-let terminates (clauses : Syntax.clause list) =
-  List.exists
+let list_constant_costs (clauses : Syntax.clause list) : Types.cost list =
+  List.filter_map
     (fun (clause : Syntax.clause) ->
-      match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
+      match clause.kind with
+      | Cost { amortized; resource; bound } -> (
+          let resource : Types.resource option =
+            match resource with
+            | Time -> Some Time
+            | Allocations -> Some Allocations
+            | Allocated_bytes -> Some Allocated_bytes
+            | Calls _ -> None
+          in
+          let bound : Types.cost_bound option =
+            match bound with
+            | Big_o { kind = Integer _; _ } -> Some Order_of
+            | At_most { kind = Integer limit; _ } -> Some (No_more_than (Some limit))
+            | Exactly { kind = Integer amount; _ } -> Some (Exactly_cost (Some amount))
+            | Big_o _ | At_most _ | Exactly _ | Finite -> None
+          in
+          match (resource, bound) with
+          | Some resource, Some bound -> Some { Types.amortized; resource; bound }
+          | _ -> None)
+      | _ -> None)
     clauses
+
+let list_timed_names (bound : Syntax.expression) =
+  let timed = ref [] in
+  let rec visit (value : Syntax.expression) =
+    (match value.kind with
+    | Call
+        ( { kind = Name { modules = []; last = { text = "time"; _ } }; _ },
+          [ { value = { kind = Name { modules = []; last }; _ }; _ } ] ) ->
+        timed := (value.id, last.text) :: !timed
+    | _ -> ());
+    Syntax_walk.visit_children visit value
+  in
+  visit bound;
+  List.rev !timed
+
+let elaborate_divergence context ~(parameters : Types.parameter_info list)
+    (clauses : Syntax.clause list) : Types.capability_set =
+  let time_bounds =
+    List.filter_map
+      (fun (clause : Syntax.clause) ->
+        match clause.kind with Cost { resource = Time; bound; _ } -> Some bound | _ -> None)
+      clauses
+  in
+  let read_divergence (id, name) =
+    match
+      List.find_opt (fun (parameter : Types.parameter_info) -> parameter.name = name) parameters
+    with
+    | Some { type_ = Function { uses; _ }; _ } when not (Types.terminates uses) ->
+        ignore
+          (record_diagnostic context.diagnostics Unbounded_time context.spans.(id)
+             (Printf.sprintf
+                "`%s` may not terminate, whatever it is passed, so `time(%s)` has no value. Give \
+                 its type a `time` clause, or a capability parameter in its `uses`, which records \
+                 whether the function passed for it terminates."
+                name name));
+        Types.no_capabilities
+    | Some { type_ = Function { uses; _ }; _ } -> Types.list_divergence uses
+    | Some _ | None -> Types.no_capabilities
+  in
+  match time_bounds with
+  | [] -> Types.make_capability_set [ Types.unconditional_divergence ]
+  | bounds ->
+      Types.intersect_divergence
+        (List.map
+           (fun (bound : Syntax.bound) ->
+             match bound with
+             | Finite -> Types.no_capabilities
+             | Big_o value | At_most value | Exactly value ->
+                 List.fold_left Types.union_capabilities Types.no_capabilities
+                   (List.map read_divergence (list_timed_names value)))
+           bounds)
 
 let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signature) :
     Types.signature =
@@ -601,15 +682,17 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
     | Some (Returns result) -> Types.Returns (elaborate_type context result)
     | Some (Lends (mode, result)) -> Types.Lends (elaborate_mode mode, elaborate_type context result)
   in
-  let terminates = terminates written.clauses in
   let result_type = Types.extract_result_type output in
   {
     generics = generics_;
     receiver;
     parameters;
     output;
-    uses = elaborate_uses context written.clauses;
-    terminates;
+    uses =
+      Types.union_capabilities
+        (elaborate_uses context written.clauses)
+        (elaborate_divergence context ~parameters written.clauses);
+    costs = list_constant_costs written.clauses;
     specification_only =
       Well_known.is Model owner
       || mentions_specification_only_type result_type
@@ -1031,10 +1114,14 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
               let signature : Syntax.signature =
                 { name = Plain_name name; generics; parameters; result = None; clauses }
               in
+              let elaborated =
+                elaborate_signature context ~owner:path ~head:[] ~self_type:None signature
+              in
               make_elaborated_interface context
                 (Theorem_interface
                    {
-                     (elaborate_signature context ~owner:path ~head:[] ~self_type:None signature) with
+                     elaborated with
+                     uses = Types.remove_divergence elaborated.uses;
                      specification_only = true;
                    })
           | Law_proof { trait_; law; type_; _ } -> (

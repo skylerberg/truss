@@ -108,8 +108,9 @@ let list_structural_parameters context (frame : State.frame) (clauses : State.cl
 let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
     path (contract : State.contract) (values : State.passed list) ~lent_final ~havoc_mut
     ~substitution_of ~instance =
+  let is_logic_call = contract.is_logic_function && invocation.uses = Types.no_capabilities in
   let values =
-    if contract.is_logic_function then
+    if is_logic_call then
       List.map
         (fun (passed : State.passed) ->
           if passed.mode = Types.Mut || Logic.mentions frame.bound passed.term then passed
@@ -292,7 +293,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
            (Facts.list_clauses clauses.requires))
   in
   let after = havoc_mut frame in
-  let in_quantifier = contract.is_logic_function && frame.binders <> [] in
+  let in_quantifier = is_logic_call && frame.binders <> [] in
   let state term =
     if in_quantifier then Facts.add_frame_fact context after term
     else Facts.assume context after term
@@ -314,7 +315,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let applied_as = ref None in
   let is_limited_call = ref false in
   let result =
-    if contract.is_logic_function && List.length callee_arguments = List.length callee_bindings then begin
+    if is_logic_call && List.length callee_arguments = List.length callee_bindings then begin
       let function_symbol = Logic.Symbol.Function { callee = path; instance } in
       let sorts =
         List.mapi
@@ -787,6 +788,7 @@ let compute_function_value_amount context frame (function_type : Types.function_
             | Types.Capability_parameter _ | Types.Capability_projection _
             | Types.Capability_variable _ ->
                 true
+            | Types.Divergence _ -> false
             | Types.Capability_error _ ->
                 Facts.raise_bug "the prover reads a capability with an error")
           (function_type.uses :> Types.capability list)
@@ -857,54 +859,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     in
     fixed @ pair_remaining parameters arguments
   in
-  if context.terminates && frame.makes_obligations then begin
-    let ends =
-      match invocation.callee with
-      | Function { path; _ } -> Laws.signature_terminates context path
-      | Trait_method { evidence = Impl { impl; _ }; name; receiver; _ } ->
-          Laws.signature_terminates context (Path.Method { owner = impl; name; receiver })
-      | Trait_method { trait; name; receiver; evidence = Bound; self_type; _ } -> (
-          let trait =
-            {
-              trait with
-              trait_arguments =
-                List.map
-                  (function
-                    | Types.Type ty -> Types.Type (Facts.substitute_type context frame ty)
-                    | argument -> argument)
-                  trait.trait_arguments;
-            }
-          in
-          match
-            Operations.find_concrete_impl context trait
-              (Facts.substitute_type context frame self_type)
-          with
-          | Some (impl, _)
-            when Interface.Impls.read_signature context.lookups.interface
-                   (Path.Method { owner = impl; name; receiver })
-                 <> None ->
-              Laws.signature_terminates context (Path.Method { owner = impl; name; receiver })
-          | _ ->
-              Laws.signature_terminates context
-                (Path.Method { owner = trait.trait; name; receiver }))
-      | Trait_method { trait; name; receiver; _ } ->
-          Laws.signature_terminates context (Path.Method { owner = trait.trait; name; receiver })
-      | Capability_method { capability; name } ->
-          Laws.signature_terminates context (Path.make_capability_method capability name)
-      | Indirect () -> (
-          match through with
-          | Some (Types.Function function_type, _, _) -> Types.terminates function_type
-          | _ -> false)
-      | Intrinsic _ -> true
-    in
-    if not ends then
-      Facts.oblige context frame Termination location
-        [
-          Text
-            "This call may not end, since its callee has no `time` clause, so neither may this \
-             function.";
-        ]
-        (Logic.Boolean false);
+  if context.terminates && frame.makes_obligations then
     List.iter
       (fun impl ->
         if Facts.has_method_in_recursion_group context impl then
@@ -920,8 +875,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             (Logic.Boolean false))
       (Mir.Call_edges.list_impls_used context.lookups.interface
          (Path.locate_package context.current)
-         invocation.callee)
-  end;
+         invocation.callee);
   let with_contract ?(substitution_of = fun _ -> []) ?(instance = []) path = function
     | Some contract ->
         Some

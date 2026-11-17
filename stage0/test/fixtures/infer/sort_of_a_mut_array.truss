@@ -1,0 +1,3 @@
+fn f(values: mut Array[Int64, 3]) {
+  mut values.sort()
+}

@@ -308,11 +308,109 @@ let () =
       match locate_core_call text "greet(name)" 1 with
       | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> Harness.fail "no conversion recorded");
+  Harness.test "an `Array` passed where a `Slice` is expected is viewed" (fun () ->
+      let text = Fixtures.Infer.sum_of_an_array_passed_as_a_slice in
+      match locate_core_call text "total(values)" 1 with
+      | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "an `Array` receiver finds a method of `Slice` and is viewed" (fun () ->
+      let text = Fixtures.Infer.contains_of_an_array in
+      match locate_core_call text "values.contains(1)" 1 with
+      | { arguments = [ receiver; _ ]; _ }, _ when is_view receiver -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "an `Array` receiver passed `mut` to a method of `Slice` is sliced whole" (fun () ->
+      let text = Fixtures.Infer.sort_of_a_mut_array in
+      match locate_core_call text "values.sort()" 1 with
+      | { arguments = [ Passed { mode = Mut; value = Value { kind = Slice _; _ } } ]; _ }, _ -> ()
+      | _ -> Harness.fail "the receiver is not a slice of the whole array");
+  Harness.test
+    "a type argument of a view's method is counted after the view's parameters, not the array's"
+    (fun () -> expect_fine Fixtures.Infer.zip_of_an_array_with_a_type_argument);
   Harness.test "a capability's method views a String argument too" (fun () ->
       let text = Fixtures.Infer.print_line_of_a_string in
       match locate_core_call text "Console.print_line(name)" 1 with
       | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> Harness.fail "no conversion recorded");
+  Harness.test "a `String` receiver finds a method of `StringSlice` and is viewed" (fun () ->
+      let text = Fixtures.Infer.to_string_of_a_string_and_of_a_literal in
+      match locate_core_call text "name.to_string()" 1 with
+      | { arguments = [ receiver ]; _ }, _ when is_view receiver -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "a `List` receiver finds a method of `Slice` and is viewed" (fun () ->
+      let text = Fixtures.Infer.contains_of_a_list in
+      match locate_core_call text "items.contains(1)" 1 with
+      | { arguments = [ receiver; _ ]; _ }, _ when is_view receiver -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "a `List` receiver passed `mut` to a method of `Slice` is sliced whole" (fun () ->
+      let text = Fixtures.Infer.sort_of_a_mut_list in
+      match locate_core_call text "items.sort()" 1 with
+      | ( {
+            arguments =
+              [
+                Passed
+                  {
+                    mode = Mut;
+                    value =
+                      Value
+                        {
+                          kind =
+                            Slice
+                              {
+                                callee = Function { path = Method { name = "slice_from"; _ }; _ };
+                                _;
+                              };
+                          _;
+                        };
+                  };
+              ];
+            _;
+          },
+          _ ) ->
+          ()
+      | _ -> Harness.fail "the receiver is not a slice of the whole list");
+  Harness.test
+    "a `List` calling a method of `Slice` that takes `mut self` needs the mode keyword, with a fix \
+     that adds it" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.sort_of_a_list_without_mut "types.missing_mode"
+        ~fixed:Fixtures.Infer.sort_of_a_mut_list);
+  Harness.test "a string literal receiver finds a method of `StringSlice` and is viewed" (fun () ->
+      let text = Fixtures.Infer.to_string_of_a_string_and_of_a_literal in
+      match locate_core_call text "\"x\".to_string()" 1 with
+      | { arguments = [ receiver ]; _ }, _ when is_view receiver -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  List.iter
+    (fun (type_name, written) ->
+      Harness.test
+        (Printf.sprintf
+           "a method of `StringSlice` written in full through `%s` views a `String` receiver"
+           type_name) (fun () ->
+          let text = Fixtures.Infer.string_slice_method_in_full_of_a_string in
+          match locate_core_call text written 1 with
+          | { arguments = [ receiver ]; _ }, _ when is_view receiver -> ()
+          | _ -> Harness.fail "no conversion recorded"))
+    [ ("StringSlice", "StringSlice.to_string(name)"); ("String", "String.to_string(name)") ];
+  Harness.test
+    "the receiver's mode chooses between a `String`'s own overload and its view's overload"
+    (fun () ->
+      let text = Fixtures.Infer.to_bytes_of_a_string_read_and_owned in
+      let find_owner occurrence =
+        match locate_core_call text "name.to_bytes()" occurrence with
+        | { callee = Function { path = Method { owner; receiver; _ }; _ }; _ }, _ ->
+            (Well_known.of_path owner, receiver)
+        | _ -> failwith "the callee is not a method"
+      in
+      if find_owner 1 <> (Some String_slice, Read) then
+        Harness.fail "a read-only receiver does not call the view's overload";
+      if find_owner 2 <> (Some String, Own) then
+        Harness.fail "an `own` receiver does not call the `String`'s own overload");
+  Harness.test "a method of a view takes no `mut` receiver" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.to_string_of_a_string_passed_mut "types.wrong_receiver");
+  Harness.test "an unknown method of a `String` is reported for it and for its view" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.unknown_method_of_a_string "types.unknown_member"
+        ~says:"neither has its view `StringSlice`");
+  Harness.test "a method value names the view that defines the method" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.to_string_of_string_as_a_value "types.unknown_member"
+        ~says:"`StringSlice.to_string`");
   Harness.test "a string literal is a StringSlice where one is expected, and a String elsewhere"
     (fun () ->
       let text = Fixtures.Infer.string_literals_kept_and_printed in
@@ -361,6 +459,41 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.push_without_mut "types.missing_mode"
         ~fixed:Fixtures.Infer.push_without_mut_fixed)
+
+let () =
+  let shapes = Fixtures.Infer.others_shape_with_private_members in
+  let others = [ ("app::shapes", shapes) ] in
+  List.iter
+    (fun (use, fixture) ->
+      Harness.test (Printf.sprintf "another module's private %s is not visible" use) (fun () ->
+          expect_one_diagnostic ~others fixture "types.member_not_visible"
+            ~says:"private to its module"))
+    [
+      ("method, called with a dot,", Fixtures.Infer.call_of_another_modules_private_method);
+      ("method, called in full,", Fixtures.Infer.call_in_full_of_another_modules_private_method);
+      ("static method", Fixtures.Infer.call_of_another_modules_private_static_method);
+      ("member constant", Fixtures.Infer.read_of_another_modules_private_member_constant);
+      ("method, used as a value,", Fixtures.Infer.another_modules_private_method_as_a_value);
+    ];
+  Harness.test "an internal method and a public method of another module are visible" (fun () ->
+      expect_no_diagnostics
+        [
+          ("app::main", Fixtures.Infer.calls_of_another_modules_internal_and_public_methods);
+          ("app::shapes", shapes);
+        ]);
+  Harness.test "an internal method of another package is not visible" (fun () ->
+      expect_one_diagnostic
+        ~setup:(Support.setup ~dependencies:[ ("app", "tools") ])
+        ~others:[ ("tools::shapes", shapes) ]
+        Fixtures.Infer.call_of_another_packages_internal_method "types.member_not_visible"
+        ~says:"internal to its package");
+  Harness.test "a call with a dot does not find a method of another module's private trait"
+    (fun () ->
+      expect_one_diagnostic ~others Fixtures.Infer.call_of_a_method_of_another_modules_private_trait
+        "types.unknown_member");
+  Harness.test "a loop does not use another module's private `count` and `element`" (fun () ->
+      expect_one_diagnostic ~others Fixtures.Infer.loop_over_a_type_with_a_private_loop_protocol
+        "types.not_indexable")
 
 let () =
   Harness.test "a statement's value must be used, with a fix that discards it" (fun () ->

@@ -425,7 +425,7 @@ let () =
   Harness.test "a function passes its own capability parameter on" (fun () ->
       expect_fine (ticks ^ Fixtures.Capabilities.passes_on_its_own_capability));
   Harness.test "a function's own capability parameter is rigid in a lambda's type" (fun () ->
-      expect_one_diagnostic Fixtures.Capabilities.own_capability_given_a_lambda_using_clock
+      expect_one_diagnostic Fixtures.Capabilities.own_capability_given_a_lambda_using_a_ticker
         "capabilities.lambda_uses");
   Harness.test "a function's own capability parameter is rigid in a binding's type" (fun () ->
       expect_one_diagnostic
@@ -475,19 +475,9 @@ let () =
         "types.misplaced_capability_parameter";
       expect_fine "type Holder(action: (fn() -> Instant uses Clock))\n")
 
-let count_widenings text =
-  List.length
-    (List.filter
-       (fun (node : Core.expression) ->
-         match node.kind with Convert { conversion = Widen; _ } -> true | _ -> false)
-       (Support.collect_first_core_nodes text).expressions)
-
 let () =
-  Harness.test "a function bound as a type that promises a cost leaves the cost to the prover"
-    (fun () ->
-      match count_widenings Fixtures.Capabilities.forever_bound_as_finite with
-      | 1 -> ()
-      | actual -> Harness.fail "%d conversions" actual);
+  Harness.test "a function that may not terminate is not bound as one that terminates" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.forever_bound_as_finite "types.mismatch");
   Harness.test "a function that promises to end can be bound as one that does" (fun () ->
       expect_fine Fixtures.Capabilities.quick_bound_as_finite);
   Harness.test "function types inside a type must promise the same costs" (fun () ->
@@ -600,3 +590,44 @@ let () =
       expect_one_diagnostic
         (feed ^ Fixtures.Capabilities.any_feed_of_a_generic_source)
         "types.no_impl")
+
+let () =
+  let apply = Fixtures.Capabilities.apply_bounded_by_the_time_of_change in
+  Harness.test "a function with a time clause cannot call one without" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.function_with_time_calling_forever
+        "capabilities.may_not_terminate");
+  Harness.test "a call that passes a function without a time clause may not terminate" (fun () ->
+      expect_one_diagnostic
+        (apply ^ Fixtures.Capabilities.apply_of_slow_under_a_time_clause)
+        "capabilities.may_not_terminate");
+  Harness.test "a lambda that calls a function without a time clause may not terminate" (fun () ->
+      expect_one_diagnostic
+        (apply ^ Fixtures.Capabilities.apply_of_a_lambda_calling_slow_under_a_time_clause)
+        "capabilities.may_not_terminate");
+  Harness.test "a `finite` function cannot call a callback whose type has no time clause" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.finite_function_calling_a_callback_without_time
+        "capabilities.may_not_terminate");
+  Harness.test "a function type with a time clause takes only functions that terminate" (fun () ->
+      expect_one_diagnostic
+        (apply ^ Fixtures.Capabilities.slow_passed_as_a_function_that_terminates)
+        "types.mismatch");
+  Harness.test "a trait method's callback with a time clause takes only functions that terminate"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.spread_passed_to_flat_map "types.mismatch");
+  Harness.test "a function of linear time is not passed as one of constant time" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.linear_spin_passed_as_constant_time
+        "types.mismatch");
+  Harness.test "a bound names the time of a callback only if the callback can terminate" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.time_of_a_callback_without_a_capability_parameter
+        "types.unbounded_time");
+  Harness.test "a specification calls only functions that terminate" (fun () ->
+      expect_one_diagnostic
+        (apply ^ Fixtures.Capabilities.ensures_calling_slow)
+        "capabilities.may_not_terminate");
+  Harness.test "a capability's implementation terminates when the capability's method does"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.spinner_calling_a_function_without_time
+        "capabilities.may_not_terminate");
+  Harness.test "an impl's time clause follows no callback that its trait's does not" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.visit_impl_naming_the_time_of_its_callback
+        "types.impl_uses")

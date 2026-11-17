@@ -128,6 +128,7 @@ let make_reach_formula context frame uses (values : State.passed list) (target :
              | Types.Capability_parameter _ | Types.Capability_projection _
              | Types.Capability_variable _ ->
                  true
+             | Types.Divergence _ -> false
              | Types.Capability_error _ ->
                  Facts.raise_bug "the prover reads a capability with an error")
            uses)

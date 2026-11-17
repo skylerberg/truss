@@ -523,7 +523,8 @@ public fn collections::SortedSet[Element: Ordered].in_range(self, range: Range[E
   if first < end { self.elements[first..end] } else { self.elements[first..first] }
 }
 
-public fn collections::SortedSet[Element: Ordered].retain(mut self, keep: (fn(Element) -> Bool cost time finite))
+public fn collections::SortedSet[Element: Ordered].retain[capability Granted](mut self, keep: (fn(Element) -> Bool uses Granted))
+  uses Granted
   ensures self.length() <= old(self.length())
   cost time O(old(self.length()) * time(keep))
 {

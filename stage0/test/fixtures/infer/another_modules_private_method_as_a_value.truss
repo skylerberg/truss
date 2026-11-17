@@ -1,0 +1,5 @@
+use app::shapes
+
+fn f(all: List[shapes::Shape]) -> List[UInt64] {
+  all.map(shapes::Shape.secret)
+}

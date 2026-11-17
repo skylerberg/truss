@@ -1,0 +1,12 @@
+fn show(text: String) {}
+
+fn rest(names: Slice[String]) -> Slice[String] {
+  names
+}
+
+fn f(names: mut List[String]) {
+  if rest(names).get(0) is Some(name) {
+    mut names.clear()
+    show(name)
+  }
+}

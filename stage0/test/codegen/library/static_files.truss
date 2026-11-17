@@ -43,7 +43,7 @@ fn get(path: StringSlice, extra: StringSlice = "") -> String
 fn header_of(reply: StringSlice, name: StringSlice) -> String {
   for line in reply.split("\r\n") {
     if line.to_ascii_lowercase().starts_with("${name.to_ascii_lowercase()}: ".slice()) {
-      return line.part(name.length() + 2, to: line.length()).to_string()
+      return line.substring(name.length() + 2, to: line.length()).to_string()
     }
   }
   "none"
@@ -51,7 +51,7 @@ fn header_of(reply: StringSlice, name: StringSlice) -> String {
 
 fn body_of(reply: StringSlice) -> String {
   match reply.find("\r\n\r\n") {
-    Some(at) => reply.part(at + 4, to: reply.length()).to_string()
+    Some(at) => reply.substring(at + 4, to: reply.length()).to_string()
     None => ""
   }
 }

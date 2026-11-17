@@ -127,35 +127,8 @@ let template_trait : Path.t = Well_known.make_path From_template
 
 let signature_terminates (context : State.context) path =
   match Interface.Impls.read_signature context.lookups.interface path with
-  | Some (signature : Types.signature) -> signature.terminates
+  | Some (signature : Types.signature) -> Types.terminates signature.uses
   | None -> true
-
-let keeps_cost context path (contract : State.contract) (asked : Types.cost) =
-  let find_constant = Contracts.find_integer_literal in
-  let is_same (cost : Mir.cost) =
-    match (asked.resource, cost.resource) with
-    | Time, Time | Allocations, Allocations | Allocated_bytes, Allocated_bytes -> true
-    | _ -> false
-  in
-  match asked with
-  | { resource = Time; bound = Finite_cost; _ } -> signature_terminates context path
-  | { resource = Calls _; _ } -> false
-  | _ -> (
-      match
-        List.find_map
-          (fun (clauses : State.clauses) ->
-            List.find_map (fun cost -> if is_same cost then Some cost else None) clauses.costs)
-          (Contracts.list_declared_clauses contract)
-      with
-      | Some cost -> (
-          match (asked.bound, cost.bound) with
-          | Order_of, (Order_of value | At_most value | Exactly value) ->
-              find_constant value <> None
-          | No_more_than (Some most), (At_most value | Exactly value) -> (
-              match find_constant value with Some limit -> Z.leq limit most | None -> false)
-          | Exactly_cost (Some exact), Exactly value -> find_constant value = Some exact
-          | _ -> false)
-      | None -> false)
 
 let check_named_callback context (frame : State.frame) (invocation : Invocation.t)
     (passed : State.passed) ~origin path (contract : State.contract) (values : State.passed list) =
@@ -170,40 +143,26 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
           (Validity.list_callback_facts context frame invocation passed.position known inputs)
       in
       let at_call = Facts.restrict frame promised in
-      (if List.length callee_clauses.parameters = List.length inputs then
-         let inside =
-           Validity.bind_arguments frame callee_clauses
-             ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
-             ~substitution:[]
-         in
-         List.iter
-           (fun (requirement : Mir.formula) ->
-             Facts.oblige context at_call Requires location
-               [
-                 Text
-                   (Printf.sprintf
-                      "`%s` may not accept every argument this parameter's type promises it: its `"
-                      (Path.show path));
-                 Facts.quote callee_clauses.callee requirement.origin;
-                 Text "` may not hold.";
-               ]
-               (snd (Validity.read_specification context inside requirement)))
-           (Facts.list_clauses callee_clauses.requires));
-      List.iter
-        (fun (cost : Types.cost) ->
-          if not (keeps_cost context path contract cost) then
-            Facts.oblige context frame Cost location
+      if List.length callee_clauses.parameters = List.length inputs then
+        let inside =
+          Validity.bind_arguments frame callee_clauses
+            ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
+            ~substitution:[]
+        in
+        List.iter
+          (fun (requirement : Mir.formula) ->
+            Facts.oblige context at_call Requires location
               [
                 Text
                   (Printf.sprintf
-                     "`%s` does not promise the contract this parameter's type, `%s`, asks of a \
-                      function passed for it."
-                     (Path.show path)
-                     (Types.show (Types.Function expected)));
+                     "`%s` may not accept every argument this parameter's type promises it: its `"
+                     (Path.show path));
+                Facts.quote callee_clauses.callee requirement.origin;
+                Text "` may not hold.";
               ]
-              (Logic.Boolean false))
-        expected.costs
+              (snd (Validity.read_specification context inside requirement)))
+          (Facts.list_clauses callee_clauses.requires)
   | _ ->
-      if callee_clauses.requires <> [] || callee_clauses.costs <> [] then
+      if callee_clauses.requires <> [] then
         Facts.raise_unsupported location
           "a function passed for a parameter whose type the prover cannot read"

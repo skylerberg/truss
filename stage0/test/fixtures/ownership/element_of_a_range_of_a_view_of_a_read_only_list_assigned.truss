@@ -1,0 +1,4 @@
+fn f(items: List[UInt64]) {
+  var view = items[..]
+  view[..][0] = 7
+}

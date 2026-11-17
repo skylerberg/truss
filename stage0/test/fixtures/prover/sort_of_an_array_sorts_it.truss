@@ -1,0 +1,5 @@
+fn f(values: mut Array[Int64, 3])
+  ensures values.is_sorted()
+{
+  mut values.sort()
+}

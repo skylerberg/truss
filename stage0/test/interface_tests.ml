@@ -579,7 +579,7 @@ let () =
       let signature =
         read_method_signature packages (Types.make_named (app "FixedClock") []) clock "now"
       in
-      match (signature.uses :> Types.capability list) with
+      match (Types.remove_divergence signature.uses :> Types.capability list) with
       | [ Capability _ ] -> ()
       | uses -> Harness.fail "%d uses" (List.length uses))
 

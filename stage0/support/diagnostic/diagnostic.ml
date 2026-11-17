@@ -129,6 +129,7 @@ module Code = struct
     | Unknown_member
     | Ambiguous_method
     | Private_field
+    | Member_not_visible
     | Not_callable
     | Not_a_value
     | No_impl
@@ -138,6 +139,7 @@ module Code = struct
     | Integer_for_float
     | Negated_unsigned
     | Unused_value
+    | Unbounded_time
     | Not_assignable
     | Wrong_try
     | Lambda_needs_type
@@ -204,6 +206,7 @@ module Code = struct
 
   type capabilities =
     | Not_available
+    | May_not_terminate
     | Lambda_uses
     | Not_granted
     | Provide_mode
@@ -386,6 +389,7 @@ module Code = struct
     | Unknown_member -> "unknown_member"
     | Ambiguous_method -> "ambiguous_method"
     | Private_field -> "private_field"
+    | Member_not_visible -> "member_not_visible"
     | Not_callable -> "not_callable"
     | Not_a_value -> "not_a_value"
     | No_impl -> "no_impl"
@@ -395,6 +399,7 @@ module Code = struct
     | Integer_for_float -> "integer_for_float"
     | Negated_unsigned -> "negated_unsigned"
     | Unused_value -> "unused_value"
+    | Unbounded_time -> "unbounded_time"
     | Not_assignable -> "not_assignable"
     | Wrong_try -> "wrong_try"
     | Lambda_needs_type -> "lambda_needs_type"
@@ -470,6 +475,7 @@ module Code = struct
   let name_capabilities_code code =
     match code with
     | Not_available -> "not_available"
+    | May_not_terminate -> "may_not_terminate"
     | Lambda_uses -> "lambda_uses"
     | Not_granted -> "not_granted"
     | Provide_mode -> "provide_mode"

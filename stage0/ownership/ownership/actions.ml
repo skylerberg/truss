@@ -166,13 +166,14 @@ let list_borrow_views builder (place : Mir.place) type_ =
   match track_place builder place with
   | Some place ->
       [
-        (if Context.is_plain builder.context type_ then Copy_of_view_in place else Borrow_of place);
+        (if Context.lends_nothing builder.context type_ then Copy_of_view_in place
+         else Borrow_of place);
       ]
   | None -> (
       match (place.root, find_temporary builder place) with
       | Local _, Some temporary
         when (lookup_held builder temporary).owns_new_value
-             && (not (Context.is_plain builder.context type_))
+             && (not (Context.lends_nothing builder.context type_))
              && not (Context.is_view builder.context type_) ->
           [ Borrow_of { root = Temporary temporary; steps = [] } ]
       | Local local, _ -> (lookup_held builder local).views
@@ -200,13 +201,16 @@ let list_part_views builder (operand : Mir.operand) =
 
 let list_operand_borrows builder (operand : Mir.operand) =
   match operand with
-  | Borrow { place; _ } -> Option.to_list (track_place builder place)
+  | Borrow { place; _ } -> (
+      match track_place builder place with
+      | Some tracked -> [ tracked ]
+      | None -> List.map extract_viewed_place (list_copy_views builder place))
   | Use { type_; _ } when Context.is_view builder.context type_ ->
       List.map extract_viewed_place (list_operand_views builder operand)
   | Use _ | Take _ | Constant _ -> []
 
 let result_may_view builder (mode : Types.mode) type_ =
-  (mode <> Own && not (Context.is_plain builder.context type_))
+  (mode <> Own && not (Context.lends_nothing builder.context type_))
   || Context.is_view builder.context type_
 
 let find_viewable_argument builder (argument : Mir.argument) =
@@ -266,6 +270,7 @@ let borrow_mut builder (operand : Mir.operand) =
         origin;
       Option.iter (fun tracked -> emit builder (Mutate tracked) origin) (track_place builder place)
   | Use { place; origin; _ } -> (
+      emit_write_through builder (find_written_slice builder place) origin;
       match place.root with
       | Local local ->
           Option.iter
@@ -403,18 +408,19 @@ let compute_rvalue_held builder (value : Mir.rvalue) : held =
   | Operand operand ->
       let views = list_operand_views builder operand in
       let lent = list_lent_places builder operand in
-      let slice, owns_new_value =
+      let slice, collection, owns_new_value =
         match operand with
         | Use { place = { root = Local local; _ } as place; _ } when is_temporary builder place ->
-            ((lookup_held builder local).slice, (lookup_held builder local).owns_new_value)
-        | Use _ | Take _ | Borrow _ -> (None, false)
-        | Constant _ -> (None, false)
+            let copied = lookup_held builder local in
+            (copied.slice, copied.collection, copied.owns_new_value)
+        | Use _ | Take _ | Borrow _ | Constant _ -> (None, None, false)
       in
       {
         nothing with
         views;
         lent = (match operand with Borrow _ -> [] | _ -> lent);
         slice;
+        collection;
         owns_new_value;
       }
   | Operation _ | Compare _ -> nothing
@@ -466,6 +472,13 @@ let emit_bound_value builder (local : Mir.local) (core : Core.local) (value : Mi
             || Context.is_view builder.context part_type) ->
       builder.lent_part_bindings <-
         { binding = local; part; origin; scrutinee } :: builder.lent_part_bindings
+  | _ -> ());
+  (match value with
+  | Operand (Borrow { place = { root = Local part; _ }; _ }) -> (
+      match (lookup_held builder part).collection with
+      | Some _ as collection ->
+          hold builder { root = Local local; projections = [] } { nothing with collection }
+      | None -> ())
   | _ -> ());
   let views =
     match value with
@@ -643,30 +656,56 @@ let emit_statement builder (statement : Mir.Graph.statement) =
       hold builder destination (make_call_result builder called)
   | Lend { part; call = called } -> (
       let is_loop_element = List.mem part builder.loop_elements in
+      let select_element (collection : Place.t) =
+        { collection with steps = collection.steps @ [ Element { node = called.node; origin } ] }
+      in
       let find_element collection collection_type ~receiver =
         if is_untracked_lent_part builder collection then None
         else
           let collection_place = track_place builder collection in
           Some
-            ( Option.map
-                (fun (place : Place.t) ->
-                  { place with steps = place.steps @ [ Element { node = called.node; origin } ] })
-                collection_place,
+            ( Option.map select_element collection_place,
               (collection_place, collection_type),
               receiver )
       in
+      let indexes_storage =
+        match called.callee with
+        | Trait_method { trait; name = "at"; self_type; _ } ->
+            (Well_known.is Index trait.trait || Well_known.is Index_mut trait.trait)
+            && Place.is_storage_type self_type
+        | _ -> false
+      in
       let element =
         match (called.callee, called.arguments) with
-        | ( Trait_method { trait; name = "at"; self_type; _ },
+        | ( _,
             Passed
               {
                 value = Borrow { place = collection; type_ = collection_type; origin = receiver; _ };
                 _;
               }
             :: _ )
-          when (Well_known.is Index trait.trait || Well_known.is Index_mut trait.trait)
-               && Place.is_storage_type self_type ->
+          when indexes_storage ->
             find_element collection collection_type ~receiver
+        | ( _,
+            Passed
+              {
+                value =
+                  Use
+                    {
+                      place = { root = Local range; projections = [] };
+                      type_ = range_type;
+                      origin = receiver;
+                    };
+                _;
+              }
+            :: _ )
+          when indexes_storage ->
+            Option.map
+              (fun sliced ->
+                ( Some (select_element sliced),
+                  (find_written_slice builder { root = Local range; projections = [] }, range_type),
+                  receiver ))
+              (lookup_held builder range).slice
         | ( ( Trait_method { name = "element"; _ }
             | Function { path = Method { name = "element"; _ }; _ } ),
             Passed
@@ -698,11 +737,12 @@ let emit_statement builder (statement : Mir.Graph.statement) =
   | Slice { destination; base; base_type; call = called } ->
       read_uses builder uses;
       emit_call builder called origin;
+      let base_place = track_place builder base in
       let elements =
         Option.map
           (fun (place : Place.t) ->
             { place with steps = place.steps @ [ Element { node = called.node; origin } ] })
-          (track_place builder base)
+          base_place
       in
       let views =
         match elements with
@@ -710,7 +750,11 @@ let emit_statement builder (statement : Mir.Graph.statement) =
         | Some place -> [ Borrow_of place ]
         | None -> list_borrow_views builder base base_type
       in
-      hold builder destination { nothing with views; slice = elements }
+      let sliced =
+        match base_place with Some _ -> base_place | None -> find_written_slice builder base
+      in
+      hold builder destination
+        { nothing with views; slice = elements; collection = Some (sliced, base_type) }
   | Assert _ | Echo _ -> read_uses builder uses
   | Provide { provided; _ } ->
       read_uses builder uses;
@@ -721,7 +765,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
   | Loan_start { loan; borrowed; mode; duration } ->
       let loans =
         match (duration, borrowed) with
-        | Rest_of_statement, Borrow { origin = receiver; _ }
+        | Rest_of_statement, (Borrow { origin = receiver; _ } | Use { origin = receiver; _ })
           when List.mem receiver builder.element_receivers ->
             []
         | _ -> list_loans builder borrowed mode duration

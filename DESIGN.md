@@ -479,6 +479,7 @@ rule excludes `Plain` arguments, such as indexes, so that case is rare.
 | Rule | Reason |
 |---|---|
 | Whether a type is a view is derived from its fields, and a record that holds a view is a view. | Nothing is declared, and a view cannot escape inside a record. |
+| A `Plain` argument lends nothing to the result of a call, unless it holds an `Array`. | A `Slice` views storage, and an integer or a record of integers has none to view, so a variable passed as an index can be assigned while the result is live. An array is stored in place: `values.slice()` views `values` itself, and assigning `values` while that view is live would change what the view reads. |
 | Generic code that keeps a value requires `Storable`. | A type parameter may stand for a view, and the bound stops generic code from storing one. |
 | An `any Trait` is a view unless `Trait` requires `Storable`. | `any` hides the type, so the compiler cannot see whether the value holds a view. |
 | `mut` access is never stored. | It lasts for one call, one iteration, or one `provide mut` block, so the ownership check tracks no mutable reference from one statement to the next. |
@@ -527,6 +528,7 @@ mutated. Such a type takes the new value in an ordinary method, as
 | A lent constructor owns the arguments that the method made, and lends the places. | A result often pairs a computed value with a borrowed one, such as a search hit with a formatted label and the matching record. Rust allows a struct with an owned field and a reference. |
 | A lent part that is no view is a part of the first parameter, never of another. | A caller then knows from the signature alone which argument the part is in. It can lend `self.titles[key]` in turn where `key` is a local, which a part of any argument would forbid. Rust names the argument with a lifetime. |
 | A lending call lends its whole receiver. | The method was proven on the assumption that nothing else uses `self` while the part is lent. |
+| A receiver that is a view lends its original. | The lent part is in the original's storage. Mutating the original while a name aliases the part would leave a dangling view. |
 | `List`, `Slice`, and `Array` can lend two parts at once. | Their elements at different positions are disjoint places. |
 
 ### Loops
@@ -745,10 +747,29 @@ only for a function type with a `time` clause, because a function with a
 `time` clause cannot call one without. `type Button(on_click: fn(Button))`
 is therefore legal.
 
+**Whether a call terminates is part of its capability set.** A function
+without a `time` clause may not terminate, and that fact travels as a
+capability does: a call needs it where its callee has it, and a capability
+parameter passes it on. `map` therefore states a `time` bound and still
+takes a function that may not terminate. Such a call may not terminate, so
+only a caller without a `time` clause can make it. Koka and F* track
+divergence as an effect in the same way. The alternative is a `time` clause
+on every callback's type, which rejects each function that has none, and a
+function has none unless its author wrote one.
+
+The check is the capability check. It runs in the type checker, it covers a
+function bound to a local as it covers one passed to a call, and a
+specification, which has no capabilities, calls only functions that
+terminate.
+
 | Rule | Reason |
 |---|---|
 | Structural recursion needs no annotation, and other recursion states `decreases`. The compiler never infers a measure. | Lean accepts structural recursion in the same way. Dafny infers a measure. A structural check with an explicit clause is more predictable than an inference that may fail. |
 | A loop that runs until a capability says to stop has no termination proof. | An implementation could supply data forever. |
+| A function type with a `time` clause takes only functions that terminate, even where its `uses` names a capability parameter. | A written clause holds. If the parameter could carry a function that may not terminate into such a type, `cost time finite` there would promise nothing. |
+| A `time` clause follows a function parameter only where its bound names `time(parameter)`. `finite` names none, so it promises termination whatever is passed. | The bound is true as written: it is unbounded exactly where the parameter's time is. A `finite` that followed its callbacks would be a condition that the signature does not show. |
+| No parameter passes on termination alone. A callback that may not terminate is taken through a capability parameter, which also takes its capabilities. | A callee needs a callback without capabilities only to apply it in a contract, and there the callback must terminate too. One mechanism then covers both. |
+| A lambda may not terminate when it calls a function that may not, or holds a loop without a measure. | Its capabilities are inferred from its body, and so is this. A lambda with neither stays in the logic, so a proof can reason about a call that passes it. |
 
 ### Cost clauses
 
@@ -815,8 +836,9 @@ A method can be overloaded on the mode of `self`, and on nothing else. One
 `iter`, `iter_mut`, and `into_iter`.
 
 **An overload set has one author.** The overloads of a name come only from
-the type's own methods, from the methods that an `impl` in the type's
-package writes, and from a trait together with the traits it requires. If
+the type's own methods, from the methods of its view, from the methods that
+an `impl` in the type's package writes, and from a trait together with the
+traits it requires. A type and its view are defined in one package. If
 overloads were collected from every visible `impl`, a package added to a
 build could capture an existing call. A temporary receiver takes the `own`
 overload when one exists, so a package that gave a type's `label(self)` an
@@ -1415,6 +1437,9 @@ Rules: [Method lookup](SPECIFICATION.md#method-lookup).
 | A trait method needs no import. | A forgotten import is a common error in the languages that need one. |
 | A method call finds only the traits of the standard library, of the calling package, and of the packages that its manifest lists. | An edit deep in the dependency graph cannot break a distant call. |
 | Two candidates for one name are an error, never a silent choice. | In Rust a type's own method wins over a trait's, so adding a method can silently change an existing call. In Truss an upgrade can break a call only with an error that names both candidates. A release that only adds names is still compatible, because otherwise no type could ever gain a method. |
+| A `String` has the methods of `StringSlice`, and a `List` and an `Array` those of `Slice`. | `self` is a parameter, and an argument of the owned type converts to its view. Without the rule, every method of a view needs a forwarding method on the owned type, whose contract is stated and proven a second time, and a view's method that has none cannot be called on the owned value. Rust reaches the methods of `str` from a `String` through `Deref`. |
+| A type's own method hides its view's method of the same name and mode. | The owned type can do better where it owns the storage: `String.to_bytes(own self)` hands over its buffer, and `StringSlice.to_bytes(self)` copies. Both are written in one package, so no other package can change which one a call reaches. |
+| An `impl` gives a type no method that its view has in that mode, and an `impl` in another package gives it none of that name. | Such a method would be found before the view's. A package added to a build could then capture a call that reached the view's method. |
 
 ### Dynamic dispatch
 
@@ -1785,7 +1810,7 @@ as every source of randomness is a capability.
 | Convention | Reason |
 |---|---|
 | Each module is one subject, one level below `standard`. | Code writes a name with its module, so the name of a type does not repeat the module: `json::Value`. A category above the module, as in Go's `encoding/json`, is not written at the use site, so it only adds something to remember. |
-| Every method of a view type also exists on the owning type. | `mut names.sort()` works without `names[..]`. Truss converts an owning collection to its view only at a parameter, so the library declares the methods on both. |
+| A method that needs no ownership of the storage is declared once, on the view type. | A `String`, a `List`, and an `Array` have the methods of their views ([Method lookup](#method-lookup)), so `mut names.sort()` works without `names[..]`, and a second declaration on the owning type would only forward. The owning type declares a method of that name where it uses its storage: `List.reverse` keeps the list's capacity. |
 | A method that works on any collection is a provided method of `Iterable`. | A user's collection gets the method by implementing `count` and `element`. |
 | A collection method takes a pure callback. A method of `Option` or `Result` takes a callback that may use capabilities. | `map` and `sort_by` may later run their callback in parallel. `Option.map` calls its callback at most once, in place of an `if`. |
 | A lookup that can miss lends an `Option`. | Nothing is copied, whatever the element type. |
@@ -2047,10 +2072,11 @@ data, and not on the database.
 **A reference is to a fully qualified name, whether or not a definition
 holds the name.** A name that is not local and not in the prelude belongs to
 the body's module, so an unqualified name resolves without a search. A
-method call names one entry of its type's methods:
+method call names one entry of its type's methods, or of its view's methods
+where the type has none of that name and mode:
 [Method lookup](SPECIFICATION.md#method-lookup) rules out a trait method with
-the name and mode of one of the type's own methods, and makes two traits that
-give one name an error at the call. An `impl` is named by its trait and its
+the name and mode of one of the type's own methods or of its view's, and
+makes two traits that give one name an error at the call. An `impl` is named by its trait and its
 type, since `impl`s do not overlap and have one home. A law proof is named by
 its trait, its law, and its type, as `proof Ordered.transitive for Box[Item]`
 writes them, so a proof that assumes a law for a type refers to one name and
