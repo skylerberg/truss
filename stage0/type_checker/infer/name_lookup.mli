@@ -10,6 +10,7 @@ val coerce :
   State.state ->
   State.env ->
   ?argument:Types.mode ->
+  ?takes_view_as_owner:bool ->
   Syntax.expression ->
   actual:Types.ty ->
   expected:Types.ty ->

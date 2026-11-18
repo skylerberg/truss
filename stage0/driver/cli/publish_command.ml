@@ -6,7 +6,7 @@ let list_unfinished snapshot database packages =
   let names = Database.make_name_lookups database in
   List.concat_map
     (fun file ->
-      let source = Command_packages.read_source snapshot packages file in
+      let source = Command_packages.read_source snapshot database packages file in
       List.concat_map
         (fun declaration ->
           let key = Resolve.Names.make_key declaration in

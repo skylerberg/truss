@@ -22,7 +22,7 @@ let run ~position =
       let database = Workspace.open_database snapshot in
       let offset =
         Source.compute_offset Source.Scalar_values
-          (Workspace.read_source snapshot written)
+          (Database.read_source database written)
           ~line:(line - 1) ~column:(column - 1)
       in
       let names = Database.make_name_lookups database in

@@ -4,7 +4,7 @@ use standard::simulation
 use standard::tasks
 
 fn read_line(connection: network::Connection, inbox: mut List[UInt8]) -> Option[String]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while true {
     for index in 1..inbox.length() {
@@ -23,13 +23,13 @@ fn read_line(connection: network::Connection, inbox: mut List[UInt8]) -> Option[
 }
 
 fn reply(connection: network::Connection, text: StringSlice)
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let _ = connection.send_all("${text}\r\n".slice().bytes())
 }
 
 fn serve_once(listener: mut network::Listener, transcript: tasks::Cell[List[String]])
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let connection = match mut listener.accept() {
     Ok(connection) => own connection
@@ -77,7 +77,7 @@ fn serve_once(listener: mut network::Listener, transcript: tasks::Cell[List[Stri
 }
 
 fn sent() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
   var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 2525)).expect("the port is free")
   let transcript = tasks::Cell[List[String]].new([])
@@ -114,7 +114,7 @@ fn sent() -> List[String]
   seen
 }
 
-test "send speaks SMTP: AUTH PLAIN, every recipient including Bcc, and a dot-stuffed MIME message" {
+test "send speaks SMTP: AUTH PLAIN, every recipient including Bcc, and a dot-stuffed MIME message" uses Panic {
   provide simulation::World.new() {
     let seen = sent()
     assert seen.length() == 10
@@ -142,7 +142,7 @@ test "send speaks SMTP: AUTH PLAIN, every recipient including Bcc, and a dot-stu
   }
 }
 
-test "a message refuses a line break in a header field, which would let a caller add headers" {
+test "a message refuses a line break in a header field, which would let a caller add headers" uses Panic {
   provide simulation::World.new() {
     let injected = mail::Message(
       from: mail::Address(email: "ada@example.test"),

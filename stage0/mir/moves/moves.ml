@@ -54,7 +54,7 @@ let list_rvalue_uses ~is_moving ~origin (rvalue : Mir.rvalue) =
   | Function_value _ | Value_parameter _ | Specification _ -> []
 
 let list_call_uses ~is_moving (call : Mir.call) =
-  (match call.callee with
+  (match call.callee.target with
     | Indirect operand -> list_operand_uses ~is_moving ~by_value:false operand
     | _ -> [])
   @ List.concat_map

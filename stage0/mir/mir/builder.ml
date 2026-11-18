@@ -234,7 +234,6 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
           {
             Tree.callee;
             arguments = Passed { mode = Read; value = receiver; function_ = None } :: bounds;
-            uses = Types.no_capabilities;
             node = node.id;
             origin = node.origin;
           }
@@ -269,6 +268,16 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
     | And _ | Or _ | Implies _ | Matches _ -> lower_truth builder node
     | Convert { conversion = Widen; value = converted } when is_function_expression converted ->
         Option.map fst (lower_function_expression builder node ~is_argument:false)
+    | Convert { conversion = View_to_owned as conversion; value = view } ->
+        let* value = lower_expression builder view in
+        let owner = Emitter.allocate_local builder (Lent Read) node.type_ origin in
+        Emitter.add_temporary builder owner;
+        Emitter.assign builder (Emitter.make_local_place owner)
+          (Convert { conversion; value; converts_function_expression = false })
+          origin;
+        Some
+          (Tree.Borrow
+             { place = Emitter.make_local_place owner; type_ = node.type_; mode = Read; origin })
     | Convert { conversion; value = converted } ->
         let* value = lower_expression builder converted in
         hold (Convert { conversion; value; converts_function_expression = false })
@@ -417,7 +426,7 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
         let* arguments = lower_operands builder arguments in
         hold (Specification (Applied { function_; arguments; unconverted }))
     | Method_cost { metric; method_ } ->
-        let* method_ = lower_callee builder method_ in
+        let* method_ = lower_target builder method_ in
         hold (Specification (Method_cost { metric; method_ }))
     | Quantified _ -> raise_bug "a quantifier over a type or a collection in code that runs"
 
@@ -601,15 +610,20 @@ and lower_function_expression builder (node : Core.expression) ~is_argument :
       Some (value, function_)
   | _ -> raise_bug "a function expression that is no function and no lambda"
 
+and lower_target builder (target : Core.operand Core.target) : Tree.operand Core.target option =
+  Core_walk.traverse_indirect (lower_operand builder Read) target
+
 and lower_callee builder (callee : Core.callee) : Tree.callee option =
-  Core_walk.traverse_indirect (lower_operand builder Read) callee
+  Option.map
+    (fun target -> { Tree.target; uses = callee.uses })
+    (lower_target builder callee.target)
 
 and lower_call builder (called : Core.call) ~node ~origin : Tree.call option =
   let* callee = lower_callee builder called.callee in
   let* arguments =
     In_order.run builder (In_order.all (List.map (plan_argument builder) called.arguments))
   in
-  Some { Tree.callee; arguments; uses = called.uses; node; origin }
+  Some { Tree.callee; arguments; node; origin }
 
 and plan_argument builder (argument : Core.argument) =
   match argument with
@@ -630,7 +644,7 @@ and plan_argument builder (argument : Core.argument) =
 
 and lower_call_value builder (node : Core.expression) (called : Core.call) =
   let origin = node.origin in
-  match called.callee with
+  match called.callee.target with
   | Intrinsic { operation = Scalar operation; type_arguments } ->
       let* operands =
         In_order.run builder
@@ -927,7 +941,6 @@ and test builder (pattern : Core.pattern) (scrutinee : Tree.place) ~branch_on =
                                 function_ = None;
                               };
                           ];
-                        uses = Types.no_capabilities;
                         node = pattern.id;
                         origin = pattern.origin;
                       };
@@ -1134,8 +1147,8 @@ and lower_statement builder (node : Core.statement) =
               lower_elements_loop builder ~origin ~pattern ~elements
                 ~loop:(fun () -> loop)
                 ~each:(fun bind_part -> each ~bind_part)
-          | Cursor { cursor; next; uses } ->
-              lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~uses
+          | Cursor { cursor; next } ->
+              lower_cursor_loop builder ~origin ~pattern ~cursor ~next
                 ~loop:(fun () -> loop)
                 ~each:(fun bind_part -> each ~bind_part))
       | While { condition = tested; clauses; body; binds_lent_part } ->
@@ -1355,7 +1368,7 @@ and find_lent_place builder part =
       | _ -> None)
     (Emitter.emitted builder)
 
-and lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~uses ~loop ~each =
+and lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~loop ~each =
   match lower_place builder cursor with
   | None -> ()
   | Some place_ ->
@@ -1364,7 +1377,7 @@ and lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~uses ~loop ~each =
       Option.iter
         (fun next ->
           lower_for_loop ~cursor_type builder ~origin ~pattern
-            ~iteration:(Pull { cursor; next; uses })
+            ~iteration:(Pull { cursor; next })
             ~loop ~each)
         (lower_callee builder next)
 
@@ -1540,7 +1553,6 @@ and lower_attached_formula builder (written : Core.expression) =
 
 and lower_loop_clauses builder (clauses : Core.loop_clause list) : Tree.loop_clause list =
   let lower_bound : Core.bound -> Tree.bound = function
-    | Finite -> Finite
     | Order_of amount -> Order_of (lower_attached_formula builder amount)
     | At_most amount -> At_most (lower_attached_formula builder amount)
     | Exactly amount -> Exactly (lower_attached_formula builder amount)

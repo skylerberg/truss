@@ -188,6 +188,7 @@ let () =
             length = make_length message;
             site;
             reported = None;
+            trace = None;
           }
       in
       let make_suite name blocks =

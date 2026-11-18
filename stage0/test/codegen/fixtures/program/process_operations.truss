@@ -24,7 +24,7 @@ fn show(label: String, bytes: List[UInt8])
 }
 
 fn main(arguments: List[String]) -> ExitCode
-  uses Console, Processes, Handles
+  uses Console, Processes, Handles, RunForever
 {
   let quiet = processes::Command.new("sh").argument("-c").argument("exit 3")
   if Processes.run(quiet) is Ok(output) {

@@ -1,5 +1,5 @@
 fn with_a_clause(start: Countdown) -> UInt8
-  uses Meter
+  uses Meter, RunForever
   cost calls(Meter.tick) == start.left + 1
 {
   var left = start
@@ -14,7 +14,7 @@ fn with_a_clause(start: Countdown) -> UInt8
 }
 
 fn without_a_clause(start: Countdown) -> UInt8
-  uses Meter
+  uses Meter, RunForever
   cost calls(Meter.tick) == start.left + 1
 {
   var left = start

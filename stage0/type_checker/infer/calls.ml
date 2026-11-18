@@ -74,7 +74,7 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
             let parameter : Types.parameter_info =
               { name = "the function value"; mode; type_ = input; has_default = false }
             in
-            let mode = check_argument state env argument.value parameter in
+            let mode = check_argument state env argument.value parameter ~has_generic_type:false in
             { Tables.expression = argument.value.id; core_argument_index = index; mode })
           arguments
       in
@@ -99,7 +99,8 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
            (Printf.sprintf "%s is not a function, so it cannot be called."
               (String.capitalize_ascii (State.describe state callee_type))))
 
-and check_argument state env (value : Syntax.expression) (parameter : Types.parameter_info) =
+and check_argument state env (value : Syntax.expression) (parameter : Types.parameter_info)
+    ~has_generic_type =
   let inner =
     match value.kind with
     | Mode (mode, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
@@ -117,7 +118,9 @@ and check_argument state env (value : Syntax.expression) (parameter : Types.para
     | Some mode -> { parameter with mode }
     | None -> parameter
   in
-  Name_lookup.coerce state env ~argument:parameter.mode value ~actual ~expected:parameter.type_;
+  Name_lookup.coerce state env ~argument:parameter.mode
+    ~takes_view_as_owner:(has_generic_type && parameter.mode = Read)
+    value ~actual ~expected:parameter.type_;
   Modes.check_mode state env value parameter actual;
   parameter.mode
 
@@ -306,7 +309,8 @@ and match_arguments state ?constructor (value : Syntax.expression)
   }
 
 and check_arguments state env ?constructor (value : Syntax.expression)
-    (parameters : Types.parameter_info list) (arguments : Syntax.argument list) ~has_receiver =
+    (parameters : Types.parameter_info list) ~(declared : Types.parameter_info list)
+    (arguments : Syntax.argument list) ~has_receiver =
   if List.length arguments > List.length parameters then
     Error
       (check_arguments_alone state env arguments
@@ -319,17 +323,31 @@ and check_arguments state env ?constructor (value : Syntax.expression)
     let is_lambda ((argument : Syntax.argument), _) =
       match argument.value.kind with Lambda _ -> true | _ -> false
     in
+    let has_generic_type (_, index) =
+      match (List.nth declared index).type_ with
+      | Types.Parameter _ | Projection _ -> true
+      | _ -> false
+    in
+    let takes_view_as_owner pair =
+      has_generic_type pair && (List.nth parameters (snd pair)).mode = Read
+    in
     let check ((argument : Syntax.argument), index) =
       let parameter = List.nth parameters index in
-      let mode = check_argument state env argument.value parameter in
+      let mode =
+        check_argument state env argument.value parameter
+          ~has_generic_type:(has_generic_type (argument, index))
+      in
       {
         Tables.expression = argument.value.id;
         core_argument_index = (if has_receiver then index + 1 else index);
         mode;
       }
     in
-    let non_lambdas = List.map check (List.filter (fun pair -> not (is_lambda pair)) matched) in
-    let lambdas = List.map check (List.filter is_lambda matched) in
+    let values, lambdas = List.partition (fun pair -> not (is_lambda pair)) matched in
+    let owners, others = List.partition takes_view_as_owner values in
+    let others = List.map check others in
+    let owners = List.map check owners in
+    let lambdas = List.map check lambdas in
     match (error, unmatched) with
     | Some error, _ -> Error (check_arguments_alone state env unmatched error)
     | None, _ :: _ -> State.raise_bug "an argument has no parameter, and no diagnostic says why"
@@ -340,7 +358,7 @@ and check_arguments state env ?constructor (value : Syntax.expression)
               (fun id ->
                 List.find_opt
                   (fun (checked : Tables.argument) -> checked.expression = id)
-                  (non_lambdas @ lambdas))
+                  (others @ owners @ lambdas))
               order,
             left_out )
 
@@ -354,7 +372,8 @@ and check_named_call state env ?expected (value : Syntax.expression) path
       | Some expected, Returns output -> State.unify_as_hint state output expected
       | _ -> ());
       match
-        check_arguments state env value instance.signature.parameters arguments ~has_receiver:false
+        check_arguments state env value instance.signature.parameters
+          ~declared:instance.declared.parameters arguments ~has_receiver:false
       with
       | Error error -> error
       | Ok (checked, left_out) ->
@@ -442,7 +461,8 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
         | None -> Types.show (Types.Named { path = type_path; arguments = [] })
       in
       match
-        ( check_arguments state env ~constructor value parameters arguments ~has_receiver:false,
+        ( check_arguments state env ~constructor value parameters ~declared:parameters arguments
+            ~has_receiver:false,
           opaque_error )
       with
       | Error error, _ | Ok _, Some error -> error

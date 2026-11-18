@@ -333,7 +333,7 @@ type Reply(code: UInt16, lines: List[String])
 type Inbox(bytes: List[UInt8])
 
 fn read_line[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Result[String, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while true {
     match line_end(inbox.bytes.slice()) {
@@ -369,7 +369,7 @@ fn line_end(bytes: Slice[UInt8]) -> Option[UInt64]
 }
 
 fn read_reply[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Result[Reply, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var lines: List[String] = []
   while true {
@@ -390,7 +390,7 @@ fn read_reply[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Resu
 }
 
 fn expect[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, lowest: UInt16, highest: UInt16) -> Result[Reply, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let reply = read_reply(stream, inbox: mut inbox)?
   if reply.code < lowest || reply.code > highest {
@@ -401,7 +401,7 @@ fn expect[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, lowest: UIn
 }
 
 fn command[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, line: StringSlice, lowest: UInt16, highest: UInt16) -> Result[Reply, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   system(stream.send_all("${line}\r\n".slice().bytes()))?
   expect(stream, inbox: mut inbox, lowest: lowest, highest: highest)
@@ -451,7 +451,7 @@ fn dot_stuffed(body: StringSlice) -> String {
 }
 
 fn authenticate[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, features: Reply, options: SmtpOptions) -> Result[Unit, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let username = match options.username {
     Some(username) => username.copy()
@@ -476,7 +476,7 @@ fn authenticate[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, featu
 }
 
 fn deliver[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, features: Reply, message: Message, encoded: StringSlice, options: SmtpOptions) -> Result[Unit, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   authenticate(stream, inbox: mut inbox, features: features, options: options)?
   let _ = command(stream, inbox: mut inbox, line: "MAIL FROM:<${message.from.email}>".slice(), lowest: 250, highest: 250)?
@@ -493,7 +493,7 @@ fn deliver[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, features: 
 }
 
 fn quit_after[Stream: streams::Duplex, Value](stream: Stream, outcome: own Result[Value, Error]) -> Result[Value, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if outcome is Err(_) {
     let _ = stream.send_all("QUIT\r\n".bytes())
@@ -513,7 +513,7 @@ fn client_config(options: SmtpOptions) -> Result[tls::ClientConfig, Error]
 }
 
 public fn send(message: Message, options: SmtpOptions) -> Result[Unit, Error]
-  uses NetworkClient, Handles, Tasks, Random, Clock, FileRead, Panic
+  uses NetworkClient, Handles, Tasks, Random, Clock, FileRead, Panic, RunForever
 {
   let encoded = message.encode()?
   let timeout = if options.timeout_seconds > 0 && options.timeout_seconds <= 1000000000 { Some(Duration.seconds(options.timeout_seconds)) } else { None }

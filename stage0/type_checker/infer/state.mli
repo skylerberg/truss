@@ -167,11 +167,11 @@ val decide_binding_mode : state -> Types.mode -> Types.ty -> Types.mode
 val resolve_associated_type :
   state -> Types.ty -> Types.trait_reference -> string -> at:Source.Definition_span.t -> Types.ty
 
-val compute_callee_uses : state -> Core.callee -> Types.capability_set
+val make_callee : state -> Core.operand Core.target -> Core.callee
 
 val make_call :
   state ->
-  callee:Core.callee ->
+  callee:Core.operand Core.target ->
   arguments:Core.argument list ->
   lends:Types.mode option ->
   Core.call
@@ -234,6 +234,7 @@ val convert :
   state ->
   env ->
   ?argument:Types.mode ->
+  ?takes_view_as_owner:bool ->
   ?expression:Core.origin ->
   Source.Definition_span.t ->
   actual:Types.ty ->

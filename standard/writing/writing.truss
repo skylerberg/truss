@@ -2,7 +2,6 @@ use standard::growth
 use standard::intrinsic
 
 internal fn byte(output: mut intrinsic::Storage[UInt8], value: UInt8)
-  cost time finite
 {
   if intrinsic::storage_length(output) >= intrinsic::storage_capacity(output) {
     growth::reserve(mut output, additional: 1)
@@ -11,7 +10,6 @@ internal fn byte(output: mut intrinsic::Storage[UInt8], value: UInt8)
 }
 
 internal fn append(output: mut intrinsic::Storage[UInt8], bytes: intrinsic::View[UInt8])
-  cost time finite
 {
   let count = intrinsic::view_length(bytes)
   let start = intrinsic::storage_length(output)
@@ -26,7 +24,6 @@ internal fn append(output: mut intrinsic::Storage[UInt8], bytes: intrinsic::View
 
 internal fn unsigned(output: mut intrinsic::Storage[UInt8], value: UInt64)
   decreases value
-  cost time finite
 {
   if value >= 10 {
     unsigned(mut output, value: value / 10)
@@ -36,7 +33,6 @@ internal fn unsigned(output: mut intrinsic::Storage[UInt8], value: UInt64)
 }
 
 internal fn signed(output: mut intrinsic::Storage[UInt8], value: Int64)
-  cost time finite
 {
   if value < 0 {
     byte(mut output, value: 45)
@@ -48,7 +44,6 @@ internal fn signed(output: mut intrinsic::Storage[UInt8], value: Int64)
 }
 
 internal fn boolean(output: mut intrinsic::Storage[UInt8], value: Bool)
-  cost time finite
 {
   if value {
     append(mut output, bytes: "true".slice().bytes)
@@ -58,19 +53,16 @@ internal fn boolean(output: mut intrinsic::Storage[UInt8], value: Bool)
 }
 
 internal fn float64(output: mut intrinsic::Storage[UInt8], value: Float64)
-  cost time finite
 {
   shortest_that_reads_back(mut output, value: value, as_float32: false)
 }
 
 internal fn float32(output: mut intrinsic::Storage[UInt8], value: Float32)
-  cost time finite
 {
   shortest_that_reads_back(mut output, value: intrinsic::convert(value), as_float32: true)
 }
 
 fn shortest_that_reads_back(output: mut intrinsic::Storage[UInt8], value: Float64, as_float32: Bool)
-  cost time finite
 {
   let infinity = intrinsic::from_bits[UInt64, Float64](9218868437227405312)
   if intrinsic::is_nan(value) {
@@ -108,7 +100,6 @@ fn shortest_that_reads_back(output: mut intrinsic::Storage[UInt8], value: Float6
 fn with_digits(value: Float64, digits: Int32) -> intrinsic::Storage[UInt8]
   ensures intrinsic::storage_length(result) > 0
   ensures intrinsic::storage_model(result)[intrinsic::storage_length(result) - 1] == 0
-  cost time finite
 {
   var text: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(40)
   let length = intrinsic::libc_snprintf(
@@ -127,7 +118,6 @@ fn with_digits(value: Float64, digits: Int32) -> intrinsic::Storage[UInt8]
 fn reads_back(text: intrinsic::View[UInt8], value: Float64, as_float32: Bool) -> Bool
   requires intrinsic::view_length(text) > 0
   requires intrinsic::view_model(text)[intrinsic::view_length(text) - 1] == 0
-  cost time finite
 {
   let read = intrinsic::libc_strtod(text)
   if as_float32 {
@@ -141,7 +131,6 @@ fn reads_back(text: intrinsic::View[UInt8], value: Float64, as_float32: Bool) ->
 
 fn upper_hexadecimal(output: mut intrinsic::Storage[UInt8], value: UInt32)
   decreases value
-  cost time finite
 {
   if value >= 16 {
     upper_hexadecimal(mut output, value: value / 16)
@@ -151,7 +140,6 @@ fn upper_hexadecimal(output: mut intrinsic::Storage[UInt8], value: UInt32)
 }
 
 fn escaped_code(output: mut intrinsic::Storage[UInt8], code: UInt32)
-  cost time finite
 {
   append(mut output, bytes: "\\u{".slice().bytes)
   upper_hexadecimal(mut output, value: code)
@@ -159,7 +147,6 @@ fn escaped_code(output: mut intrinsic::Storage[UInt8], code: UInt32)
 }
 
 fn escaped(output: mut intrinsic::Storage[UInt8], character: Character, quote: UInt8)
-  cost time finite
 {
   let code = character.code()
   let quote_code: UInt32 = intrinsic::convert(quote)
@@ -185,7 +172,6 @@ fn escaped(output: mut intrinsic::Storage[UInt8], character: Character, quote: U
 }
 
 internal fn quoted_character(output: mut intrinsic::Storage[UInt8], value: Character)
-  cost time finite
 {
   append(mut output, bytes: "Character\"".slice().bytes)
   escaped(mut output, character: value, quote: 34)
@@ -211,7 +197,9 @@ internal fn quoted_text(output: mut intrinsic::Storage[UInt8], text: intrinsic::
       code = first & 31
     }
     var following: UInt64 = 1
-    while following < length && at + following < count {
+    while following < length && at + following < count
+      decreases length - following
+    {
       let next: UInt32 = intrinsic::convert(intrinsic::view_at(text, index: at + following))
       code = (code << 6) | (next & 63)
       following += 1

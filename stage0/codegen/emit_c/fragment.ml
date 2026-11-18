@@ -59,7 +59,7 @@ let name_bytes context ~texts =
       let name = C_values.render_bytes_symbol context index in
       if Hashtbl.mem named name then Some (C_values.render_bytes_definition (text, name)) else None)
 
-let make (context : C_types.context) ~item ~kind ~functions ~definition =
+let make (context : C_types.context) ~item ~kind ~functions ~definition ~references =
   let types = List.rev context.order in
   let environments =
     List.filter_map
@@ -79,10 +79,7 @@ let make (context : C_types.context) ~item ~kind ~functions ~definition =
       name_bytes context ~texts:(definition :: List.map snd functions) @ List.rev context.statics;
     sites = List.sort_uniq compare context.sites;
     helpers = context.helpers_used;
-    references =
-      List.filter
-        (fun other -> not (Lowered.Item.equal other item))
-        (List.rev context.referenced_items);
+    references;
     calls = List.rev context.calls;
     called = List.rev context.called;
     failures = List.rev context.failures;

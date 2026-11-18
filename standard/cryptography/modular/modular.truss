@@ -351,7 +351,9 @@ internal fn bit_length(limbs: Slice[UInt64]) -> UInt64 {
     if limb != 0 {
       var bits: UInt64 = 0
       var rest = limb
-      while rest != 0 && bits < 64 {
+      while rest != 0 && bits < 64
+        decreases 64 - bits
+      {
         rest = rest >> 1
         bits += 1
       }

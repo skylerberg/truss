@@ -453,18 +453,24 @@ and elaborate_function_type context (written : Syntax.function_type) :
     match written.output with Some output -> elaborate_type context output | None -> Types.unit
   in
   let uses = elaborate_uses context written.clauses in
-  let uses =
-    if states_time written.clauses then uses else Types.leave_divergence_to_parameters uses
-  in
+  report_time_of_run_forever context ~uses written.clauses;
   match elaborate_costs context written.clauses with
   | Ok costs -> Ok { inputs; output; uses; costs = List.sort_uniq compare costs }
   | Error report -> Error report
 
-and states_time (clauses : Syntax.clause list) =
-  List.exists
-    (fun (clause : Syntax.clause) ->
-      match clause.kind with Cost { resource = Metric Time; _ } -> true | _ -> false)
-    clauses
+and report_time_of_run_forever context ~uses (clauses : Syntax.clause list) =
+  if not (Types.terminates uses) then
+    List.iter
+      (fun (clause : Syntax.clause) ->
+        match clause.kind with
+        | Cost { resource = Metric Time; _ } ->
+            ignore
+              (record_diagnostic context.diagnostics Unbounded_time context.spans.(clause.id)
+                 "A function that uses `RunForever` may run forever, so no `time` clause bounds \
+                  it. Remove the `time` clause, or remove `RunForever` and give each loop a \
+                  measure.")
+        | _ -> ())
+      clauses
 
 and elaborate_uses context clauses =
   elaborate_capabilities context
@@ -523,7 +529,6 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
             in
             let bound : Types.cost_bound option =
               match cost.bound with
-              | Finite -> None
               | Big_o _ -> Some Order_of
               | At_most value -> Some (No_more_than (evaluate_constant value))
               | Exactly value -> Some (Exactly_cost (evaluate_constant value))
@@ -577,7 +582,7 @@ let list_constant_costs (clauses : Syntax.clause list) : Types.cost list =
             | Big_o { kind = Integer _; _ } -> Some Order_of
             | At_most { kind = Integer limit; _ } -> Some (No_more_than (Some limit))
             | Exactly { kind = Integer amount; _ } -> Some (Exactly_cost (Some amount))
-            | Big_o _ | At_most _ | Exactly _ | Finite -> None
+            | Big_o _ | At_most _ | Exactly _ -> None
           in
           match (resource, bound) with
           | Some resource, Some bound -> Some { Types.amortized; resource; bound }
@@ -725,69 +730,34 @@ let find_operand_method (overloads : bound_method list) =
       | [ read_only ] -> Some read_only
       | _ -> None)
 
-let states_time_clause context (method_ : bound_method) =
-  List.exists
-    (fun (member : Resolve.Names.key) ->
-      match (member.path, context.lookups.names.read_definition member) with
-      | ( Method { receiver; _ },
-          { kind = Function { signature; _ } | Method_declaration signature; _ } ) ->
-          receiver = method_.receiver && states_time signature.clauses
-      | _ -> false)
-    (context.lookups.names.list_members method_.trait.trait method_.name)
-
-let elaborate_divergence context ~(parameters : Types.parameter_info list)
-    (clauses : Syntax.clause list) : Types.capability_set =
-  let time_bounds =
-    List.filter_map
-      (fun (clause : Syntax.clause) ->
-        match clause.kind with Cost { resource = Metric Time; bound; _ } -> Some bound | _ -> None)
-      clauses
-  in
-  let read_parameter_divergence id name =
-    match
-      List.find_opt (fun (parameter : Types.parameter_info) -> parameter.name = name) parameters
-    with
-    | Some { type_ = Function { uses; _ }; _ } when not (Types.terminates uses) ->
-        ignore
-          (record_diagnostic context.diagnostics Unbounded_time context.spans.(id)
-             (Printf.sprintf
-                "`%s` may not terminate, whatever it is passed, so `time(%s)` has no value. Give \
-                 its type a `time` clause, or a capability parameter in its `uses`, which records \
-                 whether the function passed for it terminates."
-                name name));
-        Types.no_capabilities
-    | Some { type_ = Function { uses; _ }; _ } -> Types.list_divergence uses
-    | Some _ | None -> Types.no_capabilities
-  in
-  let read_bound_method_divergence type_ (method_ : Syntax.name) =
-    match
-      Option.bind (find_bounded_type context type_) (fun self_type ->
-          find_operand_method (list_bound_methods context self_type method_.text))
-    with
-    | Some ({ self_type; trait; name; receiver } as followed)
-      when not (states_time_clause context followed) ->
-        Types.make_capability_set
-          [ Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ]
-    | Some _ | None -> Types.no_capabilities
-  in
-  let read_divergence (operand : cost_operand) =
+let report_time_of_parameters_that_run_forever context ~(parameters : Types.parameter_info list)
+    (clauses : Syntax.clause list) =
+  let report_operand (operand : cost_operand) =
     match (operand.metric, operand.callee) with
-    | Time, Function_parameter name -> read_parameter_divergence operand.written.id name.text
-    | Time, Bound_method { type_; method_ } -> read_bound_method_divergence type_ method_
-    | Time, Not_a_callee | (Allocations | Allocated_bytes), _ -> Types.no_capabilities
+    | Time, Function_parameter name -> (
+        match
+          List.find_opt
+            (fun (parameter : Types.parameter_info) -> parameter.name = name.text)
+            parameters
+        with
+        | Some { type_ = Function { uses; _ }; _ } when not (Types.terminates uses) ->
+            ignore
+              (record_diagnostic context.diagnostics Unbounded_time
+                 context.spans.(operand.written.id)
+                 (Printf.sprintf
+                    "`%s` may run forever, since its type uses `RunForever`, so `time(%s)` has no \
+                     value."
+                    name.text name.text))
+        | Some _ | None -> ())
+    | Time, (Bound_method _ | Not_a_callee) | (Allocations | Allocated_bytes), _ -> ()
   in
-  match time_bounds with
-  | [] -> Types.make_capability_set [ Types.unconditional_divergence ]
-  | bounds ->
-      Types.intersect_capabilities
-        (List.map
-           (fun (bound : Syntax.bound) ->
-             match bound with
-             | Finite -> Types.no_capabilities
-             | Big_o value | At_most value | Exactly value ->
-                 List.fold_left Types.union_capabilities Types.no_capabilities
-                   (List.map read_divergence (list_cost_operands context value)))
-           bounds)
+  List.iter
+    (fun (clause : Syntax.clause) ->
+      match clause.kind with
+      | Cost { resource = Metric Time; bound = Big_o value | At_most value | Exactly value; _ } ->
+          List.iter report_operand (list_cost_operands context value)
+      | _ -> ())
+    clauses
 
 let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signature) :
     Types.signature =
@@ -823,6 +793,9 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
     | Some (Returns result) -> Types.Returns (elaborate_type context result)
     | Some (Lends (mode, result)) -> Types.Lends (elaborate_mode mode, elaborate_type context result)
   in
+  let uses = elaborate_uses context written.clauses in
+  report_time_of_run_forever context ~uses written.clauses;
+  report_time_of_parameters_that_run_forever context ~parameters written.clauses;
   {
     generics = generics_;
     capability_parameters =
@@ -836,10 +809,7 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
     receiver;
     parameters;
     output;
-    uses =
-      Types.union_capabilities
-        (elaborate_uses context written.clauses)
-        (elaborate_divergence context ~parameters written.clauses);
+    uses;
     costs = list_constant_costs written.clauses;
     specification_only =
       Well_known.is Model owner || Types.mentions_specification_only_type parameters output;
@@ -1256,7 +1226,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                      uses =
                        Types.union_capabilities
                          (elaborate_capabilities context uses)
-                         (Types.make_capability_set [ Types.panic; Types.unconditional_divergence ]);
+                         (Types.make_capability_set [ Types.run_forever ]);
                      costs = [];
                      specification_only = false;
                      capture_free_parameters = [];
@@ -1269,12 +1239,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                 elaborate_signature context ~owner:path ~head:[] ~self_type:None signature
               in
               make_elaborated_interface context
-                (Theorem_interface
-                   {
-                     elaborated with
-                     uses = Types.remove_divergence elaborated.uses;
-                     specification_only = true;
-                   })
+                (Theorem_interface { elaborated with specification_only = true })
           | Law_proof { trait_; law; type_; _ } -> (
               let generics, for_type = elaborate_type_head context path type_ in
               match elaborate_trait_reference context trait_ with

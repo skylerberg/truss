@@ -85,7 +85,7 @@ fn remove_last_character(line: mut List[UInt8]) {
 }
 
 fn hidden_line(terminal: Terminal) -> Result[Option[String], SystemError]
-  uses Handles
+  uses Handles, RunForever
 {
   var line: List[UInt8] = []
   var typed: List[UInt8] = []
@@ -114,7 +114,7 @@ fn hidden_line(terminal: Terminal) -> Result[Option[String], SystemError]
 }
 
 public fn read_secret(prompt: StringSlice) -> Result[Option[String], SystemError]
-  uses Console, Handles
+  uses Console, Handles, RunForever
 {
   Console.print(prompt)
   var terminal = Console.terminal()

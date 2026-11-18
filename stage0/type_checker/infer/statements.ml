@@ -260,12 +260,14 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
             (Calls.check_argument state env key
                (make_parameter "key"
                   (State.resolve_associated_type state base_type index "Key"
-                     ~at:(State.read_span state key.id))));
+                     ~at:(State.read_span state key.id)))
+               ~has_generic_type:false);
           ignore
             (Calls.check_argument state env value
                (make_parameter "value"
                   (State.resolve_associated_type state base_type index "Output"
-                     ~at:(State.read_span state value.id))));
+                     ~at:(State.read_span state value.id)))
+               ~has_generic_type:false);
           let call : Syntax.expression = { kind = Expression_error; id = written.id } in
           State.record state call Types.unit;
           let make_argument (argument_expression : Syntax.expression) position mode :
@@ -314,8 +316,7 @@ and check_loop_clause state env (clause : Syntax.loop_clause) =
       State.check_cost state cost;
       match cost.bound with
       | Big_o value | At_most value | Exactly value ->
-          ignore (Hooks.check_expression state env value)
-      | Finite -> ())
+          ignore (Hooks.check_expression state env value))
 
 and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression)
     =

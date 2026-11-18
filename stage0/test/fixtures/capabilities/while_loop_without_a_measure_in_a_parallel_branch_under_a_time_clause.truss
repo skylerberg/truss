@@ -1,7 +1,0 @@
-fn f(count: UInt32)
-  cost time finite
-{
-  parallel {
-    while count != 0 {}
-  }
-}

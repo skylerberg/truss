@@ -2,7 +2,7 @@ trait Walk {
   fn each(self, visit: (fn(Int64) uses generic Granted))
     uses generic Granted
 
-  fn each_finite(self, visit: (fn(Int64) uses generic Granted cost time finite))
+  fn each_finite(self, visit: (fn(Int64) uses generic Granted))
     uses generic Granted
 
   fn each_of[Item](self, items: List[Item], visit: (fn(Item) uses generic Granted))
@@ -17,7 +17,7 @@ impl Walk for Pair {
   {
   }
 
-  fn each_finite(self, visit: (fn(Int64) uses generic Granted cost time finite))
+  fn each_finite(self, visit: (fn(Int64) uses generic Granted))
     uses generic Granted
   {
   }
@@ -36,7 +36,7 @@ impl Walk for Single {
   {
   }
 
-  fn each_finite(self, visit: (fn(Int64) uses generic Granted cost time finite))
+  fn each_finite(self, visit: (fn(Int64) uses generic Granted))
     uses generic Granted
   {
   }

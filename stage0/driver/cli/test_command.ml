@@ -4,7 +4,7 @@ let select snapshot database packages ~paths ~match_ =
   let names = Database.make_name_lookups database in
   List.concat_map
     (fun (file : Path.file) ->
-      let source = Command_packages.read_source snapshot packages file in
+      let source = Command_packages.read_source snapshot database packages file in
       List.filter_map
         (fun (declaration : Resolve.Names.declaration) ->
           match declaration.path with

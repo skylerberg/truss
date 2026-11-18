@@ -1,5 +1,5 @@
 fn f(limit: UInt32)
-  uses Meter
+  uses Meter, RunForever
   cost calls(Meter.tick) == 1
 {
   var index: UInt32 = 0

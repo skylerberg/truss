@@ -42,7 +42,7 @@ public fn cors(
   policy: CorsPolicy,
   next: (fn(own Request, mut Responder) uses generic Granted),
 )
-  uses Tasks, generic Granted
+  uses Tasks, generic Granted, RunForever
 {
   let origin = match request.header("Origin") {
     Some(origin) => origin.to_string()
@@ -298,7 +298,7 @@ public fn rate_limit(
   key: fn(Request) -> String,
   next: (fn(own Request, mut Responder) uses generic Granted),
 )
-  uses Tasks, Clock, generic Granted
+  uses Tasks, Clock, generic Granted, RunForever
 {
   match limiter.take(key(request).slice()) {
     Allowed(_) => next(own request, mut responder)
@@ -369,7 +369,7 @@ public fn csrf(
   policy: CsrfPolicy,
   next: (fn(own Request, mut Responder) uses generic Granted),
 )
-  uses Tasks, generic Granted
+  uses Tasks, generic Granted, RunForever
 {
   if is_cross_origin(request, policy: policy) {
     let _ = mut responder.send(Response.text("cross-origin request refused", status: Status.forbidden))

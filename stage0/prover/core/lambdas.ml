@@ -122,9 +122,7 @@ let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.f
   Fun.protect
     ~finally:(fun () -> context.returns <- saved_returns)
     (fun () ->
-      let inside =
-        enter { frame with locals = remove_temporaries frame.locals; panic = Undeclarable }
-      in
+      let inside = enter { frame with locals = remove_temporaries frame.locals } in
       Facts.run_in_source context frame.source (fun () -> context.run_body inside ~lambdas body);
       match Facts.join context ~value_type:type_ (List.rev context.returns) with
       | Some (returned, Some term) -> Some ({ frame with spent = returned.spent }, term)
@@ -253,18 +251,21 @@ let find_lambda_definition context frame (function_type : Types.function_type)
                 Facts.make_in_range (Facts.substitute_type context frame value_type) application
               with
               | Logic.Boolean true -> ()
-              | range ->
-                  let arguments_in_range =
-                    Logic.conjunction
-                      (List.map2
-                         (fun (name, _) (_, input) ->
-                           Facts.make_in_range
-                             (Facts.substitute_type context frame input)
-                             (Logic.Symbol name))
-                         bound function_type.inputs)
+              | range -> (
+                  let find_argument_in_range (name, _) (_, input) =
+                    Validity.find_parts_in_range context
+                      (Facts.substitute_type context frame input)
+                      (Logic.Symbol name)
                   in
-                  Facts.add_frame_fact context frame
-                    (Logic.forall (bound, Logic.( ==> ) arguments_in_range range)))
+                  match List.map2 find_argument_in_range bound function_type.inputs with
+                  | arguments when List.for_all Option.is_some arguments ->
+                      Facts.add_frame_fact context frame
+                        (Logic.forall
+                           ( bound,
+                             Logic.( ==> )
+                               (Logic.conjunction (List.filter_map Fun.id arguments))
+                               range ))
+                  | _ -> ()))
           | None -> ());
           Some term
       | _ -> None)
@@ -279,7 +280,7 @@ let check_valid context frame location ty term ~deep ~when_ =
         valid
 
 let classify_counting (cost : Mir.cost) : Costs.counting =
-  match cost.bound with Order_of _ | Finite -> Units | At_most _ -> At_most | Exactly _ -> Exactly
+  match cost.bound with Order_of _ -> Units | At_most _ -> At_most | Exactly _ -> Exactly
 
 let list_loop_counters locals (body : Mir.body) =
   let counters = ref [] in
@@ -399,9 +400,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         context.counters <- saved_counters)
       (fun () ->
         let finished =
-          let inside =
-            { inside with locals = remove_temporaries inside.locals; panic = Undeclarable }
-          in
+          let inside = { inside with locals = remove_temporaries inside.locals } in
           let inside =
             List.fold_left2
               (fun inside parameter argument ->

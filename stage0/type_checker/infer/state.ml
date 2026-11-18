@@ -415,10 +415,7 @@ let resolve_capabilities state (capabilities : Types.capability_set) =
       in
       Types.flat_map_capabilities
         (function
-          | Types.Capability_variable variable ->
-              (Types.remove_divergence (read_solved variable) :> Types.capability list)
-          | Types.Divergence (Of_variable variable) ->
-              (Types.list_divergence (read_solved variable) :> Types.capability list)
+          | Types.Capability_variable variable -> (read_solved variable :> Types.capability list)
           | capability -> [ capability ])
         capabilities
   | _ -> capabilities
@@ -439,22 +436,6 @@ and finalize_capabilities state capabilities =
           (function
             | Types.Capability_projection { base; trait; name } ->
                 [ Types.Capability_projection { base = finalize_type state base; trait; name } ]
-            | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
-                [
-                  Types.Divergence
-                    (Of_impl_method
-                       {
-                         self_type = finalize_type state self_type;
-                         trait =
-                           {
-                             trait with
-                             trait_arguments =
-                               List.map (finalize_argument state) trait.trait_arguments;
-                           };
-                         name;
-                         receiver;
-                       });
-                ]
             | capability -> [ capability ])
           capabilities))
 
@@ -565,8 +546,8 @@ let resolve_associated_type state type_ (trait : Types.trait_reference) name
         (Printf.sprintf "`%s` gives no `%s` as a `%s`." (Types.show type_) name
            (Types.show_trait trait))
 
-let compute_callee_uses state (callee : Core.callee) =
-  Callee_uses.compute state.lookups.interface ~list_bounds:(lookup_bounds state) callee
+let make_callee state (target : Core.operand Core.target) =
+  Callee_uses.make_callee state.lookups.interface ~list_bounds:(lookup_bounds state) target
 
 let make_call state ~callee ~arguments ~lends =
   Callee_uses.make_call state.lookups.interface ~list_bounds:(lookup_bounds state) ~callee
@@ -982,30 +963,6 @@ let add_mismatch state (span : Source.Definition_span.t) ~expected ~actual =
         ~fixes:[ fix "Write it as a float." [ insert span.stop ".0" ] ]
         (Printf.sprintf "An integer literal is never a float, and `%s` is expected here."
            (Types.show expected))
-  | Types.Function found, Types.Function wanted
-    when Types.subtract_capabilities (Types.list_divergence found.uses) wanted.uses
-         <> Types.no_capabilities ->
-      let missing =
-        (Types.subtract_capabilities (Types.list_divergence found.uses) wanted.uses
-          :> Types.capability list)
-      in
-      let followed_methods =
-        List.filter_map
-          (function
-            | Types.Divergence (Of_impl_method { self_type; trait; name; _ }) ->
-                Some (Types.show_impl_method self_type trait name)
-            | _ -> None)
-          missing
-      in
-      add_mismatch_diagnostic state Mismatch span ~sides
-        (Printf.sprintf "Expected %s, found %s, which %s." (Types.describe expected)
-           (Types.describe actual)
-           (match followed_methods with
-           | [ followed ] when List.compare_length_with missing 1 = 0 ->
-               Printf.sprintf "terminates only if %s does" followed
-           | _ :: _ :: _ when List.compare_lengths followed_methods missing = 0 ->
-               Printf.sprintf "terminates only if %s do" (String.concat " and " followed_methods)
-           | _ -> "may not terminate"))
   | _ ->
       add_mismatch_diagnostic state Mismatch span ~sides
         (Printf.sprintf "Expected %s, found %s." (Types.describe expected) (Types.describe actual))
@@ -1147,7 +1104,7 @@ let check_operand_clause state (cost : Syntax.cost) (operand : Interface.Elabora
            "`%s` is an upper bound on one call, and a call may spend less, so an exact amount that \
             names it would be false for that call. State this bound with `<=` or `O(...)`."
            shown)
-  | Big_o _ | At_most _ | Finite -> ()
+  | Big_o _ | At_most _ -> ()
 
 let check_cost state (cost : Syntax.cost) =
   check_resource state cost.resource;
@@ -1155,7 +1112,6 @@ let check_cost state (cost : Syntax.cost) =
   | Big_o value | At_most value | Exactly value ->
       List.iter (check_operand_clause state cost)
         (Interface.Elaborator.list_cost_operands state.context value)
-  | Finite -> ()
 
 let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let make = make_synthetic_expression state ~origin in
@@ -1165,18 +1121,20 @@ let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
     | Types.Named { path; arguments } -> (path, arguments)
     | type_ -> raise_bug "a slice of `%s`" (Types.show type_)
   in
-  let make_callee name : Core.callee =
-    Function
-      {
-        path = Method { owner = path; name; receiver = Read };
-        instantiation = { Types.no_instantiation with type_arguments };
-      }
+  let make_method_callee name =
+    make_callee state
+      (Function
+         {
+           path = Method { owner = path; name; receiver = Read };
+           instantiation = { Types.no_instantiation with type_arguments };
+         })
   in
   let build_read_argument = Operands.build_argument Read in
   let start = match start with Some start -> start | None -> make uint64 (Integer Z.zero) in
   match stop with
   | None ->
-      Slice { base; callee = make_callee "slice_from"; bounds = [ build_read_argument start ] }
+      Slice
+        { base; callee = make_method_callee "slice_from"; bounds = [ build_read_argument start ] }
   | Some stop ->
       let stop =
         if inclusive then
@@ -1187,11 +1145,17 @@ let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
       Slice
         {
           base;
-          callee = make_callee "slice_range";
+          callee = make_method_callee "slice_range";
           bounds = [ build_read_argument start; build_read_argument stop ];
         }
 
-type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
+type conversion =
+  | From_never
+  | Owned_to_view
+  | View_to_owned
+  | Function_widening
+  | To_integer
+  | From_integer
 
 let find_view_as state ~owned ~view =
   match (Types.find_view (normalize state owned), normalize state view) with
@@ -1200,7 +1164,14 @@ let find_view_as state ~owned ~view =
       Some found_view
   | _ -> None
 
-let convert state env ?argument ?expression (span : Source.Definition_span.t) ~actual ~expected =
+let find_owner_as state ~view ~owner =
+  match normalize state owner with
+  | Types.Named { path; _ } as owner when Well_known.is List path || Well_known.is String path ->
+      find_view_as state ~owned:owner ~view
+  | _ -> None
+
+let convert state env ?argument ?(takes_view_as_owner = false) ?expression
+    (span : Source.Definition_span.t) ~actual ~expected =
   let is_argument = Option.is_some argument in
   let record_conversion (conversion : conversion option) =
     match (conversion, expression) with
@@ -1221,6 +1192,7 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                   if Types.equal inner.type_ expected then inner else convert Widen
               | To_integer -> convert To_integer
               | From_integer -> convert From_integer
+              | View_to_owned -> convert View_to_owned
               | Owned_to_view
                 when argument = Some Types.Mut
                      && (Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_)
@@ -1256,11 +1228,20 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
     report_mismatch state span ~expected ~actual;
     None
   in
-  match if is_argument then find_view_as state ~owned:actual ~view:expected else None with
-  | Some view ->
-      if not (Unify.unify state.unifier wanted view) then
+  let between_owner_and_view =
+    match if is_argument then find_view_as state ~owned:actual ~view:expected else None with
+    | Some view -> Some (Owned_to_view, wanted, view)
+    | None when takes_view_as_owner ->
+        Option.map
+          (fun view -> (View_to_owned, actual_type, view))
+          (find_owner_as state ~view:actual ~owner:expected)
+    | None -> None
+  in
+  match between_owner_and_view with
+  | Some (conversion, written_view, view) ->
+      if not (Unify.unify state.unifier written_view view) then
         report_mismatch state span ~expected ~actual;
-      Some Owned_to_view
+      Some conversion
   | None -> (
       match (actual_type, wanted, expression) with
       | Types.Never, _, _ -> Some From_never

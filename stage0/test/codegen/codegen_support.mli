@@ -80,23 +80,27 @@ val expect_status :
 
 val example : Path.module_
 val example_file : Path.file
-val make_database : ?checks:bool -> Project.package list -> Database.t
+val make_database : Project.package list -> Database.t
 val make_example_package : (Path.file * string) list -> Project.package list
 
 val make_backend :
-  ?results:Backend.results -> ?evaluation_time_limit_ms:int -> Database.t -> Backend.t
+  ?results:Backend.results ->
+  ?evaluation_time_limit_ms:int ->
+  ?profile:Backend.profile ->
+  Database.t ->
+  Backend.t
 
 val load_files :
   ?results:Backend.results ->
   ?roots:Lowered.Item.t list ->
-  ?checks:bool ->
+  ?profile:Backend.profile ->
   (Path.file * string) list ->
   Database.t * Backend.t
 
 val load :
   ?results:Backend.results ->
   ?roots:Lowered.Item.t list ->
-  ?checks:bool ->
+  ?profile:Backend.profile ->
   string ->
   Database.t * Backend.t
 
@@ -105,10 +109,7 @@ val list_tests : Database.t -> Path.t list
 val run_source : string -> string
 val expect_output : string -> String.t -> unit
 val expect_pass : string -> string -> unit
-
-val run_main :
-  ?arguments:string list -> ?input:string -> ?checks:bool -> string -> int * string * string
-
+val run_main : ?arguments:string list -> ?input:string -> string -> int * string * string
 val drop_shapes : (string * Memory_layout.shape) list
 val standard_context : Monomorphic.context
 val make_standard_type : string -> string -> ?arguments:Ground.argument list -> unit -> Ground.ty

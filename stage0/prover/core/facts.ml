@@ -325,11 +325,10 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
          | Some term when not (is_parameter term) -> [ (term, "result") ]
          | _ -> []));
     template_clause;
-    panic_clause = None;
   }
 
-let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (frame : State.frame)
-    code location message goal =
+let oblige ?template_clause ?cited ?(fixes = []) context (frame : State.frame) code location message
+    goal =
   match
     make_closed_obligation ?template_clause context frame code location message
       (add_quantifier_facts
@@ -345,24 +344,9 @@ let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (fram
             | None -> [])
         | fixes -> fixes
       in
-      context.obligations <- { obligation with cited; fixes; panic_clause } :: context.obligations;
+      context.obligations <- { obligation with cited; fixes } :: context.obligations;
       assume context frame goal
   | None -> ()
-
-let oblige ?template_clause ?cited ?(fixes = []) context frame code location message goal =
-  record_obligation ?template_clause ?cited ~fixes ~panic_clause:None context frame code location
-    message goal
-
-let oblige_safe_operation ?cited ?(fixes = []) (context : State.context) (frame : State.frame) code
-    location message goal =
-  let record panic_clause =
-    record_obligation ?cited ~fixes ~panic_clause context frame code location message goal
-  in
-  match frame.panic with
-  | Declared when frame.source.key = Some context.home ->
-      if frame.makes_obligations then assume context frame goal
-  | Undeclared clause -> record (Some clause)
-  | Declared | Undeclarable -> record None
 
 let quote (source : State.source) origin =
   match source.key with Some key -> State.Quote (key, origin) | None -> Text "this expression"

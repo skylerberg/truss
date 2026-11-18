@@ -855,15 +855,16 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           reference
                       with
                       | Some (From_impl { impl; substitution }) ->
-                          Core.Trait_method
-                            {
-                              trait = reference;
-                              name = "equal";
-                              receiver = Read;
-                              self_type = string_type;
-                              instantiation = Types.no_instantiation;
-                              evidence = Impl { impl; substitution };
-                            }
+                          Callee_uses.make_callee lookups.interface ~list_bounds
+                            (Trait_method
+                               {
+                                 trait = reference;
+                                 name = "equal";
+                                 receiver = Read;
+                                 self_type = string_type;
+                                 instantiation = Types.no_instantiation;
+                                 evidence = Impl { impl; substitution };
+                               })
                       | _ -> raise_bug "`String` has no `Equal`"
                     in
                     let unknown =

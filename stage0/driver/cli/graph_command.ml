@@ -1,40 +1,13 @@
 type direction = Dependents | Dependencies
 
-let has_suffix names ~suffix =
-  let skipped = List.length names - List.length suffix in
-  skipped >= 0 && List.drop skipped names = suffix
-
-let matches (argument : Path_argument.t) (path : Path.t) =
-  let suffix = argument.prefix @ [ argument.last ] in
-  let is_named (module_ : Path.module_) name =
-    has_suffix (Path.list_module_parts module_ @ [ name ]) ~suffix
-  in
-  match (path, argument.member) with
-  | Top { module_; name }, None -> is_named module_ name
-  | (Method { owner; name; _ } | Member_constant { owner; name }), Some member -> (
-      name = member
-      &&
-      match owner with
-      | Top { module_; name } | Impl { for_type = Top { module_; name }; _ } ->
-          is_named module_ name
-      | _ -> false)
-  | (Method { name; _ } | Member_constant { name; _ }), None ->
-      argument.prefix = [] && name = argument.last
-  | _ -> false
-
 let list_definitions snapshot database argument =
   let packages = List.map snd (Workspace.list_packages snapshot) in
   let names = Database.make_name_lookups database in
-  List.sort_uniq Path.compare
-    (List.concat_map
-       (fun package ->
-         List.filter_map
-           (fun (declaration : Resolve.Names.declaration) ->
-             if declaration.ordinal = 0 && matches argument declaration.path then
-               Some declaration.path
-             else None)
-           (names.list_package_declarations package))
-       packages)
+  List.filter_map
+    (function
+      | Path_argument.Definition path when Option.is_some (names.find_key path) -> Some path
+      | Package _ | Module _ | Definition _ -> None)
+    (Path_argument.resolve names packages argument)
 
 type line = { reader : Path.t; read_kinds : string list; read : Path.t; reader_kinds : string list }
 
@@ -109,7 +82,7 @@ let run ~direction ~name =
   let snapshot, _ = Command_packages.load_current () in
   let database = Workspace.open_database snapshot in
   match list_definitions snapshot database argument with
-  | [] -> Outcome.raise_cannot_run "No definition named %s in this worktree." name
+  | [] -> Outcome.raise_cannot_run "No definition named %s is visible here." name
   | targets ->
       ignore
         (Database.prove database

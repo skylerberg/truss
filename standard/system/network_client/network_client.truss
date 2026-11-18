@@ -3,7 +3,9 @@ use standard::system::sockets
 
 internal type SystemNetworkClient()
 
-impl NetworkClient for SystemNetworkClient {
+impl NetworkClient for SystemNetworkClient
+  uses RunForever
+{
   fn resolve(self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
     sockets::addresses_of(host)
   }

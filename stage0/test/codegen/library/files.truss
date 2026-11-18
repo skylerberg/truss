@@ -257,7 +257,7 @@ test "memory files refuse operations a file's permissions forbid" {
   }
 }
 
-test "a file opened in memory files reads, writes, seeks, and changes its length through its handle" {
+test "a file opened in memory files reads, writes, seeks, and changes its length through its handle" uses Panic {
   var memory = files::MemoryFiles.new()
   provide mut memory {
     var file = FileWrite.open(path_of("/log"), mode: files::WriteMode.Update).expect("the file opens")
@@ -292,7 +292,7 @@ test "a file opened in memory files reads, writes, seeks, and changes its length
   }
 }
 
-test "a file reader over memory files reads lines through Handles" {
+test "a file reader over memory files reads lines through Handles" uses Panic {
   var memory = files::MemoryFiles.new().with_text(path_of("/fresh"), contents: "line one\r\nline two\nlast")
   provide mut memory {
     var reader = FileRead.open(path_of("/fresh")).expect("the file opens")
@@ -309,7 +309,7 @@ test "a file reader over memory files reads lines through Handles" {
   }
 }
 
-test "a removed file stays readable through a handle that was open" {
+test "a removed file stays readable through a handle that was open" uses Panic {
   var memory = files::MemoryFiles.new().with_text(path_of("/gone"), contents: "still here")
   provide mut memory {
     var reader = FileRead.open(path_of("/gone")).expect("the file opens")
@@ -319,7 +319,9 @@ test "a removed file stays readable through a handle that was open" {
   }
 }
 
-fn project() -> files::MemoryFiles {
+fn project() -> files::MemoryFiles
+  uses RunForever
+{
   files::MemoryFiles.new()
     .with_text(path_of("/project/README"), contents: "read me")
     .with_text(path_of("/project/source/main.truss"), contents: "main")

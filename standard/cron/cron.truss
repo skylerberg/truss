@@ -207,7 +207,7 @@ public fn Schedule.next_after(self, after: Instant) -> Option[Instant] {
 }
 
 public fn run(schedule: Schedule, work: (fn() uses generic Granted))
-  uses Clock, Tasks, generic Granted
+  uses Clock, Tasks, generic Granted, RunForever
 {
   while true {
     let now = Clock.now()

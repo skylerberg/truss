@@ -325,8 +325,8 @@ let grows lookups (start : Path.t) =
 
 let not_strictly_positive_message =
   "A function stored in such a value could be called on the value and call itself through it, so a \
-   function with a `time` clause might not terminate. Remove the `time` clause from the function \
-   type, or pass the function the fields that it needs instead of the whole value."
+   function without `RunForever` might run forever. Add `RunForever` to the function type's \
+   `uses`, or pass the function the fields that it needs instead of the whole value."
 
 let read_written_variant (variants : Syntax.variant list) (variant : Types.variant) =
   match
@@ -500,11 +500,16 @@ let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
   in
   let edges = ref [] in
   Core_walk.walk_definition
-    (Core_walk.make_callee_visitor (function
-      | Function { path; instantiation = { type_arguments; _ } }
-        when Path.locate_package path = key.module_.package && type_arguments <> [] ->
-          edges := (path, List.exists grows type_arguments) :: !edges
-      | _ -> ()))
+    {
+      Core_walk.ignore_all with
+      callee =
+        (fun callee ->
+          match callee.target with
+          | Function { path; instantiation = { type_arguments; _ } }
+            when Path.locate_package path = key.module_.package && type_arguments <> [] ->
+              edges := (path, List.exists grows type_arguments) :: !edges
+          | _ -> ());
+    }
     form.definition;
   List.rev !edges
 
@@ -767,7 +772,8 @@ let list_used_paths (lookups : Lookups.t) key =
     | Constant_bound path -> use path
     | Integer_bound _ -> ()
   in
-  let use_callee : Core.callee -> unit = function
+  let use_callee (callee : Core.callee) =
+    match callee.target with
     | Function { path; _ } -> use path
     | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> ()
   in
@@ -777,10 +783,7 @@ let list_used_paths (lookups : Lookups.t) key =
       callee = use_callee;
       expression =
         (fun (node : Core.expression) ->
-          match node.kind with
-          | Call { callee; _ } -> use_callee callee
-          | Function_value { path; _ } -> use path
-          | _ -> ());
+          match node.kind with Function_value { path; _ } -> use path | _ -> ());
       place =
         (function
         | Constant { path; _ } -> use path

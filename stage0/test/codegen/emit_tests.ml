@@ -462,6 +462,7 @@ let () =
                        length = Constant (Integer (UInt64, Z.of_int 4));
                        site = { definition = Codegen_support.definition "entry"; offset = 4 };
                        reported = None;
+                       trace = None;
                      });
               ];
           ]
@@ -638,6 +639,7 @@ let operate builder ?destination ?(type_arguments = [ Codegen_support.int32 ]) ?
     (Codegen_support.make_shape_env ())
     builder intrinsic_types operation ~type_arguments arguments ~destination
     ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+    ~trace:None
 
 let () =
   Codegen_support.test
@@ -894,6 +896,7 @@ let () =
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
           ~destination
           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+          ~trace:None
       in
       Codegen_support.expect_status ~extra 53
         [
@@ -973,12 +976,13 @@ let () =
           }
       in
       let operate builder ?destination operation arguments =
-        Backend.For_testing.Intrinsics.lower ~checks:true
+        Backend.For_testing.Intrinsics.lower
           ~value_arguments:[ Z.of_int 3 ]
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
           ~destination
           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+          ~trace:None
       in
       let make_program_with pushed =
         [
@@ -1106,11 +1110,12 @@ let () =
   Codegen_support.test "a storage is shortened in place and keeps its room" (fun () ->
       let storage_ty = Storage.make_storage_type Codegen_support.uint8 in
       let operate_checked builder ?destination operation arguments =
-        Backend.For_testing.Intrinsics.lower ~checks:true
+        Backend.For_testing.Intrinsics.lower
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
           ~destination
           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+          ~trace:None
       in
       let make_shortened ~to_ =
         [
@@ -1188,11 +1193,12 @@ let () =
       in
       let operate_checked builder ?destination operation arguments =
         ignore
-          (Backend.For_testing.Intrinsics.lower ~checks:true
+          (Backend.For_testing.Intrinsics.lower
              (Codegen_support.make_shape_env ~extra ())
              builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
              ~destination
-             ~site:{ definition = Codegen_support.definition "entry"; offset = 0 })
+             ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+             ~trace:None)
       in
       let byte : Lowered.operand = Constant (Integer (UInt8, Z.of_int 1)) in
       let expect_stop saying run_operation =

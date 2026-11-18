@@ -16,7 +16,7 @@ let list_holes snapshot packages database (names : Resolve.Names.lookups)
   match Database.read_resolved database key with
   | Some resolved ->
       let ({ file; base } : Resolve.Names.place) = names.read_place key in
-      let source = Command_packages.read_source snapshot packages file in
+      let source = Command_packages.read_source snapshot database packages file in
       List.map
         (fun (hole : Inspect.hole) ->
           let line, column = Source.compute_position source (base + hole.offset) in

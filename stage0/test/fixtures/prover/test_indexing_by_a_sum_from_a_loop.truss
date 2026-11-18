@@ -1,4 +1,4 @@
-test "a" {
+test "a" uses Panic {
   let counts: List[UInt64] = [1, 2, 3]
   let numbers: List[Int64] = [4, 5, 6]
   var total: UInt64 = 0

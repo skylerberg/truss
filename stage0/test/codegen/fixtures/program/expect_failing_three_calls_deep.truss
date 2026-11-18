@@ -1,0 +1,24 @@
+fn first(values: Slice[Int64]) -> Int64
+  uses Panic
+{
+  values.first().copy().expect("the values are not empty")
+}
+
+fn doubled_first(values: Slice[Int64]) -> Int64
+  uses Panic
+{
+  first(values).saturating_multiply(2)
+}
+
+fn report(values: Slice[Int64]) -> Int64
+  uses Panic
+{
+  doubled_first(values)
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Panic
+{
+  let empty: List[Int64] = []
+  if report(empty.slice()) == 0 { ExitCode.success } else { ExitCode.failure }
+}

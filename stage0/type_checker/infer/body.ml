@@ -85,7 +85,7 @@ let list_clause_expressions (clauses : Syntax.clause list) =
       | Decreases measures -> List.map (fun measure -> (measure, `Cost_function)) measures
       | Cost { bound = Big_o value | At_most value | Exactly value; _ } ->
           [ (value, `Cost_function) ]
-      | Cost { bound = Finite; _ } | Uses _ | Clause_error -> [])
+      | Uses _ | Clause_error -> [])
     clauses
 
 let check_clauses state env (clauses : Syntax.clause list) =
@@ -689,13 +689,21 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
   in
   let called = ref evidence_packages in
   Core_walk.walk_definition
-    (Core_walk.make_callee_visitor (function
-      | Trait_method { trait; evidence; _ } ->
-          called :=
-            Path.locate_package trait.trait
-            :: (match evidence with Impl { impl; _ } -> [ Path.locate_package impl ] | _ -> [])
-            @ !called
-      | _ -> ()))
+    {
+      Core_walk.ignore_all with
+      callee =
+        (fun callee ->
+          match callee.target with
+          | Trait_method { trait; evidence; _ } ->
+              called :=
+                Path.locate_package trait.trait
+                ::
+                (match evidence with
+                | Impl { impl; _ } -> [ Path.locate_package impl ]
+                | _ -> [])
+                @ !called
+          | _ -> ());
+    }
     form.definition;
   List.sort_uniq compare (named @ !called)
 

@@ -578,7 +578,6 @@ internal fn remove_dot_segments(path: StringSlice) -> String
 }
 
 internal fn Url.merge_path(self, relative: StringSlice) -> String
-  cost time finite
 {
   let base = self.path.slice()
   var merged: String = ""
@@ -628,7 +627,6 @@ public fn decode_component(text: StringSlice) -> Result[String, ParseError]
 }
 
 public fn encode_query(parameters: Slice[Parameter]) -> String
-  cost time finite
 {
   var output: String = ""
   for index in 0..parameters.length() {
@@ -766,7 +764,6 @@ public fn Url.query(self) -> Option[StringSlice]
 }
 
 public fn Url.query_parameters(self) -> List[Parameter]
-  cost time finite
 {
   match self.query {
     Some(query) => if decode_query(query.slice()) is Ok(parameters) { parameters } else { [] }
@@ -775,7 +772,6 @@ public fn Url.query_parameters(self) -> List[Parameter]
 }
 
 public fn Url.query_parameter(self, name: StringSlice) -> Option[String]
-  cost time finite
 {
   let parameters = self.query_parameters()
   for index in 0..parameters.length() {
@@ -793,7 +789,6 @@ public fn Url.fragment(self) -> Option[StringSlice]
 }
 
 public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]
-  cost time finite
 {
   if scheme_end(reference) < reference.length() {
     var absolute = parse(reference)?
@@ -831,7 +826,6 @@ public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]
 }
 
 public fn Url.with_path(own self, path: StringSlice) -> Url
-  cost time finite
 {
   var changed = own self
   let escaped = percent_encode(path, how: EscapeSet.AsPath)
@@ -846,7 +840,6 @@ public fn Url.with_path(own self, path: StringSlice) -> Url
 }
 
 public fn Url.with_path_segment(own self, segment: StringSlice) -> Url
-  cost time finite
 {
   var changed = own self
   let length = changed.path.length()
@@ -858,7 +851,6 @@ public fn Url.with_path_segment(own self, segment: StringSlice) -> Url
 }
 
 public fn Url.with_query(own self, parameters: Slice[Parameter]) -> Url
-  cost time finite
 {
   var changed = own self
   changed.query = if parameters.length() == 0 { None } else { Some(encode_query(parameters)) }
@@ -866,7 +858,6 @@ public fn Url.with_query(own self, parameters: Slice[Parameter]) -> Url
 }
 
 public fn Url.with_query_parameter(own self, name: StringSlice, value: StringSlice) -> Url
-  cost time finite
 {
   var changed = own self
   var query: String = ""
@@ -887,7 +878,6 @@ public fn Url.with_query_parameter(own self, name: StringSlice, value: StringSli
 }
 
 public fn Url.with_fragment(own self, fragment: Option[String]) -> Url
-  cost time finite
 {
   var changed = own self
   changed.fragment = match fragment {
@@ -1019,7 +1009,6 @@ impl FromTemplate for Url {
 }
 
 internal fn template_text(literals: Slice[text::Literal], part: StringSlice) -> String
-  cost time finite
 {
   var text = ""
   var index: UInt64 = 0
@@ -1053,7 +1042,6 @@ internal fn path_start(text: StringSlice) -> UInt64
 
 internal fn parses_with_parts_after_authority(literals: Slice[text::Literal], part: StringSlice) -> Bool
   requires literals.length() > 0
-  cost time finite
 {
   let text = template_text(literals, part: part)
   if !(parse(text.slice()) is Ok(_)) {
@@ -1063,7 +1051,6 @@ internal fn parses_with_parts_after_authority(literals: Slice[text::Literal], pa
 }
 
 public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
-  cost time finite
 {
   literals.length() > 0
     && parses_with_parts_after_authority(literals, part: "~")

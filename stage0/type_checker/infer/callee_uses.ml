@@ -1,14 +1,8 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
 
-let instantiate (interface : Interface.Lookups.t) (callee : Core.callee) : Types.capability_set =
-  let read_method_divergence ~owner ~name ~receiver =
-    match Interface.Definition.find_trait_method interface owner ~name ~receiver with
-    | Some method_ ->
-        Types.list_divergence
-          (Interface.Definition.read_method_signature interface ~owner method_).uses
-    | None -> raise_bug "`%s` has no method `%s`" (Path.show owner) name
-  in
-  match callee with
+let instantiate (interface : Interface.Lookups.t) (target : Core.operand Core.target) :
+    Types.capability_set =
+  match target with
   | Function { path; instantiation } -> (
       let signature =
         match Intrinsic.find_operation path with
@@ -21,63 +15,29 @@ let instantiate (interface : Interface.Lookups.t) (callee : Core.callee) : Types
             (Types.make_signature_substitution signature instantiation)
             signature.uses
       | None -> raise_bug "the callee `%s` has no signature" (Path.show path))
-  | Trait_method { trait; name; receiver; self_type; instantiation; evidence } -> (
+  | Trait_method { trait; name; receiver; self_type; instantiation; evidence = _ } -> (
       match
         ( Interface.Definition.find_trait_method interface trait.trait ~name ~receiver,
           Interface.Definition.find_trait_interface interface trait.trait )
       with
-      | Some method_, Some trait_interface -> (
+      | Some method_, Some trait_interface ->
           let signature =
             Interface.Definition.read_method_signature interface ~owner:trait.trait method_
           in
-          let declared =
-            Types.substitute_capabilities
-              (Types.combine_substitutions
-                 (Types.make_trait_substitution trait_interface.trait_generics ~self:self_type trait)
-                 (Types.make_signature_substitution signature instantiation))
-              signature.uses
-          in
-          let replace_divergence divergence =
-            Types.union_capabilities (Types.remove_divergence declared) divergence
-          in
-          match evidence with
-          | Impl { impl; substitution } -> (
-              match
-                Interface.Impls.read_signature interface (Method { owner = impl; name; receiver })
-              with
-              | Some implemented ->
-                  let own_generics =
-                    List.filter
-                      (fun (generic : Types.generic) ->
-                        Option.is_none (Types.find_argument generic.generic substitution))
-                      implemented.generics
-                  in
-                  replace_divergence
-                    (Types.list_divergence
-                       (Types.substitute_capabilities
-                          (Types.combine_substitutions substitution
-                             (Types.combine_substitutions
-                                (Types.make_substitution own_generics instantiation.type_arguments)
-                                (Types.make_capability_substitution
-                                   implemented.capability_parameters
-                                   instantiation.capability_arguments)))
-                          implemented.uses))
-              | None -> declared)
-          | Bound when not (Types.terminates signature.uses) ->
-              replace_divergence
-                (Types.make_capability_set
-                   [
-                     Types.Divergence
-                       (Of_impl_method
-                          { self_type; trait = { trait with associated = [] }; name; receiver });
-                   ])
-          | Bound | Dynamic -> declared)
+          Types.substitute_capabilities
+            (Types.combine_substitutions
+               (Types.make_trait_substitution trait_interface.trait_generics ~self:self_type trait)
+               (Types.make_signature_substitution signature instantiation))
+            signature.uses
       | _ -> raise_bug "`%s` has no method `%s`" (Path.show trait.trait) name)
-  | Capability_method { capability; name } ->
-      Types.union_capabilities
-        (Types.make_capability_set [ Types.Capability capability ])
-        (read_method_divergence ~owner:capability ~name ~receiver:Static)
-  | Intrinsic _ -> Types.no_capabilities
+  | Capability_method { capability; name } -> (
+      match Interface.Definition.find_trait_method interface capability ~name ~receiver:Static with
+      | Some method_ ->
+          Types.union_capabilities
+            (Types.make_capability_set [ Types.Capability capability ])
+            (Interface.Definition.read_method_signature interface ~owner:capability method_).uses
+      | None -> raise_bug "`%s` has no method `%s`" (Path.show capability) name)
+  | Intrinsic { operation; _ } -> (Intrinsic_signatures.make_signature operation).uses
   | Indirect function_value -> (
       let type_ =
         match function_value with
@@ -89,9 +49,12 @@ let instantiate (interface : Interface.Lookups.t) (callee : Core.callee) : Types
       | Types.Error _ -> Types.no_capabilities
       | other -> raise_bug "a call through a value of type `%s`" (Types.show other))
 
-let compute (interface : Interface.Lookups.t) ~list_bounds (callee : Core.callee) :
+let compute (interface : Interface.Lookups.t) ~list_bounds (target : Core.operand Core.target) :
     Types.capability_set =
-  Interface.Impls.normalize_capabilities interface ~list_bounds (instantiate interface callee)
+  Interface.Impls.normalize_capabilities interface ~list_bounds (instantiate interface target)
 
-let make_call interface ~list_bounds ~(callee : Core.callee) ~arguments ~lends : Core.call =
-  { callee; arguments; lends; uses = compute interface ~list_bounds callee }
+let make_callee interface ~list_bounds (target : Core.operand Core.target) : Core.callee =
+  { target; uses = compute interface ~list_bounds target }
+
+let make_call interface ~list_bounds ~callee ~arguments ~lends : Core.call =
+  { callee = make_callee interface ~list_bounds callee; arguments; lends }

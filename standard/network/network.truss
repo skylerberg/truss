@@ -51,7 +51,6 @@ public fn IpAddress.is_multicast(self) -> Bool
 }
 
 internal fn write_dotted(output: mut String, first: UInt8, second: UInt8, third: UInt8, fourth: UInt8)
-  cost time finite
 {
   first.display(mut output)
   mut output.push(".")
@@ -106,7 +105,6 @@ internal fn is_ipv4_mapped(octets: Array[UInt8, 16]) -> Bool
 }
 
 internal fn write_groups(output: mut String, octets: Array[UInt8, 16])
-  cost time finite
 {
   if is_ipv4_mapped(octets) {
     mut output.push("::ffff:")

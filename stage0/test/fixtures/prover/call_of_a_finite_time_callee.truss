@@ -1,5 +1,4 @@
 fn g() -> Int64
-  cost time finite
 {
   0
 }

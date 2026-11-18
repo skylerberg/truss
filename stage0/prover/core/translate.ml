@@ -82,7 +82,6 @@ let make_empty_frame source =
     result = None;
     condition = Logic.Boolean true;
     makes_obligations = true;
-    panic = Undeclarable;
     bound = [];
     binders = [];
     substitution = Types.no_substitution;
@@ -105,29 +104,24 @@ type promise = {
 let list_promises context (source : State.source) locals (costs : Mir.cost list) ~inherited =
   List.filter_map
     (fun (cost : Mir.cost) ->
-      match cost with
-      | { resource = Metric Time; bound = Finite; _ } -> None
-      | _ -> (
-          match Contracts.find_resource cost ~locals with
-          | None ->
-              Facts.raise_unsupported
-                (Facts.locate context source cost.origin)
-                "this `calls` target"
-          | Some resource ->
-              let counter =
-                {
-                  Costs.resource;
-                  counting = Lambdas.classify_counting cost;
-                  amortized = cost.amortized;
-                }
-              in
-              (match (cost.resource, resource) with
-              | Calls (Function_parameter local), Calls (Through term) ->
-                  context.call_targets <- (term, local) :: context.call_targets
-              | _ -> ());
-              if counter.counting = Units && not (List.mem counter context.bounded_counters) then
-                context.bounded_counters <- counter :: context.bounded_counters;
-              Some { counter; clause = cost; written_in = source; inherited }))
+      match Contracts.find_resource cost ~locals with
+      | None ->
+          Facts.raise_unsupported (Facts.locate context source cost.origin) "this `calls` target"
+      | Some resource ->
+          let counter =
+            {
+              Costs.resource;
+              counting = Lambdas.classify_counting cost;
+              amortized = cost.amortized;
+            }
+          in
+          (match (cost.resource, resource) with
+          | Calls (Function_parameter local), Calls (Through term) ->
+              context.call_targets <- (term, local) :: context.call_targets
+          | _ -> ());
+          if counter.counting = Units && not (List.mem counter context.bounded_counters) then
+            context.bounded_counters <- counter :: context.bounded_counters;
+          Some { counter; clause = cost; written_in = source; inherited })
     costs
 
 let show_promiser_kind (lookups : Lookups.t) (source : State.source) =
@@ -147,7 +141,6 @@ let keep_promise context (frame : State.frame) (promise : promise) ~(at : State.
     match promise.clause.bound with
     | Order_of amount | At_most amount | Exactly amount ->
         snd (Validity.read_specification context { at with makes_obligations = false } amount)
-    | Finite -> Costs.zero
   in
   let goal =
     match promise.counter.counting with
@@ -260,21 +253,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
             | _ -> ());
             Validity.assume_valid context frame ty term;
             Facts.bind frame (Core_local local) ty term)
-      {
-        (make_empty_frame source) with
-        substitution;
-        panic =
-          (match signature with
-          | Some { uses; _ } when not proof -> (
-              if Types.may_panic uses then Declared
-              else
-                match
-                  Interface.Impls.find_capability_declaration lookups.interface path Types.panic
-                with
-                | Some (Declared_by clause) -> Undeclared clause
-                | Some (Fixed_by_trait _) | None -> Undeclarable)
-          | Some _ | None -> Undeclarable);
-      }
+      { (make_empty_frame source) with substitution }
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
@@ -396,8 +375,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
         match promise.clause.bound with
         | Order_of amount | At_most amount | Exactly amount ->
             let result = Option.map (Facts.arrive context start "result") output in
-            ignore (Validity.read_specification context { start with result } amount)
-        | Finite -> ())
+            ignore (Validity.read_specification context { start with result } amount))
     promised;
   Reader.read_body context start ~lambdas:mir.lambdas mir.body;
   let returns = List.rev context.returns in

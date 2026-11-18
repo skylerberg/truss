@@ -45,7 +45,7 @@ let fix snapshot packages =
           match Diagnostic.list_machine_applicable diagnostics with
           | [] -> []
           | chosen ->
-              let source = Command_packages.read_source snapshot packages file in
+              let source = Command_packages.read_source snapshot database packages file in
               let edits =
                 List.concat_map
                   (fun (diagnostic : Diagnostic.t) ->

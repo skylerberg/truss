@@ -1,15 +1,13 @@
-val instantiate : Interface.Lookups.t -> Core.callee -> Types.capability_set
-
-val compute :
+val make_callee :
   Interface.Lookups.t ->
   list_bounds:(Types.parameter -> Types.trait_reference list) ->
-  Core.callee ->
-  Types.capability_set
+  Core.operand Core.target ->
+  Core.callee
 
 val make_call :
   Interface.Lookups.t ->
   list_bounds:(Types.parameter -> Types.trait_reference list) ->
-  callee:Core.callee ->
+  callee:Core.operand Core.target ->
   arguments:Core.argument list ->
   lends:Types.mode option ->
   Core.call

@@ -48,7 +48,9 @@ public fn Setup.new() -> Setup {
   )
 }
 
-public fn Setup.with_file(own self, path: Path, contents: StringSlice) -> Setup {
+public fn Setup.with_file(own self, path: Path, contents: StringSlice) -> Setup
+  uses RunForever
+{
   var changed = own self
   changed.files = own changed.files.with_text(path, contents: contents)
   changed
@@ -179,7 +181,6 @@ fn endpoint_of(handle: streams::Handle) -> Option[UInt64] {
 }
 
 fn same_host(first: network::IpAddress, second: network::IpAddress) -> Bool
-  cost time finite
 {
   first == second || first.is_unspecified() || second.is_unspecified()
 }
@@ -426,7 +427,9 @@ internal fn State.timeout_of(self, blocking: Blocking) -> Option[Duration] {
   }
 }
 
-internal fn State.close(mut self, endpoint: UInt64) -> Result[Unit, SystemError] {
+internal fn State.close(mut self, endpoint: UInt64) -> Result[Unit, SystemError]
+  uses RunForever
+{
   match self.endpoint(endpoint) {
     Closed => return Err(SystemError.Closed)
     Connected(stream) => {
@@ -784,7 +787,7 @@ public fn World.from(setup: own Setup, seed: UInt64 = 0) -> World {
 }
 
 fn World.preemption_point(self)
-  uses Panic
+  uses Panic, RunForever
 {
   provide self.tasks {
     Tasks.yield_now()
@@ -792,7 +795,7 @@ fn World.preemption_point(self)
 }
 
 fn World.clock_time(self) -> Instant
-  uses Panic
+  uses Panic, RunForever
 {
   provide self.tasks {
     self.start + self.tasks.elapsed()
@@ -886,7 +889,7 @@ public fn World.commands(self) -> List[List[String]]
 }
 
 fn World.wake(self)
-  uses Panic
+  uses Panic, RunForever
 {
   provide self.tasks {
     Tasks.wake(intrinsic::shared_key(self.state))
@@ -894,7 +897,7 @@ fn World.wake(self)
 }
 
 fn World.wait_until_done(self, blocking: Blocking, reason: StringSlice) -> Result[Completion, SystemError]
-  uses Panic
+  uses Panic, RunForever
 {
   provide self.tasks {
     let key = intrinsic::shared_key(self.state)
@@ -915,7 +918,7 @@ fn World.wait_until_done(self, blocking: Blocking, reason: StringSlice) -> Resul
 }
 
 fn World.perform(self, blocking: Blocking, reason: StringSlice) -> Result[Completion, SystemError]
-  uses Panic
+  uses Panic, RunForever
 {
   self.preemption_point()
   provide self.tasks {
@@ -938,7 +941,7 @@ fn World.perform(self, blocking: Blocking, reason: StringSlice) -> Result[Comple
 }
 
 impl Console for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn print(self, text: StringSlice) {
     self.preemption_point()
@@ -996,7 +999,7 @@ impl Console for World
 }
 
 impl FileRead for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
     self.preemption_point()
@@ -1090,7 +1093,7 @@ impl FileRead for World
 }
 
 impl FileWrite for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
     self.preemption_point()
@@ -1210,7 +1213,7 @@ impl FileWrite for World
 }
 
 impl NetworkClient for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn resolve(self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
     self.preemption_point()
@@ -1247,7 +1250,7 @@ impl NetworkClient for World
 }
 
 impl NetworkServer for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn listen(self, address: network::SocketAddress, options: network::ListenOptions) -> Result[network::Listener, SystemError] {
     self.preemption_point()
@@ -1275,7 +1278,7 @@ impl NetworkServer for World
 }
 
 fn World.arrival(self, listener: streams::Handle) -> Result[network::Accepted, SystemError]
-  uses Panic
+  uses Panic, RunForever
 {
   match endpoint_of(listener) {
     Some(endpoint) => {
@@ -1293,7 +1296,7 @@ fn World.arrival(self, listener: streams::Handle) -> Result[network::Accepted, S
 }
 
 impl Handles for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn read(self, handle: streams::Handle, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
     match endpoint_of(handle) {
@@ -1621,7 +1624,7 @@ impl Handles for World
 }
 
 impl Clock for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn now(self) -> Instant {
     provide self.tasks {
@@ -1645,7 +1648,7 @@ impl Clock for World
 }
 
 impl Random for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn next(self) -> UInt64 {
     self.preemption_point()
@@ -1656,7 +1659,7 @@ impl Random for World
 }
 
 impl Environment for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn variable(self, name: StringSlice) -> Option[String] {
     self.preemption_point()
@@ -1723,7 +1726,7 @@ impl Environment for World
 }
 
 impl Processes for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn run(self, command: processes::Command) -> Result[processes::Output, SystemError] {
     self.preemption_point()
@@ -1742,7 +1745,7 @@ impl Processes for World
 }
 
 impl Signals for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn wait(self, signals: Slice[processes::Signal]) -> Option[processes::Signal] {
     match self.perform(
@@ -1756,7 +1759,7 @@ impl Signals for World
 }
 
 impl Tasks for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn open(self) -> UInt64 {
     provide self.tasks {
@@ -1826,7 +1829,7 @@ impl Tasks for World
 }
 
 impl Log for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn record(self, record: log::Record) {
     self.preemption_point()

@@ -45,7 +45,7 @@ let find_forwarding (body : Mir.Graph.body) : forwarding option =
         | Call
             {
               destination = Some { root = Local local; projections = [] };
-              call = { callee = Intrinsic _; _ } as call;
+              call = { callee = { target = Intrinsic _; _ }; _ } as call;
             }
           when is_new local ->
             scan ~held ~computed:(computed @ [ (local, call) ]) rest
@@ -69,9 +69,10 @@ let substitute_trait substitution (trait : Types.trait_reference) : Types.trait_
       List.map (fun (name, ty) -> (name, Types.substitute substitution ty)) trait.associated;
   }
 
-let substitute_callee substitution (callee : Mir.callee) : Mir.callee option =
+let substitute_target substitution (target : Mir.operand Core.target) :
+    Mir.operand Core.target option =
   let substitute_instantiation = Types.substitute_instantiation substitution in
-  match callee with
+  match target with
   | Function { path; instantiation } ->
       Some (Function { path; instantiation = substitute_instantiation instantiation })
   | Trait_method method_ ->
@@ -166,7 +167,7 @@ let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit 
     | Take _ -> None
   in
   let find_forwarded_call (inner : Mir.call) : Mir.call option =
-    let* callee = substitute_callee substitution inner.callee in
+    let* target = substitute_target substitution inner.callee.target in
     let* arguments =
       List.fold_right
         (fun (argument : Mir.argument) arguments ->
@@ -178,8 +179,8 @@ let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit 
           | Default -> None)
         inner.arguments (Some [])
     in
-    if Types.remove_divergence inner.uses = Types.no_capabilities then
-      Some { outer with callee; arguments; uses = inner.uses }
+    if List.for_all Types.is_run_forever (inner.callee.uses :> Types.capability list) then
+      Some { outer with callee = { inner.callee with target }; arguments }
     else None
   in
   let* setup =

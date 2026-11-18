@@ -1,5 +1,5 @@
 fn f(count: UInt32)
-  uses Meter
+  uses Meter, RunForever
   cost calls(Meter.tick) == 3 * count
 {
   for outer in 0..count

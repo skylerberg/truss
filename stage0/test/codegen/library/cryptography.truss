@@ -204,7 +204,6 @@ fn pattern(count: UInt64) -> List[UInt8] {
 }
 
 fn pattern_byte(index: UInt64) -> UInt8
-  cost time finite
 {
   let small = index % 251
   match UInt8.try_from_integer(small) {
@@ -291,7 +290,6 @@ fn sealing_nonce() -> cryptography::Nonce {
 }
 
 fn associated_byte(index: UInt64) -> UInt8
-  cost time finite
 {
   match UInt8.try_from_integer(160 + index % 7) {
     Ok(byte) => byte

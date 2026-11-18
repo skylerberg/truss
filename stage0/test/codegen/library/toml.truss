@@ -1,14 +1,18 @@
 use standard::serialization
 use standard::toml
 
-fn parsed(text: StringSlice) -> Map[String, toml::Value] {
+fn parsed(text: StringSlice) -> Map[String, toml::Value]
+  uses RunForever
+{
   match toml::parse(text) {
     Ok(table) => own table
     Err(_) => [:]
   }
 }
 
-fn rejects(text: StringSlice) -> Bool {
+fn rejects(text: StringSlice) -> Bool
+  uses RunForever
+{
   toml::parse(text) is Err(_)
 }
 
