@@ -759,9 +759,8 @@ let lower_intrinsic st ?reported (operation : Intrinsic.operation) ~type_argumen
           | Intrinsics.Place place -> ignore (Lowering.move_place st place)
           | Value _ -> ())
         (Intrinsics.list_consumed_places operation);
-      Intrinsics.lower ~checks:(Lowering.checks_operations st) ~value_arguments ?reported
-        st.context.env st.builder st.context.types operation ~type_arguments arguments ~destination
-        ~site
+      Intrinsics.lower ~may_panic:(Lowering.may_panic st) ~value_arguments ?reported st.context.env
+        st.builder st.context.types operation ~type_arguments arguments ~destination ~site
 
 let read_field_default (st : Lowering.state) (ty : Ground.ty) ~variant ~field :
     Mir.Graph.t Mir.field_default Mir.sourced =
@@ -1070,8 +1069,7 @@ let find_forwarded_call st (call : Mir.call) : Forwarded.t option =
   | _ -> None
 
 let find_checked_requires (st : Lowering.state) path =
-  if Types.may_panic st.frame.code.uses then Mir.find_checked_requires st.context.lookups.mir path
-  else None
+  if Lowering.may_panic st then Mir.find_checked_requires st.context.lookups.mir path else None
 
 let is_forwarded_whole (frame : Lowering.mir_frame) part =
   match frame.body.blocks.(frame.block).terminator with
@@ -1389,7 +1387,7 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
   | Operation { operation; type_arguments; operands } ->
       let type_arguments, value_arguments = split_arguments st type_arguments in
       ignore
-        (Intrinsics.lower ~checks:(Lowering.checks_operations st) ~value_arguments
+        (Intrinsics.lower ~may_panic:(Lowering.may_panic st) ~value_arguments
            ?reported:(find_reported_site st) st.context.env st.builder st.context.types
            (Scalar operation) ~type_arguments
            (List.map
@@ -1555,7 +1553,7 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
         match arguments with
         | [ (_, _, message) ] ->
             ignore
-              (Intrinsics.lower ~checks:(Lowering.checks_operations st) st.context.env st.builder
+              (Intrinsics.lower ~may_panic:(Lowering.may_panic st) st.context.env st.builder
                  st.context.types (Runtime Crash) ~type_arguments:[] [ Intrinsics.Place message ]
                  ~destination:None ~site:(locate_site st origin))
         | _ -> Definitions.raise_bug "Panic.crash takes one message"

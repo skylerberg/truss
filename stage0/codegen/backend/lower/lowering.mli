@@ -81,7 +81,7 @@ type state = {
 val make_frame : Definitions.code -> frame
 val enter : Definitions.context -> ?nested:int ref -> builder:Emit_c.Builder.t -> frame -> state
 val may_fork : state -> bool
-val checks_operations : state -> bool
+val may_panic : state -> bool
 val allocate_local : state -> ?name:string -> Lowered.ty -> Lowered.place
 val outline : state -> parts:Lowered.local list -> (unit -> unit) -> int * Lowered.operand
 val ground : state -> Types.ty -> Ground.ty

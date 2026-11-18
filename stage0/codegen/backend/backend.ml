@@ -46,15 +46,15 @@ let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
   | Call_evaluation { function_; arguments } ->
       Compiled (Lower.lower_call_evaluation context ~function_ ~arguments)
 
-let lower (settings : Lookups.settings) (lookups : Lookups.t) item =
+let lower system (lookups : Lookups.t) item =
   let env =
-    Memory_layout.create settings.system
+    Memory_layout.create system
       ~compute_shape:(Monomorphic.compute_shape (Lower.make_monomorphic_context lookups.interface))
   in
   match
     Compiler_bug.run_while_doing ~stage:"Backend"
       ("lowering " ^ Lowered.Item.to_string item)
-      (fun () -> make (Lower.make_context settings ~env lookups) item)
+      (fun () -> make (Lower.make_context ~env lookups) item)
   with
   | lowered -> Ok lowered
   | exception Lower.Unsupported unsupported -> Error unsupported

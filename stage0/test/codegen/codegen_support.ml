@@ -202,22 +202,22 @@ let example : Path.module_ = { package = { owner = None; name = "example" }; mod
 let example_file : Path.file = { module_ = example; name = "main" }
 let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
 
-let make_database ?checks packages =
-  Database.create ?checks ~loaded:[ Lazy.force standard_package_database ] packages
+let make_database packages =
+  Database.create ~loaded:[ Lazy.force standard_package_database ] packages
 
 let make_example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
 
-let make_backend ?results ?evaluation_time_limit_ms database =
+let make_backend ?results ?evaluation_time_limit_ms ?(profile = Backend.Development) database =
   Backend.create ?results ?evaluation_time_limit_ms
     (match Database.find_lowered_lookups database [ example.package ] with
     | Ok lookups -> lookups
     | Error message -> failwith message)
-    (Lazy.force c_compiler) Development
+    (Lazy.force c_compiler) profile
 
-let load_files ?results ?(roots = []) ?checks files =
+let load_files ?results ?(roots = []) ?profile files =
   let packages = make_example_package files in
-  let database = make_database ?checks packages in
+  let database = make_database packages in
   List.iter (Database.For_testing.add_root database) roots;
   List.iter
     (fun ((file : Path.file), text) ->
@@ -236,9 +236,10 @@ let load_files ?results ?(roots = []) ?checks files =
           fail "the source has diagnostics:\n%s"
             (String.concat "" (List.map (Diagnostic.render source) diagnostics)))
     files;
-  (database, make_backend ?results database)
+  (database, make_backend ?results ?profile database)
 
-let load ?results ?roots ?checks text = load_files ?results ?roots ?checks [ (example_file, text) ]
+let load ?results ?roots ?profile text =
+  load_files ?results ?roots ?profile [ (example_file, text) ]
 
 let list_tests_in database (module_ : Path.module_) =
   List.filter_map
@@ -257,8 +258,8 @@ let run_source text =
 let expect_output text expected = expect_string ~expected (run_source text)
 let expect_pass name source = test name (fun () -> expect_output source "test 0 passed\n")
 
-let run_main ?(arguments = []) ?input ?checks text =
-  let _, backend = load ?checks text in
+let run_main ?(arguments = []) ?input text =
+  let _, backend = load text in
   match
     Backend.For_testing.run_program ?input backend
       ~main:(Top { module_ = example; name = "main" })

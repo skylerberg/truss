@@ -1067,6 +1067,18 @@ let () =
           if status <> 0 then fail "%s: status %d: %s" name status output)
         [ "Square.area"; "demo::Square.area"; "Shape.area" ])
 
+let find_counts output kind =
+  let prefix = kind ^ "  " in
+  List.find_map
+    (fun line ->
+      if String.starts_with ~prefix line then
+        Some
+          (List.filter (( <> ) "")
+             (String.split_on_char ' '
+                (String.sub line (String.length prefix) (String.length line - String.length prefix))))
+      else None)
+    (String.split_on_char '\n' output)
+
 let () =
   test "TRUSS_DATABASE_COUNTS=1 writes the database's work during the command, by kind of part"
     (fun () ->
@@ -1074,13 +1086,21 @@ let () =
       let root = make_package [ ("main.truss", Fixtures.doubling) ] in
       Unix.putenv "TRUSS_DATABASE_COUNTS" "1";
       let _, output = run_truss [ "check"; "--no-proofs"; "-C"; root ] in
-      let list_cells row = List.filter (( <> ) "") (String.split_on_char ' ' row) in
-      if
-        not
-          (List.mem
-             [ "parsed"; "file"; "1"; "0"; "1"; "1"; "1" ]
-             (List.map list_cells (String.split_on_char '\n' output)))
-      then fail "no row counts one parsed file, computed, written, and read once: %s" output)
+      if find_counts output "parsed file" <> Some [ "1"; "0"; "1"; "1"; "1" ] then
+        fail "no row counts one parsed file, computed, written, and read once: %s" output);
+  test "a second release build of an unchanged package computes no body, proof, or code" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.main_with_a_todo_proof) ] in
+      Unix.putenv "TRUSS_DATABASE_COUNTS" "";
+      ignore (run_truss [ "build"; "-C"; root ]);
+      Unix.putenv "TRUSS_DATABASE_COUNTS" "1";
+      let _, output = run_truss [ "build"; "-C"; root ] in
+      Unix.putenv "TRUSS_DATABASE_COUNTS" "";
+      List.iter
+        (fun kind ->
+          match find_counts output kind with
+          | None | Some ("0" :: _) -> ()
+          | Some _ -> fail "the second build computed parts of kind %s: %s" kind output)
+        [ "parsed file"; "checked body"; "proof"; "lowered code"; "test key" ])
 
 let list_holes root =
   list_objects (Cli.Json.lookup_field "holes" (run_json [ "holes"; "-C"; root ]))

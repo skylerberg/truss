@@ -546,7 +546,7 @@ let lower_list_into (st : Lowering.state) ty destination ~site fills =
   let storage_place = Lowered.project destination (Field field) in
   let lower operation arguments destination =
     ignore
-      (Intrinsics.lower ~checks:(Lowering.checks_operations st) st.context.env st.builder
+      (Intrinsics.lower ~may_panic:(Lowering.may_panic st) st.context.env st.builder
          st.context.types operation ~type_arguments:[ element ] arguments ~destination ~site)
   in
   lower (Buffer Storage_with_capacity)

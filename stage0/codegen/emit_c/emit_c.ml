@@ -210,8 +210,13 @@ let render_file env profile (fragments : (fragment * linkage) list) =
   Buffer.add_string buffer C_runtime.runtime_declarations;
   Buffer.add_string buffer
     (match profile with
-    | Development -> "#define T_UNREACHABLE() t_runtime_compiler_bug()\n"
-    | Release -> "#define T_UNREACHABLE() __builtin_unreachable()\n");
+    | Development ->
+        "#define T_UNREACHABLE() t_runtime_compiler_bug()\n\
+         #define T_OBLIGATION_FAILED(message, length, site) t_runtime_panic(message, length, site)\n"
+    | Release ->
+        "#define T_UNREACHABLE() __builtin_unreachable()\n\
+         #define T_OBLIGATION_FAILED(message, length, site) ((void)(message), (void)(length), \
+         (void)(site), __builtin_unreachable())\n");
   let helpers_used =
     List.sort_uniq String.compare
       (context.helpers_used
