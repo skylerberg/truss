@@ -558,22 +558,8 @@ public fn String.push_character(mut self, character: Character)
   ensures self.length() == old(self.length()) + character.utf8_length()
   cost amortized time O(1)
 {
-  let code = character.code()
-  if code < 128 {
-    growth::push(mut self.storage, value: intrinsic::convert(code))
-  } else if code < 2048 {
-    growth::push(mut self.storage, value: intrinsic::convert(192 + code / 64))
-    growth::push(mut self.storage, value: intrinsic::convert(128 + code % 64))
-  } else if code < 65536 {
-    growth::push(mut self.storage, value: intrinsic::convert(224 + code / 4096))
-    growth::push(mut self.storage, value: intrinsic::convert(128 + code / 64 % 64))
-    growth::push(mut self.storage, value: intrinsic::convert(128 + code % 64))
-  } else {
-    growth::push(mut self.storage, value: intrinsic::convert(240 + code / 262144))
-    growth::push(mut self.storage, value: intrinsic::convert(128 + code / 4096 % 64))
-    growth::push(mut self.storage, value: intrinsic::convert(128 + code / 64 % 64))
-    growth::push(mut self.storage, value: intrinsic::convert(128 + code % 64))
-  }
+  growth::reserve(mut self.storage, additional: character.utf8_length())
+  character.encode_onto(mut self.storage)
 }
 
 public fn String.pop_character(mut self) -> Option[Character]

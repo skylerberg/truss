@@ -1,0 +1,5 @@
+fn f(value: UInt32) -> Int64
+  ensures result == value
+{
+  Int64.from_integer(value)
+}

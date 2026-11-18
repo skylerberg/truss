@@ -29,10 +29,10 @@ let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
   match item with
   | Code { path; instantiation } -> Compiled (Lower.lower_source_code context ~path ~instantiation)
   | Generated generated -> Compiled (Lower.lower_generated context generated)
-  | Table table -> Compiled (Emit_c.make_fragment env (Table (Lower.lower_table context table)))
+  | Table table -> Compiled (Emit_c.make_table_fragment env (Lower.lower_table context table))
   | Constant path -> (
       match Lower.lower_constant context path with
-      | Folded data -> Folded (data, Emit_c.make_fragment env (Data data))
+      | Folded data -> Folded (data, Emit_c.make_data_fragment env data)
       | Run ty -> Evaluate (path, ty))
   | Drop ty -> Compiled (Drop_and_copy.drop drop_and_copy ty)
   | Copy ty -> Compiled (Drop_and_copy.copy drop_and_copy ty)
@@ -46,15 +46,15 @@ let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
   | Call_evaluation { function_; arguments } ->
       Compiled (Lower.lower_call_evaluation context ~function_ ~arguments)
 
-let lower (settings : Lookups.settings) (lookups : Lookups.t) item =
+let lower system (lookups : Lookups.t) item =
   let env =
-    Memory_layout.create settings.system
+    Memory_layout.create system
       ~compute_shape:(Monomorphic.compute_shape (Lower.make_monomorphic_context lookups.interface))
   in
   match
     Compiler_bug.run_while_doing ~stage:"Backend"
       ("lowering " ^ Lowered.Item.to_string item)
-      (fun () -> make (Lower.make_context settings ~env lookups) item)
+      (fun () -> make (Lower.make_context ~env lookups) item)
   with
   | lowered -> Ok lowered
   | exception Lower.Unsupported unsupported -> Error unsupported
@@ -191,7 +191,7 @@ let list_small_callees ~find ~is_worked_on fragment =
 let test_runner : Lowered.Item.t =
   Code { path = Well_known.make_path Run_tests; instantiation = Ground.no_instantiation }
 
-let make_test_root path = Lowered.Item.Code { path; instantiation = Ground.no_instantiation }
+let make_test_root path = Lowered.Item.Generated (Test_main path)
 
 let list_roots ~tests ~mains =
   (if tests = [] then [] else test_runner :: List.map make_test_root tests)
@@ -295,7 +295,6 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
   | Stopped report -> Stopped report
 
 and compile_fragment backend item =
-  let emit_data (data : Lowered.data) = Emit_c.make_fragment (make_env backend) (Data data) in
   let compiled =
     match read_lowered backend item with
     | Compiled fragment | Folded (_, fragment) -> fragment
@@ -304,7 +303,8 @@ and compile_fragment backend item =
           run_while_compiling backend (Lowered.Item.Evaluator path) ~read:(fun encoded ->
               Encoding.decode (make_env backend) ty encoded)
         with
-        | Ran value -> emit_data { data_item = Constant path; ty; value }
+        | Ran value ->
+            Emit_c.make_data_fragment (make_env backend) { data_item = Constant path; ty; value }
         | Ran_too_long ->
             raise_cannot_build "Evaluating %s ran past the time limit of %d ms." (Path.show path)
               backend.evaluation_time_limit_ms
@@ -482,7 +482,10 @@ let list_reached_definitions lookups root =
     (List.filter_map
        (fun (_, way) ->
          match List.rev way with
-         | (Lowered.Item.Code { path; _ } | Constant path | Generated (Program_main path)) :: _ ->
+         | ( Lowered.Item.Code { path; _ }
+           | Constant path
+           | Generated (Program_main path | Test_main path) )
+           :: _ ->
              Some path
          | _ -> None)
        (trace_root lookups root))

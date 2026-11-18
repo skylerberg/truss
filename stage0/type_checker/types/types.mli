@@ -78,6 +78,7 @@ val make_capability_set : capability list -> capability_set
 val no_capabilities : capability_set
 val union_capabilities : capability_set -> capability_set -> capability_set
 val unconditional_divergence : capability
+val panic : capability
 val list_divergence : capability_set -> capability_set
 val remove_divergence : capability_set -> capability_set
 val terminates : capability_set -> bool
@@ -98,6 +99,7 @@ val is_empty_substitution : substitution -> bool
 val combine_substitutions : substitution -> substitution -> substitution
 val bind_argument : parameter -> argument -> substitution -> substitution
 val find_argument : parameter -> substitution -> argument option
+val list_type_arguments : substitution -> (parameter * ty) list
 val substitute : substitution -> ty -> ty
 val substitute_argument : substitution -> argument -> argument
 val substitute_trait : substitution -> trait_reference -> trait_reference

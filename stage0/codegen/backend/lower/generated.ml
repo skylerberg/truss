@@ -282,8 +282,8 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
   let list = Lowering.allocate_temporary st list_ty in
   let lower operation type_arguments arguments destination =
     ignore
-      (Intrinsics.lower ~checks:context.checks context.env builder context.types operation
-         ~type_arguments arguments ~destination
+      (Intrinsics.lower ~may_panic:false context.env builder context.types operation ~type_arguments
+         arguments ~destination
          ~site:{ definition = main_path; offset = 0 })
   in
   let wanted = Emit_c.Builder.allocate_local builder (Value context.types.uint64) in
@@ -351,6 +351,24 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
   | _ -> Definitions.raise_bug "an ExitCode that is not a record of one field");
   Emit_c.Builder.build st.builder
     (Lowering.finish_function st ~first:[ count; arguments_pointer ] ~rest:[] ())
+
+let build_test_main context (item : Lowered.Item.t) test_path : Emit_c.fragment =
+  let st =
+    make_generated_state context ~item ~definition:test_path ~substitution:Types.no_substitution
+  in
+  Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
+  let signature = Definitions.read_signature context test_path in
+  st.evidence <-
+    list_real_implementations st ~user:(Path.show test_path)
+      (Definitions.list_evidence st.context Types.no_substitution signature.uses);
+  Targets.lower_item_call st
+    (Code { path = test_path; instantiation = Ground.no_instantiation })
+    ~signature ~substitution:Types.no_substitution ~arguments:[]
+    ~destination:
+      (choose_result_place st
+         (Monomorphic.ground context.monomorphic Types.no_substitution Types.unit))
+    ();
+  Lowering.finish_item st ~rest:[] ()
 
 let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instantiation
     ~(ty : Ground.function_type) : Emit_c.fragment =
@@ -492,6 +510,7 @@ let lower context (generated : Lowered.Item.generated) : Emit_c.fragment =
   | Adapter { function_; instantiation; ty } ->
       build_adapter context item ~function_ ~instantiation ~ty
   | Program_main main -> build_program_main context item main
+  | Test_main test -> build_test_main context item test
 
 let lower_table context (table : Lowered.Item.table) : Lowered.table =
   let item = Lowered.Item.Table table in

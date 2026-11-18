@@ -59,16 +59,11 @@ type held =
   | Alias of Mir.place
   | Element of { place : Place.t; written_slices : Place.t list }
   | Range of { elements : view; written_slices : Place.t list }
-  | Value of {
-      views : view list;
-      lent : Place.t list;
-      owns_new_value : bool;
-      written_slices : Place.t list;
-    }
+  | Value of { views : view list; lent : Place.t list; written_slices : Place.t list }
   | Lent_part of { views : view list; is_loop_part : bool }
   | Bound_part of { written_slices : Place.t list }
 
-let make_value views = Value { views; lent = []; owns_new_value = true; written_slices = [] }
+let make_value views = Value { views; lent = []; written_slices = [] }
 
 type reach = Place_of of view | Elements_of of view | Views of view list
 type access = { reach : reach; written_slices : Place.t list }
@@ -123,8 +118,7 @@ let list_held_views (held : held) =
 
 let untrack_elements (held : held) =
   match held with
-  | Range { elements; written_slices } ->
-      Value { views = [ elements ]; lent = []; owns_new_value = false; written_slices }
+  | Range { elements; written_slices } -> Value { views = [ elements ]; lent = []; written_slices }
   | Alias _ | Element _ | Value _ | Lent_part _ | Bound_part _ -> held
 
 let merge_held (known : held) (value : held) : held =
@@ -136,7 +130,6 @@ let merge_held (known : held) (value : held) : held =
           {
             views = union known.views value.views;
             lent = union known.lent value.lent;
-            owns_new_value = known.owns_new_value && value.owns_new_value;
             written_slices = union known.written_slices value.written_slices;
           }
     | Lent_part part, Value value -> Lent_part { part with views = union part.views value.views }
@@ -246,7 +239,7 @@ let access_place builder (place : Mir.place) ~(borrowed_as : Types.ty option) =
           in
           match Hashtbl.find_opt builder.held local with
           | Some (Range { elements; _ }) -> { reach = Elements_of elements; written_slices }
-          | (Some (Value { owns_new_value = true; _ }) | None) when is_owned_temporary ->
+          | (Some (Value _) | None) when is_owned_temporary ->
               { reach = Views [ Borrow_of { root = Temporary local; steps = [] } ]; written_slices }
           | Some (Value { views; _ } | Lent_part { views; _ }) ->
               { reach = Views views; written_slices }
@@ -472,15 +465,7 @@ let compute_rvalue_held builder (value : Mir.rvalue) : held =
       | Some (Value value), _ :: _ -> Value { value with lent = [] }
       | Some copied, _ -> copied
       | None, _ -> make_value [])
-  | Operand ((Use _ | Take _) as moved) -> make_value (list_operand_views builder moved)
-  | Operand ((Borrow _ | Constant _) as operand) ->
-      Value
-        {
-          views = list_operand_views builder operand;
-          lent = [];
-          owns_new_value = false;
-          written_slices = [];
-        }
+  | Operand operand -> make_value (list_operand_views builder operand)
   | Operation _ | Compare _ | Is_variant _ | Function_value _ | Value_parameter _ | Specification _
     ->
       make_value []
@@ -492,26 +477,16 @@ let compute_rvalue_held builder (value : Mir.rvalue) : held =
         {
           views = List.concat_map (list_given_views builder) supplied;
           lent = List.concat_map (list_lent_places builder) supplied;
-          owns_new_value = true;
           written_slices = [];
         }
   | Array elements -> make_value (List.concat_map (list_given_views builder) elements)
+  | Lambda { captures = []; _ } -> make_value []
   | Lambda { captures; _ } ->
-      Value
-        {
-          views =
-            (match captures with
-            | [] -> []
-            | _ ->
-                Borrow_of { root = Environment; steps = [] }
-                :: List.map
-                     (fun (capture : Mir.capture) ->
-                       Borrow_of { root = Local capture.local; steps = [] })
-                     captures);
-          lent = [];
-          owns_new_value = false;
-          written_slices = [];
-        }
+      make_value
+        (Borrow_of { root = Environment; steps = [] }
+        :: List.map
+             (fun (capture : Mir.capture) -> Borrow_of { root = Local capture.local; steps = [] })
+             captures)
 
 let emit_bound_value builder (local : Mir.local) (core : Core.local) (value : Mir.rvalue) origin
     ~is_var =
@@ -658,6 +633,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
                  && Option.is_some (track_place builder place) ->
               read_uses builder ~is_returned:(fun _ -> true) uses;
               hold builder target (make_value (list_copy_views builder place))
+          | Operand (Borrow _) -> raise_bug "a temporary assigned a borrow"
           | _ ->
               read_uses builder uses;
               hold builder target (compute_rvalue_held builder value))
@@ -665,7 +641,9 @@ let emit_statement builder (statement : Mir.Graph.statement) =
           read_uses builder uses;
           match value with
           | Operand (Borrow { place; _ }) -> hold builder target (Alias place)
-          | _ -> raise_bug "a lent local that holds no borrow")
+          | Convert { conversion = View_to_owned; _ } ->
+              hold builder target (compute_rvalue_held builder value)
+          | _ -> raise_bug "a lent local that holds neither a borrow nor the owner of a view")
       | Source { local = core; _ } ->
           read_uses builder uses;
           emit_bound_value builder local core value origin
@@ -754,8 +732,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
                 elements = map_viewed_place select_range elements;
                 written_slices = base.written_slices;
               }
-        | Views views ->
-            Value { views; lent = []; owns_new_value = false; written_slices = base.written_slices })
+        | Views views -> Value { views; lent = []; written_slices = base.written_slices })
   | Assert _ | Echo _ -> read_uses builder uses
   | Provide { provided; _ } ->
       read_uses builder uses;

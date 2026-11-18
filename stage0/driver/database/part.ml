@@ -103,7 +103,10 @@ let locate_item_package : Lowered.Item.t -> Path.package = function
   | Template_check { from_template = path; _ }
   | Call_evaluation { function_ = path; _ }
   | Generated
-      (Locked_entry { capability = path; _ } | Adapter { function_ = path; _ } | Program_main path)
+      ( Locked_entry { capability = path; _ }
+      | Adapter { function_ = path; _ }
+      | Program_main path
+      | Test_main path )
   | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
       Path.locate_package path
   | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> locate_type_package ty
@@ -229,6 +232,7 @@ let show_stored : type a. a stored -> string =
         | Constant declared -> "constant " ^ show_key declared
         | Instantiations -> "instantiations"
         | Tests -> "tests"
+        | Internals -> "internals"
         | Dependencies -> "dependencies")
   | Call_edges (path, package) ->
       Printf.sprintf "call edges %s %s" (Path.show_package package) (Path.show path)
@@ -254,7 +258,10 @@ let find_item_definition : Lowered.Item.t -> Path.t option = function
   | Template_check { from_template = path; _ }
   | Call_evaluation { function_ = path; _ }
   | Generated
-      (Locked_entry { capability = path; _ } | Adapter { function_ = path; _ } | Program_main path)
+      ( Locked_entry { capability = path; _ }
+      | Adapter { function_ = path; _ }
+      | Program_main path
+      | Test_main path )
   | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
       Some path
   | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> find_type_definition ty
@@ -277,7 +284,7 @@ let find_name_definition = function
 
 let find_stored_definition : type a. a stored -> Path.t option = function
   | Parsed _ | Namespace _ | Grant _ | Import_check _
-  | Package_check (_, (Instantiations | Tests | Dependencies)) ->
+  | Package_check (_, (Instantiations | Tests | Internals | Dependencies)) ->
       None
   | Resolved (key, _)
   | Trait_header key

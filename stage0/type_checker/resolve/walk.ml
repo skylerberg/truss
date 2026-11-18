@@ -163,14 +163,13 @@ let resolve_module_names state (first : Syntax.name) (rest : Syntax.name list) =
       first.text
       (List.map (fun (name : Syntax.name) -> name.text) rest)
   with
-  | Found_module (module_, `Package)
-    when module_ = Intrinsic.module_ && state.key.module_.package <> Path.standard_package ->
-      make_failure
-        (add_diagnostic state Intrinsic_import (read_span state first.id)
-           "Only the `standard` package can use `standard::intrinsic`.")
-  | Found_module (module_, _) ->
+  | Found_module module_ ->
       set_target state first (Module module_);
       Ok module_
+  | Restricted_module ->
+      make_failure
+        (add_diagnostic state Intrinsic_import (read_span state first.id)
+           Names.restricted_module_message)
   | Ambiguous_module (imported, package) ->
       make_failure
         (add_diagnostic state Ambiguous_module (read_span state first.id)

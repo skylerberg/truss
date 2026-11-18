@@ -13,9 +13,10 @@ let describe_missing_method state type_ name =
         (State.show state type_) name (State.show state view)
   | None -> Printf.sprintf "`%s` has no method `%s`." (State.show state type_) name
 
-let rec coerce state env ?argument (value : Syntax.expression) ~actual ~expected =
-  State.convert state env ?argument ~expression:value.id (State.read_span state value.id) ~actual
-    ~expected
+let rec coerce state env ?argument ?takes_view_as_owner (value : Syntax.expression) ~actual
+    ~expected =
+  State.convert state env ?argument ?takes_view_as_owner ~expression:value.id
+    (State.read_span state value.id) ~actual ~expected
 
 and infer_literal_type state ~expected kind =
   match Option.map (State.resolve state) expected with

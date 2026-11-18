@@ -59,6 +59,7 @@ and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t opt
 
 let is_divergence = function Divergence _ -> true | _ -> false
 let unconditional_divergence : capability = Divergence Always
+let panic : capability = Capability (Well_known.make_path Panic)
 
 let make_capability_set capabilities : capability_set =
   List.sort_uniq compare
@@ -212,6 +213,11 @@ let bind_argument parameter argument substitution =
   { substitution with arguments = (parameter, argument) :: substitution.arguments }
 
 let find_argument parameter substitution = List.assoc_opt parameter substitution.arguments
+
+let list_type_arguments substitution =
+  List.filter_map
+    (function parameter, Type ty -> Some (parameter, ty) | _, Value _ -> None)
+    substitution.arguments
 
 let rec substitute substitution type_ =
   if is_empty_substitution substitution then type_

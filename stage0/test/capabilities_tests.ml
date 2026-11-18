@@ -677,6 +677,8 @@ let () =
   Harness.test "a function with a time clause cannot call one without" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.function_with_time_calling_forever
         "capabilities.may_not_terminate");
+  Harness.test "a function with a time clause can crash through Panic.crash and expect" (fun () ->
+      expect_fine Fixtures.Capabilities.crash_and_expect_in_functions_with_a_time_clause);
   Harness.test "a call that passes a function without a time clause may not terminate" (fun () ->
       expect_one_diagnostic
         (apply ^ Fixtures.Capabilities.apply_of_slow_under_a_time_clause)

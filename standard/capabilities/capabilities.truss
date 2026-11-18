@@ -151,6 +151,7 @@ public capability Log {
 
 public capability Panic {
   fn crash(message: StringSlice) -> Never
+    cost time O(1)
 }
 
 public type SystemError =

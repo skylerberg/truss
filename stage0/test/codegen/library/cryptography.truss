@@ -207,7 +207,7 @@ fn pattern_byte(index: UInt64) -> UInt8
   cost time finite
 {
   let small = index % 251
-  match UInt8.try_from(small) {
+  match UInt8.try_from_integer(small) {
     Ok(byte) => byte
     Err(_) => 0
   }
@@ -293,7 +293,7 @@ fn sealing_nonce() -> cryptography::Nonce {
 fn associated_byte(index: UInt64) -> UInt8
   cost time finite
 {
-  match UInt8.try_from(160 + index % 7) {
+  match UInt8.try_from_integer(160 + index % 7) {
     Ok(byte) => byte
     Err(_) => 0
   }
@@ -430,7 +430,7 @@ fn stepped_32(start: UInt8, step: UInt8) -> Array[UInt8, 32] {
 fn message_of(count: UInt64) -> List[UInt8] {
   var message: List[UInt8] = []
   for index in 0..count {
-    match UInt8.try_from(index % 253) {
+    match UInt8.try_from_integer(index % 253) {
       Ok(byte) => mut message.push(byte)
       Err(_) => mut message.push(0)
     }
@@ -534,8 +534,8 @@ test "Ed25519 rejects a response that is not below the group's order" {
   var carry: UInt16 = 0
   let count: UInt64 = 32
   for index in 0..count {
-    let sum = UInt16.from(malleated[index + 32]) + UInt16.from(order[index]) + carry
-    match UInt8.try_from(sum & 255) {
+    let sum = UInt16.from_integer(malleated[index + 32]) + UInt16.from_integer(order[index]) + carry
+    match UInt8.try_from_integer(sum & 255) {
       Ok(byte) => {
         malleated[index + 32] = byte
       }
@@ -587,7 +587,7 @@ test "signing keys and agreement keys are drawn from the random capability" {
 fn stepped_bytes(count: UInt64, start: UInt64, modulus: UInt64) -> List[UInt8] {
   var bytes: List[UInt8] = []
   for index in 0..count {
-    match UInt8.try_from(start + index % modulus) {
+    match UInt8.try_from_integer(start + index % modulus) {
       Ok(byte) => mut bytes.push(byte)
       Err(_) => mut bytes.push(0)
     }

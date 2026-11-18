@@ -1246,7 +1246,21 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                 (Constant_interface { constant_type = elaborate_type context type_ })
           | Test { uses; _ } ->
               make_elaborated_interface context
-                (Test_interface (elaborate_capabilities context uses))
+                (Test_interface
+                   {
+                     generics = [];
+                     capability_parameters = [];
+                     receiver = None;
+                     parameters = [];
+                     output = Returns Types.unit;
+                     uses =
+                       Types.union_capabilities
+                         (elaborate_capabilities context uses)
+                         (Types.make_capability_set [ Types.panic; Types.unconditional_divergence ]);
+                     costs = [];
+                     specification_only = false;
+                     capture_free_parameters = [];
+                   })
           | Theorem { name; generics; parameters; clauses; _ } ->
               let signature : Syntax.signature =
                 { name = Plain_name name; generics; parameters; result = None; clauses }

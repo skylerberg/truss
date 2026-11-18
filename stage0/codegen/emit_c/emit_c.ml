@@ -125,23 +125,20 @@ module Builder = Builder
 
 let make_symbol = Mangling.make_symbol
 
-type compiled = Data of Lowered.data | Table of Lowered.table
+let make_data_fragment env (data : Lowered.data) =
+  let context = C_types.make_context env (Mangling.make_symbol data.data_item) in
+  let definition = C_data.render_data context data in
+  Fragment.make context ~item:data.data_item ~kind:Static_data ~functions:[] ~definition
 
-let make_fragment env (compiled : compiled) : fragment =
-  match compiled with
-  | Data data ->
-      let context = C_types.make_context env (Mangling.make_symbol data.data_item) in
-      let definition = C_data.render_data context data in
-      Fragment.make context ~item:data.data_item ~kind:Static_data ~functions:[] ~definition
-  | Table table ->
-      let context = C_types.make_context env (Mangling.make_symbol table.table_item) in
-      let definition = C_data.render_table context table in
-      {
-        (Fragment.make context ~item:table.table_item ~kind:(Table_entries table.capability)
-           ~functions:[] ~definition)
-        with
-        references = List.map fst table.entries;
-      }
+let make_table_fragment env (table : Lowered.table) : fragment =
+  let context = C_types.make_context env (Mangling.make_symbol table.table_item) in
+  let definition = C_data.render_table context table in
+  {
+    (Fragment.make context ~item:table.table_item ~kind:(Table_entries table.capability)
+       ~functions:[] ~definition)
+    with
+    references = List.map fst table.entries;
+  }
 
 let render_file env profile (fragments : (fragment * linkage) list) =
   let context = C_types.make_context env "" in
@@ -213,8 +210,13 @@ let render_file env profile (fragments : (fragment * linkage) list) =
   Buffer.add_string buffer C_runtime.runtime_declarations;
   Buffer.add_string buffer
     (match profile with
-    | Development -> "#define T_UNREACHABLE() t_runtime_compiler_bug()\n"
-    | Release -> "#define T_UNREACHABLE() __builtin_unreachable()\n");
+    | Development ->
+        "#define T_UNREACHABLE() t_runtime_compiler_bug()\n\
+         #define T_OBLIGATION_FAILED(message, length, site) t_runtime_panic(message, length, site)\n"
+    | Release ->
+        "#define T_UNREACHABLE() __builtin_unreachable()\n\
+         #define T_OBLIGATION_FAILED(message, length, site) ((void)(message), (void)(length), \
+         (void)(site), __builtin_unreachable())\n");
   let helpers_used =
     List.sort_uniq String.compare
       (context.helpers_used

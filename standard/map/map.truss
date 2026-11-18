@@ -399,10 +399,11 @@ public fn Map[Key: Hash + Ordered, Value].reserve(mut self, additional: UInt64)
 
 public fn Map[Key: Hash + Ordered, Value].retain(
   mut self,
-  keep: (fn(Entry[Key, Value]) -> Bool uses generic Granted),
+  keep: (fn(Entry[Key, Value]) -> Bool cost time finite),
 )
-  uses generic Granted
   ensures self.length() <= old(self.length())
+  ensures forall key: Key =>
+    self.model().contains_key(key) ==> keep(Entry(key: key, value: self.model().get(key)))
   cost time O(old(self.length()) * time(keep))
 {
   let count = self.entries.length()
@@ -412,6 +413,7 @@ public fn Map[Key: Hash + Ordered, Value].retain(
     invariant kept_count <= index
     invariant forall i in 0..self.entries.length() => forall j in 0..self.entries.length() =>
       i < j ==> !(self.entries.model()[i].key == self.entries.model()[j].key)
+    invariant forall i in 0..kept_count => keep(self.entries.model()[i])
   {
     if keep(self.entries[index]) {
       mut self.entries.swap(kept_count, second: index)

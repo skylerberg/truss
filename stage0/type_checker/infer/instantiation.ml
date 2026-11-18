@@ -197,6 +197,7 @@ and check_type_argument state (value : Syntax.expression) : Types.argument =
                "A type argument is a type, or a `UInt64` value."))
 
 type instance = {
+  declared : Types.signature;
   signature : Types.signature;
   substitution : Types.substitution;
   instantiation : Types.instantiation;
@@ -218,7 +219,12 @@ let instantiate (state : State.state) (span : Source.Definition_span.t)
     Types.combine_substitutions (Types.make_signature_substitution signature instantiation) extra
   in
   require_bounds state span signature.generics substitution;
-  { signature = Types.substitute_signature substitution signature; substitution; instantiation }
+  {
+    declared = signature;
+    signature = Types.substitute_signature substitution signature;
+    substitution;
+    instantiation;
+  }
 
 let find_intrinsic_signature path =
   Option.map Intrinsic_signatures.make_signature (Intrinsic.find_operation path)

@@ -503,6 +503,32 @@ let lower_literal_place st (ty : Ground.ty) text =
   in
   build ty (Build { ty; variant = None; fields = [ (field, Copy part) ] })
 
+let lower_owner_of_view (st : Lowering.state) ~(owner : Ground.ty) ~(view : Ground.ty)
+    (viewed : Lowered.place) (destination : Lowered.place) =
+  let storage_field, storage =
+    match Monomorphic.compute_shape st.context.monomorphic owner with
+    | Record [ (field, Typed storage) ] when Storage.match_storage_element storage <> None ->
+        (field, storage)
+    | _ -> Definitions.raise_bug "%s owns no storage" (Ground.to_string owner)
+  in
+  let elements =
+    match Monomorphic.compute_shape st.context.monomorphic view with
+    | Record [ (field, Typed elements) ] when Storage.match_view_element elements <> None ->
+        Lowered.project viewed (Field field)
+    | _ -> Definitions.raise_bug "%s views no storage" (Ground.to_string view)
+  in
+  let length : Lowered.operand = Copy (Storage.project_view_length elements) in
+  let built = Lowering.allocate_local st (Value storage) in
+  Emit_c.Builder.emit st.builder
+    (Assign
+       ( built,
+         Storage.build_storage storage
+           ~buffer:(Copy (Storage.project_view_elements elements))
+           ~length ~capacity:length ));
+  Emit_c.Builder.emit st.builder
+    (Assign
+       (destination, Build { ty = owner; variant = None; fields = [ (storage_field, Copy built) ] }))
+
 let lower_static_constant (st : Lowering.state) path : Lowered.place =
   let ty = Interface.Definition.read_constant_type st.context.lookups.interface path in
   { root = Static { item = Constant path; ty = Lowering.ground st ty }; projections = [] }
@@ -520,7 +546,7 @@ let lower_list_into (st : Lowering.state) ty destination ~site fills =
   let storage_place = Lowered.project destination (Field field) in
   let lower operation arguments destination =
     ignore
-      (Intrinsics.lower ~checks:(Lowering.checks_operations st) st.context.env st.builder
+      (Intrinsics.lower ~may_panic:(Lowering.may_panic st) st.context.env st.builder
          st.context.types operation ~type_arguments:[ element ] arguments ~destination ~site)
   in
   lower (Buffer Storage_with_capacity)

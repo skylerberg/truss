@@ -8,6 +8,7 @@ type piece =
       key : Resolve.Names.key;
       clause : Core.origin;
       replacements : (Core.origin * string) list;
+      type_names : (string * string) list;
     }
 
 type message = piece list

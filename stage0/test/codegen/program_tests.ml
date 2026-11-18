@@ -160,7 +160,7 @@ let () =
     "a release build stops a function that declares `uses Panic` at an operation that fails"
     (fun () ->
       let _, backend =
-        Codegen_support.load ~checks:false Fixtures.Program.operations_that_stop_the_program
+        Codegen_support.load ~profile:Release Fixtures.Program.operations_that_stop_the_program
       in
       let run operation =
         match

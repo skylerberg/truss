@@ -316,6 +316,9 @@ let report_trailing_lambda cursor ~(callee : Syntax.expression) ~parameter ~(ope
     :: Diagnostic.insert (Source.make_zero_width closing.span.stop) ")"
     :: List.map (fun (token : Token.t) -> Diagnostic.replace token.span parameter) uses)
 
+let integer_type_names =
+  [ "Int8"; "Int16"; "Int32"; "Int64"; "UInt8"; "UInt16"; "UInt32"; "UInt64" ]
+
 let report_as_conversion cursor ~(value : Syntax.expression) ~(as_token : Token.t)
     ~(target : Syntax.type_expression) =
   match spell_node cursor target.id with
@@ -332,16 +335,48 @@ let report_as_conversion cursor ~(value : Syntax.expression) ~(as_token : Token.
             Diagnostic.replace (Source.make_span value.stop target.stop) ")";
           ]
       in
-      Cursor.report cursor As_conversion as_token.span
-        (Printf.sprintf
-           "Truss has no `as`; write `%s.from(x)`, or `%s.try_from(x)` when the conversion can \
-            lose information."
-           target_spelling target_spelling)
-        ~fixes:[ make_conversion_fix "from"; make_conversion_fix "try_from" ]
+      let report_with_names checked fallible =
+        Cursor.report cursor As_conversion as_token.span
+          (Printf.sprintf
+             "Truss has no `as`; write `%s.%s(x)`, or `%s.%s(x)` when the value may not fit."
+             target_spelling checked target_spelling fallible)
+          ~fixes:[ make_conversion_fix checked; make_conversion_fix fallible ]
+      in
+      if List.mem target_spelling integer_type_names then
+        report_with_names "from_integer" "try_from_integer"
+      else if List.mem target_spelling [ "Float32"; "Float64" ] then
+        let method_ = "to_" ^ String.lowercase_ascii target_spelling in
+        let is_simple =
+          match Cursor.spell cursor value with
+          | Some value_text ->
+              String.for_all
+                (fun character ->
+                  character = '_' || character = '.'
+                  || (character >= 'a' && character <= 'z')
+                  || (character >= 'A' && character <= 'Z')
+                  || (character >= '0' && character <= '9'))
+                value_text
+          | None -> false
+        in
+        Cursor.report cursor As_conversion as_token.span
+          (Printf.sprintf "Truss has no `as`; write `x.%s()`." method_)
+          ~fixes:
+            [
+              Diagnostic.fix
+                (Printf.sprintf "Write `.%s()`" method_)
+                ((if is_simple then []
+                  else [ Diagnostic.insert (Source.make_zero_width value.start) "(" ])
+                @ [
+                    Diagnostic.replace
+                      (Source.make_span value.stop target.stop)
+                      ((if is_simple then "" else ")") ^ "." ^ method_ ^ "()");
+                  ]);
+            ]
+      else report_with_names "from" "try_from"
   | None ->
       Cursor.report cursor As_conversion as_token.span
-        "Truss has no `as`; call the target type's `from`, or its `try_from` when the conversion \
-         can lose information."
+        "Truss has no `as`; call a conversion of the target type, such as `from_integer` or \
+         `try_from_integer` for an integer, or `from` or `try_from` for a library type."
 
 let report_elif cursor ~(previous_stop : int) ~(elif_token : Token.t) =
   report cursor Elif elif_token.span "Truss writes `else if`, not `elif`." "Write `else if`"

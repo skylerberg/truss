@@ -157,6 +157,7 @@ let rec mangle : Lowered.Item.t -> string = function
   | Generated (Entry impl_method) ->
       render_marker "Entry" ^ mangle (Lowered.Item.make_method_code impl_method)
   | Generated (Program_main main) -> render_marker "Program" ^ mangle_path main
+  | Generated (Test_main test) -> render_marker "TestMain" ^ mangle_path test
   | Table (Any_table { impl; type_arguments }) ->
       render_marker "Vtable" ^ mangle_path impl ^ mangle_arguments type_arguments
   | Table (Locked_table capability) -> render_marker "LockedTable" ^ mangle_path capability

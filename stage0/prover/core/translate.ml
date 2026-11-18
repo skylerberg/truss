@@ -269,8 +269,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
               if Types.may_panic uses then Declared
               else
                 match
-                  Interface.Impls.find_capability_declaration lookups.interface path
-                    (Capability (Well_known.make_path Panic))
+                  Interface.Impls.find_capability_declaration lookups.interface path Types.panic
                 with
                 | Some (Declared_by clause) -> Undeclared clause
                 | Some (Fixed_by_trait _) | None -> Undeclarable)
@@ -672,20 +671,6 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
             (Logic.Operation ("<=", [ Logic.int 0; potential_term ])))
         potential
   | None -> ());
-  make_outcome context
-
-let test (lookups : Lookups.t) (source : State.source) ~path =
-  let home = require_home source in
-  let context =
-    make_context lookups ~home ~current:path ~terminates:false ~measures:[]
-      ~inherits_precondition:false
-  in
-  (match Mir.find_code (lookups.mir.read_body_part home) with
-  | Some (mir : Mir.t) ->
-      Reader.read_body context
-        { (make_empty_frame source) with panic = Declared }
-        ~lambdas:mir.lambdas mir.body
-  | None -> Facts.raise_bug "the test `%s` has no MIR" source.name);
   make_outcome context
 
 let translate_constant (lookups : Lookups.t) (source : State.source) ~path =

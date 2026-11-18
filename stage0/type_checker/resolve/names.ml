@@ -154,12 +154,17 @@ let resolve_used_module lookups ~from (path : Syntax.path) =
       resolve_full_module lookups ~from first.text (list_texts rest @ [ path.last.text ])
 
 let is_visible_module lookups ~(from : Path.module_) (module_ : Path.module_) =
-  module_ = Intrinsic.module_
-  || List.mem module_.package (list_visible_packages lookups from.package)
-     && lookups.module_exists module_
+  List.mem module_.package (list_visible_packages lookups from.package)
+  && lookups.module_exists module_
+
+let is_restricted_module ~(from : Path.module_) (module_ : Path.module_) =
+  module_ = Intrinsic.module_ && from.package <> Path.standard_package
+
+let restricted_module_message = "Only the `standard` package can use `standard::intrinsic`."
 
 type module_lookup =
-  | Found_module of Path.module_ * [ `Import of string | `Package ]
+  | Found_module of Path.module_
+  | Restricted_module
   | Ambiguous_module of Path.module_ * Path.module_
   | No_module of string
 
@@ -175,8 +180,9 @@ let lookup_module lookups ~(from : Path.module_) ~imports first rest =
   match imported with
   | Some imported when exists imported && exists package && imported <> package ->
       Ambiguous_module (imported, package)
-  | Some imported when exists imported -> Found_module (imported, `Import first)
-  | _ when exists package -> Found_module (package, `Package)
+  | Some imported when exists imported -> Found_module imported
+  | _ when exists package ->
+      if is_restricted_module ~from package then Restricted_module else Found_module package
   | _ -> No_module (String.concat "::" (first :: rest))
 
 let make_top_path module_ name : Path.t = Top { module_; name }
@@ -385,11 +391,11 @@ let find_head_type lookups ~(from : Path.module_) ~imports (path : Syntax.path) 
         lookup_module lookups ~from ~imports first.text
           (List.map (fun (name : Syntax.name) -> name.text) rest)
       with
-      | Found_module (module_, _) -> (
+      | Found_module module_ -> (
           match lookup_in lookups ~from module_ path.last.text ~is_kind:is_type_kind with
           | Visible (item, path) -> Some (item, path)
           | Hidden _ | Absent -> None)
-      | Ambiguous_module _ | No_module _ -> None)
+      | Restricted_module | Ambiguous_module _ | No_module _ -> None)
 
 let make_unresolved_path (file : Path.file) names : Path.t = Unresolved { file; names }
 
@@ -415,9 +421,9 @@ let resolve_count lookups ~(file : Path.file) ~parameters (name : Syntax.name) :
     | Some { kind = Constant; _ } -> Constant (make_top_path file.module_ name.text)
     | _ -> Constant (make_unresolved_path file [ name.text ])
 
-let rec resolve_reference lookups ~file ~imports ~parameters ~self (written : Syntax.path_type) :
-    Path.reference =
-  let resolve_local_argument = resolve_argument lookups ~file ~imports ~parameters ~self in
+let rec resolve_reference lookups ~file ~imports ~spell ~parameters ~self
+    (written : Syntax.path_type) : Path.reference =
+  let resolve_local_argument = resolve_argument lookups ~file ~imports ~spell ~parameters ~self in
   {
     path = resolve_type_path lookups ~file ~imports written.path;
     arguments =
@@ -437,17 +443,16 @@ let rec resolve_reference lookups ~file ~imports ~parameters ~self (written : Sy
            written.arguments);
   }
 
-and resolve_argument lookups ~file ~imports ~parameters ~self (type_ : Syntax.type_expression) :
-    Path.argument =
-  let make_rejected names : Path.argument =
-    Named { path = make_unresolved_path file names; arguments = []; associated = [] }
-  in
+and resolve_argument lookups ~file ~imports ~spell ~parameters ~self
+    (type_ : Syntax.type_expression) : Path.argument =
   match type_.kind with
   | Path_type { path = { modules = []; last }; arguments = []; _ }
     when List.mem last.text parameters ->
       Parameter last.text
-  | Path_type written -> Named (resolve_reference lookups ~file ~imports ~parameters ~self written)
-  | Any_type written -> Any (resolve_reference lookups ~file ~imports ~parameters ~self written)
+  | Path_type written ->
+      Named (resolve_reference lookups ~file ~imports ~spell ~parameters ~self written)
+  | Any_type written ->
+      Any (resolve_reference lookups ~file ~imports ~spell ~parameters ~self written)
   | Self_type None ->
       Named
         {
@@ -455,15 +460,14 @@ and resolve_argument lookups ~file ~imports ~parameters ~self (type_ : Syntax.ty
           arguments = List.map (fun name -> Path.Parameter name) parameters;
           associated = [];
         }
-  | Self_type (Some name) -> make_rejected [ "Self"; name.text ]
-  | Associated (base, name) -> make_rejected [ base.text; name.text ]
-  | Function_type _ -> make_rejected [ "fn" ]
-  | Type_error -> make_rejected []
+  | Self_type (Some _) | Associated _ | Function_type _ | Type_error ->
+      Named { path = make_unresolved_path file [ spell type_.id ]; arguments = []; associated = [] }
 
-let resolve_header lookups ~file ~imports (trait_ : Syntax.path_type) (head : Syntax.type_head) =
+let resolve_header lookups ~file ~imports ~spell (trait_ : Syntax.path_type)
+    (head : Syntax.type_head) =
   let for_type = resolve_type_path lookups ~file ~imports head.path in
-  ( resolve_reference lookups ~file ~imports ~parameters:(list_head_parameters head) ~self:for_type
-      trait_,
+  ( resolve_reference lookups ~file ~imports ~spell ~parameters:(list_head_parameters head)
+      ~self:for_type trait_,
     for_type )
 
 type written = {
@@ -481,7 +485,13 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
   let resolve_owner (head : Syntax.type_head) =
     resolve_type_path lookups ~file ~imports head.path
   in
-  let resolve_local_header = resolve_header lookups ~file ~imports in
+  let resolve_local_header (item : Syntax.definition Syntax.item) =
+    let spell id =
+      let span : Source.Definition_span.t = item.positions.spans.(id) in
+      String.sub text (item.base + span.start) (span.stop - span.start)
+    in
+    resolve_header lookups ~file ~imports ~spell
+  in
   let make_written index ?container (item : Syntax.definition Syntax.item) path kind generic =
     Some
       {
@@ -535,7 +545,7 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
     | Theorem { name; generics; _ } ->
         declare (make_top_path module_ name.text) Theorem (generics <> [])
     | Impl { trait_; type_; _ } ->
-        let trait, for_type = resolve_local_header trait_ type_ in
+        let trait, for_type = resolve_local_header item trait_ type_ in
         declare (Impl { module_; trait; for_type }) Impl (type_.generics <> [])
     | Test { name; _ } ->
         let text =
@@ -544,7 +554,7 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
         in
         declare (Test { module_; name = text }) Test false
     | Law_proof { trait_; law; type_; _ } ->
-        let trait, for_type = resolve_local_header trait_ type_ in
+        let trait, for_type = resolve_local_header item trait_ type_ in
         declare (Law_proof { module_; trait; law = law.text; for_type }) Law_proof false
     | Definition_error { name = Some (Plain_name name); intended = Some intended } ->
         declare (make_top_path module_ name.text) (convert_named (convert_intended intended)) false

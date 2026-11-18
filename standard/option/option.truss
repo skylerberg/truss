@@ -219,19 +219,23 @@ public fn Option[Value].get_or_insert(mut self, value: own Value) lends mut Valu
   }
 }
 
-public fn Option[Value].unwrap(own self) -> Value
+public fn Option[Value].expect(own self, message: StringSlice) -> Value
   uses Panic
+  ensures self is Some(held) && identical(result, held)
+  cost time O(1)
 {
   match own self {
     Some(value) => value
-    None => Panic.crash("unwrap of None")
+    None => Panic.crash(message)
   }
 }
 
-public fn Option[Value].expect(own self, message: StringSlice) -> Value
+public fn Option[Value].expect(self, message: StringSlice) lends Value
   uses Panic
+  ensures self is Some(held) && identical(result, held)
+  cost time O(1)
 {
-  match own self {
+  match self {
     Some(value) => value
     None => Panic.crash(message)
   }

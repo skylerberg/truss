@@ -57,7 +57,7 @@ fn main(arguments: List[String]) -> ExitCode
   let count = arguments.length()
   match arguments[1].slice() {
     "overflow" => Console.print_line("${total([9223372036854775807, 1])}")
-    "division" => Console.print_line("${100 / (Int64.try_from(count).unwrap_or(0) - 2)}")
+    "division" => Console.print_line("${100 / (Int64.try_from_integer(count).unwrap_or(0) - 2)}")
     "shift" => Console.print_line("${count << (count * 32)}")
     "index" => Console.print_line("${numbers[count]}")
     "slice" => Console.print_line("${numbers[count + 1..].length()}")

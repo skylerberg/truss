@@ -3,7 +3,7 @@ type snapshot
 val take_snapshot : string -> (snapshot * (string * Path.package) list, string) result
 val retake : snapshot -> (snapshot, string) result
 val locate_root : snapshot -> string
-val open_database : ?checks:bool -> snapshot -> Database.t
+val open_database : snapshot -> Database.t
 val problems : snapshot -> Project.problem list
 val list_dependency_problems : snapshot -> Database.t -> Project.problem list
 val list_packages : snapshot -> (string * Path.package) list

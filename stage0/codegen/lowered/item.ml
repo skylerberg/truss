@@ -23,6 +23,7 @@ and generated =
       ty : Ground.function_type;
     }
   | Program_main of Path.t
+  | Test_main of Path.t
 
 and table =
   | Impl_table of { impl : Path.t; type_arguments : Ground.argument list }
@@ -82,6 +83,7 @@ let rec to_string = function
       "locked entry " ^ Path.show capability ^ "." ^ name
   | Generated (Entry impl_method) -> "entry " ^ to_string (make_method_code impl_method)
   | Generated (Program_main main) -> "program " ^ Path.show main
+  | Generated (Test_main test) -> "test main " ^ Path.show test
   | Table (Any_table { impl; type_arguments }) ->
       "any table " ^ Path.show impl ^ show_arguments type_arguments
   | Table (Locked_table capability) -> "locked table " ^ Path.show capability

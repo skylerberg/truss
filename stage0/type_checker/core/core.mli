@@ -101,7 +101,7 @@ and capture = { local : local; type_ : Types.ty }
 and specification_function = Log | Power | Callback_cost of Metric.t | Calls
 and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
 and construction = Array | Specification_only
-and conversion = Widen | To_integer | From_integer
+and conversion = Widen | To_integer | From_integer | View_to_owned
 
 and binder =
   | Over_type of { local : local; type_ : Types.ty }
