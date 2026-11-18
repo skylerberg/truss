@@ -67,7 +67,7 @@ public fn Request.form(own self) -> Result[Form, Error]
     return Err(Error.Unsupported(message: "a body that is not application/x-www-form-urlencoded"))
   }
   let text = own self.text()?
-  Form.parse(text.slice())
+  Form.parse(text)
 }
 
 fn parameter_of(value: StringSlice, name: StringSlice) -> Option[String] {
@@ -325,15 +325,15 @@ public fn encode_multipart(fields: Form, files: Slice[FilePart] = []) -> Encoded
   let boundary = "truss-${Random.next().format(radix: 16, minimum_digits: 16)}${Random.next().format(radix: 16, minimum_digits: 16)}"
   var body: List[UInt8] = []
   for field in fields.entries() {
-    push_text(mut body, text: "--${boundary}\r\nContent-Disposition: form-data; name=\"${quoted(field.name.slice())}\"\r\n\r\n".slice())
-    push_text(mut body, text: field.value.slice())
+    push_text(mut body, text: "--${boundary}\r\nContent-Disposition: form-data; name=\"${quoted(field.name)}\"\r\n\r\n")
+    push_text(mut body, text: field.value)
     push_text(mut body, text: "\r\n")
   }
   for file in files {
-    push_text(mut body, text: "--${boundary}\r\nContent-Disposition: form-data; name=\"${quoted(file.name.slice())}\"; filename=\"${quoted(file.filename.slice())}\"\r\nContent-Type: ${file.content_type}\r\n\r\n".slice())
+    push_text(mut body, text: "--${boundary}\r\nContent-Disposition: form-data; name=\"${quoted(file.name)}\"; filename=\"${quoted(file.filename)}\"\r\nContent-Type: ${file.content_type}\r\n\r\n")
     mut body.append_slice(file.bytes.slice())
     push_text(mut body, text: "\r\n")
   }
-  push_text(mut body, text: "--${boundary}--\r\n".slice())
+  push_text(mut body, text: "--${boundary}--\r\n")
   Encoded(content_type: "multipart/form-data; boundary=${boundary}", body: own body)
 }

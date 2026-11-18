@@ -22,11 +22,11 @@ impl Display for Error {
     match self {
       Malformed(message) => {
         mut output.push("a malformed JWT: ")
-        mut output.push(message.slice())
+        mut output.push(message)
       }
       Algorithm(name) => {
         mut output.push("a JWT signed with ")
-        mut output.push(name.slice())
+        mut output.push(name)
         mut output.push(", which these rules do not accept")
       }
       NoKey => mut output.push("no key that can verify this JWT")
@@ -200,10 +200,10 @@ public fn sign[Item: serialization::Serialize](
   }
   var input = segment(json::Value.Object(members: own header))
   mut input.push(".")
-  mut input.push(segment(json::to_value(claims)).slice())
+  mut input.push(segment(json::to_value(claims)))
   let signature = sign_with(key, algorithm: algorithm, input: input.slice().bytes())?
   mut input.push(".")
-  mut input.push(jwk::encoded(signature.slice()).slice())
+  mut input.push(jwk::encoded(signature.slice()))
   Ok(own input)
 }
 
@@ -322,7 +322,7 @@ public fn verify(token: StringSlice, keys: Slice[jwk::Key], rules: Validation) -
     Some(name) => own name
     None => return Err(malformed("a header without a text \"alg\""))
   }
-  let algorithm = match Algorithm.from_name(name.slice()) {
+  let algorithm = match Algorithm.from_name(name) {
     Some(algorithm) => algorithm
     None => return Err(Error.Algorithm(name: own name))
   }
@@ -390,7 +390,7 @@ public fn verify(token: StringSlice, keys: Slice[jwk::Key], rules: Validation) -
   }
   match rules.audience {
     Some(audience) => {
-      if !has_audience(claims, audience: audience.slice()) {
+      if !has_audience(claims, audience: audience) {
         return Err(Error.Audience)
       }
     }

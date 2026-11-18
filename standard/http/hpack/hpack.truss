@@ -10,7 +10,7 @@ impl Display for Error {
   fn display(self, output: mut String)
   {
     mut output.push("HPACK: ")
-    mut output.push(self.message.slice())
+    mut output.push(self.message)
   }
 }
 
@@ -94,7 +94,7 @@ fn evict(table: mut Table) {
     decreases table.entries.length()
   {
     let oldest = mut table.entries.remove_at(0)
-    table.size = table.size.saturating_subtract(entry_size(oldest.name.slice(), value: oldest.value.slice()))
+    table.size = table.size.saturating_subtract(entry_size(oldest.name, value: oldest.value))
   }
   if table.entries.is_empty() {
     table.size = 0
@@ -284,7 +284,7 @@ fn decode_block(table: mut Table, maximum: UInt64, block: Slice[UInt8], list_lim
       let index = read_integer(block, at: mut at, prefix_bits: 7)?
       let name = entry_name(table, index: index)?
       let value = entry_value(table, index: index)?
-      list_size = list_size.saturating_add(entry_size(name.slice(), value: value.slice()))
+      list_size = list_size.saturating_add(entry_size(name, value: value))
       mut fields.push(Field(name: own name, value: own value))
     } else if (first & 224) == 32 {
       if !fields.is_empty() {
@@ -302,9 +302,9 @@ fn decode_block(table: mut Table, maximum: UInt64, block: Slice[UInt8], list_lim
       let name = if index == 0 { read_string(block, at: mut at)? } else { entry_name(table, index: index)? }
       let value = read_string(block, at: mut at)?
       if is_indexed {
-        insert(mut table, name: name.slice(), value: value.slice())
+        insert(mut table, name: name, value: value)
       }
-      list_size = list_size.saturating_add(entry_size(name.slice(), value: value.slice()))
+      list_size = list_size.saturating_add(entry_size(name, value: value))
       mut fields.push(Field(name: own name, value: own value, is_sensitive: is_sensitive))
     }
     if list_size > list_limit {
@@ -405,17 +405,17 @@ fn encode_field(output: mut List[UInt8], table: mut Table, field: Field) {
       }
     }
   }
-  let is_indexed = !sensitive && entry_size(field.name.slice(), value: field.value.slice()) <= table.limit
+  let is_indexed = !sensitive && entry_size(field.name, value: field.value) <= table.limit
   if is_indexed {
     write_integer(mut output, flags: 64, prefix_bits: 6, value: name_index)
   } else {
     write_integer(mut output, flags: if sensitive { 16 } else { 0 }, prefix_bits: 4, value: name_index)
   }
   if name_index == 0 {
-    write_string(mut output, text: field.name.slice())
+    write_string(mut output, text: field.name)
   }
-  write_string(mut output, text: field.value.slice())
+  write_string(mut output, text: field.value)
   if is_indexed {
-    insert(mut table, name: field.name.slice(), value: field.value.slice())
+    insert(mut table, name: field.name, value: field.value)
   }
 }

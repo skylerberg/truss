@@ -340,7 +340,7 @@ fn combined[Element: Ordered + Copyable](
       }
       List(storage: own output)
     }
-    None => intrinsic::crash("two sorted sets cannot hold that many elements".slice())
+    None => intrinsic::crash("two sorted sets cannot hold that many elements")
   }
 }
 

@@ -20,15 +20,15 @@ impl Display for Error {
     match self {
       Malformed(message) => {
         mut output.push("a malformed message: ")
-        mut output.push(message.slice())
+        mut output.push(message)
       }
       Rejected(code, message) => {
         mut output.push("the mail server refused with ")
         code.display(mut output)
         mut output.push(": ")
-        mut output.push(message.slice())
+        mut output.push(message)
       }
-      Unsupported(message) => mut output.push(message.slice())
+      Unsupported(message) => mut output.push(message)
       System(error) => error.display(mut output)
       Tls(error) => error.display(mut output)
     }
@@ -84,7 +84,7 @@ fn check_address(address: Address) -> Result[Unit, Error] {
     return Err(malformed("an email address that is not of the form name@domain"))
   }
   match address.name {
-    Some(name) => if has_line_break(name.slice()) { return Err(malformed("a name with a line break")) }
+    Some(name) => if has_line_break(name) { return Err(malformed("a name with a line break")) }
     None => {}
   }
   Ok(Unit)
@@ -114,7 +114,7 @@ fn quoted_name(name: StringSlice) -> String {
 
 fn mailbox(address: Address) -> String {
   match address.name {
-    Some(name) => "${quoted_name(name.slice())} <${address.email}>"
+    Some(name) => "${quoted_name(name)} <${address.email}>"
     None => "<${address.email}>"
   }
 }
@@ -125,7 +125,7 @@ fn mailbox_list(addresses: Slice[Address]) -> String {
     if !listed.is_empty() {
       mut listed.push(", ")
     }
-    mut listed.push(mailbox(address).slice())
+    mut listed.push(mailbox(address))
   }
   listed
 }
@@ -221,7 +221,7 @@ fn multipart(subtype: StringSlice, boundary: StringSlice, parts: Slice[String]) 
   var body = "Content-Type: multipart/${subtype}; boundary=\"${boundary}\"\r\n\r\n"
   for part in parts {
     mut body.push("--${boundary}\r\n")
-    mut body.push(part.slice())
+    mut body.push(part)
   }
   mut body.push("--${boundary}--\r\n")
   body
@@ -265,11 +265,11 @@ public fn Message.encode(self) -> Result[String, Error]
     Some(address) => check_address(address)?
     None => {}
   }
-  if has_line_break(self.subject.slice()) {
+  if has_line_break(self.subject) {
     return Err(malformed("a subject with a line break"))
   }
   for attachment in self.attachments {
-    if has_line_break(attachment.filename.slice()) || has_line_break(attachment.content_type.slice()) {
+    if has_line_break(attachment.filename) || has_line_break(attachment.content_type) {
       return Err(malformed("an attachment name or type with a line break"))
     }
   }
@@ -287,23 +287,23 @@ public fn Message.encode(self) -> Result[String, Error]
     Some(address) => mut head.push("Reply-To: ${mailbox(address)}\r\n")
     None => {}
   }
-  mut head.push("Subject: ${encoded_word(self.subject.slice())}\r\n")
+  mut head.push("Subject: ${encoded_word(self.subject)}\r\n")
   mut head.push("Date: ${message_date(Clock.now())}\r\n")
-  mut head.push("Message-ID: <${Random.next().format(radix: 16, minimum_digits: 16)}${Random.next().format(radix: 16, minimum_digits: 16)}@${domain_of(self.from.email.slice())}>\r\n")
+  mut head.push("Message-ID: <${Random.next().format(radix: 16, minimum_digits: 16)}${Random.next().format(radix: 16, minimum_digits: 16)}@${domain_of(self.from.email)}>\r\n")
   mut head.push("MIME-Version: 1.0\r\n")
   var bodies: List[String] = []
   match self.text {
-    Some(text) => mut bodies.push(text_part("text/plain", body: text.slice()))
+    Some(text) => mut bodies.push(text_part("text/plain", body: text))
     None => {}
   }
   match self.html {
-    Some(html) => mut bodies.push(text_part("text/html", body: html.slice()))
+    Some(html) => mut bodies.push(text_part("text/html", body: html))
     None => {}
   }
   if bodies.is_empty() {
     mut bodies.push(text_part("text/plain", body: ""))
   }
-  let content = if bodies.length() == 1 { bodies[0].copy() } else { multipart("alternative", boundary: boundary().slice(), parts: bodies.slice()) }
+  let content = if bodies.length() == 1 { bodies[0].copy() } else { multipart("alternative", boundary: boundary(), parts: bodies.slice()) }
   if self.attachments.is_empty() {
     return Ok("${head}${content}")
   }
@@ -311,7 +311,7 @@ public fn Message.encode(self) -> Result[String, Error]
   for attachment in self.attachments {
     mut parts.push(attachment_part(attachment))
   }
-  Ok("${head}${multipart("mixed", boundary: boundary().slice(), parts: parts.slice())}")
+  Ok("${head}${multipart("mixed", boundary: boundary(), parts: parts.slice())}")
 }
 
 public type Security = StartTls | Implicit | Plain
@@ -410,7 +410,7 @@ fn command[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, line: Stri
 fn has_extension(reply: Reply, name: StringSlice) -> Bool {
   for line in reply.lines {
     let upper = line.slice().to_ascii_uppercase()
-    if upper == name || upper.slice().starts_with("${name} ".slice()) {
+    if upper == name || upper.slice().starts_with("${name} ") {
       return true
     }
   }
@@ -463,13 +463,13 @@ fn authenticate[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, featu
     mut credentials.append_slice(username.slice().bytes())
     mut credentials.push(0)
     mut credentials.append_slice(password.slice().bytes())
-    let _ = command(stream, inbox: mut inbox, line: "AUTH PLAIN ${base64::encode(credentials.slice())}".slice(), lowest: 235, highest: 235)?
+    let _ = command(stream, inbox: mut inbox, line: "AUTH PLAIN ${base64::encode(credentials.slice())}", lowest: 235, highest: 235)?
     return Ok(Unit)
   }
   if offers_mechanism(features, mechanism: "LOGIN") {
     let _ = command(stream, inbox: mut inbox, line: "AUTH LOGIN", lowest: 334, highest: 334)?
-    let _ = command(stream, inbox: mut inbox, line: base64::encode(username.slice().bytes()).slice(), lowest: 334, highest: 334)?
-    let _ = command(stream, inbox: mut inbox, line: base64::encode(password.slice().bytes()).slice(), lowest: 235, highest: 235)?
+    let _ = command(stream, inbox: mut inbox, line: base64::encode(username.slice().bytes()), lowest: 334, highest: 334)?
+    let _ = command(stream, inbox: mut inbox, line: base64::encode(password.slice().bytes()), lowest: 235, highest: 235)?
     return Ok(Unit)
   }
   Err(Error.Unsupported(message: "a mail server that offers neither AUTH PLAIN nor AUTH LOGIN"))
@@ -479,10 +479,10 @@ fn deliver[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, features: 
   uses Handles, Tasks, RunForever
 {
   authenticate(stream, inbox: mut inbox, features: features, options: options)?
-  let _ = command(stream, inbox: mut inbox, line: "MAIL FROM:<${message.from.email}>".slice(), lowest: 250, highest: 250)?
+  let _ = command(stream, inbox: mut inbox, line: "MAIL FROM:<${message.from.email}>", lowest: 250, highest: 250)?
   for list in [message.to.copy(), message.cc.copy(), message.bcc.copy()] {
     for address in list {
-      let _ = command(stream, inbox: mut inbox, line: "RCPT TO:<${address.email}>".slice(), lowest: 250, highest: 251)?
+      let _ = command(stream, inbox: mut inbox, line: "RCPT TO:<${address.email}>", lowest: 250, highest: 251)?
     }
   }
   let _ = command(stream, inbox: mut inbox, line: "DATA", lowest: 354, highest: 354)?
@@ -517,7 +517,7 @@ public fn send(message: Message, options: SmtpOptions) -> Result[Unit, Error]
 {
   let encoded = message.encode()?
   let timeout = if options.timeout_seconds > 0 && options.timeout_seconds <= 1000000000 { Some(Duration.seconds(options.timeout_seconds)) } else { None }
-  var connection = system(network::connect(options.host.slice(), port: options.port, timeout: timeout))?
+  var connection = system(network::connect(options.host, port: options.port, timeout: timeout))?
   let _ = mut connection.set_read_timeout(timeout)
   let _ = mut connection.set_write_timeout(timeout)
   let greeting = "EHLO ${options.client_name}"
@@ -525,23 +525,23 @@ public fn send(message: Message, options: SmtpOptions) -> Result[Unit, Error]
     Plain => {
       var inbox = Inbox(bytes: [])
       let _ = expect(connection, inbox: mut inbox, lowest: 220, highest: 220)?
-      let features = quit_after(connection, outcome: command(connection, inbox: mut inbox, line: greeting.slice(), lowest: 250, highest: 250))?
-      quit_after(connection, outcome: deliver(connection, inbox: mut inbox, features: features, message: message, encoded: encoded.slice(), options: options))
+      let features = quit_after(connection, outcome: command(connection, inbox: mut inbox, line: greeting, lowest: 250, highest: 250))?
+      quit_after(connection, outcome: deliver(connection, inbox: mut inbox, features: features, message: message, encoded: encoded, options: options))
     }
     Implicit => {
-      let secured = match tls::connect(own connection, host: options.host.slice(), config: client_config(options)?) {
+      let secured = match tls::connect(own connection, host: options.host, config: client_config(options)?) {
         Ok(secured) => own secured
         Err(error) => return Err(Error.Tls(error: own error))
       }
       var inbox = Inbox(bytes: [])
       let _ = expect(secured, inbox: mut inbox, lowest: 220, highest: 220)?
-      let features = quit_after(secured, outcome: command(secured, inbox: mut inbox, line: greeting.slice(), lowest: 250, highest: 250))?
-      quit_after(secured, outcome: deliver(secured, inbox: mut inbox, features: features, message: message, encoded: encoded.slice(), options: options))
+      let features = quit_after(secured, outcome: command(secured, inbox: mut inbox, line: greeting, lowest: 250, highest: 250))?
+      quit_after(secured, outcome: deliver(secured, inbox: mut inbox, features: features, message: message, encoded: encoded, options: options))
     }
     StartTls => {
       var inbox = Inbox(bytes: [])
       let _ = expect(connection, inbox: mut inbox, lowest: 220, highest: 220)?
-      let offered = quit_after(connection, outcome: command(connection, inbox: mut inbox, line: greeting.slice(), lowest: 250, highest: 250))?
+      let offered = quit_after(connection, outcome: command(connection, inbox: mut inbox, line: greeting, lowest: 250, highest: 250))?
       if !has_extension(offered, name: "STARTTLS") {
         return quit_after(connection, outcome: Err(Error.Unsupported(message: "a mail server that does not offer STARTTLS")))
       }
@@ -549,13 +549,13 @@ public fn send(message: Message, options: SmtpOptions) -> Result[Unit, Error]
       if !inbox.bytes.is_empty() {
         return Err(malformed("a mail server that sent bytes before the TLS handshake"))
       }
-      let secured = match tls::connect(own connection, host: options.host.slice(), config: client_config(options)?) {
+      let secured = match tls::connect(own connection, host: options.host, config: client_config(options)?) {
         Ok(secured) => own secured
         Err(error) => return Err(Error.Tls(error: own error))
       }
       var secured_inbox = Inbox(bytes: [])
-      let features = quit_after(secured, outcome: command(secured, inbox: mut secured_inbox, line: greeting.slice(), lowest: 250, highest: 250))?
-      quit_after(secured, outcome: deliver(secured, inbox: mut secured_inbox, features: features, message: message, encoded: encoded.slice(), options: options))
+      let features = quit_after(secured, outcome: command(secured, inbox: mut secured_inbox, line: greeting, lowest: 250, highest: 250))?
+      quit_after(secured, outcome: deliver(secured, inbox: mut secured_inbox, features: features, message: message, encoded: encoded, options: options))
     }
   }
 }

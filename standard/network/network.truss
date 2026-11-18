@@ -852,7 +852,7 @@ impl NetworkClient for HostsAllowed
 
   fn connect(self, address: SocketAddress, timeout: Option[Duration]) -> Result[Connection, SystemError] {
     for allowed in self.hosts {
-      match NetworkClient.resolve(allowed.slice()) {
+      match NetworkClient.resolve(allowed) {
         Ok(addresses) => {
           if addresses.contains(address.address) {
             return NetworkClient.connect(address, timeout: timeout)

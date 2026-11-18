@@ -61,10 +61,10 @@ impl Display for Error {
   {
     if self.path.length() > 0 {
       mut output.push("at ")
-      mut output.push(self.path.slice())
+      mut output.push(self.path)
       mut output.push(": ")
     }
-    mut output.push(self.message.slice())
+    mut output.push(self.message)
   }
 }
 
@@ -92,16 +92,16 @@ public fn optional[Field: Deserialize, Source: Deserializer](
 
 public fn unknown_variant[Source: Deserializer](source: Source, name: String) -> Error {
   var message = "there is no variant `"
-  mut message.push(name.slice())
+  mut message.push(name)
   mut message.push("`")
-  source.error(message.slice())
+  source.error(message)
 }
 
 fn out_of_range[Source: Deserializer](source: Source, type_name: StringSlice) -> Error {
   var message = "expected a number that fits `"
   mut message.push(type_name)
   mut message.push("`")
-  source.error(message.slice())
+  source.error(message)
 }
 
 impl Serialize for Bool {
@@ -257,7 +257,7 @@ impl Deserialize for Float64 {
 
 impl Serialize for String {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.text(self.slice())
+    mut sink.text(self)
   }
 }
 
@@ -321,7 +321,7 @@ impl Serialize for Map[Key: Hash + Ordered + Display, Member: Serialize] {
     mut sink.begin_map(self.length())
     for entry in self {
       let key = "${entry.key}"
-      mut sink.key(key.slice())
+      mut sink.key(key)
       entry.value.serialize(mut sink)
     }
     mut sink.end_map()
@@ -336,7 +336,7 @@ impl Deserialize for Map[Key: Hash + Ordered + text::Parse, Member: Deserialize]
     var members: Map[Key, Member] = [:]
     while true {
       match mut source.next_key() {
-        Some(name) => match Key.parse(name.slice()) {
+        Some(name) => match Key.parse(name) {
           Ok(key) => mut members.insert(own key, value: Member.deserialize(mut source)?)
           Err(_) => return Err(source.error("expected a key of the map's type"))
         }
@@ -350,7 +350,7 @@ impl Deserialize for Map[Key: Hash + Ordered + text::Parse, Member: Deserialize]
 
 public fn serialize_text[Item: Display, Sink: Serializer](item: Item, sink: mut Sink) {
   let text = "${item}"
-  mut sink.text(text.slice())
+  mut sink.text(text)
 }
 
 public fn deserialize_text[Item: text::Parse, Source: Deserializer](
@@ -358,12 +358,12 @@ public fn deserialize_text[Item: text::Parse, Source: Deserializer](
   expected: StringSlice,
 ) -> Result[Item, Error] {
   let text = mut source.text()?
-  match Item.parse(text.slice()) {
+  match Item.parse(text) {
     Ok(item) => Ok(own item)
     Err(_) => {
       var message = "expected "
       mut message.push(expected)
-      Err(source.error(message.slice()))
+      Err(source.error(message))
     }
   }
 }
@@ -634,7 +634,7 @@ fn name_top[Node: Tree](reader: mut TreeReader[Node], name: own String) {
 fn expected_error[Node: Tree](reader: TreeReader[Node], expected: StringSlice) -> Error {
   var message = "expected "
   mut message.push(expected)
-  reader.error(message.slice())
+  reader.error(message)
 }
 
 fn mismatch_error[Node: Tree](reader: TreeReader[Node], expected: StringSlice) -> Error {
@@ -947,7 +947,7 @@ impl Deserializer for TreeReader[Node: Tree] {
     for segment in self.path {
       if segment.length() > 0 {
         mut path.push("/")
-        mut path.push(segment.slice())
+        mut path.push(segment)
       }
     }
     Error(path: own path, message: message.to_string())

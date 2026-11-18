@@ -183,17 +183,17 @@ fn start(workers: mut List[Worker], index: UInt64)
   var output_read: Int32 = -1
   var output_write: Int32 = -1
   if intrinsic::libc_pipe(mut command_read, write_end: mut command_write) != 0 {
-    intrinsic::crash("the system gave the test runner no pipe".slice())
+    intrinsic::crash("the system gave the test runner no pipe")
   }
   if intrinsic::libc_pipe(mut report_read, write_end: mut report_write) != 0 {
-    intrinsic::crash("the system gave the test runner no pipe".slice())
+    intrinsic::crash("the system gave the test runner no pipe")
   }
   if intrinsic::libc_pipe(mut output_read, write_end: mut output_write) != 0 {
-    intrinsic::crash("the system gave the test runner no pipe".slice())
+    intrinsic::crash("the system gave the test runner no pipe")
   }
   let process = intrinsic::libc_fork()
   if process < 0 {
-    intrinsic::crash("the system started no worker for the test runner".slice())
+    intrinsic::crash("the system started no worker for the test runner")
   }
   if process == 0 {
     for other in 0..workers.length() {
@@ -211,7 +211,7 @@ fn start(workers: mut List[Worker], index: UInt64)
     let _ = intrinsic::libc_close(report_read)
     let _ = intrinsic::libc_close(output_read)
     if intrinsic::libc_dup2(output_write, onto: 1) < 0 || intrinsic::libc_dup2(output_write, onto: 2) < 0 {
-      intrinsic::crash("the test runner cannot give a worker its output pipe".slice())
+      intrinsic::crash("the test runner cannot give a worker its output pipe")
     }
     let _ = intrinsic::libc_close(output_write)
     intrinsic::report_tests_to(report_write)
@@ -265,13 +265,13 @@ fn report_end(
 {
   var report: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
   if intrinsic::view_length(message) > 0 {
-    add_block(mut report, label: "message".slice(), content: message)
+    add_block(mut report, label: "message", content: message)
   }
   if intrinsic::view_length(echoed) > 0 {
-    add_block(mut report, label: "echo".slice(), content: echoed)
+    add_block(mut report, label: "echo", content: echoed)
   }
   if intrinsic::view_length(printed) > 0 {
-    add_block(mut report, label: "output".slice(), content: printed)
+    add_block(mut report, label: "output", content: printed)
   }
   writing::append(mut report, bytes: "test ".slice().bytes)
   writing::unsigned(mut report, value: number)

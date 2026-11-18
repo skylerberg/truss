@@ -42,34 +42,34 @@ impl Display for Error {
     match self {
       UnknownOption(name) => {
         mut output.push("unknown option `")
-        mut output.push(name.slice())
+        mut output.push(name)
         mut output.push("`")
       }
       MissingValue(name) => {
         mut output.push("`")
-        mut output.push(name.slice())
+        mut output.push(name)
         mut output.push("` needs a value")
       }
       MissingRequired(name) => {
         mut output.push("`")
-        mut output.push(name.slice())
+        mut output.push(name)
         mut output.push("` is required")
       }
       UnexpectedArgument(value) => {
         mut output.push("unexpected argument `")
-        mut output.push(value.slice())
+        mut output.push(value)
         mut output.push("`")
       }
       InvalidValue(name, value) => {
         mut output.push("`")
-        mut output.push(value.slice())
+        mut output.push(value)
         mut output.push("` is not a value `")
-        mut output.push(name.slice())
+        mut output.push(name)
         mut output.push("` takes")
       }
       UnknownCommand(name) => {
         mut output.push("unknown command `")
-        mut output.push(name.slice())
+        mut output.push(name)
         mut output.push("`")
       }
       HelpRequested => mut output.push("help was requested")
@@ -284,7 +284,7 @@ fn Parser.take_option_value(
   if next == arguments.length() {
     return Err(Error.MissingValue(name: name.to_string()))
   }
-  add_value(mut parsed, name: name, value: arguments[next].slice(), repeated: repeated)
+  add_value(mut parsed, name: name, value: arguments[next], repeated: repeated)
   Ok(next + 1)
 }
 
@@ -345,7 +345,7 @@ fn Parser.parse_short_options(
       let attached: Option[StringSlice] = if rest is Some(text) && text.length() > 0 { Some(text) } else { None }
       return self.take_option_value(mut parsed, position: position, attached: attached, arguments: arguments, next: next)
     }
-    set_flag(mut parsed, name: self.parameters[position].name.slice())
+    set_flag(mut parsed, name: self.parameters[position].name)
   }
   Ok(next)
 }
@@ -378,7 +378,7 @@ fn Parser.finalize(self, parsed: own Parsed, positional_count: UInt64) -> Result
     let kind = self.parameters[index].kind
     if kind == Kind.Option && finished.index_of(name) == finished.options.length() {
       if self.parameters[index].default is Some(text) {
-        add_value(mut finished, name: name, value: text.slice(), repeated: false)
+        add_value(mut finished, name: name, value: text, repeated: false)
       } else if self.parameters[index].required {
         return Err(Error.MissingRequired(name: name.to_string()))
       }
@@ -421,7 +421,7 @@ public fn Parser.parse(self, arguments: Slice[String]) -> Result[Parsed, Error]
       if position < self.parameters.length() {
         add_value(
           mut parsed,
-          name: self.parameters[position].name.slice(),
+          name: self.parameters[position].name,
           value: argument,
           repeated: self.parameters[position].kind == Kind.Rest,
         )
@@ -453,19 +453,19 @@ fn Parameter.write_usage(self, text: mut String)
     mut text.push(name)
     mut text.push("]")
   } else if self.kind == Kind.Option {
-    mut text.push(open.slice())
+    mut text.push(open)
     mut text.push("--")
     mut text.push(name)
     mut text.push(" <")
     mut text.push(name)
     mut text.push(">")
-    mut text.push(close.slice())
+    mut text.push(close)
   } else if self.kind == Kind.Positional {
-    mut text.push(open.slice())
+    mut text.push(open)
     mut text.push("<")
     mut text.push(name)
     mut text.push(">")
-    mut text.push(close.slice())
+    mut text.push(close)
   } else {
     mut text.push("[<")
     mut text.push(name)
@@ -533,7 +533,7 @@ fn Parser.label_width(self) -> UInt64
 fn write_row(text: mut String, label: StringSlice, width: UInt64, help: StringSlice)
 {
   mut text.push("  ")
-  mut text.push(label.pad_end(width).slice())
+  mut text.push(label.pad_end(width))
   if help.length() > 0 {
     mut text.push("  ")
     mut text.push(help)
@@ -563,10 +563,10 @@ fn Parser.write_section(self, text: mut String, title: StringSlice, options: Boo
           mut help.push(" ")
         }
         mut help.push("(default: ")
-        mut help.push(value.slice())
+        mut help.push(value)
         mut help.push(")")
       }
-      write_row(mut text, label: self.parameters[index].label().slice(), width: width, help: help.slice())
+      write_row(mut text, label: self.parameters[index].label(), width: width, help: help)
     }
     index += 1
   }
@@ -575,7 +575,7 @@ fn Parser.write_section(self, text: mut String, title: StringSlice, options: Boo
 public fn Parser.usage(self) -> String
 {
   var text = "usage: "
-  mut text.push(self.name.slice())
+  mut text.push(self.name)
   var index: UInt64 = 0
   while index < self.parameters.length()
     invariant index <= self.parameters.length()
@@ -595,10 +595,10 @@ public fn Parser.help(self) -> String
 {
   var text = ""
   if self.about.length() > 0 {
-    mut text.push(self.about.slice())
+    mut text.push(self.about)
     mut text.push("\n\n")
   }
-  mut text.push(self.usage().slice())
+  mut text.push(self.usage())
   mut text.push("\n")
   let width = self.label_width()
   self.write_section(mut text, title: "arguments", options: false, width: width)
@@ -612,9 +612,9 @@ public fn Parser.help(self) -> String
     {
       write_row(
         mut text,
-        label: self.commands[index].name.slice(),
+        label: self.commands[index].name,
         width: width,
-        help: self.commands[index].about.slice(),
+        help: self.commands[index].about,
       )
       index += 1
     }

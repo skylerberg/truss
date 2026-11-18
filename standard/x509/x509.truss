@@ -12,7 +12,7 @@ public type Error(message: String)
 impl Display for Error {
   fn display(self, output: mut String)
   {
-    mut output.push(self.message.slice())
+    mut output.push(self.message)
   }
 }
 
@@ -508,7 +508,7 @@ public fn pem_blocks(text: StringSlice, label: StringSlice) -> List[List[UInt8]]
       body = ""
     } else if trimmed == end {
       if inside {
-        match base64::decode(body.slice()) {
+        match base64::decode(body) {
           Ok(bytes) => mut blocks.push(own bytes)
           Err(_) => {}
         }
@@ -614,7 +614,7 @@ public fn Certificate.matches_host(self, host: StringSlice) -> Bool {
   let wanted_text = wanted.slice()
   let trimmed = if wanted_text.ends_with(".") { wanted_text.part(0, to: wanted_text.length() - 1) } else { wanted_text }
   for name in self.dns_names {
-    let pattern = lowered(name.slice())
+    let pattern = lowered(name)
     let pattern_text = pattern.slice()
     if pattern_text == trimmed {
       return true
@@ -773,10 +773,10 @@ public fn system_roots() -> Result[List[Certificate], SystemError]
   uses FileRead, Panic
 {
   for path in root_bundles {
-    match FileRead.read_text(Path.new(path.slice())) {
+    match FileRead.read_text(Path.new(path)) {
       Ok(text) => {
         var roots: List[Certificate] = []
-        for block in pem_blocks(text.slice(), label: "CERTIFICATE") {
+        for block in pem_blocks(text, label: "CERTIFICATE") {
           match Certificate.parse(block.slice()) {
             Ok(root) => mut roots.push(own root)
             Err(_) => {}

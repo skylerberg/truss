@@ -635,7 +635,7 @@ public fn Slice[Element: Copyable].repeated(self, times: UInt64) -> List[Element
       }
       List(storage: own elements)
     }
-    None => intrinsic::crash("a list cannot hold that many elements".slice())
+    None => intrinsic::crash("a list cannot hold that many elements")
   }
 }
 
