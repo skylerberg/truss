@@ -72,11 +72,9 @@ let make_definition_form text (path : Path.t) =
   let packages = Support.setup [ ("app::main", text) ] in
   let file = Support.parse_file "app::main" in
   (match
-     List.map
-       (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.make_span 0 0) message)
-       (Support.parse_errors packages file)
-     @ Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
-         (Support.make_database packages) file
+     Database.For_testing.list_diagnostics
+       [ Parse; Resolve; Interface; Infer ]
+       (Support.make_database packages) file
    with
   | [] -> ()
   | reported ->

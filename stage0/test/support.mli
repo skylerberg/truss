@@ -15,6 +15,12 @@ val make_names : Project.package list -> Resolve.Names.lookups
 val list_declarations : Project.package list -> Path.module_ -> Resolve.Names.declaration list
 val list_codes : Diagnostic.t list -> string list
 
+val run_check :
+  check:(Project.package list -> Path.file -> Diagnostic.t list) ->
+  Project.package list ->
+  string ->
+  Diagnostic.t list
+
 type core_nodes = {
   expressions : Core.expression list;
   statements : Core.statement list;

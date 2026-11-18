@@ -72,8 +72,7 @@ let read_source packages (file : Path.file) =
 let parse_errors packages file =
   List.map
     (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-    (let tokens, lexer_diagnostics = Lexer.lex (read_source packages file) in
-     lexer_diagnostics @ snd (Parser.parse tokens ~lexer_diagnostics))
+    (snd (Parser.parse_source (read_source packages file)))
 
 let list_codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
