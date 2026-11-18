@@ -1944,6 +1944,14 @@ scratch. Nothing in it depends on the order of the edits, so a copy of one
 worktree's database is a correct start for another, and a hot build and a
 cold one agree.
 
+**A build's profile is not an input to the database.** A development build
+and a release build read the same lowered code. Lowering emits every check
+that a proof replaces, and the prelude of each C file defines the check's
+failure: a panic in a development build, and `__builtin_unreachable()` in a
+release build, where the C compiler deletes the check. A release build
+therefore reads the parts that editing and testing computed, and saves the
+proofs that it drains for the next check.
+
 **A definition is identified by its name, not by its content.** Unison
 identifies a definition by a hash of its content and of its dependencies'
 hashes, so an edit gives every transitive dependent a new identity, and every

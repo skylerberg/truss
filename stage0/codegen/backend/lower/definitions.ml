@@ -7,7 +7,6 @@ type context = {
   monomorphic : Monomorphic.context;
   types : Intrinsics.types;
   bool : Ground.ty;
-  checks : bool;
 }
 
 let make_monomorphic_context (interface : Interface.Lookups.t) : Monomorphic.context =
@@ -21,7 +20,7 @@ let make_monomorphic_context (interface : Interface.Lookups.t) : Monomorphic.con
 let uint64 = Ground.make_builtin UInt64
 let string_slice : Ground.ty = Named { path = Well_known.make_path String_slice; arguments = [] }
 
-let make_context (settings : Lookups.settings) ~env (lookups : Lookups.t) =
+let make_context ~env (lookups : Lookups.t) =
   let monomorphic = make_monomorphic_context lookups.interface in
   {
     lookups;
@@ -30,7 +29,6 @@ let make_context (settings : Lookups.settings) ~env (lookups : Lookups.t) =
     monomorphic;
     types = { uint64; string_slice };
     bool = Ground.make_builtin Bool;
-    checks = settings.checks;
   }
 
 type written = { spans : Source.Definition_span.t array; text : string }

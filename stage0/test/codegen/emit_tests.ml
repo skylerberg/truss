@@ -634,7 +634,7 @@ let build_entry build_body : Codegen_support.program_fragment =
 
 let operate builder ?destination ?(type_arguments = [ Codegen_support.int32 ]) ?value_arguments
     operation arguments =
-  Backend.For_testing.Intrinsics.lower ?value_arguments
+  Backend.For_testing.Intrinsics.lower ~may_panic:false ?value_arguments
     (Codegen_support.make_shape_env ())
     builder intrinsic_types operation ~type_arguments arguments ~destination
     ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
@@ -888,7 +888,7 @@ let () =
         ]
       in
       let operate builder ?destination operation arguments =
-        Backend.For_testing.Intrinsics.lower
+        Backend.For_testing.Intrinsics.lower ~may_panic:false
           ~value_arguments:[ Z.of_int 3 ]
           (Codegen_support.make_shape_env ~extra ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
@@ -973,7 +973,7 @@ let () =
           }
       in
       let operate builder ?destination operation arguments =
-        Backend.For_testing.Intrinsics.lower ~checks:true
+        Backend.For_testing.Intrinsics.lower ~may_panic:false
           ~value_arguments:[ Z.of_int 3 ]
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
@@ -1106,7 +1106,7 @@ let () =
   Codegen_support.test "a storage is shortened in place and keeps its room" (fun () ->
       let storage_ty = Storage.make_storage_type Codegen_support.uint8 in
       let operate_checked builder ?destination operation arguments =
-        Backend.For_testing.Intrinsics.lower ~checks:true
+        Backend.For_testing.Intrinsics.lower ~may_panic:false
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
           ~destination
@@ -1188,7 +1188,7 @@ let () =
       in
       let operate_checked builder ?destination operation arguments =
         ignore
-          (Backend.For_testing.Intrinsics.lower ~checks:true
+          (Backend.For_testing.Intrinsics.lower ~may_panic:false
              (Codegen_support.make_shape_env ~extra ())
              builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
              ~destination
