@@ -18,8 +18,8 @@ val is_external_test : Lookups.t -> Path.t -> bool
 
 type real_implementation = { impl : Path.t; constructor : Path.t }
 
+val list_real_implementations : Lookups.t -> real_implementation list
 val find_real_implementation : Lookups.t -> Path.t -> real_implementation option
-val is_real_implementation_constructor : Lookups.t -> Path.t -> bool
 
 val find_trait_method :
   Lookups.t -> Path.t -> name:string -> receiver:Path.receiver -> Types.trait_method option

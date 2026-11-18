@@ -752,13 +752,12 @@ let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
           else None)
         (list_named_constants lookups value)
 
-let must_be_used (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
+let must_be_used (lookups : Lookups.t) ~constructors (declaration : Resolve.Names.declaration) =
   (match declaration.visibility with Private | Internal -> true | Public | Public_opaque -> false)
   && declaration.ordinal = 0
   && Option.is_none (lookups.interface.names.find_container (Resolve.Names.make_key declaration))
   && Option.is_none (Well_known.of_path declaration.path)
-  && (not
-        (Interface.Definition.is_real_implementation_constructor lookups.interface declaration.path))
+  && (not (List.exists (Path.equal declaration.path) constructors))
   && (not (Path.is_entry_point declaration.path))
   &&
   match declaration.kind with
@@ -839,11 +838,16 @@ let report_unused (lookups : Lookups.t) (declaration : Resolve.Names.declaration
   }
 
 let check_unexported (lookups : Lookups.t) package =
+  let constructors =
+    List.map
+      (fun (real : Interface.Definition.real_implementation) -> real.constructor)
+      (Interface.Definition.list_real_implementations lookups.interface)
+  in
   let uses =
     List.map
       (fun declaration ->
         ( declaration,
-          must_be_used lookups declaration,
+          must_be_used lookups ~constructors declaration,
           list_used_paths lookups (Resolve.Names.make_key declaration) ))
       (lookups.interface.names.list_package_declarations package)
   in

@@ -249,7 +249,7 @@ let build_real_implementation (st : Lowering.state) ~user capability =
   Targets.lower_implementation_evidence st ~impl:real.impl ~type_arguments:[] ~implementation
     ~site:None
 
-let list_real_implementations (st : Lowering.state) ~user capabilities =
+let build_real_implementations (st : Lowering.state) ~user capabilities =
   List.map
     (fun capability ->
       ( capability,
@@ -329,7 +329,7 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
         [ Place (Lowered.project list (Field storage_field)); Value (Lowering.move_place st text) ]
         None);
   st.evidence <-
-    list_real_implementations st ~user:"main"
+    build_real_implementations st ~user:"main"
       (Definitions.list_evidence st.context Types.no_substitution signature.uses);
   let exit_ty =
     match signature.output with
@@ -357,7 +357,7 @@ let build_test_main context (item : Lowered.Item.t) test_path : Emit_c.fragment 
   Emit_c.Ir_builder.start st.builder (Emit_c.Ir_builder.allocate_block st.builder);
   let signature = Definitions.read_signature context test_path in
   st.evidence <-
-    list_real_implementations st ~user:(Path.show test_path)
+    build_real_implementations st ~user:(Path.show test_path)
       (Definitions.list_evidence st.context Types.no_substitution signature.uses);
   Targets.lower_item_call st
     (Code { path = test_path; instantiation = Ground.no_instantiation })
