@@ -89,7 +89,7 @@ let find snapshot database packages ~body text =
       in
       let names = Database.make_name_lookups database [ key.module_.package ] in
       let ({ file = written; base } : Resolve.Names.place) = names.read_place key in
-      let source = Command_packages.read_source snapshot packages written in
+      let source = Command_packages.read_source snapshot database packages written in
       {
         declaration;
         file = Source.path source;

@@ -18,5 +18,5 @@ val list_manifest_problems :
   (string * Path.package * Database.manifest_problem) list
 
 val select_files : Workspace.snapshot -> Path.package list -> string list -> Path.file list
-val read_source : Workspace.snapshot -> Path.package list -> Path.file -> Source.t
 val show_file : Workspace.snapshot -> Path.package list -> Path.file -> string
+val read_source : Workspace.snapshot -> Database.t -> Path.package list -> Path.file -> Source.t

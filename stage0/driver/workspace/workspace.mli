@@ -12,7 +12,6 @@ val list_registry_packages : snapshot -> (Path.package * Registry.Version.t * st
 val lock_fix : snapshot -> string option
 val list_package_files : snapshot -> Path.package -> Path.file list
 val list_dependency_names : snapshot -> Path.package -> Path.package list
-val read_source : snapshot -> Path.file -> Source.t
 val locate_file : snapshot -> Path.file -> string
 val list_package_databases : unit -> string list
 val make_trial : snapshot -> (string * string option) list -> snapshot
