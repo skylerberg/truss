@@ -169,10 +169,8 @@ let c_compiler =
 
 let counter = ref 0
 
-let worker_counts =
-  match Sys.getenv_opt "TRUSS_CFLAGS" with
-  | Some flags when String.includes ~affix:"-fsanitize=" flags -> [ 8 ]
-  | Some _ | None -> [ 1; 2; 8; 32 ]
+let list_worker_counts () =
+  if C_compiler.For_testing.has_sanitizer (Lazy.force c_compiler) then [ 8 ] else [ 1; 2; 8; 32 ]
 
 let test_position (site : Lowered.site) : Emit_c.position =
   { file = "test.truss"; line = 1; column = site.offset + 1 }
@@ -216,7 +214,7 @@ let make_example_package files : Project.package list =
 
 let make_backend ?results ?evaluation_time_limit_ms database =
   Backend.create ?results ?evaluation_time_limit_ms
-    (Database.make_lowering_requests database [ example.package ])
+    (Database.make_lowered_lookups database [ example.package ])
     (Lazy.force c_compiler) Development
 
 let load_files ?results ?(roots = []) ?checks files =

@@ -2257,16 +2257,15 @@ let list_reached_todo_types database key =
   in
   List.sort_uniq Path.compare (visit [] (Stored (Any (Test_key key))))
 
-let make_lowering_requests database packages : Backend.requests =
+let make_lowered_lookups database packages : Backend.lowered_lookups =
   let interface = make_interface_lookups database packages in
   {
-    settings = read_lowering_settings database;
+    system = (read_lowering_settings database).system;
     read_source =
       (fun file ->
         note_untracked_read database (Input (Source file));
         read_source database file);
     interface;
-    mir = make_recording_mir_lookups database (note_untracked_read database);
     find_lowered =
       (fun key ->
         request database packages ~through:Lowered_code

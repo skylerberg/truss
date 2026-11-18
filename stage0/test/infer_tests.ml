@@ -474,6 +474,8 @@ let () =
       ("static method", Fixtures.Infer.call_of_another_modules_private_static_method);
       ("member constant", Fixtures.Infer.read_of_another_modules_private_member_constant);
       ("method, used as a value,", Fixtures.Infer.another_modules_private_method_as_a_value);
+      ( "member constant, in a pattern,",
+        Fixtures.Infer.pattern_of_another_modules_private_member_constant );
     ];
   Harness.test "an internal method and a public method of another module are visible" (fun () ->
       expect_no_diagnostics
@@ -491,9 +493,58 @@ let () =
     (fun () ->
       expect_one_diagnostic ~others Fixtures.Infer.call_of_a_method_of_another_modules_private_trait
         "types.unknown_member");
-  Harness.test "a loop does not use another module's private `count` and `element`" (fun () ->
-      expect_one_diagnostic ~others Fixtures.Infer.loop_over_a_type_with_a_private_loop_protocol
-        "types.not_indexable")
+  List.iter
+    (fun (construct, fixture) ->
+      Harness.test
+        (Printf.sprintf
+           "%s over another module's private `count` and `element` names the hidden method"
+           construct) (fun () ->
+          expect_one_diagnostic ~others fixture "types.member_not_visible"
+            ~says:"`app::shapes::Shape.count` is private to its module"))
+    [
+      ("a loop", Fixtures.Infer.loop_over_a_type_with_a_private_loop_protocol);
+      ("a quantifier", Fixtures.Infer.quantifier_over_a_type_with_a_private_loop_protocol);
+    ];
+  Harness.test "reading another module's private method as a field does not reveal the method"
+    (fun () ->
+      expect_one_diagnostic ~others Fixtures.Infer.field_read_of_another_modules_private_method
+        "types.unknown_member" ~says:"has no field `secret`");
+  Harness.test
+    "a call with a dot reaches a trait's method where the type's own method of its name is hidden"
+    (fun () ->
+      let packages =
+        Support.setup
+          ~dependencies:[ ("app", "tools") ]
+          [
+            ( "app::main",
+              Fixtures.Infer.call_of_a_trait_method_named_like_another_packages_internal_method );
+            ("tools::kits", Fixtures.Infer.kit_with_an_internal_part);
+          ]
+      in
+      let list_callees module_ definition_name =
+        let file = Support.parse_file module_ in
+        (match check packages file with
+        | [] -> ()
+        | reported ->
+            Harness.fail "%s: %s" module_ (String.concat "; " (Support.list_codes reported)));
+        List.concat_map
+          (fun (declaration : Resolve.Names.declaration) ->
+            match declaration.path with
+            | (Top { name; _ } | Method { name; _ }) when name = definition_name ->
+                List.filter_map
+                  (fun (node : Core.expression) ->
+                    match node.kind with Call { callee; _ } -> Some callee | _ -> None)
+                  (Support.collect_core_nodes packages (Resolve.Names.make_key declaration))
+                    .expressions
+            | _ -> [])
+          (Support.list_declarations packages file.module_)
+      in
+      (match list_callees "app::main" "f" with
+      | [ Trait_method { name = "part"; _ } ] -> ()
+      | _ -> Harness.fail "the call in `app` does not reach `Parted.part`");
+      match list_callees "tools::kits" "measure" with
+      | [ Function { path = Method { name = "part"; receiver = Read; _ }; _ } ] -> ()
+      | _ -> Harness.fail "the call in `tools` does not reach `Kit.part`")
 
 let () =
   Harness.test "a statement's value must be used, with a fix that discards it" (fun () ->
@@ -947,6 +998,24 @@ let () =
           ("given", Read);
           ("count", Own);
         ]);
+  Harness.test
+    "a compound assignment copies a `Plain` operand that its operator reads, and views an operand \
+     of another type" (fun () ->
+      let packages = Support.setup [ ("app::main", Fixtures.Infer.compound_assignment_operands) ] in
+      let assigning =
+        List.find
+          (fun (declaration : Resolve.Names.declaration) ->
+            Path.equal declaration.path (Support.make_top_path "app::main" "f"))
+          (Support.list_declarations packages (Support.parse_module "app::main"))
+      in
+      match
+        List.filter_map
+          (fun (node : Core.statement) ->
+            match node.kind with Compound_assign { operand; _ } -> Some operand | _ -> None)
+          (Support.collect_core_nodes packages (Resolve.Names.make_key assigning)).statements
+      with
+      | [ Value _; Place _ ] -> ()
+      | _ -> Harness.fail "the operands are not a copy of `count` and a view of `title`");
   Harness.test "a range pattern on a type that is not an integer or Character is an error"
     (fun () -> expect_one_diagnostic Fixtures.Infer.bool_range_arm "types.mismatch");
   Harness.test "an integer range on a type that is not ordered is one error" (fun () ->

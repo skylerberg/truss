@@ -7,11 +7,10 @@ type lowered =
   | Folded of Lowered.data * Emit_c.fragment
   | Evaluate of Path.t * Ground.ty
 
-type requests = {
-  settings : Lookups.settings;
+type lowered_lookups = {
+  system : Libc.system;
   read_source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
-  mir : Mir.lookups;
   find_lowered : Instance.key -> (lowered, unsupported) result option;
   read_test_key : Instance.key -> (string, unsupported) result;
   list_reached_todo_types : Instance.key -> Path.t list;
@@ -227,7 +226,7 @@ type 'a ran = Ran of 'a | Ran_too_long | Stopped of string
 type results = { find : string -> string option; add : string -> string -> unit }
 
 type t = {
-  requests : requests;
+  lookups : lowered_lookups;
   monomorphic : Monomorphic.context;
   c_compiler : C_compiler.t;
   profile : profile;
@@ -240,17 +239,17 @@ type t = {
 }
 
 let make_env backend =
-  Memory_layout.create backend.requests.settings.system
+  Memory_layout.create backend.lookups.system
     ~compute_shape:(Monomorphic.compute_shape backend.monomorphic)
 
 let read_lowered backend key =
-  match backend.requests.find_lowered key with
+  match backend.lookups.find_lowered key with
   | Some (Ok lowered) -> lowered
   | Some (Error unsupported) -> raise (Lower.Unsupported unsupported)
   | None -> raise_bug "%s is requested from code with errors" (Instance.to_string key)
 
 let read_test_key backend root =
-  match backend.requests.read_test_key root with
+  match backend.lookups.read_test_key root with
   | Ok test_key -> test_key
   | Error unsupported -> raise (Lower.Unsupported unsupported)
 
@@ -277,7 +276,7 @@ let make_result_key backend root =
        (Cbor.Array
           [
             Cbor.int Emit_c.version;
-            Cbor.Text (Libc.show_system backend.requests.settings.system);
+            Cbor.Text (Libc.show_system backend.lookups.system);
             Cbor.Text (show_profile backend.profile);
             Bytes
               (C_compiler.make_fingerprint backend.c_compiler (select_optimization backend.profile));
@@ -286,23 +285,23 @@ let make_result_key backend root =
 
 type location = { file : Path.file; line : int; column : int }
 
-let locate_offset (requests : requests) (definition : Path.t) offset =
-  let names = requests.interface.names in
+let locate_offset (lookups : lowered_lookups) (definition : Path.t) offset =
+  let names = lookups.interface.names in
   match Option.map names.read_place (names.find_key definition) with
   | Some { file; base } ->
-      let line, column = Source.compute_position (requests.read_source file) (base + offset) in
+      let line, column = Source.compute_position (lookups.read_source file) (base + offset) in
       { file; line; column }
   | None -> raise_bug "%s has no place in a file" (Path.show definition)
 
-let locate_site requests (site : Lowered.site) = locate_offset requests site.definition site.offset
+let locate_site lookups (site : Lowered.site) = locate_offset lookups site.definition site.offset
 
-let locate_todo_type (requests : requests) (path : Path.t) =
-  let names = requests.interface.names in
+let locate_todo_type (lookups : lowered_lookups) (path : Path.t) =
+  let names = lookups.interface.names in
   match
     Option.map (fun key -> (names.read_definition key, names.read_spans key)) (names.find_key path)
   with
   | Some ({ kind = Type_definition { name; _ }; _ }, spans) ->
-      locate_offset requests path spans.(name.id).start
+      locate_offset lookups path spans.(name.id).start
   | Some _ | None ->
       raise_bug "%s is reached as a type defined as todo, and has no definition" (Path.show path)
 
@@ -367,8 +366,7 @@ let rec build ?report_progress ?(tests = false) ?(supplied = []) backend ~roots 
         ("startup", startup);
         ( "sites",
           Emit_c.render_sites_file
-            ~resolve_position:(fun site ->
-              make_position backend (locate_site backend.requests site))
+            ~resolve_position:(fun site -> make_position backend (locate_site backend.lookups site))
             linked );
       ]
   in
@@ -457,7 +455,7 @@ let show_unsupported backend (unsupported : Lower.unsupported) =
   let where =
     match unsupported.at with
     | None -> ""
-    | Some at -> show_location backend (locate_site backend.requests at) ^ ": "
+    | Some at -> show_location backend (locate_site backend.lookups at) ^ ": "
   in
   where ^ "Stage0 cannot build this yet: " ^ unsupported.construct ^ "."
 
@@ -629,7 +627,7 @@ let make_incomplete_record backend todo_types =
            (List.map
               (fun path ->
                 Printf.sprintf "the type %s is defined as todo\n  at %s" (Path.show path)
-                  (show_location backend (locate_todo_type backend.requests path)))
+                  (show_location backend (locate_todo_type backend.lookups path)))
               todo_types));
     echo = None;
     output = None;
@@ -643,12 +641,12 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
   let roots = List.map make_test_root tests in
   report_progress Lowering;
   let is_keyed test =
-    results <> None && not (Interface.Definition.is_external_test backend.requests.interface test)
+    results <> None && not (Interface.Definition.is_external_test backend.lookups.interface test)
   in
   let known =
     List.mapi
       (fun index (test, root) ->
-        match backend.requests.list_reached_todo_types root with
+        match backend.lookups.list_reached_todo_types root with
         | _ :: _ as todo_types ->
             (index, root, None, Some (make_incomplete_record backend todo_types))
         | [] ->
@@ -736,16 +734,16 @@ type unshippable = {
 let make_root_key (root : Path.t) : Instance.key =
   match root with Test _ -> make_test_root root | _ -> Generated (Program_main root)
 
-let rec read_executed_fragment (requests : requests) key =
-  match requests.find_lowered key with
+let rec read_executed_fragment (lookups : lowered_lookups) key =
+  match lookups.find_lowered key with
   | Some (Ok (Compiled fragment | Folded (_, fragment))) -> Some fragment
-  | Some (Ok (Evaluate (path, _))) -> read_executed_fragment requests (Instance.Evaluator path)
+  | Some (Ok (Evaluate (path, _))) -> read_executed_fragment lookups (Instance.Evaluator path)
   | Some (Error _) | None -> None
 
-let trace_root requests root =
-  Emit_c.trace_reachable ~lookup:(read_executed_fragment requests) [ make_root_key root ]
+let trace_root lookups root =
+  Emit_c.trace_reachable ~lookup:(read_executed_fragment lookups) [ make_root_key root ]
 
-let list_reached_definitions requests root =
+let list_reached_definitions lookups root =
   List.sort_uniq Path.compare
     (List.filter_map
        (fun (_, way) ->
@@ -753,10 +751,10 @@ let list_reached_definitions requests root =
          | (Instance.Code { path; _ } | Constant path | Generated (Program_main path)) :: _ ->
              Some path
          | _ -> None)
-       (trace_root requests root))
+       (trace_root lookups root))
 
-let list_unshippable (requests : requests) ~main =
-  let reached = trace_root requests main in
+let list_unshippable (lookups : lowered_lookups) ~main =
+  let reached = trace_root lookups main in
   begin
     let list_definitions keys =
       List.fold_left
@@ -771,14 +769,14 @@ let list_unshippable (requests : requests) ~main =
     let reports =
       List.map
         (fun path ->
-          let ({ file; line; column } : location) = locate_todo_type requests path in
+          let ({ file; line; column } : location) = locate_todo_type lookups path in
           { failure = `Todo; file; line; column; way = [ main; path ] })
-        (requests.list_reached_todo_types (make_root_key main))
+        (lookups.list_reached_todo_types (make_root_key main))
       @ List.concat_map
           (fun (compiled, keys) ->
             List.map
               (fun (failure, site) ->
-                let ({ file; line; column } : location) = locate_site requests site in
+                let ({ file; line; column } : location) = locate_site lookups site in
                 {
                   failure = (match failure with Emit_c.Echo -> `Echo | Todo -> `Todo);
                   file;
@@ -808,7 +806,7 @@ let list_unshippable (requests : requests) ~main =
 
 let make_program_root backend ~main =
   let root = make_root_key main in
-  match backend.requests.list_reached_todo_types root with
+  match backend.lookups.list_reached_todo_types root with
   | [] -> root
   | todo_types ->
       raise_cannot_build "%s"
@@ -818,7 +816,7 @@ let make_program_root backend ~main =
                 Printf.sprintf
                   "%s: the type %s is defined as todo, and `main` can reach it, so the program \
                    cannot be built."
-                  (show_location backend (locate_todo_type backend.requests path))
+                  (show_location backend (locate_todo_type backend.lookups path))
                   (Path.show path))
               todo_types))
 
@@ -836,8 +834,8 @@ let build_program backend ~main ~output =
     ~startup:(Startup.render_program_start (Instance.make_symbol root))
     ~output
 
-let list_reached_todo_types (requests : requests) root =
-  requests.list_reached_todo_types (make_root_key root)
+let list_reached_todo_types (lookups : lowered_lookups) root =
+  lookups.list_reached_todo_types (make_root_key root)
 
 let run_template_check backend ~from_template ~literals ~clauses =
   let ran =
@@ -859,7 +857,7 @@ let run_template_check backend ~from_template ~literals ~clauses =
 
 let evaluate_call backend ~function_ ~arguments =
   capture_failure backend @@ fun () ->
-  match Interface.Impls.read_signature backend.requests.interface function_ with
+  match Interface.Impls.read_signature backend.lookups.interface function_ with
   | Some { output = Returns result; _ } ->
       let ty = Monomorphic.ground backend.monomorphic Types.no_substitution result in
       let key = Instance.Call_evaluation { function_; arguments } in
@@ -869,10 +867,10 @@ let evaluate_call backend ~function_ ~arguments =
 
 let create ?(show_file = Path.show_file) ?results ?(evaluation_time_limit_ms = 10_000)
     ?(programs = Filename.get_temp_dir_name ())
-    ?(is_worked_on = fun package -> package <> Path.standard_package) requests c_compiler profile =
+    ?(is_worked_on = fun package -> package <> Path.standard_package) lookups c_compiler profile =
   {
-    requests;
-    monomorphic = Lower.make_monomorphic_context requests.interface;
+    lookups;
+    monomorphic = Lower.make_monomorphic_context lookups.interface;
     c_compiler;
     profile;
     show_file;

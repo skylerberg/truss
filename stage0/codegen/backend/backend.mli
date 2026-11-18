@@ -3,11 +3,10 @@ module Lookups = Lookups
 type unsupported = { construct : string; at : Lowered.site option }
 type lowered
 
-type requests = {
-  settings : Lookups.settings;
+type lowered_lookups = {
+  system : Libc.system;
   read_source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
-  mir : Mir.lookups;
   find_lowered : Instance.key -> (lowered, unsupported) result option;
   read_test_key : Instance.key -> (string, unsupported) result;
   list_reached_todo_types : Instance.key -> Path.t list;
@@ -28,7 +27,7 @@ val create :
   ?evaluation_time_limit_ms:int ->
   ?programs:string ->
   ?is_worked_on:(Path.package -> bool) ->
-  requests ->
+  lowered_lookups ->
   C_compiler.t ->
   profile ->
   t
@@ -69,9 +68,9 @@ type unshippable = {
   way : Path.t list;
 }
 
-val list_unshippable : requests -> main:Path.t -> unshippable list
-val list_reached_definitions : requests -> Path.t -> Path.t list
-val list_reached_todo_types : requests -> Path.t -> Path.t list
+val list_unshippable : lowered_lookups -> main:Path.t -> unshippable list
+val list_reached_definitions : lowered_lookups -> Path.t -> Path.t list
+val list_reached_todo_types : lowered_lookups -> Path.t -> Path.t list
 val make_program_path : t -> string
 val build_program : t -> main:Path.t -> output:string -> (unit, string) result
 

@@ -345,23 +345,23 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
       | Types.Error _ | Types.Hole -> (type_, mode)
       | _ -> (
           let cursor = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
-          let by_position =
-            if mode = Types.Own then None
+          let by_position : (Tables.loop * Types.ty * Types.mode) Resolve.Names.lookup =
+            if mode = Types.Own then Absent
             else
               Name_lookup.find_elements_calls state (State.read_span state iterable.id) type_ mode
-          and consumed =
+          and consumed : (Tables.loop * Types.ty) Resolve.Names.lookup =
             if mode = Types.Own then
               Name_lookup.find_consuming_cursor state (State.read_span state iterable.id) type_
-            else None
+            else Absent
           in
           match (by_position, consumed, State.find_evidence state type_ cursor) with
-          | Some (loop, element, lends), _, _ ->
+          | Visible (loop, element, lends), _, _ ->
               State.record_loop state ~loop:written.id ~iterable loop;
               (element, lends)
-          | None, Some (loop, element), _ ->
+          | _, Visible (loop, element), _ ->
               State.record_loop state ~loop:written.id ~iterable loop;
               (element, Types.Own)
-          | None, None, Some _ ->
+          | _, _, Some _ ->
               State.record_loop state ~loop:written.id ~iterable
                 (Pulled
                    {
@@ -375,7 +375,9 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
               ( State.resolve_associated_type state type_ cursor "Element"
                   ~at:(State.read_span state iterable.id),
                 Types.Own )
-          | None, None, None ->
+          | Hidden hidden, _, None | _, Hidden hidden, None ->
+              (Members.make_hidden_error state (State.read_span state iterable.id) hidden, mode)
+          | Absent, Absent, None ->
               ( State.make_error_type state Not_indexable
                   (State.read_span state iterable.id)
                   (match mode with

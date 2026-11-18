@@ -16,7 +16,7 @@ let require_main snapshot database packages =
          no program."
         (Path.show_package package)
 
-let refuse_unshippable snapshot packages requests main proofs =
+let refuse_unshippable snapshot packages lookups main proofs =
   let in_code =
     List.map
       (fun ({ failure; file; line; column; way } : Backend.unshippable) ->
@@ -25,7 +25,7 @@ let refuse_unshippable snapshot packages requests main proofs =
           column,
           (failure :> [ `Todo | `Echo | `Proof_hole ]),
           way ))
-      (Backend.list_unshippable requests ~main)
+      (Backend.list_unshippable lookups ~main)
   in
   let in_proofs =
     List.concat_map
@@ -33,7 +33,7 @@ let refuse_unshippable snapshot packages requests main proofs =
         List.map
           (fun (file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
           (Proofs.list_holes snapshot packages proofs definition))
-      (Backend.list_reached_definitions requests main)
+      (Backend.list_reached_definitions lookups main)
   in
   match List.sort_uniq compare (in_code @ in_proofs) with
   | [] -> ()
@@ -81,7 +81,7 @@ let build_program ?output snapshot packages (profile : Backend.profile) =
   let main = require_main snapshot database packages in
   Option.iter
     (refuse_unshippable snapshot packages
-       (Workspace_backend.make_lowering_requests database packages)
+       (Workspace_backend.make_lowered_lookups database packages)
        main)
     (Report.force_proofs report);
   let backend = Workspace_backend.create database snapshot packages profile in

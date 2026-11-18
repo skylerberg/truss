@@ -525,10 +525,12 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
           (State.read_span state collection.id)
           collection_type Types.Read
       with
-      | Some (loop, element, _) ->
+      | Visible (loop, element, _) ->
           State.record_loop state ~loop:quantifier.id ~iterable:collection loop;
           element
-      | None ->
+      | Hidden hidden ->
+          Members.make_hidden_error state (State.read_span state collection.id) hidden
+      | Absent ->
           State.make_error_type state Not_indexable
             (State.read_span state collection.id)
             (Printf.sprintf "`%s` cannot be looped over." (Types.show collection_type)))
