@@ -1,0 +1,25 @@
+trait Grow {
+  fn grow(self, steps: UInt32) -> Int64
+}
+
+type Seed(height: Int64)
+
+type Sprout(height: Int64)
+
+impl Grow for Seed {
+  fn grow(self, steps: UInt32) -> Int64
+    decreases steps
+  {
+    if steps == 0 { return self.height }
+    Sprout(height: self.height).grow(steps - 1)
+  }
+}
+
+impl Grow for Sprout {
+  fn grow(self, steps: UInt32) -> Int64
+    decreases steps
+  {
+    if steps == 0 { return self.height }
+    Seed(height: self.height).grow(steps - 1)
+  }
+}

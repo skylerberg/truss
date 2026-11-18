@@ -6,6 +6,7 @@ val call_contract :
   Path.t ->
   State.contract ->
   State.passed list ->
+  recursive_callee:Path.t option ->
   lent_final:(Logic.term -> Logic.term) option ->
   havoc_mut:(State.frame -> State.frame) ->
   substitution_of:(State.clauses -> Types.substitution) ->

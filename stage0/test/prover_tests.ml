@@ -18,6 +18,21 @@ let expect_only_code text code =
       if List.exists (fun other -> other <> code) actual then
         Harness.fail "%s" (String.concat ", " actual)
 
+let list_termination_failures text =
+  let packages = Support.setup [ ("app::main", text) ] in
+  List.filter_map
+    (fun (diagnostic : Diagnostic.t) ->
+      if Diagnostic.Code.name diagnostic.code = "prover.termination" then Some diagnostic.message
+      else None)
+    (check packages (Support.parse_file "app::main"))
+
+let expect_one_termination_failure ~says text =
+  match list_termination_failures text with
+  | [ message ] ->
+      if not (String.includes ~affix:says message) then
+        Harness.fail "expected a message that says %S, got: %s" says message
+  | messages -> Harness.fail "%d termination failures" (List.length messages)
+
 let read_message text =
   let packages = Support.setup [ ("app::main", text) ] in
   match check packages (Support.parse_file "app::main") with
@@ -1290,8 +1305,164 @@ let () =
       expect_only_code Fixtures.Prover.looper_provided_by_its_own_caller "prover.termination");
   Harness.test "a call through any that reaches back is recursion" (fun () ->
       expect_only_code Fixtures.Prover.step_reaching_back_through_any "prover.termination");
-  Harness.test "a method that calls itself through any is recursion" (fun () ->
-      expect_not_proven Fixtures.Prover.check_calling_itself_through_any "prover.termination")
+  Harness.test
+    "a method that calls itself through any is recursion at the conversion and at the call"
+    (fun () ->
+      match
+        List.sort compare
+          (list_termination_failures Fixtures.Prover.check_calling_itself_through_any)
+      with
+      | [ call; conversion ]
+        when String.starts_with ~prefix:"This call to `Check.check` may not end" call
+             && String.starts_with
+                  ~prefix:
+                    "This conversion to `any` gives `app::main::impl app::main::Check for \
+                     app::main::Loop`, whose methods call back here"
+                  conversion ->
+          ()
+      | messages -> Harness.fail "%s" (String.concat "; " messages))
+
+let () =
+  Harness.test "an impl's method that calls itself through its type is recursion" (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:
+          "This recursive call may not end: give the function a `decreases` clause for the prover \
+           to show that the recursion ends."
+        Fixtures.Prover.from_calling_itself_through_its_type "prover.termination");
+  Harness.test "an impl's method that calls itself through its receiver is recursion" (fun () ->
+      expect_not_proven Fixtures.Prover.grow_calling_itself_through_its_receiver
+        "prover.termination");
+  Harness.test "an impl's method that calls itself through its trait is recursion" (fun () ->
+      expect_not_proven Fixtures.Prover.grow_calling_itself_through_its_trait "prover.termination");
+  Harness.test "methods of two impls that call each other without measures cannot be shown to end"
+    (fun () ->
+      match list_codes Fixtures.Prover.grow_of_two_impls_calling_each_other with
+      | [ "prover.termination"; "prover.termination" ] -> ()
+      | codes -> Harness.fail "codes %s" (String.concat ", " codes));
+  Harness.test "methods of two impls that call each other with measures that decrease" (fun () ->
+      expect_proven Fixtures.Prover.grow_of_two_impls_with_measures);
+  Harness.test "a function that calls an impl's method that calls it back is recursion" (fun () ->
+      Support.expect_one_diagnostic ~check ~at:("seed.grow(steps + 1)", 1)
+        Fixtures.Prover.tend_calling_a_grow_that_calls_it_back "prover.termination");
+  Harness.test "an impl's method whose measure decreases" (fun () ->
+      expect_proven Fixtures.Prover.grow_with_a_measure_that_decreases);
+  Harness.test "an impl's method whose measure does not decrease" (fun () ->
+      expect_not_proven Fixtures.Prover.grow_with_a_measure_that_does_not_decrease
+        "prover.termination");
+  Harness.test "an impl's method that recurses on a part of its receiver ends" (fun () ->
+      expect_proven (tree ^ Fixtures.Prover.depth_of_a_tree_in_an_impl));
+  Harness.test "an impl's method that recurses on an element of a field's list ends" (fun () ->
+      expect_proven Fixtures.Prover.tree_visit_of_its_children_in_an_impl);
+  Harness.test "an impl's method that recurses on its receiver itself does not end" (fun () ->
+      expect_not_proven
+        (tree ^ Fixtures.Prover.depth_of_the_tree_itself_in_an_impl)
+        "prover.termination");
+  Harness.test "an override that calls another type's provided method is not recursion" (fun () ->
+      expect_proven Fixtures.Prover.describe_overridden_by_calling_a_provided_describe);
+  Harness.test "a written method that calls a derived method of its trait is not recursion"
+    (fun () -> expect_proven Fixtures.Prover.default_written_over_a_derived_default);
+  Harness.test
+    "a written method that calls a written method that calls a derived method of their trait is \
+     not recursion" (fun () ->
+      expect_proven Fixtures.Prover.default_written_over_a_written_default_over_a_derived_default);
+  Harness.test "a written method that calls an integer's inherited max is not recursion" (fun () ->
+      expect_proven Fixtures.Prover.rank_compare_calling_the_max_of_an_integer);
+  Harness.test "a written equal that gives a derived Equal to a generic function is not recursion"
+    (fun () ->
+      expect_proven Fixtures.Prover.outer_equal_through_a_generic_function_given_a_derived_equal);
+  Harness.test "an override that calls provided methods that its impl inherits is not recursion"
+    (fun () -> expect_proven Fixtures.Prover.clamp_overridden_by_calling_inherited_max_and_min);
+  Harness.test "provided methods that call each other with measures that decrease" (fun () ->
+      expect_proven Fixtures.Prover.ping_and_pong_provided_with_measures);
+  Harness.test "an impl's method that may run forever calls itself without a measure" (fun () ->
+      expect_proven Fixtures.Prover.grow_that_may_run_forever_calling_itself_through_its_receiver);
+  Harness.test "an impl's method's written measure holds where the method may run forever"
+    (fun () ->
+      Support.expect_one_diagnostic ~check ~says:"This call may not decrease `steps`."
+        Fixtures.Prover.grow_that_may_run_forever_with_a_measure_that_does_not_decrease
+        "prover.termination");
+  Harness.test
+    "a recursion through an impl given to a bound is not rejected where its methods may run forever"
+    (fun () ->
+      expect_proven Fixtures.Prover.pot_that_may_run_forever_growing_a_seed_that_grows_a_pot);
+  Harness.test
+    "a recursion through an inherited method is not rejected where the methods may run forever"
+    (fun () ->
+      expect_proven
+        Fixtures.Prover.pong_that_may_run_forever_calling_an_inherited_ping_that_calls_it_back)
+
+let () =
+  Harness.test "a call of an inherited method that calls back is recursion through inherited code"
+    (fun () ->
+      Support.expect_one_diagnostic ~check ~says:"through code that its `impl` inherits"
+        ~at:("Foo().ping(steps)", 1) Fixtures.Prover.poke_calling_a_provided_ping_that_calls_it_back
+        "prover.termination");
+  Harness.test
+    "a written method and a method its impl inherits that call each other are recursion through \
+     inherited code" (fun () ->
+      Support.expect_one_diagnostic ~check ~says:"through code that its `impl` inherits"
+        ~at:("self.ping(steps - 1)", 1)
+        Fixtures.Prover.pong_calling_an_inherited_ping_that_calls_it_back "prover.termination");
+  Harness.test "a provided body that calls itself on a type is recursion through inherited code"
+    (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:
+          "This call to `Hop.step` reaches back here through code that its `impl` inherits from \
+           its trait. No measure can be stated for that code, so the recursion cannot be shown to \
+           end."
+        Fixtures.Prover.step_provided_by_calling_itself_on_a_type "prover.termination");
+  Harness.test
+    "a provided body that gives its receiver to a generic function that calls it back is recursion"
+    (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:"This call uses `app::main::Step` where a bound needs it, and its methods reach back"
+        ~at:("run(self)", 1)
+        Fixtures.Prover.step_provided_by_giving_its_receiver_to_a_generic_function
+        "prover.termination");
+  Harness.test "a call of a derived method that calls back is recursion through derived code"
+    (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:
+          "This call to `Holder.default` reaches back here through code that its `impl` derives. \
+           No measure can be stated for that code, so the recursion cannot be shown to end."
+        Fixtures.Prover.default_calling_a_derived_default_that_calls_it_back "prover.termination");
+  Harness.test "an equal that compares its receiver with the operator is recursion" (fun () ->
+      expect_one_termination_failure ~says:"give the function a `decreases` clause"
+        Fixtures.Prover.equal_comparing_its_receiver_with_the_operator);
+  Harness.test "an equal that compares its receiver in a derived wrapper is recursion" (fun () ->
+      expect_one_termination_failure ~says:"through code that its `impl` derives"
+        Fixtures.Prover.equal_comparing_its_receiver_through_a_derived_wrapper);
+  Harness.test "an equal that compares lists of its own type gives its impl to the list's equal"
+    (fun () ->
+      expect_one_termination_failure
+        ~says:
+          "This call uses `app::main::impl standard::core::Equal for app::main::Tree` where a \
+           bound needs it, and its methods reach back here."
+        Fixtures.Prover.tree_equal_comparing_its_lists_of_children);
+  Harness.test "an equal that compares each child in a loop recurses on parts" (fun () ->
+      match list_termination_failures Fixtures.Prover.tree_equal_comparing_each_child with
+      | [] -> ()
+      | messages -> Harness.fail "%s" (String.concat "; " messages));
+  Harness.test "a method of a generic impl is given the impl of its type argument" (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:"uses `app::main::impl app::main::Grow for app::main::Seed` where a bound needs it"
+        Fixtures.Prover.pot_growing_a_seed_that_grows_a_pot "prover.termination");
+  Harness.test "a derived method of a generic type is given the impl of its type argument"
+    (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:
+          "uses `app::main::impl standard::core::Default for app::main::Seed` where a bound needs \
+           it"
+        Fixtures.Prover.default_of_a_seed_through_a_derived_default_of_its_pot "prover.termination");
+  Harness.test "a trait's method is given the impls of its own type arguments" (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:"uses `app::main::impl app::main::Grow for app::main::Seed` where a bound needs it"
+        Fixtures.Prover.visit_given_a_seed_that_calls_it_back "prover.termination");
+  Harness.test "a call through any in a function that an impl's method calls is recursion"
+    (fun () ->
+      match list_codes Fixtures.Prover.step_of_a_node_reaching_back_through_any with
+      | [ "prover.termination"; "prover.termination" ] -> ()
+      | codes -> Harness.fail "codes %s" (String.concat ", " codes))
 
 let () =
   Harness.test "a constant's value is well defined" (fun () ->

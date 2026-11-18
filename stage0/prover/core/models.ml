@@ -45,8 +45,8 @@ let rec index_sequence (context : State.context) element term index =
   let sequence = make_sequence_type element in
   let index_trait = Well_known.make_path Index in
   match
-    Mir.Call_edges.list_impls_for context.lookups.interface Path.standard_package [ index_trait ]
-      sequence
+    Interface.Impls.list_impls_of_trait_for_type context.lookups.interface ~trait:index_trait
+      ~type_:sequence_path Path.standard_package
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "at"; receiver = Read } in

@@ -662,13 +662,15 @@ the type of a function that uses the parameter's capabilities and runs
 forever has no written form.
 
 **The recursion check follows every edge of the call graph.** A function
-reaches itself by a direct call, by naming a function as a value, and by
-passing an `impl` where a bound needs one, because the code that receives
-the function or the `impl` can call back. If the check ignored the last two,
-a package could implement a trait with a method that calls a generic
-function that calls the method back, and each termination proof would
-assume the other. Every such cycle is visible within one package, because
-Truss has no mutable state outside variables and because of the next rule.
+reaches itself by a direct call, and by supplying code to a callee: by
+naming a function as a value, by passing an `impl` where a bound needs one,
+by converting a value to `any`, and by providing an `impl`, because the
+code that receives the function or the `impl` can call back. If the check
+ignored the supplied code, a package could implement a trait with a method
+that calls a generic function that calls the method back, and each
+termination proof would assume the other. Every such cycle is visible within
+one package, because Truss has no mutable state outside variables and
+because of the next rule.
 
 **A type cannot hold a terminating function that takes the type.** With
 `type Knot(run: fn(Knot) -> Bool)`, a function that calls `knot.run(knot)`
@@ -686,6 +688,8 @@ not.
 | Rule | Reason |
 |---|---|
 | Structural recursion needs no annotation, and other recursion states `decreases`. | Lean accepts structural recursion in the same way. Dafny infers a measure. A structural check with an explicit clause is more predictable than an inference that may fail. |
+| Code that supplies other code to a callee answers for the calls made to the supplied code. The suppliers are a type argument's `impl` given to a bound, a function named as a value, a value converted to `any`, and a provided `impl`. A recursion through supplied code is rejected. | A generic callee is checked once, for every type argument, so it cannot know the code that it is given, and a call through a bound passes the supplier no arguments to compare with a measure. If neither side answered, an `impl`'s method could call a generic function that calls the method back, and each termination proof would assume the other: a function without `RunForever` would never return. |
+| A recursion through a method that an `impl` derives or inherits is rejected. | A derived method is generated, and an inherited method is the trait's provided body, which is checked once for every `impl`. Neither states a measure for the `impl`, so a caller on the cycle has nothing to compare, and accepting the call would assume that the cycle ends. A method written in the `impl` states the measure. The alternative is to check each provided body again for each `impl` that inherits it, which proves the same code once per `impl` and gives a trait's author errors in code that the author did not write. |
 | A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` has the distance between them as its default measure, and a `for` loop over a cursor has the cursor's `remaining()`. | Most loops count toward a bound that their condition names, so `decreases high - low` would only repeat the condition. The default is one measure read from the loop's own code, never chosen by a search among candidates, so a reader knows the measure that the proof uses. Dafny takes the same default for a loop. A cursor's `remaining()` states its measure once, in its type, for every loop over it. |
 | A written measure holds in every function, including one that uses `RunForever`. | A reader takes a written `decreases` as a fact. If `RunForever` switched measures off, a function that declares it for one loop would leave the measures of its other loops unchecked. A cursor's `remaining()` is written too, in the cursor's type, and no loop body can change the cursor. |
 | A `while` loop's default measure and structural recursion are checked only in a function without `RunForever`. | Both are inferred from code that may not be meant to end. A loop that draws samples until it has accepted enough, as `sample_ntt` does, compares toward a bound that an iteration may not approach. |

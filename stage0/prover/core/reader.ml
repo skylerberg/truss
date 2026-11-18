@@ -943,6 +943,7 @@ and read_choice context frame run (choice : Mir.choice) =
 
 and read_statement context frame run (statement : Mir.statement) =
   let location = Facts.locate context frame.source statement.origin in
+  Facts.reject_recursion_through_supplied_code context frame location statement;
   match statement.kind with
   | Basic basic -> read_basic context frame run statement ~location basic
   | Assert_by_bit_vector { names; code; _ } ->
@@ -1384,6 +1385,12 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
   | Template { destination; literals; call } -> (
       match (call.callee.target, call.arguments) with
       | Trait_method { trait; name; receiver; evidence; _ }, [ Passed { value = template; _ } ] ->
+          Facts.reject_uncompared_recursion context frame location
+            (snd (Facts.find_recursive_callee context frame location call.callee.target))
+            ~describe:
+              (Printf.sprintf
+                 "This template calls `%s`, which calls back here, and a template passes no \
+                  arguments the prover can compare, so the recursion cannot be shown to end.");
           let frame, tagged =
             Values.apply_template context frame
               { origin = call.origin; type_ = compute_target_type context frame run destination }
@@ -1393,23 +1400,6 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
           Some (write_place context frame run destination tagged)
       | _ -> Facts.raise_unsupported location "a tagged template whose tag the prover cannot read")
   | Provide { provided; _ } ->
-      if context.terminates && frame.makes_obligations then
-        List.iter
-          (fun (implementation : Mir.provided) ->
-            List.iter
-              (fun (provided : Core.provided) ->
-                if Facts.has_method_in_recursion_group context provided.impl then
-                  Facts.oblige context frame Termination location
-                    [
-                      State.Text
-                        (Printf.sprintf
-                           "This `provide` gives `%s`, whose methods call back here, so the prover \
-                            cannot show that the recursion ends."
-                           (Path.show provided.impl));
-                    ]
-                    (Logic.Boolean false))
-              implementation.provides)
-          provided;
       Hashtbl.replace run.provides statement.origin provided;
       Some frame
   | Provide_end -> (

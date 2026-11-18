@@ -1296,9 +1296,9 @@ impl serialization::Serialize for Value {
       }
       Object(members) => {
         mut sink.begin_map(members.length())
-        for entry in members {
-          mut sink.key(entry.key)
-          entry.value.serialize(mut sink)
+        for index in 0..members.entries.length() {
+          mut sink.key(members.entries[index].key)
+          members.entries[index].value.serialize(mut sink)
         }
         mut sink.end_map()
       }

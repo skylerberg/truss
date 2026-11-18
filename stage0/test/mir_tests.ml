@@ -1317,10 +1317,16 @@ let () =
   Harness.test "a derived method of a type that holds itself calls itself" (fun () ->
       expect_edges (equal_of "Tree")
         ~expected:[ "derived standard::core::Equal for app::main::Tree.equal"; meters_equal ]);
-  Harness.test "a derived method of a type that holds a list of itself calls the list's method"
-    (fun () ->
+  Harness.test
+    "a derived method of a type that holds a list of itself calls the list's method and gives it \
+     the type's impl" (fun () ->
       expect_edges (equal_of "Forest")
-        ~expected:[ "standard::list::impl standard::core::Equal for standard::list::List.equal" ]);
+        ~expected:
+          [
+            "standard::list::impl standard::core::Equal for standard::list::List.equal";
+            "derived standard::core::Equal for app::main::Forest.equal";
+            "derived standard::core::Equal for app::main::Forest.not_equal";
+          ]);
   Harness.test "a derived method has no call edge for a field of a type parameter's type" (fun () ->
       expect_edges (equal_of "Pair") ~expected:[ meters_equal ]);
   Harness.test "a derived method calls the derived method of a field whose type derives the trait"
@@ -1336,16 +1342,6 @@ let () =
       expect_edges
         (Support.make_top_path "app::main" "make")
         ~expected:[ "derived standard::core::Default for app::main::Config.default" ]);
-  Harness.test "a derived impl's methods are its derived method and its trait's provided methods"
-    (fun () ->
-      expect_paths
-        ~expected:
-          [
-            "derived standard::core::Equal for app::main::Span.equal";
-            "standard::core::Equal.not_equal";
-          ]
-        (Mir.Call_edges.list_impl_methods (Lazy.force lookups).interface
-           (make_derived_impl "Span" Equal)));
   Harness.test "a trait's method reaches the derived methods of the trait's impls" (fun () ->
       let implementations =
         List.map Path.show
@@ -1359,6 +1355,108 @@ let () =
             Harness.fail "the implementations lack %s: [%s]" expected
               (String.concat "; " implementations))
         [ meters_equal; "derived standard::core::Equal for app::main::Span.equal" ])
+
+let () =
+  let lookups = lazy (make_call_edge_lookups Fixtures.Mir.impls_inheriting_a_provided_method) in
+  let list_edges path = Mir.Call_edges.list_path_edges (Lazy.force lookups) path in
+  let level = Support.make_top_path "app::main" "Level" in
+  let method_of type_name name =
+    "app::main::impl app::main::Level for app::main::" ^ type_name ^ "." ^ name
+  in
+  let find_edge ~ending edges =
+    match List.filter (fun edge -> String.ends_with ~suffix:ending (Path.show edge)) edges with
+    | [ edge ] -> edge
+    | matching -> failwith (Printf.sprintf "%d edges end with %s" (List.length matching) ending)
+  in
+  let raised_of_shelf () =
+    find_edge ~ending:"Shelf.raised" (list_edges (Support.make_top_path "app::main" "raise"))
+  in
+  Harness.test "a call of a method that an impl inherits is a call edge to the impl's method"
+    (fun () ->
+      expect_paths
+        ~expected:[ method_of "Shelf" "raised" ]
+        (list_edges (Support.make_top_path "app::main" "raise")));
+  Harness.test "an inherited method calls its own impl's method where its body calls through Self"
+    (fun () ->
+      expect_paths
+        ~expected:[ method_of "Shelf" "height" ]
+        (List.filter
+           (fun edge -> Path.locate_package edge <> Path.standard_package)
+           (list_edges (raised_of_shelf ()))));
+  Harness.test "an integer's inherited `max` calls that integer's `compare` and no other type's"
+    (fun () ->
+      expect_paths
+        ~expected:
+          [
+            "standard::numbers::signed::impl standard::core::Ordered for \
+             standard::intrinsic::Int64.compare";
+            "derived standard::core::Equal for standard::core::Ordering.equal";
+          ]
+        (list_edges (find_edge ~ending:"Int64.max(own self)" (list_edges (raised_of_shelf ())))));
+  Harness.test "the body of a provided method calls its trait's method where it calls through Self"
+    (fun () ->
+      expect_paths ~expected:[ "app::main::Level.height" ]
+        (List.filter
+           (fun edge -> Path.locate_package edge <> Path.standard_package)
+           (list_edges (Method { owner = level; name = "raised"; receiver = Read }))));
+  Harness.test "a trait's method reaches the method of every impl, written or inherited" (fun () ->
+      expect_paths
+        ~expected:
+          [ method_of "Shelf" "raised"; method_of "Stair" "raised"; method_of "Pot" "raised" ]
+        (Mir.Call_edges.list_implementations (Lazy.force lookups)
+           ~calling_package:(Support.parse_module "app::main").package
+           (Method { owner = level; name = "raised"; receiver = Read })));
+  Harness.test "a call of a generic impl's method has edges to the impl of the type argument"
+    (fun () ->
+      expect_paths
+        ~expected:
+          [
+            method_of "Pot" "height";
+            method_of "Stair" "height";
+            method_of "Stair" "raised";
+            method_of "Stair" "picked";
+          ]
+        (list_edges (Support.make_top_path "app::main" "measure")));
+  Harness.test "a generic function named as a value has edges to the impl of its type argument"
+    (fun () ->
+      expect_paths
+        ~expected:
+          [
+            "app::main::pick";
+            method_of "Stair" "height";
+            method_of "Stair" "raised";
+            method_of "Stair" "picked";
+          ]
+        (list_edges (Support.make_top_path "app::main" "name_pick")));
+  Harness.test
+    "the body of a provided method that gives its receiver to a bound has edges to its trait's \
+     methods" (fun () ->
+      expect_paths
+        ~expected:
+          [
+            "app::main::pick";
+            "app::main::Level.height";
+            "app::main::Level.raised";
+            "app::main::Level.picked";
+          ]
+        (list_edges (Method { owner = level; name = "picked"; receiver = Read })));
+  Harness.test
+    "an inherited method that gives its receiver to a bound has edges to its own impl's methods"
+    (fun () ->
+      let picked_of_shelf : Path.t =
+        match raised_of_shelf () with
+        | Method { owner; receiver; _ } -> Method { owner; name = "picked"; receiver }
+        | path -> path
+      in
+      expect_paths
+        ~expected:
+          [
+            "app::main::pick";
+            method_of "Shelf" "height";
+            method_of "Shelf" "raised";
+            method_of "Shelf" "picked";
+          ]
+        (list_edges picked_of_shelf))
 
 let () =
   let program = Fixtures.Core.slice_match_on_a_constant_and_loop_over_a_ticking_countdown in

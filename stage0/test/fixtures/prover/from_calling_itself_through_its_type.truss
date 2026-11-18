@@ -1,0 +1,7 @@
+type Celsius(degrees: Int64)
+
+impl From[Int64] for Celsius {
+  fn from(value: own Int64) -> Celsius {
+    Celsius.from(value)
+  }
+}

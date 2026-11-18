@@ -1,0 +1,21 @@
+trait Grow {
+  fn grow(self, steps: UInt32) -> Int64
+}
+
+type Seed(height: Int64)
+
+fn tend(seed: Seed, steps: UInt32) -> Int64
+  decreases steps
+{
+  if steps >= 100 { return 0 }
+  seed.grow(steps + 1)
+}
+
+impl Grow for Seed {
+  fn grow(self, steps: UInt32) -> Int64
+    decreases steps
+  {
+    if steps == 0 { return self.height }
+    tend(self, steps: steps - 1)
+  }
+}

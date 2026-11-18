@@ -767,8 +767,10 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       let havoc_mut (frame : State.frame) =
         cursor_access.write frame (Facts.arrive context frame "changed" cursor_type)
       in
+      let _, recursive_callee = Facts.find_recursive_callee context head location next.callee in
       let after, pulled =
-        Calls.call_contract ~lent_final:None context head pulling next path contract
+        Calls.call_contract ~recursive_callee ~lent_final:None context head pulling next path
+          contract
           [
             {
               position = 0;

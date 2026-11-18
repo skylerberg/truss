@@ -1,0 +1,15 @@
+type Tree(value: Int64, children: List[Tree])
+
+impl Equal for Tree {
+  fn equal(self, other: Tree) -> Bool {
+    if self.value != other.value || self.children.length() != other.children.length() {
+      return false
+    }
+    for index in 0..self.children.length() {
+      if !self.children[index].equal(other.children[index]) {
+        return false
+      }
+    }
+    true
+  }
+}
