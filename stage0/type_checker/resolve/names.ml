@@ -1077,8 +1077,8 @@ let list_changes before after =
   @ list_changed_impls (fun trait -> Impls_of_trait trait) (fun impls -> impls.by_trait)
   @ law_proofs
 
-let of_namespaces ~(read_namespace : Path.package -> namespace) ~module_exists ~split_module
-    ~list_dependency_names : lookups =
+let of_namespaces ~(read_namespace : Path.package -> namespace) ~split_module ~list_dependency_names
+    : lookups =
   let of_module (module_ : Path.module_) =
     Module_map.find_opt module_ (read_namespace module_.package).modules
   in
@@ -1104,7 +1104,7 @@ let of_namespaces ~(read_namespace : Path.package -> namespace) ~module_exists ~
     list_entries =
       (fun module_ -> match of_module module_ with Some names -> names.entries | None -> []);
     list_imports = (fun key -> (read_declared key).imports);
-    module_exists;
+    module_exists = (fun module_ -> Option.is_some (of_module module_));
     split_module;
     list_dependency_names;
     find_key =

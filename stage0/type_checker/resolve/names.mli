@@ -161,7 +161,6 @@ val list_changes : namespace -> namespace -> change list
 
 val of_namespaces :
   read_namespace:(Path.package -> namespace) ->
-  module_exists:(Path.module_ -> bool) ->
   split_module:(string list -> Path.module_ option) ->
   list_dependency_names:(Path.package -> Path.package list) ->
   lookups
