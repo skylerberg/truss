@@ -1,0 +1,32 @@
+fn f(tally: mut Tally, count: Int64, shelf: mut Shelf, title: String) {
+  tally += count
+  shelf += title
+}
+
+type Tally(total: Int64)
+
+impl Add[Int64] for Tally {
+  type Output = Tally
+
+  fn add_is_defined(self, right: Int64) -> Bool {
+    true
+  }
+
+  fn add(self, right: Int64) -> Tally {
+    Tally(total: self.total.wrapping_add(right))
+  }
+}
+
+type Shelf(length: UInt64)
+
+impl Add[String] for Shelf {
+  type Output = Shelf
+
+  fn add_is_defined(self, right: String) -> Bool {
+    true
+  }
+
+  fn add(self, right: String) -> Shelf {
+    Shelf(length: self.length.wrapping_add(right.length()))
+  }
+}
