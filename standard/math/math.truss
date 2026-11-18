@@ -132,6 +132,42 @@ let half_base: UInt64 = 4294967296
 
 let half_mask: UInt64 = 4294967295
 
+let limb_base: Integer = UInt64.maximum + 1
+
+fn limbs_value(limbs: Sequence[UInt64], from: Integer) -> Integer
+  requires 0 <= from
+  requires from <= limbs.length()
+  ensures result == (if from == limbs.length() { 0 } else { limbs[from] + limb_base * limbs_value(limbs, from: from + 1) })
+  decreases limbs.length() - from
+  cost time finite
+{
+  if from == limbs.length() { 0 } else { limbs[from] + limb_base * limbs_value(limbs, from: from + 1) }
+}
+
+theorem limbs_value_is_positive(limbs: Sequence[UInt64], from: Integer)
+  requires 0 <= from
+  requires from < limbs.length()
+  requires limbs[limbs.length() - 1] != 0
+  ensures limbs_value(limbs, from: from) >= 1
+  decreases limbs.length() - from
+  cost time finite
+{
+  if from + 1 < limbs.length() {
+    limbs_value_is_positive(limbs, from: from + 1)
+  }
+}
+
+impl Model for BigInteger {
+  type Value = Integer
+
+  fn model(self) -> Integer
+    ensures result == (if self.negative { -limbs_value(self.magnitude.model(), from: 0) } else { limbs_value(self.magnitude.model(), from: 0) })
+    cost time finite
+  {
+    if self.negative { -limbs_value(self.magnitude.model(), from: 0) } else { limbs_value(self.magnitude.model(), from: 0) }
+  }
+}
+
 fn trim(limbs: mut List[UInt64])
   ensures limbs.length() <= old(limbs.length())
   ensures limbs.length() == 0 || limbs[limbs.length() - 1] != 0
@@ -641,12 +677,14 @@ fn divide_magnitudes(dividend: Slice[UInt64], divisor: Slice[UInt64]) -> DigitDi
 }
 
 public fn BigInteger.zero() -> BigInteger
+  ensures result.model() == 0
   cost time O(1)
 {
   BigInteger(negative: false, magnitude: [])
 }
 
 fn BigInteger.from_limb(value: UInt64) -> BigInteger
+  ensures result.model() == value
   cost time finite
 {
   if value == 0 {
@@ -1046,7 +1084,9 @@ public fn BigInteger.to_float64(self) -> Float64
 }
 
 impl From[Int64] for BigInteger {
-  fn from(value: own Int64) -> BigInteger {
+  fn from(value: own Int64) -> BigInteger
+    ensures result.model() == value
+  {
     if value == 0 {
       return BigInteger.zero()
     }
@@ -1060,7 +1100,9 @@ impl From[Int64] for BigInteger {
 }
 
 impl From[UInt64] for BigInteger {
-  fn from(value: own UInt64) -> BigInteger {
+  fn from(value: own UInt64) -> BigInteger
+    ensures result.model() == value
+  {
     BigInteger.from_limb(value)
   }
 }
@@ -1068,11 +1110,17 @@ impl From[UInt64] for BigInteger {
 impl TryFrom[BigInteger] for Int64 {
   type Error = core::ConversionError
 
-  fn try_from(value: own BigInteger) -> Result[Int64, core::ConversionError] {
+  fn try_from(value: own BigInteger) -> Result[Int64, core::ConversionError]
+    ensures (result is Ok(_)) == (Int64.minimum <= value.model() && value.model() <= Int64.maximum)
+    ensures !(result is Ok(converted) && converted != value.model())
+  {
     if value.magnitude.length() == 0 {
       return Ok(0)
     }
     if value.magnitude.length() > 1 {
+      proof {
+        limbs_value_is_positive(value.magnitude.model(), from: 1)
+      }
       return Err(core::ConversionError())
     }
     let limb = value.magnitude[0]
@@ -1093,11 +1141,20 @@ impl TryFrom[BigInteger] for Int64 {
 impl TryFrom[BigInteger] for UInt64 {
   type Error = core::ConversionError
 
-  fn try_from(value: own BigInteger) -> Result[UInt64, core::ConversionError] {
+  fn try_from(value: own BigInteger) -> Result[UInt64, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value.model() && value.model() <= UInt64.maximum)
+    ensures !(result is Ok(converted) && converted != value.model())
+  {
     if value.magnitude.length() == 0 {
       return Ok(0)
     }
     if value.negative || value.magnitude.length() > 1 {
+      proof {
+        limbs_value_is_positive(value.magnitude.model(), from: 0)
+        if value.magnitude.length() > 1 {
+          limbs_value_is_positive(value.magnitude.model(), from: 1)
+        }
+      }
       return Err(core::ConversionError())
     }
     Ok(value.magnitude[0])

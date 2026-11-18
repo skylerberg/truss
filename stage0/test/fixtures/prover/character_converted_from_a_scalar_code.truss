@@ -1,0 +1,19 @@
+fn f(code: UInt32) -> UInt32
+  requires code < 55296
+  ensures result == code
+{
+  match Character.try_from(code) {
+    Ok(character) => character.code()
+    Err(_) => unreachable
+  }
+}
+
+fn g(character: Character) -> UInt8
+  requires character.is_ascii()
+  ensures result == character.code()
+{
+  match UInt8.try_from(character) {
+    Ok(byte) => byte
+    Err(_) => unreachable
+  }
+}
