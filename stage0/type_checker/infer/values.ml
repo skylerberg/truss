@@ -526,7 +526,7 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
           collection_type Types.Read
       with
       | Some (loop, element, _) ->
-          state.tables.loops.(quantifier.id) <- Some loop;
+          State.record_loop state ~loop:quantifier.id ~iterable:collection loop;
           element
       | None ->
           State.make_error_type state Not_indexable

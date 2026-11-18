@@ -581,33 +581,40 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
               instance.signature )
       | None -> None)
   | Some (Trait_overload (trait, method_)) ->
-      let instance =
-        Instantiation.instantiate state span
-          ~extra:
-            (Types.make_trait_substitution
-               (Members.list_trait_generics state.lookups trait.trait)
-               ~self:type_ trait)
-          (Members.read_method_signature state.lookups trait.trait method_)
+      let instance, callee =
+        instantiate_trait_method state span ~self_type:type_ trait method_
+          ~evidence:
+            (match type_ with
+            | Types.Any _ -> Tables.Dynamic
+            | Types.Parameter _ -> Bound
+            | _ -> (
+                match State.find_evidence state type_ trait with
+                | Some evidence -> State.convert_evidence evidence
+                | None -> Built_in))
       in
-      Some
-        ( Trait_method
-            {
-              trait;
-              name;
-              receiver;
-              self_type = type_;
-              instantiation = instance.instantiation;
-              evidence =
-                (match type_ with
-                | Types.Any _ -> Dynamic
-                | Types.Parameter _ -> Bound
-                | _ -> (
-                    match State.find_evidence state type_ trait with
-                    | Some evidence -> State.convert_evidence evidence
-                    | None -> Built_in));
-            },
-          instance.signature )
+      Some (callee, (instance : Instantiation.instance).signature)
   | Some (View_overload _) | None -> None
+
+and instantiate_trait_method state span ~self_type (trait : Types.trait_reference)
+    (method_ : Types.trait_method) ~evidence =
+  let instance =
+    Instantiation.instantiate state span
+      ~extra:
+        (Types.make_trait_substitution
+           (Members.list_trait_generics state.lookups trait.trait)
+           ~self:self_type trait)
+      (Members.read_method_signature state.lookups trait.trait method_)
+  in
+  ( instance,
+    Tables.Trait_method
+      {
+        trait;
+        name = method_.method_name;
+        receiver = method_.method_receiver;
+        self_type;
+        instantiation = instance.instantiation;
+        evidence;
+      } )
 
 and make_argumentless_call callee result : Tables.call =
   { callee; arguments = []; omitted_defaults = []; callee_result = result }

@@ -2185,6 +2185,12 @@ trait Ordered: Equal {
 - With a trait that takes type parameters, the `impl` is chosen by the types
   of the arguments, inferred first without looking at which `impl`s exist,
   and never by the expected result type.
+- A call's arguments give the trait's arguments, and so does a type
+  parameter's one bound of the trait, which its signature states. The
+  `impl`s of a type never do: where `Pair` implements only `Bag[Int64]`,
+  `pair.count()` is an error, and is written `Bag[Int64].count(pair)`. A loop
+  over a `Pair` whose elements come from the methods of `Bag` is an error for
+  the same reason.
 
 ### Associated types
 

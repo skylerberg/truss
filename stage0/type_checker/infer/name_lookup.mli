@@ -49,6 +49,15 @@ val list_trait_static_methods :
 
 val resolve_evidence : State.state -> Syntax.expression -> Types.ty -> Types.trait_reference -> unit
 
+val instantiate_trait_method :
+  State.state ->
+  Source.Definition_span.t ->
+  self_type:Types.ty ->
+  Types.trait_reference ->
+  Types.trait_method ->
+  evidence:Tables.evidence ->
+  Instantiation.instance * Tables.callee
+
 val resolve_overloads :
   State.state ->
   Types.ty ->
