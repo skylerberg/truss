@@ -37,7 +37,7 @@ let rec render_initializer (emission : Emission.t) ty (value : Lowered.static_va
       let count = List.length elements in
       let buffer =
         if count = 0 || Memory_layout.has_zero_size emission.types.env element then
-          "((void *)" ^ Emission.render_bytes_name emission "" ^ ")"
+          fst (C_values.render_constant emission Storage.empty_buffer)
         else begin
           let values = List.filter_map (render_initializer emission element) elements in
           let name =

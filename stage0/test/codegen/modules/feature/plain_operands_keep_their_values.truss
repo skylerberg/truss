@@ -1,0 +1,57 @@
+type Coin(cents: Int64)
+
+type Tally(counts: List[Int64])
+
+impl Add[Int64] for Tally {
+  type Output = Tally
+
+  fn add_is_defined(self, right: Int64) -> Bool {
+    true
+  }
+
+  fn add(self, right: Int64) -> Tally {
+    var counts = self.counts.copy()
+    mut counts.push(right)
+    Tally(counts: own counts)
+  }
+}
+
+type Purse(coins: List[Coin])
+
+impl Add[Coin] for Purse {
+  type Output = Purse
+
+  fn add_is_defined(self, right: Coin) -> Bool {
+    true
+  }
+
+  fn add(self, right: Coin) -> Purse {
+    var coins = self.coins.copy()
+    mut coins.push(right)
+    Purse(coins: own coins)
+  }
+}
+
+fn first_after_raising(count: mut Int64) -> UInt64 {
+  count = 9
+  0
+}
+
+fn first_after_melting(coin: mut Coin) -> UInt64 {
+  coin.cents = 9
+  0
+}
+
+test "a compound assignment's `Plain` operand keeps its value when an index key of the target assigns the operand's place" {
+  var tallies: List[Tally] = [Tally(counts: [])]
+  var count: Int64 = 1
+  tallies[first_after_raising(mut count)] += count
+  assert count == 9
+  assert tallies[0].counts[0] == 1
+
+  var purses: List[Purse] = [Purse(coins: [])]
+  var coin = Coin(cents: 1)
+  purses[first_after_melting(mut coin)] += coin
+  assert coin.cents == 9
+  assert purses[0].coins[0].cents == 1
+}

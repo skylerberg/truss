@@ -1,7 +1,5 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
-
-let is_runtime_call (path : Path.t) =
-  Well_known.is Write_fully path || Well_known.is_runtime_constructor path
+let is_runtime_call (path : Path.t) = Well_known.is Write_fully path
 
 let list_code_supplied_to (interface : Interface.Lookups.t) path instantiation =
   match Interface.Impls.read_signature interface path with

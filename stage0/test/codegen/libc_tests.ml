@@ -1,11 +1,6 @@
 let view_ty = Codegen_support.named "View" ~arguments:[ Type Codegen_support.uint8 ]
 let bytes_ty = Storage.make_storage_type Codegen_support.uint8
-
-let extra =
-  [
-    ( Ground.to_string view_ty,
-      Storage.make_view_shape ~uint64:Codegen_support.uint64 Codegen_support.uint8 );
-  ]
+let extra = [ (Ground.to_string view_ty, Storage.make_view_shape Codegen_support.uint8) ]
 
 let intrinsic_types : Backend.For_testing.Intrinsics.types =
   { uint64 = Codegen_support.uint64; string_slice = Codegen_support.named "StringSlice" }
@@ -32,7 +27,7 @@ let make_view builder text =
   Emit_c.Ir_builder.emit builder
     (Assign
        ( Lowered.make_local_place view,
-         Storage.build_view view_ty ~elements:(Constant (Bytes text))
+         Storage.build_view view_ty ~buffer:(Constant (Bytes text))
            ~length:(Lowered.make_uint64_constant (String.length text)) ));
   view
 
@@ -697,7 +692,7 @@ let () =
         Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place name,
-               Storage.build_view view_ty ~elements:(Constant (Bytes text))
+               Storage.build_view view_ty ~buffer:(Constant (Bytes text))
                  ~length:(Lowered.make_uint64_constant (String.length text)) ));
         let open_test_file () =
           let descriptor = Emit_c.Ir_builder.allocate_local builder (Codegen_support.value int32) in

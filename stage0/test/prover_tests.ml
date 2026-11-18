@@ -2046,7 +2046,7 @@ let () =
       | Ok solver ->
           if List.hd (Solver.solve_all solver [ (request, query) ]) <> Solver.Proven then
             Harness.fail "expected the cached answer";
-          if Solver.count_queries_run solver <> 0 then Harness.fail "ran the solver");
+          if Solver.For_testing.count_queries_run solver <> 0 then Harness.fail "ran the solver");
   Harness.test "a proven answer in the cache is read whatever values the request asks for"
     (fun () ->
       let query = make_self_comparison ">=" in
@@ -2067,7 +2067,7 @@ let () =
       | Ok solver ->
           if List.hd (Solver.solve_all solver [ (request, query) ]) <> Solver.Proven then
             Harness.fail "expected the cached answer";
-          if Solver.count_queries_run solver <> 0 then Harness.fail "ran the solver");
+          if Solver.For_testing.count_queries_run solver <> 0 then Harness.fail "ran the solver");
   Harness.test "each solver keeps its own answers" (fun () ->
       let query = make_self_comparison "<" in
       let request = Solver.make_request query in
@@ -2075,8 +2075,9 @@ let () =
       | Ok first, Ok second ->
           ignore (Solver.solve_all first [ (request, query) ]);
           ignore (Solver.solve_all second [ (request, query) ]);
-          if Solver.count_queries_run second <> 1 then
-            Harness.fail "the second solver ran %d queries" (Solver.count_queries_run second)
+          if Solver.For_testing.count_queries_run second <> 1 then
+            Harness.fail "the second solver ran %d queries"
+              (Solver.For_testing.count_queries_run second)
       | Error message, _ | _, Error message -> Harness.fail "%s" message);
   Harness.test "a solved answer is added to the cache under its query's key" (fun () ->
       let query = make_self_comparison "<=" in
@@ -2089,7 +2090,8 @@ let () =
       | Error message -> Harness.fail "%s" message
       | Ok solver ->
           ignore (Solver.solve_all solver [ (request, query) ]);
-          if Solver.count_queries_run solver <> 1 then Harness.fail "did not run the solver";
+          if Solver.For_testing.count_queries_run solver <> 1 then
+            Harness.fail "did not run the solver";
           if
             Hashtbl.find_opt cached_answers (Solver.For_testing.hash_query query) <> Some "proven\n"
           then Harness.fail "the cache does not have the answer");
@@ -2102,7 +2104,7 @@ let () =
     with
     | Obligations { obligations; _ } ->
         List.find_map
-          (fun (obligation : Prover.State.obligation) ->
+          (fun (obligation : Prover.Obligation.t) ->
             if obligation.code = code then Some obligation.query else None)
           obligations
     | Unsupported _ | Not_proven_here -> None
@@ -2115,8 +2117,8 @@ let () =
           let request = Solver.make_request query in
           if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown Out_of_steps then
             Harness.fail "expected an unknown answer from the step limit";
-          if Solver.count_queries_run solver <> 1 then
-            Harness.fail "ran %d queries" (Solver.count_queries_run solver));
+          if Solver.For_testing.count_queries_run solver <> 1 then
+            Harness.fail "ran %d queries" (Solver.For_testing.count_queries_run solver));
   let power_of_itself_is_three =
     let symbol = Logic.Symbol.Variable { label = "base"; numbers = [] } in
     {
@@ -2156,7 +2158,8 @@ let () =
           let solved = Solver.solve_all first [ (request, query) ] in
           if Solver.solve_all second [ (request, query) ] <> solved then
             Harness.fail "the cache gave another answer";
-          if Solver.count_queries_run second <> 0 then Harness.fail "ran the solver again"
+          if Solver.For_testing.count_queries_run second <> 0 then
+            Harness.fail "ran the solver again"
       | Error message, _ | _, Error message -> Harness.fail "%s" message);
   Harness.test "an obligation that the solver stops on before the step limit names Z3's reason"
     (fun () ->
@@ -2202,9 +2205,9 @@ let () =
           match List.hd (Solver.solve_all solver [ (first, query) ]) with
           | Proven | Unknown _ -> Harness.fail "expected a counterexample"
           | Counterexample _ ->
-              let queries_before = Solver.count_queries_run solver in
+              let queries_before = Solver.For_testing.count_queries_run solver in
               ignore (Solver.solve_all solver [ (second, query) ]);
-              let queries_run = Solver.count_queries_run solver - queries_before in
+              let queries_run = Solver.For_testing.count_queries_run solver - queries_before in
               if queries_run <> 1 then Harness.fail "ran %d queries" queries_run));
   Harness.test "a function defined by a quantified formula reaches the solver as a definition"
     (fun () ->
@@ -2287,7 +2290,7 @@ let () =
         with
         | Obligations { obligations; _ } ->
             List.fold_left
-              (fun most (obligation : Prover.State.obligation) ->
+              (fun most (obligation : Prover.Obligation.t) ->
                 let text = Logic.show_query obligation.query in
                 max most (String.find_all ~sub:"12345" (fun _ matches -> matches + 1) text 0))
               0 obligations

@@ -68,7 +68,7 @@ let () =
           && Option.fold ~none:true ~some:(( = ) site_column) column
         then Some (site_line, site_column, site, input)
         else None)
-      (Prover.list_queries ~runs:[]
+      (Prover.For_testing.list_queries ~runs:[]
          (Database.make_proof_lookups database)
          (Database.list_proofs (Database.prove database [ file ]))
          file)

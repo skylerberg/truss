@@ -30,7 +30,7 @@ and describe_string literal =
     (fun index (text : Token.text) ->
       if index > 0 then Buffer.add_string parts " ${...} ";
       Buffer.add_string parts (Diagnostic.quote text.value))
-    (Token.list_texts literal);
+    (Token.For_testing.list_texts literal);
   Printf.sprintf "%s%s %s" tag form (Buffer.contents parts)
 
 let print_tokens source tokens =
@@ -58,7 +58,9 @@ let print_tokens source tokens =
 
 let show_diagnostics ~json source diagnostics =
   let shown = Diagnostic.select_shown diagnostics in
-  if json then print_string (Diagnostic.to_json source shown)
+  if json then
+    print_string
+      ("[" ^ String.concat ",\n" (List.map (Diagnostic.to_json_object source) shown) ^ "]\n")
   else List.iter (fun diagnostic -> prerr_string (Diagnostic.render source diagnostic)) shown;
   if diagnostics = [] then 0 else 1
 
@@ -67,7 +69,7 @@ let read file =
     prerr_endline (file ^ " does not exist.");
     exit 2
   end;
-  Source.read_file file
+  Source.For_testing.read_file file
 
 let run_tokens_command ~file ~json =
   let source = read file in

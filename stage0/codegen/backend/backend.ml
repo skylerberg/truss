@@ -557,13 +557,6 @@ let make_program_root backend ~main =
                   (Path.show path))
               todo_types))
 
-let run_program ?input backend ~main ~arguments =
-  capture_failure backend @@ fun () ->
-  let root = make_program_root backend ~main in
-  build_and_run backend ~roots:[ root ]
-    ~startup:(Startup.render_program_start (Emit_c.make_symbol root))
-    (fun program -> Process.run ?input program arguments)
-
 let build_program backend ~main ~output =
   capture_failure backend @@ fun () ->
   let root = make_program_root backend ~main in
@@ -631,7 +624,6 @@ module For_testing = struct
 
   let build_supplied_tests = build_supplied_tests
   let compile_fragment = compile_fragment
-  let run_program = run_program
   let evaluate_call = evaluate_call
   let drop_and_copy = Drop_and_copy.create
   let is_trivial = Drop_and_copy.is_trivial

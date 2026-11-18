@@ -2618,8 +2618,7 @@ and the prelude changes only with a language version.
   public, is a test, an `impl`, or another definition the rule does not
   check, or is itself used, so definitions that use only each other are an
   error together. The `main` of a package's root module is exempt, and so
-  is a definition the compiler calls, such as the static `new` of a
-  `system` module's type, which builds the implementation of a capability.
+  is a definition the compiler calls by name.
 
 ## No foreign code
 

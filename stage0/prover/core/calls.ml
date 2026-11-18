@@ -268,11 +268,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         in
         let before, after = split_prefix before after in
         Facts.oblige context frame Termination location
-          (State.Text "This call may not decrease `"
+          (Obligation.Text "This call may not decrease `"
            :: List.concat
                 (List.mapi
                    (fun index (measure : Mir.formula) ->
-                     (if index = 0 then [] else [ State.Text ", " ])
+                     (if index = 0 then [] else [ Obligation.Text ", " ])
                      @ [ Facts.quote caller measure.origin ])
                    measures)
           @ [ Text "`." ])
@@ -291,7 +291,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           list_required_fixes context frame precondition_clauses requirement term values
             ~type_names:(list_type_names (substitution_of precondition_clauses))
         in
-        let message : State.message =
+        let message : Obligation.message =
           [
             Text "`";
             Facts.quote precondition_clauses.callee clause.origin;

@@ -297,7 +297,7 @@ let check_fixes_work text =
       let before = select_judged (List.filter (fun other -> other != diagnostic) diagnostics) in
       List.iter
         (fun (fix : Source.span Diagnostic.fix) ->
-          match Diagnostic.apply_fix text fix with
+          match Diagnostic.apply_edits text fix.edits with
           | exception Invalid_argument _ ->
               fail "the fix %S has overlapping edits in %s" fix.title (Diagnostic.quote text)
           | fixed ->
@@ -482,10 +482,12 @@ let round_trip random =
   in
   let others =
     Array.of_list
-      (List.map (fun (spelling, keyword) -> (spelling, Token.Keyword keyword)) Token.keywords
+      (List.map
+         (fun (spelling, keyword) -> (spelling, Token.Keyword keyword))
+         Token.For_testing.keywords
       @ List.map
           (fun (spelling, reserved) -> (spelling, Token.Reserved reserved))
-          Token.reserved_words
+          Token.For_testing.reserved_words
       @ List.filter_map
           (fun (spelling, punctuation) ->
             match punctuation with
@@ -533,7 +535,7 @@ let () =
     else []
   in
   let list_pieces path =
-    let source = Source.read_file path in
+    let source = Source.For_testing.read_file path in
     let tokens, _ = Lexer.lex source in
     List.map
       (fun (piece : Parser.For_testing.piece) ->

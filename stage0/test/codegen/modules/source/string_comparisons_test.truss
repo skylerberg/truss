@@ -1,0 +1,6 @@
+test "strings compare, order, and trim" {
+  let padded = "  hello \n"
+  assert padded.trim().to_string() == "hello"
+  assert "apple" < "banana"
+  assert "apple" != "apples"
+}

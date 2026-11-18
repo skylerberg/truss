@@ -1016,14 +1016,15 @@ let read_host_system () =
 let list_proof_template_checks : Prover.proof part -> _ = function
   | Value (Obligations { obligations; _ }) ->
       List.filter_map
-        (fun (obligation : Prover.State.obligation) ->
+        (fun (obligation : Prover.Obligation.t) ->
           Option.map
-            (fun (template_clause : Prover.State.template_clause) -> template_clause.check)
+            (fun (template_clause : Prover.Obligation.template_clause) -> template_clause.check)
             obligation.template_clause)
         obligations
   | Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked -> []
 
-let make_template_check_root ({ from_template; literals; clauses } : Prover.State.template_check) =
+let make_template_check_root
+    ({ from_template; literals; clauses } : Prover.Obligation.template_check) =
   Lowered.Item.Template_check { from_template; literals; clauses }
 
 let claim_template_check_roots database (key : Resolve.Names.key) =

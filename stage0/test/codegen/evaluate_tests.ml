@@ -3,7 +3,7 @@ let solver =
 
 let run_template_checks backend checks =
   List.map
-    (fun ({ from_template; literals; clauses } as check : Prover.State.template_check) ->
+    (fun ({ from_template; literals; clauses } as check : Prover.Obligation.template_check) ->
       (check, Backend.run_template_check backend ~from_template ~literals ~clauses))
     checks
 
@@ -133,7 +133,8 @@ let () =
       let runs = run_template_checks backend (Database.list_template_checks proofs) in
       let lookups = Database.make_proof_lookups database in
       let listed =
-        Prover.list_queries ~runs lookups (Database.list_proofs proofs) Codegen_support.example_file
+        Prover.For_testing.list_queries ~runs lookups (Database.list_proofs proofs)
+          Codegen_support.example_file
       in
       let states =
         Prover.list_states

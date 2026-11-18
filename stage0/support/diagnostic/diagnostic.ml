@@ -612,7 +612,7 @@ let apply_edits text (edits : Source.span edit list) =
   let position =
     List.fold_left
       (fun position (edit : Source.span edit) ->
-        if edit.span.start < position then invalid_arg "Diagnostic.apply_fix: overlapping edits";
+        if edit.span.start < position then invalid_arg "Diagnostic.apply_edits: overlapping edits";
         Buffer.add_substring buffer text position (edit.span.start - position);
         Buffer.add_string buffer edit.replacement;
         edit.span.stop)
@@ -620,8 +620,6 @@ let apply_edits text (edits : Source.span edit list) =
   in
   Buffer.add_substring buffer text position (String.length text - position);
   Buffer.contents buffer
-
-let apply_fix text (fix : Source.span fix) = apply_edits text fix.edits
 
 module Starts = Map.Make (Int)
 
@@ -836,9 +834,6 @@ let to_json_object source diagnostic =
     (encode_json_string diagnostic.message)
     (encode_json_span source diagnostic.span)
     (String.concat "," notes) (String.concat "," fixes)
-
-let to_json source diagnostics =
-  "[" ^ String.concat ",\n" (List.map (to_json_object source) diagnostics) ^ "]\n"
 
 module For_testing = struct
   let limit = limit

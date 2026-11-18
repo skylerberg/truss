@@ -86,7 +86,9 @@ let replace_capabilities find_replacement (set : capability_set) =
        (fun capability -> Option.value ~default:[ capability ] (find_replacement capability))
        set)
 
-let make_builtin builtin = Named { path = Intrinsic.make_builtin_path builtin; arguments = [] }
+let make_builtin ?(arguments = []) builtin =
+  Named { path = Intrinsic.make_builtin_path builtin; arguments }
+
 let unit = make_builtin Unit
 let bool = make_builtin Bool
 let make_self_parameter trait = { owner = trait; name = "Self" }

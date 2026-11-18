@@ -1,6 +1,4 @@
-module State = State
-module Facts = Facts
-module Contracts = Contracts
+module Obligation = Obligation
 module Lookups = Lookups
 
 module Key_table = Hashtbl.Make (Structural_key.Make (struct
@@ -8,12 +6,12 @@ module Key_table = Hashtbl.Make (Structural_key.Make (struct
 end))
 
 module Template_check_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = State.template_check
+  type t = Obligation.template_check
 end))
 
 type proof =
-  | Obligations of State.outcome
-  | Unsupported of State.location * string
+  | Obligations of Obligation.outcome
+  | Unsupported of Obligation.location * string
   | Not_proven_here
 
 let find_inherited_clauses (lookups : Lookups.t) (path : Path.t) =
@@ -99,12 +97,12 @@ let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
   if derives_default && Option.is_some (Mir.read_code lookups.mir path) then
     let outcome = Translate.translate_function lookups source ~path in
     List.map
-      (fun (obligation : State.obligation) ->
+      (fun (obligation : Obligation.t) ->
         let message =
           match obligation.code with
           | Invariant ->
               [
-                State.Text
+                Obligation.Text
                   "The value that the derived `Default` builds from the fields' defaults may not \
                    meet this type's invariant.";
               ]
@@ -142,9 +140,9 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                       let prefix = "Where " ^ String.concat " and " shown ^ ": " in
                       {
                         outcome with
-                        State.obligations =
+                        Obligation.obligations =
                           List.map
-                            (fun (obligation : State.obligation) ->
+                            (fun (obligation : Obligation.t) ->
                               { obligation with message = Text prefix :: obligation.message })
                             outcome.obligations;
                       })
@@ -154,11 +152,13 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                   {
                     obligations =
                       List.concat_map
-                        (fun (outcome : State.outcome) -> outcome.obligations)
+                        (fun (outcome : Obligation.outcome) -> outcome.obligations)
                         outcomes;
                     holes =
                       List.sort_uniq compare
-                        (List.concat_map (fun (outcome : State.outcome) -> outcome.holes) outcomes);
+                        (List.concat_map
+                           (fun (outcome : Obligation.outcome) -> outcome.holes)
+                           outcomes);
                   })
         | Constant -> Obligations (Translate.translate_constant lookups source ~path:key.path)
         | Impl ->
@@ -166,8 +166,11 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
             Obligations
               {
                 obligations =
-                  List.concat_map (fun (outcome : State.outcome) -> outcome.obligations) outcomes;
-                holes = List.concat_map (fun (outcome : State.outcome) -> outcome.holes) outcomes;
+                  List.concat_map
+                    (fun (outcome : Obligation.outcome) -> outcome.obligations)
+                    outcomes;
+                holes =
+                  List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes;
               }
         | Type -> (
             let has_defaults () =
@@ -284,7 +287,7 @@ let show_truss_value members value =
   in
   show value
 
-let show_counterexample members (obligation : State.obligation) answer_values =
+let show_counterexample members (obligation : Obligation.t) answer_values =
   let shown =
     List.filter_map
       (fun (symbol, name) ->
@@ -315,7 +318,7 @@ let make_diagnostic code span message =
   Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
 
 let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
-    (location : State.location) =
+    (location : Obligation.location) =
   Source.Definition_span.locate (names.read_spans key)
     (match location with
     | Node origin -> origin
@@ -376,11 +379,11 @@ let substitute_clause text spans clause replacements type_names =
   Buffer.add_string buffer (replace_type_names type_names (String.drop_first next clause_text));
   Buffer.contents buffer
 
-let render (lookups : Lookups.t) (message : State.message) =
+let render (lookups : Lookups.t) (message : Obligation.message) =
   String.concat ""
     (List.map
        (function
-         | State.Text text -> text
+         | Obligation.Text text -> text
          | Quote (key, origin) ->
              Facts.quote_span
                (lookups.interface.names.read_text key)
@@ -392,10 +395,10 @@ let render (lookups : Lookups.t) (message : State.message) =
                clause replacements type_names)
        message)
 
-let render_fix lookups ({ title; edits } : State.fix) =
+let render_fix lookups ({ title; edits } : Obligation.fix) =
   Diagnostic.fix (render lookups title)
     (List.map
-       (fun ({ at; replacement } : State.edit) ->
+       (fun ({ at; replacement } : Obligation.edit) ->
          Diagnostic.replace at (render lookups replacement))
        edits)
 
@@ -425,7 +428,7 @@ let explain_unknown = function
          proof or a counterexample. Z3 gives the reason `%s`."
         reason
 
-let make_request (obligation : State.obligation) =
+let make_request (obligation : Obligation.t) =
   let terms =
     List.map (fun (term, _) -> (Logic.Symbol.Named_term term, term)) obligation.locals
     @ List.concat
@@ -441,13 +444,13 @@ type question = Decided of answer | Asked of (Solver.request * Logic.query)
 
 type posed = {
   site : Source.Definition_span.t site;
-  obligation : State.obligation;
+  obligation : Obligation.t;
   question : question;
 }
 
 type posed_proof = Unreadable of Source.Definition_span.t site | Posed of posed list
 
-let run_answer runs ({ check; clause } : State.template_clause) =
+let run_answer runs ({ check; clause } : Obligation.template_clause) =
   Option.map
     (function
       | Ok holds -> Ran (List.assoc clause (List.combine check.clauses holds))
@@ -470,7 +473,7 @@ let pose_proof (lookups : Lookups.t) runs key proof =
   | Obligations outcome ->
       Posed
         (List.map
-           (fun (obligation : State.obligation) ->
+           (fun (obligation : Obligation.t) ->
              {
                site =
                  {
@@ -654,13 +657,15 @@ let list_diagnostics verdicts file =
     (list_file_states verdicts file)
   |> sort_diagnostics
 
-let list_queries ~runs lookups proofs file =
-  List.concat_map
-    (fun (base, posed_proof) ->
-      List.map
-        (fun (site, asked) -> (locate_site ~base site, Solver.show_input asked))
-        (list_asked posed_proof))
-    (list_file_definitions lookups
-       (Key_table.of_seq (List.to_seq (pose_proofs ~runs lookups proofs)))
-       file)
-  |> List.sort (fun (left, _) (right, _) -> compare_sites left right)
+module For_testing = struct
+  let list_queries ~runs lookups proofs file =
+    List.concat_map
+      (fun (base, posed_proof) ->
+        List.map
+          (fun (site, asked) -> (locate_site ~base site, Solver.show_input asked))
+          (list_asked posed_proof))
+      (list_file_definitions lookups
+         (Key_table.of_seq (List.to_seq (pose_proofs ~runs lookups proofs)))
+         file)
+    |> List.sort (fun (left, _) (right, _) -> compare_sites left right)
+end

@@ -38,8 +38,6 @@ val extract_last_name : Path.module_ -> string
 
 type entry = { name : string; kind : named; visibility : visibility; generic : bool }
 
-module String_map : Map.S with type key = String.t
-
 val is_type_kind : named -> bool
 val is_value_kind : named -> bool
 val is_public : visibility -> bool

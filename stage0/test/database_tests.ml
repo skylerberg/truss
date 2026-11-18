@@ -343,7 +343,7 @@ let count_termination_obligations database ~of_:shown =
   | Some (Value (Obligations outcome)) ->
       List.length
         (List.filter
-           (fun (obligation : Prover.State.obligation) -> obligation.code = Termination)
+           (fun (obligation : Prover.Obligation.t) -> obligation.code = Termination)
            outcome.obligations)
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None ->
       failwith ("the proof of " ^ shown ^ " makes no obligations")
