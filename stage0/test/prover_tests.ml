@@ -104,6 +104,10 @@ let () =
         Harness.fail "message %S" actual);
   Harness.test "a function that declares `uses Panic` stops at an operation that fails" (fun () ->
       expect_proven Fixtures.Prover.failing_operations_of_a_function_that_may_panic);
+  Harness.test "expect returns the payload of an Option or a Result" (fun () ->
+      expect_proven Fixtures.Prover.payloads_through_expect);
+  Harness.test "expect lends the payload of an Option it is lent" (fun () ->
+      expect_proven Fixtures.Prover.elements_lent_through_expect);
   Harness.test "a test has `Panic`, so an operation it cannot prove is checked when it runs"
     (fun () -> expect_proven Fixtures.Prover.test_indexing_by_a_sum_from_a_loop);
   Harness.test "a lambda proves its operations, since it has no `uses` of its own" (fun () ->
