@@ -1,9 +1,9 @@
 module Item_table = Hashtbl.Make (Lowered.Item)
 
-let derive_test_key = Blake3.derive_key ~context:"truss 2026-11-12 reach key"
+let derive_test_key = Blake3.derive_key ~context:"truss 2026-11-17 test key"
 let encode_test_key fields = derive_test_key (Cbor.encode (Cbor.Array fields))
 
-let derive_cycle_member_key ~read_known_key members start =
+let derive_group_member_key ~read_known_key members start =
   let visit_order = Item_table.create 8 in
   let rec visit visited = function
     | [] -> List.rev visited
@@ -45,7 +45,7 @@ let derive ~read_hash_and_references ~read_known_key component =
         ( key,
           encode_test_key
             [
-              Text "unit";
+              Text "item";
               Bytes fragment_hash;
               Cbor.Array
                 (List.map (fun reference -> Cbor.Bytes (read_known_key reference)) references);
@@ -57,5 +57,5 @@ let derive ~read_hash_and_references ~read_known_key component =
         (fun member -> Item_table.replace members member (read_hash_and_references member))
         component;
       List.map
-        (fun member -> (member, derive_cycle_member_key ~read_known_key members member))
+        (fun member -> (member, derive_group_member_key ~read_known_key members member))
         component

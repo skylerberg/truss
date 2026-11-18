@@ -386,17 +386,17 @@ let is_present cache key =
   (match cache.writer with Some writer -> Hashtbl.mem writer.segment.table key | None -> false)
   || List.exists (fun segment -> find_in segment key <> None) cache.segments
 
-let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-12 store result"
+let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-17 cache result key"
 
 type result_kind = Package_database | Test_result | Solver_answer
 
-let show_result_tag = function
-  | Package_database -> "package"
-  | Test_result -> "tests"
-  | Solver_answer -> "solver"
+let show_result_kind = function
+  | Package_database -> "package database"
+  | Test_result -> "test result"
+  | Solver_answer -> "solver answer"
 
 let make_result_key ~kind ~key =
-  derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text (show_result_tag kind); Cbor.Bytes key ]))
+  derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text (show_result_kind kind); Cbor.Bytes key ]))
 
 let find_result cache ~kind ~key =
   let name = make_result_key ~kind ~key in
