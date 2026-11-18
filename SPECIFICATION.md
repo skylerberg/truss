@@ -558,9 +558,10 @@ fn Option[Value].take(mut self) -> Option[Value] {
   and records, sum types, and `Array`s built only from those, is `Plain`.
 - **A name bound to a `Plain` value is a copy.** A `let`, or a pattern of a
   `match` or an `is`, that binds a `Plain` value without `mut` copies it, so
-  the place it was bound from can be assigned while the name is live. The
-  variable of a `for` loop is not copied: the loop lends its collection for
-  the body.
+  the place it was bound from can be assigned while the name is live. A
+  compound assignment's `Plain` operand is a copy too, so an index key of
+  the target can assign the operand's place. The variable of a `for` loop is
+  not copied: the loop lends its collection for the body.
 - **`Copyable` types have `copy()`.** An implicit copy never allocates.
 - A copy has the original's capacity.
 - **Handles are not `Copyable`,** nor is a type that holds one.

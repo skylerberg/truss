@@ -760,7 +760,9 @@ let build_compound_assign state (written : Syntax.statement) (target : Syntax.ex
                        Operands.build_argument (read_argument_mode 1) bound_value;
                      ]
                    ~lends:None),
-              Operands.build (read_argument_mode 1) right ))
+              Operands.build
+                (State.decide_binding_mode state (read_argument_mode 1) right.type_)
+                right ))
     | Some _ -> State.raise_bug "a compound assignment's call is not a trait method call"
     | None -> make_built_in (convert_to_operation operation)
   in
