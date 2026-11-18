@@ -1293,7 +1293,8 @@ it is.
 
 | Rule | Reason |
 |---|---|
-| A trait can require other traits. | A law can then span traits. `Hash` requires `Equal`, so its law, that equal values hash equally, is stated and proven. In Rust, `Hash` does not require `Eq`, and that law is only a comment. |
+| A trait can require other traits. | A law can then span traits. `Ordered` requires `Equal`, so its law `agrees_with_equal` states that `compare` returns `Ordering.Equal` exactly when `==` holds. Rust's `Ord` requires `Eq` too, but that agreement is only documentation. |
+| `Hash` has no law relating it to `Equal`. | A law is a specification, and a specification cannot call `hash`, which mutates its `Hasher`. Stating the law would take a `hash` that returns its hash, which gives up a keyed hasher provided through a capability, or a specification form for the state a mutating call leaves. A derived `Hash` agrees with a derived `Equal` by construction. |
 | A type has one `impl` of each trait. | Two traits that both require `Equal` share that `impl`, so there is no diamond problem. |
 | An `impl`'s method has its trait's signature, which the `impl` restates. | The body of the method and every call of it are checked against the same types. A method with a signature of its own would have a body checked against types that no call is checked against. |
 
@@ -1349,7 +1350,7 @@ Rules: [Deriving](SPECIFICATION.md#deriving).
 | Rule | Reason |
 |---|---|
 | Deriving is opt-in. | An `Equal` on a public type is a promise to its users, and structural equality is wrong for some types, such as a set stored as an unsorted list. |
-| A derived `Ordered` or `Hash` needs a derived `Equal`. | The laws of `Ordered` and `Hash` relate them to `Equal`, and two derived implementations agree by construction. A hand-written `Equal`, such as that of a set stored as a list, would not agree with a field-by-field `Ordered` or `Hash`. |
+| A derived `Ordered` or `Hash` needs a derived `Equal`. | The laws of `Ordered` relate it to `Equal`, and a map finds a key only when its hash agrees with `Equal`. Two derived implementations agree by construction. A hand-written `Equal`, such as that of a set stored as a list, would not agree with a field-by-field `Ordered` or `Hash`. |
 | One derived `Serialize` serves every format. | Its methods are generic over a `Serializer`. A type that needs other field names writes the `impl`, because Truss has no attributes. |
 | Every type has debug output, with no derive. | The test runner can show any value. Text for people goes through `Display`, which is written by hand, because a structural dump is rarely fit for a user. |
 
