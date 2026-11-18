@@ -240,12 +240,7 @@ let () =
             ];
         ]
       in
-      incr Codegen_support.counter;
-      let output =
-        Filename.concat
-          (Lazy.force Codegen_support.scratch)
-          (Printf.sprintf "tests%d" !Codegen_support.counter)
-      in
+      let output = Codegen_support.make_scratch_path "tests" in
       match Backend.For_testing.build_supplied_tests backend ~time_limit_ms:300 tests ~output with
       | Error message -> Codegen_support.fail "%s" message
       | Ok () ->
