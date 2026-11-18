@@ -1,8 +1,14 @@
 let test = Harness.test
 
-let list_diagnostics database (file : Path.file) =
+let list_package_diagnostics database (file : Path.file) =
   Database.check database [ file.module_.package ];
   Database.list_file_diagnostics database file
+
+let list_fragment_diagnostics database file =
+  List.filter
+    (fun (diagnostic : Diagnostic.t) ->
+      not (Diagnostic.For_testing.is_unused_definition diagnostic.code))
+    (list_package_diagnostics database file)
 
 let fail = Harness.fail
 let expect_string = Harness.expect_string
@@ -215,7 +221,7 @@ let make_backend ?results ?evaluation_time_limit_ms database =
     | Error message -> failwith message)
     (Lazy.force c_compiler) Development
 
-let load_files ?results ?(roots = []) ?checks files =
+let load_checked ~list_diagnostics ?results ?(roots = []) ?checks files =
   let packages = make_example_package files in
   let database = make_database ?checks packages in
   List.iter (Database.For_testing.add_root database) roots;
@@ -238,7 +244,12 @@ let load_files ?results ?(roots = []) ?checks files =
     files;
   (database, make_backend ?results database)
 
-let load ?results ?roots ?checks text = load_files ?results ?roots ?checks [ (example_file, text) ]
+let load_files ?results ?roots ?checks files =
+  load_checked ~list_diagnostics:list_package_diagnostics ?results ?roots ?checks files
+
+let load ?results ?roots ?checks text =
+  load_checked ~list_diagnostics:list_fragment_diagnostics ?results ?roots ?checks
+    [ (example_file, text) ]
 
 let list_tests_in database (module_ : Path.module_) =
   List.filter_map

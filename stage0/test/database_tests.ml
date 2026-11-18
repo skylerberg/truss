@@ -10,7 +10,8 @@ let () =
 let check_text text =
   let database = Support.make_database (Support.setup [ ("app::main", text) ]) in
   (match
-     Support.list_codes (Support.list_diagnostics database (Support.parse_file "app::main"))
+     Support.list_codes
+       (Support.list_fragment_diagnostics database (Support.parse_file "app::main"))
    with
   | [] -> ()
   | codes -> Harness.fail "the program has diagnostics: %s" (String.concat ", " codes));
@@ -253,7 +254,7 @@ let expect_recursion_group text ~of_:name ~expected =
       (String.concat "; " expected)
 
 let callee_and_caller =
-  "fn callee(x: Int64) -> Int64 { x + 1 }\nfn caller() -> Int64 { callee(1) }\n"
+  "fn callee(x: Int64) -> Int64 { x + 1 }\npublic fn caller() -> Int64 { callee(1) }\n"
 
 let with_helper =
   [ ("app::main", callee_and_caller); ("app::extra", "fn helper() -> Int64 { 1 }\n") ]
@@ -349,7 +350,8 @@ let () =
 let () =
   Harness.test "a caller's checked body reads the callee's interface and not its body" (fun () ->
       expect_reads
-        (check_text "fn callee(x: Int64) -> Int64 { x + 1 }\nfn caller() -> Int64 { callee(1) }\n")
+        (check_text
+           "fn callee(x: Int64) -> Int64 { x + 1 }\npublic fn caller() -> Int64 { callee(1) }\n")
         "checked body app::main::caller" ~includes:[ "interface app::main::callee" ]
         ~excludes:
           [
@@ -365,7 +367,8 @@ let () =
         ~excludes:[ "resolved body app::main::f" ]);
   Harness.test "a checked body reads its callee's signature check" (fun () ->
       expect_reads
-        (check_text "fn callee(x: Int64) -> Int64 { x + 1 }\nfn caller() -> Int64 { callee(1) }\n")
+        (check_text
+           "fn callee(x: Int64) -> Int64 { x + 1 }\npublic fn caller() -> Int64 { callee(1) }\n")
         "checked body app::main::caller"
         ~includes:[ "signature check app::main::callee" ]
         ~excludes:[]);
@@ -395,8 +398,10 @@ let () =
            ~after:
              [
                ( "app::main",
-                 "fn callee(x: Int64) -> Int64 {\n  x + 1\n}\nfn caller() -> Int64 { callee(1) }\n"
-               );
+                 "fn callee(x: Int64) -> Int64 {\n\
+                 \  x + 1\n\
+                  }\n\
+                  public fn caller() -> Int64 { callee(1) }\n" );
              ])
         ~exactly:
           [
@@ -412,7 +417,7 @@ let () =
            ~before:[ ("app::main", callee_and_caller); ("app::main/other", "") ]
            ~after:
              [
-               ("app::main", "fn caller() -> Int64 { callee(1) }\n");
+               ("app::main", "public fn caller() -> Int64 { callee(1) }\n");
                ("app::main/other", "fn callee(x: Int64) -> Int64 { x + 1 }\n");
              ])
         ~exactly:
@@ -430,7 +435,8 @@ let () =
            ~after:
              [
                ( "app::main",
-                 "fn callee(x: Int64) -> Int64 { x + 2 }\nfn caller() -> Int64 { callee(1) }\n" );
+                 "fn callee(x: Int64) -> Int64 { x + 2 }\n\
+                  public fn caller() -> Int64 { callee(1) }\n" );
              ])
         ~names:[ "caller" ]);
   Harness.test "an edit to a signature recomputes the callers" (fun () ->
@@ -440,7 +446,7 @@ let () =
           ~after:
             [
               ( "app::main",
-                "fn callee(x: Int32) -> Int64 { 1 }\nfn caller() -> Int64 { callee(1) }\n" );
+                "fn callee(x: Int32) -> Int64 { 1 }\npublic fn caller() -> Int64 { callee(1) }\n" );
             ]
       in
       if not (List.mem "checked body app::main::caller" recomputed) then
@@ -454,7 +460,7 @@ let () =
             [
               ( "app::main",
                 "fn callee(x: Int64) -> Int64 ensures result == 1 { 1 }\n\
-                 fn caller() -> Int64 { callee(1) }\n" );
+                 public fn caller() -> Int64 { callee(1) }\n" );
             ]
       in
       if not (List.mem "proof app::main::caller" recomputed) then
@@ -463,13 +469,13 @@ let () =
   Harness.test "adding the definition that a call names fixes the call" (fun () ->
       ignore
         (list_propagated
-           ~before:[ ("app::main", "fn caller() -> Int64 { callee(1) }\n") ]
+           ~before:[ ("app::main", "public fn caller() -> Int64 { callee(1) }\n") ]
            ~after:[ ("app::main", callee_and_caller) ]));
   Harness.test "removing a definition deletes its parts and fails its callers" (fun () ->
       expect_untouched
         (list_propagated
            ~before:[ ("app::main", callee_and_caller) ]
-           ~after:[ ("app::main", "fn caller() -> Int64 { callee(1) }\n") ])
+           ~after:[ ("app::main", "public fn caller() -> Int64 { callee(1) }\n") ])
         ~names:[ "app::main::callee" ]);
   Harness.test "a field that makes a type not plain recomputes the types that hold it" (fun () ->
       let recomputed =
@@ -618,7 +624,7 @@ let () =
              [
                ( "app::main",
                  "fn callee(x: Int64) -> Int64 requires x > 0 { x }\n\
-                  fn caller() -> Int64 { callee(1) }\n" );
+                  public fn caller() -> Int64 { callee(1) }\n" );
              ]
            ~after:
              [
@@ -628,7 +634,7 @@ let () =
                   {\n\
                  \  x\n\
                   }\n\
-                  fn caller() -> Int64 { callee(1) }\n" );
+                  public fn caller() -> Int64 { callee(1) }\n" );
              ])
         ~exactly:
           [ "import check app/main/main.truss"; "namespace app"; "parsed app/main/main.truss" ]);
@@ -640,7 +646,8 @@ let () =
           ~after:
             [
               ( "app::main",
-                "fn callee(x: Int64) -> Int64 { x + 2 }\nfn caller() -> Int64 { callee(1) }\n" );
+                "fn callee(x: Int64) -> Int64 { x + 2 }\n\
+                 public fn caller() -> Int64 { callee(1) }\n" );
             ]
       in
       expect_included recomputed
@@ -817,7 +824,7 @@ let () =
       let after =
         [
           ( "app::main",
-            "fn callee(x: Int64) -> Int64 { x + 2 }\nfn caller() -> Int64 { callee(1) }\n" );
+            "fn callee(x: Int64) -> Int64 { x + 2 }\npublic fn caller() -> Int64 { callee(1) }\n" );
         ]
       in
       let log = commit [] (list_saved (build before)) in
@@ -882,7 +889,8 @@ let settle_on_disk root =
         (String.concat ", " parts));
   observed.recomputed
 
-let edited_body = "fn callee(x: Int64) -> Int64 { x + 2 }\nfn caller() -> Int64 { callee(1) }\n"
+let edited_body =
+  "fn callee(x: Int64) -> Int64 { x + 2 }\npublic fn caller() -> Int64 { callee(1) }\n"
 
 let () =
   Harness.test "a database written to .truss and reopened recomputes nothing" (fun () ->
@@ -1005,7 +1013,10 @@ let () =
       let after =
         [
           ( "app::main",
-            "fn callee(x: Int64) -> Int64 {\n  x + 1\n}\nfn caller() -> Int64 { callee(1) }\n" );
+            "fn callee(x: Int64) -> Int64 {\n\
+            \  x + 1\n\
+             }\n\
+             public fn caller() -> Int64 { callee(1) }\n" );
         ]
       in
       let import_check =

@@ -64,6 +64,10 @@ let make_standard_module modules = { package = standard_package; modules }
 let make_standard_path modules name = Top { module_ = make_standard_module modules; name }
 let make_capability_method capability name = Method { owner = capability; name; receiver = Static }
 
+let is_entry_point = function
+  | Top { module_ = { modules = []; _ }; name = "main" } -> true
+  | _ -> false
+
 let rec locate_package = function
   | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ } ->
       module_.package

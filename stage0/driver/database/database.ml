@@ -1017,10 +1017,11 @@ let claim_template_check_roots database (key : Resolve.Names.key) =
 let find_entry_point (names : Resolve.Names.lookups) package =
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->
-      match declaration.path with
-      | Top { name = "main"; _ } when declaration.kind = Function && declaration.ordinal = 0 ->
-          Some declaration.path
-      | _ -> None)
+      if
+        Path.is_entry_point declaration.path
+        && declaration.kind = Function && declaration.ordinal = 0
+      then Some declaration.path
+      else None)
     (names.list_declarations { package; modules = [] })
 
 let claim_lowering_roots database (names : Resolve.Names.lookups) package =

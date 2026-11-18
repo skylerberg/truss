@@ -1746,9 +1746,9 @@ in review, because the fields are written in the public declaration. The
 fields of an opaque type are accessible throughout its package, not only in
 one file, because the methods of a type can live in any file of the package.
 
-**An `internal` definition that nothing in its package uses is an error,**
-as an unused variable is. No other package can call it, so it is dead code,
-and it keeps alive the code it calls.
+**A private or `internal` definition that nothing in its package uses is an
+error,** as an unused variable is. No other package can call it, so it is
+dead code, and it keeps alive the code it calls.
 
 **There is no level between `internal` and `public`.** Swift's `package`
 level works because the code it spans is versioned as one unit. Truss
