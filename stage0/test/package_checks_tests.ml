@@ -89,6 +89,11 @@ let () =
   Harness.test "a type that contains itself with growing arguments is an error" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.nested_type_with_growing_arguments
         "package.growing_type");
+  Harness.test
+    "an impl whose associated type grows the type that holds it reaches the recursion limit"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Package_checks.impl_growing_a_type_through_its_associated_type
+        "types.recursion_limit" ~says:"needs more than 64 nested types");
   Harness.test "generic code that instantiates itself with growing arguments is an error" (fun () ->
       let packages =
         Support.setup
