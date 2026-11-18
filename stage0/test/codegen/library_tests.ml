@@ -29,19 +29,19 @@ let () =
   if Harness.is_wanted checking then Codegen_support.test checking load else load ();
   match !loaded with
   | None -> ()
-  | Some (database, compile) -> (
+  | Some (database, backend) -> (
       let tests =
         List.concat_map
           (fun ((file : Path.file), _) -> Codegen_support.list_tests_in database file.module_)
           files
         |> List.filter (fun path -> Harness.is_wanted (name_of path))
       in
-      match Compile.run_tests compile ~time_limit_ms:10000 tests with
+      match Backend.run_tests backend ~time_limit_ms:10000 tests with
       | exception Compiler_bug.Bug bug -> fail_unbuilt (Compiler_bug.to_string bug)
       | Error message -> fail_unbuilt message
       | Ok records ->
           List.iter2
-            (fun path (record : Compile.record) ->
+            (fun path (record : Backend.record) ->
               Codegen_support.test (name_of path) (fun () ->
                   match (find_expected_panic path, record.outcome, record.message) with
                   | None, Passed, _ -> ()
@@ -49,6 +49,6 @@ let () =
                     when String.includes ~affix:expected message ->
                       ()
                   | _, outcome, message ->
-                      Codegen_support.fail "%s%s" (Compile.show_outcome outcome)
+                      Codegen_support.fail "%s%s" (Backend.show_outcome outcome)
                         (match message with Some message -> ": " ^ message | None -> "")))
             tests records)

@@ -19,13 +19,13 @@ let require_main snapshot database packages =
 let refuse_unshippable snapshot packages requests main proofs =
   let in_code =
     List.map
-      (fun ({ failure; file; line; column; way } : Compile.unshippable) ->
+      (fun ({ failure; file; line; column; way } : Backend.unshippable) ->
         ( Command_packages.show_file snapshot packages file,
           line,
           column,
           (failure :> [ `Todo | `Echo | `Proof_hole ]),
           way ))
-      (Compile.list_unshippable requests ~main)
+      (Backend.list_unshippable requests ~main)
   in
   let in_proofs =
     List.concat_map
@@ -33,7 +33,7 @@ let refuse_unshippable snapshot packages requests main proofs =
         List.map
           (fun (file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
           (Proofs.list_holes snapshot packages proofs definition))
-      (Compile.list_reached_definitions requests main)
+      (Backend.list_reached_definitions requests main)
   in
   match List.sort_uniq compare (in_code @ in_proofs) with
   | [] -> ()
@@ -73,18 +73,20 @@ let refuse_unshippable snapshot packages requests main proofs =
           refusals;
       raise (Outcome.Stop 1)
 
-let build_program ?output snapshot packages (build : Compiler.build) =
-  let is_release = build = Release in
+let build_program ?output snapshot packages (profile : Backend.profile) =
+  let is_release = profile = Release in
   let database = Workspace.open_database ~checks:(not is_release) snapshot in
   let report = Report.gather ~proofs:is_release database snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
   let main = require_main snapshot database packages in
   Option.iter
-    (refuse_unshippable snapshot packages (Compiler.make_lowering_requests database packages) main)
+    (refuse_unshippable snapshot packages
+       (Workspace_backend.make_lowering_requests database packages)
+       main)
     (Report.force_proofs report);
-  let compile = Compiler.create database snapshot packages build in
-  let output = Option.value output ~default:(Compile.make_program_path compile) in
-  match Compile.build_program compile ~main ~output with
+  let backend = Workspace_backend.create database snapshot packages profile in
+  let output = Option.value output ~default:(Backend.make_program_path backend) in
+  match Backend.build_program backend ~main ~output with
   | Error message -> Outcome.raise_cannot_run "%s" message
   | Ok () -> output
 

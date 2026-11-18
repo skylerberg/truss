@@ -115,6 +115,6 @@ let () =
             instantiation = Ground.no_instantiation;
           }
       in
-      let _, compile = Codegen_support.load ~roots:[ not_code ] "type Point(x: Int64)\n" in
+      let _, backend = Codegen_support.load ~roots:[ not_code ] "type Point(x: Int64)\n" in
       expect_bug ~saying:"while lowering example::Point" (fun () ->
-          ignore (Compile.For_testing.compile_fragment compile not_code)))
+          ignore (Backend.For_testing.compile_fragment backend not_code)))

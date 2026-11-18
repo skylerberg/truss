@@ -428,14 +428,12 @@ let execute ~doing run =
 let forwarded =
   [
     Registry.Index.variable;
-    Toolchain.added_flags_variable;
-    "TRUSS_CC";
-    "TRUSS_KEEP_C";
     "TRUSS_Z3";
     "TRUSS_CACHE_SIZE";
     "TRUSS_WORKERS";
     database_counts_variable;
   ]
+  @ C_compiler.variables
 
 type work =
   | Command_line of string list
