@@ -446,7 +446,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         | Types.Capability_variable _ ->
             report "%s contains a capability inference variable" subject
         | Types.Capability_error _ -> report "%s contains a capability with an error" subject)
-      (set :> Types.capability list)
+      (Types.list_capabilities set)
   and check_type subject (ty : Types.ty) =
     match ty with
     | Named { arguments; _ } -> List.iter (check_argument subject) arguments
@@ -811,7 +811,7 @@ let check_derived interface path form = check_form interface ~path ~key:None for
 let check_file (interface : Interface.Lookups.t) ~find_core (file : Path.file) =
   List.fold_left
     (fun count (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.make_key declaration in
+      let key = declaration.key in
       match find_core key with
       | Some form ->
           check interface key form;

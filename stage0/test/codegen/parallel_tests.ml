@@ -1,12 +1,11 @@
-let run_with_workers ~workers text =
-  Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
-  let status, output, errors = Codegen_support.run_main text in
-  if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors;
-  output
-
 let expect_same_with_any_workers text ~expected =
+  let program = Codegen_support.build_main text in
   List.iter
-    (fun workers -> Codegen_support.expect_string ~expected (run_with_workers ~workers text))
+    (fun workers ->
+      Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
+      let status, output, errors = Process.run program [] in
+      if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors;
+      Codegen_support.expect_string ~expected output)
     (Codegen_support.list_worker_counts ())
 
 let () =
@@ -67,9 +66,11 @@ let () =
         Codegen_support.fail "reported %s" errors)
 
 let () =
-  Codegen_support.expect_pass
-    "a test runs the branches of a parallel block and of a parallel for, in order"
-    (board ^ Fixtures.Parallel.parallel_board_test)
+  Codegen_support.test
+    "a test runs the branches of a parallel block and of a parallel for, in order" (fun () ->
+      Codegen_support.expect_output
+        (board ^ Fixtures.Parallel.parallel_board_test)
+        "test 0 passed\n")
 
 let () =
   Codegen_support.test
@@ -126,8 +127,8 @@ let () =
     (fun () ->
       let work : Ground.function_type =
         {
-          parameters = [ (Read, Codegen_support.named "UInt64") ];
-          result = Codegen_support.named "Unit";
+          parameters = [ (Read, Codegen_support.uint64) ];
+          result = Codegen_support.unit;
           uses = [];
         }
       in
@@ -144,8 +145,7 @@ let () =
         Codegen_support.function_ ~parameters:[ 0; 1; 4 ] ~environment
           [
             Codegen_support.local ~name:"environment" (Raw (Nullable_pointer Opaque));
-            Codegen_support.local ~name:"item"
-              (Codegen_support.value (Codegen_support.named "UInt64"));
+            Codegen_support.local ~name:"item" (Codegen_support.value Codegen_support.uint64);
             Codegen_support.local (Pointer { target = Environment 0; writable = false });
             Codegen_support.local (Codegen_support.value Codegen_support.int32);
             Codegen_support.local ~name:"capabilities" Convention.capabilities;

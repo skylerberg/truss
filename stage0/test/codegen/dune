@@ -1,3 +1,35 @@
+(library
+ (name codegen_support)
+ (wrapped false)
+ (modules codegen_support fixtures)
+ (libraries
+  harness
+  core_lint
+  compiler_bug
+  zarith
+  path
+  ground
+  memory_layout
+  lowered
+  convention
+  emit_c
+  c_compiler
+  process
+  startup
+  workspace
+  cache
+  project
+  interface
+  infer
+  libc
+  storage
+  monomorphic
+  resolve
+  diagnostic
+  source
+  backend
+  database))
+
 (tests
  (names
   layout_tests
@@ -9,16 +41,12 @@
   program_tests
   evaluate_tests
   failure_tests
-  owning_tests
   libc_tests
   parallel_tests
   concurrent_tests
   shared_tests
-  lowering_tests
-  library_tests)
+  lowering_tests)
  (modules
-  codegen_support
-  fixtures
   layout_tests
   emit_tests
   drop_and_copy_tests
@@ -28,14 +56,13 @@
   program_tests
   evaluate_tests
   failure_tests
-  owning_tests
   libc_tests
   parallel_tests
   concurrent_tests
   shared_tests
-  lowering_tests
-  library_tests)
+  lowering_tests)
  (libraries
+  codegen_support
   harness
   core_lint
   compiler_bug
@@ -75,8 +102,32 @@
   file_system)
  (deps
   (glob_files %{workspace_root}/*.md)
-  (glob_files_rec %{workspace_root}/standard/*.md)
-  (glob_files library/*.truss)))
+  (glob_files_rec %{workspace_root}/standard/*.md)))
+
+(executable
+ (name module_tests)
+ (modules module_tests)
+ (libraries codegen_support harness backend compiler_bug path))
+
+(rule
+ (alias runtest)
+ (deps
+  (glob_files_rec modules/**.truss))
+ (action
+  (setenv
+   TRUSS_TEST_SHARE
+   0/2
+   (run %{exe:module_tests.exe}))))
+
+(rule
+ (alias runtest)
+ (deps
+  (glob_files_rec modules/**.truss))
+ (action
+  (setenv
+   TRUSS_TEST_SHARE
+   1/2
+   (run %{exe:module_tests.exe}))))
 
 (rule
  (target fixtures.ml)

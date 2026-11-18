@@ -18,7 +18,12 @@ val bind_law_parameters :
   State.frame
 
 val assume_laws :
-  State.context -> State.frame -> at:State.location -> Types.trait_reference -> Types.ty -> unit
+  State.context ->
+  State.frame ->
+  at:Obligation.location ->
+  Types.trait_reference ->
+  Types.ty ->
+  unit
 
 val template_trait : Path.t
 val has_method_cost : State.context -> Invocation.callee -> Path.t -> bool

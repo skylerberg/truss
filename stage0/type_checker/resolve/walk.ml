@@ -129,19 +129,12 @@ let set_target state (name : Syntax.name) target =
   (lookup_current_names state).names.(name.id) <- Some target
 
 let report_unknown state (name : Syntax.name) ~expected candidates =
-  let fixes =
-    match Diagnostic.find_closest name.text candidates with
-    | Some candidate ->
-        [
-          Diagnostic.fix
-            (Printf.sprintf "Write `%s`." candidate)
-            [ Diagnostic.replace (read_span state name.id) candidate ];
-        ]
-    | None -> []
-  in
+  let span = read_span state name.id in
   set_target state name
     (Unknown
-       (add_diagnostic state ~fixes Unknown_name (read_span state name.id)
+       (add_diagnostic state
+          ~fixes:(Diagnostic.list_spelling_fixes span ~written:name.text candidates)
+          Unknown_name span
           (Printf.sprintf "Nothing named `%s` is %s." name.text expected)))
 
 let find_module_item state text = state.lookups.find state.key.module_ text

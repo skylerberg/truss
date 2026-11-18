@@ -1,0 +1,13 @@
+fn squares() -> Array[Int64, 3] {
+  [1, 4, 9]
+}
+
+fn capacity[count: UInt64](items: Array[Int64, count]) -> UInt64 {
+  count
+}
+
+test "an array literal and a generic value parameter used as a value" {
+  assert capacity(squares()) == 3
+  let four: Array[Int64, 4] = [0, 0, 0, 0]
+  assert capacity(four) == 4
+}

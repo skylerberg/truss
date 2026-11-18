@@ -101,13 +101,14 @@ let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
   let is_logic_function =
     match signature with
     | Some (signature : Types.signature) -> (
-        List.for_all
-          (function
-            | Types.Capability_parameter _ -> true
-            | Types.Capability _ | Types.Capability_projection _ | Types.Capability_variable _
-            | Types.Capability_error _ ->
-                false)
-          (signature.uses :> Types.capability list)
+        (not
+           (Types.exists_capability
+              (function
+                | Types.Capability_parameter _ -> false
+                | Types.Capability _ | Types.Capability_projection _ | Types.Capability_variable _
+                | Types.Capability_error _ ->
+                    true)
+              signature.uses))
         && List.for_all
              (fun (info : Types.parameter_info) -> info.mode <> Types.Mut)
              signature.parameters

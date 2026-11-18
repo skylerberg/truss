@@ -1,5 +1,7 @@
 let check_file database file =
-  match Support.list_fragment_diagnostics database file with
+  match
+    Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database file
+  with
   | [] -> Support.list_proof_diagnostics database file
   | errors -> errors
 
@@ -70,9 +72,9 @@ let () =
         String.includes ~affix:"`name` is" actual
         || not (String.includes ~affix:"`count` is 255" actual)
       then Harness.fail "message %S" actual);
-  Harness.test "an obligation with neither a proof nor a counterexample says so" (fun () ->
+  Harness.test "an obligation that the solver runs out of steps on says so" (fun () ->
       let actual = read_message Fixtures.Prover.sum_of_two_cubes in
-      if not (String.includes ~affix:"found neither a proof nor a counterexample" actual) then
+      if not (String.includes ~affix:"reached its step limit" actual) then
         Harness.fail "message %S" actual);
   Harness.test "code generic over an integer trait is proven for each type that implements it"
     (fun () ->
@@ -217,7 +219,7 @@ let () =
       in
       match
         Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Obligations { obligations = [ obligation ]; _ } ->
           if not (List.exists applies_limited obligation.query.facts) then
@@ -251,7 +253,8 @@ let () =
       let main = Support.parse_file "app::main" in
       (match
          Support.list_codes
-           (Support.list_fragment_diagnostics (Support.make_database packages) main)
+           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
+              (Support.make_database packages) main)
        with
       | [] -> ()
       | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
@@ -263,13 +266,13 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
         Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Some Blocked -> ()
       | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
@@ -289,20 +292,21 @@ let () =
       let main = Support.parse_file "app::main" in
       (match
          Support.list_codes
-           (Support.list_fragment_diagnostics (Support.make_database packages) main)
+           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
+              (Support.make_database packages) main)
        with
       | [] -> ()
       | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
         Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Some Blocked -> ()
       | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
@@ -334,13 +338,13 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
         Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Some (Value (Obligations _)) -> ()
       | Some (Value (Unsupported _ | Not_proven_here)) ->
@@ -364,13 +368,13 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
         Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Some (Value (Obligations _)) -> ()
       | Some (Value (Unsupported _ | Not_proven_here)) ->
@@ -391,11 +395,16 @@ let () =
       let main = Support.parse_file "app::main" in
       (match
          Support.list_codes
-           (Support.list_fragment_diagnostics database (Support.parse_file "app::main/measured"))
+           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database
+              (Support.parse_file "app::main/measured"))
        with
       | [ "resolve.unknown_name" ] -> ()
       | codes -> Harness.fail "the trait reports %s" (String.concat ", " codes));
-      (match Support.list_codes (Support.list_fragment_diagnostics database main) with
+      (match
+         Support.list_codes
+           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database
+              main)
+       with
       | [] -> ()
       | codes -> Harness.fail "a caller does not check: %s" (String.concat ", " codes));
       (match Support.list_codes (Support.list_proof_diagnostics database main) with
@@ -404,13 +413,13 @@ let () =
       let proofs = Support.prove database main in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          match Database.For_testing.find_proof proofs (Resolve.Names.make_key declaration) with
+          match Database.For_testing.find_proof proofs declaration.key with
           | Some (Value (Obligations _)) -> ()
           | Some (Value (Unsupported _ | Not_proven_here)) ->
-              Harness.fail "%s has no obligations" (Path.show declaration.path)
+              Harness.fail "%s has no obligations" (Path.show declaration.key.path)
           | Some (Failed _ | Blocked) ->
-              Harness.fail "the proof of %s is blocked" (Path.show declaration.path)
-          | None -> Harness.fail "%s has no proof" (Path.show declaration.path))
+              Harness.fail "the proof of %s is blocked" (Path.show declaration.key.path)
+          | None -> Harness.fail "%s has no proof" (Path.show declaration.key.path))
         ((Support.make_names packages).list_declarations_in main))
 
 let tree = Fixtures.Prover.tree
@@ -1190,8 +1199,8 @@ let count_holes text =
     Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
   in
   List.fold_left
-    (fun total declaration ->
-      match prove_key (Resolve.Names.make_key declaration) with
+    (fun total (declaration : Resolve.Names.declaration) ->
+      match prove_key declaration.key with
       | Obligations outcome -> total + List.length outcome.holes
       | Unsupported _ | Not_proven_here -> total)
     0
@@ -2046,7 +2055,7 @@ let () =
       | Ok solver ->
           if List.hd (Solver.solve_all solver [ (request, query) ]) <> Solver.Proven then
             Harness.fail "expected the cached answer";
-          if Solver.count_queries_run solver <> 0 then Harness.fail "ran the solver");
+          if Solver.For_testing.count_queries_run solver <> 0 then Harness.fail "ran the solver");
   Harness.test "a proven answer in the cache is read whatever values the request asks for"
     (fun () ->
       let query = make_self_comparison ">=" in
@@ -2067,7 +2076,7 @@ let () =
       | Ok solver ->
           if List.hd (Solver.solve_all solver [ (request, query) ]) <> Solver.Proven then
             Harness.fail "expected the cached answer";
-          if Solver.count_queries_run solver <> 0 then Harness.fail "ran the solver");
+          if Solver.For_testing.count_queries_run solver <> 0 then Harness.fail "ran the solver");
   Harness.test "each solver keeps its own answers" (fun () ->
       let query = make_self_comparison "<" in
       let request = Solver.make_request query in
@@ -2075,8 +2084,9 @@ let () =
       | Ok first, Ok second ->
           ignore (Solver.solve_all first [ (request, query) ]);
           ignore (Solver.solve_all second [ (request, query) ]);
-          if Solver.count_queries_run second <> 1 then
-            Harness.fail "the second solver ran %d queries" (Solver.count_queries_run second)
+          if Solver.For_testing.count_queries_run second <> 1 then
+            Harness.fail "the second solver ran %d queries"
+              (Solver.For_testing.count_queries_run second)
       | Error message, _ | _, Error message -> Harness.fail "%s" message);
   Harness.test "a solved answer is added to the cache under its query's key" (fun () ->
       let query = make_self_comparison "<=" in
@@ -2089,7 +2099,8 @@ let () =
       | Error message -> Harness.fail "%s" message
       | Ok solver ->
           ignore (Solver.solve_all solver [ (request, query) ]);
-          if Solver.count_queries_run solver <> 1 then Harness.fail "did not run the solver";
+          if Solver.For_testing.count_queries_run solver <> 1 then
+            Harness.fail "did not run the solver";
           if
             Hashtbl.find_opt cached_answers (Solver.For_testing.hash_query query) <> Some "proven\n"
           then Harness.fail "the cache does not have the answer");
@@ -2097,12 +2108,11 @@ let () =
     let packages = Support.setup [ ("app::main", text) ] in
     let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
     match
-      Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-        (Resolve.Names.make_key key)
+      Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main") key.key
     with
     | Obligations { obligations; _ } ->
         List.find_map
-          (fun (obligation : Prover.State.obligation) ->
+          (fun (obligation : Prover.Obligation.t) ->
             if obligation.code = code then Some obligation.query else None)
           obligations
     | Unsupported _ | Not_proven_here -> None
@@ -2113,10 +2123,83 @@ let () =
       | _, Error message -> Harness.fail "%s" message
       | Some query, Ok solver ->
           let request = Solver.make_request query in
-          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown then
-            Harness.fail "expected an unknown answer";
-          if Solver.count_queries_run solver <> 1 then
-            Harness.fail "ran %d queries" (Solver.count_queries_run solver));
+          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown Out_of_steps then
+            Harness.fail "expected an unknown answer from the step limit";
+          if Solver.For_testing.count_queries_run solver <> 1 then
+            Harness.fail "ran %d queries" (Solver.For_testing.count_queries_run solver));
+  let power_of_itself_is_three =
+    let symbol = Logic.Symbol.Variable { label = "base"; numbers = [] } in
+    {
+      Logic.declarations = [ Logic.Constant (symbol, Logic.Int) ];
+      facts = [];
+      goal =
+        Logic.Operation
+          ( "not",
+            [
+              Logic.Operation
+                ( "=",
+                  [
+                    Logic.Operation ("^", [ Logic.Symbol symbol; Logic.Symbol symbol ]); Logic.int 3;
+                  ] );
+            ] );
+    }
+  in
+  Harness.test "an unknown answer before the step limit carries Z3's reason" (fun () ->
+      let query = power_of_itself_is_three in
+      match Solver.find () with
+      | Error message -> Harness.fail "%s" message
+      | Ok solver -> (
+          match Solver.solve_all solver [ (Solver.make_request query, query) ] with
+          | [ Unknown (Incomplete reason) ] ->
+              if not (String.includes ~affix:"incomplete (theory arithmetic)" reason) then
+                Harness.fail "reason %S" reason
+          | _ -> Harness.fail "expected an unknown answer with Z3's reason"));
+  Harness.test "an unknown answer's reason is read back from the cache" (fun () ->
+      let query = power_of_itself_is_three in
+      let request = Solver.make_request query in
+      let cached_answers = Hashtbl.create 1 in
+      let cache =
+        { Solver.find = Hashtbl.find_opt cached_answers; add = Hashtbl.replace cached_answers }
+      in
+      match (Solver.find ~cache (), Solver.find ~cache ()) with
+      | Ok first, Ok second ->
+          let solved = Solver.solve_all first [ (request, query) ] in
+          if Solver.solve_all second [ (request, query) ] <> solved then
+            Harness.fail "the cache gave another answer";
+          if Solver.For_testing.count_queries_run second <> 0 then
+            Harness.fail "ran the solver again"
+      | Error message, _ | _, Error message -> Harness.fail "%s" message);
+  Harness.test "an obligation that the solver stops on before the step limit names Z3's reason"
+    (fun () ->
+      let cache =
+        {
+          Solver.find = (fun _ -> Some "incomplete \"(incomplete quantifiers)\"\n");
+          add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
+        }
+      in
+      match Solver.find ~cache () with
+      | Error message -> Harness.fail "%s" message
+      | Ok solver -> (
+          let database =
+            Support.make_database
+              (Support.setup [ ("app::main", Fixtures.Prover.addition_that_can_overflow) ])
+          in
+          let file = Support.parse_file "app::main" in
+          match
+            Prover.list_diagnostics
+              (Prover.decide ~runs:[]
+                 (Database.make_proof_lookups database)
+                 solver
+                 (Database.list_proofs (Support.prove database file)))
+              file
+          with
+          | [ diagnostic ] ->
+              if
+                not
+                  (String.includes ~affix:"Z3 gives the reason `(incomplete quantifiers)`"
+                     diagnostic.message)
+              then Harness.fail "message %S" diagnostic.message
+          | diagnostics -> Harness.fail "%d diagnostics" (List.length diagnostics)));
   Harness.test "a second request for a query solved in a small model runs one query" (fun () ->
       match
         ( find_obligation_query Fixtures.Prover.addition_under_an_exists_in_a_forall Overflow,
@@ -2128,11 +2211,11 @@ let () =
           let first = Solver.make_request query
           and second = Solver.make_request ~terms:[ (Logic.Symbol.Reached 0, Logic.int 1) ] query in
           match List.hd (Solver.solve_all solver [ (first, query) ]) with
-          | Proven | Unknown -> Harness.fail "expected a counterexample"
+          | Proven | Unknown _ -> Harness.fail "expected a counterexample"
           | Counterexample _ ->
-              let queries_before = Solver.count_queries_run solver in
+              let queries_before = Solver.For_testing.count_queries_run solver in
               ignore (Solver.solve_all solver [ (second, query) ]);
-              let queries_run = Solver.count_queries_run solver - queries_before in
+              let queries_run = Solver.For_testing.count_queries_run solver - queries_before in
               if queries_run <> 1 then Harness.fail "ran %d queries" queries_run));
   Harness.test "a function defined by a quantified formula reaches the solver as a definition"
     (fun () ->
@@ -2146,7 +2229,7 @@ let () =
       let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
       match
         Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-          (Resolve.Names.make_key key)
+          key.key
       with
       | Obligations { obligations = [ obligation ]; _ } ->
           let text = Logic.show_query obligation.query in
@@ -2158,7 +2241,7 @@ let () =
         let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
         match
           Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-            (Resolve.Names.make_key key)
+            key.key
         with
         | Obligations { obligations = [ obligation ]; _ } ->
             Solver.For_testing.hash_query obligation.query
@@ -2206,16 +2289,16 @@ let () =
         let key =
           List.find
             (fun (declaration : Resolve.Names.declaration) ->
-              Path.equal declaration.path (Support.make_top_path "app::main" "f"))
+              Path.equal declaration.key.path (Support.make_top_path "app::main" "f"))
             (Support.list_declarations packages (Support.parse_module "app::main"))
         in
         match
           Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-            (Resolve.Names.make_key key)
+            key.key
         with
         | Obligations { obligations; _ } ->
             List.fold_left
-              (fun most (obligation : Prover.State.obligation) ->
+              (fun most (obligation : Prover.Obligation.t) ->
                 let text = Logic.show_query obligation.query in
                 max most (String.find_all ~sub:"12345" (fun _ matches -> matches + 1) text 0))
               0 obligations

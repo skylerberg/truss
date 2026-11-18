@@ -91,7 +91,24 @@ module For_testing : sig
   val is_folded : t -> Path.t -> bool
   val make_lowered : Emit_c.fragment -> lowered
 
-  module Intrinsics = Intrinsics
+  module Intrinsics : sig
+    type argument = Intrinsics.argument = Place of Lowered.place | Value of Lowered.operand
+    type types = Intrinsics.types = { uint64 : Ground.ty; string_slice : Ground.ty }
+
+    val lower :
+      ?value_arguments:Z.t list ->
+      ?reported:Lowered.operand ->
+      Memory_layout.env ->
+      Emit_c.Ir_builder.t ->
+      types ->
+      Intrinsic.operation ->
+      type_arguments:Ground.ty list ->
+      argument list ->
+      destination:Lowered.place option ->
+      site:Lowered.site ->
+      trace:Lowered.operand option ->
+      Lowered.place option
+  end
 
   val build_supplied_tests :
     t ->
@@ -104,13 +121,6 @@ module For_testing : sig
 
   val evaluate_call :
     t -> function_:Path.t -> arguments:Z.t list -> (Lowered.static_value ran, string) result
-
-  val run_program :
-    ?input:string ->
-    t ->
-    main:Path.t ->
-    arguments:string list ->
-    (int * string * string, string) result
 
   val drop_and_copy : Memory_layout.env -> Drop_and_copy.t
   val is_trivial : Drop_and_copy.t -> Ground.ty -> bool

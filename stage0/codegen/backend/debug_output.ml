@@ -20,7 +20,7 @@ let make_signature env ty =
 let write_text env builder ~output value =
   if value <> "" then
     Writing.emit_write_bytes_call env builder ~output Writing_append
-      ~elements:(Constant (Bytes value))
+      ~buffer:(Constant (Bytes value))
       ~length:(Lowered.make_uint64_constant (String.length value))
 
 let emit_debug_call env builder ~output ty (place : Lowered.place) =
@@ -74,28 +74,20 @@ let build_debug env ty =
   let rec write_list element ~index_element ~count =
     write_output_text "[";
     Emit_c.Ir_builder.emit_loop builder ~count (fun index ->
-        let is_after_first = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place is_after_first,
-               Binary
-                 (Not_equal, Copy (Lowered.make_local_place index), Lowered.make_uint64_constant 0)
-             ));
         Emit_c.Ir_builder.emit_when builder
-          (Copy (Lowered.make_local_place is_after_first))
+          (Binary (Not_equal, Copy (Lowered.make_local_place index), Lowered.make_uint64_constant 0))
           (fun () -> write_output_text ", ");
         emit_output_call element (index_element (Lowered.Copy (Lowered.make_local_place index))));
     write_output_text "]"
   and write_storage_or_view field_ty (place : Lowered.place) ~as_text =
-    let element, buffer, count =
-      match (Storage.match_storage_element field_ty, Storage.match_view_element field_ty) with
-      | Some element, _ -> (element, Storage.project_buffer place, Storage.project_length place)
-      | None, Some element ->
-          (element, Storage.project_view_elements place, Storage.project_view_length place)
+    let element =
+      match (Storage.find_storage_element field_ty, Storage.find_view_element field_ty) with
+      | Some element, _ | None, Some element -> element
       | None, None -> raise_bug "%s is not storage or a view" (Ground.to_string field_ty)
     in
+    let buffer = Storage.project_buffer place and count = Storage.project_length place in
     if as_text then
-      Writing.emit_write_bytes_call env builder ~output Writing_quoted_text ~elements:(Copy buffer)
+      Writing.emit_write_bytes_call env builder ~output Writing_quoted_text ~buffer:(Copy buffer)
         ~length:(Copy count)
     else
       write_list element
@@ -139,10 +131,9 @@ let build_debug env ty =
       | _, Scalar scalar -> write_scalar_debug env builder ~output scalar value
       | Named { path; _ }, Record [] ->
           write_output_text
-            (if Ground.show_path_name path = "Unit" then "Unit"
-             else Ground.show_path_name path ^ "()")
+            (if Path.show_name path = "Unit" then "Unit" else Path.show_name path ^ "()")
       | Named { path; _ }, Record fields ->
-          write_fields (Ground.show_path_name path) fields (fun field ->
+          write_fields (Path.show_name path) fields (fun field ->
               Lowered.project value (Field field))
       | _, Record _ -> raise_bug "%s has the shape of a record and no name" (Ground.to_string ty)
       | _, Array (element, count) ->

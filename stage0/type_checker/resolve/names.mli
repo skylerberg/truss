@@ -17,28 +17,16 @@ val convert_named : named -> kind
 val show_kind : kind -> string
 
 type visibility = Private | Internal | Public | Public_opaque
-
-type declaration = {
-  module_ : Path.module_;
-  path : Path.t;
-  ordinal : int;
-  kind : kind;
-  visibility : visibility;
-  generic : bool;
-}
-
 type key = { module_ : Path.module_; path : Path.t; ordinal : int }
+type declaration = { key : key; kind : kind; visibility : visibility; generic : bool }
 type place = { file : Path.file; base : int }
 
-val make_key : declaration -> key
 val show_key : key -> string
 val extract_signature_name : Syntax.signature -> Syntax.name
 val classify_receiver : Syntax.parameter list -> Path.receiver
 val extract_last_name : Path.module_ -> string
 
 type entry = { name : string; kind : named; visibility : visibility; generic : bool }
-
-module String_map : Map.S with type key = String.t
 
 val is_type_kind : named -> bool
 val is_value_kind : named -> bool

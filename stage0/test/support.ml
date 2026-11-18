@@ -75,12 +75,6 @@ let parse_errors packages file =
     (let tokens, lexer_diagnostics = Lexer.lex (read_source packages file) in
      lexer_diagnostics @ snd (Parser.parse tokens ~lexer_diagnostics))
 
-let list_fragment_diagnostics database file =
-  List.filter
-    (fun (diagnostic : Diagnostic.t) ->
-      not (Diagnostic.For_testing.is_unused_definition diagnostic.code))
-    (Database.list_file_diagnostics database file)
-
 let list_codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
 
@@ -123,8 +117,7 @@ let list_declarations packages (module_ : Path.module_) =
 
 let collect_first_core_nodes text =
   let packages = setup [ ("app::main", text) ] in
-  collect_core_nodes packages
-    (Resolve.Names.make_key (List.hd (list_declarations packages (parse_module "app::main"))))
+  collect_core_nodes packages (List.hd (list_declarations packages (parse_module "app::main"))).key
 
 let expect_no_diagnostics ~check files =
   let packages = setup files in
@@ -196,7 +189,7 @@ let expect_one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "a
       | None, _ -> ()
       | Some _, [] -> Harness.fail "no fix"
       | Some expected, fix :: _ -> (
-          let after = Diagnostic.apply_fix text fix in
+          let after = Diagnostic.apply_edits text fix.edits in
           if after <> expected then Harness.fail "fixed to %S" after
           else
             let packages = setup ((file, after) :: others) in

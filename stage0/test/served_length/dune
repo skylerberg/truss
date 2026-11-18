@@ -1,0 +1,3 @@
+(executable
+ (name served_length)
+ (libraries workspace))

@@ -60,10 +60,10 @@ let list_runnable database =
   let lookups = Database.make_proof_lookups database in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.make_key declaration in
+      let key = declaration.key in
       match
-        ( Interface.Definition.find_declared_signature interface declaration.path,
-          Mir.read_contract mir declaration.path )
+        ( Interface.Definition.find_declared_signature interface key.path,
+          Mir.read_contract mir key.path )
       with
       | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),
           Some { form = { requires; _ }; _ } )
@@ -81,7 +81,7 @@ let list_runnable database =
             List.map
               (fun (requirement : Mir.requirement) ->
                 "("
-                ^ Prover.Facts.quote_span
+                ^ Source.Definition_span.quote
                     (lookups.interface.names.read_text key)
                     (Source.Definition_span.locate
                        (lookups.interface.names.read_spans key)
@@ -93,7 +93,7 @@ let list_runnable database =
           | ranges_written
             when List.length ranges_written = List.length ranges
                  && not (List.exists (fun admit -> String.includes ~affix:"==>" admit) admits) ->
-              Some { path = declaration.path; key; signature; admits; ranges = ranges_written }
+              Some { path = key.path; key; signature; admits; ranges = ranges_written }
           | _ -> None)
       | _ -> None)
     (lookups.interface.names.list_declarations example)
@@ -102,8 +102,8 @@ let is_proven (names : Resolve.Names.lookups) key states =
   let base = (names.read_place key).base and text = names.read_text key in
   List.for_all
     (fun (state : Source.span Prover.state) ->
-      state.span.stop <= base
-      || state.span.start >= base + String.length text
+      state.site.span.stop <= base
+      || state.site.span.start >= base + String.length text
       || state.failure = None)
     states
 

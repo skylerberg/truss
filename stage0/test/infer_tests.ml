@@ -13,7 +13,7 @@ let locate_expression text written occurrence =
   let actual =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.make_key declaration in
+        let key = declaration.key in
         match
           ( (Support.make_names packages).read_definition key,
             (Support.make_names packages).read_spans key,
@@ -568,13 +568,12 @@ let () =
             Harness.fail "%s: %s" module_ (String.concat "; " (Support.list_codes reported)));
         List.concat_map
           (fun (declaration : Resolve.Names.declaration) ->
-            match declaration.path with
+            match declaration.key.path with
             | (Top { name; _ } | Method { name; _ }) when name = definition_name ->
                 List.filter_map
                   (fun (node : Core.expression) ->
                     match node.kind with Call { callee; _ } -> Some callee.target | _ -> None)
-                  (Support.collect_core_nodes packages (Resolve.Names.make_key declaration))
-                    .expressions
+                  (Support.collect_core_nodes packages declaration.key).expressions
             | _ -> [])
           (Support.list_declarations packages file.module_)
       in
@@ -872,8 +871,7 @@ let () =
       let find_type_check_result () =
         let packages = Support.setup [ ("app::main", text) ] in
         let key =
-          Resolve.Names.make_key
-            (List.hd (Support.list_declarations packages (Support.parse_module "app::main")))
+          (List.hd (Support.list_declarations packages (Support.parse_module "app::main"))).key
         in
         Database.read_checked_body (Support.make_database packages) key
       in
@@ -886,10 +884,7 @@ let () =
         (fun ((file : Path.file), _) ->
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
-              match
-                Database.read_checked_body (Support.make_database packages)
-                  (Resolve.Names.make_key declaration)
-              with
+              match Database.read_checked_body (Support.make_database packages) declaration.key with
               | Some { tables; _ } ->
                   List.iter
                     (Array.iter (function
@@ -897,7 +892,7 @@ let () =
                         when Types.exists
                                (function Variable _ | Literal _ -> true | _ -> false)
                                type_ ->
-                          Harness.fail "%s: an unsolved type" (Path.show declaration.path)
+                          Harness.fail "%s: an unsolved type" (Path.show declaration.key.path)
                       | _ -> ()))
                     [ tables.types; tables.local_types ]
               | None -> ())
@@ -1054,14 +1049,14 @@ let () =
       let assigning =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.path (Support.make_top_path "app::main" "f"))
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "f"))
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
         List.filter_map
           (fun (node : Core.statement) ->
             match node.kind with Compound_assign { operand; _ } -> Some operand | _ -> None)
-          (Support.collect_core_nodes packages (Resolve.Names.make_key assigning)).statements
+          (Support.collect_core_nodes packages assigning.key).statements
       with
       | [ Value _; Place _ ] -> ()
       | _ -> Harness.fail "the operands are not a copy of `count` and a view of `title`");

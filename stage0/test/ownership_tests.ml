@@ -1029,8 +1029,8 @@ let count_disjoint_obligations text =
   let file = Support.parse_file "app::main" in
   let database = Support.make_database packages in
   List.fold_left
-    (fun total declaration ->
-      match Database.For_testing.read_ownership database (Resolve.Names.make_key declaration) with
+    (fun total (declaration : Resolve.Names.declaration) ->
+      match Database.For_testing.read_ownership database declaration.key with
       | Value must_be_disjoint -> total + List.length must_be_disjoint
       | Failed _ | Blocked -> total)
     0

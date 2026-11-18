@@ -64,7 +64,10 @@ let make_context (definition : State.definition) ~terminates ~proving : State.co
   }
 
 let make_outcome (context : State.context) =
-  { State.obligations = List.rev context.report.obligations; holes = List.rev context.report.holes }
+  {
+    Obligation.obligations = List.rev context.report.obligations;
+    holes = List.rev context.report.holes;
+  }
 
 let make_empty_frame source =
   {

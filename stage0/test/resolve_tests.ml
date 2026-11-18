@@ -42,7 +42,7 @@ let locate_name packages name text occurrence =
   let located =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.make_key declaration in
+        let key = declaration.key in
         match
           ( (Support.make_names packages).read_definition key,
             (Support.make_names packages).read_spans key,
@@ -255,7 +255,7 @@ let find_bracket text written occurrence =
   let declarations = Support.list_declarations packages (Support.parse_module "app::main") in
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.make_key declaration in
+      let key = declaration.key in
       match
         ( (Support.make_names packages).read_definition key,
           (Support.make_names packages).read_spans key,
@@ -537,12 +537,12 @@ let () =
         setup [ ("app::main", Fixtures.Resolve.method_of_standard_intrinsic_outside_standard) ]
       in
       (match Support.list_declarations packages (parse_module "app::main") with
-      | [ { path = Method { owner; _ }; _ } ] when not (Path.is_resolved owner) -> ()
+      | [ { key = { path = Method { owner; _ }; _ }; _ } ] when not (Path.is_resolved owner) -> ()
       | declarations ->
           Harness.fail "declared [%s]"
             (String.concat "; "
                (List.map
-                  (fun (declaration : Resolve.Names.declaration) -> Path.show declaration.path)
+                  (fun (declaration : Resolve.Names.declaration) -> Path.show declaration.key.path)
                   declarations)));
       match list_codes (check packages (parse_file "app::main")) with
       | [ "resolve.intrinsic_import" ] -> ()
@@ -568,8 +568,8 @@ let () =
         List.sort compare
           (List.filter_map
              (fun (declaration : Resolve.Names.declaration) ->
-               match declaration.path with
-               | Impl _ -> Some (Path.show declaration.path, declaration.ordinal)
+               match declaration.key.path with
+               | Impl _ -> Some (Path.show declaration.key.path, declaration.key.ordinal)
                | _ -> None)
              (Support.list_declarations packages (parse_module "app::main")))
       with

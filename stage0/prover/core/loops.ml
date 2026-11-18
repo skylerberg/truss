@@ -22,7 +22,8 @@ type loop_start = {
   loop_costs : loop_cost list;
   fresh_mark : int;
   facts_mark : int;
-  preserved : (State.message * Types.ty * Logic.term * (State.frame -> Logic.term option)) list;
+  preserved :
+    (Obligation.message * Types.ty * Logic.term * (State.frame -> Logic.term option)) list;
   havocked : State.frame;
 }
 
@@ -386,7 +387,7 @@ let list_validity_obligations context (entry : State.frame) (changed : State.cha
     | Logic.Boolean true -> None
     | valid -> Some (described, ty, valid, read)
   in
-  let describe local : State.message =
+  let describe local : Obligation.message =
     match
       ( Tables.Local_table.find_opt context.report.local_names local,
         Tables.Local_table.find_opt context.report.local_origins local )
@@ -407,7 +408,7 @@ let list_validity_obligations context (entry : State.frame) (changed : State.cha
   match (changed.changes_self, entry.self, entry.self_type) with
   | true, Some before, Some ty ->
       Option.to_list
-        (find_obligation [ State.Text "`self`" ] ty before (fun (at : State.frame) -> at.self))
+        (find_obligation [ Obligation.Text "`self`" ] ty before (fun (at : State.frame) -> at.self))
   | _ -> []
 
 let assume_preserved_validity context head preserved =
@@ -427,7 +428,8 @@ let check_preserved_validity context end_ location preserved =
       match read end_ with
       | Some term ->
           Facts.oblige context end_ Invariant location
-            (State.Text (Printf.sprintf "The invariant of `%s` may not hold for " (Types.show ty))
+            (Obligation.Text
+               (Printf.sprintf "The invariant of `%s` may not hold for " (Types.show ty))
              :: described
             @ [ Text " after an iteration." ])
             (Logic.( ==> ) valid_on_entry
@@ -653,7 +655,7 @@ let oblige_next_gives_the_model context (after : State.frame) location ~element 
   | Some first, Some value_after, Some value_ahead ->
       Facts.oblige context after Invariant location
         [
-          State.Text
+          Obligation.Text
             "This loop names `visited`, and the `next` of its cursor may not give the values of \
              the cursor's `model()` in order.";
         ]

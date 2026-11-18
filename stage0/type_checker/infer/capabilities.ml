@@ -59,7 +59,7 @@ let show_exceptions (allowed : Types.capability_set) =
   match
     List.map
       (fun capability -> Printf.sprintf "`%s`" (Types.show_capability capability))
-      (allowed :> Types.capability list)
+      (Types.list_capabilities allowed)
   with
   | [] -> ""
   | shown -> " except " ^ String.concat " and " shown
@@ -179,7 +179,7 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
               | None ->
                   Printf.sprintf "%s uses `%s`, which is not available here.%s" subject shown
                     (add_alternative ~sentence_start:true alternative)))
-      (missing :> Types.capability list)
+      (Types.list_capabilities missing)
   in
   if required <> Types.no_capabilities then begin
     state.capability_constraints <-
@@ -377,9 +377,9 @@ let solve (state : State.state) =
     Option.value ~default:Types.no_capabilities (Hashtbl.find_opt solution variable)
   in
   let substitute =
-    Types.flat_map_capabilities (function
-      | Types.Capability_variable variable -> (read_value variable :> Types.capability list)
-      | capability -> [ capability ])
+    Types.replace_capabilities (function
+      | Types.Capability_variable variable -> Some (read_value variable)
+      | _ -> None)
   in
   let compute_missing (constraint_ : State.subset_constraint) =
     let missing =
@@ -394,7 +394,7 @@ let solve (state : State.state) =
     let variables =
       List.filter_map
         (function Types.Capability_variable variable -> Some variable | _ -> None)
-        (constraint_.superset :> Types.capability list)
+        (Types.list_capabilities constraint_.superset)
     in
     if variables = [] || missing = Types.no_capabilities then false
     else begin
@@ -438,11 +438,10 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
         | Some interface ->
             List.exists
               (fun (method_ : Types.trait_method) ->
-                List.exists can_hold_a_capability
-                  ((Interface.Definition.read_method_signature state.lookups.interface
-                      ~owner:bound.trait method_)
-                     .uses
-                    :> Types.capability list))
+                Types.exists_capability can_hold_a_capability
+                  (Interface.Definition.read_method_signature state.lookups.interface
+                     ~owner:bound.trait method_)
+                    .uses)
               interface.methods
         | None -> false)
       (trait :: Interface.Properties.list_bound_closure state.lookups.interface ~self:type_ trait)
@@ -454,9 +453,7 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
   in
   match type_ with
   | Types.Function { uses; inputs; output; _ } ->
-      List.exists
-        (fun capability -> not (Types.is_built_in_capability capability))
-        (uses :> Types.capability list)
+      Types.exists_capability (fun capability -> not (Types.is_built_in_capability capability)) uses
       || List.exists (fun (_, input) -> can_call_inside input) inputs
       || can_call_inside output
   | Types.Any trait -> trait_uses trait
@@ -494,10 +491,8 @@ let check_monitor_lock checking ~(read_solved : int -> Types.capability_set) ava
       (Form.list_capability_impls state implementation.type_)
   in
   let available =
-    Types.flat_map_capabilities
-      (function
-        | Types.Capability_variable variable -> (read_solved variable :> Types.capability list)
-        | capability -> [ capability ])
+    Types.replace_capabilities
+      (function Types.Capability_variable variable -> Some (read_solved variable) | _ -> None)
       available
   in
   if not (Types.has_capability tasks available || List.exists provides_tasks implementations) then

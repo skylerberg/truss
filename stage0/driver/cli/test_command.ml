@@ -7,19 +7,17 @@ let select snapshot database packages ~paths ~match_ =
       let source = Command_packages.read_source snapshot database packages file in
       List.filter_map
         (fun (declaration : Resolve.Names.declaration) ->
-          match declaration.path with
+          match declaration.key.path with
           | Test { name; _ }
-            when declaration.ordinal = 0
+            when declaration.key.ordinal = 0
                  && match match_ with Some text -> String.includes ~affix:text name | None -> true
             ->
               let line =
-                fst
-                  (Source.compute_position source
-                     (names.read_place (Resolve.Names.make_key declaration)).base)
+                fst (Source.compute_position source (names.read_place declaration.key).base)
               in
               Some
                 {
-                  path = declaration.path;
+                  path = declaration.key.path;
                   module_ = file.module_;
                   name;
                   file = Source.path source;

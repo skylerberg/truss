@@ -23,7 +23,7 @@ val compute_callee_amount :
   is_recursive:bool ->
   clauses:State.clauses list ->
   bind_frame:(State.clauses -> State.frame) ->
-  uses:Types.capability list ->
+  uses:Types.capability_set ->
   values:State.passed list ->
   change:(unit -> Logic.term) option ->
   Costs.counter ->

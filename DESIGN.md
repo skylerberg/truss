@@ -1441,17 +1441,11 @@ Every promise of a program is proven at compile time: contracts,
 invariants, laws, loop invariants, and every operation that can fail.
 
 ```truss
-theorem reverse_twice[Element](items: Slice[Element])
-  ensures items.reverse().reverse() == items.to_list()
-  decreases items.length()
+theorem reverse_twice[Element](items: Sequence[Element])
+  ensures identical(items.reversed().reversed(), items)
 {
-  match items.split_first() {
-    None => {}
-    Some((first, rest)) => {
-      reverse_twice(rest)
-      reverse_of_append(rest.reverse(), suffix: [first])
-    }
-  }
+  assert forall i in 0..items.length() =>
+    identical(items.reversed().reversed()[i], items[i])
 }
 ```
 

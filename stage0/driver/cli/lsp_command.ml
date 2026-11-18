@@ -65,9 +65,9 @@ let encode_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
 let encode_state encoding source (state : Source.span Prover.state) =
   Json.Object
     [
-      ("range", encode_range encoding source state.span);
-      ("code", Json.String (Diagnostic.Code.name (Prover state.code)));
-      ("shows", Json.String state.shows);
+      ("range", encode_range encoding source state.site.span);
+      ("code", Json.String (Diagnostic.Code.name (Prover state.site.code)));
+      ("shows", Json.String state.site.shows);
       ("proven", Json.Bool (state.failure = None));
       ("trustsCompiledCode", Json.Bool state.trusts_compiled_code);
     ]

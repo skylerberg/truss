@@ -376,7 +376,7 @@ let () =
 let () =
   Harness.test "Layout lets every token in the first set of a statement begin one" (fun () ->
       let kinds =
-        List.map (fun (_, keyword) -> Token.Keyword keyword) Token.keywords
+        List.map (fun (_, keyword) -> Token.Keyword keyword) Token.For_testing.keywords
         @ List.map (fun (_, punctuation) -> Token.Punctuation punctuation) Token.punctuation
         @ [
             Upper "Name";

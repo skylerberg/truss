@@ -779,7 +779,7 @@ let () =
         List.filter_map
           (fun (node : Core.expression) ->
             match (node.kind, node.type_) with
-            | Lambda _, Function { uses; _ } -> Some (uses :> Types.capability list)
+            | Lambda _, Function { uses; _ } -> Some (Types.list_capabilities uses)
             | _ -> None)
           (list_core_expressions text ~of_function:"run")
       with

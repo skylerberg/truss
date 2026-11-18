@@ -1,14 +1,14 @@
 val make_variable : ?numbers:int list -> string -> 'a Logic.Symbol.t
 
 type unsupported = {
-  location : State.location;
+  location : Obligation.location;
   construct : string;
   foreign_definition : string option;
 }
 
 exception Unsupported of unsupported
 
-val raise_unsupported : State.location -> ('a, unit, string, 'b) format4 -> 'a
+val raise_unsupported : Obligation.location -> ('a, unit, string, 'b) format4 -> 'a
 val run_in_source : State.context -> State.source -> (unit -> 'a) -> 'a
 val raise_bug : ('a, unit, string, 'b) format4 -> 'a
 val read_parameter_name : Mir.parameter -> string
@@ -23,63 +23,63 @@ val mentions_fresh_after : State.context -> int -> Logic.term -> bool
 val close_over_binders : State.frame -> Logic.term -> Logic.term option
 val add_frame_fact : State.context -> State.frame -> Logic.term -> unit
 val assume : State.context -> State.frame -> Logic.term -> unit
-val add_requires : State.context -> State.frame -> State.message -> State.fix list
+val add_requires : State.context -> State.frame -> Obligation.message -> Obligation.fix list
 val show_truss_value : State.context -> Logic.term -> string option
 
 val oblige :
-  ?template_clause:State.template_clause ->
+  ?template_clause:Obligation.template_clause ->
   ?cited:Resolve.Names.key * Core.origin ->
-  ?fixes:State.fix list ->
+  ?fixes:Obligation.fix list ->
   State.context ->
   State.frame ->
   Diagnostic.Code.prover ->
-  State.location ->
-  State.message ->
+  Obligation.location ->
+  Obligation.message ->
   Logic.term ->
   unit
 
 val show_callee : Path.t -> string
 
 val reject_recursion_through_supplied_code :
-  State.context -> State.frame -> State.location -> Mir.statement -> unit
+  State.context -> State.frame -> Obligation.location -> Mir.statement -> unit
 
 val find_recursive_callee :
   State.context ->
   State.frame ->
-  State.location ->
+  Obligation.location ->
   'operand Core.target ->
   Mir.Call_edges.resolution * Path.t option
 
 val reject_uncompared_recursion :
   State.context ->
   State.frame ->
-  State.location ->
+  Obligation.location ->
   Path.t option ->
   describe:(string -> string) ->
   unit
 
 val make_closed_obligation :
-  ?template_clause:State.template_clause ->
+  ?template_clause:Obligation.template_clause ->
   State.context ->
   State.frame ->
   Diagnostic.Code.prover ->
-  State.location ->
-  State.message ->
+  Obligation.location ->
+  Obligation.message ->
   Logic.term ->
-  State.obligation option
+  Obligation.t option
 
 val make_obligation :
-  ?template_clause:State.template_clause ->
+  ?template_clause:Obligation.template_clause ->
   State.context ->
   State.frame ->
   Diagnostic.Code.prover ->
-  State.location ->
-  State.message ->
+  Obligation.location ->
+  Obligation.message ->
   Logic.term ->
-  State.obligation
+  Obligation.t
 
-val locate : State.context -> State.source -> Core.origin -> State.location
-val quote : State.source -> int -> State.piece
+val locate : State.context -> State.source -> Core.origin -> Obligation.location
+val quote : State.source -> int -> Obligation.piece
 val quote_span : string -> Source.Definition_span.t -> string
 val quote_origin : State.context -> State.frame -> Core.origin -> string
 val find_bounds : Types.ty -> (Z.t * Z.t) option

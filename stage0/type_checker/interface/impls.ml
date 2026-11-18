@@ -468,16 +468,16 @@ and normalize_capabilities lookups ~list_bounds ?depth (capabilities : Types.cap
     | Capability_projection _ -> true
     | _ -> false
   in
-  if not (List.exists reads_an_impl (capabilities :> Types.capability list)) then capabilities
+  if not (Types.exists_capability reads_an_impl capabilities) then capabilities
   else
-    Types.flat_map_capabilities
+    Types.replace_capabilities
       (function
         | Types.Capability_projection { base; trait; name } ->
-            (project_capability_set lookups ~list_bounds ?depth
-               (normalize lookups ~list_bounds base)
-               { trait with associated = [] } name
-              :> Types.capability list)
-        | capability -> [ capability ])
+            Some
+              (project_capability_set lookups ~list_bounds ?depth
+                 (normalize lookups ~list_bounds base)
+                 { trait with associated = [] } name)
+        | _ -> None)
       capabilities
 
 and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
@@ -522,20 +522,19 @@ and normalize_in_impl lookups ~list_bounds (impl : Types.impl_interface) type_ =
     type_
 
 and normalize_capabilities_in_impl lookups ~list_bounds (impl : Types.impl_interface) capabilities =
-  Types.flat_map_capabilities
-    (fun capability ->
-      let set =
-        match capability with
-        | Types.Capability_projection { base; trait = projected; name }
-          when Types.equal base impl.for_type
-               && Path.equal (read_declaring_capability_trait lookups ~base projected name).trait
-                    impl.implements.trait ->
-            Option.value ~default:Types.no_capabilities (List.assoc_opt name impl.capability_sets)
-        | capability -> Types.make_capability_set [ capability ]
-      in
-      (normalize_capabilities lookups ~list_bounds:(list_impl_bounds impl ~list_bounds) set
-        :> Types.capability list))
-    capabilities
+  normalize_capabilities lookups
+    ~list_bounds:(list_impl_bounds impl ~list_bounds)
+    (Types.replace_capabilities
+       (function
+         | Types.Capability_projection { base; trait = projected; name }
+           when Types.equal base impl.for_type
+                && Path.equal (read_declaring_capability_trait lookups ~base projected name).trait
+                     impl.implements.trait ->
+             Some
+               (Option.value ~default:Types.no_capabilities
+                  (List.assoc_opt name impl.capability_sets))
+         | _ -> None)
+       capabilities)
 
 and normalize_signature_in_impl lookups ~list_bounds (implementation : implementation)
     (signature : Types.signature) =
@@ -646,15 +645,15 @@ let find_self_capability_set (implemented : implemented_method) (declared : Type
              && List.mem name trait.associated_capabilities ->
           Some name
       | _ -> None)
-    (declared.uses :> Types.capability list)
+    (Types.list_capabilities declared.uses)
 
 let names_capability_set (impl : Types.impl_interface) name (own : Types.signature) =
-  List.exists
+  Types.exists_capability
     (function
       | Types.Capability_projection { base; name = named; _ } ->
           Types.equal base impl.for_type && named = name
       | _ -> false)
-    (own.uses :> Types.capability list)
+    own.uses
 
 let find_capability_declaration lookups (path : Path.t) (capability : Types.capability) =
   let ( let* ) = Option.bind in

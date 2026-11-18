@@ -1,11 +1,12 @@
 type t = Shape of Memory_layout.shape | Storage of Ground.ty | Handle | Shared of Ground.ty | Any
 
 let classify env (ty : Ground.ty) =
-  match (Storage.match_storage_element ty, ty) with
-  | Some element, _ -> Storage element
-  | None, Named { path; arguments = [] } when Intrinsic.find_builtin path = Some Handle -> Handle
-  | None, Named { path; arguments = [ Type value ] } when Intrinsic.find_builtin path = Some Shared
-    ->
-      Shared value
-  | None, Any _ -> Any
-  | None, _ -> Shape (Memory_layout.compute_shape env ty)
+  match ty with
+  | Any _ -> Any
+  | Named { path; arguments } -> (
+      match (Intrinsic.find_builtin path, arguments) with
+      | Some Storage, [ Type element ] -> Storage element
+      | Some Handle, [] -> Handle
+      | Some Shared, [ Type value ] -> Shared value
+      | _ -> Shape (Memory_layout.compute_shape env ty))
+  | Function _ | Never -> Shape (Memory_layout.compute_shape env ty)

@@ -90,8 +90,8 @@ let list_occurrences database snapshot packages =
   List.concat_map
     (fun file ->
       List.concat_map
-        (fun declaration ->
-          let key = Resolve.Names.make_key declaration in
+        (fun (declaration : Resolve.Names.declaration) ->
+          let key = declaration.key in
           match Database.read_resolved database key with
           | Some resolved ->
               let ({ file; base } : Resolve.Names.place) = names.read_place key in

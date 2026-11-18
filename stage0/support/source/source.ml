@@ -57,7 +57,6 @@ let compute_line_starts text =
   Dynarray.to_array starts
 
 let create ~path text = { path; text; line_starts = compute_line_starts text }
-let read_file path = create ~path (In_channel.with_open_bin path In_channel.input_all)
 let path source = source.path
 let text source = source.text
 
@@ -126,3 +125,7 @@ let compute_offset units source ~line ~column =
     walk source.line_starts.(line) 0
 
 let starts_line source offset = offset = compute_line_start source offset
+
+module For_testing = struct
+  let read_file path = create ~path (In_channel.with_open_bin path In_channel.input_all)
+end
