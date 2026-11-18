@@ -307,9 +307,7 @@ unchanged.
 Rules: [Generic parameters](SPECIFICATION.md#generic-parameters).
 
 Generic code is monomorphized, so a generic function costs nothing at run
-time. Monomorphization rules out polymorphic recursion. Truss reports
-polymorphic recursion during type checking, as Go does. Rust reports it
-later, when instantiation fails.
+time. Monomorphization rules out polymorphic recursion.
 
 ### Invariants
 
@@ -687,9 +685,7 @@ Explicit type arguments use the brackets of indexing, as in
 `parse[Int64](text)`. Rust needs `parse::<i64>` because `<` is also the
 less-than operator. Brackets have no such conflict. The kind of the name
 before the brackets decides between the two readings, and the rules of
-[Scope](#scope) keep that kind easy to see. The cost is that a highlighter
-that works from the text alone can mistake `items[Color.Red]` for a type
-argument, so exact highlighting comes from the language server.
+[Scope](#scope) keep that kind easy to see.
 
 ### Termination
 
@@ -945,7 +941,6 @@ cannot be trusted to remember one table (*LLM habits*).
 
 | Rule | Reason |
 |---|---|
-| `echo` takes everything after it. | Putting `echo` in front of an expression shows the whole expression. |
 | A range binds more loosely than arithmetic. | `0..count - 1` means `0..(count - 1)`. |
 | `+=` exists, and `++` and `--` do not. | `a += b` evaluates the place `a` once, so a long place expression is not mistyped the second time, and an index is proven in bounds once. As expressions, `++` and `--` are confusing and rarely clearer than `+= 1`. |
 | A compound assignment passes the old value to the operator as owned. | `matrix += other` can update in place, with no separate trait such as Rust's `AddAssign`. |
@@ -953,9 +948,7 @@ cannot be trusted to remember one table (*LLM habits*).
 **An arithmetic operator calls a trait with a type parameter for its right
 operand,** because times, geometry, and money need mixed types, as in
 `instant + duration`. A comparison takes one type on both sides, because the
-laws of `Equal` and `Ordered` relate a type to itself. A `List`, an `Array`,
-or a `String` compared with its view is viewed first. The view allocates
-nothing and compares the same elements.
+laws of `Equal` and `Ordered` relate a type to itself.
 
 **An operator trait states the domain of its operation.** If `add` promised
 a result for every pair of values, the `impl` for a fixed-width integer
@@ -1030,10 +1023,6 @@ whose invariant was broken partway through an update. A program that must
 keep running proves that it cannot panic instead: a server requires a
 handler type without `Panic`, so no request can end the process. If the
 process fails anyway, a supervisor restarts it.
-
-A panic prints the site of each call that led to it. `expect` and the other
-functions of the standard library crash in their own bodies, so the site of
-the crash alone names a line of the library, not the caller's mistake.
 
 `unreachable` must be proven. Code that claims a point is unreachable must
 not panic when the point is reached. Code that panics on purpose calls
@@ -1327,9 +1316,7 @@ override keeps it.** `Equal.not_equal` ensures `result == !self.equal(other)`,
 so `a != b` always means `!(a == b)`, the prover reasons from the trait
 alone, and generic code knows the result through a bound. A type can still
 override a provided method with a faster one. This covers most uses of
-specialization, with no overlapping `impl`s. A fast path that depends only on
-the representation of a type, such as copying a list of `Plain` values at
-once, needs no language feature: the compiler knows which types are `Plain`.
+specialization, with no overlapping `impl`s.
 
 **An `impl` can promise more than its trait:** a weaker precondition and a
 stronger postcondition, which is behavioral subtyping. `Index` can then say
@@ -1594,7 +1581,6 @@ in place of an expression, a body, or a type definition.
 | Code with a `todo` is type-checked and proven. | A caller's contracts are proven before its callees exist. |
 | A release build refuses a program that can reach a `todo`. | A `todo` that panicked when reached would be a failure that the signature does not show. |
 | A test that reaches a `todo` is incomplete, not failed. | Tests can be written first. |
-| The tools list every `todo` with its expected type, the names in scope, and the work it blocks. | Each `todo` is a self-contained task, so several agents can fill them in at once (*parallel agents*). |
 
 ## Debug output
 
@@ -1739,8 +1725,6 @@ take from a package:
 A client for a product, such as `truss::postgres`, is an approved package
 instead, owned by `truss` on the registry. A client follows the releases of
 a product, not a published standard, and few programs need any one client.
-An approved package is plain Truss, is granted capabilities as any
-dependency is, and is held to the toolchain's review and release rules.
 
 The standard library is part of the toolchain: it has no version of its own,
 and it appears in no manifest and no lock file. A package instead names the
@@ -1830,7 +1814,6 @@ Rules: [The registry](PACKAGES.md#the-registry).
 | A package is published as its source. | The code that a reviewer reads in the registry is the code that compiles. |
 | The registry keeps an append-only public log of the hash of every version, as Go's checksum database does. | The registry cannot give two users different code under one version. |
 | The registry signs the proofs and test results that it computed for a release. | Proving a whole dependency tree on a machine that starts with nothing, such as an agent's new container, is the cost that GOALS.md sets out to remove. Each signed result is a function of its key, so a registry that signed a false result is caught by anyone who recomputes it. |
-| A new toolchain re-proves the registry, as far as the toolchain changed the proofs. | A toolchain that fails a proof of an approved package that the previous toolchain passed is not released. |
 | A yanked release, one that is marked as not to use, still builds. | If yanking broke builds, one compromised account could stop every project that depends on the package. |
 
 ## Incremental builds
@@ -1917,11 +1900,6 @@ slower. Every worktree and CI share the caches. The database itself caches
 nothing, so a revert or a branch switch is a change to the files like any
 other. The database computes the cheap stages again, and the solver, the C
 compiler, and the tests are cache hits.
-
-The compiler trusts what the cache holds: it links the cached object files
-and takes the cached solver answers as proofs. A user who could write
-another user's cache could run code as that user, or make a false contract
-pass, so only the cache's user can write its directory.
 
 ## Omitted features
 
