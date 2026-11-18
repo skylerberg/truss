@@ -610,10 +610,12 @@ it.
   long as `middle` can be used. A `let` keeps no other temporary, such as the
   receiver in `let part = make_list().slice()`. A view cannot be used after
   the temporary or the local that it views is dropped.
-- **The one implicit conversion** is a `List` or an `Array` passed to a
-  `Slice` parameter, or a `String` to a `StringSlice` parameter, which
-  becomes a view of it.
-  `self` is such a parameter, so `StringSlice.trim(name)` takes a `String`.
+- **The one implicit conversion** makes a view of a `List` or an `Array`
+  where a `Slice` is expected, and of a `String` where a `StringSlice` is.
+  It applies to an argument of such a parameter, and to an operand of a
+  comparison whose other operand is such a view, so `items == part[1..]`
+  compares two slices and allocates nothing. `self` is such a parameter,
+  so `StringSlice.trim(name)` takes a `String`.
 
 ## Constants
 
@@ -1734,8 +1736,9 @@ if         = "if" expression block [ "else" ( if | block ) ] ;
 ### Operators
 
 `==` and `!=` call the `Equal` trait, and `<`, `<=`, `>`, and `>=` call
-`Ordered`. Both sides have the same type, and functions and `any` values
-cannot be compared. `!` works on `Bool`, `~` on integers, and negation on
+`Ordered`. Both sides have the same type, or one side is a view that the
+other converts to (see [Views](#views)). Functions and `any` values cannot
+be compared. `!` works on `Bool`, `~` on integers, and negation on
 signed integers and floats.
 
 The arithmetic operators call traits with a type parameter for the right

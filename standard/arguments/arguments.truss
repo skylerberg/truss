@@ -161,7 +161,7 @@ fn Parser.find_long(self, name: StringSlice) -> UInt64
     decreases self.parameters.length() - index
   {
     let kind = self.parameters[index].kind
-    if (kind == Kind.Flag || kind == Kind.Option) && self.parameters[index].name.slice() == name {
+    if (kind == Kind.Flag || kind == Kind.Option) && self.parameters[index].name == name {
       return index
     }
     index += 1
@@ -223,7 +223,7 @@ fn Parser.find_command(self, name: StringSlice) -> UInt64
     invariant index <= self.commands.length()
     decreases self.commands.length() - index
   {
-    if self.commands[index].name.slice() == name {
+    if self.commands[index].name == name {
       return index
     }
     index += 1
@@ -240,7 +240,7 @@ fn Parsed.index_of(self, name: StringSlice) -> UInt64
     invariant index <= self.options.length()
     decreases self.options.length() - index
   {
-    if self.options[index].name.slice() == name {
+    if self.options[index].name == name {
       return index
     }
     index += 1
@@ -650,7 +650,7 @@ public fn Parsed.flag(self, name: StringSlice) -> Bool
     invariant index <= self.switches.length()
     decreases self.switches.length() - index
   {
-    if self.switches[index].slice() == name {
+    if self.switches[index] == name {
       return true
     }
     index += 1

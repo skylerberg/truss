@@ -14,7 +14,7 @@ fn kind_of(text: StringSlice) -> Option[json::ParseErrorKind] {
 
 fn round_trip(text: StringSlice) -> Bool {
   match json::parse(text) {
-    Ok(value) => value.to_text().slice() == text
+    Ok(value) => value.to_text() == text
     Err(_) => false
   }
 }

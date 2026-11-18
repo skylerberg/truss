@@ -838,7 +838,7 @@ public type HostsAllowed(hosts: Set[String])
 
 fn HostsAllowed.allows(self, host: StringSlice) -> Bool {
   for allowed in self.hosts {
-    if allowed.slice() == host {
+    if allowed == host {
       return true
     }
   }

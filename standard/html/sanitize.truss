@@ -41,7 +41,7 @@ let dropped_with_content: Array[String, 17] = [
 
 fn listed_in(names: Slice[String], name: StringSlice) -> Bool {
   for candidate in names {
-    if candidate.slice() == name {
+    if candidate == name {
       return true
     }
   }
@@ -53,7 +53,7 @@ fn is_attribute_allowed(policy: SanitizePolicy, element: StringSlice, name: Stri
     return true
   }
   for allowed in policy.element_attributes {
-    if allowed.element.slice() == element && allowed.name.slice() == name {
+    if allowed.element == element && allowed.name == name {
       return true
     }
   }
@@ -61,7 +61,7 @@ fn is_attribute_allowed(policy: SanitizePolicy, element: StringSlice, name: Stri
 }
 
 fn is_url_name(name: StringSlice) -> Bool {
-  name == "href".slice() || name == "src".slice() || name == "cite".slice()
+  name == "href" || name == "src" || name == "cite"
 }
 
 fn is_name_byte(byte: UInt8) -> Bool {

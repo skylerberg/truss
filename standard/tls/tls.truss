@@ -695,7 +695,7 @@ fn parse_server_hello(body: Slice[UInt8], session: Slice[UInt8]) -> Result[Serve
   let extensions = read_extensions(mut decoder)?
   match find_extension(extensions.slice(), kind: 43) {
     Some(version) => {
-      if version.slice() != [3, 4].slice() {
+      if version != [3, 4] {
         return Err(protocol_error("a version other than TLS 1.3"))
       }
     }

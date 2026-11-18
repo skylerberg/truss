@@ -204,6 +204,12 @@ let () =
   Harness.test "comparing integer types that differ is an error with a fix that converts" (fun () ->
       expect_one_diagnostic Fixtures.Infer.comparison_of_uint64_and_uint32
         "types.mismatched_integers" ~fixed:Fixtures.Infer.comparison_of_uint64_and_uint32_fixed);
+  Harness.test "a comparison views a list, an array, or a string that meets its view" (fun () ->
+      expect_fine Fixtures.Infer.comparisons_of_owners_and_views);
+  Harness.test "a comparison of a list with a slice of another element type is a mismatch"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.comparison_of_a_list_and_a_slice_of_another_element
+        "types.mismatch");
   Harness.test "+ on strings is an error with a fix to interpolation" (fun () ->
       expect_one_diagnostic Fixtures.Infer.string_plus_a_string "types.string_addition"
         ~fixed:Fixtures.Infer.string_plus_a_string_fixed);

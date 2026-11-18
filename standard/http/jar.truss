@@ -150,7 +150,7 @@ internal fn CookieJar.store(mut self, address: url::Url, set_cookie: StringSlice
     Err(_) => return
   }
   let host = host_of(address)
-  let is_https = address.scheme() == "https".slice()
+  let is_https = address.scheme() == "https"
   if cookie.is_secure && !is_https {
     return
   }
@@ -217,7 +217,7 @@ internal fn CookieJar.header_for(mut self, address: url::Url, now: Int64) -> Opt
   }
   let host = host_of(address)
   let path = request_path(address)
-  let is_https = address.scheme() == "https".slice()
+  let is_https = address.scheme() == "https"
   var matching: List[Stored] = []
   for stored in self.cookies {
     let is_domain_match = if stored.is_host_only { stored.domain == host } else { domain_matches(host.slice(), domain: stored.domain.slice()) }

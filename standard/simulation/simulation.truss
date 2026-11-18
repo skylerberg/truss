@@ -248,7 +248,7 @@ internal fn State.resolve(mut self, host: StringSlice) -> Result[List[network::I
   }
   var addresses: List[network::IpAddress] = []
   for known in self.hosts {
-    if known.name.slice() == host {
+    if known.name == host {
       mut addresses.push(known.address)
     }
   }
@@ -634,7 +634,7 @@ internal fn State.program_for(self, command: processes::Command) -> Option[UInt6
   var chosen: Option[UInt64] = None
   var most: UInt64 = 0
   for index in 0..self.programs.length() {
-    if self.programs[index].name.slice() == command.program()
+    if self.programs[index].name == command.program()
       && command.argument_list().starts_with(self.programs[index].arguments.slice())
       && self.programs[index].arguments.length() >= most
     {

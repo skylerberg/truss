@@ -921,7 +921,7 @@ internal fn serve[Stream: streams::Duplex](
     Ok(bytes) => own bytes
     Err(_) => return
   }
-  if opening.slice() != preface.slice().bytes() || open_connection(stream, is_server: true, header_limit: header_limit) is Err(_) {
+  if opening != preface.slice().bytes() || open_connection(stream, is_server: true, header_limit: header_limit) is Err(_) {
     return
   }
   let arrivals = tasks::Channel[Arrival].new(capacity: 128)

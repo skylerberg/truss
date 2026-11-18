@@ -489,10 +489,10 @@ fn number_value(text: StringSlice, at: mut UInt64) -> Result[Value, Failure] {
   let signed = token.byte(0) == 43 || token.byte(0) == 45
   let negative = token.byte(0) == 45
   let body = if signed { text.part(start + 1, to: end) } else { token }
-  if body == "inf".slice() {
+  if body == "inf" {
     return Ok(Value.Float(value: if negative { Float64.negative_infinity } else { Float64.infinity }))
   }
-  if body == "nan".slice() {
+  if body == "nan" {
     return Ok(Value.Float(value: Float64.not_a_number))
   }
   if body.length() >= 2 && (body.starts_with("0x") || body.starts_with("0o") || body.starts_with("0b")) {
@@ -606,11 +606,11 @@ fn parse_value(text: StringSlice, at: mut UInt64, depth: UInt64) -> Result[Value
       let end = token_end(text, from: at)
       if end <= text.length() {
         let token = text.part(at, to: end)
-        if token == "true".slice() {
+        if token == "true" {
           at = end
           return Ok(Value.Boolean(value: true))
         }
-        if token == "false".slice() {
+        if token == "false" {
           at = end
           return Ok(Value.Boolean(value: false))
         }
