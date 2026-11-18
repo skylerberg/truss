@@ -1,7 +1,7 @@
 let make_variable ?(numbers = []) label = Logic.Symbol.Variable { label; numbers }
 
 type unsupported = {
-  location : State.location;
+  location : Obligation.location;
   construct : string;
   foreign_definition : string option;
 }
@@ -182,7 +182,7 @@ let assume context (frame : State.frame) term =
       else add_scoped_fact context frame guarded
 
 let locate (context : State.context) (source : State.source) origin =
-  if source.key = Some context.home then State.Node origin else Whole_definition
+  if source.key = Some context.home then Obligation.Node origin else Whole_definition
 
 let make_requires_fix (context : State.context) required =
   let names = context.lookups.interface.names in
@@ -195,7 +195,10 @@ let make_requires_fix (context : State.context) required =
   in
   let edit at before =
     Some
-      { State.at; replacement = (State.Text (before ^ "  requires ") :: required) @ [ Text "\n" ] }
+      {
+        Obligation.at;
+        replacement = (Obligation.Text (before ^ "  requires ") :: required) @ [ Text "\n" ];
+      }
   in
   let edit =
     match brace with
@@ -208,7 +211,10 @@ let make_requires_fix (context : State.context) required =
   match edit with
   | Some edit when not context.inherits_precondition ->
       [
-        { State.title = (State.Text "Add `requires " :: required) @ [ Text "`" ]; edits = [ edit ] };
+        {
+          Obligation.title = (Obligation.Text "Add `requires " :: required) @ [ Text "`" ];
+          edits = [ edit ];
+        };
       ]
   | Some _ | None -> []
 
@@ -277,14 +283,14 @@ let show_truss_goal context term =
     printed
   else None
 
-let add_requires context (frame : State.frame) (required : State.message) =
+let add_requires context (frame : State.frame) (required : Obligation.message) =
   match frame.condition with
   | Logic.Boolean true -> make_requires_fix context required
   | condition -> (
       match show_truss_goal context condition with
       | Some premise ->
           make_requires_fix context
-            ((State.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ State.Text ")" ])
+            ((Obligation.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ Obligation.Text ")" ])
       | None -> make_requires_fix context required)
 
 let rec make_closed_obligation ?template_clause context (frame : State.frame) code location message
@@ -308,7 +314,7 @@ let rec make_closed_obligation ?template_clause context (frame : State.frame) co
     | None -> None
 
 and make_obligation ?template_clause (context : State.context) (frame : State.frame) code location
-    message goal : State.obligation =
+    message goal : Obligation.t =
   let query =
     Logic.prune
       {
@@ -455,7 +461,9 @@ let reject_uncompared_recursion (context : State.context) frame location recursi
       recursive_callee
 
 let quote (source : State.source) origin =
-  match source.key with Some key -> State.Quote (key, origin) | None -> Text "this expression"
+  match source.key with
+  | Some key -> Obligation.Quote (key, origin)
+  | None -> Text "this expression"
 
 let quote_span text (span : Source.Definition_span.t) =
   if span.stop = span.start then "this expression" else Source.Definition_span.quote text span

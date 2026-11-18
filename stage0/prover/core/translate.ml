@@ -72,7 +72,7 @@ let make_context ?node (lookups : Lookups.t) ~home ~current ~terminates ~measure
   context
 
 let make_outcome (context : State.context) =
-  { State.obligations = List.rev context.obligations; holes = List.rev context.holes }
+  { Obligation.obligations = List.rev context.obligations; holes = List.rev context.holes }
 
 let make_empty_frame source =
   {

@@ -360,8 +360,7 @@ let solve_all solver requests =
   solve_distinct (fun request -> request.values_key);
   List.map (solve solver) requests
 
-let count_queries_run solver = run_locked solver (fun () -> solver.queries_run)
-
 module For_testing = struct
   let hash_query = hash_query
+  let count_queries_run solver = run_locked solver (fun () -> solver.queries_run)
 end

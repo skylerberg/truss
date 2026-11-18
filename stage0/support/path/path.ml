@@ -148,4 +148,3 @@ module Ordered = struct
 end
 
 module Map = Map.Make (Ordered)
-module Set = Set.Make (Ordered)

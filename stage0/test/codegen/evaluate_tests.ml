@@ -3,7 +3,7 @@ let solver =
 
 let run_template_checks backend checks =
   List.map
-    (fun ({ from_template; literals; clauses } as check : Prover.State.template_check) ->
+    (fun ({ from_template; literals; clauses } as check : Prover.Obligation.template_check) ->
       (check, Backend.run_template_check backend ~from_template ~literals ~clauses))
     checks
 

@@ -116,16 +116,6 @@ let make_declared_code context ~impl ~(declaration : Resolve.Names.key) ~trait_s
                (Types.make_capability_substitution trait_signature.capability_parameters
                   (Monomorphic.convert_capability_arguments instantiation)))))
 
-let make_declaration_code context (path : Path.t) instantiation =
-  match (path, Interface.Impls.find_implemented_method context.lookups.interface path) with
-  | Method { owner = (Impl _ | Derived _) as impl; _ }, Some implemented -> (
-      match context.lookups.interface.names.find_key implemented.declaration with
-      | Some declaration ->
-          make_declared_code context ~impl ~declaration
-            ~trait_substitution:implemented.implementation.substitution path instantiation
-      | None -> raise_bug "%s has no declaration" (Path.show implemented.declaration))
-  | _ -> raise_bug "%s implements no method of a trait" (Path.show path)
-
 let make_code context (path : Path.t) (instantiation : Ground.instantiation) : code =
   match path with
   | Top _ | Method _ | Test _ -> (

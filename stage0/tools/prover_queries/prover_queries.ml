@@ -61,21 +61,21 @@ let () =
   let source = Database.read_source database file in
   let queries =
     List.filter_map
-      (fun (query : Prover.query) ->
+      (fun (query : Prover.For_testing.query) ->
         let query_line, query_column = Source.compute_position source query.span.start in
         if
           Option.fold ~none:true ~some:(( = ) query_line) line
           && Option.fold ~none:true ~some:(( = ) query_column) column
         then Some (query_line, query_column, query)
         else None)
-      (Prover.list_queries
+      (Prover.For_testing.list_queries
          (Database.make_proof_lookups database)
          (Database.list_proofs (Database.prove database [ file ]))
          file)
   in
   if queries = [] then exit_with_error "No obligation of %s starts there." path;
   List.iter
-    (fun (query_line, query_column, (query : Prover.query)) ->
+    (fun (query_line, query_column, (query : Prover.For_testing.query)) ->
       Printf.printf "(echo %s)\n%s(reset)\n"
         (quote_string
            (Printf.sprintf "%s:%d:%d %s: %s" path query_line query_column
