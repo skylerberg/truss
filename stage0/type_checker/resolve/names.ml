@@ -696,7 +696,7 @@ type declared = {
 
 type module_names = {
   entries : entry list;
-  index : entry String_map.t;
+  entries_by_name : entry String_map.t;
   module_declarations : declaration list;
 }
 
@@ -714,10 +714,11 @@ type namespace = {
 let make_module_names entries =
   {
     entries;
-    index =
+    entries_by_name =
       List.fold_left
-        (fun index (entry : entry) ->
-          if String_map.mem entry.name index then index else String_map.add entry.name entry index)
+        (fun by_name (entry : entry) ->
+          if String_map.mem entry.name by_name then by_name
+          else String_map.add entry.name entry by_name)
         String_map.empty entries;
     module_declarations = [];
   }
@@ -803,7 +804,7 @@ let build_namespace lookups package
   let find_pass_name (module_ : Path.module_) name =
     if module_.package = package then
       Option.bind (Module_map.find_opt module_ modules_map) (fun names ->
-          String_map.find_opt name names.index)
+          String_map.find_opt name names.entries_by_name)
     else lookups.find module_ name
   in
   let pass_module_exists (module_ : Path.module_) =
@@ -1021,7 +1022,7 @@ let pair_entries merge before after =
   merge (fun _ before after -> Some (before, after)) before after
 
 let list_changes before after =
-  let entries_of = Option.fold ~none:String_map.empty ~some:(fun names -> names.index) in
+  let entries_of = Option.fold ~none:String_map.empty ~some:(fun names -> names.entries_by_name) in
   let modules =
     Module_map.fold
       (fun module_ ((before : module_names option), (after : module_names option)) changes ->
@@ -1145,7 +1146,8 @@ let of_namespaces ~(read_namespace : Path.package -> namespace) ~split_module ~l
   {
     find =
       (fun module_ name ->
-        Option.bind (of_module module_) (fun names -> String_map.find_opt name names.index));
+        Option.bind (of_module module_) (fun names ->
+            String_map.find_opt name names.entries_by_name));
     list_entries =
       (fun module_ -> match of_module module_ with Some names -> names.entries | None -> []);
     list_imports = (fun key -> (read_declared key).imports);
