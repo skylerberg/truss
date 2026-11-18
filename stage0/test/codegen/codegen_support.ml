@@ -99,7 +99,7 @@ type function_ = {
   blocks : block list;
 }
 
-type item = Memory_layout.env -> Emit_c.fragment
+type program_fragment = Memory_layout.env -> Emit_c.fragment
 
 let local ?name ty = { ty; name }
 let value ty = Lowered.Value ty
@@ -130,7 +130,7 @@ let write builder (function_ : function_) =
   ({ parameters = function_.parameters; result = function_.result; returns = function_.returns }
     : Emit_c.Builder.prototype)
 
-let item ?(nested = []) name main : item =
+let define_function ?(nested = []) name main : program_fragment =
  fun env ->
   let builder = Emit_c.Builder.create env ~item:(code_item name) in
   List.iteri
@@ -140,10 +140,10 @@ let item ?(nested = []) name main : item =
     nested;
   Emit_c.Builder.build builder (write builder main)
 
-let make_constant_item fragment : item = fun _ -> fragment
+let make_program_fragment fragment : program_fragment = fun _ -> fragment
 
 let entry ?nested locals blocks =
-  item ?nested "entry" (function_ ~result:(value int32) locals blocks)
+  define_function ?nested "entry" (function_ ~result:(value int32) locals blocks)
 
 let call name ?(result = Some (value int32)) ?(parameters = []) arguments place : Lowered.statement
     =
@@ -173,11 +173,11 @@ let list_worker_counts () =
 let test_position (site : Lowered.site) : Emit_c.position =
   { file = "test.truss"; line = 1; column = site.offset + 1 }
 
-let run_program ?(extra = []) ?env ?input (items : item list) =
+let run_program ?(extra = []) ?env ?input (program : program_fragment list) =
   incr counter;
   let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "program%d" !counter) in
   let env = match env with Some env -> env | None -> make_shape_env ~extra () in
-  let fragments = List.map (fun item -> item env) items in
+  let fragments = List.map (fun program_fragment -> program_fragment env) program in
   match
     C_compiler.build_executable (Lazy.force c_compiler) O1
       ~units:
@@ -194,8 +194,8 @@ let run_program ?(extra = []) ?env ?input (items : item list) =
   | Ok () -> Process.run ?input output []
   | Error message -> failwith message
 
-let expect_status ?extra expected items =
-  let status, _, errors = run_program ?extra items in
+let expect_status ?extra expected program =
+  let status, _, errors = run_program ?extra program in
   if status <> expected then fail "expected status %d, got %d (%s)" expected status errors
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }

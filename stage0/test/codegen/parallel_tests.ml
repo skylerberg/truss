@@ -117,7 +117,7 @@ let () =
         [ "f_capture0"; "f_capture1"; "int32_t l6_own;" ];
       if String.includes ~affix:"f_capture2" c then
         Codegen_support.fail "a function reaches three locals:\n%s" c;
-      Codegen_support.expect_status 20 [ Codegen_support.make_constant_item fragment ])
+      Codegen_support.expect_status 20 [ Codegen_support.make_program_fragment fragment ])
 
 let () =
   Codegen_support.test
