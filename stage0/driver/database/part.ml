@@ -29,7 +29,7 @@ type parsed = { tree : Syntax.file; diagnostics : Diagnostic.t list; text : stri
 
 type _ stored =
   | Parsed : Path.file -> parsed stored
-  | Namespace : Path.package -> Resolve.Names.namespace stored
+  | Namespace : Path.package -> Resolve.Namespace.t stored
   | Resolved : Resolve.Names.key * Resolve.section -> Resolve.resolved stored
   | Trait_header : Resolve.Names.key -> Resolve.trait_header stored
   | Constant_value : Path.t -> Z.t option stored

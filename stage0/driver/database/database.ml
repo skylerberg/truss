@@ -98,13 +98,13 @@ let make_empty_package_database name ~dependencies =
 let make_absent_package_database name =
   let package_database = make_empty_package_database name ~dependencies:[] in
   Stored_table.replace package_database.values (Any (Namespace name))
-    (Binding (Namespace name, Value Resolve.Names.empty_namespace));
+    (Binding (Namespace name, Value Resolve.Namespace.empty));
   package_database
 
-let find_package_namespace (package_database : package_database) : Resolve.Names.namespace =
+let find_package_namespace (package_database : package_database) : Resolve.Namespace.t =
   match Stored_table.find_opt package_database.values (Any (Namespace package_database.name)) with
   | Some (Binding (Namespace _, Value namespace)) -> namespace
-  | Some _ | None -> Resolve.Names.empty_namespace
+  | Some _ | None -> Resolve.Namespace.empty
 
 let set_files (package_database : package_database) files =
   package_database.files <- List.sort compare files;
@@ -499,7 +499,7 @@ let read_namespace database package =
         (Path.show_package package)
 
 let make_name_lookups_over database ~read_namespace =
-  Resolve.Names.of_namespaces ~read_namespace
+  Resolve.Namespace.make_lookups ~read_namespace
     ~split_module:
       (Path.split_module ~is_package:(fun name -> Option.is_some (find_package database name)))
     ~list_dependency_names:(list_dependency_names database)
@@ -574,7 +574,7 @@ let make_untracked_name_lookups database =
 let make_namespace database note (package_database : package_database) =
   note (Part.Input (Modules package_database.name));
   note (Part.Input (Files package_database.name));
-  Resolve.Names.build_namespace
+  Resolve.Namespace.build
     (make_recording_name_lookups database note)
     package_database.name
     (List.map
@@ -1060,7 +1060,7 @@ let holds_position database (Part.Any typed as part) =
   | Proof _ | Package_check _ | Lowered _ -> true
   | _ -> (make_stored database part).is_failed
 
-let mark_change database package (change : Resolve.Names.change) =
+let mark_change database package (change : Resolve.Namespace.change) =
   let part : Part.name =
     match change with
     | Entry (module_, name) -> Entry (module_, name)
@@ -1135,7 +1135,7 @@ let compute_namespace database (package_database : package_database) =
           ignore (Call_graph.add_root graph root)
       | _ -> ())
     implied;
-  List.iter (mark_change database package) (Resolve.Names.list_changes before after);
+  List.iter (mark_change database package) (Resolve.Namespace.list_changes before after);
   List.iter (fun part -> if not (was_implied part) then mark_stale database part) implied;
   forget database (List.filter (fun part -> not (is_implied part)) implied_before);
   claim_lowering_roots database (make_untracked_name_lookups database) package
@@ -1725,7 +1725,7 @@ let mark_differences database name ~(before : package_database option)
   let before = Option.value before ~default:(make_absent_package_database name) in
   let after = Option.value after ~default:(make_absent_package_database name) in
   List.iter (mark_change database name)
-    (Resolve.Names.list_changes (find_package_namespace before) (find_package_namespace after));
+    (Resolve.Namespace.list_changes (find_package_namespace before) (find_package_namespace after));
   let find_text (package_database : package_database) file =
     Option.map Source.text (File_table.find_opt package_database.sources file)
   in

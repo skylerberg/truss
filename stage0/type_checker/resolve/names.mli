@@ -85,6 +85,7 @@ val lookup_module :
   string list ->
   module_lookup
 
+val make_top_path : Path.module_ -> string -> Path.t
 val find_definition : lookups -> Path.t -> (key * Syntax.definition) option
 val find_law_parameters : lookups -> Path.t -> string -> string list option
 
@@ -115,42 +116,3 @@ val list_members_visible_to_package :
 
 val find_bare_type : lookups -> from:Path.module_ -> string -> (entry * Path.t) option
 val find_kind : lookups -> Path.t -> named option
-
-type namespace
-
-val build_namespace :
-  lookups ->
-  Path.package ->
-  (Path.module_ * (Path.file * Syntax.file * string) list) list ->
-  namespace
-
-val empty_namespace : namespace
-
-type change =
-  | Entry of Path.module_ * string
-  | Entries of Path.module_
-  | Imports of key
-  | Declaration of key
-  | Tree of key
-  | Positions of key
-  | Text of key
-  | Place of key
-  | Container of key
-  | Contained of key
-  | Module_declarations of Path.module_
-  | File_declarations of Path.file
-  | Package_declarations
-  | Members of Path.t * string
-  | Traits_declaring of string
-  | Impl_index
-  | Impls_of_type of Path.t
-  | Impls_of_trait of Path.t
-  | Law_proofs of law_proof_name
-
-val list_changes : namespace -> namespace -> change list
-
-val of_namespaces :
-  read_namespace:(Path.package -> namespace) ->
-  split_module:(string list -> Path.module_ option) ->
-  list_dependency_names:(Path.package -> Path.package list) ->
-  lookups
