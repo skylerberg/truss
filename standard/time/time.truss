@@ -244,49 +244,49 @@ impl Default for Duration {
   }
 }
 
-internal fn write_fixed_point(output: mut TextBuilder, whole: UInt64, fraction: UInt64, digits: UInt64)
+internal fn write_fixed_point(output: mut String, whole: UInt64, fraction: UInt64, digits: UInt64)
   cost time finite
 {
   whole.display(mut output)
   if fraction != 0 {
-    mut output.write(".")
+    mut output.push(".")
     write_fraction(mut output, value: fraction, digits: digits)
   }
 }
 
 impl Display for Duration {
-  fn display(self, output: mut TextBuilder) {
+  fn display(self, output: mut String) {
     if self.nanoseconds == 0 {
-      mut output.write("0s")
+      mut output.push("0s")
       return
     }
     if self.nanoseconds < 0 {
-      mut output.write("-")
+      mut output.push("-")
     }
     let magnitude = self.nanoseconds.unsigned_absolute()
     if magnitude < 1000 {
       magnitude.display(mut output)
-      mut output.write("ns")
+      mut output.push("ns")
     } else if magnitude < 1000000 {
       write_fixed_point(mut output, whole: magnitude / 1000, fraction: magnitude % 1000, digits: 3)
-      mut output.write("\u{b5}s")
+      mut output.push("\u{b5}s")
     } else if magnitude < 1000000000 {
       write_fixed_point(mut output, whole: magnitude / 1000000, fraction: magnitude % 1000000, digits: 6)
-      mut output.write("ms")
+      mut output.push("ms")
     } else {
       let seconds = magnitude / 1000000000
       let hours = seconds / 3600
       let minutes = seconds / 60 % 60
       if hours > 0 {
         hours.display(mut output)
-        mut output.write("h")
+        mut output.push("h")
       }
       if hours > 0 || minutes > 0 {
         minutes.display(mut output)
-        mut output.write("m")
+        mut output.push("m")
       }
       write_fixed_point(mut output, whole: seconds % 60, fraction: magnitude % 1000000000, digits: 9)
-      mut output.write("s")
+      mut output.push("s")
     }
   }
 }
@@ -603,9 +603,9 @@ internal fn Instant.date_time(self) -> DateTime
 }
 
 impl Display for Instant {
-  fn display(self, output: mut TextBuilder) {
+  fn display(self, output: mut String) {
     self.date_time().display(mut output)
-    mut output.write("Z")
+    mut output.push("Z")
   }
 }
 
@@ -817,7 +817,7 @@ internal fn DateTime.instant(self, offset_seconds: Int64) -> Option[Instant]
   Some(Instant(nanoseconds: whole.checked_add(near * 86400000000000 + nanoseconds_of_day - offset_seconds * 1000000000)?))
 }
 
-internal fn write_fraction(output: mut TextBuilder, value: UInt64, digits: UInt64)
+internal fn write_fraction(output: mut String, value: UInt64, digits: UInt64)
   cost time finite
 {
   let padded = value.format(minimum_digits: digits)
@@ -829,7 +829,7 @@ internal fn write_fraction(output: mut TextBuilder, value: UInt64, digits: UInt6
   {
     end -= 1
   }
-  mut output.write(text.part(0, to: end))
+  mut output.push(text.part(0, to: end))
 }
 
 impl text::Parse for Instant {
@@ -856,15 +856,15 @@ public type ParseTimeError =
   derives Equal
 
 impl Display for ParseTimeError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Empty => mut output.write("the text is empty")
+      Empty => mut output.push("the text is empty")
       Malformed(offset) => {
-        mut output.write("the text is not a time at offset ")
+        mut output.push("the text is not a time at offset ")
         offset.display(mut output)
       }
-      OutOfRange => mut output.write("the time is outside the range the type holds")
+      OutOfRange => mut output.push("the time is outside the range the type holds")
     }
   }
 }
@@ -958,21 +958,21 @@ public fn Month.days(self, leap_year: Bool) -> UInt8
 }
 
 impl Display for Month {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      January => mut output.write("January")
-      February => mut output.write("February")
-      March => mut output.write("March")
-      April => mut output.write("April")
-      May => mut output.write("May")
-      June => mut output.write("June")
-      July => mut output.write("July")
-      August => mut output.write("August")
-      September => mut output.write("September")
-      October => mut output.write("October")
-      November => mut output.write("November")
-      December => mut output.write("December")
+      January => mut output.push("January")
+      February => mut output.push("February")
+      March => mut output.push("March")
+      April => mut output.push("April")
+      May => mut output.push("May")
+      June => mut output.push("June")
+      July => mut output.push("July")
+      August => mut output.push("August")
+      September => mut output.push("September")
+      October => mut output.push("October")
+      November => mut output.push("November")
+      December => mut output.push("December")
     }
   }
 }
@@ -1003,16 +1003,16 @@ public fn Weekday.is_weekend(self) -> Bool
 }
 
 impl Display for Weekday {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Monday => mut output.write("Monday")
-      Tuesday => mut output.write("Tuesday")
-      Wednesday => mut output.write("Wednesday")
-      Thursday => mut output.write("Thursday")
-      Friday => mut output.write("Friday")
-      Saturday => mut output.write("Saturday")
-      Sunday => mut output.write("Sunday")
+      Monday => mut output.push("Monday")
+      Tuesday => mut output.push("Tuesday")
+      Wednesday => mut output.push("Wednesday")
+      Thursday => mut output.push("Thursday")
+      Friday => mut output.push("Friday")
+      Saturday => mut output.push("Saturday")
+      Sunday => mut output.push("Sunday")
     }
   }
 }
@@ -1371,12 +1371,12 @@ internal fn iso_week(ordinal: Int64, weekday: Int64, year: Int64) -> Int64
   week
 }
 
-internal fn write_two_digits(output: mut TextBuilder, value: Int64)
+internal fn write_two_digits(output: mut String, value: Int64)
   requires 0 <= value && value <= 99
   cost time finite
 {
   if value < 10 {
-    mut output.write("0")
+    mut output.push("0")
   }
   value.display(mut output)
 }
@@ -1495,13 +1495,13 @@ public fn Date.at(self, time: TimeOfDay) -> DateTime
 }
 
 impl Display for Date {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     let civil = self.civil()
-    mut output.write(civil.year.format(minimum_digits: 4))
-    mut output.write("-")
+    mut output.push(civil.year.format(minimum_digits: 4))
+    mut output.push("-")
     write_two_digits(mut output, value: civil.month)
-    mut output.write("-")
+    mut output.push("-")
     write_two_digits(mut output, value: civil.day)
   }
 }
@@ -1622,16 +1622,16 @@ public fn TimeOfDay.since_midnight(self) -> Duration
 }
 
 impl Display for TimeOfDay {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     write_two_digits(mut output, value: intrinsic::convert(self.hour()))
-    mut output.write(":")
+    mut output.push(":")
     write_two_digits(mut output, value: intrinsic::convert(self.minute()))
-    mut output.write(":")
+    mut output.push(":")
     write_two_digits(mut output, value: intrinsic::convert(self.second()))
     let nanosecond = self.nanosecond()
     if nanosecond != 0 {
-      mut output.write(".")
+      mut output.push(".")
       write_fraction(mut output, value: intrinsic::convert(nanosecond), digits: 9)
     }
   }
@@ -1672,10 +1672,10 @@ public fn DateTime.plus(self, duration: Duration) -> Option[DateTime]
 }
 
 impl Display for DateTime {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     self.date.display(mut output)
-    mut output.write("T")
+    mut output.push("T")
     self.time.display(mut output)
   }
 }
@@ -1812,25 +1812,25 @@ public fn TimeZone.utc() -> TimeZone
   TimeZone(name: "UTC", transitions: [], offsets: [], first_offset: 0, rule: None)
 }
 
-fn write_offset(output: mut TextBuilder, seconds: Int64)
+fn write_offset(output: mut String, seconds: Int64)
   requires -100 * 3600 < seconds && seconds < 100 * 3600
   cost time finite
 {
   if seconds == 0 {
-    mut output.write("Z")
+    mut output.push("Z")
     return
   }
   if seconds < 0 {
-    mut output.write("-")
+    mut output.push("-")
   } else {
-    mut output.write("+")
+    mut output.push("+")
   }
   let size = if seconds < 0 { -seconds } else { seconds }
   write_two_digits(mut output, value: size / 3600)
-  mut output.write(":")
+  mut output.push(":")
   write_two_digits(mut output, value: (size % 3600) / 60)
   if size % 60 != 0 {
-    mut output.write(":")
+    mut output.push(":")
     write_two_digits(mut output, value: size % 60)
   }
 }
@@ -1843,10 +1843,10 @@ public fn TimeZone.fixed(offset: Duration) -> Option[TimeZone]
     return None
   }
   let seconds = nanoseconds / 1000000000
-  var name = TextBuilder.new()
+  var name = ""
   write_offset(mut name, seconds: seconds)
   Some(TimeZone(
-    name: own name.finish(),
+    name: own name,
     transitions: [],
     offsets: [],
     first_offset: intrinsic::convert(seconds),
@@ -2258,13 +2258,13 @@ public fn TimeZone.to_instant(self, local: DateTime) -> Option[LocalInstant]
 public fn TimeZone.format(self, instant: Instant) -> String
   cost time finite
 {
-  var output = TextBuilder.new()
+  var output = ""
   self.to_local(instant).display(mut output)
   let offset = self.offset_seconds(instant.unix_seconds())
   if -100 * 3600 < offset && offset < 100 * 3600 {
     write_offset(mut output, seconds: offset)
   }
-  own output.finish()
+  output
 }
 
 public type ZoneError =
@@ -2273,10 +2273,10 @@ public type ZoneError =
   derives Equal
 
 impl Display for ZoneError {
-  fn display(self, output: mut TextBuilder) {
+  fn display(self, output: mut String) {
     match self {
-      UnknownZone => mut output.write("the time zone is not known")
-      MalformedRules => mut output.write("the time zone's rules are malformed")
+      UnknownZone => mut output.push("the time zone is not known")
+      MalformedRules => mut output.push("the time zone's rules are malformed")
     }
   }
 }
@@ -2407,20 +2407,20 @@ public fn DateTime.format(self, layout: Layout) -> String
   let civil = self.date.civil()
   let nanoseconds_of_day: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
   let seconds = nanoseconds_of_day / 1000000000
-  var output = TextBuilder.new()
+  var output = ""
   var index: UInt64 = 0
   while index < layout.parts.length()
     invariant index <= layout.parts.length()
     decreases layout.parts.length() - index
   {
     match layout.parts[index] {
-      Text(text) => mut output.write(text.slice())
+      Text(text) => mut output.push(text.slice())
       Year => {
         let year = if civil.year < 0 { -civil.year } else { civil.year }
         if civil.year < 0 {
-          mut output.write("-")
+          mut output.push("-")
         }
-        mut output.write(year.format(minimum_digits: 4).slice())
+        mut output.push(year.format(minimum_digits: 4).slice())
       }
       Month => write_two_digits(mut output, value: civil.month)
       Day => write_two_digits(mut output, value: civil.day)
@@ -2431,14 +2431,14 @@ public fn DateTime.format(self, layout: Layout) -> String
         let padded = (nanoseconds_of_day % 1000000000).format(minimum_digits: 9)
         let shown: UInt64 = intrinsic::convert(digits)
         if shown <= padded.length() {
-          mut output.write(padded.slice().part(0, to: shown))
+          mut output.push(padded.slice().part(0, to: shown))
         }
       }
       Weekday => self.date.weekday().display(mut output)
     }
     index += 1
   }
-  own output.finish()
+  output
 }
 
 type LayoutFields(year: Int64, month: Int64, day: Int64, hour: Int64, minute: Int64, second: Int64, nanosecond: Int64)

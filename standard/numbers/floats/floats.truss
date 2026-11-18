@@ -34,8 +34,8 @@ impl Default for Float32 {
 }
 
 impl Display for Float32 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_float32(self)
+  fn display(self, output: mut String) {
+    mut output.push_float32(self)
   }
 }
 
@@ -262,8 +262,8 @@ impl Default for Float64 {
 }
 
 impl Display for Float64 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_float64(self)
+  fn display(self, output: mut String) {
+    mut output.push_float64(self)
   }
 }
 

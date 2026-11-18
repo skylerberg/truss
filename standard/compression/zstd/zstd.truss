@@ -8,18 +8,18 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       Malformed(message) => {
-        mut output.write("malformed zstd data: ")
-        mut output.write(message.slice())
+        mut output.push("malformed zstd data: ")
+        mut output.push(message.slice())
       }
-      ChecksumMismatch => mut output.write("the zstd frame's checksum does not match its content")
+      ChecksumMismatch => mut output.push("the zstd frame's checksum does not match its content")
       TooLarge(limit) => {
-        mut output.write("the decompressed data is longer than ")
+        mut output.push("the decompressed data is longer than ")
         limit.display(mut output)
-        mut output.write(" bytes")
+        mut output.push(" bytes")
       }
     }
   }

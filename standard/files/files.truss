@@ -494,8 +494,8 @@ impl Hash for Path {
 }
 
 impl Display for Path {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write(self.text.slice())
+  fn display(self, output: mut String) {
+    mut output.push(self.text.slice())
   }
 }
 
@@ -1204,8 +1204,8 @@ public type GlobError(offset: UInt64)
   derives Equal
 
 impl Display for GlobError {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write("the glob is not valid at byte ")
+  fn display(self, output: mut String) {
+    mut output.push("the glob is not valid at byte ")
     self.offset.display(mut output)
   }
 }

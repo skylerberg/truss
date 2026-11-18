@@ -50,12 +50,12 @@ public fn hotp(secret: Slice[UInt8], counter: UInt64, digits: UInt32 = 6, algori
   let value = truncated(mac(algorithm, key: secret, message: message.slice()).slice())
   let length: UInt64 = intrinsic::convert(digits)
   let number = "${value % powers_of_ten[length]}"
-  var text = TextBuilder.new()
+  var text = ""
   for _ in number.length()..length {
-    mut text.write("0")
+    mut text.push("0")
   }
-  mut text.write(number.slice())
-  own text.finish()
+  mut text.push(number.slice())
+  text
 }
 
 public fn Totp.generate(digits: UInt32 = 6, period_seconds: Int64 = 30, algorithm: Algorithm = Algorithm.Sha1) -> Totp

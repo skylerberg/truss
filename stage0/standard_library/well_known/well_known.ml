@@ -31,7 +31,6 @@ type t =
   | Slice
   | String
   | String_slice
-  | Text_builder
   | Literal
   | Template
   | From_template
@@ -97,7 +96,6 @@ let all =
     Slice;
     String;
     String_slice;
-    Text_builder;
     Literal;
     Template;
     From_template;
@@ -163,7 +161,6 @@ let locate_known = function
   | Slice -> ([ "list" ], "Slice")
   | String -> ([ "text" ], "String")
   | String_slice -> ([ "text" ], "StringSlice")
-  | Text_builder -> ([ "text" ], "TextBuilder")
   | Literal -> ([ "text" ], "Literal")
   | Template -> ([ "text" ], "Template")
   | From_template -> ([ "text" ], "FromTemplate")
