@@ -70,9 +70,9 @@ let () =
         String.includes ~affix:"`name` is" actual
         || not (String.includes ~affix:"`count` is 255" actual)
       then Harness.fail "message %S" actual);
-  Harness.test "an obligation with neither a proof nor a counterexample says so" (fun () ->
+  Harness.test "an obligation that the solver runs out of steps on says so" (fun () ->
       let actual = read_message Fixtures.Prover.sum_of_two_cubes in
-      if not (String.includes ~affix:"found neither a proof nor a counterexample" actual) then
+      if not (String.includes ~affix:"reached its step limit" actual) then
         Harness.fail "message %S" actual);
   Harness.test "code generic over an integer trait is proven for each type that implements it"
     (fun () ->
@@ -2113,10 +2113,109 @@ let () =
       | _, Error message -> Harness.fail "%s" message
       | Some query, Ok solver ->
           let request = Solver.make_request query in
-          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown then
-            Harness.fail "expected an unknown answer";
+          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown Out_of_steps then
+            Harness.fail "expected an unknown answer from the step limit";
           if Solver.count_queries_run solver <> 1 then
             Harness.fail "ran %d queries" (Solver.count_queries_run solver));
+  let power_of_itself_is_three =
+    let symbol = Logic.Symbol.Variable { label = "base"; numbers = [] } in
+    {
+      Logic.declarations = [ Logic.Constant (symbol, Logic.Int) ];
+      facts = [];
+      goal =
+        Logic.Operation
+          ( "not",
+            [
+              Logic.Operation
+                ( "=",
+                  [
+                    Logic.Operation ("^", [ Logic.Symbol symbol; Logic.Symbol symbol ]); Logic.int 3;
+                  ] );
+            ] );
+    }
+  in
+  Harness.test "an unknown answer before the step limit carries Z3's reason" (fun () ->
+      let query = power_of_itself_is_three in
+      match Solver.find () with
+      | Error message -> Harness.fail "%s" message
+      | Ok solver -> (
+          match Solver.solve_all solver [ (Solver.make_request query, query) ] with
+          | [ Unknown (Incomplete reason) ] ->
+              if not (String.includes ~affix:"incomplete (theory arithmetic)" reason) then
+                Harness.fail "reason %S" reason
+          | _ -> Harness.fail "expected an unknown answer with Z3's reason"));
+  Harness.test "an unknown answer's reason is read back from the cache" (fun () ->
+      let query = power_of_itself_is_three in
+      let request = Solver.make_request query in
+      let cached_answers = Hashtbl.create 1 in
+      let cache =
+        { Solver.find = Hashtbl.find_opt cached_answers; add = Hashtbl.replace cached_answers }
+      in
+      match (Solver.find ~cache (), Solver.find ~cache ()) with
+      | Ok first, Ok second ->
+          let solved = Solver.solve_all first [ (request, query) ] in
+          if Solver.solve_all second [ (request, query) ] <> solved then
+            Harness.fail "the cache gave another answer";
+          if Solver.count_queries_run second <> 0 then Harness.fail "ran the solver again"
+      | Error message, _ | _, Error message -> Harness.fail "%s" message);
+  Harness.test "an obligation that the solver stops on before the step limit names Z3's reason"
+    (fun () ->
+      let cache =
+        {
+          Solver.find = (fun _ -> Some "incomplete \"(incomplete quantifiers)\"\n");
+          add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
+        }
+      in
+      match Solver.find ~cache () with
+      | Error message -> Harness.fail "%s" message
+      | Ok solver -> (
+          let database =
+            Support.make_database
+              (Support.setup [ ("app::main", Fixtures.Prover.addition_that_can_overflow) ])
+          in
+          let file = Support.parse_file "app::main" in
+          match
+            Prover.list_diagnostics
+              (Prover.decide ~runs:[]
+                 (Database.make_proof_lookups database)
+                 solver
+                 (Database.list_proofs (Support.prove database file)))
+              file
+          with
+          | [ diagnostic ] ->
+              if
+                not
+                  (String.includes ~affix:"Z3 gives the reason `(incomplete quantifiers)`"
+                     diagnostic.message)
+              then Harness.fail "message %S" diagnostic.message
+          | diagnostics -> Harness.fail "%d diagnostics" (List.length diagnostics)));
+  Harness.test "a listed query has the span and the code of the diagnostic its obligation gives"
+    (fun () ->
+      let database =
+        Support.make_database
+          (Support.setup [ ("app::main", Fixtures.Prover.addition_that_can_overflow) ])
+      in
+      let file = Support.parse_file "app::main" in
+      match
+        ( Prover.list_queries
+            (Database.make_proof_lookups database)
+            (Database.list_proofs (Support.prove database file))
+            file,
+          Support.list_proof_diagnostics database file )
+      with
+      | [ query ], [ diagnostic ] ->
+          if query.span <> diagnostic.span then Harness.fail "the query has another span";
+          if Diagnostic.Code.Prover query.code <> diagnostic.code then
+            Harness.fail "the query has another code";
+          if
+            not
+              (String.includes ~affix:"(check-sat)\n" query.input
+              && String.ends_with ~suffix:"(get-info :reason-unknown)\n(get-info :rlimit)\n"
+                   query.input)
+          then Harness.fail "input %S" query.input
+      | queries, diagnostics ->
+          Harness.fail "%d queries and %d diagnostics" (List.length queries)
+            (List.length diagnostics));
   Harness.test "a second request for a query solved in a small model runs one query" (fun () ->
       match
         ( find_obligation_query Fixtures.Prover.addition_under_an_exists_in_a_forall Overflow,
@@ -2128,7 +2227,7 @@ let () =
           let first = Solver.make_request query
           and second = Solver.make_request ~terms:[ (Logic.Symbol.Reached 0, Logic.int 1) ] query in
           match List.hd (Solver.solve_all solver [ (first, query) ]) with
-          | Proven | Unknown -> Harness.fail "expected a counterexample"
+          | Proven | Unknown _ -> Harness.fail "expected a counterexample"
           | Counterexample _ ->
               let queries_before = Solver.count_queries_run solver in
               ignore (Solver.solve_all solver [ (second, query) ]);

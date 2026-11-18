@@ -27,6 +27,13 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `brew install z3` on macOS, or from the release's archive, and put it on
   the path or name it in `TRUSS_Z3`. CI downloads that release and checks
   its hash.
+- **`stage0/tools/prover_queries`** prints the solver's input for each
+  obligation that starts at a position, written as a diagnostic writes it:
+  `dune exec ./stage0/tools/prover_queries/prover_queries.exe --
+  standard/numbers/floats/floats.truss:6:13`. A file of a package is named
+  by its path. The output is one script for `z3 -in`, which prints each
+  obligation's answer, Z3's reason for an unknown answer, and the steps Z3
+  used.
 - **The Unicode tables are generated** from the Unicode character database
   files that `stage0/tools/unicode/sources.txt` lists with their hashes:
   the compiler's into `stage0/support/unicode/unicode_tables.ml`, and the standard

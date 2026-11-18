@@ -1,12 +1,3 @@
-let () =
-  match Sys.argv with
-  | [| _; "__serve"; key |] ->
-      Workspace.serve ~key ~handle:(fun ~report_progress (request : string) ->
-          report_progress "working";
-          String.length request);
-      Unix._exit 0
-  | _ -> ()
-
 let check_text text =
   let database = Support.make_database (Support.setup [ ("app::main", text) ]) in
   (match
@@ -363,6 +354,16 @@ let callee_and_caller =
 let with_helper =
   [ ("app::main", callee_and_caller); ("app::extra", "fn helper() -> Int64 { 1 }\n") ]
 
+let served_length_program =
+  Filename.concat (Filename.dirname Sys.executable_name) "served_length/served_length.exe"
+
+let request_served_length ~key request =
+  match Process.run served_length_program [ key; request ] with
+  | 0, output, _ -> String.split_on_char '\n' (String.trim output)
+  | status, _, errors ->
+      Harness.fail "served_length exited with status %d: %s" status (String.trim errors);
+      []
+
 let () =
   Harness.test "a client whose background process exits without serving gets an error at once"
     (fun () ->
@@ -396,19 +397,11 @@ let () =
       let cache = Harness.make_scratch_directory "ended-servers-cache" in
       Unix.putenv "TRUSS_CACHE" cache;
       let key = Harness.make_scratch_directory "still-served" in
-      let program = Unix.realpath Sys.executable_name in
-      let measure_served request =
-        match Workspace.For_testing.call_starting ~program ~key ~report_progress:ignore request with
-        | Ok (length : int) -> length
-        | Error message ->
-            Harness.fail "%s" message;
-            -1
-      in
-      let wait_for_first_periodic_work () = ignore (measure_served "two") in
+      let wait_for_first_periodic_work () = ignore (request_served_length ~key "two") in
       Fun.protect
         ~finally:(fun () -> ignore (Workspace.stop_servers ()))
         (fun () ->
-          ignore (measure_served "one");
+          ignore (request_served_length ~key "one");
           wait_for_first_periodic_work ();
           let servers = Filename.concat cache "servers" in
           let list_files () =
@@ -426,30 +419,31 @@ let () =
           if remaining <> running then
             Harness.fail "kept %s, where the running process has %s" (String.concat ", " remaining)
               (String.concat ", " running);
-          if measure_served "three" <> 5 then Harness.fail "the running process stopped answering"));
+          if request_served_length ~key "three" <> [ "progress working"; "length 5" ] then
+            Harness.fail "the running process stopped answering"));
+  Harness.test "a test executable given an argument exits at once instead of running its tests"
+    (fun () ->
+      Unix.putenv "TRUSS_TEST" "a name that no test has";
+      match Process.run Sys.executable_name [ "--help" ] with
+      | 2, output, errors ->
+          if output <> "" then Harness.fail "printed %S" output;
+          if not (String.includes ~affix:"takes no arguments, and was given `--help`" errors) then
+            Harness.fail "reported %S" errors
+      | status, _, _ -> Harness.fail "exited with status %d" status);
   Harness.test "the background process answers each request and sends its progress" (fun () ->
       Unix.putenv "TRUSS_CACHE" (Harness.make_scratch_directory "served-cache");
       let key = Harness.make_scratch_directory "served" in
-      let program = Unix.realpath Sys.executable_name in
-      let progressed = ref false in
-      let measure_served request =
-        match
-          Workspace.For_testing.call_starting ~program ~key
-            ~report_progress:(fun text -> if text = "working" then progressed := true)
-            request
-        with
-        | Ok (length : int) -> length
-        | Error message ->
-            Harness.fail "%s" message;
-            -1
-      in
       Fun.protect
         ~finally:(fun () -> ignore (Workspace.stop_servers ()))
         (fun () ->
-          let lengths = List.map measure_served [ "one"; "three"; "four" ] in
-          if lengths <> [ 3; 5; 4 ] then
-            Harness.fail "answered %s" (String.concat ", " (List.map string_of_int lengths));
-          if not !progressed then Harness.fail "sent no progress"))
+          let answers = List.map (request_served_length ~key) [ "one"; "three"; "four" ] in
+          let expected =
+            List.map
+              (fun length -> [ "progress working"; Printf.sprintf "length %d" length ])
+              [ 3; 5; 4 ]
+          in
+          if answers <> expected then
+            Harness.fail "answered %s" (String.concat "; " (List.map (String.concat ", ") answers))))
 
 let () =
   Harness.test "a caller's checked body reads the callee's interface and not its body" (fun () ->
