@@ -1,3 +1,8 @@
+let extend_standard_library files =
+  Database.For_testing.extend_package
+    ~loaded:[ Workspace.For_testing.load_standard_package_database () ]
+    ~package:Path.standard_package files
+
 let probe : Path.file =
   { module_ = { package = Path.standard_package; modules = [ "shared_probe" ] }; name = "probe" }
 
@@ -5,16 +10,7 @@ let source = Fixtures.Shared.shared_probe
 
 let loaded =
   lazy
-    (let database =
-       Database.create
-         [
-           {
-             name = Path.standard_package;
-             dependencies = [];
-             files = Standard_library.files @ [ (probe, source) ];
-           };
-         ]
-     in
+    (let database = extend_standard_library [ (probe, source) ] in
      Database.For_testing.add_root database
        (Generated (Program_main (Top { module_ = probe.module_; name = "main" })));
      let text = Source.create ~path:(Path.show_file probe) source in
@@ -70,16 +66,7 @@ let () =
   Codegen_support.test
     "Shared's operations need Tasks except directly in a method of a capability's impl, and its \
      value must be Storable" (fun () ->
-      let database =
-        Database.create
-          [
-            {
-              name = Path.standard_package;
-              dependencies = [];
-              files = Standard_library.files @ [ (checks, checks_source) ];
-            };
-          ]
-      in
+      let database = extend_standard_library [ (checks, checks_source) ] in
       let text = checks_source in
       let actual =
         List.map

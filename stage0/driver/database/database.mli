@@ -94,4 +94,7 @@ module For_testing : sig
   val add_root : t -> Lowered.Item.t -> unit
   val with_failing_part : string -> (unit -> 'a) -> 'a
   val propagate : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit
+
+  val extend_package :
+    loaded:package_database list -> package:Path.package -> (Path.file * string) list -> t
 end

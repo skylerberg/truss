@@ -48,7 +48,12 @@ let list_shown root path =
 
 let run_show root path = List.map (read_string_field "text") (list_shown root path)
 let read_header text = List.hd (String.split_on_char '\n' text)
-let () = Unix.putenv "TRUSS_CACHE" (Harness.make_scratch_directory "store")
+
+let () =
+  let store = Harness.make_scratch_directory "store" in
+  Workspace.For_testing.copy_standard_package_database ~into:store;
+  Workspace.reset ();
+  Unix.putenv "TRUSS_CACHE" store
 
 let () =
   test "-C before the command is read as an option of the command" (fun () ->
@@ -180,6 +185,7 @@ let () =
 
 let with_fresh_cache work =
   let cache = Harness.make_scratch_directory "cleaned-cache" in
+  Workspace.For_testing.copy_standard_package_database ~into:cache;
   Workspace.reset ();
   Unix.putenv "TRUSS_CACHE" cache;
   Fun.protect ~finally:Workspace.reset (fun () -> work cache)

@@ -25,6 +25,17 @@ let standard_package_database = lazy (Workspace.For_testing.load_standard_packag
 let make_database packages =
   Database.create ~loaded:[ Lazy.force standard_package_database ] packages
 
+let extend_standard_library (packages : Project.package list) =
+  Database.For_testing.extend_package
+    ~loaded:[ Lazy.force standard_package_database ]
+    ~package:Path.standard_package
+    (List.concat_map
+       (fun (package : Project.package) ->
+         if package.name <> Path.standard_package then
+           failwith (Path.show_package package.name ^ " is not the standard package");
+         package.files)
+       packages)
+
 let setup ?(dependencies = []) files : Project.package list =
   let files = List.map (fun (name, text) -> (parse_file name, text)) files in
   let package_of ((file : Path.file), _) = file.module_.package in

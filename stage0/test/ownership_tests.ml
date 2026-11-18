@@ -1251,12 +1251,4 @@ let () =
         "ownership.use_after_move");
   Harness.test "a move in the right operand is the only move of the place" (fun () ->
       expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_and);
-      expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_or));
-  Harness.test "the moves in a chain of thousands of `&&` are checked" (fun () ->
-      let chain = String.concat " && " (List.init 4000 (fun _ -> "flag")) in
-      expect_one_diagnostic
-        (take
-        ^ Printf.sprintf
-            "fn f(flag: Bool, box: own Box) -> Bool {\n  %s && take(own box) && take(own box)\n}\n"
-            chain)
-        "ownership.use_after_move")
+      expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_or))

@@ -169,7 +169,9 @@ Every stage of stage0 is tested the same way:
   package database, which a test executable loads once from the user's cache.
   A test must not give a new database the library's sources: that parses
   and checks the whole library again, so every such test gets slower each
-  time the library grows.
+  time the library grows. A test whose probe module must be in the standard
+  package, such as one that calls an intrinsic, extends the stored package
+  with `Database.For_testing.extend_package`, which checks only the probe.
 - **The standard library's own tests are written in Truss.** Each file of
   `stage0/test/codegen/library/` is a module of tests for one module of the
   library, named after it. `library_tests` builds every file's tests into

@@ -917,16 +917,14 @@ let () =
           {
             name = Path.standard_package;
             dependencies = [];
-            files =
-              Standard_library.files
-              @ List.map (fun (name, text) -> (Support.parse_file name, text)) files;
+            files = List.map (fun (name, text) -> (Support.parse_file name, text)) files;
           };
         ]
       in
       Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard::probe"
         ~check:(fun packages ->
           Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
-            (Database.create packages))
+            (Support.extend_standard_library packages))
         Fixtures.Infer.storage_lengthen_of_storages "types.unsatisfied_bound");
   Harness.test "a type written in a body that is not a type is an error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.let_of_type_display "types.not_a_type");
