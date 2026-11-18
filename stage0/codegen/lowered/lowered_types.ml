@@ -11,7 +11,7 @@ type ty =
   | Lend_mark
 
 type site = { definition : Path.t; offset : int }
-type root = Local of local | Static of { key : Item.t; ty : Ground.ty }
+type root = Local of local | Static of { item : Item.t; ty : Ground.ty }
 
 type place = { root : root; projections : projection list }
 
@@ -172,5 +172,10 @@ type static_value =
   | Static_array of static_value list
   | Static_storage of { element : Ground.ty; elements : static_value list }
 
-type data = { data_key : Item.t; ty : Ground.ty; value : static_value }
-type table = { table_key : Item.t; capability : Path.t option; entries : (Item.t * signature) list }
+type data = { data_item : Item.t; ty : Ground.ty; value : static_value }
+
+type table = {
+  table_item : Item.t;
+  capability : Path.t option;
+  entries : (Item.t * signature) list;
+}

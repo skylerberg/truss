@@ -47,8 +47,8 @@ let list_bound_methods (interface : Interface.Lookups.t) path type_arguments =
         (pair_generics signature.generics type_arguments)
   | None -> []
 
-let check (interface : Interface.Lookups.t) ~find_call_edges (key : Lowered.Item.t) fragment =
-  match key with
+let check (interface : Interface.Lookups.t) ~find_call_edges (item : Lowered.Item.t) fragment =
+  match item with
   | Code { path = caller; instantiation } -> (
       match find_call_edges (resolve_call_node interface caller) with
       | None -> ()
@@ -69,7 +69,7 @@ let check (interface : Interface.Lookups.t) ~find_call_edges (key : Lowered.Item
                        || List.exists (Path.equal callee) allowed
                        || List.exists (Path.equal (resolve_call_node interface callee)) allowed) ->
                   raise_bug "%s calls %s, which is not among its call edges"
-                    (Lowered.Item.to_string key) (Lowered.Item.to_string called)
+                    (Lowered.Item.to_string item) (Lowered.Item.to_string called)
               | _ -> ())
             (Emit_c.called fragment))
   | _ -> ()

@@ -715,7 +715,7 @@ let () =
                 in
                 let database, backend = Codegen_support.load ~roots:functions text in
                 List.iter
-                  (fun key -> ignore (Backend.For_testing.compile_fragment backend key))
+                  (fun item -> ignore (Backend.For_testing.compile_fragment backend item))
                   functions;
                 match Codegen_support.list_tests database with
                 | [] -> ()

@@ -362,14 +362,14 @@ let find_stored (type a) database (typed : a Part.stored) : a part option =
           Compiler_bug.raise_bug ~stage:"Database" "%s holds a value of another kind"
             (Part.show (Stored part)))
 
-let list_item_parts key = [ Part.Any (Lowered key); Part.Any (Test_key key) ]
+let list_item_parts item = [ Part.Any (Lowered item); Part.Any (Test_key item) ]
 
-let create_item database key =
+let create_item database item =
   List.iter
     (fun part ->
       if not (is_stale database part || Stored_table.mem database.item_values part) then
         mark_stale database part)
-    (list_item_parts key)
+    (list_item_parts item)
 
 let list_call_edges = function
   | Some (Value edges) -> edges
@@ -404,7 +404,7 @@ let write_value database typed value =
   | None -> Stored_table.remove values part);
   update_indexes database typed ~before ~after:value
 
-let list_item_edges database key = list_lowered_references (find_stored database (Lowered key))
+let list_item_edges database item = list_lowered_references (find_stored database (Lowered item))
 
 let make_value_slot database typed =
   {
@@ -825,10 +825,10 @@ let make_recording_lowering_lookups database note : Backend.Lookups.t =
 
 exception Reaches_unsupported of Backend.unsupported
 
-let compute_test_keys database keys =
+let compute_test_keys database items =
   let outcome =
     compute_and_record database
-      (List.map (fun key -> Part.Any (Test_key key)) keys)
+      (List.map (fun item -> Part.Any (Test_key item)) items)
       (fun note ->
         let require_supported = function
           | Ok value -> value
@@ -836,24 +836,25 @@ let compute_test_keys database keys =
         in
         match
           Backend.derive_test_keys
-            ~read_lowered:(fun key -> require_supported (read_value database note (Lowered key)))
-            ~read_known_key:(fun key -> require_supported (read_value database note (Test_key key)))
-            keys
+            ~read_lowered:(fun item -> require_supported (read_value database note (Lowered item)))
+            ~read_known_key:(fun item ->
+              require_supported (read_value database note (Test_key item)))
+            items
         with
         | test_keys -> Value (Ok test_keys)
         | exception Reaches_unsupported unsupported -> Value (Error unsupported)
         | exception Reads_failed_part -> Blocked)
   in
   List.iter
-    (fun key ->
-      store database (Any (Test_key key))
-        (make_value_slot database (Test_key key))
+    (fun item ->
+      store database (Any (Test_key item))
+        (make_value_slot database (Test_key item))
         (Some
            (match outcome with
-           | Value (Ok test_keys) -> Value (Ok (List.assoc key test_keys))
+           | Value (Ok test_keys) -> Value (Ok (List.assoc item test_keys))
            | Value (Error unsupported) -> Value (Error unsupported)
            | Failed _ | Blocked -> Blocked)))
-    keys
+    items
 
 type stored = {
   has_value : bool;
@@ -953,22 +954,22 @@ and claim_roots database claimant roots =
 and settle_references database =
   if References.has_changes database.references then
     collect database
-      (References.update database.references ~find_successors:(fun key ->
-           Some (list_item_edges database key)))
+      (References.update database.references ~find_successors:(fun item ->
+           Some (list_item_edges database item)))
         .removed
 
-and collect database keys = forget database (List.concat_map list_item_parts keys)
+and collect database items = forget database (List.concat_map list_item_parts items)
 
-let list_current_edges database key =
-  if is_stale database (Any (Lowered key)) then [] else list_item_edges database key
+let list_current_edges database item =
+  if is_stale database (Any (Lowered item)) then [] else list_item_edges database item
 
 let collect_ready_items database =
   let ready = Item_table.create 1024 in
   let pending = Queue.create () in
-  let reach key =
-    if not (Item_table.mem ready key) then begin
-      Item_table.replace ready key ();
-      Queue.add key pending
+  let reach item =
+    if not (Item_table.mem ready item) then begin
+      Item_table.replace ready item ();
+      Queue.add item pending
     end
   in
   let is_current_claimant (claimant : Part.t) =
@@ -985,7 +986,9 @@ let collect_ready_items database =
   ready
 
 let is_drained ~ready (Part.Any part) =
-  match part with Lowered key | Test_key key -> Item_table.mem (Lazy.force ready) key | _ -> true
+  match part with
+  | Lowered item | Test_key item -> Item_table.mem (Lazy.force ready) item
+  | _ -> true
 
 let read_lowering_settings database =
   match database.lowering with
@@ -1367,14 +1370,14 @@ type component =
 let list_component_parts = function
   | Single part -> [ part ]
   | Type_fact_component paths -> List.map (fun path -> Part.Any (Type_facts path)) paths
-  | Test_key_component keys -> List.map (fun key -> Part.Any (Test_key key)) keys
+  | Test_key_component items -> List.map (fun item -> Part.Any (Test_key item)) items
 
 let compute database unit =
   try
     match unit with
     | Single part -> compute_part database part
     | Type_fact_component paths -> compute_type_facts database paths
-    | Test_key_component keys -> compute_test_keys database keys
+    | Test_key_component items -> compute_test_keys database items
   with Interface.Properties.Recursion_limit message ->
     Compiler_bug.raise_bug ~stage:"Database"
       "a stage after the checks reached a recursion limit: %s" message
@@ -1404,15 +1407,17 @@ let list_components database (stage : Stage.t) package parts =
   | _ -> List.map (fun part -> Single part) parts
 
 let list_test_key_components database parts =
-  let keys = List.filter_map (function Part.Any (Test_key key) -> Some key | _ -> None) parts in
-  let in_closure = Item_table.of_seq (Seq.map (fun key -> (key, ())) (List.to_seq keys)) in
+  let items =
+    List.filter_map (function Part.Any (Test_key item) -> Some item | _ -> None) parts
+  in
+  let in_closure = Item_table.of_seq (Seq.map (fun item -> (item, ())) (List.to_seq items)) in
   List.map
-    (fun keys -> Test_key_component keys)
+    (fun items -> Test_key_component items)
     (Strongly_connected.list_components
        (module Lowered.Item)
-       ~list_successors:(fun key ->
-         List.filter (Item_table.mem in_closure) (list_item_edges database key))
-       keys)
+       ~list_successors:(fun item ->
+         List.filter (Item_table.mem in_closure) (list_item_edges database item))
+       items)
 
 let find_call_successors database calling_package node =
   match find_stored database (Call_edges (node, calling_package)) with

@@ -38,7 +38,7 @@ let resolve_impl (context : Definitions.context) substitution ~(trait : Types.tr
   in
   (impl, impl_arguments)
 
-let make_trait_method_key context substitution ~(trait : Types.trait_reference) ~name ~receiver
+let make_trait_method_item context substitution ~(trait : Types.trait_reference) ~name ~receiver
     ~self_type ~(instantiation : Types.instantiation) ~(evidence : Core.evidence) =
   let impl, impl_arguments = resolve_impl context substitution ~trait ~self_type ~evidence in
   let own = Monomorphic.ground_instantiation context.monomorphic substitution instantiation in
@@ -447,7 +447,7 @@ let count_passed (signature : Types.signature) =
   in
   (1 lsl defaulted) - 1
 
-let lower_item_call (st : Lowering.state) key ~(signature : Types.signature) ~substitution
+let lower_item_call (st : Lowering.state) item ~(signature : Types.signature) ~substitution
     ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?mask ?(lending = []) ~destination
     () =
   let mask = match mask with Some mask -> mask | None -> count_passed signature in
@@ -465,7 +465,7 @@ let lower_item_call (st : Lowering.state) key ~(signature : Types.signature) ~su
     @ List.map (lookup_evidence st)
         (Definitions.list_evidence st.context substitution signature.uses)
   in
-  let target = Lowered.Direct { function_ = Item key; signature = c_signature } in
+  let target = Lowered.Direct { function_ = Item item; signature = c_signature } in
   Emit_c.Builder.emit st.builder
     (Call
        {
@@ -505,7 +505,7 @@ let lower_literal_place st (ty : Ground.ty) text =
 
 let lower_static_constant (st : Lowering.state) path : Lowered.place =
   let ty = Interface.Definition.read_constant_type st.context.lookups.interface path in
-  { root = Static { key = Constant path; ty = Lowering.ground st ty }; projections = [] }
+  { root = Static { item = Constant path; ty = Lowering.ground st ty }; projections = [] }
 
 let read_list_parts monomorphic ty =
   match Monomorphic.compute_shape monomorphic ty with

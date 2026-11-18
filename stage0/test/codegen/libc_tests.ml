@@ -19,7 +19,7 @@ let operate builder ?destination ?(type_arguments = []) operation arguments =
 
 let build_entry build_body : Codegen_support.item =
  fun env ->
-  let builder = Emit_c.Builder.create env ~key:(Codegen_support.key "entry") in
+  let builder = Emit_c.Builder.create env ~item:(Codegen_support.code_item "entry") in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
   let result = build_body builder in
   Emit_c.Builder.finish builder (Return (Some (Copy (Lowered.make_local_place result))));
@@ -101,7 +101,7 @@ let () =
   Codegen_support.test "a call of a function the system lacks stops the program, and calls nothing"
     (fun () ->
       let env = Memory_layout.create linux ~compute_shape:(Codegen_support.compute_shape extra) in
-      let builder = Emit_c.Builder.create env ~key:(Codegen_support.key "entry") in
+      let builder = Emit_c.Builder.create env ~item:(Codegen_support.code_item "entry") in
       Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
       let length =
         Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
@@ -118,7 +118,7 @@ let () =
            ~destination:(Some (Lowered.make_local_place length))
            ~site:{ definition = Codegen_support.definition "entry"; offset = 0 });
       Emit_c.Builder.finish builder (Return (Some (Copy (Lowered.make_local_place length))));
-      let built =
+      let fragment =
         Emit_c.Builder.build builder
           {
             parameters = [];
@@ -126,7 +126,7 @@ let () =
             returns = true;
           }
       in
-      let c = Emit_c.For_testing.render_c (Emit_c.make_fragment env (Code built)) in
+      let c = Emit_c.For_testing.render_c fragment in
       if not (String.includes ~affix:"t_runtime_panic(" c) then
         Codegen_support.fail "the call does not stop the program:\n%s" c;
       if String.includes ~affix:"proc_pidpath(" c then
@@ -664,7 +664,7 @@ let () =
         }
       in
       let entry =
-        let builder = Emit_c.Builder.create env ~key:(Codegen_support.key "entry") in
+        let builder = Emit_c.Builder.create env ~item:(Codegen_support.code_item "entry") in
         Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
         let name = Emit_c.Builder.allocate_local builder (Codegen_support.value view_ty) in
         let text = path ^ "\000" in

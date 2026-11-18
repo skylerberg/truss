@@ -2,10 +2,10 @@ type t
 
 val create : Memory_layout.env -> t
 val is_trivial : t -> Ground.ty -> bool
-val drop : t -> Ground.ty -> Emit_c.Builder.item_code
-val build_any_drop : t -> Ground.ty -> Emit_c.Builder.item_code
-val build_any_copy : t -> Ground.ty -> Emit_c.Builder.item_code
-val copy : t -> Ground.ty -> Emit_c.Builder.item_code
+val drop : t -> Ground.ty -> Emit_c.fragment
+val build_any_drop : t -> Ground.ty -> Emit_c.fragment
+val build_any_copy : t -> Ground.ty -> Emit_c.fragment
+val copy : t -> Ground.ty -> Emit_c.fragment
 
 val copy_into :
   t -> Emit_c.Builder.t -> destination:Lowered.place -> source:Lowered.place -> Ground.ty -> unit
