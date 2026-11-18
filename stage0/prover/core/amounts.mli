@@ -18,8 +18,8 @@ val compute_callee_amount :
   State.context ->
   State.frame ->
   path:Path.t ->
-  parts:State.part list ->
-  bind_frame:(State.part -> State.frame) ->
+  clauses:State.clauses list ->
+  bind_frame:(State.clauses -> State.frame) ->
   uses:Types.capability list ->
   values:State.passed list ->
   change:(unit -> Logic.term) option ->
@@ -33,6 +33,8 @@ val has_potential : State.context -> ?seen:Types.ty list -> Types.ty -> bool
 
 val compute_potential :
   State.context -> State.frame -> ?seen:Types.ty list -> Types.ty -> Logic.term -> Logic.term
+
+val compute_elements_potential : State.context -> Types.ty -> Logic.term -> Logic.term
 
 val declare_trait_method_time :
   State.context ->

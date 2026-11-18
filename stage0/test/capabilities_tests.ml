@@ -697,7 +697,11 @@ let () =
         "types.mismatch");
   Harness.test "a trait method's callback with a time clause takes only functions that terminate"
     (fun () ->
-      expect_one_diagnostic Fixtures.Capabilities.spread_passed_to_flat_map "types.mismatch");
+      expect_one_diagnostic
+        Fixtures.Capabilities.slow_passed_to_a_trait_method_as_a_function_that_terminates
+        "types.mismatch");
+  Harness.test "a trait method's callback that uses a capability parameter may have no time clause"
+    (fun () -> expect_fine Fixtures.Capabilities.spread_passed_to_flat_map);
   Harness.test "a function of linear time is not passed as one of constant time" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.linear_spin_passed_as_constant_time
         "types.mismatch");
