@@ -413,9 +413,11 @@ and project_associated_type lookups ~list_bounds ?defining type_ (trait : Types.
 
 and project_declared_type lookups ~list_bounds ?defining type_ (trait : Types.trait_reference) name
     =
-  match List.assoc_opt name trait.associated with
-  | Some fixed -> Some fixed
-  | None -> (
+  match (List.assoc_opt name trait.associated, type_) with
+  | Some fixed, _ -> Some fixed
+  | None, Types.Literal (kind, _) ->
+      project_for_every_type_of_kind lookups ~list_bounds ?defining type_ kind trait name
+  | None, _ -> (
       match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
       | Some (From_impl { impl; substitution }) -> (
           match Definition.find_impl_interface lookups impl with
@@ -445,6 +447,37 @@ and project_declared_type lookups ~list_bounds ?defining type_ (trait : Types.tr
       | Some (Accepted (Types.Variable _)) -> None
       | Some (Accepted unknown) -> Some unknown
       | None -> None)
+
+and project_for_every_type_of_kind lookups ~list_bounds ?defining literal kind
+    (trait : Types.trait_reference) name =
+  let replace ~from ~into type_ =
+    Types.map (fun part -> if Types.equal part from then Some into else None) type_
+  in
+  let replace_in_trait ~from ~into (reference : Types.trait_reference) : Types.trait_reference =
+    {
+      reference with
+      trait_arguments =
+        List.map
+          (function
+            | Types.Type argument -> Types.Type (replace ~from ~into argument) | value -> value)
+          reference.trait_arguments;
+      associated =
+        List.map (fun (name, type_) -> (name, replace ~from ~into type_)) reference.associated;
+    }
+  in
+  match
+    List.map
+      (fun candidate ->
+        Option.map
+          (replace ~from:candidate ~into:literal)
+          (project_declared_type lookups ~list_bounds ?defining candidate
+             (replace_in_trait ~from:literal ~into:candidate trait)
+             name))
+      (Types.list_literal_types kind)
+  with
+  | Some projected :: rest when List.for_all (Option.equal Types.equal (Some projected)) rest ->
+      Some projected
+  | _ -> None
 
 and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Types.trait_reference)
     name =

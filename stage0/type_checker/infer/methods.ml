@@ -447,22 +447,8 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
   with
   | Error error -> error
   | Ok (checked, left_out) ->
-      let result, reference =
-        Name_lookup.name_unknown_associated_types state self_type reference
-          (Types.extract_result_type instance.signature.output)
-      in
-      Modes.note_lending state value instance.signature.output;
-      state.tables.calls.(value.id) <-
-        Some
-          {
-            callee;
-            arguments = receiver_argument @ checked;
-            omitted_defaults = left_out;
-            callee_result = result;
-          };
-      Form.register_call state value;
-      Name_lookup.resolve_evidence state value self_type reference;
-      result
+      finish_trait_call state value ~self_type ~trait:reference ~callee instance
+        (receiver_argument @ checked) left_out
 
 and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_arguments
     (member : Syntax.name) arguments =
@@ -758,11 +744,6 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
           with
           | Error error -> error
           | Ok (checked, left_out) ->
-              let result, trait =
-                Name_lookup.name_unknown_associated_types state receiver_type trait
-                  (Types.extract_result_type instance.signature.output)
-              in
-              Modes.note_lending state value instance.signature.output;
               let receiver_argument =
                 {
                   Tables.expression = receiver.id;
@@ -770,14 +751,40 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                   mode = (match method_.method_receiver with Mut -> Mut | Own -> Own | _ -> Read);
                 }
               in
-              state.tables.calls.(value.id) <-
-                Some
-                  {
-                    callee;
-                    arguments = receiver_argument :: checked;
-                    omitted_defaults = left_out;
-                    callee_result = result;
-                  };
-              Form.register_call state value;
-              Name_lookup.resolve_evidence state value receiver_type trait;
-              result))
+              finish_trait_call state value ~self_type:receiver_type ~trait ~callee instance
+                (receiver_argument :: checked) left_out))
+
+and name_unknown_associated_types state self_type (reference : Types.trait_reference) result =
+  let self_type = State.zonk state self_type in
+  let associated = ref [] in
+  let result =
+    Types.map
+      (function
+        | Types.Projection { base; trait; name }
+          when Path.equal trait.trait reference.trait
+               && Types.equal (State.zonk state base) self_type
+               && Unify.list_unknowns state.unifier self_type <> [] ->
+            Some
+              (match List.assoc_opt name !associated with
+              | Some variable -> variable
+              | None ->
+                  let variable = State.make_fresh_type state in
+                  associated := (name, variable) :: !associated;
+                  variable)
+        | _ -> None)
+      (State.normalize state result)
+  in
+  (result, List.rev !associated)
+
+and finish_trait_call state (value : Syntax.expression) ~self_type ~trait ~callee
+    (instance : Instantiation.instance) arguments left_out =
+  let result, solved =
+    name_unknown_associated_types state self_type trait
+      (Types.extract_result_type instance.signature.output)
+  in
+  Modes.note_lending state value instance.signature.output;
+  state.tables.calls.(value.id) <-
+    Some { callee; arguments; omitted_defaults = left_out; callee_result = result };
+  Form.register_call state value;
+  Name_lookup.resolve_evidence ~solved state value self_type trait;
+  result

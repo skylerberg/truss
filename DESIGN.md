@@ -139,7 +139,7 @@ Rules: [Number literals](SPECIFICATION.md#number-literals).
 | A literal operand takes the type of the other operand. | Go's untyped constants work this way. The rule never consults the set of `impl`s, so adding an `impl` never changes the type of an existing literal. Rust lets the search for an `impl` decide, so an `impl` added later can make an existing call ambiguous. |
 | A literal that no use decides takes the first default type that its uses allow. | A shift amount and a literal too large for `Int64` need no rule of their own. |
 | Only the sealed integer traits take part in choosing a default. | No package can implement them, so adding an `impl` never changes the default of an existing literal. Haskell limits its defaulting to the standard classes for the same reason. |
-| A literal has the methods of a trait that every type of its kind implements. | `count.saturating_add(1)` would otherwise fix `count` at `Int64` before a later use decides it, and the type of a local would depend on the order of its uses. |
+| A literal has the methods of a trait that every type of its kind implements, and the associated types that every such type gives alike. | `count.saturating_add(1)` would otherwise fix `count` at `Int64` before a later use decides it, and the type of a local would depend on the order of its uses. |
 | A leading zero is an error. | `0755` is octal in C and the shell, where it sets file permissions. Read as decimal, it would silently set the wrong permissions (*LLM habits*). |
 
 [Functions](#functions) explains how a local that is declared from a literal

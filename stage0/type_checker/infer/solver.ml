@@ -245,11 +245,14 @@ let list_frame_unknowns (state : State.state) (frame : State.frame) =
   @ List.concat_map (Unify.list_argument_unknowns state.unifier) call_arguments
 
 let hand_literals_to_parent (state : State.state) (frame : State.frame) (parent : State.frame) =
+  let escaping_types =
+    List.map (fun local -> (local, state.tables.local_types.(local))) frame.declared
+    @ Option.to_list (Option.map (fun id -> (id, state.tables.types.(id))) frame.escaping)
+  in
   if parent.frame_specification = frame.frame_specification then
     List.iter
-      (fun local ->
-        match state.tables.local_types.(local) with
-        | Some type_ ->
+      (function
+        | local, Some type_ ->
             List.iter
               (function
                 | Unify.Unknown_literal (kind, index) when index >= frame.first_variable ->
@@ -258,8 +261,8 @@ let hand_literals_to_parent (state : State.state) (frame : State.frame) (parent 
                     state.undecided <- { index; kind; local; owner = parent } :: state.undecided
                 | _ -> ())
               (Unify.list_unknowns state.unifier type_)
-        | None -> ())
-      frame.declared
+        | _, None -> ())
+      escaping_types
 
 let default_literals (state : State.state) (frame : State.frame) ~is_undecided =
   let literals =
@@ -439,8 +442,8 @@ let settle (state : State.state) (frame : State.frame) =
         @ parent.obligations
   | None -> ()
 
-let run_in_statement (state : State.state) (env : State.env) (span : Source.Definition_span.t) body
-    =
+let run_in_statement ?escaping (state : State.state) (env : State.env)
+    (span : Source.Definition_span.t) body =
   let frame : State.frame =
     {
       first_variable = state.unifier.next + 1;
@@ -448,6 +451,7 @@ let run_in_statement (state : State.state) (env : State.env) (span : Source.Defi
       recorded_loops = [];
       bindings = [];
       declared = [];
+      escaping = Option.map (fun (value : Syntax.expression) -> value.id) escaping;
       obligations = [];
       reported_unmet_bounds = [];
       compiled_expressions = [];

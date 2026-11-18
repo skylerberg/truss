@@ -433,8 +433,8 @@ and match_ state env ?expected (value : Syntax.expression) scrutinees arms =
     List.map
       (fun (scrutinee : Syntax.expression) ->
         ( scrutinee,
-          Solver.run_in_statement state env (State.read_span state scrutinee.id) (fun () ->
-              Hooks.check_expression state env scrutinee) ))
+          Solver.run_in_statement ~escaping:scrutinee state env (State.read_span state scrutinee.id)
+            (fun () -> Hooks.check_expression state env scrutinee) ))
       scrutinees
   in
   State.register_expression state value (fun () ->

@@ -378,9 +378,10 @@ and list_trait_static_methods (state : State.state) path name receiver =
     (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
        ~from:state.key.module_ name)
 
-and resolve_evidence state (value : Syntax.expression) self_type (reference : Types.trait_reference)
-    =
-  Solver.require state self_type reference
+and resolve_evidence ?(solved = []) ?report_unmet state (value : Syntax.expression) self_type
+    (reference : Types.trait_reference) =
+  Solver.require state self_type
+    { reference with associated = reference.associated @ solved }
     ~on_met:(fun evidence ->
       match state.tables.calls.(value.id) with
       | Some ({ callee = Trait_method method_; _ } as call) ->
@@ -397,32 +398,13 @@ and resolve_evidence state (value : Syntax.expression) self_type (reference : Ty
                     };
               }
       | _ -> State.raise_bug "evidence for a call that is not of a trait method")
-    ~on_unmet:(fun self_type _ ->
-      State.add_diagnostic state No_impl (State.read_span state value.id)
-        (Printf.sprintf "`%s` does not implement `%s`." (Types.show self_type)
-           (Types.show_trait (Unify.zonk_trait state.unifier reference))))
-
-and name_unknown_associated_types state self_type (reference : Types.trait_reference) result =
-  let self_type = State.zonk state self_type in
-  let associated = ref [] in
-  let result =
-    Types.map
-      (function
-        | Types.Projection { base; trait; name }
-          when Path.equal trait.trait reference.trait
-               && Types.equal (State.zonk state base) self_type
-               && Unify.list_unknowns state.unifier self_type <> [] ->
-            Some
-              (match List.assoc_opt name !associated with
-              | Some variable -> variable
-              | None ->
-                  let variable = State.make_fresh_type state in
-                  associated := (name, variable) :: !associated;
-                  variable)
-        | _ -> None)
-      (State.normalize state result)
-  in
-  (result, { reference with associated = List.rev !associated })
+    ~on_unmet:(fun self_type mismatch ->
+      match report_unmet with
+      | Some report_unmet -> report_unmet self_type mismatch
+      | None ->
+          State.add_diagnostic state No_impl (State.read_span state value.id)
+            (Printf.sprintf "`%s` does not implement `%s`." (Types.show self_type)
+               (Types.show_trait (Unify.zonk_trait state.unifier reference))))
 
 and list_trait_candidates (state : State.state) receiver_type name =
   let with_method (trait : Types.trait_reference) =

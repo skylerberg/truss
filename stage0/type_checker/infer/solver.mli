@@ -1,4 +1,10 @@
-val run_in_statement : State.state -> State.env -> Source.Definition_span.t -> (unit -> 'a) -> 'a
+val run_in_statement :
+  ?escaping:Syntax.expression ->
+  State.state ->
+  State.env ->
+  Source.Definition_span.t ->
+  (unit -> 'a) ->
+  'a
 
 val require :
   State.state ->

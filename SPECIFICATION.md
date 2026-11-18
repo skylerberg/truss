@@ -174,6 +174,10 @@ and `Float64` for a float. In a specification, an integer literal tries
   kind meets, and has the methods of such a trait: `count.saturating_add(1)`
   leaves `count` undecided, and after `let range = 0..3`, `for index in range`
   finds `Range`'s `Iterable`, whose bound `Countable` every integer type meets.
+- An associated type of a literal is the one that every type of its kind
+  gives alike. With `fn doubled[Value: Add[Value]](value: Value) -> Value.Output`,
+  `doubled(3)` has the literal's own type, because every integer type's
+  `Output` under `Add` is itself.
 - A call of a method that no such trait declares, such as
   `value.to_big_endian_bytes()`, needs the literal's type, so the literal
   takes its default type at the call.

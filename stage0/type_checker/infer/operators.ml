@@ -189,72 +189,69 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
       | _ ->
           let type_ = Hooks.check_expression state env ?expected inner in
           let resolved = State.normalize state type_ in
+          let is_literal = match resolved with Types.Literal _ -> true | _ -> false in
           if resolved = Types.Hole then Types.Hole
-          else if
-            is_unsigned_integer state resolved
-            || match resolved with Types.Literal _ -> true | _ -> false
-          then begin
-            check_built_in_operator state value [ inner ] type_;
-            State.register_expression state value (fun () ->
-                Form.build_operator state value Negate [ inner ]);
-            Solver.require_type state type_
-              ~holds:(fun resolved -> not (is_unsigned_integer state resolved))
-              ~on_unmet:(report_negated_unsigned state value)
-              ()
-          end
-          else if
-            env.specification && (State.is_integer_type state resolved || resolved = Types.Integer)
-          then begin
+          else if env.specification && is_integer_operand state resolved then begin
+            if is_literal then ignore (State.unify state type_ Types.Integer);
             State.register_expression state value (fun () ->
                 Form.build_operator state value Negate [ inner ]);
             Types.Integer
           end
           else begin
             Form.register_call state value;
-            check_operator_call
-              ~operands:
-                [ { Tables.expression = inner.id; core_argument_index = 0; mode = Types.Read } ]
-              state value ~trait:(Well_known.make_path Negate) ~method_:"negate" ~left:type_
-              ~right:None
+            let result =
+              check_operator_call
+                ~report_no_impl:(fun resolved ->
+                  if is_unsigned_integer state resolved then
+                    Some (report_negated_unsigned state value resolved)
+                  else None)
+                ~operands:
+                  [ { Tables.expression = inner.id; core_argument_index = 0; mode = Types.Read } ]
+                state value ~trait:(Well_known.make_path Negate) ~method_:"negate" ~left:type_
+                ~right:None
+            in
+            if is_literal then ignore (State.unify state result type_);
+            result
           end)
 
 and report_negated_unsigned state (value : Syntax.expression) resolved =
   State.add_diagnostic state Negated_unsigned (State.read_span state value.id)
     (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (Types.show resolved))
 
-and check_operator_call ~operands state (value : Syntax.expression) ~trait ~method_ ~left ~right =
+and check_operator_call ?(report_no_impl = fun _ -> None) ~operands state
+    (value : Syntax.expression) ~trait ~method_ ~left ~right =
   let arguments = match right with Some right -> [ Types.Type right ] | None -> [] in
   let reference = State.make_trait_reference ~arguments trait in
   let result = State.make_fresh_type state in
-  let make_call evidence : Tables.call =
-    {
-      callee =
-        Trait_method
-          {
-            trait = Unify.zonk_trait state.unifier reference;
-            name = method_;
-            receiver = Read;
-            self_type = left;
-            instantiation = Types.no_instantiation;
-            evidence;
-          };
-      arguments = operands;
-      omitted_defaults = [];
-      callee_result = result;
-    }
-  in
-  state.tables.calls.(value.id) <- Some (make_call Built_in);
-  Solver.require state left
-    { reference with associated = [ ("Output", result) ] }
-    ~on_met:(fun evidence ->
-      state.tables.calls.(value.id) <- Some (make_call (State.convert_evidence evidence)))
-    ~on_unmet:(fun left output ->
+  state.tables.calls.(value.id) <-
+    Some
+      {
+        callee =
+          Trait_method
+            {
+              trait = reference;
+              name = method_;
+              receiver = Read;
+              self_type = left;
+              instantiation = Types.no_instantiation;
+              evidence = Built_in;
+            };
+        arguments = operands;
+        omitted_defaults = [];
+        callee_result = result;
+      };
+  Name_lookup.resolve_evidence state value left reference
+    ~solved:[ ("Output", result) ]
+    ~report_unmet:(fun left output ->
       match output with
-      | None ->
-          State.add_diagnostic state No_impl (State.read_span state value.id)
-            (Printf.sprintf "`%s` does not implement `%s`, so the operator does not apply."
-               (Types.show left)
-               (Types.show_trait (Unify.zonk_trait state.unifier reference)))
+      | None -> (
+          match report_no_impl left with
+          | Some report -> report
+          | None ->
+              State.add_diagnostic state No_impl (State.read_span state value.id)
+                (Printf.sprintf "`%s` does not implement `%s`, so the operator does not apply."
+                   (Types.show left)
+                   (Types.show_trait (Unify.zonk_trait state.unifier reference))))
       | Some (_, output) ->
           State.add_diagnostic state Mismatch (State.read_span state value.id)
             (Printf.sprintf "This operator gives `%s`, and `%s` is expected."

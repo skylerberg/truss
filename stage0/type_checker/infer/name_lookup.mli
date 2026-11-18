@@ -47,10 +47,14 @@ val list_trait_static_methods :
   Path.receiver ->
   (Types.trait_reference * Types.trait_method) list
 
-val resolve_evidence : State.state -> Syntax.expression -> Types.ty -> Types.trait_reference -> unit
-
-val name_unknown_associated_types :
-  State.state -> Types.ty -> Types.trait_reference -> Types.ty -> Types.ty * Types.trait_reference
+val resolve_evidence :
+  ?solved:(string * Types.ty) list ->
+  ?report_unmet:(Types.ty -> (string * Types.ty) option -> Diagnostic.reported) ->
+  State.state ->
+  Syntax.expression ->
+  Types.ty ->
+  Types.trait_reference ->
+  unit
 
 val instantiate_trait_method :
   State.state ->

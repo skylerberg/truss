@@ -39,6 +39,7 @@ type frame = {
   mutable recorded_loops : (Syntax.id * Syntax.id) list;
   mutable bindings : int list;
   mutable declared : int list;
+  escaping : Syntax.id option;
   mutable obligations : obligation list;
   mutable reported_unmet_bounds : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
   mutable compiled_expressions : int list;

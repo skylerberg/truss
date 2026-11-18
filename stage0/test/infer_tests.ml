@@ -246,6 +246,16 @@ let () =
   Harness.test "a negated local of literals waits for the same decision" (fun () ->
       expect_type Fixtures.Infer.negation_of_a_literal_local "-count" "Int64";
       expect_type Fixtures.Infer.negation_of_a_float_literal_local "-ratio" "Float64");
+  Harness.test "an associated type of a literal is the one every type of its kind gives" (fun () ->
+      let text = Fixtures.Infer.literal_passed_to_a_function_returning_an_associated_type in
+      expect_type text "doubled(3)" "UInt8";
+      expect_type text "doubled(3)" ~occurrence:2 "Int64";
+      expect_fine text);
+  Harness.test "a scrutinee's literal type is decided by the statement that holds the match"
+    (fun () ->
+      let text = Fixtures.Infer.match_on_a_literal_decided_by_an_arm in
+      expect_type text "3" "UInt8";
+      expect_fine text);
   Harness.test "a negated local of literals decided unsigned is an error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.negation_of_a_literal_local_decided_unsigned
         "types.negated_unsigned");

@@ -63,22 +63,23 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
           (Printf.sprintf "A range pattern matches an integer or a `Character`, not `%s`."
              (State.show state resolved))
       in
-      let resolved = State.resolve state type_ in
-      if rejects_ranges resolved then ignore (report_not_range_type resolved)
-      else begin
-        List.iter
-          (fun (bound : Syntax.range_end) ->
-            match bound.kind with
-            | End_literal literal ->
-                check_literal_pattern state bound.id (State.read_span state bound.id) literal type_
-            | End_constant constant ->
-                check_qualified_constant state bound.id (State.read_span state bound.id) constant
-                  type_)
-          [ start; stop ];
-        ignore
-          (Solver.require_type state type_
-             ~holds:(fun resolved -> not (rejects_ranges resolved))
-             ~on_unmet:report_not_range_type ())
+      begin match
+        Solver.require_type state type_
+          ~holds:(fun resolved -> not (rejects_ranges resolved))
+          ~on_unmet:report_not_range_type ()
+      with
+      | Types.Error _ -> ()
+      | _ ->
+          List.iter
+            (fun (bound : Syntax.range_end) ->
+              match bound.kind with
+              | End_literal literal ->
+                  check_literal_pattern state bound.id (State.read_span state bound.id) literal
+                    type_
+              | End_constant constant ->
+                  check_qualified_constant state bound.id (State.read_span state bound.id) constant
+                    type_)
+            [ start; stop ]
       end
   | Variant { name = variant_name; fields } -> (
       match type_ with

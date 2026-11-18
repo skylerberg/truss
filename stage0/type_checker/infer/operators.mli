@@ -27,6 +27,7 @@ val check_prefix :
   Types.ty
 
 val check_operator_call :
+  ?report_no_impl:(Types.ty -> Diagnostic.reported option) ->
   operands:Tables.argument list ->
   State.state ->
   Syntax.expression ->
