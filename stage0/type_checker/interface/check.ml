@@ -108,22 +108,21 @@ let list_signature_types (signature : Types.signature) =
       signature.generics
 
 let check_real_implementations (state : Checking.state) (resolved : Resolve.resolved) ~recipient
-    ~report_panic (uses : Syntax.capability_reference list) =
+    (uses : Syntax.capability_reference list) =
   List.iter
     (fun (capability : Syntax.capability_reference) ->
       match capability.kind with
       | Capability_path written -> (
           match resolved.names.(written.path.last.id) with
           | Some (Definition (Capability, path))
-            when Option.is_none (Definition.find_real_implementation state.lookups path) ->
-              if Well_known.is Panic path then report_panic capability
-              else
-                Checking.report state No_real_implementation state.spans.(capability.id)
-                  (Printf.sprintf
-                     "`%s` has no real implementation, so the runtime cannot provide it to %s. \
-                      Provide an implementation in the body with `provide`."
-                     (Elaborator.show_path written.path)
-                     recipient)
+            when (not (Well_known.is Panic path))
+                 && Option.is_none (Definition.find_real_implementation state.lookups path) ->
+              Checking.report state No_real_implementation state.spans.(capability.id)
+                (Printf.sprintf
+                   "`%s` has no real implementation, so the runtime cannot provide it to %s. \
+                    Provide an implementation in the body with `provide`."
+                   (Elaborator.show_path written.path)
+                   recipient)
           | _ -> ())
       | Self_capabilities _ | Associated_capabilities _ | Generic_capability _ -> ())
     uses
@@ -152,7 +151,7 @@ let check_main state resolved (clauses : Syntax.clause list) (signature : Types.
   in
   if not (list_of_string && exit_code && signature.generics = [] && signature.receiver = None) then
     Checking.report state Main_signature span main_message;
-  check_real_implementations state resolved ~recipient:"`main`" ~report_panic:ignore
+  check_real_implementations state resolved ~recipient:"`main`"
     (List.concat_map
        (fun (clause : Syntax.clause) -> match clause.kind with Uses written -> written | _ -> [])
        clauses)
@@ -170,29 +169,6 @@ let make_element_removal (spans : Source.Definition_span.t array)
   | _, Some next -> delete spans.(removed).start spans.(next).start
   | Some previous, None -> delete spans.(previous).stop spans.(removed).stop
   | None, None -> delete clause.start clause.stop
-
-let check_test_uses (state : Checking.state) (resolved : Resolve.resolved)
-    (name : Syntax.string_literal) (uses : Syntax.capability_reference list) =
-  match List.rev uses with
-  | [] -> ()
-  | (last : Syntax.capability_reference) :: _ ->
-      let clause =
-        Source.Definition_span.make state.spans.(name.id).stop state.spans.(last.id).stop
-      in
-      let elements =
-        List.map (fun (capability : Syntax.capability_reference) -> capability.id) uses
-      in
-      let report_panic (panic : Syntax.capability_reference) =
-        Checking.report state No_real_implementation state.spans.(panic.id)
-          ~fixes:
-            [
-              Diagnostic.fix "Remove `Panic`"
-                [ make_element_removal state.spans ~clause elements panic.id ];
-            ]
-          "`Panic` has no real implementation. Every test has it without declaring it. Declaring \
-           it would make this test external, so the test's result would never be cached."
-      in
-      check_real_implementations state resolved ~recipient:"a test" ~report_panic uses
 
 let check_duplicates state member_kind (names : Syntax.name list) =
   ignore
@@ -495,7 +471,8 @@ let check (state : Checking.state) =
     | None, Impl { trait_; members; _ }, Impl_interface impl ->
         Impl_checks.check_impl state members impl trait_
     | None, Constant { name = Member_name (head, _); _ }, _ -> check_method_location state head
-    | None, Test { name; uses; _ }, Test_interface _ -> check_test_uses state resolved name uses
+    | None, Test { uses; _ }, Test_interface _ ->
+        check_real_implementations state resolved ~recipient:"a test" uses
     | None, _, _ -> ()
 
 let list_diagnostics (lookups : Lookups.t) key =

@@ -432,7 +432,7 @@ change to its API.
 | A handle is not `Copyable`. | Copying one would duplicate an operating-system handle, which can fail, and `copy()` cannot fail. |
 | Generic code copies only under a `Copyable` bound. | An unbounded type parameter then accepts every type, handles included. |
 | A copy is identical to its original. | A storage's capacity and its potential are functions of the value. A copy shrunk to its length would make `items.copy().capacity() == items.capacity()` false at run time, and give the copy a potential other than the one `copy()` paid for. |
-| A string literal is a `String` constant, copied where an owned `String` is needed. | Every `String` then owns its buffer. Copy-on-write needs a run-time test of whether the buffer is static before each write, drop, and copy, and gives a literal a capacity below its length, which the prover assumes cannot happen. |
+| A string literal is a `String` constant, copied where an owned `String` is needed. | Every `String` that code mutates or drops then owns its buffer. Copy-on-write needs a run-time test of whether the buffer is static before each write, drop, and copy, and gives a literal a capacity below its length, which the prover assumes cannot happen. |
 | A string literal where a `StringSlice` is expected is a `StringSlice`. | A `match` whose arms are literals then has the expected type. Converting its `String` value instead would make a view of a copy that is dropped at the end of the statement. |
 
 ### Views
@@ -481,6 +481,8 @@ rule excludes `Plain` arguments, such as indexes, so that case is rare.
 | Generic code that keeps a value requires `Storable`. | A type parameter may stand for a view, and the bound stops generic code from storing one. |
 | An `any Trait` is a view unless `Trait` requires `Storable`. | `any` hides the type, so the compiler cannot see whether the value holds a view. |
 | `mut` access is never stored. | It lasts for one call, one iteration, or one `provide mut` block, so the ownership check tracks no mutable reference from one statement to the next. |
+| A view is passed as its owning type to a read-only parameter whose declared type is a type parameter or an associated type. | Generic code cannot declare the view of its type parameter: `Map.get` takes `key: Key`, so a lookup in a `Map[String, Int64]` with a `StringSlice` allocated a `String` first. A callee cannot mutate, move, drop, or store a read-only parameter, so it cannot tell a `String` that owns its buffer from one that views another's, as it cannot tell a view from a copy. A `List` and a `String` hold their elements outside the value, so a view that the callee returns views storage that the argument already views. Rust needs the `Borrow` trait and a blanket `impl` for this lookup, and C++ a transparent comparator. |
+| A parameter declared as `List` or `String` takes no view. | Its signature can declare `Slice` or `StringSlice`, which takes both. If it took a view too, the two declarations would accept the same arguments, and every signature would choose between them for no reason. |
 
 ### Lending methods
 
@@ -869,7 +871,7 @@ reason: a later release of the trait can add one.
 3. A reader could not tell which `process` runs in `process(item)`.
 
 A trait with type parameters covers most uses of overloading:
-`Int64.from(count)` selects an `impl` of `From[Source]` by the type of
+`BigInteger.from(count)` selects an `impl` of `From[Source]` by the type of
 `count`. It avoids all three costs, because the argument types are inferred
 first, nothing is selected by the expected result type, and the candidate
 `impl`s live in known packages ([Implementations](#implementations)).
@@ -1031,6 +1033,15 @@ intrinsic at any other type parameter: the obligations that prevent an
 overflow or an out-of-range conversion need a range and a width that the
 parameter lacks.
 
+**A conversion between built-in scalars is a method of the target type,
+not an `impl` of `From` or `TryFrom`.** `Int64.from_integer(count)` requires
+that `count` fits, and `Int64.try_from_integer(count)` returns a `Result`.
+Each is one method of `FixedWidthInteger`, generic over the source and proven
+for every pair of integer types, with one contract. Impls would need one per
+pair. A float converts with `try_from_float64` and `to_float64`, and a
+`Character` with `from_code` and `code`. `From` and `TryFrom` are for
+conversions that involve a library type, as in `BigInteger.from(count)`.
+
 ### Floats
 
 Rules: [Floats](SPECIFICATION.md#floats).
@@ -1058,9 +1069,8 @@ an operation produces.
 
 Rules: [Failure](SPECIFICATION.md#failure).
 
-Only a test and a function whose signature declares `uses Panic` can panic.
-The exceptions are running out of memory and overflowing the stack, which no
-language rules out.
+Code panics only where it has `Panic`. The exceptions are running out of
+memory and overflowing the stack, which no language rules out.
 
 Every operation that can fail is a proof obligation: an integer overflow, a
 division by zero, an index out of bounds, a shift that is too large, and
@@ -1068,14 +1078,13 @@ division by zero, an index out of bounds, a shift that is too large, and
 the fact locally, requires the fact of its caller, calls a checked variant
 that returns an `Option` or a `Result`, or declares `uses Panic`.
 
-**`Panic` turns a proof into a check.** In a test, and in a function that
-declares `uses Panic`, an operation that is not proven safe is checked when
-it runs, and the proof goes on as though it held, since a failed check ends
-the program. The check is in every build, so a release build panics where a
-test build does. An index checks the precondition of the `impl`'s `at`. An
-index through a bound is proven: the prover reads the trait's precondition
-there, and the call would check the `impl`'s, so a check would not be the
-fact the proof assumed.
+**`Panic` turns a proof into a check.** In code that has `Panic`, an
+operation that is not proven safe is checked when it runs, and the proof goes
+on as though it held, since a failed check ends the program. The check is in
+every build, so a release build panics where a test build does. An index
+checks the precondition of the `impl`'s `at`. An index through a bound is
+proven: the prover reads the trait's precondition there, and the call would
+check the `impl`'s, so a check would not be the fact the proof assumed.
 
 **A lambda proves its operations.** Its capabilities are inferred before the
 prover runs. A lambda that could panic where its type allows no `Panic` would
@@ -1087,6 +1096,11 @@ whose invariant was broken partway through an update. A program that must
 keep running proves that it cannot panic instead: a server requires a
 handler type without `Panic`, so no request can end the process. If the
 process fails anyway, a supervisor restarts it.
+
+| Rule | Reason |
+|---|---|
+| A panic prints the site of each call that led to it. | `expect` and the other functions of the standard library crash in their own bodies, so the site of the crash alone names a line of the library, not the caller's mistake. |
+| The chain starts again in the body of a function value. | A function type passes no `Panic`, so a value of `fn()` can be passed where `fn() uses Panic` is allowed without a change to how it is called. |
 
 `unreachable` must be proven. Code that claims a point is unreachable must
 not panic when the point is reached. Code that panics on purpose calls
@@ -1523,8 +1537,7 @@ in a test build takes constant time.
 |---|---|
 | A test with `uses` is external: it gets the real implementations, and its result is never cached. | Its result depends on the world. It gets no hidden isolation: a test that wants a scratch directory narrows file access where a reader can see it. |
 | A test's standard input is empty. | Workers run tests at once, so input from the terminal would go to whichever test read first, and a test waiting for a person would run into its time limit. A test that needs input gets it from a `Console` it provides, or gives it to a program it runs through `Processes`. |
-| A test has `Panic` and cannot declare it. | A panic does not depend on the world. Declaring `Panic` would make the test external, so the suite would run it every time instead of caching its result. |
-| A test checks each operation that it cannot prove. | A test without `uses` runs one execution path, so running it decides what a proof of that path would. A proof would only make the test state loop invariants. |
+| A test declares `Panic` as a function does, and a test that declares only `Panic` is deterministic. | A test's signature states its effects like any other. A panic does not depend on the world, so the suite caches the result of such a test. |
 | A failed test is never retried. | A retry hides exactly the failures that an external test exists to catch. |
 | A test cannot expect a panic. | That would treat a panic as intended behavior, which is the job of `Result`. The misuse that other languages test this way, such as a violated precondition, does not compile. To check that a program crashes on bad input, an external test runs the program through `Processes`. |
 | A test has a time limit. | A loop that never ends fails its test. |
@@ -1742,6 +1755,10 @@ A public type that is not opaque exposes its fields. The exposure is visible
 in review, because the fields are written in the public declaration. The
 fields of an opaque type are accessible throughout its package, not only in
 one file, because the methods of a type can live in any file of the package.
+
+**An `internal` definition that nothing in its package uses is an error,**
+as an unused variable is. No other package can call it, so it is dead code,
+and it keeps alive the code it calls.
 
 **There is no level between `internal` and `public`.** Swift's `package`
 level works because the code it spans is versioned as one unit. Truss
@@ -2047,7 +2064,7 @@ pass, so only the cache's user can write its directory.
 | Generators and coroutines | [Lending methods](#lending-methods) and [Loops](#loops) |
 | Closures that mutate captured variables, trailing lambdas, short lambda forms, and implicit lambda parameters | [Lambdas](#lambdas) |
 | Overloading by parameter type | [Overloads by receiver mode](#overloads-by-receiver-mode) |
-| `into()` | Rust infers the target of `into()` from context, which is a common source of inference failures. A conversion names its target, as in `Int64.from(count)`. |
+| `into()` | Rust infers the target of `into()` from context, which is a common source of inference failures. A conversion names its target, as in `Int64.from_integer(count)`. |
 | `++`, `--`, and chained comparisons | [Operators](#operators) |
 | A string concatenation operator | [Strings](#strings) |
 | Exceptions and catching a panic | [Failure](#failure) |

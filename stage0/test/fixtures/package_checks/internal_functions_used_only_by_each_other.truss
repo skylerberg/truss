@@ -1,0 +1,7 @@
+internal fn twice(value: Int64) -> Int64 {
+  value + value
+}
+
+internal fn quadruple(value: Int64) -> Int64 {
+  twice(twice(value))
+}

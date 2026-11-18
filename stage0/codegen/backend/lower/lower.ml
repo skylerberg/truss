@@ -50,8 +50,6 @@ let begin_body (st : Lowering.state) ~(body : Mir.Graph.body) ~defaults =
       (Definitions.list_evidence st.context code.substitution code.uses)
   in
   Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
-  st.evidence <-
-    st.evidence @ Generated.list_real_implementations st ~user:(Path.show code.definition) code.real;
   let places =
     match mask with
     | Some mask -> Mir_form.fill_defaults st (Lowered.make_local_place mask) body ~defaults places
@@ -129,7 +127,8 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.fragment =
       let result = Lowering.allocate_temporary st result_ty in
       Targets.lower_item_call st
         (Code { path = function_; instantiation = Ground.no_instantiation })
-        ~signature ~substitution:Types.no_substitution ~arguments:passed ~destination:result ();
+        ~signature ~substitution:Types.no_substitution ~arguments:passed ~destination:result
+        ~site:None ();
       let output = Targets.begin_output st in
       Encoding.encode_call context.env st.builder
         ~output:(Address { place = output; writable = true })

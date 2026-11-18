@@ -1,4 +1,3 @@
-let panic : Types.capability = Capability (Well_known.make_path Panic)
 let tasks : Types.capability = Capability (Well_known.make_path Tasks)
 
 type divergence_explanation = {
@@ -59,7 +58,7 @@ let make_parallel_scope ~enclosing description =
   {
     available =
       Types.union_capabilities
-        (Types.make_capability_set [ panic ])
+        (Types.make_capability_set [ Types.panic ])
         (Types.list_divergence enclosing.available);
     kind = Parallel { description; enclosing };
     termination_demand = enclosing.termination_demand;
@@ -208,7 +207,7 @@ let rec require_available checking scope (origin : Core.origin) ?(for_implementa
     | Parallel { enclosing; _ } ->
         require_available checking enclosing origin ~for_implementation ~indirect_call
           ~explain_divergence
-          ~restriction:(Types.make_capability_set [ panic ])
+          ~restriction:(Types.make_capability_set [ Types.panic ])
           required
     | Function_body _ | Lambda_body _ | Restricted _ -> ()
   end
@@ -1004,23 +1003,17 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
         laws
   | Constant _ | Test _ | Law_proof _ | Empty -> ());
   (match (form.definition, state.definition.kind, elaborated.interface) with
-  | Function { body; _ }, (Function _ | Method_declaration _), Function_interface _ ->
+  | Function { body = Some body; _ }, (Function _ | Method_declaration _), Function_interface _
+  | Test (Some body), _, Test_interface _ ->
       let signature =
         match Interface.Impls.read_signature state.lookups.interface state.key.path with
         | Some signature -> signature
-        | None -> State.raise_bug "a checked function has no signature"
+        | None -> State.raise_bug "a checked function or test has no signature"
       in
-      Option.iter
-        (check_block checking
-           (make_function_body_scope
-              (Interface.Impls.normalize_capabilities state.lookups.interface
-                 ~list_bounds:(State.lookup_bounds state) signature.uses)))
-        body
-  | Test (Some body), _, Test_interface uses ->
       check_block checking
         (make_function_body_scope
-           (Types.union_capabilities uses
-              (Types.make_capability_set [ panic; Types.unconditional_divergence ])))
+           (Interface.Impls.normalize_capabilities state.lookups.interface
+              ~list_bounds:(State.lookup_bounds state) signature.uses))
         body
   | Function { body = Some body; _ }, Theorem _, _ | Law_proof { body = Some body; _ }, _, _ ->
       check_block checking (make_no_capabilities_scope "a proof") body

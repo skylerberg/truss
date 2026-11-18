@@ -1196,7 +1196,13 @@ let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
           bounds = [ build_read_argument start; build_read_argument stop ];
         }
 
-type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
+type conversion =
+  | From_never
+  | Owned_to_view
+  | View_to_owned
+  | Function_widening
+  | To_integer
+  | From_integer
 
 let find_view_as state ~owned ~view =
   match (Types.find_view (normalize state owned), normalize state view) with
@@ -1205,7 +1211,14 @@ let find_view_as state ~owned ~view =
       Some found_view
   | _ -> None
 
-let convert state env ?argument ?expression (span : Source.Definition_span.t) ~actual ~expected =
+let find_owner_as state ~view ~owner =
+  match normalize state owner with
+  | Types.Named { path; _ } as owner when Well_known.is List path || Well_known.is String path ->
+      find_view_as state ~owned:owner ~view
+  | _ -> None
+
+let convert state env ?argument ?(takes_view_as_owner = false) ?expression
+    (span : Source.Definition_span.t) ~actual ~expected =
   let is_argument = Option.is_some argument in
   let record_conversion (conversion : conversion option) =
     match (conversion, expression) with
@@ -1226,6 +1239,7 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                   if Types.equal inner.type_ expected then inner else convert Widen
               | To_integer -> convert To_integer
               | From_integer -> convert From_integer
+              | View_to_owned -> convert View_to_owned
               | Owned_to_view
                 when argument = Some Types.Mut
                      && (Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_)
@@ -1261,11 +1275,20 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
     report_mismatch state span ~expected ~actual;
     None
   in
-  match if is_argument then find_view_as state ~owned:actual ~view:expected else None with
-  | Some view ->
-      if not (Unify.unify state.unifier wanted view) then
+  let between_owner_and_view =
+    match if is_argument then find_view_as state ~owned:actual ~view:expected else None with
+    | Some view -> Some (Owned_to_view, wanted, view)
+    | None when takes_view_as_owner ->
+        Option.map
+          (fun view -> (View_to_owned, actual_type, view))
+          (find_owner_as state ~view:actual ~owner:expected)
+    | None -> None
+  in
+  match between_owner_and_view with
+  | Some (conversion, written_view, view) ->
+      if not (Unify.unify state.unifier written_view view) then
         report_mismatch state span ~expected ~actual;
-      Some Owned_to_view
+      Some conversion
   | None -> (
       match (actual_type, wanted, expression) with
       | Types.Never, _, _ -> Some From_never

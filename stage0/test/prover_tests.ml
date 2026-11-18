@@ -119,7 +119,11 @@ let () =
         Harness.fail "message %S" actual);
   Harness.test "a function that declares `uses Panic` stops at an operation that fails" (fun () ->
       expect_proven Fixtures.Prover.failing_operations_of_a_function_that_may_panic);
-  Harness.test "a test checks an operation it cannot prove when it runs, as `uses Panic` does"
+  Harness.test "expect returns the payload of an Option or a Result" (fun () ->
+      expect_proven Fixtures.Prover.payloads_through_expect);
+  Harness.test "expect lends the payload of an Option it is lent" (fun () ->
+      expect_proven Fixtures.Prover.elements_lent_through_expect);
+  Harness.test "a test that declares `Panic` checks an operation it cannot prove when it runs"
     (fun () -> expect_proven Fixtures.Prover.test_indexing_by_a_sum_from_a_loop);
   Harness.test "a lambda proves its operations, since it has no `uses` of its own" (fun () ->
       let actual = read_message Fixtures.Prover.overflow_in_a_lambda_of_a_function_that_may_panic in
@@ -127,6 +131,8 @@ let () =
         (not (String.includes ~affix:"may overflow `UInt8`" actual))
         || String.includes ~affix:"uses Panic" actual
       then Harness.fail "message %S" actual);
+  Harness.test "a lambda in a test proves its operations, as one in a function with `Panic` does"
+    (fun () -> expect_not_proven Fixtures.Prover.overflow_in_a_lambda_of_a_test "prover.overflow");
   Harness.test "an overflow in an impl names where the impl can declare `Panic`" (fun () ->
       List.iter
         (fun (text, declaration) ->
@@ -635,6 +641,10 @@ let () =
       expect_proven Fixtures.Prover.checked_add_of_255);
   Harness.test "a conversion succeeds exactly when the value fits" (fun () ->
       expect_proven Fixtures.Prover.try_from_of_an_int64);
+  Harness.test "a widening conversion needs no check of its range" (fun () ->
+      expect_proven Fixtures.Prover.integer_widened_without_a_check);
+  Harness.test "a float conversion keeps the value of a float or an integer" (fun () ->
+      expect_proven Fixtures.Prover.float_conversions_keep_the_value);
   Harness.test "a widening conversion keeps the value" (fun () ->
       expect_proven Fixtures.Prover.to_index);
   Harness.test "a widening conversion costs constant time" (fun () ->
@@ -1290,7 +1300,7 @@ let () =
           (list_termination_failures Fixtures.Prover.check_calling_itself_through_any)
       with
       | [ call; conversion ]
-        when String.starts_with ~prefix:"This call to `app::main::Check.check` may not end" call
+        when String.starts_with ~prefix:"This call to `Check.check` may not end" call
              && String.starts_with
                   ~prefix:
                     "This conversion to `any` gives `app::main::impl app::main::Check for \
@@ -1303,8 +1313,8 @@ let () =
   Harness.test "an impl's method that calls itself through its type is recursion" (fun () ->
       Support.expect_one_diagnostic ~check
         ~says:
-          "This call to `app::main::impl standard::core::From[standard::intrinsic::Int64] for \
-           app::main::Celsius.from` may not end: it calls back here"
+          "This recursive call may not end: give the function a `decreases` clause for the prover \
+           to show that the recursion ends."
         Fixtures.Prover.from_calling_itself_through_its_type "prover.termination");
   Harness.test "an impl's method that calls itself through its receiver is recursion" (fun () ->
       expect_not_proven Fixtures.Prover.grow_calling_itself_through_its_receiver
@@ -1660,6 +1670,26 @@ let () =
           Fixtures.Prover.increment_in_a_greeter_impl;
           Fixtures.Prover.decrement_in_a_countdown_cursor;
         ]);
+  Harness.test "a narrowing conversion names its callee and offers its requires at the target"
+    (fun () ->
+      let packages =
+        Support.setup [ ("app::main", Fixtures.Prover.integer_narrowed_without_a_check) ]
+      in
+      match check packages (Support.parse_file "app::main") with
+      | [ { message; fixes = [ { title; _ } ]; _ } ]
+        when String.includes ~affix:"for this call to `Int8.from_integer`" message
+             && title
+                = "Add `requires Int8.minimum_value() <= value && value <= Int8.maximum_value()`" ->
+          ()
+      | actual ->
+          Harness.fail "%s"
+            (String.concat "; "
+               (List.map
+                  (fun (diagnostic : Diagnostic.t) ->
+                    String.concat ", "
+                      (diagnostic.message
+                      :: List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes))
+                  actual)));
   Harness.test "a divisor that may be zero offers a requires that it is not" (fun () ->
       match fix_titles Fixtures.Prover.halves_of_an_unchecked_divisor with
       | [ "Add `requires parts != 0`" ] -> ()
@@ -2552,7 +2582,9 @@ let () =
       expect_proven Fixtures.Prover.standard_map_of_a_lambda_that_allocates_once;
       expect_not_proven Fixtures.Prover.standard_map_of_a_lambda_that_allocates "prover.cost");
   Harness.test "a collection's map has one output for each element" (fun () ->
-      expect_proven Fixtures.Prover.standard_map_keeping_the_length)
+      expect_proven Fixtures.Prover.standard_map_keeping_the_length);
+  Harness.test "every element that filter or retain keeps satisfies the predicate" (fun () ->
+      expect_proven Fixtures.Prover.standard_retain_keeping_only_matches)
 
 let () =
   let ticker = Fixtures.Prover.ticker_without_a_time_clause in

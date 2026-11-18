@@ -752,6 +752,119 @@ let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
           else None)
         (list_named_constants lookups value)
 
+let must_be_used (declaration : Resolve.Names.declaration) =
+  declaration.visibility = Internal && declaration.ordinal = 0
+  && Option.is_none (Well_known.of_path declaration.path)
+  && (not (Well_known.is_runtime_constructor declaration.path))
+  &&
+  match declaration.kind with
+  | Function | Method | Constant | Member_constant -> true
+  | Type | Trait | Capability | Theorem | Impl | Test | Law_proof -> false
+
+let list_used_paths (lookups : Lookups.t) key =
+  let used = ref [] in
+  let use path = used := path :: !used in
+  let use_constant : Core.pattern_constant -> unit = function
+    | Named_constant path -> use path
+    | Boolean_constant _ | Integer_constant _ | String_constant _ -> ()
+  in
+  let use_bound : Core.range_bound -> unit = function
+    | Constant_bound path -> use path
+    | Integer_bound _ -> ()
+  in
+  let use_callee (callee : Core.callee) =
+    match callee.target with
+    | Function { path; _ } -> use path
+    | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> ()
+  in
+  Core_walk.walk_definition
+    {
+      Core_walk.ignore_all with
+      callee = use_callee;
+      expression =
+        (fun (node : Core.expression) ->
+          match node.kind with Function_value { path; _ } -> use path | _ -> ());
+      place =
+        (function
+        | Constant { path; _ } -> use path
+        | Local _ | Field _ | Lent _ | Temporary _ -> ());
+      pattern =
+        (fun (node : Core.pattern) ->
+          match node.kind with
+          | Literal value | Equal_to { value; _ } -> use_constant value
+          | Range { start; stop; _ } ->
+              use_bound start;
+              use_bound stop
+          | Wildcard | Bind _ | Variant _ | Record _ | Alternatives _ -> ());
+    }
+    (lookups.read_core key).definition;
+  !used
+
+let locate_name (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
+  match definition.kind with
+  | Function { signature; _ } | Method_declaration signature ->
+      spans.((Resolve.Names.extract_signature_name signature).id)
+  | Constant { name = Plain_name name | Member_name (_, name); _ } -> spans.(name.id)
+  | _ -> raise_bug "an unused internal definition that is neither a function nor a constant"
+
+let report_unused (lookups : Lookups.t) (declaration : Resolve.Names.declaration) ~is_named =
+  let (code : Diagnostic.Code.usage), noun =
+    match declaration.kind with
+    | Constant | Member_constant -> (Unused_constant, "constant")
+    | _ -> (Unused_function, "function")
+  in
+  let message =
+    if is_named then
+      Printf.sprintf "Only unused definitions use the internal %s `%s`. Delete it with them." noun
+        (Path.show declaration.path)
+    else
+      Printf.sprintf "Nothing in `%s` uses the internal %s `%s`. Delete it."
+        (Path.show_package declaration.module_.package)
+        noun (Path.show declaration.path)
+  in
+  let definition, spans = read_definition lookups declaration in
+  {
+    key = Resolve.Names.make_key declaration;
+    diagnostic = Diagnostic.make ~code:(Usage code) (locate_name spans definition) message;
+  }
+
+let check_internals (lookups : Lookups.t) package =
+  let uses =
+    List.map
+      (fun declaration ->
+        (declaration, list_used_paths lookups (Resolve.Names.make_key declaration)))
+      (lookups.interface.names.list_package_declarations package)
+  in
+  let uses_of_internal = Path_table.create 64 in
+  let named_by_another = Path_table.create 64 in
+  List.iter
+    (fun ((declaration : Resolve.Names.declaration), paths) ->
+      if must_be_used declaration then Path_table.replace uses_of_internal declaration.path paths;
+      List.iter
+        (fun path ->
+          if not (Path.equal path declaration.path) then Path_table.replace named_by_another path ())
+        paths)
+    uses;
+  let reached = Path_table.create 64 in
+  let rec reach paths =
+    List.iter
+      (fun path ->
+        if not (Path_table.mem reached path) then begin
+          Path_table.replace reached path ();
+          Option.iter reach (Path_table.find_opt uses_of_internal path)
+        end)
+      paths
+  in
+  List.iter (fun (declaration, paths) -> if not (must_be_used declaration) then reach paths) uses;
+  List.filter_map
+    (fun ((declaration : Resolve.Names.declaration), _) ->
+      if must_be_used declaration && not (Path_table.mem reached declaration.path) then
+        Some
+          (report_unused lookups declaration
+             ~is_named:(Path_table.mem named_by_another declaration.path))
+      else None)
+    uses
+
 type check =
   | Sealed of Resolve.Names.key
   | Impl of Resolve.Names.key
@@ -759,6 +872,7 @@ type check =
   | Constant of Resolve.Names.key
   | Instantiations
   | Tests
+  | Internals
   | Dependencies
 
 let list_checks (declarations : Resolve.Names.declaration list) =
@@ -775,7 +889,7 @@ let list_checks (declarations : Resolve.Names.declaration list) =
         | Constant | Member_constant -> [ Constant (Resolve.Names.make_key declaration) ]
         | _ -> [])
     declarations
-  @ [ Instantiations; Tests; Dependencies ]
+  @ [ Instantiations; Tests; Internals; Dependencies ]
 
 let describe_unused_dependency ~package dependency =
   Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." (Path.show_package package)
@@ -805,4 +919,5 @@ let run (lookups : Lookups.t) package check =
   | Constant key -> Placed (check_constant lookups (lookups.interface.names.read_declaration key))
   | Instantiations -> Placed (check_instantiation lookups package)
   | Tests -> Placed (check_tests lookups package)
+  | Internals -> Placed (check_internals lookups package)
   | Dependencies -> Unused_dependencies (list_unused_dependencies lookups package)

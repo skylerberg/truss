@@ -23,6 +23,7 @@ and generated =
       ty : Ground.function_type;
     }
   | Program_main of Path.t
+  | Test_main of Path.t
 
 and table =
   | Impl_table of { impl : Path.t; type_arguments : Ground.argument list }

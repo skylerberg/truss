@@ -40,13 +40,14 @@ let run_quietly arguments = fst (run_truss arguments)
 let run_json arguments = Cli.Json.parse (snd (run_truss (arguments @ [ "--json" ])))
 let list_objects = function Cli.Json.List items -> items | _ -> []
 
-let encode_text_field name value =
+let read_string_field name value =
   match Cli.Json.lookup_field name value with Cli.Json.String text -> text | _ -> ""
 
-let run_show root path =
-  List.map (encode_text_field "text")
-    (list_objects (Cli.Json.lookup_field "definitions" (run_json [ "show"; "-C"; root; path ])))
+let list_shown root path =
+  list_objects (Cli.Json.lookup_field "definitions" (run_json [ "show"; "-C"; root; path ]))
 
+let run_show root path = List.map (read_string_field "text") (list_shown root path)
+let read_header text = List.hd (String.split_on_char '\n' text)
 let () = Unix.putenv "TRUSS_CACHE" (Harness.make_scratch_directory "store")
 
 let () =
@@ -766,7 +767,15 @@ let () =
       let root = make_package [ ("main.truss", Fixtures.point_with_a_sum_method) ] in
       expect_strings
         ~expected:[ "public type Point(x: Int64, y: Int64)"; "public fn Point.sum(self) -> Int64" ]
-        (run_show root "demo::Point"))
+        (run_show root "demo::Point"));
+  test "a standard library type is shown with its file" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.point_with_a_sum_method) ] in
+      match list_shown root "standard::option::Option" with
+      | option :: _ ->
+          expect_string ~expected:"standard/option/option.truss" (read_string_field "file" option);
+          expect_string ~expected:"public type Option[Value] ="
+            (read_header (read_string_field "text" option))
+      | [] -> fail "found nothing")
 
 let make_two_points () =
   make_package
@@ -776,7 +785,7 @@ let make_two_points () =
       ("drawing/drawing.truss", Fixtures.drawing_point);
     ]
 
-let list_headers texts = List.map (fun text -> List.hd (String.split_on_char '\n' text)) texts
+let list_headers texts = List.map read_header texts
 
 let () =
   test "a type is shown with an impl that names it by its module's path" (fun () ->
@@ -792,6 +801,57 @@ let () =
         fail "the drawing's Point showed %s" (String.concat "; " drawing);
       if List.mem "impl Display for Point {" geometry then
         fail "the geometry's Point showed %s" (String.concat "; " geometry))
+
+let expect_headers ~expected texts =
+  let headers = list_headers texts in
+  List.iter
+    (fun header ->
+      if not (List.mem header headers) then
+        fail "%s is missing from %s" header (String.concat "; " headers))
+    expected
+
+let () =
+  test "a built-in type is shown by its name with its methods and its impls" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.point_with_a_sum_method) ] in
+      expect_headers
+        ~expected:
+          [
+            "public fn Int64.to_big_endian_bytes(self) -> Array[UInt8, 8]";
+            "impl FixedWidthInteger for Int64 {";
+            "impl Serialize for Int64 {";
+          ]
+        (run_show root "Int64"));
+  test "a built-in type is shown with an impl that the project writes for it" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.doubled_for_int64) ] in
+      expect_headers ~expected:[ "impl Doubled for Int64 {" ] (run_show root "Int64"));
+  test "a prelude type and a prelude trait are shown by their names" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.point_with_a_sum_method) ] in
+      expect_headers ~expected:[ "public type Option[Value] =" ] (run_show root "Option");
+      expect_headers
+        ~expected:[ "public trait FixedWidthInteger:" ]
+        (run_show root "FixedWidthInteger"));
+  test "a method written in an impl is shown through the implementing type" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.square_area) ] in
+      expect_strings ~expected:[ "fn area(self) -> Int64" ] (run_show root "demo::Square.area"));
+  test "a module is shown without repeating the methods written in its traits and impls" (fun () ->
+      let root =
+        make_package
+          [
+            ("main.truss", Fixtures.point_with_a_sum_method);
+            ("shapes/shapes.truss", Fixtures.square_area);
+          ]
+      in
+      expect_strings
+        ~expected:[ "trait Shape {"; "type Square(side: Int64)"; "impl Shape for Square {" ]
+        (list_headers (run_show root "demo::shapes")));
+  test "a built-in type that no definition names is shown as having nothing to show" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.point_with_a_sum_method) ] in
+      let status, output = run_truss [ "show"; "-C"; root; "Never" ] in
+      if
+        status <> 0
+        || not
+             (String.includes ~affix:"`Never` is visible here but has no definition to show." output)
+      then fail "status %d: %s" status output)
 
 let make_lowered_lookups (snapshot, packages) =
   Cli.Workspace_backend.require_lowered_lookups (Workspace.open_database snapshot) packages
@@ -941,7 +1001,31 @@ let () =
         not
           (String.includes ~affix:"fn Point.value(self)" text
           && String.includes ~affix:"Point(x: 1).value()" text)
-      then fail "wrote %s" text)
+      then fail "wrote %s" text);
+  test "renaming a member constant rewrites its uses" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.point_origin_and_its_use) ] in
+      if rename root "demo::Point.origin" "center" <> 0 then fail "refused";
+      let text = read root "main.truss" in
+      if
+        not
+          (String.includes ~affix:"let Point.center: Point" text
+          && String.includes ~affix:"Point.center.x" text)
+      then fail "wrote %s" text);
+  test "a method is renamed by a suffix of its path" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.point_get_and_its_calls) ] in
+      if rename root "Point.get" "value" <> 0 then fail "refused";
+      let text = read root "main.truss" in
+      if not (String.includes ~affix:"Point(x: 1).value()" text) then fail "wrote %s" text);
+  test "a new name with a full path is checked against the renamed definition's module" (fun () ->
+      let root = make_package two_files in
+      if rename root "total" "demo::weather::sum" <> 0 then fail "refused";
+      if not (String.includes ~affix:"public fn sum(" (read root "weather/weather.truss")) then
+        fail "wrote %s" (read root "weather/weather.truss"));
+  test "a suffix that names two definitions renames neither" (fun () ->
+      let root = make_two_points () in
+      let status, output = run_truss [ "rename"; "-C"; root; "Point"; "Spot" ] in
+      if status <> 2 || not (String.includes ~affix:"`Point` names 2 definitions" output) then
+        fail "status %d: %s" status output)
 
 let rewrite root path text =
   Out_channel.with_open_bin (Filename.concat root path) (fun out -> output_string out text);
@@ -1006,8 +1090,8 @@ let expect_read lines ~reader ~parts ~reads ~of_ =
     not
       (List.exists
          (fun line ->
-           encode_text_field "reader" line = reader
-           && encode_text_field "of" line = of_
+           read_string_field "reader" line = reader
+           && read_string_field "of" line = of_
            && List.mem reads (list_strings (Cli.Json.lookup_field "reads" line))
            && List.for_all
                 (fun part -> List.mem part (list_strings (Cli.Json.lookup_field "parts" line)))
@@ -1034,7 +1118,7 @@ let () =
       in
       expect_read lines ~reader:"demo::four" ~parts:[ "checked body" ] ~reads:"interface"
         ~of_:"demo::double";
-      if List.exists (fun line -> encode_text_field "of" line = "demo::four") lines then
+      if List.exists (fun line -> read_string_field "of" line = "demo::four") lines then
         fail "four is listed as its own dependency");
   test "a mut self method's dependents are found by its name without the receiver" (fun () ->
       expect_read
@@ -1054,6 +1138,11 @@ let () =
       let status, output = run_truss [ "dependents"; "-C"; root; "ouble" ] in
       if status <> 2 || not (String.includes ~affix:"No definition named ouble" output) then
         fail "status %d: %s" status output);
+  test "a built-in type has no definition whose dependents could be listed" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.doubling) ] in
+      let status, output = run_truss [ "dependents"; "-C"; root; "Int64" ] in
+      if status <> 2 || not (String.includes ~affix:"No definition named Int64" output) then
+        fail "status %d: %s" status output);
   test "a name that is not a path is refused" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.doubling) ] in
       let status, output = run_truss [ "dependents"; "-C"; root; "demo:double" ] in
@@ -1067,6 +1156,18 @@ let () =
           if status <> 0 then fail "%s: status %d: %s" name status output)
         [ "Square.area"; "demo::Square.area"; "Shape.area" ])
 
+let find_counts output kind =
+  let prefix = kind ^ "  " in
+  List.find_map
+    (fun line ->
+      if String.starts_with ~prefix line then
+        Some
+          (List.filter (( <> ) "")
+             (String.split_on_char ' '
+                (String.sub line (String.length prefix) (String.length line - String.length prefix))))
+      else None)
+    (String.split_on_char '\n' output)
+
 let () =
   test "TRUSS_DATABASE_COUNTS=1 writes the database's work during the command, by kind of part"
     (fun () ->
@@ -1074,13 +1175,21 @@ let () =
       let root = make_package [ ("main.truss", Fixtures.doubling) ] in
       Unix.putenv "TRUSS_DATABASE_COUNTS" "1";
       let _, output = run_truss [ "check"; "--no-proofs"; "-C"; root ] in
-      let list_cells row = List.filter (( <> ) "") (String.split_on_char ' ' row) in
-      if
-        not
-          (List.mem
-             [ "parsed"; "file"; "1"; "0"; "1"; "1"; "1" ]
-             (List.map list_cells (String.split_on_char '\n' output)))
-      then fail "no row counts one parsed file, computed, written, and read once: %s" output)
+      if find_counts output "parsed file" <> Some [ "1"; "0"; "1"; "1"; "1" ] then
+        fail "no row counts one parsed file, computed, written, and read once: %s" output);
+  test "a second release build of an unchanged package computes no body, proof, or code" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.main_with_a_todo_proof) ] in
+      Unix.putenv "TRUSS_DATABASE_COUNTS" "";
+      ignore (run_truss [ "build"; "-C"; root ]);
+      Unix.putenv "TRUSS_DATABASE_COUNTS" "1";
+      let _, output = run_truss [ "build"; "-C"; root ] in
+      Unix.putenv "TRUSS_DATABASE_COUNTS" "";
+      List.iter
+        (fun kind ->
+          match find_counts output kind with
+          | None | Some ("0" :: _) -> ()
+          | Some _ -> fail "the second build computed parts of kind %s: %s" kind output)
+        [ "parsed file"; "checked body"; "proof"; "lowered code"; "test key" ])
 
 let list_holes root =
   list_objects (Cli.Json.lookup_field "holes" (run_json [ "holes"; "-C"; root ]))
@@ -1089,12 +1198,12 @@ let () =
   test "a hole has the type it must have and the names in scope with theirs" (fun () ->
       match list_holes (make_package [ ("main.truss", Fixtures.unfinished) ]) with
       | [ hole ] ->
-          if encode_text_field "type" hole <> "String" then fail "the type is not String";
+          if read_string_field "type" hole <> "String" then fail "the type is not String";
           expect_strings
             ~expected:[ "count: Int64"; "header: String"; "title: String" ]
             (List.map
                (fun binding ->
-                 encode_text_field "name" binding ^ ": " ^ encode_text_field "type" binding)
+                 read_string_field "name" binding ^ ": " ^ read_string_field "type" binding)
                (list_objects (Cli.Json.lookup_field "in_scope" hole)))
       | found -> fail "found %d holes" (List.length found));
   test "a hole blocks the tests that can reach it, and only those" (fun () ->
@@ -1132,14 +1241,14 @@ let () =
   test "a hole whose type nothing fixes, such as one interpolated, is not decided yet" (fun () ->
       match list_holes (make_package [ ("main.truss", Fixtures.show_of_an_interpolated_todo) ]) with
       | [ hole ] ->
-          if encode_text_field "type" hole <> "not decided yet" then
-            fail "type %s" (encode_text_field "type" hole)
+          if read_string_field "type" hole <> "not decided yet" then
+            fail "type %s" (read_string_field "type" hole)
       | found -> fail "found %d holes" (List.length found));
   test "a type defined as todo is a hole" (fun () ->
       match list_holes (make_package [ ("main.truss", "type Session = todo\n") ]) with
       | [ hole ] ->
-          if encode_text_field "kind" hole <> "type" then
-            fail "kind %s" (encode_text_field "kind" hole)
+          if read_string_field "kind" hole <> "type" then
+            fail "kind %s" (read_string_field "kind" hole)
       | found -> fail "found %d holes" (List.length found));
   test "a type defined as todo blocks main and the tests that reach it, and only those" (fun () ->
       match list_holes (make_package [ ("main.truss", Fixtures.unfinished_type) ]) with
@@ -1152,8 +1261,8 @@ let () =
       let outcomes =
         List.map
           (fun test ->
-            ( encode_text_field "name" test,
-              encode_text_field "outcome" test,
+            ( read_string_field "name" test,
+              read_string_field "outcome" test,
               match Cli.Json.lookup_field "message" test with
               | Cli.Json.String message -> message
               | _ -> "" ))
@@ -1188,7 +1297,7 @@ let () =
       then fail "%s" output;
       let outputs =
         List.map
-          (fun test -> (encode_text_field "name" test, encode_text_field "output" test))
+          (fun test -> (read_string_field "name" test, read_string_field "output" test))
           (list_objects (Cli.Json.lookup_field "tests" (run_json [ "test"; "-C"; root ])))
       in
       match outputs with

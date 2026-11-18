@@ -770,6 +770,14 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
           match (operands, Facts.find_float_format target) with
           | [ value ], Some format -> make_float_of_integer format "RNE" value
           | _ -> fallback ())
+      | Convert, [ source; target ]
+        when Facts.find_float_format source <> None && Facts.find_float_format target <> None -> (
+          match (operands, Facts.find_float_format target) with
+          | [ value ], Some (exponent, significand) ->
+              Logic.Operation
+                ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
+                  [ Logic.Operation ("RNE", []); value ] )
+          | _ -> fallback ())
       | Convert, [ _; target ] when Types.is_builtin Character target -> (
           match operands with
           | [ value ] ->

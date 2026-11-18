@@ -7,7 +7,7 @@ let expect_bug ~saying work =
         Codegen_support.fail "expected %S in %S" saying text
 
 let env = Codegen_support.make_shape_env ()
-let emit env item = ignore (item env)
+let emit env program_fragment = ignore (program_fragment env)
 
 let make_caller arguments =
   Codegen_support.entry

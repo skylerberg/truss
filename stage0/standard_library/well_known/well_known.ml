@@ -205,6 +205,12 @@ let is_system_module (module_ : Path.module_) =
   module_.package = Path.standard_package
   && match module_.modules with [ "system"; _ ] -> true | _ -> false
 
+let is_runtime_constructor (path : Path.t) =
+  match path with
+  | Method { owner = Top { module_; _ }; name = "new"; receiver = Static } ->
+      is_system_module module_
+  | _ -> false
+
 module For_testing = struct
   let all = all
 end

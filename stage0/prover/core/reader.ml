@@ -726,26 +726,18 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Value_parameter parameter ->
       (frame, Models.make_value_term context frame (Value_parameter parameter))
   | Convert { conversion = To_integer; value; _ } -> (frame, translate_operand value)
+  | Convert { conversion = View_to_owned; value; _ } ->
+      ( frame,
+        Values.make_owner_of_view context frame
+          ~view:(compute_operand_type context frame value)
+          ~owner:ty (translate_operand value) )
   | Convert { conversion = From_integer; value; _ } ->
       (frame, Operations.convert_from_integer context frame site (translate_operand value))
   | Function_value { path; instantiation; is_argument } ->
       ( frame,
         Values.translate_global_value context frame site path instantiation.type_arguments
           ~is_argument )
-  | To_any { value; trait; _ } ->
-      Facts.reject_recursion_through_supplied_code context frame
-        (Facts.locate context frame.source site.origin)
-        (lazy
-          (Mir.Call_edges.list_code_supplied_by_conversion context.lookups.interface
-             frame.substitution
-             (compute_operand_type context frame value)
-             trait))
-        ~describe:(fun supplier ->
-          Printf.sprintf
-            "This conversion to `any` gives `%s`, whose methods call back here, so the prover \
-             cannot show that the recursion ends."
-            supplier);
-      Operations.convert_to_any context frame site
+  | To_any _ -> Operations.convert_to_any context frame site
   | Operation { operation; operands; type_arguments } ->
       let types =
         List.filter_map
@@ -951,6 +943,7 @@ and read_choice context frame run (choice : Mir.choice) =
 
 and read_statement context frame run (statement : Mir.statement) =
   let location = Facts.locate context frame.source statement.origin in
+  Facts.reject_recursion_through_supplied_code context frame location statement;
   match statement.kind with
   | Basic basic -> read_basic context frame run statement ~location basic
   | Assert_by_bit_vector { names; code; _ } ->
@@ -1419,19 +1412,6 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
           Some (write_place context frame run destination tagged)
       | _ -> Facts.raise_unsupported location "a tagged template whose tag the prover cannot read")
   | Provide { provided; _ } ->
-      List.iter
-        (fun (implementation : Mir.provided) ->
-          List.iter
-            (fun (provided : Core.provided) ->
-              Facts.reject_recursion_through_supplied_code context frame location
-                (lazy (Mir.Call_edges.list_impl_methods context.lookups.interface provided.impl))
-                ~describe:(fun supplier ->
-                  Printf.sprintf
-                    "This `provide` gives `%s`, whose methods call back here, so the prover cannot \
-                     show that the recursion ends."
-                    supplier))
-            implementation.provides)
-        provided;
       Hashtbl.replace run.provides statement.origin provided;
       Some frame
   | Provide_end -> (

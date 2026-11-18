@@ -74,9 +74,8 @@ let refuse_unshippable snapshot packages lookups main proofs =
       raise (Outcome.Stop 1)
 
 let build_program ?output snapshot packages (profile : Backend.profile) =
-  let is_release = profile = Release in
-  let database = Workspace.open_database ~checks:(not is_release) snapshot in
-  let report = Report.gather ~proofs:is_release database snapshot packages in
+  let database = Workspace.open_database snapshot in
+  let report = Report.gather ~proofs:(profile = Release) database snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
   let main = require_main snapshot database packages in
   let lookups = Workspace_backend.require_lowered_lookups database packages in

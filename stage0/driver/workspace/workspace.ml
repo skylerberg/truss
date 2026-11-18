@@ -255,14 +255,6 @@ let list_dependency_names snapshot name =
       List.map (fun (dependency : Manifest.dependency) -> dependency.package) package.dependencies
   | None -> []
 
-let read_source snapshot (file : Path.file) =
-  match
-    Option.bind (find_package snapshot file.module_.package) (fun package ->
-        List.assoc_opt file package.files)
-  with
-  | Some text -> Source.create ~path:(Path.show_file file) text
-  | None -> Compiler_bug.raise_bug ~stage:"Workspace" "%s is not a file" (Path.show_file file)
-
 let locate_root snapshot = match snapshot.kind with Worktree root | Trial { root; _ } -> root
 
 let list_registry_packages snapshot =
@@ -359,9 +351,9 @@ let load_layout snapshot =
 let extract_package_databases loaded =
   List.map (fun (loaded : loaded) -> loaded.package_database) loaded
 
-let build_cold_database ~checks snapshot =
+let build_cold_database snapshot =
   let loaded, packages = load_layout snapshot in
-  Database.create ~checks ~loaded:(extract_package_databases loaded) packages
+  Database.create ~loaded:(extract_package_databases loaded) packages
 
 let database_directory = ".truss"
 let compiler_line = "compiler " ^ Compiler_version.digest
@@ -510,7 +502,7 @@ let copy_database root (trial : snapshot) =
       let database = Database.copy worktree.database in
       ignore (apply_changes database trial (find_file_changes worktree.snapshot trial));
       database
-  | None -> build_cold_database ~checks:true trial
+  | None -> build_cold_database trial
 
 let make_trial snapshot changes =
   let root = locate_root snapshot in
@@ -521,14 +513,13 @@ let make_trial snapshot changes =
   in
   { trial with kind = Trial { root; database = lazy (copy_database root trial) } }
 
-let open_database ?(checks = true) snapshot =
+let open_database snapshot =
   match snapshot.kind with
-  | Worktree root when checks -> (
+  | Worktree root -> (
       match Hashtbl.find_opt worktrees root with
       | Some worktree when worktree.snapshot == snapshot -> worktree.database
       | Some _ | None -> copy_database root snapshot)
-  | Trial { database; _ } when checks -> Lazy.force database
-  | Worktree _ | Trial _ -> build_cold_database ~checks snapshot
+  | Trial { database; _ } -> Lazy.force database
 
 let is_under prefix path =
   prefix = "" || path = prefix || String.starts_with ~prefix:(prefix ^ "/") path
@@ -783,7 +774,7 @@ let stop_servers ?key () = Server.stop_servers ?key ~wait:true ()
 
 module For_testing = struct
   let load_standard_package_database () = (load_standard_package ()).package_database
-  let build_cold_database = build_cold_database ~checks:true
+  let build_cold_database = build_cold_database
   let collect_cache = collect
   let listen = Server.listen
   let call_starting = Server.For_testing.call_starting

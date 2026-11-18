@@ -63,7 +63,7 @@ public fn FixedEnvironment.with_zone(own self, name: StringSlice, rules: own Lis
 impl Environment for FixedEnvironment {
   fn variable(self, name: StringSlice) -> Option[String]
   {
-    self.variables.get(name.to_string()).map(fn(value) { value.copy() })
+    self.variables.get(name).map(fn(value) { value.copy() })
   }
 
   fn variables(self) -> List[Variable]
@@ -94,6 +94,6 @@ impl Environment for FixedEnvironment {
 
   fn zone_rules(self, name: StringSlice) -> Option[List[UInt8]]
   {
-    self.zones.get(name.to_string()).map(fn(value) { value.copy() })
+    self.zones.get(name).map(fn(value) { value.copy() })
   }
 }

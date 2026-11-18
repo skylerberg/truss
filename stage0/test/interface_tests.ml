@@ -196,21 +196,16 @@ let () =
                 Harness.fail "%s has no real implementation" (Path.show capability.path))
             others
       | _ -> Harness.fail "the standard library does not declare Panic exactly once");
-  Harness.test "a test cannot declare Panic, with a fix that removes its uses" (fun () ->
-      expect_one_diagnostic "test \"t\" uses Panic {\n  assert 1 + 1 == 2\n}\n"
-        "types.no_real_implementation" ~fixed:"test \"t\" {\n  assert 1 + 1 == 2\n}\n");
-  Harness.test "the fix removes Panic and one comma beside it from a test's uses" (fun () ->
+  Harness.test "a test declares Panic, which leaves it deterministic" (fun () ->
       List.iter
-        (fun (written, fixed) ->
-          expect_one_diagnostic
-            (Printf.sprintf "test \"t\" uses %s {}\n" written)
-            "types.no_real_implementation"
-            ~fixed:(Printf.sprintf "test \"t\" uses %s {}\n" fixed))
-        [
-          ("Clock, Panic", "Clock");
-          ("Panic, Clock", "Clock");
-          ("Clock, Panic, Random", "Clock, Random");
-        ]);
+        (fun (written, is_external) ->
+          let text = Printf.sprintf "test \"t\" uses %s {}\n" written in
+          expect_no_diagnostics [ ("app::main", text) ];
+          let test : Path.t = Test { module_ = Support.parse_module "app::main"; name = "t" } in
+          let packages = Support.setup [ ("app::main", text) ] in
+          if Interface.Definition.is_external_test (make_interface packages) test <> is_external
+          then Harness.fail "a test that uses %s is external: %b" written (not is_external))
+        [ ("Panic", false); ("Clock, Panic", true) ]);
   Harness.test "a test cannot declare a capability that has no real implementation" (fun () ->
       expect_one_diagnostic "capability Greeter {\n  fn greet()\n}\n\ntest \"t\" uses Greeter {}\n"
         "types.no_real_implementation"
@@ -751,14 +746,17 @@ let () =
              (option opaque) (trait "Equal" []))
       then Harness.fail "found an impl");
   Harness.test "an impl of a conversion is found by the argument's type" (fun () ->
-      let packages = Support.setup [] in
-      if
-        Option.is_none
-          (Interface.Impls.find_evidence (make_interface packages)
-             ~list_bounds:(fun _ -> [])
-             int64
-             (trait "From" [ Types.make_builtin Int32 ]))
-      then Harness.fail "no impl")
+      let packages = Support.setup [ ("app::main", Fixtures.Interface.meters_from_numbers) ] in
+      let interface = make_interface packages in
+      let meters = Types.make_named (app "Meters") [] in
+      let find_from source =
+        Interface.Impls.find_evidence interface
+          ~list_bounds:(fun _ -> [])
+          meters (trait "From" [ source ])
+      in
+      if Option.is_none (find_from int64) then Harness.fail "no impl of From[Int64]";
+      if Option.is_some (find_from (Types.make_builtin Int32)) then
+        Harness.fail "an impl of From[Int32]")
 
 let () =
   let text = Fixtures.Interface.described in

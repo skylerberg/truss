@@ -453,7 +453,8 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
                 | Value ty when C_types.is_struct context ty -> " = {0}"
                 | Value _ | Pointer _ | Raw _ -> " = 0"
                 | Lend | Lend_mark -> " = {0}"
-                | Environment _ | Evidence _ -> raise_bug "a zeroed environment or evidence slot"
+                | Environment _ | Evidence _ | Trace ->
+                    raise_bug "a zeroed environment, evidence slot, or link of the call chain"
             in
             Buffer.add_string body
               (Printf.sprintf "  %s %s%s;\n"
@@ -516,11 +517,13 @@ let build builder prototype =
   let enclosing_text =
     write_functions builder ~enclosing_symbol:(Mangling.make_symbol enclosing.code.item) prototype
   in
-  let nested = List.sort compare enclosing.code.nested in
-  Fragment.make enclosing.code.context ~item:enclosing.code.item
+  let { item; context; nested } = enclosing.code in
+  let nested = List.sort compare nested in
+  Fragment.make context ~item
     ~kind:(Functions { nested = List.length nested; weight = enclosing.size })
     ~functions:(List.map snd nested @ [ enclosing_text ])
     ~definition:""
+    ~references:(C_types.list_referenced_items context ~referrer:item)
 
 let build_nested parent ~index ~environment build_body =
   let code = (lookup_current_function parent).code in

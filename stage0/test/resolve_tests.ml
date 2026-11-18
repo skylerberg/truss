@@ -532,4 +532,57 @@ let () =
   Harness.test "a name used through an import of standard::intrinsic is not an error of its own"
     (fun () ->
       expect_one_diagnostic Fixtures.Resolve.call_through_standard_intrinsic
-        "resolve.intrinsic_import")
+        "resolve.intrinsic_import");
+  Harness.test "a type head through standard::intrinsic outside the standard package names no type"
+    (fun () ->
+      let packages =
+        setup [ ("app::main", Fixtures.Resolve.method_of_standard_intrinsic_outside_standard) ]
+      in
+      (match Support.list_declarations packages (parse_module "app::main") with
+      | [ { path = Method { owner; _ }; _ } ] when not (Path.is_resolved owner) -> ()
+      | declarations ->
+          Harness.fail "declared [%s]"
+            (String.concat "; "
+               (List.map
+                  (fun (declaration : Resolve.Names.declaration) -> Path.show declaration.path)
+                  declarations)));
+      match list_codes (check packages (parse_file "app::main")) with
+      | [ "resolve.intrinsic_import" ] -> ()
+      | reported -> Harness.fail "reported [%s]" (String.concat "; " reported))
+
+let () =
+  Harness.test "impls rejected for different function type arguments are not duplicates" (fun () ->
+      let packages =
+        setup
+          [ ("app::main", Fixtures.Resolve.impls_rejected_for_different_function_type_arguments) ]
+      in
+      let file = parse_file "app::main" in
+      if Support.parse_errors packages file = [] then Harness.fail "parsed";
+      match list_codes (check packages file) with
+      | [] -> ()
+      | reported -> Harness.fail "reported [%s]" (String.concat "; " reported));
+  Harness.test "impls rejected for different function type arguments have distinct keys" (fun () ->
+      let packages =
+        setup
+          [ ("app::main", Fixtures.Resolve.impls_rejected_for_different_function_type_arguments) ]
+      in
+      match
+        List.sort compare
+          (List.filter_map
+             (fun (declaration : Resolve.Names.declaration) ->
+               match declaration.path with
+               | Impl _ -> Some (Path.show declaration.path, declaration.ordinal)
+               | _ -> None)
+             (Support.list_declarations packages (parse_module "app::main")))
+      with
+      | [
+       ("app::main::impl app::main::Wraps[fn(Bool) -> Int64] for app::main::Box", 0);
+       ("app::main::impl app::main::Wraps[fn(Int64) -> Int64] for app::main::Box", 0);
+      ] ->
+          ()
+      | impls ->
+          Harness.fail "declared [%s]"
+            (String.concat "; "
+               (List.map
+                  (fun (shown, ordinal) -> Printf.sprintf "%s, ordinal %d" shown ordinal)
+                  impls)))

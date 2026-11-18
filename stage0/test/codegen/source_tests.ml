@@ -212,7 +212,6 @@ let () =
         [ "_binding"; "_index"; "_position" ])
 
 let () =
-  Codegen_support.test "negating the least value of a signed type panics, where the checks are on"
-    (fun () ->
+  Codegen_support.test "negating the least value of a signed type panics in a test" (fun () ->
       Codegen_support.expect_output Fixtures.Source.flip_of_an_int8
         "test 0 panicked\nmessage 47\narithmetic overflow\n  at example/main.truss:2:3\n")

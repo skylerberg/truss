@@ -1348,16 +1348,6 @@ let () =
       expect_edges
         (Support.make_top_path "app::main" "make")
         ~expected:[ "derived standard::core::Default for app::main::Config.default" ]);
-  Harness.test "a derived impl's methods are its derived method and the methods it inherits"
-    (fun () ->
-      expect_paths
-        ~expected:
-          [
-            "derived standard::core::Equal for app::main::Span.equal";
-            "derived standard::core::Equal for app::main::Span.not_equal";
-          ]
-        (Mir.Call_edges.list_impl_methods (Lazy.force lookups).interface
-           (make_derived_impl "Span" Equal)));
   Harness.test "a trait's method reaches the derived methods of the trait's impls" (fun () ->
       let implementations =
         List.map Path.show

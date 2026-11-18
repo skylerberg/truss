@@ -610,12 +610,24 @@ it.
   long as `middle` can be used. A `let` keeps no other temporary, such as the
   receiver in `let part = make_list().slice()`. A view cannot be used after
   the temporary or the local that it views is dropped.
-- **The one implicit conversion** makes a view of a `List` or an `Array`
-  where a `Slice` is expected, and of a `String` where a `StringSlice` is.
-  It applies to an argument of such a parameter, and to an operand of a
+- **The implicit conversions are between a `List`, an `Array`, or a
+  `String` and its view.** One makes a view of a `List` or an `Array` where
+  a `Slice` is expected, and of a `String` where a `StringSlice` is. It
+  applies to an argument of such a parameter, and to an operand of a
   comparison whose other operand is such a view, so `items == part[1..]`
   compares two slices and allocates nothing. `self` is such a parameter,
   so `StringSlice.trim(name)` takes a `String`.
+- **The other passes a view as its owning type to generic code.** A
+  read-only parameter whose declared type is a type parameter or an
+  associated type takes a `Slice` where the call instantiates that type to
+  a `List`, and a `StringSlice` where it instantiates it to `String`. So
+  `counts.get(word)` and `counts[word]` look up a `Map[String, Int64]` with
+  a `StringSlice`. The call allocates nothing: the callee reads a `List` or
+  a `String` that holds the view's elements and owns no storage, and a view
+  that the call returns views what the argument views. `self` is no such
+  parameter, and neither is a parameter declared as `List` or `String`,
+  which takes no view. The receiver and the other arguments instantiate the
+  type parameter first, in whatever order the arguments are written.
 
 ## Constants
 
@@ -1149,8 +1161,8 @@ fn Slice[Element].zip[Other](self, other: Slice[Other]) -> Zipped[Element, Other
 ### Overloads by receiver mode
 
 ```truss
-fn Slice[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
-fn List[Element].filter(own self, keep: fn(Element) -> Bool) -> List[Element]
+fn Slice[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
+fn List[Element].filter(own self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
 ```
 
 A method can have up to three overloads that differ only in the mode of
@@ -1851,8 +1863,8 @@ public trait Add[Right] {
 
 ## Failure
 
-Code panics only in a test and where its signature declares `uses Panic`.
-Running out of memory and overflowing the stack are the exceptions.
+Code panics only where it has `Panic`. Running out of memory and overflowing
+the stack are the exceptions.
 
 Every operation that can fail is a proof obligation: integer overflow,
 division by zero, indexing or slicing out of bounds, a shift that is too
@@ -1866,10 +1878,10 @@ is an error, and one of these makes it compile:
 
 `unreachable` admits only the first.
 
-In a test, and in the body of a function that declares `uses Panic`, an
-operation that is not proven safe is checked when it runs, in every build,
-and panics when it fails. The check prevents the out-of-bounds read or the
-wrapped result that the unchecked operation would give.
+In code that has `Panic`, an operation that is not proven safe is checked
+when it runs, in every build, and panics when it fails. The check prevents
+the out-of-bounds read or the wrapped result that the unchecked operation
+would give.
 
 - An overflow, a division by zero, and a shift that is too large are checked
   where they happen.
@@ -1877,7 +1889,7 @@ wrapped result that the unchecked operation would give.
   `requires` of the method it calls. One through a trait bound or `any` is
   proven, and so is a `requires` that cannot be evaluated at run time (see
   [Deriving](#deriving)).
-- A lambda in that body, a `proof` block, and every clause are proven. A
+- A lambda in that code, a `proof` block, and every clause are proven. A
   lambda's capabilities are inferred from its body, not declared, and a
   `proof` block and a clause do not run.
 
@@ -1885,6 +1897,14 @@ wrapped result that the unchecked operation would give.
 and location to standard error and ends the process with a nonzero exit
 code, and no Truss code runs afterward. No code can `provide` `Panic`, so a
 panic cannot be caught.
+
+A panic also prints its call chain: the site of each call that led to it,
+back to `main` or the test, through `parallel` branches and tasks.
+
+- The chain of a panic in an `impl`'s method continues from the `provide`
+  of the implementation, where the `impl` gets its `Panic`.
+- The chain of a panic in a lambda or in a function used as a value starts
+  in that function's body, because a function type passes no `Panic`.
 
 ## Capabilities
 
@@ -1957,9 +1977,9 @@ These capabilities are in the prelude:
 | `Log` | Writing to the program's log |
 | `Panic` | Ending the program |
 
-The runtime holds a *real implementation* of every standard capability
-except `Panic`, which is built in. A capability that a package declares has
-no real implementation.
+The runtime holds a *real implementation* of every standard capability.
+`Panic`'s is built in, and no `impl` implements it. A capability that a
+package declares has no real implementation.
 
 ### Handles
 
@@ -1987,10 +2007,9 @@ fn main(arguments: List[String]) -> ExitCode
 }
 ```
 
-`main` has this signature. Its `uses` clause names only `Panic` and
-capabilities with a real implementation, and the runtime provides those real
-implementations and nothing else. The program ends when `main` returns or
-panics.
+`main` has this signature. Its `uses` clause names only capabilities with
+a real implementation, and the runtime provides those real implementations
+and nothing else. The program ends when `main` returns or panics.
 
 ## Parallelism
 
@@ -2370,12 +2389,12 @@ test "config loads with defaults" {
 ```
 
 - `plain_string` is a `STRING` with no interpolation.
-- A test has `Panic`. It provides every other capability its code uses,
-  unless it declares them with `uses`. A test with `uses` is *external*: it
-  gets the real implementations of exactly those capabilities. Any other
-  test is deterministic.
+- A test provides every capability its code uses, unless it declares them
+  with `uses`, as a function does. A test whose `uses` names a capability
+  other than `Panic` is *external*: it gets the real implementations of
+  exactly those capabilities. Any other test is deterministic.
 - A test's `uses` names only capabilities with a [real
-  implementation](#standard-capabilities), so it cannot name `Panic`.
+  implementation](#standard-capabilities).
 - A test's standard input is empty.
 - A failed `assert` ends the test as failed, and the rest of the test can
   rely on the asserted fact.
@@ -2624,6 +2643,12 @@ and the prelude changes only with a language version.
   use call no private or `internal` function and name no such constant. An
   `ensures` may name any function the definition can, so that callers in its
   package can know its result in terms of private helpers.
+- An `internal` function, method, or constant that no definition of its
+  package uses is an error. A use counts when the user is not `internal` or
+  is itself used, so `internal` definitions that use only each other are an
+  error together. A definition the compiler calls is exempt, such as the
+  static `new` of a `system` module's type, which builds the implementation
+  of a capability.
 
 ## No foreign code
 

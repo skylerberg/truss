@@ -1,6 +1,6 @@
 use standard::tasks
 
-test "Task 2 is receiving from an empty channel." {
+test "Task 2 is receiving from an empty channel." uses Panic {
   provide tasks::SeededTasks.new(0) {
     let numbers = tasks::Channel[Int64].new()
     concurrent {
@@ -10,7 +10,7 @@ test "Task 2 is receiving from an empty channel." {
   }
 }
 
-test "Task 1 is sending to a channel that no task is receiving from." {
+test "Task 1 is sending to a channel that no task is receiving from." uses Panic {
   provide tasks::SeededTasks.new(0) {
     let numbers = tasks::Channel[Int64].new()
     concurrent {
@@ -19,7 +19,7 @@ test "Task 1 is sending to a channel that no task is receiving from." {
   }
 }
 
-test "Task 0 is sending to a full channel." {
+test "Task 0 is sending to a full channel." uses Panic {
   provide tasks::SeededTasks.new(0) {
     let numbers = tasks::Channel[Int64].new(capacity: 1)
     let _ = numbers.send(1)

@@ -1,5 +1,13 @@
 type Sum(pieces: UInt64, total: Int64)
 
+type Count(value: Int64)
+
+impl From[Count] for Int64 {
+  fn from(value: own Count) -> Int64 {
+    value.value
+  }
+}
+
 impl FromTemplate for Sum {
   type Part = Int64
 
@@ -13,7 +21,7 @@ impl FromTemplate for Sum {
 }
 
 test "templates" {
-  let small: Int8 = 2
+  let small = Count(value: 2)
   let large: Int64 = 40
   let sum = Sum"a ${small} b ${large} c"
   assert sum.pieces == 3

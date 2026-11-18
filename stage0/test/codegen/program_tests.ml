@@ -160,7 +160,7 @@ let () =
     "a release build stops a function that declares `uses Panic` at an operation that fails"
     (fun () ->
       let _, backend =
-        Codegen_support.load ~checks:false Fixtures.Program.operations_that_stop_the_program
+        Codegen_support.load ~profile:Release Fixtures.Program.operations_that_stop_the_program
       in
       let run operation =
         match
@@ -760,3 +760,36 @@ let () =
               (String.includes ~affix:"Stage0 cannot build this yet" message
               && String.includes ~affix:"a capability method that lends" message)
           then Codegen_support.fail "failed with: %s" message)
+
+let expect_panic_with fixture lines =
+  let status, _, errors = Codegen_support.run_main fixture in
+  Codegen_support.expect_int ~expected:101 status;
+  let expected = String.concat "\n" lines in
+  if not (String.includes ~affix:expected errors) then
+    Codegen_support.fail "%S is not in the error output:\n%s" expected errors
+
+let () =
+  Codegen_support.test "a panic prints the site of each call that led to it" (fun () ->
+      expect_panic_with Fixtures.Program.expect_failing_three_calls_deep
+        [ "panic: the values are not empty"; "  at standard/option/option.truss:" ];
+      expect_panic_with Fixtures.Program.expect_failing_three_calls_deep
+        [
+          "  called at example/main.truss:4:3";
+          "  called at example/main.truss:10:3";
+          "  called at example/main.truss:16:3";
+          "  called at example/main.truss:23:6";
+        ]);
+  Codegen_support.test "a panic in an impl's method prints the provide of the impl" (fun () ->
+      expect_panic_with Fixtures.Program.crash_in_an_impl_that_main_provides
+        [
+          "panic: the counter has no next value";
+          "  at example/main.truss:9:5";
+          "  called at example/main.truss:22:17";
+        ]);
+  Codegen_support.test "a pure function value can be passed where its function type allows Panic"
+    (fun () ->
+      let status, _, errors =
+        Codegen_support.run_main
+          Fixtures.Program.pure_function_variable_passed_where_panic_is_allowed
+      in
+      if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors)

@@ -51,7 +51,8 @@ let () =
     (fun () ->
       Codegen_support.expect_output Fixtures.Lowering.grid_cell_index_out_of_bounds
         "test 0 panicked\nmessage 47\nindex out of bounds\n  at example/main.truss:4:3\n");
-  Codegen_support.test "a test checks the requires of an index's `at` where the index is written"
+  Codegen_support.test
+    "a test that declares `Panic` checks the requires of an index's `at` where the index is written"
     (fun () ->
       Codegen_support.expect_output Fixtures.Lowering.test_indexing_outside_the_requires_of_at
         "test 0 panicked\nmessage 49\nindex out of bounds\n  at example/main.truss:30:11\n");
@@ -97,7 +98,12 @@ let () =
     "a call of a lending method that never lends compiles, and the code after it is unreachable"
     (fun () ->
       Codegen_support.expect_output Fixtures.Lowering.call_of_a_lending_method_that_never_lends
-        "test 0 panicked\nmessage 35\nno cell\n  at example/main.truss:6:3\n")
+        "test 0 panicked\n\
+         message 108\n\
+         no cell\n\
+        \  at example/main.truss:6:3\n\
+        \  called at example/main.truss:12:3\n\
+        \  called at example/main.truss:17:10\n")
 
 let () =
   Codegen_support.expect_pass "a named function as a value, at its own type and at a wider one"

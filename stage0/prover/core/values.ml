@@ -329,6 +329,27 @@ let make_text_value context frame (ty : Types.ty) text =
       | _ -> ());
   literal
 
+let make_owner_of_view context frame ~(view : Types.ty) ~(owner : Types.ty) viewed =
+  let symbol = Logic.Symbol.Owner_of_view owner in
+  Facts.declare context
+    (Logic.Function (symbol, [ Facts.declare_sort context view ], Facts.declare_sort context owner));
+  let converted = Logic.Apply (symbol, [ viewed ]) in
+  Validity.assume_valid context frame owner converted;
+  let element =
+    match owner with
+    | Types.Named { arguments = [ Types.Type element ]; _ } -> element
+    | _ -> Types.make_builtin UInt8
+  in
+  (match
+     ( Models.find_model context owner converted ~element,
+       Models.find_model context view viewed ~element )
+   with
+  | Some owned, Some elements -> Facts.assume context frame (Logic.equal owned elements)
+  | _ ->
+      Facts.raise_bug "`%s` and its view `%s` have no model of one type" (Types.show owner)
+        (Types.show view));
+  converted
+
 let project_field context frame ty variant field field_type term =
   let part = Validity.select_field context ty variant field term in
   Amounts.assume_typed context frame (Facts.make_in_range field_type part);
@@ -391,30 +412,6 @@ let assume_contract_for_every_argument context (frame : State.frame) (contract :
 
 let translate_named_function (context : State.context) (frame : State.frame)
     (site : Invocation.site) path type_arguments (contract : State.contract) ~is_argument =
-  if context.terminates && frame.makes_obligations && Facts.is_in_recursion_group context path then
-    Facts.oblige context frame Termination
-      (Facts.locate context frame.source site.origin)
-      [
-        Text
-          (Printf.sprintf
-             "Naming `%s` as a value reaches back here, and such a use passes no arguments the \
-              prover can compare, so the recursion cannot be shown to end: write it as a direct \
-              call on a part."
-             (Path.show path));
-      ]
-      (Logic.Boolean false);
-  Facts.reject_recursion_through_supplied_code context frame
-    (Facts.locate context frame.source site.origin)
-    (lazy
-      (Mir.Call_edges.list_code_supplied_by_function_value context.lookups.interface
-         frame.substitution path
-         { type_arguments; capability_arguments = [] }))
-    ~describe:(fun supplier ->
-      Printf.sprintf
-        "Naming `%s` as a value uses `%s` where a bound needs it, and its methods reach back here. \
-         Such a use passes no arguments the prover can compare, so the recursion cannot be shown \
-         to end."
-        (Path.show path) supplier);
   let ty = Facts.substitute_type context frame site.type_ in
   let callee_clauses = contract.callee_clauses in
   (match ty with

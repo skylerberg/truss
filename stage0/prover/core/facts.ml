@@ -362,20 +362,56 @@ let oblige ?template_clause ?cited ?(fixes = []) context frame code location mes
     message goal
 
 let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
-    ~describe supplied =
-  if context.terminates && frame.makes_obligations then
+    (statement : Mir.statement) =
+  let reject text = oblige context frame Termination location [ Text text ] (Logic.Boolean false) in
+  let reject_supply (supplier : Mir.Call_edges.supplier) code =
+    let recursive = List.filter (is_in_recursion_group context) code in
+    (match supplier with
+    | Named_function path when List.exists (Path.equal path) recursive ->
+        reject
+          (Printf.sprintf
+             "Naming `%s` as a value reaches back here, and such a use passes no arguments the \
+              prover can compare, so the recursion cannot be shown to end: write it as a direct \
+              call on a part."
+             (Path.show path))
+    | Named_function _ | Call | Conversion_to_any | Provide -> ());
     List.iter
-      (fun supplier ->
-        oblige context frame Termination location
-          [ Text (describe (Path.show supplier)) ]
-          (Logic.Boolean false))
+      (fun owner ->
+        let owner = Path.show owner in
+        reject
+          (match supplier with
+          | Call ->
+              Printf.sprintf
+                "This call uses `%s` where a bound needs it, and its methods reach back here. Such \
+                 a use passes no arguments the prover can compare, so the recursion cannot be \
+                 shown to end: write it as a direct call on a part."
+                owner
+          | Named_function path ->
+              Printf.sprintf
+                "Naming `%s` as a value uses `%s` where a bound needs it, and its methods reach \
+                 back here. Such a use passes no arguments the prover can compare, so the \
+                 recursion cannot be shown to end."
+                (Path.show path) owner
+          | Conversion_to_any ->
+              Printf.sprintf
+                "This conversion to `any` gives `%s`, whose methods call back here, so the prover \
+                 cannot show that the recursion ends."
+                owner
+          | Provide ->
+              Printf.sprintf
+                "This `provide` gives `%s`, whose methods call back here, so the prover cannot \
+                 show that the recursion ends."
+                owner))
       (List.sort_uniq Path.compare
          (List.filter_map
-            (fun (node : Path.t) ->
-              match node with
-              | Method { owner; _ } when is_in_recursion_group context node -> Some owner
-              | _ -> None)
-            (Lazy.force supplied)))
+            (fun (node : Path.t) -> match node with Method { owner; _ } -> Some owner | _ -> None)
+            recursive))
+  in
+  if context.terminates && frame.makes_obligations then
+    List.iter
+      (fun (edge : Mir.Call_edges.edge) ->
+        match edge with Calls _ -> () | Supplies { supplier; code } -> reject_supply supplier code)
+      (Mir.Call_edges.list_statement_edges context.lookups.interface frame.substitution statement)
 
 let find_recursive_callee (context : State.context) (frame : State.frame) location callee =
   let resolution =
@@ -394,23 +430,15 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
     None
   in
   let recursive_callee =
-    if context.terminates && frame.makes_obligations then begin
-      reject_recursion_through_supplied_code context frame location resolution.supplied
-        ~describe:(fun supplier ->
-          Printf.sprintf
-            "This call uses `%s` where a bound needs it, and its methods reach back here. Such a \
-             use passes no arguments the prover can compare, so the recursion cannot be shown to \
-             end: write it as a direct call on a part."
-            supplier);
-      match resolution.target with
-      | Some target when is_in_recursion_group context target -> (
-          match context.lookups.mir.find_form_origin target with
-          | Some (Derived _, _) -> reject target "derives"
-          | Some (Inherited _, _) -> reject target "inherits from its trait"
-          | Some (Written _, _) | None -> Some target)
-      | Some _ | None -> None
-    end
-    else None
+    match resolution.target with
+    | Some target
+      when context.terminates && frame.makes_obligations && is_in_recursion_group context target
+      -> (
+        match context.lookups.mir.find_form_origin target with
+        | Some (Derived _, _) -> reject target "derives"
+        | Some (Inherited _, _) -> reject target "inherits from its trait"
+        | Some (Written _, _) | None -> Some target)
+    | Some _ | None -> None
   in
   (resolution, recursive_callee)
 

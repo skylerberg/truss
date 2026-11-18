@@ -48,8 +48,5 @@ let list_states checked file = Prover.list_states (Lazy.force checked.verdicts) 
 
 let list_holes snapshot packages checked definition =
   List.map
-    (fun (file, offset) ->
-      let source = Command_packages.read_source snapshot packages file in
-      let line, column = Source.compute_position source offset in
-      (Shown_path.show_path (Source.path source), line, column))
+    (fun (file, line, column) -> (Command_packages.show_file snapshot packages file, line, column))
     (Database.list_holes checked.proofs definition)

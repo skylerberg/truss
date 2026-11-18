@@ -99,7 +99,7 @@ test "a constructor of a part found through recursion is read" {
   assert tree.find(9) is None
 }
 
-test "a part found through recursion is changed" {
+test "a part found through recursion is changed" uses Panic {
   var tree = sample()
   mut tree.slot(3) = 30
   mut tree.slot(1) = 10
