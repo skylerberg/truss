@@ -726,6 +726,11 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Value_parameter parameter ->
       (frame, Models.make_value_term context frame (Value_parameter parameter))
   | Convert { conversion = To_integer; value; _ } -> (frame, translate_operand value)
+  | Convert { conversion = View_to_owned; value; _ } ->
+      ( frame,
+        Values.make_owner_of_view context frame
+          ~view:(compute_operand_type context frame value)
+          ~owner:ty (translate_operand value) )
   | Convert { conversion = From_integer; value; _ } ->
       (frame, Operations.convert_from_integer context frame site (translate_operand value))
   | Function_value { path; instantiation; is_argument } ->

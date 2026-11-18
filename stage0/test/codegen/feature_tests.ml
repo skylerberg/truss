@@ -63,6 +63,10 @@ let () =
     Fixtures.Feature.while_condition_binding_a_lent_label;
   Codegen_support.expect_pass "sets and maps keep one of each key, in order"
     Fixtures.Feature.set_and_map_test;
+  Codegen_support.test
+    "a view passed as its owning type reads the view's elements, and is never dropped" (fun () ->
+      Codegen_support.expect_output Fixtures.Feature.lookups_by_views_of_keys
+        (String.concat "" (List.init 3 (Printf.sprintf "test %d passed\n"))));
   Codegen_support.expect_pass "strings, constants, and ranges of constants are patterns"
     Fixtures.Feature.command_patterns;
   Codegen_support.expect_pass "floats display as the shortest decimal that reads back"

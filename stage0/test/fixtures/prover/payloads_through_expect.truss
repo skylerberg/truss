@@ -1,0 +1,13 @@
+fn sum(left: Int64, right: Int64) -> Int64
+  uses Panic
+  ensures result == left + right
+{
+  left.checked_add(right).expect("the sum fits Int64")
+}
+
+fn parsed(text: own Result[Int64, String]) -> Int64
+  uses Panic
+  ensures text is Ok(value) && result == value
+{
+  own text.expect("the text is a number")
+}

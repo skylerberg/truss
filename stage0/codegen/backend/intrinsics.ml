@@ -22,8 +22,8 @@ let list_consumed_places : Intrinsic.operation -> int list = function
   | Buffer Array_from_storage -> [ 0 ]
   | _ -> []
 
-let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types operation
-    ~type_arguments arguments ~destination ~site ~trace =
+let lower ~may_panic ?(value_arguments = []) ?reported env builder types operation ~type_arguments
+    arguments ~destination ~site ~trace =
   let set rvalue =
     Option.iter
       (fun destination_place -> Emit_c.Builder.emit builder (Assign (destination_place, rvalue)))
@@ -44,30 +44,35 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
   let copy_length storage = Lowered.Copy (Storage.project_length storage) in
   let copy_view_length view = Lowered.Copy (Storage.project_view_length view) in
   let index_element = Storage.index_element in
-  let panic_when failed message =
-    let fail = Emit_c.Builder.allocate_block builder
-    and go_on = Emit_c.Builder.allocate_block builder in
-    Emit_c.Builder.branch builder failed ~yes:fail ~no:go_on;
-    Emit_c.Builder.start builder fail;
+  let fail failure message =
     Emit_c.Builder.finish builder
       (Fail
          {
-           failure = Panic;
+           failure;
            message = Constant (Bytes message);
            length = Lowered.make_uint64_constant (String.length message);
            site;
            reported;
            trace;
-         });
-    Emit_c.Builder.start builder go_on
+         })
   in
-  let panic_if (failed : Lowered.rvalue) message =
+  let fail_when failure condition message =
+    let failed = Emit_c.Builder.allocate_block builder
+    and after = Emit_c.Builder.allocate_block builder in
+    Emit_c.Builder.branch builder condition ~yes:failed ~no:after;
+    Emit_c.Builder.start builder failed;
+    fail failure message;
+    Emit_c.Builder.start builder after
+  in
+  let check_failure : Lowered.failure = if may_panic then Panic else Obligation in
+  let check_when condition message = fail_when check_failure condition message in
+  let check_if (condition : Lowered.rvalue) message =
     let decided =
       let is_unsigned_zero : Lowered.operand -> bool = function
         | Constant (Integer ((UInt8 | UInt16 | UInt32 | UInt64), zero)) -> Z.sign zero = 0
         | _ -> false
       in
-      match failed with
+      match condition with
       | Binary (op, Constant (Integer (_, left)), Constant (Integer (_, right))) -> (
           match op with
           | Greater -> Some (Z.gt left right)
@@ -83,28 +88,18 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
       | Binary (Less_equal, zero, _) when is_unsigned_zero zero -> Some true
       | _ -> None
     in
-    if checks then
-      match decided with
-      | Some false -> ()
-      | Some true ->
-          Emit_c.Builder.finish builder
-            (Fail
-               {
-                 failure = Panic;
-                 message = Constant (Bytes message);
-                 length = Lowered.make_uint64_constant (String.length message);
-                 site;
-                 reported;
-                 trace;
-               });
-          Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder)
-      | None ->
-          let holds = Emit_c.Builder.allocate_local builder (Raw Bool) in
-          Emit_c.Builder.emit builder (Assign (Lowered.make_local_place holds, failed));
-          panic_when (Copy (Lowered.make_local_place holds)) message
+    match decided with
+    | Some false -> ()
+    | Some true ->
+        fail check_failure message;
+        Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder)
+    | None ->
+        let is_failed = Emit_c.Builder.allocate_local builder (Raw Bool) in
+        Emit_c.Builder.emit builder (Assign (Lowered.make_local_place is_failed, condition));
+        check_when (Copy (Lowered.make_local_place is_failed)) message
   in
   let check_index index count =
-    panic_if (Binary (Greater_equal, index, count)) "index out of bounds"
+    check_if (Binary (Greater_equal, index, count)) "index out of bounds"
   in
   let compute_room storage : Lowered.operand =
     let room = Emit_c.Builder.allocate_local builder (Value types.uint64) in
@@ -145,7 +140,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
     in
     let lower_checked_arithmetic op overflow =
       match find_integer_argument () with
-      | Some _ when checks ->
+      | Some _ ->
           let result = Emit_c.Builder.allocate_local builder (Value (read_type_argument 0)) in
           let over = Emit_c.Builder.allocate_local builder (Raw Bool) in
           call ~result:(Lowered.make_local_place over) overflow
@@ -154,19 +149,19 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
               read_operand 1;
               Address { place = Lowered.make_local_place result; writable = true };
             ];
-          panic_when (Copy (Lowered.make_local_place over)) "arithmetic overflow";
+          check_when (Copy (Lowered.make_local_place over)) "arithmetic overflow";
           set (Use (Copy (Lowered.make_local_place result)))
       | _ -> set_binary op
     in
     let lower_checked_division op =
       match find_integer_argument () with
-      | Some integer when checks ->
+      | Some integer ->
           let zero = Emit_c.Builder.allocate_local builder (Raw Bool) in
           Emit_c.Builder.emit builder
             (Assign
                ( Lowered.make_local_place zero,
                  Binary (Equal, read_operand 1, Constant (Integer (integer, Z.zero))) ));
-          panic_when (Copy (Lowered.make_local_place zero)) "division by zero";
+          check_when (Copy (Lowered.make_local_place zero)) "division by zero";
           (match integer with
           | Int8 | Int16 | Int32 | Int64 ->
               let bits = 8 * Memory_layout.compute_integer_size integer in
@@ -189,7 +184,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                        ( Bit_and,
                          Copy (Lowered.make_local_place by_minus_one),
                          Copy (Lowered.make_local_place of_least) ) ));
-              panic_when (Copy (Lowered.make_local_place both)) "arithmetic overflow"
+              check_when (Copy (Lowered.make_local_place both)) "arithmetic overflow"
           | _ -> ());
           set_binary op
       | _ -> set_binary op
@@ -212,9 +207,9 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           in
           (match amount with
           | Int8 | Int16 | Int32 | Int64 ->
-              panic_if (Binary (Less, read_operand 1, make_constant 0)) "shift amount out of range"
+              check_if (Binary (Less, read_operand 1, make_constant 0)) "shift amount out of range"
           | _ -> ());
-          panic_if
+          check_if
             (Binary (Greater_equal, read_operand 1, make_constant bits))
             "shift amount out of range"
       | _ -> ());
@@ -286,7 +281,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
     | Remainder -> lower_checked_division Remainder
     | Negate -> (
         match find_integer_argument () with
-        | Some ((Int8 | Int16 | Int32 | Int64) as integer) when checks ->
+        | Some ((Int8 | Int16 | Int32 | Int64) as integer) ->
             let bits = 8 * Memory_layout.compute_integer_size integer in
             let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
             let of_least = Emit_c.Builder.allocate_local builder (Raw Bool) in
@@ -294,7 +289,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
               (Assign
                  ( Lowered.make_local_place of_least,
                    Binary (Equal, read_operand 0, Constant (Integer (integer, least))) ));
-            panic_when (Copy (Lowered.make_local_place of_least)) "arithmetic overflow";
+            check_when (Copy (Lowered.make_local_place of_least)) "arithmetic overflow";
             set_unary Negate
         | _ -> set_unary Negate)
     | Wrapping_add -> set_binary Add
@@ -325,11 +320,11 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
         (match
            (classify_scalar env (read_type_argument 0), classify_scalar env (read_type_argument 1))
          with
-        | (Float32 | Float64), Integer _ when checks ->
+        | (Float32 | Float64), Integer _ ->
             let in_range = Emit_c.Builder.allocate_local builder (Raw Bool) in
             Emit_c.Builder.emit builder
               (Assign (Lowered.make_local_place in_range, make_fits_test ()));
-            panic_if
+            check_if
               (Unary (Not, Copy (Lowered.make_local_place in_range)))
               "conversion out of range"
         | _ -> ());
@@ -371,7 +366,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
           Lowered.make_uint64_constant layout.size;
           Address { place = Lowered.make_local_place bytes; writable = true };
         ];
-      panic_when (Copy (Lowered.make_local_place too_many)) "out of memory";
+      fail_when Panic (Copy (Lowered.make_local_place too_many)) "out of memory";
       let buffer = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
       let is_allocated = Emit_c.Builder.allocate_local builder (Raw Bool)
       and is_unallocated = Emit_c.Builder.allocate_local builder (Raw Bool) in
@@ -493,26 +488,25 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
         set (Use (Copy (Storage.project_capacity (extract_place (read_argument 0)))))
     | Storage_set_capacity ->
         let storage = extract_place (read_argument 0) in
-        panic_if
+        check_if
           (Binary (Less, read_operand 1, copy_length storage))
           "a storage's capacity set to less than its length";
         set_capacity storage (read_operand 1)
     | Storage_lengthen ->
         let storage = extract_place (read_argument 0) in
-        if checks then
-          panic_if
-            (Binary (Greater, read_operand 1, compute_room storage))
-            "a storage lengthened to more than its capacity";
+        check_if
+          (Binary (Greater, read_operand 1, compute_room storage))
+          "a storage lengthened to more than its capacity";
         add_to_length storage (read_operand 1)
     | Storage_shorten ->
         let storage = extract_place (read_argument 0) in
-        panic_if
+        check_if
           (Binary (Greater, read_operand 1, copy_length storage))
           "a storage shortened to more than its length";
         Emit_c.Builder.emit builder (Assign (Storage.project_length storage, Use (read_operand 1)))
     | Storage_push ->
         let storage = extract_place (read_argument 0) in
-        panic_if
+        check_if
           (Binary (Greater_equal, copy_length storage, Copy (Storage.project_capacity storage)))
           "an element pushed to a storage that has no room";
         Emit_c.Builder.emit builder
@@ -520,7 +514,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
         add_to_length storage (Lowered.make_uint64_constant 1)
     | Storage_pop ->
         let storage = extract_place (read_argument 0) in
-        panic_if
+        check_if
           (Binary (Equal, copy_length storage, Lowered.make_uint64_constant 0))
           "an element popped from an empty storage";
         Emit_c.Builder.emit builder
@@ -531,8 +525,8 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
     | Storage_insert ->
         let storage = extract_place (read_argument 0) in
         let index = read_operand 1 in
-        panic_if (Binary (Greater, index, copy_length storage)) "index out of bounds";
-        panic_if
+        check_if (Binary (Greater, index, copy_length storage)) "index out of bounds";
+        check_if
           (Binary (Greater_equal, copy_length storage, Copy (Storage.project_capacity storage)))
           "an element inserted into a storage that has no room";
         let after = allocate_uint64_local () in
@@ -647,17 +641,9 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
         in
         Emit_c.Builder.emit builder
           (Assign (moved_storage, Use (Move (extract_place (read_argument 0)))));
-        if checks then begin
-          let other = Emit_c.Builder.allocate_local builder (Raw Bool) in
-          Emit_c.Builder.emit builder
-            (Assign
-               ( Lowered.make_local_place other,
-                 Binary (Not_equal, copy_length moved_storage, Constant (Integer (UInt64, count)))
-               ));
-          panic_when
-            (Copy (Lowered.make_local_place other))
-            "a storage made into an array of another length"
-        end;
+        check_if
+          (Binary (Not_equal, copy_length moved_storage, Constant (Integer (UInt64, count))))
+          "a storage made into an array of another length";
         if Z.sign count > 0 && (Memory_layout.of_type env array_ty).size > 0 then begin
           let untyped = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
           Emit_c.Builder.emit builder
@@ -722,8 +708,8 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
              (Copy (Storage.project_view_elements (extract_place (read_argument 0))), Integer UInt64))
     | View_slice ->
         let view = extract_place (read_argument 0) in
-        panic_if (Binary (Greater, read_operand 1, read_operand 2)) "slice out of bounds";
-        panic_if (Binary (Greater, read_operand 2, copy_view_length view)) "slice out of bounds";
+        check_if (Binary (Greater, read_operand 1, read_operand 2)) "slice out of bounds";
+        check_if (Binary (Greater, read_operand 2, copy_view_length view)) "slice out of bounds";
         let count = allocate_uint64_local () in
         Emit_c.Builder.emit builder
           (Assign (Lowered.make_local_place count, Binary (Subtract, read_operand 2, read_operand 1)));
@@ -891,19 +877,8 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
         Emit_c.Builder.start builder after;
         load_text_at entry ~is_present:(extract_place (read_argument 1))
     | Libc function_ when not (Libc.is_available (Memory_layout.system env) function_) ->
-        let message =
-          Printf.sprintf "this system's C library has no %s" (Libc.show_function function_)
-        in
-        Emit_c.Builder.finish builder
-          (Fail
-             {
-               failure = Panic;
-               message = Constant (Bytes message);
-               length = Lowered.make_uint64_constant (String.length message);
-               site;
-               reported;
-               trace;
-             });
+        fail Panic
+          (Printf.sprintf "this system's C library has no %s" (Libc.show_function function_));
         Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder)
     | Libc function_ -> (
         let ground scalar =
@@ -974,105 +949,103 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
               | Fixed number -> make_number_constant number)
             parameters
         in
-        if checks then begin
-          let position = ref 0 in
-          let passed =
-            List.concat_map
-              (fun (name, (passes : Libc.passes)) ->
-                match passes with
-                | Value _ | Elements _ | Room _ | Elements_to_change _ ->
-                    let index = !position in
-                    incr position;
-                    [ (name, Some passes, index) ]
-                | Written (_, names) ->
-                    List.map
-                      (fun name ->
-                        let index = !position in
-                        incr position;
-                        (name, None, index))
-                      names
-                | Always _ | Fixed _ -> [])
-              parameters
-          in
-          let cast_to_uint64 operand : Lowered.operand =
-            let count = allocate_uint64_local () in
-            Emit_c.Builder.emit builder
-              (Assign (Lowered.make_local_place count, Convert (operand, Integer UInt64)));
-            Copy (Lowered.make_local_place count)
-          in
-          let find_count (extent : Libc.extent) : Lowered.operand option =
-            match extent with
-            | Counted { by; each } -> (
-                match List.find_opt (fun (name, _, _) -> name = by) passed with
-                | Some (_, _, index) ->
-                    let count = cast_to_uint64 (read_operand index) in
-                    if each = 1 then Some count
-                    else begin
-                      let scaled = allocate_uint64_local () in
-                      Emit_c.Builder.emit builder
-                        (Assign
-                           ( Lowered.make_local_place scaled,
-                             Binary (Multiply, count, Lowered.make_uint64_constant each) ));
-                      Some (Copy (Lowered.make_local_place scaled))
-                    end
-                | None -> raise_bug "a C library row counts by %s, which it does not take" by)
-            | Exactly elements -> Some (Lowered.make_uint64_constant elements)
-            | Number number -> Some (cast_to_uint64 (make_number_constant number))
-            | Through_zero -> None
-          in
-          List.iter
-            (fun (_, (passes : Libc.passes option), index) ->
+        let position = ref 0 in
+        let passed =
+          List.concat_map
+            (fun (name, (passes : Libc.passes)) ->
               match passes with
-              | Some (Room (_, extent)) ->
-                  Option.iter
-                    (fun count ->
-                      panic_if
-                        (Binary (Greater, count, compute_room (extract_place (read_argument index))))
-                        "a call of the C library with less room than it writes")
-                    (find_count extent)
-              | Some (Elements_to_change (_, extent)) ->
-                  Option.iter
-                    (fun count ->
-                      panic_if
-                        (Binary (Greater, count, copy_length (extract_place (read_argument index))))
-                        "a call of the C library with fewer elements than it mutates")
-                    (find_count extent)
-              | Some (Elements (element, extent)) -> (
-                  let view = extract_place (read_argument index) in
-                  match find_count extent with
-                  | Some count ->
-                      panic_if
-                        (Binary (Greater, count, copy_view_length view))
-                        "a call of the C library with fewer elements than it reads"
-                  | None ->
-                      let message =
-                        "a call of the C library with text that does not end with a zero"
-                      in
-                      let zero : Lowered.operand =
-                        match classify_scalar env (ground element) with
-                        | Integer integer -> Constant (Integer (integer, Z.zero))
-                        | _ -> raise_bug "a C library row reads up to a zero that is not an integer"
-                      in
-                      panic_if
-                        (Binary (Equal, copy_view_length view, Lowered.make_uint64_constant 0))
-                        message;
-                      let last = allocate_uint64_local () in
-                      Emit_c.Builder.emit builder
-                        (Assign
-                           ( Lowered.make_local_place last,
-                             Binary (Subtract, copy_view_length view, Lowered.make_uint64_constant 1)
-                           ));
-                      panic_if
-                        (Binary
-                           ( Not_equal,
-                             Copy
-                               (Storage.index_view_element view
-                                  (Copy (Lowered.make_local_place last))),
-                             zero ))
-                        message)
-              | Some (Value _ | Written _ | Always _ | Fixed _) | None -> ())
-            passed
-        end;
+              | Value _ | Elements _ | Room _ | Elements_to_change _ ->
+                  let index = !position in
+                  incr position;
+                  [ (name, Some passes, index) ]
+              | Written (_, names) ->
+                  List.map
+                    (fun name ->
+                      let index = !position in
+                      incr position;
+                      (name, None, index))
+                    names
+              | Always _ | Fixed _ -> [])
+            parameters
+        in
+        let cast_to_uint64 operand : Lowered.operand =
+          let count = allocate_uint64_local () in
+          Emit_c.Builder.emit builder
+            (Assign (Lowered.make_local_place count, Convert (operand, Integer UInt64)));
+          Copy (Lowered.make_local_place count)
+        in
+        let find_count (extent : Libc.extent) : Lowered.operand option =
+          match extent with
+          | Counted { by; each } -> (
+              match List.find_opt (fun (name, _, _) -> name = by) passed with
+              | Some (_, _, index) ->
+                  let count = cast_to_uint64 (read_operand index) in
+                  if each = 1 then Some count
+                  else begin
+                    let scaled = allocate_uint64_local () in
+                    Emit_c.Builder.emit builder
+                      (Assign
+                         ( Lowered.make_local_place scaled,
+                           Binary (Multiply, count, Lowered.make_uint64_constant each) ));
+                    Some (Copy (Lowered.make_local_place scaled))
+                  end
+              | None -> raise_bug "a C library row counts by %s, which it does not take" by)
+          | Exactly elements -> Some (Lowered.make_uint64_constant elements)
+          | Number number -> Some (cast_to_uint64 (make_number_constant number))
+          | Through_zero -> None
+        in
+        List.iter
+          (fun (_, (passes : Libc.passes option), index) ->
+            match passes with
+            | Some (Room (_, extent)) ->
+                Option.iter
+                  (fun count ->
+                    check_if
+                      (Binary (Greater, count, compute_room (extract_place (read_argument index))))
+                      "a call of the C library with less room than it writes")
+                  (find_count extent)
+            | Some (Elements_to_change (_, extent)) ->
+                Option.iter
+                  (fun count ->
+                    check_if
+                      (Binary (Greater, count, copy_length (extract_place (read_argument index))))
+                      "a call of the C library with fewer elements than it mutates")
+                  (find_count extent)
+            | Some (Elements (element, extent)) -> (
+                let view = extract_place (read_argument index) in
+                match find_count extent with
+                | Some count ->
+                    check_if
+                      (Binary (Greater, count, copy_view_length view))
+                      "a call of the C library with fewer elements than it reads"
+                | None ->
+                    let message =
+                      "a call of the C library with text that does not end with a zero"
+                    in
+                    let zero : Lowered.operand =
+                      match classify_scalar env (ground element) with
+                      | Integer integer -> Constant (Integer (integer, Z.zero))
+                      | _ -> raise_bug "a C library row reads up to a zero that is not an integer"
+                    in
+                    check_if
+                      (Binary (Equal, copy_view_length view, Lowered.make_uint64_constant 0))
+                      message;
+                    let last = allocate_uint64_local () in
+                    Emit_c.Builder.emit builder
+                      (Assign
+                         ( Lowered.make_local_place last,
+                           Binary (Subtract, copy_view_length view, Lowered.make_uint64_constant 1)
+                         ));
+                    check_if
+                      (Binary
+                         ( Not_equal,
+                           Copy
+                             (Storage.index_view_element view
+                                (Copy (Lowered.make_local_place last))),
+                           zero ))
+                      message)
+            | Some (Value _ | Written _ | Always _ | Fixed _) | None -> ())
+          passed;
         let target = Lowered.Foreign (Libc.make_declaration (Memory_layout.system env) function_) in
         let emit_bracket intrinsic =
           if Libc.is_blocking function_ then

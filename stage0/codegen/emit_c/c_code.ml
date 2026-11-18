@@ -402,11 +402,12 @@ let write_terminator context fc buffer (terminator : Lowered.terminator) =
       | Some (text, _) -> write_line "return %s;" text)
   | Unreachable -> write_line "%s" (render_unreachable context)
   | Fail { failure; message; length; site; reported; trace } ->
-      if match failure with Lowered.Todo -> true | Panic | Assertion -> false then
+      if match failure with Lowered.Todo -> true | Panic | Obligation | Assertion -> false then
         context.failures <- (Todo, site) :: context.failures;
       let runtime =
         match failure with
         | Panic -> "t_runtime_panic"
+        | Obligation -> "T_OBLIGATION_FAILED"
         | Assertion -> "t_runtime_assertion_failed"
         | Todo -> "t_runtime_todo"
       in
@@ -417,8 +418,8 @@ let write_terminator context fc buffer (terminator : Lowered.terminator) =
       in
       let chain =
         match (failure, trace) with
-        | Panic, Some trace -> [ fst (render_operand trace) ]
-        | Panic, None -> [ fst (render_operand (Constant Null)) ]
+        | (Panic | Obligation), Some trace -> [ fst (render_operand trace) ]
+        | (Panic | Obligation), None -> [ fst (render_operand (Constant Null)) ]
         | (Assertion | Todo), None -> []
         | (Assertion | Todo), Some _ ->
             C_runtime.raise_bug "a call chain on a failure that is not a panic"

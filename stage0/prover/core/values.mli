@@ -28,6 +28,9 @@ val apply_map_literal :
 
 val make_text_value : State.context -> State.frame -> Types.ty -> string -> Logic.term
 
+val make_owner_of_view :
+  State.context -> State.frame -> view:Types.ty -> owner:Types.ty -> Logic.term -> Logic.term
+
 val project_field :
   State.context ->
   State.frame ->

@@ -7,11 +7,10 @@ type context = {
   monomorphic : Monomorphic.context;
   types : Intrinsics.types;
   bool : Ground.ty;
-  checks : bool;
 }
 
 val make_monomorphic_context : Interface.Lookups.t -> Monomorphic.context
-val make_context : Lookups.settings -> env:Memory_layout.env -> Lookups.t -> context
+val make_context : env:Memory_layout.env -> Lookups.t -> context
 
 type written = { spans : Source.Definition_span.t array; text : string }
 

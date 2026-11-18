@@ -283,8 +283,8 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
   let list = Lowering.allocate_temporary st list_ty in
   let lower operation type_arguments arguments destination =
     ignore
-      (Intrinsics.lower ~checks:context.checks context.env builder context.types operation
-         ~type_arguments arguments ~destination
+      (Intrinsics.lower ~may_panic:false context.env builder context.types operation ~type_arguments
+         arguments ~destination
          ~site:{ definition = main_path; offset = 0 }
          ~trace:None)
   in

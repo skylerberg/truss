@@ -121,17 +121,10 @@ public fn Result[Value, Error].unwrap_or_else(
   }
 }
 
-public fn Result[Value, Error].unwrap(own self) -> Value
-  uses Panic
-{
-  match own self {
-    Ok(value) => value
-    Err(_) => Panic.crash("unwrap of Err")
-  }
-}
-
 public fn Result[Value, Error].expect(own self, message: StringSlice) -> Value
   uses Panic
+  ensures self is Ok(held) && identical(result, held)
+  cost time O(1)
 {
   match own self {
     Ok(value) => value

@@ -140,7 +140,7 @@ type rvalue =
   | Is_variant of place * string
   | Function_value of { code : function_ref; environment : operand option }
 
-type failure = Panic | Assertion | Todo
+type failure = Panic | Obligation | Assertion | Todo
 type destination = Discarded | Returned of place | Written of place
 
 type statement =
