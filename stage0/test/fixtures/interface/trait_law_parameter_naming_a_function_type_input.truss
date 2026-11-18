@@ -1,0 +1,9 @@
+trait Holder {
+  type Element: Equal
+
+  law reflexive(value: (fn(index: UInt64) -> UInt64 cost time finite)) {
+    true
+  }
+}
+
+fn mistyped(value: Option[Int64, Int64]) {}

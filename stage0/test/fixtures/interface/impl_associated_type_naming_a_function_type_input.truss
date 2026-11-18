@@ -1,0 +1,11 @@
+trait Holder {
+  type Element
+}
+
+type Box(value: UInt64)
+
+impl Holder for Box {
+  type Element = (fn(index: UInt64) -> UInt64 cost time finite)
+}
+
+fn mistyped(value: Option[Int64, Int64]) {}

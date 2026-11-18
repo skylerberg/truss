@@ -57,6 +57,7 @@ module Code = struct
     | Cost_word
     | Finite_not_time
     | Loop_cost_bound
+    | Function_type_cost_bound
     | Function_type_names
     | Misplaced_requires
     | Misplaced_function_type
@@ -317,6 +318,7 @@ module Code = struct
     | Cost_word -> "cost_word"
     | Finite_not_time -> "finite_not_time"
     | Loop_cost_bound -> "loop_cost_bound"
+    | Function_type_cost_bound -> "function_type_cost_bound"
     | Function_type_names -> "function_type_names"
     | Misplaced_requires -> "misplaced_requires"
     | Misplaced_function_type -> "misplaced_function_type"

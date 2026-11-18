@@ -1,0 +1,2 @@
+type Counter(value: UInt64)
+  cost potential "steps"

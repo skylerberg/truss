@@ -77,30 +77,24 @@ let classify_self_mode (signature : Types.signature) =
   | Some (Own, _) -> Types.Own
   | _ -> Types.Read
 
-let list_clause_expressions (clauses : Syntax.clause list) =
-  List.concat_map
-    (fun (clause : Syntax.clause) ->
-      match clause.kind with
-      | Requires value | Ensures value -> [ (value, `Bool) ]
-      | Decreases measures -> List.map (fun measure -> (measure, `Cost_function)) measures
-      | Cost { bound = Big_o value | At_most value | Exactly value; _ } ->
-          [ (value, `Cost_function) ]
-      | Cost { bound = Finite; _ } | Uses _ | Clause_error -> [])
-    clauses
-
 let check_clauses state env (clauses : Syntax.clause list) =
   let env = { env with State.specification = true } in
+  let check_in_statement id check =
+    State.run_in_statement state env (State.read_span state id) check
+  in
   List.iter
     (fun (clause : Syntax.clause) ->
-      match clause.kind with Cost cost -> State.check_cost state cost | _ -> ())
-    clauses;
-  List.iter
-    (fun ((value : Syntax.expression), kind) ->
-      State.run_in_statement state env (State.read_span state value.id) (fun () ->
-          match kind with
-          | `Bool -> Expressions.check state env value Types.bool
-          | `Cost_function -> ignore (Expressions.check_expression state env value)))
-    (list_clause_expressions clauses)
+      match clause.kind with
+      | Requires value | Ensures value ->
+          check_in_statement value.id (fun () -> Expressions.check state env value Types.bool)
+      | Decreases measures ->
+          List.iter
+            (fun (measure : Syntax.expression) ->
+              check_in_statement measure.id (fun () -> Hooks.check_integer state env measure))
+            measures
+      | Cost cost -> check_in_statement clause.id (fun () -> Statements.check_cost state env cost)
+      | Uses _ | Clause_error -> ())
+    clauses
 
 let check_function_type_requires state env (written : Syntax.parameter list)
     (signature : Types.signature) =
@@ -329,7 +323,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                     Expressions.check state env value Types.bool)
             | Potential value ->
                 State.run_in_statement state env (State.read_span state value.id) (fun () ->
-                    ignore (Expressions.check_expression state env value))
+                    Hooks.check_integer state env value)
             | Derives _ -> ())
           clauses;
         let list_defaulted variant (fields : Syntax.field list) =
@@ -425,9 +419,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                    (List.mapi
                       (fun index (line : Syntax.trait_member Syntax.node) ->
                         match line.kind with
-                        | Law law
-                          when not (is_broken (Member_header index) || is_broken (Member_body index))
-                          ->
+                        | Law law when not (is_broken (Member_body index)) ->
                             let parameters =
                               List.filter_map
                                 (fun (parameter : Syntax.parameter) : Core.parameter option ->
@@ -457,27 +449,26 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       members)));
         List.iteri
           (fun index (line : Syntax.trait_member Syntax.node) ->
-            if not (is_broken (Member_header index)) then
-              match line.kind with
-              | Law law ->
-                  let env : State.env = { no_output with specification = true; self = Some self } in
-                  List.iter
-                    (fun (parameter : Syntax.parameter) ->
-                      match parameter.kind with
-                      | Named_parameter { name; type_; _ } ->
-                          State.declare state name
-                            (Interface.Elaborator.elaborate_type state.context type_)
-                            ~is_var:false ~mode:Types.Read
-                      | _ -> ())
-                    law.parameters;
-                  List.iter
-                    (fun (requirement : Syntax.expression) ->
-                      State.run_in_statement state env (State.read_span state requirement.id)
-                        (fun () -> Expressions.check state env requirement Types.bool))
-                    law.requires;
-                  if not (is_broken (Member_body index)) then
-                    check_body state { env with output = Some (Returns Types.bool) } law.body
-              | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
+            match line.kind with
+            | Law law ->
+                let env : State.env = { no_output with specification = true; self = Some self } in
+                List.iter
+                  (fun (parameter : Syntax.parameter) ->
+                    match parameter.kind with
+                    | Named_parameter { name; type_; _ } ->
+                        State.declare state name
+                          (Interface.Elaborator.elaborate_type state.context type_)
+                          ~is_var:false ~mode:Types.Read
+                    | _ -> ())
+                  law.parameters;
+                List.iter
+                  (fun (requirement : Syntax.expression) ->
+                    State.run_in_statement state env (State.read_span state requirement.id)
+                      (fun () -> Expressions.check state env requirement Types.bool))
+                  law.requires;
+                if not (is_broken (Member_body index)) then
+                  check_body state { env with output = Some (Returns Types.bool) } law.body
+            | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
           members
     | Constant { value; _ }, Constant_interface constant ->
         state.form.definition_builder <-

@@ -57,6 +57,7 @@ module Code : sig
     | Cost_word
     | Finite_not_time
     | Loop_cost_bound
+    | Function_type_cost_bound
     | Function_type_names
     | Misplaced_requires
     | Misplaced_function_type

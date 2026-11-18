@@ -27,6 +27,39 @@ let () =
     Standard_library.files
 
 let () =
+  List.iter
+    (fun (error, container, fixture, parser_code) ->
+      Harness.test
+        (Printf.sprintf "%s leaves %s unelaborated, and the other definitions are checked" error
+           container) (fun () ->
+          let database = Support.make_database (Support.setup [ ("app::main", fixture) ]) in
+          match
+            List.sort compare
+              (Support.list_codes
+                 (Support.list_diagnostics database (Support.parse_file "app::main")))
+          with
+          | [ first; "types.arity" ] when first = parser_code -> ()
+          | codes -> Harness.fail "reported [%s]" (String.concat "; " codes)))
+    [
+      ( "a cost bound that is not a literal in an impl's associated type",
+        "the impl",
+        Fixtures.Interface.impl_associated_type_with_a_cost_bound_that_is_not_a_literal,
+        "parser.function_type_cost_bound" );
+      ( "a named input of a function type in an impl's associated type",
+        "the impl",
+        Fixtures.Interface.impl_associated_type_naming_a_function_type_input,
+        "parser.function_type_names" );
+      ( "a cost bound that is not a literal in a law's parameter",
+        "the trait",
+        Fixtures.Interface.trait_law_parameter_with_a_cost_bound_that_is_not_a_literal,
+        "parser.function_type_cost_bound" );
+      ( "a named input of a function type in a law's parameter",
+        "the trait",
+        Fixtures.Interface.trait_law_parameter_naming_a_function_type_input,
+        "parser.function_type_names" );
+    ]
+
+let () =
   Harness.test "a function's signature is elaborated" (fun () ->
       let packages =
         Support.setup

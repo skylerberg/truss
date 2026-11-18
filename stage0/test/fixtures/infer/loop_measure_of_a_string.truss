@@ -1,0 +1,11 @@
+fn count_down(count: UInt64) -> UInt64
+  cost time finite
+{
+  var remaining = count
+  while remaining > 0
+    decreases "steps"
+  {
+    remaining = remaining - 1
+  }
+  remaining
+}

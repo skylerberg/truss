@@ -1141,7 +1141,24 @@ let () =
   Harness.test "a constant of a derived type of integers in a pattern" (fun () ->
       expect_fine Fixtures.Infer.integer_point_constant_arm);
   Harness.test "a loop's cost bound is checked" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.loop_cost_naming_a_missing_name "resolve.unknown_name")
+      expect_one_diagnostic Fixtures.Infer.loop_cost_naming_a_missing_name "resolve.unknown_name");
+  List.iter
+    (fun (amount, fixture, written) ->
+      Harness.test (Printf.sprintf "%s that is not an integer is a type error" amount) (fun () ->
+          expect_one_diagnostic fixture "types.mismatch" ~says:"Expected `Integer`" ~at:(written, 1)))
+    [
+      ("a cost bound", Fixtures.Infer.cost_bound_of_a_string, "\"steps\"");
+      ("an allocation bound", Fixtures.Infer.cost_bound_of_a_bool, "true");
+      ("a measure", Fixtures.Infer.measure_of_a_string, "\"steps\"");
+      ("a loop's measure", Fixtures.Infer.loop_measure_of_a_string, "\"steps\"");
+      ("a loop's cost bound", Fixtures.Infer.loop_cost_bound_of_a_string, "\"steps\"");
+      ("a potential", Fixtures.Infer.potential_of_a_string, "\"steps\"");
+      ("an argument of log", Fixtures.Infer.log_of_a_string, "\"steps\"");
+      ("an argument of power", Fixtures.Infer.power_of_a_string, "\"steps\"");
+    ];
+  Harness.test
+    "cost bounds, measures, and potentials of built-in integers and Integer check cleanly"
+    (fun () -> expect_fine Fixtures.Infer.cost_bounds_and_measures_of_integers)
 
 let identity = Fixtures.Infer.identity
 

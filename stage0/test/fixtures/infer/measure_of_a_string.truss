@@ -1,0 +1,6 @@
+fn count_down(count: UInt64) -> UInt64
+  cost time finite
+  decreases "steps"
+{
+  if count == 0 { 0 } else { count_down(count - 1) }
+}

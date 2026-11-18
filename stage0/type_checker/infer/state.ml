@@ -1148,7 +1148,7 @@ let check_operand_clause state (cost : Syntax.cost) (operand : Interface.Elabora
            shown)
   | Big_o _ | At_most _ | Finite -> ()
 
-let check_cost state (cost : Syntax.cost) =
+let check_cost_callees state (cost : Syntax.cost) =
   check_resource state cost.resource;
   match cost.bound with
   | Big_o value | At_most value | Exactly value ->

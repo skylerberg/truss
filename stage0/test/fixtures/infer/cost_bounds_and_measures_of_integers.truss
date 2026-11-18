@@ -1,0 +1,22 @@
+type Counter(value: UInt64, limit: UInt32)
+  cost potential value + limit
+
+fn total(items: List[Int64]) -> Int64
+  cost time O(items.length() * log(items.length()) + power(2, 3))
+  cost allocations <= 0
+{
+  var sum: Int64 = 0
+  for item in items
+    cost time O(visited.length())
+  {
+    sum = sum.wrapping_add(item)
+  }
+  sum
+}
+
+fn count_down(count: UInt64, step: Int32) -> UInt64
+  cost time finite
+  decreases count, step
+{
+  if count == 0 { 0 } else { count_down(count - 1, step) }
+}
