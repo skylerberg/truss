@@ -84,6 +84,7 @@ val conjunction : term list -> term
 val disjunction : term list -> term
 val truncated_divide : term -> term -> term
 val truncated_remainder : term -> term -> term
+val integer_of_bits : is_signed:bool -> width:int -> term -> term
 val mentions : symbol list -> term -> bool
 val list_free_constants : term -> symbol list
 val has_quantifier : term -> bool

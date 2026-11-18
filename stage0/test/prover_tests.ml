@@ -1278,6 +1278,18 @@ let () =
       expect_proven Fixtures.Prover.conversions_and_indexing_through_bounds_under_a_time_clause)
 
 let () =
+  Harness.test "a float converted to an integer keeps the bounds checked on the float" (fun () ->
+      expect_proven Fixtures.Prover.float_converted_within_bounds_on_the_float);
+  Harness.test "a float with a fraction does not convert to an integer" (fun () ->
+      expect_proven Fixtures.Prover.float_with_a_fraction_not_converted);
+  Harness.test "the least Int64 converts from a float and the next power of two does not" (fun () ->
+      expect_proven Fixtures.Prover.float_converted_at_the_limits_of_int64);
+  Harness.test "a character converts from its scalar code and back" (fun () ->
+      expect_proven Fixtures.Prover.character_converted_from_a_scalar_code);
+  Harness.test "an integer converted to a BigInteger converts back to itself" (fun () ->
+      expect_proven Fixtures.Prover.big_integer_converted_back)
+
+let () =
   Harness.test "two literals with the same text are the same value" (fun () ->
       expect_proven Fixtures.Prover.literal_ensured_identical_to_itself);
   Harness.test "two literals with different text are different values" (fun () ->
