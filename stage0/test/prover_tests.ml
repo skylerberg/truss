@@ -2231,6 +2231,17 @@ let () =
       | codes -> Harness.fail "expected prover.requires, found %s" (String.concat ", " codes))
 
 let () =
+  let expect_unsupported text =
+    match Support.list_codes (check_in_standard text) with
+    | [ "prover.unsupported" ] -> ()
+    | codes -> Harness.fail "expected prover.unsupported, found %s" (String.concat ", " codes)
+  in
+  Harness.test "a float converted to a type parameter is unsupported, not unchecked" (fun () ->
+      expect_unsupported Fixtures.Prover.float_converted_to_a_type_parameter);
+  Harness.test "an intrinsic sum at a type parameter with no integer bound is unsupported"
+    (fun () -> expect_unsupported Fixtures.Prover.intrinsic_sum_at_a_type_parameter)
+
+let () =
   let expect_only_requires text =
     match Support.list_codes (check_in_standard text) with
     | [ "prover.requires" ] -> ()

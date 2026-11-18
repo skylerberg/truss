@@ -1023,7 +1023,10 @@ Code for every integer width is written once, against the integer traits, as
 Swift's extensions of `FixedWidthInteger` are. The traits are sealed, so
 generic code over one is proven once for each built-in type, with that
 type's range and bit width. For the same reason, a literal under such a
-bound must fit every type that implements the trait.
+bound must fit every type that implements the trait. The prover rejects an
+intrinsic at any other type parameter: the obligations that prevent an
+overflow or an out-of-range conversion need a range and a width that the
+parameter lacks.
 
 ### Floats
 
