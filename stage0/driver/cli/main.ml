@@ -180,9 +180,9 @@ let show =
       non_empty & pos_all string []
       & info [] ~docv:"PATH"
           ~doc:
-            "A package, module, type, definition, or method, such as $(b,weather), \
-             $(b,weather::forecast), $(b,weather::forecast::parse), or \
-             $(b,weather::forecast::Forecast.summary).")
+            "A package, module, or definition: its full path, such as $(b,weather::forecast) or \
+             $(b,weather::forecast::Forecast.summary); a name in scope in every module, such as \
+             $(b,Int64); or a suffix of a definition's path, such as $(b,Forecast.summary).")
   in
   let body = Cmdliner.Arg.(value & flag & info [ "body" ] ~doc:"Print whole definitions.") in
   make_command "show" ~doc:"Print the signatures of a package, module, type, or definition."
@@ -211,8 +211,8 @@ let name_argument =
     & pos 0 (some string) None
     & info [] ~docv:"NAME"
         ~doc:
-          "A definition: its full path, or a suffix of one, such as $(b,parse) or \
-           $(b,Forecast.summary).")
+          "A definition: its full path, a name in scope in every module, such as $(b,Option), or a \
+           suffix of a definition's path, such as $(b,parse) or $(b,Forecast.summary).")
 
 let dependents =
   make_command "dependents"
@@ -231,7 +231,15 @@ let dependencies =
          $ name_argument))
 
 let rename =
-  let from_ = Cmdliner.Arg.(required & pos 0 (some string) None & info [] ~docv:"FROM") in
+  let from_ =
+    Cmdliner.Arg.(
+      required
+      & pos 0 (some string) None
+      & info [] ~docv:"FROM"
+          ~doc:
+            "A module or definition of the project's packages: its full path, or a suffix of a \
+             definition's path that names only that definition.")
+  in
   let to_ = Cmdliner.Arg.(required & pos 1 (some string) None & info [] ~docv:"TO") in
   make_command "rename"
     ~doc:

@@ -1,4 +1,6 @@
-type target = Definition of Path.t | Module of Path.module_
+type target =
+  | Definition of { path : Path.t; module_ : Path.module_; owner : string option }
+  | Module of Path.module_
 
 type plan = {
   edits : (Path.file * Source.span Diagnostic.edit list) list;
@@ -23,59 +25,65 @@ let group_by_file edits =
           edits ))
     (List.sort_uniq compare (List.map fst edits))
 
-let locate_in_package packages from_ =
-  let is_package package = List.mem package packages in
-  let argument = Path_argument.parse from_ in
-  match Path.split_module ~is_package (argument.prefix @ [ argument.last ]) with
-  | Some module_ -> (module_, argument.member)
-  | None ->
-      Outcome.raise_cannot_run
-        "Only the definitions of this project's packages can be renamed, and `%s` is not in one."
-        from_
+let find_renamed (names : Resolve.Names.lookups) packages : Path_argument.target -> target option =
+  function
+  | Module module_ when List.mem module_.package packages -> Some (Module module_)
+  | Definition path -> (
+      let is_declared_here =
+        match names.find_key path with
+        | Some key -> List.mem key.module_.package packages
+        | None -> false
+      in
+      match path with
+      | Top { module_; _ } when is_declared_here ->
+          Some (Definition { path; module_; owner = None })
+      | Method { owner = Top { module_; name }; _ }
+      | Member_constant { owner = Top { module_; name }; _ }
+        when is_declared_here ->
+          Some (Definition { path; module_; owner = Some name })
+      | _ -> None)
+  | Package _ | Module _ -> None
 
-let resolve_target snapshot database packages from_ =
-  let { Path.package; modules = names }, member = locate_in_package packages from_ in
-  let package_name = Path.show_package package in
-  if member = None && has_module snapshot packages { package; modules = names } then
-    Module { package; modules = names }
-  else
-    match List.rev names with
-    | last :: rest when has_module snapshot packages { package; modules = List.rev rest } ->
-        let module_ : Path.module_ = { package; modules = List.rev rest } in
-        let is_declared path =
-          List.exists
-            (fun (declaration : Resolve.Names.declaration) ->
-              match (declaration.path, path) with
-              | Method { owner; name; _ }, Path.Method { owner = other_owner; name = other_name; _ }
-                ->
-                  Path.equal owner other_owner && name = other_name
-              | candidate, path -> Path.equal candidate path)
-            (List.concat_map (Database.make_name_lookups database packages).list_declarations
-               (Command_packages.list_modules snapshot packages))
-        in
-        let path : Path.t =
-          match member with
-          | None -> Top { module_; name = last }
-          | Some name -> Method { owner = Top { module_; name = last }; name; receiver = Static }
-        in
-        if is_declared path then Definition path
-        else Outcome.raise_cannot_run "Nothing named `%s` is defined in %s." from_ package_name
-    | _ -> Outcome.raise_cannot_run "Nothing named `%s` is defined in %s." from_ package_name
+let show_target = function
+  | Definition { path; _ } -> Path.show path
+  | Module module_ -> Path.show_module module_
 
-let compute_new_name ~from_ to_ =
-  let written = Path_argument.parse to_ and old = Path_argument.parse from_ in
-  let split_owner_and_name (argument : Path_argument.t) =
-    match argument.member with Some member -> (argument.last, member) | None -> ("", argument.last)
-  in
-  let from_owner, _ = split_owner_and_name old in
-  if written.prefix <> [] && written.prefix <> old.prefix then
+let resolve_target database packages from_ =
+  let names = Database.make_name_lookups database packages in
+  match
+    List.filter_map (find_renamed names packages)
+      (Path_argument.resolve names packages (Path_argument.parse from_))
+  with
+  | [ target ] -> target
+  | [] -> Outcome.raise_cannot_run "Nothing named `%s` is defined in this project's packages." from_
+  | targets ->
+      Outcome.raise_cannot_run "`%s` names %d definitions: %s. Rename one by its full path." from_
+        (List.length targets)
+        (String.concat ", " (List.map show_target targets))
+
+let compute_new_name ~from_ ~(module_ : Path.module_) ~owner to_ =
+  let written = Path_argument.parse to_ in
+  if written.prefix <> [] && written.prefix <> Path.list_module_parts module_ then
     Outcome.raise_cannot_run
       "A rename keeps a definition in its module, and `%s` is in another one than `%s`." to_ from_;
-  let owner, name = split_owner_and_name written in
-  if written.member <> None && owner <> from_owner then
-    Outcome.raise_cannot_run "A rename keeps a method with its type, and `%s` is not under `%s`."
-      to_ from_owner;
-  name
+  match (written.member, owner) with
+  | None, _ -> written.last
+  | Some member, Some owner when written.last = owner -> member
+  | Some _, Some owner ->
+      Outcome.raise_cannot_run "A rename keeps a member with its type, and `%s` is not under `%s`."
+        to_ owner
+  | Some _, None ->
+      Outcome.raise_cannot_run
+        "A rename keeps a definition outside a type, and `%s` names a member of `%s`." to_
+        written.last
+
+let parse_module_path package text =
+  match Path_argument.parse text with
+  | { prefix; last; member = None } -> (
+      match Path.split_module ~is_package:(( = ) package) (prefix @ [ last ]) with
+      | Some { modules = _ :: _ as modules; _ } -> Some modules
+      | Some _ | None -> None)
+  | { member = Some _; _ } | (exception Outcome.Cannot_run _) -> None
 
 let list_occurrences database snapshot packages =
   let names = Database.make_name_lookups database packages in
@@ -114,9 +122,9 @@ let plan_definition database snapshot packages path name =
 let plan_module database snapshot packages (old_module : Path.module_) to_ =
   let package = old_module.package in
   let modules =
-    match locate_in_package packages to_ with
-    | { package = named; modules = _ :: _ as modules }, None when named = package -> modules
-    | _ | (exception Outcome.Cannot_run _) ->
+    match parse_module_path package to_ with
+    | Some modules -> modules
+    | None ->
         let package = Path.show_package package in
         Outcome.raise_cannot_run "`%s` is not a module path in %s, such as `%s::name`." to_ package
           package
@@ -137,7 +145,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
       (fun (file, (span : Source.span), (target : Inspect.References.target)) ->
         match target with
         | Module edit_module when edit_module = old_module ->
-            let text = Source.text (Workspace.read_source snapshot file) in
+            let text = Source.text (Database.read_source database file) in
             let written = String.sub text span.start (span.stop - span.start) in
             Some (file, Diagnostic.replace span (if String.contains written ':' then full else last))
         | _ -> None)
@@ -157,15 +165,14 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
   in
   { edits = group_by_file edits; moved = Some (old_module, new_module) }
 
-let read_text snapshot file = Source.text (Workspace.read_source snapshot file)
-
-let apply_plan snapshot packages plan =
+let apply_plan database snapshot packages plan =
   List.map
     (fun file ->
+      let text = Source.text (Database.read_source database file) in
       let text =
         match List.assoc_opt file plan.edits with
-        | Some edits -> Diagnostic.apply_edits (read_text snapshot file) edits
-        | None -> read_text snapshot file
+        | Some edits -> Diagnostic.apply_edits text edits
+        | None -> text
       in
       (file, compute_moved_file plan file, text))
     (Command_packages.list_files snapshot packages)
@@ -195,12 +202,12 @@ let make_trial_snapshot snapshot after =
 let encode_edits snapshot packages plan =
   List.concat_map
     (fun (file, edits) ->
-      let source = Command_packages.read_source snapshot packages file in
+      let path = Command_packages.show_file snapshot packages file in
       List.map
         (fun (edit : Source.span Diagnostic.edit) ->
           Json.Object
             [
-              ("file", Json.String (Source.path source));
+              ("file", Json.String path);
               ("start", Json.Int edit.span.start);
               ("stop", Json.Int edit.span.stop);
               ("replacement", Json.String edit.replacement);
@@ -215,12 +222,13 @@ let run ~from_ ~to_ =
   let report = Report.gather database snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
   let plan =
-    match resolve_target snapshot database packages from_ with
-    | Definition path ->
-        plan_definition database snapshot packages path (compute_new_name ~from_ to_)
+    match resolve_target database packages from_ with
+    | Definition { path; module_; owner } ->
+        plan_definition database snapshot packages path
+          (compute_new_name ~from_ ~module_ ~owner to_)
     | Module module_ -> plan_module database snapshot packages module_ to_
   in
-  let after = apply_plan snapshot packages plan in
+  let after = apply_plan database snapshot packages plan in
   let database = Workspace.open_database (make_trial_snapshot snapshot after) in
   Database.check database packages;
   let caused =

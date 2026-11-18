@@ -127,7 +127,8 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.fragment =
       let result = Lowering.allocate_temporary st result_ty in
       Targets.lower_item_call st
         (Code { path = function_; instantiation = Ground.no_instantiation })
-        ~signature ~substitution:Types.no_substitution ~arguments:passed ~destination:result ();
+        ~signature ~substitution:Types.no_substitution ~arguments:passed ~destination:result
+        ~site:None ();
       let output = Targets.begin_output st in
       Encoding.encode_call context.env st.builder
         ~output:(Address { place = output; writable = true })

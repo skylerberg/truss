@@ -610,12 +610,24 @@ it.
   long as `middle` can be used. A `let` keeps no other temporary, such as the
   receiver in `let part = make_list().slice()`. A view cannot be used after
   the temporary or the local that it views is dropped.
-- **The one implicit conversion** makes a view of a `List` or an `Array`
-  where a `Slice` is expected, and of a `String` where a `StringSlice` is.
-  It applies to an argument of such a parameter, and to an operand of a
+- **The implicit conversions are between a `List`, an `Array`, or a
+  `String` and its view.** One makes a view of a `List` or an `Array` where
+  a `Slice` is expected, and of a `String` where a `StringSlice` is. It
+  applies to an argument of such a parameter, and to an operand of a
   comparison whose other operand is such a view, so `items == part[1..]`
   compares two slices and allocates nothing. `self` is such a parameter,
   so `StringSlice.trim(name)` takes a `String`.
+- **The other passes a view as its owning type to generic code.** A
+  read-only parameter whose declared type is a type parameter or an
+  associated type takes a `Slice` where the call instantiates that type to
+  a `List`, and a `StringSlice` where it instantiates it to `String`. So
+  `counts.get(word)` and `counts[word]` look up a `Map[String, Int64]` with
+  a `StringSlice`. The call allocates nothing: the callee reads a `List` or
+  a `String` that holds the view's elements and owns no storage, and a view
+  that the call returns views what the argument views. `self` is no such
+  parameter, and neither is a parameter declared as `List` or `String`,
+  which takes no view. The receiver and the other arguments instantiate the
+  type parameter first, in whatever order the arguments are written.
 
 ## Constants
 
@@ -1850,6 +1862,14 @@ would give.
 and location to standard error and ends the process with a nonzero exit
 code, and no Truss code runs afterward. No code can `provide` `Panic`, so a
 panic cannot be caught.
+
+A panic also prints its call chain: the site of each call that led to it,
+back to `main` or the test, through `parallel` branches and tasks.
+
+- The chain of a panic in an `impl`'s method continues from the `provide`
+  of the implementation, where the `impl` gets its `Panic`.
+- The chain of a panic in a lambda or in a function used as a value starts
+  in that function's body, because a function type passes no `Panic`.
 
 ## Capabilities
 

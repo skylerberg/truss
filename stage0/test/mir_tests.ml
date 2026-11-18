@@ -13,7 +13,7 @@ let list_operand_locals : Mir.operand -> Mir.local list = function
   | Constant _ -> []
 
 let list_call_locals (call : Mir.call) =
-  (match call.callee with Indirect callee -> list_operand_locals callee | _ -> [])
+  (match call.callee.target with Indirect callee -> list_operand_locals callee | _ -> [])
   @ List.concat_map
       (function Mir.Passed { value; _ } -> list_operand_locals value | Default -> [])
       call.arguments
@@ -520,7 +520,7 @@ let () =
                 {
                   call =
                     {
-                      callee = Function { path = Top { name = "step"; _ }; _ };
+                      callee = { target = Function { path = Top { name = "step"; _ }; _ }; _ };
                       arguments = [ _; Passed { value = Constant { value = Integer next; _ }; _ } ];
                       _;
                     };
@@ -1365,3 +1365,90 @@ let () =
             Harness.fail "the implementations lack %s: [%s]" expected
               (String.concat "; " implementations))
         [ meters_equal; "derived standard::core::Equal for app::main::Span.equal" ])
+
+let () =
+  let program = Fixtures.Core.slice_match_on_a_constant_and_loop_over_a_ticking_countdown in
+  let show_callee (callee : Mir.callee) =
+    Printf.sprintf "%s uses %s"
+      (match callee.target with
+      | Function { path; _ } -> Path.show path
+      | Trait_method { trait; name; _ } -> Path.show trait.trait ^ "." ^ name
+      | Capability_method _ | Intrinsic _ | Indirect _ -> "another callee")
+      (Types.show_capabilities callee.uses)
+  in
+  let expect_shown ~expected actual =
+    if actual <> expected then
+      Harness.fail "expected [%s], found [%s]" (String.concat "; " expected)
+        (String.concat "; " actual)
+  in
+  Harness.test
+    "a slice's call, the call of a pattern's `equal`, and a pulled `next` carry the capability set \
+     of Core's callee" (fun () ->
+      let built, _ = lower_tree_and_graph program in
+      let carried = ref [] in
+      Mir.iter_code
+        (fun (statement : Mir.statement) ->
+          match statement.kind with
+          | Basic (Slice { call; _ }) ->
+              carried := ("a slice carries " ^ show_callee call.callee) :: !carried
+          | Basic
+              (Call
+                 {
+                   call = { callee = { target = Trait_method { name = "equal"; _ }; _ }; _ } as call;
+                   _;
+                 }) ->
+              carried := ("a pattern carries " ^ show_callee call.callee) :: !carried
+          | For { iteration = Pull { next; _ }; _ } ->
+              carried := ("a loop carries " ^ show_callee next) :: !carried
+          | _ -> ())
+        built;
+      expect_shown (List.rev !carried)
+        ~expected:
+          [
+            "a loop carries standard::core::Cursor.next uses {Meter, may not terminate}";
+            "a slice carries standard::list::List.slice_from uses {}";
+            "a pattern carries standard::core::Equal.equal uses {}";
+          ]);
+  Harness.test "the callee that a statement invokes is found for a call, a slice, and a pull"
+    (fun () ->
+      let built, _ = lower_tree_and_graph program in
+      let invoked = ref [] in
+      Mir.iter_code
+        (fun statement ->
+          Option.iter
+            (fun callee -> invoked := show_callee callee :: !invoked)
+            (Mir.find_callee statement))
+        built;
+      expect_shown (List.rev !invoked)
+        ~expected:
+          [
+            "standard::core::Cursor.next uses {Meter, may not terminate}";
+            "standard::list::List.slice_from uses {}";
+            "standard::core::Equal.equal uses {}";
+            "standard::list::Slice.length uses {}";
+          ]);
+  Harness.test "a loop over a cursor is a call edge to the cursor's `next`" (fun () ->
+      expect_paths
+        ~expected:
+          [ "app::main::impl standard::core::Cursor for app::main::Countdown.next(mut self)" ]
+        (List.filter
+           (fun (path : Path.t) ->
+             match path with Method { name = "next"; _ } -> true | _ -> false)
+           (Mir.Call_edges.list_path_edges (make_call_edge_lookups program)
+              (Support.make_top_path "app::main" "g"))));
+  Harness.test
+    "a `provide` whose body uses `Tasks` only through a pulled `next` can use tasks, so it locks \
+     what it provides `mut`" (fun () ->
+      let built, _ =
+        lower_tree_and_graph
+          (Fixtures.Infer.tally ^ Fixtures.Capabilities.spawning_cursor
+         ^ Fixtures.Mir.provide_of_a_tally_over_a_loop_pulling_from_a_spawning_cursor)
+      in
+      let provides = ref [] in
+      Mir.iter_code
+        (fun (statement : Mir.statement) ->
+          match statement.kind with
+          | Basic (Provide { can_use_tasks; _ }) -> provides := can_use_tasks :: !provides
+          | _ -> ())
+        built;
+      if !provides <> [ true ] then Harness.fail "the `provide` cannot use tasks")

@@ -3,7 +3,7 @@ module Part = Part
 type t
 type package_database
 
-val create : ?loaded:package_database list -> ?checks:bool -> Project.package list -> t
+val create : ?loaded:package_database list -> Project.package list -> t
 val copy : t -> t
 val read_package_database : t -> Path.package -> package_database
 val list_package_diagnostics : package_database -> (Source.t * Diagnostic.t list) list
@@ -30,6 +30,7 @@ type manifest_problem =
 val list_manifest_problems : t -> Path.package -> manifest_problem list
 val find_code_packages : t -> Path.package -> Path.package list option
 val read_checked_body : t -> Resolve.Names.key -> Infer.checked option
+val read_source : t -> Path.file -> Source.t
 val read_parsed : t -> Path.file -> Syntax.file
 val make_name_lookups : t -> Path.package list -> Resolve.Names.lookups
 val read_resolved : t -> Resolve.Names.key -> Resolve.resolved option
@@ -47,7 +48,7 @@ type 'a part = Value of 'a | Failed of Diagnostic.in_definition list | Blocked
 type proofs
 
 val prove : t -> Path.file list -> proofs
-val list_holes : proofs -> Path.t -> (Path.file * int) list
+val list_holes : proofs -> Path.t -> (Path.file * int * int) list
 val list_template_checks : proofs -> Prover.State.template_check list
 val list_proofs : proofs -> (Resolve.Names.key * Prover.proof) list
 val make_proof_lookups : t -> Prover.Lookups.t

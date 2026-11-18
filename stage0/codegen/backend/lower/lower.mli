@@ -7,7 +7,7 @@ type context
 val env : context -> Memory_layout.env
 val drop_and_copy : context -> Drop_and_copy.t
 val make_monomorphic_context : Interface.Lookups.t -> Monomorphic.context
-val make_context : Lookups.settings -> env:Memory_layout.env -> Lookups.t -> context
+val make_context : env:Memory_layout.env -> Lookups.t -> context
 
 val lower_source_code :
   context -> path:Path.t -> instantiation:Ground.instantiation -> Emit_c.fragment

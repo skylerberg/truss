@@ -641,7 +641,9 @@ let emit_statement builder (statement : Mir.Graph.statement) =
           read_uses builder uses;
           match value with
           | Operand (Borrow { place; _ }) -> hold builder target (Alias place)
-          | _ -> raise_bug "a lent local that holds no borrow")
+          | Convert { conversion = View_to_owned; _ } ->
+              hold builder target (compute_rvalue_held builder value)
+          | _ -> raise_bug "a lent local that holds neither a borrow nor the owner of a view")
       | Source { local = core; _ } ->
           read_uses builder uses;
           emit_bound_value builder local core value origin
@@ -675,7 +677,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
   | Lend { part; call = called } -> (
       let is_loop_element = List.mem part builder.loop_elements in
       let selects_element (receiver : Mir.operand) =
-        match called.callee with
+        match called.callee.target with
         | Trait_method { trait; name = "at"; self_type; _ } ->
             (Well_known.is Index trait.trait || Well_known.is Index_mut trait.trait)
             && Place.is_storage_type self_type

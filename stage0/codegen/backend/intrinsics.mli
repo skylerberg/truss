@@ -4,7 +4,7 @@ type types = { uint64 : Ground.ty; string_slice : Ground.ty }
 val list_consumed_places : Intrinsic.operation -> int list
 
 val lower :
-  ?checks:bool ->
+  may_panic:bool ->
   ?value_arguments:Z.t list ->
   ?reported:Lowered.operand ->
   Memory_layout.env ->
@@ -15,4 +15,5 @@ val lower :
   argument list ->
   destination:Lowered.place option ->
   site:Lowered.site ->
+  trace:Lowered.operand option ->
   Lowered.place option

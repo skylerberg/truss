@@ -33,15 +33,8 @@ type 'indirect target =
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
   | Indirect of 'indirect
 
-type callee = operand target
-
-and call = {
-  callee : callee;
-  arguments : argument list;
-  lends : Types.mode option;
-  uses : Types.capability_set;
-}
-
+type callee = { target : operand target; uses : Types.capability_set }
+and call = { callee : callee; arguments : argument list; lends : Types.mode option }
 and argument = Passed of { mode : Types.mode; value : operand } | Default
 and operand = Place of place | Value of expression
 
@@ -102,13 +95,13 @@ and kind =
   | Yielded
   | Identical of expression * expression
   | Specification_function of { function_ : specification_function; arguments : expression list }
-  | Method_cost of { metric : Metric.t; method_ : callee }
+  | Method_cost of { metric : Metric.t; method_ : operand target }
 
 and capture = { local : local; type_ : Types.ty }
 and specification_function = Log | Power | Callback_cost of Metric.t | Calls
 and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
 and construction = Array | Specification_only
-and conversion = Widen | To_integer | From_integer
+and conversion = Widen | To_integer | From_integer | View_to_owned
 
 and binder =
   | Over_type of { local : local; type_ : Types.ty }
@@ -156,7 +149,7 @@ and loop_mode = Sequential | Parallel_loop | Concurrent_loop
 and iteration =
   | Integer_range of { start : expression; stop : expression; inclusive : bool }
   | Elements of elements
-  | Cursor of { cursor : place; next : callee; uses : Types.capability_set }
+  | Cursor of { cursor : place; next : callee }
 
 and elements = { count : expression; position : pattern; element : place }
 and loop_clause = Invariant of expression | Decreases of expression list | Cost of cost

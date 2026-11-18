@@ -58,7 +58,7 @@ let list_callee_signatures context (callee : Mir.callee) : Types.signature list 
   let list_signatures path =
     Option.to_list (Interface.Impls.read_signature context.lookups.interface path)
   in
-  match callee with
+  match callee.target with
   | Function { path; _ } -> list_signatures path
   | Trait_method { trait; name; receiver; _ } ->
       list_signatures (Method { owner = trait.trait; name; receiver })
@@ -78,7 +78,7 @@ let stores_function context (callee : Mir.callee) position =
     | Some parameter -> List.mem parameter.name signature.capture_free_parameters
     | None -> false
   in
-  match callee with
+  match callee.target with
   | Indirect _ -> true
   | _ -> List.exists is_declared (list_callee_signatures context callee)
 

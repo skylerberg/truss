@@ -500,11 +500,16 @@ let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
   in
   let edges = ref [] in
   Core_walk.walk_definition
-    (Core_walk.make_callee_visitor (function
-      | Function { path; instantiation = { type_arguments; _ } }
-        when Path.locate_package path = key.module_.package && type_arguments <> [] ->
-          edges := (path, List.exists grows type_arguments) :: !edges
-      | _ -> ()))
+    {
+      Core_walk.ignore_all with
+      callee =
+        (fun callee ->
+          match callee.target with
+          | Function { path; instantiation = { type_arguments; _ } }
+            when Path.locate_package path = key.module_.package && type_arguments <> [] ->
+              edges := (path, List.exists grows type_arguments) :: !edges
+          | _ -> ());
+    }
     form.definition;
   List.rev !edges
 
@@ -770,7 +775,8 @@ let list_used_paths (lookups : Lookups.t) key =
     | Constant_bound path -> use path
     | Integer_bound _ -> ()
   in
-  let use_callee : Core.callee -> unit = function
+  let use_callee (callee : Core.callee) =
+    match callee.target with
     | Function { path; _ } -> use path
     | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> ()
   in
@@ -780,10 +786,7 @@ let list_used_paths (lookups : Lookups.t) key =
       callee = use_callee;
       expression =
         (fun (node : Core.expression) ->
-          match node.kind with
-          | Call { callee; _ } -> use_callee callee
-          | Function_value { path; _ } -> use path
-          | _ -> ());
+          match node.kind with Function_value { path; _ } -> use path | _ -> ());
       place =
         (function
         | Constant { path; _ } -> use path
@@ -805,7 +808,7 @@ let locate_name (spans : Source.Definition_span.t array) (definition : Syntax.de
   | Function { signature; _ } | Method_declaration signature ->
       spans.((Resolve.Names.extract_signature_name signature).id)
   | Constant { name = Plain_name name | Member_name (_, name); _ } -> spans.(name.id)
-  | _ -> raise_bug "an unused internal definition that is neither a function nor a constant"
+  | _ -> raise_bug "an unused definition that is neither a function nor a constant"
 
 let report_unused (lookups : Lookups.t) (declaration : Resolve.Names.declaration) ~is_named =
   let (code : Diagnostic.Code.usage), noun =

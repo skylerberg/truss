@@ -1,0 +1,7 @@
+fn length_of(text: String) -> UInt64 {
+  text.length()
+}
+
+fn f(word: StringSlice) -> UInt64 {
+  length_of(word)
+}

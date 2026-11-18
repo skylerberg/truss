@@ -28,7 +28,9 @@ let () =
   Harness.test "comparisons, hashes, and lookups state how much they allocate" (fun () ->
       expect_proven Fixtures.Library_use.comparisons_and_lookups_without_allocations);
   Harness.test "a comparison of a list or a string with its view allocates nothing and proves"
-    (fun () -> expect_proven Fixtures.Library_use.comparisons_of_owners_and_views)
+    (fun () -> expect_proven Fixtures.Library_use.comparisons_of_owners_and_views);
+  Harness.test "a lookup with a view of its key allocates nothing and finds the key's elements"
+    (fun () -> expect_proven Fixtures.Library_use.lookups_by_views_of_keys)
 
 let () =
   Harness.test "a display that ends is proven, and a function with a time clause calls it"

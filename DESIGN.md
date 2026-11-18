@@ -432,7 +432,7 @@ change to its API.
 | A handle is not `Copyable`. | Copying one would duplicate an operating-system handle, which can fail, and `copy()` cannot fail. |
 | Generic code copies only under a `Copyable` bound. | An unbounded type parameter then accepts every type, handles included. |
 | A copy is identical to its original. | A storage's capacity and its potential are functions of the value. A copy shrunk to its length would make `items.copy().capacity() == items.capacity()` false at run time, and give the copy a potential other than the one `copy()` paid for. |
-| A string literal is a `String` constant, copied where an owned `String` is needed. | Every `String` then owns its buffer. Copy-on-write needs a run-time test of whether the buffer is static before each write, drop, and copy, and gives a literal a capacity below its length, which the prover assumes cannot happen. |
+| A string literal is a `String` constant, copied where an owned `String` is needed. | Every `String` that code mutates or drops then owns its buffer. Copy-on-write needs a run-time test of whether the buffer is static before each write, drop, and copy, and gives a literal a capacity below its length, which the prover assumes cannot happen. |
 | A string literal where a `StringSlice` is expected is a `StringSlice`. | A `match` whose arms are literals then has the expected type. Converting its `String` value instead would make a view of a copy that is dropped at the end of the statement. |
 
 ### Views
@@ -481,6 +481,8 @@ rule excludes `Plain` arguments, such as indexes, so that case is rare.
 | Generic code that keeps a value requires `Storable`. | A type parameter may stand for a view, and the bound stops generic code from storing one. |
 | An `any Trait` is a view unless `Trait` requires `Storable`. | `any` hides the type, so the compiler cannot see whether the value holds a view. |
 | `mut` access is never stored. | It lasts for one call, one iteration, or one `provide mut` block, so the ownership check tracks no mutable reference from one statement to the next. |
+| A view is passed as its owning type to a read-only parameter whose declared type is a type parameter or an associated type. | Generic code cannot declare the view of its type parameter: `Map.get` takes `key: Key`, so a lookup in a `Map[String, Int64]` with a `StringSlice` allocated a `String` first. A callee cannot mutate, move, drop, or store a read-only parameter, so it cannot tell a `String` that owns its buffer from one that views another's, as it cannot tell a view from a copy. A `List` and a `String` hold their elements outside the value, so a view that the callee returns views storage that the argument already views. Rust needs the `Borrow` trait and a blanket `impl` for this lookup, and C++ a transparent comparator. |
+| A parameter declared as `List` or `String` takes no view. | Its signature can declare `Slice` or `StringSlice`, which takes both. If it took a view too, the two declarations would accept the same arguments, and every signature would choose between them for no reason. |
 
 ### Lending methods
 
@@ -1091,6 +1093,11 @@ whose invariant was broken partway through an update. A program that must
 keep running proves that it cannot panic instead: a server requires a
 handler type without `Panic`, so no request can end the process. If the
 process fails anyway, a supervisor restarts it.
+
+| Rule | Reason |
+|---|---|
+| A panic prints the site of each call that led to it. | `expect` and the other functions of the standard library crash in their own bodies, so the site of the crash alone names a line of the library, not the caller's mistake. |
+| The chain starts again in the body of a function value. | A function type passes no `Panic`, so a value of `fn()` can be passed where `fn() uses Panic` is allowed without a change to how it is called. |
 
 `unreachable` must be proven. Code that claims a point is unreachable must
 not panic when the point is reached. Code that panics on purpose calls
