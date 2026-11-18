@@ -141,13 +141,14 @@ let () =
       let count = Codegen_support.at ~projections:[ Deref; Field "count"; Deref ] 2 in
       let add amount = Lowered.Assign (count, Binary (Add, Copy count, amount)) in
       let coroutine =
-        Codegen_support.function_ ~parameters:[ 0; 1 ] ~environment
+        Codegen_support.function_ ~parameters:[ 0; 1; 4 ] ~environment
           [
             Codegen_support.local ~name:"environment" (Raw (Nullable_pointer Opaque));
             Codegen_support.local ~name:"item"
               (Codegen_support.value (Codegen_support.named "UInt64"));
             Codegen_support.local (Pointer { target = Environment 0; writable = false });
             Codegen_support.local (Codegen_support.value Codegen_support.int32);
+            Codegen_support.local ~name:"capabilities" Convention.capabilities;
           ]
           [
             Codegen_support.block

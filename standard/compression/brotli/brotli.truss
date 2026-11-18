@@ -257,9 +257,7 @@ fn read_code_length_code(bits: mut Bits, skipped: UInt64) -> Result[PrefixCode, 
   code_from_lengths(lengths.slice())
 }
 
-fn read_complex_code(bits: mut Bits, alphabet_size: UInt64, skipped: UInt64) -> Result[PrefixCode, Error]
-  uses RunForever
-{
+fn read_complex_code(bits: mut Bits, alphabet_size: UInt64, skipped: UInt64) -> Result[PrefixCode, Error] {
   let length_code = read_code_length_code(bits: mut bits, skipped: skipped)?
   var lengths: List[UInt8] = List.filled(0, count: alphabet_size)
   var symbol: UInt64 = 0
@@ -268,6 +266,7 @@ fn read_complex_code(bits: mut Bits, alphabet_size: UInt64, skipped: UInt64) -> 
   var repeat_length: UInt8 = 0
   var space: Int64 = 32768
   while symbol < alphabet_size && space > 0
+    invariant repeat <= symbol
     decreases alphabet_size - symbol
   {
     let code = length_code.decode(bits: mut bits)?
@@ -297,12 +296,13 @@ fn read_complex_code(bits: mut Bits, alphabet_size: UInt64, skipped: UInt64) -> 
         return malformed("a code length repeat past its alphabet")
       }
       let added = repeat - earlier
-      for _ in 0..added {
-        if symbol < lengths.length() {
-          lengths[symbol] = repeat_length
+      let stop = symbol + added
+      for index in symbol..stop {
+        if index < lengths.length() {
+          lengths[index] = repeat_length
         }
-        symbol = symbol.saturating_add(1)
       }
+      symbol = stop
       if repeat_length != 0 && repeat_length <= 15 {
         let weight: Int64 = 32768 >> intrinsic::convert[UInt8, UInt64](repeat_length)
         let count: Int64 = intrinsic::convert(if added > 65536 { 65536 } else { added })
@@ -319,9 +319,7 @@ fn read_complex_code(bits: mut Bits, alphabet_size: UInt64, skipped: UInt64) -> 
   code_from_lengths(lengths.slice())
 }
 
-fn read_prefix_code(bits: mut Bits, alphabet_size: UInt64) -> Result[PrefixCode, Error]
-  uses RunForever
-{
+fn read_prefix_code(bits: mut Bits, alphabet_size: UInt64) -> Result[PrefixCode, Error] {
   let kind: UInt64 = intrinsic::convert(mut bits.read(2) & 3)
   if kind == 1 {
     read_simple_code(bits: mut bits, alphabet_size: alphabet_size)
@@ -354,9 +352,7 @@ fn read_block_count(bits: mut Bits, code: PrefixCode) -> Result[UInt64, Error] {
 
 type Blocks(types: UInt64, type_code: PrefixCode, count_code: PrefixCode, current: UInt64, previous: UInt64, remaining: UInt64)
 
-fn read_blocks(bits: mut Bits) -> Result[Blocks, Error]
-  uses RunForever
-{
+fn read_blocks(bits: mut Bits) -> Result[Blocks, Error] {
   let types = read_type_count(bits: mut bits)
   if types < 2 {
     return Ok(Blocks(types: 1, type_code: single_symbol(0), count_code: single_symbol(0), current: 0, previous: 1, remaining: block_count_omitted))
@@ -385,9 +381,7 @@ fn Blocks.advance(mut self, bits: mut Bits) -> Result[Unit, Error] {
   Ok(Unit)
 }
 
-fn read_context_map(bits: mut Bits, size: UInt64, trees: UInt64) -> Result[List[UInt8], Error]
-  uses RunForever
-{
+fn read_context_map(bits: mut Bits, size: UInt64, trees: UInt64) -> Result[List[UInt8], Error] {
   var map: List[UInt8] = List.filled(0, count: size)
   if trees < 2 {
     return Ok(own map)
@@ -445,9 +439,7 @@ fn read_context_map(bits: mut Bits, size: UInt64, trees: UInt64) -> Result[List[
   Ok(own map)
 }
 
-fn read_codes(bits: mut Bits, count: UInt64, alphabet_size: UInt64) -> Result[List[PrefixCode], Error]
-  uses RunForever
-{
+fn read_codes(bits: mut Bits, count: UInt64, alphabet_size: UInt64) -> Result[List[PrefixCode], Error] {
   var codes: List[PrefixCode] = []
   for _ in 0..count {
     mut codes.push(read_prefix_code(bits: mut bits, alphabet_size: alphabet_size)?)
@@ -596,9 +588,7 @@ fn append_affix(output: mut List[UInt8], affix: UInt64) {
   }
 }
 
-fn decode_compressed(bits: mut Bits, stream: mut Stream, output: mut List[UInt8], length: UInt64) -> Result[Unit, Error]
-  uses RunForever
-{
+fn decode_compressed(bits: mut Bits, stream: mut Stream, output: mut List[UInt8], length: UInt64) -> Result[Unit, Error] {
   var literal_blocks = read_blocks(bits: mut bits)?
   var command_blocks = read_blocks(bits: mut bits)?
   var distance_blocks = read_blocks(bits: mut bits)?
@@ -714,9 +704,7 @@ fn window_bits(bits: mut Bits) -> Result[UInt32, Error] {
   Ok(if low == 0 { 17 } else { 8 + low })
 }
 
-public fn decompress(input: Slice[UInt8], limit: UInt64 = 268435456) -> Result[List[UInt8], Error]
-  uses RunForever
-{
+public fn decompress(input: Slice[UInt8], limit: UInt64 = 268435456) -> Result[List[UInt8], Error] {
   var bits = Bits(bytes: input.to_list(), position: 0)
   if input.is_empty() {
     return malformed("no stream header")

@@ -260,7 +260,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Block body ->
       State.register_expression state value (fun () -> Block (State.build_block state body));
       Statements.check_block_value state env ?expected body
-  | Expression_error -> Types.Error (Diagnostic.make_recovered (State.read_span state value.id))
+  | Expression_error -> Types.Error Diagnostic.reported_elsewhere
 
 and check_member_value state env (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) =

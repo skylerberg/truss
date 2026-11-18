@@ -209,7 +209,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   in
   let callee_clauses = contract.callee_clauses in
   if
-    context.terminates && frame.makes_obligations
+    frame.makes_obligations
     && (match invocation.callee with
       | Trait_method _ -> Mir.Call_edges.is_dispatched invocation.callee
       | _ -> true)
@@ -217,7 +217,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   then
     begin match (context.measures, callee_clauses.decreases) with
     | [], []
-      when Path.equal path context.current
+      when context.terminates && Path.equal path context.current
            && list_structural_parameters context frame callee_clauses <> [] ->
         let pairs = list_structural_parameters context frame callee_clauses in
         let before = List.map (fun (ty, entry, _) -> Models.rank context ty entry) pairs in
@@ -236,7 +236,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             conjunction
               (List.map (fun right_term -> Operation ("<=", [ int 0; right_term ])) before)
             &&& Amounts.compare_lexicographically before after)
-    | [], _ | _, [] ->
+    | ([], _ | _, []) when context.terminates ->
         Facts.oblige context frame Termination location
           [
             Text
@@ -246,7 +246,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                  (show_callee path));
           ]
           (Logic.Boolean false)
-    | measures, callee_measures ->
+    | (_ :: _ as measures), (_ :: _ as callee_measures) ->
         let current_frame =
           { frame with makes_obligations = false; locals = frame.old_locals; self = frame.old_self }
         in
@@ -279,6 +279,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                    measures)
           @ [ Text "`." ])
           (Amounts.compare_lexicographically before after)
+    | [], _ | _, [] -> ()
     end;
   let precondition_clauses = Contracts.select_precondition_clauses contract in
   let required =

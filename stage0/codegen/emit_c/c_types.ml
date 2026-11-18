@@ -4,6 +4,7 @@ type key =
   | Code of Ground.function_type
   | Environment of string * int
   | Evidence of int
+  | Capabilities of int
 
 module Keys = Map.Make (struct
   type t = key
@@ -17,6 +18,7 @@ let render_key_name = function
   | Code function_type -> Mangling.make_type_name (Function function_type) ^ "_Code"
   | Environment (symbol, nested_index) -> Printf.sprintf "%s_Environment_%d" symbol nested_index
   | Evidence nested_index -> Printf.sprintf "t_Evidence_%d" nested_index
+  | Capabilities count -> Printf.sprintf "t_Capabilities_%d" count
 
 type definition =
   | Typedef of string
@@ -106,6 +108,9 @@ let rec render_type types symbol : Lowered.ty -> string = function
       let key = Evidence (max nested_index 1) in
       register types key;
       render_key_name key
+  | Capabilities count ->
+      register types (Capabilities count);
+      render_key_name (Capabilities count)
   | Trace -> "struct t_trace"
   | Lend -> "struct " ^ use_helper types "t_lend"
   | Lend_mark -> "struct " ^ use_helper types "t_lend" ^ "_mark"
@@ -224,6 +229,9 @@ and define_text types key =
               nested_index;
           holds = [];
         }
+  | Capabilities count ->
+      Struct
+        { body = Printf.sprintf "  struct t_capability entries[%d];\n" (count + 1); holds = [] }
   | Environment _ ->
       let fields =
         match Keys.find_opt key types.environments with

@@ -837,6 +837,9 @@ fn serve(listener: mut Listener)
   integer measure over the parameters that stays at or above zero and that
   every recursive call makes smaller. A list of measures is compared in
   order. Functions in a cycle of calls each state one.
+- A function that uses `RunForever` may state `decreases` as well. Each of
+  its recursive calls to a function that states one then makes the measure
+  smaller.
 - A function also reaches itself by naming a function as a value, and by
   using an `impl` where a bound needs one. Inside an `impl`'s methods, using
   that same `impl` is a recursive call to every method of the `impl`, and
@@ -1477,11 +1480,14 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   exits, has type `Never`.
 - `invariant` holds at the start of every iteration and when the loop ends.
 - `decreases` names a measure that every iteration makes smaller and that
-  never goes below zero. Where a loop states no measure, a `while` loop
-  whose condition compares two sides that mutate nothing with `<`, `<=`,
-  `>`, or `>=` has the distance between them as its measure, and a `for`
-  loop over a cursor whose type has a `remaining(self) -> UInt64` method has
-  that method's value.
+  never goes below zero. It holds in every function, including one that
+  uses `RunForever`.
+- Where a `for` loop over a cursor states no measure, and the cursor's type
+  has a `remaining(self) -> UInt64` method, that method's value is the
+  loop's measure, and it holds as a written one does.
+- In a function without `RunForever`, a `while` loop that states no measure,
+  and whose condition compares two sides that mutate nothing with `<`, `<=`,
+  `>`, or `>=`, has the distance between them as its measure.
 - **A loop without a measure uses `RunForever`** (see
   [Termination](#termination)). A `for` loop over a range or over a
   collection's elements always terminates.
@@ -1813,12 +1819,9 @@ code, and no Truss code runs afterward. No code can `provide` `Panic`, so a
 panic cannot be caught.
 
 A panic also prints its call chain: the site of each call that led to it,
-back to `main` or the test, through `parallel` branches and tasks.
-
-- The chain of a panic in an `impl`'s method continues from the `provide`
-  of the implementation, where the `impl` gets its `Panic`.
-- The chain of a panic in a lambda or in a function used as a value starts
-  in that function's body, because a function type passes no `Panic`.
+back to `main` or the test, through calls of function values, `parallel`
+branches, and tasks. The chain of a panic in an `impl`'s method continues
+from the `provide` of the implementation, where the `impl` gets its `Panic`.
 
 ## Capabilities
 

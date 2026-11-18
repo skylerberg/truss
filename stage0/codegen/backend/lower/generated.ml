@@ -387,9 +387,9 @@ let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instant
         (Lowering.allocate_parameter st ~owned:(mode = Own) mode ty, types_mode, ty))
       ty.parameters
   in
-  let evidence = Lowering.list_evidence_parameters st ty.uses in
-  Lowering.start_trace st;
+  let capabilities = Emit_c.Ir_builder.allocate_local builder Convention.capabilities in
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
+  Lowering.look_up_capabilities st ~table:(Copy (Lowered.make_local_place capabilities)) ty.uses;
   Targets.lower_item_call st
     (Code { path = function_; instantiation })
     ~signature ~substitution
@@ -398,7 +398,8 @@ let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instant
     ~site:None ();
   Emit_c.Ir_builder.build st.builder
     (Lowering.finish_function st ~returns:(ty.result <> Never) ~first:[ environment ]
-       ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
+       ~rest:
+         (List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ [ capabilities ])
        ())
 
 let build_any_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl_method) :

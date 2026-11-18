@@ -290,7 +290,7 @@ val show_count : int -> string -> string -> string
 type reported
 
 val make_reported : _ diagnostic -> reported
-val make_recovered : _ -> reported
+val reported_elsewhere : reported
 val map_spans : ('a -> 'b) -> 'a diagnostic -> 'b diagnostic
 val apply_fix : string -> Source.span fix -> string
 val apply_edits : string -> Source.span edit list -> string

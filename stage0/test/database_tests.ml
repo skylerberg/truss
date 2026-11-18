@@ -1104,6 +1104,14 @@ let () =
                ("app::main/second", "fn second() -> Int64 { first() }\n");
              ])
         ~parts:[ "namespace app"; "checked body app::main::second" ]);
+  Harness.test "adding the module that a use names matches a cold build" (fun () ->
+      let user =
+        ("app::main", "use app::tools\n\nfn caller() -> Int64 {\n  tools::helper()\n}\n")
+      in
+      expect_included
+        (list_propagated ~before:[ user ]
+           ~after:[ user; ("app::tools", "public fn helper() -> Int64 { 1 }\n") ])
+        ~parts:[ "checked body app::main::caller" ]);
   let read_callee_ownership database =
     let file = Support.parse_file "app::main" in
     Database.For_testing.read_ownership database

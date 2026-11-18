@@ -299,7 +299,7 @@ let () =
         ]
       in
       let lambda =
-        Codegen_support.function_ ~parameters:[ 0; 1 ]
+        Codegen_support.function_ ~parameters:[ 0; 1; 4 ]
           ~result:(Codegen_support.value Codegen_support.int32)
           ~environment
           [
@@ -307,6 +307,7 @@ let () =
             Codegen_support.local ~name:"argument" (Codegen_support.value Codegen_support.int32);
             Codegen_support.local (Pointer { target = Environment 0; writable = false });
             Codegen_support.local (Codegen_support.value Codegen_support.int32);
+            Codegen_support.local ~name:"capabilities" Convention.capabilities;
           ]
           [
             Codegen_support.block
@@ -353,7 +354,7 @@ let () =
                   Call
                     {
                       target = Indirect { value = Codegen_support.copy 2; signature };
-                      arguments = [ Codegen_support.constant_int32 1 ];
+                      arguments = [ Codegen_support.constant_int32 1; Constant Null ];
                       result = Returned (Codegen_support.at 3);
                     };
                 ]

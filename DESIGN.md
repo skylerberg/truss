@@ -766,6 +766,8 @@ not.
 | Structural recursion needs no annotation, and other recursion states `decreases`. | Lean accepts structural recursion in the same way. Dafny infers a measure. A structural check with an explicit clause is more predictable than an inference that may fail. |
 | A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` has the distance between them as its default measure, and a `for` loop over a cursor has the cursor's `remaining()`. | Most loops count toward a bound that their condition names, so `decreases high - low` would only repeat the condition. The default is one measure read from the loop's own code, never chosen by a search among candidates, so a reader knows the measure that the proof uses. Dafny takes the same default for a loop. A cursor's `remaining()` states its measure once, in its type, for every loop over it. |
 | A loop that runs until a capability says to stop has no termination proof. | An implementation could supply data forever. |
+| A written measure holds in every function, including one that uses `RunForever`. | A reader takes a written `decreases` as a fact. If `RunForever` switched measures off, a function that declares it for one loop would leave the measures of its other loops unchecked. A cursor's `remaining()` is written too, in the cursor's type, and no loop body can change the cursor. |
+| A `while` loop's default measure and structural recursion are checked only in a function without `RunForever`. | Both are inferred from code that may not be meant to end. A loop that draws samples until it has accepted enough, as `sample_ntt` does, compares toward a bound that an iteration may not approach. |
 | A loop without a measure uses `RunForever`. | The capability check then covers the loop in every body, as it covers a call. A lambda's loop needs no rule of its own: the lambda's capabilities are inferred from its body. |
 | Nothing implements `RunForever`. | A `provide` of it would let a function that does not declare `RunForever` run forever. |
 | A function that uses `RunForever` has no `time` clause. | A written clause holds, and the time of a function that may run forever has no bound. |
@@ -823,6 +825,10 @@ A function type puts its clauses after its result, inside parentheses, as in
 `(fn(Request) -> Response uses Database, Log cost time O(1))`. Truss has
 whole clauses, not one or two effect keywords, so the clauses come in the
 order they have in a definition, and the parentheses mark where they end.
+
+| Rule | Reason |
+|---|---|
+| A call of a function value passes the caller's capabilities as one table, and the function finds each capability it uses in the table by name. | A value of `fn()` can be passed where `(fn() uses Clock)` is allowed, and stored or returned there, with no wrapper and no change to how it is called. A wrapper would need storage that lives as long as the value, which a function value that captures nothing does not have. |
 
 ## Methods
 
@@ -1088,7 +1094,6 @@ process fails anyway, a supervisor restarts it.
 | Rule | Reason |
 |---|---|
 | A panic prints the site of each call that led to it. | `expect` and the other functions of the standard library crash in their own bodies, so the site of the crash alone names a line of the library, not the caller's mistake. |
-| The chain starts again in the body of a function value. | A function type passes no `Panic`, so a value of `fn()` can be passed where `fn() uses Panic` is allowed without a change to how it is called. |
 
 `unreachable` must be proven. Code that claims a point is unreachable must
 not panic when the point is reached. Code that panics on purpose calls

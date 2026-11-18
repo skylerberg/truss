@@ -106,8 +106,8 @@ let check_tree text (item : Syntax.definition Syntax.item) =
     fail "a definition's span is out of bounds in %s" quoted;
   List.iter
     (fun (span : Source.Definition_span.t) ->
-      if span.stop > length then fail "a recovery is out of bounds in %s" quoted)
-    item.positions.recovered;
+      if span.stop > length then fail "a syntax error is out of bounds in %s" quoted)
+    item.positions.syntax_errors;
   Syntax_walk.visit_definition (visit_expression definition_span) item.value
 
 let check_parse_robust text =
@@ -125,9 +125,9 @@ let check_parse_robust text =
       if
         diagnostics = []
         && List.exists
-             (fun (item : Syntax.definition Syntax.item) -> item.positions.recovered <> [])
+             (fun (item : Syntax.definition Syntax.item) -> item.positions.syntax_errors <> [])
              items
-      then fail "the parser recovered with no error in %s" (Diagnostic.quote text)
+      then fail "a syntax error has no diagnostic in %s" (Diagnostic.quote text)
 
 type verdict = Grammar_rejects | Grammar_accepts | Unknown
 

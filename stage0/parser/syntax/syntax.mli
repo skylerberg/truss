@@ -304,7 +304,7 @@ type definition = { visibility : visibility; kind : definition_kind; id : id }
 
 type positions = {
   spans : Source.Definition_span.t array;
-  recovered : Source.Definition_span.t list;
+  syntax_errors : Source.Definition_span.t list;
 }
 
 type 'value item = { base : int; stop : int; value : 'value; positions : positions }

@@ -561,7 +561,7 @@ let refresh ?on_bug ~(read : Watcher.t -> Watcher.changes) worktree =
   in
   match Option.map read worktree.watcher with
   | Some Removed -> `Removed
-  | Some Overflow | None -> update (Registry.Content.list_input_files root)
+  | Some Rescan | None -> update (Registry.Content.list_input_files root)
   | Some (Changed []) -> `Unchanged
   | Some (Changed paths) -> update (list_changed_files root worktree.snapshot.files paths)
 

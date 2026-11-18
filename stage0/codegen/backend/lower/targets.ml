@@ -227,6 +227,32 @@ let lookup_evidence (st : Lowering.state) capability =
 let pass_evidence (st : Lowering.state) ~site capability =
   extend_evidence st ~site capability (lookup_evidence st capability)
 
+let pass_capabilities (st : Lowering.state) ~site capabilities =
+  match capabilities with
+  | [] -> Lowered.Constant Null
+  | _ ->
+      let table =
+        Emit_c.Ir_builder.allocate_local st.builder (Capabilities (List.length capabilities))
+      in
+      Emit_c.Ir_builder.emit st.builder
+        (Call
+           {
+             target = Intrinsic Capabilities_fill;
+             arguments =
+               Address { place = Lowered.make_local_place table; writable = true }
+               :: List.concat_map
+                    (fun capability ->
+                      let name = Path.show capability in
+                      [
+                        Lowered.Constant (Bytes name);
+                        Lowered.make_uint64_constant (String.length name);
+                        pass_evidence st ~site capability;
+                      ])
+                    capabilities;
+             result = Discarded;
+           });
+      Lowered.Address { place = Lowered.make_local_place table; writable = false }
+
 let lower_nested_function (st : Lowering.state) ~(function_type : Ground.function_type)
     ~(output : Types.result option) ~(captures : (Lowered.place * Ground.ty) list)
     ~(body :
@@ -287,8 +313,7 @@ let lower_nested_function (st : Lowering.state) ~(function_type : Ground.functio
             (Lowering.allocate_parameter inner ~in_scope:false ~owned:(mode = Own) mode ty, mode, ty))
           function_type.parameters
       in
-      let evidence = Lowering.list_evidence_parameters inner function_type.uses in
-      Lowering.start_trace inner;
+      let capabilities = Emit_c.Ir_builder.allocate_local builder Convention.capabilities in
       let environment_pointer =
         Emit_c.Ir_builder.allocate_local builder
           (Pointer { target = Environment index; writable = false })
@@ -298,6 +323,9 @@ let lower_nested_function (st : Lowering.state) ~(function_type : Ground.functio
         (Assign
            ( Lowered.make_local_place environment_pointer,
              Use (Copy (Lowered.make_local_place environment_parameter)) ));
+      Lowering.look_up_capabilities inner
+        ~table:(Copy (Lowered.make_local_place capabilities))
+        function_type.uses;
       body inner
         ~captures:
           (List.map
@@ -309,7 +337,8 @@ let lower_nested_function (st : Lowering.state) ~(function_type : Ground.functio
              captured)
         (List.map (fun ((_, place), mode, ty) -> (place, mode, ty)) parameter_places);
       Lowering.finish_function inner ~first:[ environment_parameter ]
-        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
+        ~rest:
+          (List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ [ capabilities ])
         ())
 
 let lower_indirect_call st ~(function_type : Ground.function_type) ~(value : Lowered.place) ~site
@@ -321,7 +350,7 @@ let lower_indirect_call st ~(function_type : Ground.function_type) ~(value : Low
            let mode : Types.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
            Option.to_list (pass st mode ty place))
          function_type.parameters places)
-    @ List.map (pass_evidence st ~site) function_type.uses
+    @ [ pass_capabilities st ~site function_type.uses ]
   in
   let target =
     Lowered.Indirect

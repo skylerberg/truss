@@ -1,0 +1,26 @@
+type Stuck(left: UInt64)
+
+fn Stuck.remaining(self) -> UInt64
+  ensures result == self.left
+{
+  self.left
+}
+
+impl Cursor for Stuck {
+  type Element = UInt64
+
+  fn next(mut self) -> Option[UInt64]
+    ensures result is Some(_)
+    ensures self.left == old(self.left)
+  {
+    Some(self.left)
+  }
+}
+
+fn f(start: UInt64)
+  uses RunForever
+{
+  for value in Stuck(left: start) {
+    let _ = value
+  }
+}

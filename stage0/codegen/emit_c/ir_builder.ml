@@ -399,8 +399,9 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
                 | Value ty when C_types.is_struct emission.types ty -> " = {0}"
                 | Value _ | Pointer _ | Raw _ -> " = 0"
                 | Lend | Lend_mark -> " = {0}"
-                | Environment _ | Evidence _ | Trace ->
-                    raise_bug "a zeroed environment, evidence slot, or link of the call chain"
+                | Environment _ | Evidence _ | Capabilities _ | Trace ->
+                    raise_bug
+                      "a zeroed environment, evidence slot, table, or link of the call chain"
             in
             Buffer.add_string body
               (Printf.sprintf "  %s %s%s;\n"
