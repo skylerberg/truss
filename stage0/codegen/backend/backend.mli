@@ -32,25 +32,14 @@ val create :
   profile ->
   t
 
-type outcome = Passed | Failed | Panicked | Incomplete | Timed_out | Crashed
-
-val show_outcome : outcome -> string
-
-type record = {
-  outcome : outcome;
-  message : string option;
-  echo : string option;
-  output : string option;
-  microseconds : int;
-  cached : bool;
-}
+module Test_report = Test_report
 
 type progress =
   | Lowering
   | Compiling of { compiled : int; total : int }
   | Running of { tests : int }
   | Started of { test : int }
-  | Ended of { test : int; record : record }
+  | Ended of { test : int; record : Test_report.record }
 
 val run_tests :
   ?rerun:bool ->
@@ -58,7 +47,7 @@ val run_tests :
   t ->
   time_limit_ms:int ->
   Path.t list ->
-  (record list, string) result
+  (Test_report.record list, string) result
 
 type unshippable = {
   failure : [ `Todo | `Echo ];
@@ -103,8 +92,6 @@ module For_testing : sig
   val make_lowered : Emit_c.fragment -> lowered
 
   module Intrinsics = Intrinsics
-
-  val parse_report : string -> (record list, string) result
 
   val build_supplied_tests :
     t ->

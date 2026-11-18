@@ -17,8 +17,8 @@ let render_records records =
   in
   String.concat ""
     (List.mapi
-       (fun index (record : Backend.record) ->
-         Printf.sprintf "test %d %s\n" index (Backend.show_outcome record.outcome)
+       (fun index (record : Backend.Test_report.record) ->
+         Printf.sprintf "test %d %s\n" index (Backend.Test_report.show_outcome record.outcome)
          ^ render_block "message" record.message
          ^ render_block "echo" record.echo
          ^ render_block "output" record.output)

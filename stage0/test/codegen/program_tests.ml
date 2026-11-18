@@ -12,7 +12,10 @@ let () =
           Backend.run_tests backend ~time_limit_ms:2000 (Codegen_support.list_tests database)
         with
         | Ok records ->
-            ( (if List.for_all (fun (record : Backend.record) -> record.outcome = Passed) records
+            ( (if
+                 List.for_all
+                   (fun (record : Backend.Test_report.record) -> record.outcome = Passed)
+                   records
                then 0
                else 1),
               Codegen_support.render_records records )
@@ -62,7 +65,7 @@ let () =
       | Ok records -> (
           let results_by_name =
             List.map2
-              (fun (test : Path.t) (record : Backend.record) ->
+              (fun (test : Path.t) (record : Backend.Test_report.record) ->
                 match test with
                 | Test { name; _ } -> (name, (record.outcome, record.output))
                 | _ -> failwith "list_tests gave a path that is not a test")
