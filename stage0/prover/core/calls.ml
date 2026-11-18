@@ -749,8 +749,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                   result = Some result;
                   condition = after.condition;
                 })
-              ~uses:(invocation.uses :> Types.capability list)
-              ~values ~change:(Some compute_change) counter)
+              ~uses:invocation.uses ~values ~change:(Some compute_change) counter)
   in
   (after, result)
 
@@ -823,7 +822,7 @@ let compute_function_value_amount context frame ~location (function_type : Types
           (Logic.int 1)
   | Calls (Capability path | Capability_method (path, _)) ->
       if
-        List.exists
+        Types.exists_capability
           (function
             | Types.Capability used -> Path.equal used path
             | Types.Capability_parameter _ | Types.Capability_projection _
@@ -831,7 +830,7 @@ let compute_function_value_amount context frame ~location (function_type : Types
                 true
             | Types.Capability_error _ ->
                 Facts.raise_bug "the prover reads a capability with an error")
-          (function_type.uses :> Types.capability list)
+          function_type.uses
       then Operations.declare_unknown_amount context frame counter
       else Costs.zero
 

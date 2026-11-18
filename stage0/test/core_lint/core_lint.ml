@@ -446,7 +446,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         | Types.Capability_variable _ ->
             report "%s contains a capability inference variable" subject
         | Types.Capability_error _ -> report "%s contains a capability with an error" subject)
-      (set :> Types.capability list)
+      (Types.list_capabilities set)
   and check_type subject (ty : Types.ty) =
     match ty with
     | Named { arguments; _ } -> List.iter (check_argument subject) arguments

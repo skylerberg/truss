@@ -1,8 +1,3 @@
-let extend_standard_library files =
-  Database.For_testing.extend_package
-    ~loaded:[ Workspace.For_testing.load_standard_package_database () ]
-    ~package:Path.standard_package files
-
 let probe : Path.file =
   { module_ = { package = Path.standard_package; modules = [ "shared_probe" ] }; name = "probe" }
 
@@ -10,22 +5,9 @@ let source = Fixtures.Shared.shared_probe
 
 let loaded =
   lazy
-    (let database = extend_standard_library [ (probe, source) ] in
-     Database.For_testing.add_root database
-       (Generated (Program_main (Top { module_ = probe.module_; name = "main" })));
-     let text = Source.create ~path:(Path.show_file probe) source in
-     (match Codegen_support.list_fragment_diagnostics database probe with
-     | [] -> ()
-     | diagnostics ->
-         Codegen_support.fail "the source has diagnostics:\n%s"
-           (String.concat "" (List.map (Diagnostic.render text) diagnostics)));
-     ( database,
-       Backend.create
-         (match Database.find_lowered_lookups database [ Path.standard_package ] with
-         | Ok lookups -> lookups
-         | Error message -> failwith message)
-         (Lazy.force Codegen_support.c_compiler)
-         Development ))
+    (Codegen_support.load_standard_probe
+       ~roots:[ Generated (Program_main (Top { module_ = probe.module_; name = "main" })) ]
+       probe source)
 
 let () =
   Codegen_support.test "shared values are updated, copied, and dropped without a leak" (fun () ->
@@ -66,7 +48,7 @@ let () =
   Codegen_support.test
     "Shared's operations need Tasks except directly in a method of a capability's impl, and its \
      value must be Storable" (fun () ->
-      let database = extend_standard_library [ (checks, checks_source) ] in
+      let database = Codegen_support.extend_standard_library [ (checks, checks_source) ] in
       let text = checks_source in
       let actual =
         List.map

@@ -23,8 +23,8 @@ let list_capabilities context substitution (set : Types.capability_set) : Path.t
              raise_bug "the associated capability set %s is not normalized" name
          | Capability_variable _ -> raise_bug "a set of capabilities the checker left unsolved"
          | Capability_error _ -> raise_bug "a capability with an error reached code generation")
-       (context.normalize_capabilities (Types.substitute_capabilities substitution set)
-         :> Types.capability list))
+       (Types.list_capabilities
+          (context.normalize_capabilities (Types.substitute_capabilities substitution set))))
 
 let rec ground context substitution (ty : Types.ty) : Ground.ty =
   match context.normalize (Types.substitute substitution ty) with

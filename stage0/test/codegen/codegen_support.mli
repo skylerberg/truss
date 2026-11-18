@@ -91,6 +91,11 @@ val make_backend :
   Database.t ->
   Backend.t
 
+val extend_standard_library : (Path.file * string) list -> Database.t
+
+val load_standard_probe :
+  ?roots:Lowered.Item.t list -> Path.file -> string -> Database.t * Backend.t
+
 val load_files :
   ?results:Backend.results ->
   ?roots:Lowered.Item.t list ->

@@ -116,7 +116,8 @@ let lambda_captures_target (context : State.context) lambda target =
   | Some captured, Some local -> List.mem local captured
   | _ -> false
 
-let make_reach_formula context frame uses (values : State.passed list) (target : Costs.target) =
+let make_reach_formula context frame (uses : Types.capability_set) (values : State.passed list)
+    (target : Costs.target) =
   match target with
   | Through term ->
       Logic.disjunction
@@ -127,7 +128,7 @@ let make_reach_formula context frame uses (values : State.passed list) (target :
            values)
   | Capability path | Capability_method (path, _) ->
       Logic.Boolean
-        (List.exists
+        (Types.exists_capability
            (function
              | Types.Capability used -> Path.equal used path
              | Types.Capability_parameter _ | Types.Capability_projection _
@@ -306,16 +307,13 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
               compute_callee_amount context frame ~is_recursive:false
                 ~clauses:[ capability_clauses ]
                 ~bind_frame:(fun _ -> inside)
-                ~uses:(invocation.uses :> Types.capability list)
-                ~values ~change:None counter
+                ~uses:invocation.uses ~values ~change:None counter
           | None -> Operations.declare_unknown_amount context frame counter))
   | Function _ | Trait_method _ | Indirect () -> (
       match counter.resource with
       | Calls target ->
           make_conditional_amount
-            (make_reach_formula context frame
-               (invocation.uses :> Types.capability list)
-               values target)
+            (make_reach_formula context frame invocation.uses values target)
             (Operations.declare_unknown_amount context frame counter)
       | Metric _ -> Operations.declare_unknown_amount context frame counter)
 

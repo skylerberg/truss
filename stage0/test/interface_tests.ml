@@ -808,7 +808,7 @@ let () =
       let signature =
         read_method_signature packages (Types.make_named (app "FixedClock") []) clock "now"
       in
-      match (signature.uses :> Types.capability list) with
+      match Types.list_capabilities signature.uses with
       | [ Capability _ ] -> ()
       | uses -> Harness.fail "%d uses" (List.length uses))
 

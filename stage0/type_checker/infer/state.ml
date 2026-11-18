@@ -409,14 +409,13 @@ let make_unsolved_type state =
 
 let resolve_capabilities state (capabilities : Types.capability_set) =
   match state.capability_solution with
-  | Some solution when Types.has_capability_variable capabilities ->
-      let read_solved variable =
-        Option.value ~default:Types.no_capabilities (Hashtbl.find_opt solution variable)
-      in
-      Types.flat_map_capabilities
+  | Some solution when Types.contains_capability_variable capabilities ->
+      Types.replace_capabilities
         (function
-          | Types.Capability_variable variable -> (read_solved variable :> Types.capability list)
-          | capability -> [ capability ])
+          | Types.Capability_variable variable ->
+              Some
+                (Option.value ~default:Types.no_capabilities (Hashtbl.find_opt solution variable))
+          | _ -> None)
         capabilities
   | _ -> capabilities
 
@@ -432,11 +431,15 @@ and finalize_capabilities state capabilities =
   resolve_capabilities state
     (Interface.Impls.normalize_capabilities state.lookups.interface
        ~list_bounds:(lookup_bounds state)
-       (Types.flat_map_capabilities
+       (Types.replace_capabilities
           (function
             | Types.Capability_projection { base; trait; name } ->
-                [ Types.Capability_projection { base = finalize_type state base; trait; name } ]
-            | capability -> [ capability ])
+                Some
+                  (Types.make_capability_set
+                     [
+                       Types.Capability_projection { base = finalize_type state base; trait; name };
+                     ])
+            | _ -> None)
           capabilities))
 
 and finalize_argument state = function
