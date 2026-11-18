@@ -21,19 +21,15 @@ type target = Package of Path.package | Module of Path.module_ | Definition of P
 let is_visible packages (module_ : Path.module_) visibility =
   List.mem module_.package packages || Resolve.Names.is_public visibility
 
-let rec is_shown (names : Resolve.Names.lookups) packages (declaration : Resolve.Names.declaration)
-    =
-  match (declaration.path, names.find_container (Resolve.Names.make_key declaration)) with
-  | Impl _, _ -> true
-  | _, Some container -> is_shown names packages (names.read_declaration container)
-  | _, None -> is_visible packages declaration.module_ declaration.visibility
+let is_shown packages (declaration : Resolve.Names.declaration) =
+  is_visible packages declaration.module_ declaration.visibility
 
 let list_shown_declarations (names : Resolve.Names.lookups) packages =
   List.sort_uniq Path.compare_package
     (packages @ List.concat_map (Resolve.Names.list_transitive_dependencies names) packages)
   |> List.concat_map names.list_package_declarations
   |> List.filter (fun (declaration : Resolve.Names.declaration) ->
-      declaration.ordinal = 0 && is_shown names packages declaration)
+      declaration.ordinal = 0 && is_shown packages declaration)
 
 let find_module (names : Resolve.Names.lookups) written =
   match names.split_module written with

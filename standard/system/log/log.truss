@@ -4,7 +4,9 @@ use standard::system::calls
 
 internal type SystemLog()
 
-impl Log for SystemLog {
+impl Log for SystemLog
+  uses RunForever
+{
   fn record(self, record: log::Record) {
     var line = ""
     mut line.push("level=")

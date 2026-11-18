@@ -8,7 +8,9 @@ internal type SystemProcesses()
 
 type Started(process: Int32, input: Int32, output: Int32, error_output: Int32)
 
-impl Processes for SystemProcesses {
+impl Processes for SystemProcesses
+  uses RunForever
+{
   fn run(self, command: processes::Command) -> Result[processes::Output, SystemError] {
     let started = begin(command)?
     calls::close_descriptor(started.input)
@@ -55,7 +57,9 @@ impl Processes for SystemProcesses {
   }
 }
 
-fn begin(command: processes::Command) -> Result[Started, SystemError] {
+fn begin(command: processes::Command) -> Result[Started, SystemError]
+  uses RunForever
+{
   var texts: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
   var starts: intrinsic::Storage[UInt64] = intrinsic::storage_empty()
   handles::with_file_error(add_ended_with_zero_byte(command.program.slice().bytes, texts: mut texts, starts: mut starts))?
@@ -188,7 +192,9 @@ fn add_variables(
   command: processes::Command,
   texts: mut intrinsic::Storage[UInt8],
   starts: mut intrinsic::Storage[UInt64],
-) -> Result[Unit, Int32] {
+) -> Result[Unit, Int32]
+  uses RunForever
+{
   if command.inherits_variables {
     var index: UInt64 = 0
     var is_present = true
@@ -260,7 +266,9 @@ fn collect(
   into: mut intrinsic::Storage[UInt8],
   error_output: Int32,
   error_into: mut intrinsic::Storage[UInt8],
-) -> Result[Unit, Int32] {
+) -> Result[Unit, Int32]
+  uses RunForever
+{
   var output_open = output >= 0
   var error_open = error_output >= 0
   while output_open || error_open {
@@ -283,7 +291,9 @@ fn collect(
   Ok(Unit)
 }
 
-fn drain(pipe: Int32, into: mut intrinsic::Storage[UInt8]) -> Result[Bool, Int32] {
+fn drain(pipe: Int32, into: mut intrinsic::Storage[UInt8]) -> Result[Bool, Int32]
+  uses RunForever
+{
   var open = true
   var empty = false
   while open && !empty {

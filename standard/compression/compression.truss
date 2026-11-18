@@ -99,13 +99,17 @@ fn value_at(values: Slice[UInt64], index: UInt64) -> UInt64 {
   if index < values.length() { values[index] } else { 0 }
 }
 
-fn put_at(values: mut List[UInt64], index: UInt64, value: UInt64) {
+fn put_at(values: mut List[UInt64], index: UInt64, value: UInt64)
+  ensures values.length() == old(values.length())
+{
   if index < values.length() {
     values[index] = value
   }
 }
 
-fn add_at(values: mut List[UInt64], index: UInt64, amount: UInt64) {
+fn add_at(values: mut List[UInt64], index: UInt64, amount: UInt64)
+  ensures values.length() == old(values.length())
+{
   if index < values.length() {
     values[index] = values[index].saturating_add(amount)
   }
@@ -183,7 +187,9 @@ fn inflate_codes(
   lengths: Huffman,
   distances: Huffman,
   limit: UInt64,
-) -> Result[Unit, Error] {
+) -> Result[Unit, Error]
+  uses RunForever
+{
   while true {
     let symbol = decode_symbol(mut reader, input: input, code: lengths)?
     if symbol < 256 {
@@ -228,7 +234,9 @@ fn fixed_codes() -> Result[core::Pair[Huffman, Huffman], Error] {
   Ok(core::Pair(first: Huffman.from_lengths(lengths.slice(), at: 0)?, second: Huffman.from_lengths(distances.slice(), at: 0)?))
 }
 
-fn dynamic_codes(reader: mut BitReader, input: Slice[UInt8]) -> Result[core::Pair[Huffman, Huffman], Error] {
+fn dynamic_codes(reader: mut BitReader, input: Slice[UInt8]) -> Result[core::Pair[Huffman, Huffman], Error]
+  uses RunForever
+{
   let at = reader.position
   let literal_count = read_bits(mut reader, input: input, wanted: 5)?.saturating_add(257)
   let distance_count = read_bits(mut reader, input: input, wanted: 5)?.saturating_add(1)
@@ -289,7 +297,9 @@ fn dynamic_codes(reader: mut BitReader, input: Slice[UInt8]) -> Result[core::Pai
   ))
 }
 
-fn inflate_from(input: Slice[UInt8], start: UInt64, limit: UInt64, is_flushed: Bool = false) -> Result[core::Pair[List[UInt8], UInt64], Error] {
+fn inflate_from(input: Slice[UInt8], start: UInt64, limit: UInt64, is_flushed: Bool = false) -> Result[core::Pair[List[UInt8], UInt64], Error]
+  uses RunForever
+{
   var reader = BitReader.new(start)
   var output: List[UInt8] = []
   var last = false
@@ -338,12 +348,16 @@ fn number_at(input: Slice[UInt8], offset: UInt64, size: UInt64, big_endian: Bool
   Some(value)
 }
 
-internal fn inflate_flushed(input: Slice[UInt8], limit: UInt64) -> Result[List[UInt8], Error] {
+internal fn inflate_flushed(input: Slice[UInt8], limit: UInt64) -> Result[List[UInt8], Error]
+  uses RunForever
+{
   let inflated = inflate_from(input, start: 0, limit: limit, is_flushed: true)?
   Ok(own inflated.first)
 }
 
-public fn decompress(input: Slice[UInt8], format: Format = Format.Gzip, limit: UInt64 = 268435456) -> Result[List[UInt8], Error] {
+public fn decompress(input: Slice[UInt8], format: Format = Format.Gzip, limit: UInt64 = 268435456) -> Result[List[UInt8], Error]
+  uses RunForever
+{
   match format {
     Deflate => {
       let inflated = inflate_from(input, start: 0, limit: limit)?
@@ -388,7 +402,9 @@ public fn decompress(input: Slice[UInt8], format: Format = Format.Gzip, limit: U
 
 fn skip_text(input: Slice[UInt8], from: UInt64) -> Result[UInt64, Error] {
   var at = from
-  while at < input.length() && input[at] != 0 {
+  while at < input.length() && input[at] != 0
+    decreases input.length() - at
+  {
     at += 1
   }
   if at >= input.length() {
@@ -397,7 +413,9 @@ fn skip_text(input: Slice[UInt8], from: UInt64) -> Result[UInt64, Error] {
   Ok(at + 1)
 }
 
-fn gunzip_member(input: Slice[UInt8], start: UInt64, limit: UInt64) -> Result[core::Pair[List[UInt8], UInt64], Error] {
+fn gunzip_member(input: Slice[UInt8], start: UInt64, limit: UInt64) -> Result[core::Pair[List[UInt8], UInt64], Error]
+  uses RunForever
+{
   if start > input.length() || input.length() - start < 18 || input[start] != 31 || input[start + 1] != 139 || input[start + 2] != 8 {
     return Err(Error.Malformed(offset: start))
   }
@@ -516,7 +534,9 @@ fn match_length(input: Slice[UInt8], candidate: UInt64, position: UInt64) -> UIn
   let room = input.length() - position
   let reach = position - candidate
   var length: UInt64 = 0
-  while length < maximum_match && length < room && length < reach && input[candidate + length] == input[position + length] {
+  while length < maximum_match && length < room && length < reach && input[candidate + length] == input[position + length]
+    decreases maximum_match - length
+  {
     length += 1
   }
   length
@@ -532,7 +552,9 @@ fn longest_match(matcher: Matcher, input: Slice[UInt8], position: UInt64) -> Fou
   let hash = hash_at(input, position: position)
   var candidate = if hash < matcher.head.length() { matcher.head[hash] } else { UInt64.maximum }
   var steps: UInt64 = 0
-  while candidate < position && position - candidate <= window && steps < matcher.chain {
+  while candidate < position && position - candidate <= window && steps < matcher.chain
+    decreases matcher.chain - steps
+  {
     let length = match_length(input, candidate: candidate, position: position)
     if length > best.length {
       best = Found(length: length, distance: position - candidate)
@@ -594,6 +616,7 @@ fn length_symbol(length: UInt64) -> UInt64
   var index: UInt64 = 0
   while index < 28 && length_bases[index + 1] <= length
     invariant index <= 28
+    decreases 28 - index
   {
     index += 1
   }
@@ -606,6 +629,7 @@ fn distance_symbol(distance: UInt64) -> UInt64
   var index: UInt64 = 0
   while index < 29 && distance_bases[index + 1] <= distance
     invariant index <= 29
+    decreases 29 - index
   {
     index += 1
   }
@@ -623,7 +647,9 @@ fn code_lengths(frequencies: Slice[UInt64], limit: UInt64) -> List[UInt64] {
     }
   }
   var added: UInt64 = 0
-  while used < 2 && added < weights.length() {
+  while used < 2 && added < weights.length()
+    decreases weights.length() - added
+  {
     if value_at(weights.slice(), index: added) == 0 {
       put_at(mut weights, index: added, value: 1)
       used = used.saturating_add(1)
@@ -682,7 +708,9 @@ fn tree_depths(weights: Slice[UInt64]) -> List[UInt64] {
   for symbol in 0..weights.length() {
     var node = value_at(leaf_of.slice(), index: symbol)
     var depth: UInt64 = 0
-    while node < nodes.length() && nodes[node].parent != none && depth < 600 {
+    while node < nodes.length() && nodes[node].parent != none && depth < 600
+      decreases 600 - depth
+    {
       node = nodes[node].parent
       depth += 1
     }
@@ -691,7 +719,9 @@ fn tree_depths(weights: Slice[UInt64]) -> List[UInt64] {
   depths
 }
 
-fn take_lightest(open: mut List[UInt64], nodes: Slice[Node]) -> UInt64 {
+fn take_lightest(open: mut List[UInt64], nodes: Slice[Node]) -> UInt64
+  ensures old(open.length()) > 0 ==> open.length() + 1 == old(open.length())
+{
   if open.is_empty() {
     return 0
   }
@@ -751,7 +781,9 @@ fn length_runs(lengths: Slice[UInt64]) -> List[Run] {
   while index < lengths.length() {
     let length = lengths[index]
     var count: UInt64 = 1
-    while count < lengths.length() - index && lengths[index + count] == length && count < 138 {
+    while count < lengths.length() - index && lengths[index + count] == length && count < 138
+      decreases 138 - count
+    {
       count += 1
     }
     if length == 0 && count >= 11 {
@@ -776,7 +808,9 @@ fn length_runs(lengths: Slice[UInt64]) -> List[Run] {
   runs
 }
 
-fn write_block(writer: mut BitWriter, input: Slice[UInt8], tokens: Slice[Token], from: UInt64, to: UInt64, last: Bool) {
+fn write_block(writer: mut BitWriter, input: Slice[UInt8], tokens: Slice[Token], from: UInt64, to: UInt64, last: Bool)
+  uses RunForever
+{
   var literal_frequencies: List[UInt64] = List.filled(0, count: 286)
   var distance_frequencies: List[UInt64] = List.filled(0, count: 30)
   for token in tokens {
@@ -801,11 +835,15 @@ fn write_block(writer: mut BitWriter, input: Slice[UInt8], tokens: Slice[Token],
   let literal_lengths = code_lengths(literal_frequencies.slice(), limit: 15)
   let distance_lengths = code_lengths(distance_frequencies.slice(), limit: 15)
   var literal_count: UInt64 = 286
-  while literal_count > 257 && value_at(literal_lengths.slice(), index: literal_count - 1) == 0 {
+  while literal_count > 257 && value_at(literal_lengths.slice(), index: literal_count - 1) == 0
+    decreases literal_count
+  {
     literal_count -= 1
   }
   var distance_count: UInt64 = 30
-  while distance_count > 1 && value_at(distance_lengths.slice(), index: distance_count - 1) == 0 {
+  while distance_count > 1 && value_at(distance_lengths.slice(), index: distance_count - 1) == 0
+    decreases distance_count
+  {
     distance_count -= 1
   }
   var all_lengths: List[UInt64] = []
@@ -826,6 +864,7 @@ fn write_block(writer: mut BitWriter, input: Slice[UInt8], tokens: Slice[Token],
   var run_count: UInt64 = 19
   while run_count > 4 && value_at(run_lengths.slice(), index: code_length_order[run_count - 1]) == 0
     invariant run_count <= 19
+    decreases run_count
   {
     run_count -= 1
   }
@@ -898,7 +937,9 @@ fn write_block(writer: mut BitWriter, input: Slice[UInt8], tokens: Slice[Token],
   write_bits(mut writer, value: value_at(literal_codes.slice(), index: 256), count: value_at(literal_lengths.slice(), index: 256))
 }
 
-fn write_stored(writer: mut BitWriter, input: Slice[UInt8], from: UInt64, to: UInt64, last: Bool) {
+fn write_stored(writer: mut BitWriter, input: Slice[UInt8], from: UInt64, to: UInt64, last: Bool)
+  uses RunForever
+{
   let stop = if to < from { from } else { to }
   var start = from
   var first = true
@@ -923,7 +964,9 @@ fn write_stored(writer: mut BitWriter, input: Slice[UInt8], from: UInt64, to: UI
   }
 }
 
-fn deflate(input: Slice[UInt8], level: Level) -> List[UInt8] {
+fn deflate(input: Slice[UInt8], level: Level) -> List[UInt8]
+  uses RunForever
+{
   let tokens = tokens_of(input, level: level)
   var writer = BitWriter.new()
   let block: UInt64 = 16384
@@ -964,7 +1007,9 @@ fn push_number(output: mut List[UInt8], value: UInt32, big_endian: Bool) {
   }
 }
 
-public fn compress(input: Slice[UInt8], format: Format = Format.Gzip, level: Level = Level.Balanced) -> List[UInt8] {
+public fn compress(input: Slice[UInt8], format: Format = Format.Gzip, level: Level = Level.Balanced) -> List[UInt8]
+  uses RunForever
+{
   let deflated = deflate(input, level: level)
   match format {
     Deflate => deflated

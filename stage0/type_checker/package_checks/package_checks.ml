@@ -325,8 +325,8 @@ let grows lookups (start : Path.t) =
 
 let not_strictly_positive_message =
   "A function stored in such a value could be called on the value and call itself through it, so a \
-   function with a `time` clause might not terminate. Remove the `time` clause from the function \
-   type, or pass the function the fields that it needs instead of the whole value."
+   function without `RunForever` might run forever. Add `RunForever` to the function type's \
+   `uses`, or pass the function the fields that it needs instead of the whole value."
 
 let read_written_variant (variants : Syntax.variant list) (variant : Types.variant) =
   match
@@ -752,8 +752,9 @@ let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
           else None)
         (list_named_constants lookups value)
 
-let must_be_used (declaration : Resolve.Names.declaration) =
+let must_be_used (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
   declaration.visibility = Internal && declaration.ordinal = 0
+  && Option.is_none (lookups.interface.names.find_container (Resolve.Names.make_key declaration))
   && Option.is_none (Well_known.of_path declaration.path)
   && (not (Well_known.is_runtime_constructor declaration.path))
   &&
@@ -839,7 +840,8 @@ let check_internals (lookups : Lookups.t) package =
   let named_by_another = Path_table.create 64 in
   List.iter
     (fun ((declaration : Resolve.Names.declaration), paths) ->
-      if must_be_used declaration then Path_table.replace uses_of_internal declaration.path paths;
+      if must_be_used lookups declaration then
+        Path_table.replace uses_of_internal declaration.path paths;
       List.iter
         (fun path ->
           if not (Path.equal path declaration.path) then Path_table.replace named_by_another path ())
@@ -855,10 +857,12 @@ let check_internals (lookups : Lookups.t) package =
         end)
       paths
   in
-  List.iter (fun (declaration, paths) -> if not (must_be_used declaration) then reach paths) uses;
+  List.iter
+    (fun (declaration, paths) -> if not (must_be_used lookups declaration) then reach paths)
+    uses;
   List.filter_map
     (fun ((declaration : Resolve.Names.declaration), _) ->
-      if must_be_used declaration && not (Path_table.mem reached declaration.path) then
+      if must_be_used lookups declaration && not (Path_table.mem reached declaration.path) then
         Some
           (report_unused lookups declaration
              ~is_named:(Path_table.mem named_by_another declaration.path))
@@ -908,15 +912,29 @@ let list_unused_dependencies (lookups : Lookups.t) package =
 
 type outcome = Placed of placed list | Unused_dependencies of Path.package list
 
+let check_definition (lookups : Lookups.t) key check_declaration =
+  let names = lookups.interface.names in
+  match check_declaration (names.read_declaration key) with
+  | placed -> Placed placed
+  | exception Interface.Properties.Recursion_limit message ->
+      Placed
+        [
+          {
+            key;
+            diagnostic =
+              Diagnostic.make ~code:(Types Recursion_limit)
+                (names.read_spans key).((names.read_definition key).id)
+                message;
+          };
+        ]
+
 let run (lookups : Lookups.t) package check =
   let list_contained = memoize (list_contained_types lookups) in
   match check with
-  | Sealed key -> Placed (check_sealed lookups (lookups.interface.names.read_declaration key))
-  | Impl key ->
-      Placed (check_impl lookups ~list_contained (lookups.interface.names.read_declaration key))
-  | Type key ->
-      Placed (check_type lookups ~list_contained (lookups.interface.names.read_declaration key))
-  | Constant key -> Placed (check_constant lookups (lookups.interface.names.read_declaration key))
+  | Sealed key -> check_definition lookups key (check_sealed lookups)
+  | Impl key -> check_definition lookups key (check_impl lookups ~list_contained)
+  | Type key -> check_definition lookups key (check_type lookups ~list_contained)
+  | Constant key -> check_definition lookups key (check_constant lookups)
   | Instantiations -> Placed (check_instantiation lookups package)
   | Tests -> Placed (check_tests lookups package)
   | Internals -> Placed (check_internals lookups package)

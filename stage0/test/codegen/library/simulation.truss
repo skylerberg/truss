@@ -7,7 +7,7 @@ use standard::simulation
 use standard::tasks
 
 fn collect(numbers: tasks::Channel[Int64]) -> List[Int64]
-  uses Tasks
+  uses Tasks, RunForever
 {
   var received: List[Int64] = []
   for number in numbers.messages() {
@@ -17,7 +17,7 @@ fn collect(numbers: tasks::Channel[Int64]) -> List[Int64]
 }
 
 fn random_numbers(seed: UInt64) -> List[UInt64]
-  uses Panic
+  uses Panic, RunForever
 {
   var numbers: List[UInt64] = []
   provide simulation::World.new(seed: seed) {

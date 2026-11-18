@@ -22,6 +22,9 @@ val make_validity :
   Logic.term ->
   Logic.term
 
+val find_parts_in_range :
+  State.context -> ?seen:Types.ty list -> Types.ty -> Logic.term -> Logic.term option
+
 val assume_valid : State.context -> State.frame -> Types.ty -> Logic.term -> unit
 
 val declare_callback_arguments :

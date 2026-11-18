@@ -5,5 +5,5 @@ capability Runner {
 type Direct()
 
 impl Runner for Direct {
-  fn run(self, work: (fn(Int64) cost time finite)) {}
+  fn run(self, work: (fn(Int64) cost time O(1))) {}
 }

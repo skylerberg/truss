@@ -129,7 +129,6 @@ impl FromTemplate for Command {
 }
 
 public fn is_valid_command(literals: Slice[text::Literal]) -> Bool
-  cost time finite
 {
   if literals.length() == 0 {
     return false

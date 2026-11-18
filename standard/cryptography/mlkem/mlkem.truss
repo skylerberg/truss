@@ -59,7 +59,9 @@ fn multiply(first: UInt64, second: UInt64) -> UInt64 {
 fn ntt(coefficients: mut Array[UInt64, 256]) {
   var zeta_index: UInt64 = 1
   var length: UInt64 = 128
-  while length >= 2 && length <= 128 {
+  while length >= 2 && length <= 128
+    decreases length
+  {
     var start: UInt64 = 0
     while start < 256 {
       let zeta = zetas[zeta_index % 128]
@@ -82,7 +84,9 @@ fn ntt(coefficients: mut Array[UInt64, 256]) {
 fn inverse_ntt(coefficients: mut Array[UInt64, 256]) {
   var zeta_index: UInt64 = 127
   var length: UInt64 = 2
-  while length <= 128 {
+  while length <= 128
+    invariant length >= 2
+  {
     var start: UInt64 = 0
     while start < 256 {
       let zeta = zetas[zeta_index % 128]
@@ -169,6 +173,7 @@ fn decode(bytes: Slice[UInt8], bits: UInt64) -> Array[UInt64, 256] {
     }
     while filled < bits && at < bytes.length()
       invariant filled <= 19
+      decreases bytes.length() - at
     {
       buffer = buffer | (intrinsic::convert[UInt8, UInt64](bytes[at]) << filled)
       filled += 8
@@ -219,7 +224,9 @@ fn decompressed(coefficients: Array[UInt64, 256], bits: UInt64) -> Array[UInt64,
   result
 }
 
-fn sample_ntt(rho: Slice[UInt8], column: UInt8, row: UInt8) -> Array[UInt64, 256] {
+fn sample_ntt(rho: Slice[UInt8], column: UInt8, row: UInt8) -> Array[UInt64, 256]
+  uses RunForever
+{
   var seed = rho.to_list()
   mut seed.push(column)
   mut seed.push(row)
@@ -272,7 +279,9 @@ fn sample_noise(seed: Slice[UInt8], nonce: UInt8) -> Array[UInt64, 256] {
 
 type Matrix(rows: Array[Array[Array[UInt64, 256], 3], 3])
 
-fn matrix(rho: Slice[UInt8]) -> Matrix {
+fn matrix(rho: Slice[UInt8]) -> Matrix
+  uses RunForever
+{
   var rows: Array[Array[Array[UInt64, 256], 3], 3] = Array.filled(Array.filled(Array.filled(0)))
   let rank: UInt64 = 3
   for row in 0..rank {
@@ -293,7 +302,9 @@ internal fn hash_256(input: Slice[UInt8]) -> List[UInt8] {
 
 internal type KeyPair(encapsulation: List[UInt8], decapsulation: List[UInt8])
 
-fn generate_pke(seed: Slice[UInt8]) -> KeyPair {
+fn generate_pke(seed: Slice[UInt8]) -> KeyPair
+  uses RunForever
+{
   var input = seed.to_list()
   mut input.push(3)
   let expanded = split_512(input.slice())
@@ -330,7 +341,9 @@ fn generate_pke(seed: Slice[UInt8]) -> KeyPair {
   KeyPair(encapsulation: own encapsulation, decapsulation: own decapsulation)
 }
 
-fn encrypt(encapsulation: Slice[UInt8], message: Slice[UInt8], randomness: Slice[UInt8]) -> List[UInt8] {
+fn encrypt(encapsulation: Slice[UInt8], message: Slice[UInt8], randomness: Slice[UInt8]) -> List[UInt8]
+  uses RunForever
+{
   if encapsulation.length() != encapsulation_key_length {
     return []
   }
@@ -391,7 +404,9 @@ fn decrypt(decapsulation: Slice[UInt8], ciphertext: Slice[UInt8]) -> List[UInt8]
   message
 }
 
-internal fn generate(seed: Slice[UInt8], rejection: Slice[UInt8]) -> KeyPair {
+internal fn generate(seed: Slice[UInt8], rejection: Slice[UInt8]) -> KeyPair
+  uses RunForever
+{
   let pair = generate_pke(seed)
   var decapsulation = pair.decapsulation.copy()
   mut decapsulation.append_slice(pair.encapsulation.slice())
@@ -402,7 +417,9 @@ internal fn generate(seed: Slice[UInt8], rejection: Slice[UInt8]) -> KeyPair {
 
 internal type Encapsulated(shared: List[UInt8], ciphertext: List[UInt8])
 
-internal fn encapsulate(encapsulation: Slice[UInt8], message: Slice[UInt8]) -> Encapsulated {
+internal fn encapsulate(encapsulation: Slice[UInt8], message: Slice[UInt8]) -> Encapsulated
+  uses RunForever
+{
   var input = message.to_list()
   mut input.append(hash_256(encapsulation))
   let expanded = split_512(input.slice())
@@ -413,7 +430,9 @@ internal fn encapsulate(encapsulation: Slice[UInt8], message: Slice[UInt8]) -> E
   Encapsulated(shared: expanded[0..32].to_list(), ciphertext: own ciphertext)
 }
 
-internal fn decapsulate(decapsulation: Slice[UInt8], ciphertext: Slice[UInt8]) -> List[UInt8] {
+internal fn decapsulate(decapsulation: Slice[UInt8], ciphertext: Slice[UInt8]) -> List[UInt8]
+  uses RunForever
+{
   if decapsulation.length() != decapsulation_key_length || ciphertext.length() != ciphertext_length {
     return []
   }

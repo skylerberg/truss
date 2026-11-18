@@ -28,9 +28,7 @@ and visit_clause on_expression (clause : Syntax.clause) =
   | Requires value | Ensures value -> on_expression value
   | Decreases measures -> List.iter on_expression measures
   | Cost cost -> (
-      match cost.bound with
-      | Big_o value | At_most value | Exactly value -> on_expression value
-      | Finite -> ())
+      match cost.bound with Big_o value | At_most value | Exactly value -> on_expression value)
   | Clause_error -> ()
 
 and visit_loop_clause on_expression (clause : Syntax.loop_clause) =
@@ -38,9 +36,7 @@ and visit_loop_clause on_expression (clause : Syntax.loop_clause) =
   | Invariant value -> on_expression value
   | Loop_decreases measures -> List.iter on_expression measures
   | Loop_cost cost -> (
-      match cost.bound with
-      | Big_o value | At_most value | Exactly value -> on_expression value
-      | Finite -> ())
+      match cost.bound with Big_o value | At_most value | Exactly value -> on_expression value)
 
 and visit_string_literal on_expression (literal : Syntax.string_literal) =
   List.iter (fun (value, _) -> on_expression value) literal.rest
@@ -332,9 +328,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
             walk_path_type capability;
             on_name name
         | Metric _ -> ());
-        match cost.bound with
-        | Big_o value | At_most value | Exactly value -> walk_expression value
-        | Finite -> ())
+        match cost.bound with Big_o value | At_most value | Exactly value -> walk_expression value)
     | Clause_error -> ()
   and walk_string_literal (literal : Syntax.string_literal) =
     Option.iter walk_path literal.tag;

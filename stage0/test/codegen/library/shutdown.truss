@@ -4,7 +4,7 @@ use standard::processes
 use standard::simulation
 
 fn patient(request: own http::Request, responder: mut http::Responder)
-  uses Tasks, Clock
+  uses Tasks, Clock, RunForever
 {
   if request.target == "/slow" {
     Clock.sleep(Duration.milliseconds(400))
@@ -22,7 +22,7 @@ fn loopback(port: UInt16) -> network::SocketAddress {
 }
 
 fn exchange(port: UInt16, raw: StringSlice) -> String
-  uses NetworkClient, Handles, Panic
+  uses NetworkClient, Handles, Panic, RunForever
 {
   var connection = network::connect("localhost", port: port).expect("the server accepts")
   let _ = mut connection.write_all(raw.bytes())
@@ -32,7 +32,7 @@ fn exchange(port: UInt16, raw: StringSlice) -> String
 }
 
 fn drained_over_http_one() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic, RunForever
 {
   var listener = NetworkServer.listen(loopback(8094)).expect("the port is free")
   let shutdown = http::Shutdown.new()
@@ -68,7 +68,7 @@ test "a shutdown over HTTP/1.1 finishes the request in flight, closes an idle co
 }
 
 fn cut_short() -> String
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic, RunForever
 {
   var listener = NetworkServer.listen(loopback(8095)).expect("the port is free")
   let shutdown = http::Shutdown.new()
@@ -126,7 +126,7 @@ fn frame_kinds(bytes: Slice[UInt8]) -> List[String] {
 }
 
 fn drained_over_http_two() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic, RunForever
 {
   var listener = NetworkServer.listen(loopback(8096)).expect("the port is free")
   let shutdown = http::Shutdown.new()

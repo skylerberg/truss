@@ -6,7 +6,7 @@ let raise_bug format = Compiler_bug.raise_bug ~stage:"Emit_c" format
 let render_site_symbol (site : Lowered.site) =
   Printf.sprintf "t_Site_%s_%d" (Mangling.mangle_path site.definition) site.offset
 
-let site_structs =
+let shared_structs =
   "struct t_site {\n\
   \  const uint8_t *file;\n\
   \  uint64_t file_length;\n\
@@ -16,6 +16,11 @@ let site_structs =
    struct t_trace {\n\
   \  const struct t_site *site;\n\
   \  const struct t_trace *caller;\n\
+   };\n\
+   struct t_capability {\n\
+  \  const uint8_t *name;\n\
+  \  uint64_t length;\n\
+  \  void *evidence;\n\
    };\n"
 
 let render_integer_type : Memory_layout.integer -> string = function
@@ -49,7 +54,7 @@ let runtime_declarations =
       "typedef __UINT16_TYPE__ uint16_t;\n";
       "typedef __UINT32_TYPE__ uint32_t;\n";
       "typedef __UINT64_TYPE__ uint64_t;\n";
-      site_structs;
+      shared_structs;
       "_Noreturn void t_runtime_panic(const uint8_t *message, uint64_t length, const struct t_site \
        *site, const struct t_trace *trace);\n";
       "_Noreturn void t_runtime_assertion_failed(const uint8_t *message, uint64_t length, const \
@@ -58,6 +63,8 @@ let runtime_declarations =
        *site);\n";
       "void t_runtime_echo(const uint8_t *text, uint64_t length, const struct t_site *site);\n";
       "_Noreturn void t_runtime_compiler_bug(void);\n";
+      "void *t_runtime_find_capability(const struct t_capability *capabilities, const uint8_t \
+       *name, uint64_t length);\n";
       "struct t_evidence {\n\
       \  void *implementation;\n\
       \  const void *const *table;\n\
@@ -71,12 +78,12 @@ let runtime_declarations =
       "void t_runtime_parallel(const struct t_branch *branches, uint64_t count);\n";
       "void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t \
        last), void *environment, uint64_t first, uint64_t last);\n";
-      "uint64_t t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item), void \
-       *environment, uint64_t item);\n";
+      "uint64_t t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item, void \
+       *capabilities), void *environment, uint64_t item);\n";
       "uint8_t t_runtime_coroutine_resume(uint64_t coroutine);\n";
       "void t_runtime_coroutine_suspend(void);\n";
       "uint8_t t_runtime_tasks_spawn(uint64_t group, void (*code)(void *environment, uint64_t \
-       item), void *environment, uint64_t item);\n";
+       item, void *capabilities), void *environment, uint64_t item);\n";
       "void t_runtime_run_test(uint32_t index);\n";
       "void t_runtime_report_tests_to(int32_t descriptor);\n";
       "uint64_t t_runtime_live_blocks(void);\n";

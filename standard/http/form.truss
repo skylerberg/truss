@@ -61,7 +61,7 @@ fn media_type(headers: Headers) -> String {
 }
 
 public fn Request.form(own self) -> Result[Form, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if media_type(self.headers) != "application/x-www-form-urlencoded" {
     return Err(Error.Unsupported(message: "a body that is not application/x-www-form-urlencoded"))
@@ -144,7 +144,7 @@ fn index_of(haystack: Slice[UInt8], needle: Slice[UInt8]) -> Option[UInt64]
 }
 
 fn fill_buffer(multipart: mut Multipart) -> Result[UInt64, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   mut multipart.body.read(mut multipart.buffer, limit: 65536)
 }
@@ -156,7 +156,7 @@ fn drop_front(bytes: mut List[UInt8], count: UInt64) -> List[UInt8] {
 }
 
 fn content_piece(multipart: mut Multipart, limit: UInt64) -> Result[Option[List[UInt8]], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while true {
     match index_of(multipart.buffer.slice(), needle: multipart.delimiter.slice()) {
@@ -196,7 +196,7 @@ fn content_piece(multipart: mut Multipart, limit: UInt64) -> Result[Option[List[
 }
 
 fn read_part_headers(multipart: mut Multipart) -> Result[Headers, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let ending: List[UInt8] = [13, 10, 13, 10]
   while true {
@@ -234,7 +234,7 @@ fn read_part_headers(multipart: mut Multipart) -> Result[Headers, Error]
 }
 
 public fn Multipart.next_part(mut self) -> Result[Option[Part], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while self.section == Section.Preamble || self.section == Section.Body {
     let _ = content_piece(mut self, limit: 65536)?
@@ -258,7 +258,7 @@ public fn Multipart.next_part(mut self) -> Result[Option[Part], Error]
 }
 
 public fn Multipart.read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if self.section != Section.Body || limit == 0 {
     return Ok(0)
@@ -274,7 +274,7 @@ public fn Multipart.read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Re
 }
 
 public fn Multipart.read_all(mut self, limit: UInt64 = 8388608) -> Result[List[UInt8], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var bytes: List[UInt8] = []
   while self.section == Section.Body {
@@ -292,7 +292,7 @@ public fn Multipart.read_all(mut self, limit: UInt64 = 8388608) -> Result[List[U
 }
 
 public fn Multipart.copy_to[Sink: streams::Writer](mut self, sink: mut Sink) -> Result[UInt64, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var copied: UInt64 = 0
   while self.section == Section.Body {

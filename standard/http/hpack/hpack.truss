@@ -90,7 +90,9 @@ fn entry_size(name: StringSlice, value: StringSlice) -> UInt64 {
 type Table(entries: List[Field], size: UInt64, limit: UInt64)
 
 fn evict(table: mut Table) {
-  while table.size > table.limit && !table.entries.is_empty() {
+  while table.size > table.limit && !table.entries.is_empty()
+    decreases table.entries.length()
+  {
     let oldest = mut table.entries.remove_at(0)
     table.size = table.size.saturating_subtract(entry_size(oldest.name.slice(), value: oldest.value.slice()))
   }
@@ -264,11 +266,15 @@ public fn Decoder.new(limit: UInt64 = 4096) -> Decoder {
   Decoder(table: Table(entries: [], size: 0, limit: limit), maximum: limit)
 }
 
-public fn Decoder.decode(mut self, block: Slice[UInt8], list_limit: UInt64 = 65536) -> Result[List[Field], Error] {
+public fn Decoder.decode(mut self, block: Slice[UInt8], list_limit: UInt64 = 65536) -> Result[List[Field], Error]
+  uses RunForever
+{
   decode_block(mut self.table, maximum: self.maximum, block: block, list_limit: list_limit)
 }
 
-fn decode_block(table: mut Table, maximum: UInt64, block: Slice[UInt8], list_limit: UInt64) -> Result[List[Field], Error] {
+fn decode_block(table: mut Table, maximum: UInt64, block: Slice[UInt8], list_limit: UInt64) -> Result[List[Field], Error]
+  uses RunForever
+{
   var fields: List[Field] = []
   var list_size: UInt64 = 0
   var at: UInt64 = 0

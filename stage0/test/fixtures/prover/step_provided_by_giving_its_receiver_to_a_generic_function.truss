@@ -1,14 +1,10 @@
 trait Step {
-  fn step(self) -> Int64
-    cost time finite
-  {
+  fn step(self) -> Int64 {
     run(self)
   }
 }
 
-fn run[Item: Step](item: Item) -> Int64
-  cost time finite
-{
+fn run[Item: Step](item: Item) -> Int64 {
   item.step()
 }
 

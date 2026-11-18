@@ -15,9 +15,9 @@ let locate_expression text written occurrence =
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.make_key declaration in
         match
-          ( (Support.make_names packages key.module_.package).read_definition key,
-            (Support.make_names packages key.module_.package).read_spans key,
-            (Support.make_names packages key.module_.package).read_place key,
+          ( (Support.make_names packages).read_definition key,
+            (Support.make_names packages).read_spans key,
+            (Support.make_names packages).read_place key,
             Database.read_checked_body (Support.make_database packages) key )
         with
         | definition, spans, { base; _ }, Some result ->
@@ -40,7 +40,7 @@ let locate_expression text written occurrence =
             Syntax_walk.visit_definition visit definition;
             Option.map (fun value -> (value, result)) !best
         | _ -> None)
-      ((Support.make_names packages file.module_.package).list_declarations_in file)
+      ((Support.make_names packages).list_declarations_in file)
   in
   match actual with
   | Some actual -> actual
@@ -894,7 +894,7 @@ let () =
                       | _ -> ()))
                     [ tables.types; tables.local_types ]
               | None -> ())
-            ((Support.make_names packages file.module_.package).list_declarations_in file))
+            ((Support.make_names packages).list_declarations_in file))
         Standard_library.files)
 
 let point = "type Point(x: Int64)\n\n"
@@ -1338,10 +1338,8 @@ let () =
     "the target of `calls` in a clause is a function parameter, a capability, or a capability's \
      method" (fun () ->
       let make_clause_source counted =
-        "type Point(x: Int64)\n\n\
-         fn f(count: Int64, visit: (fn() cost time finite))\n\
-        \  uses Clock\n\
-        \  cost calls(" ^ counted ^ ") <= 1\n{\n  todo\n}\n"
+        "type Point(x: Int64)\n\nfn f(count: Int64, visit: fn())\n  uses Clock\n  cost calls("
+        ^ counted ^ ") <= 1\n{\n  todo\n}\n"
       in
       expect_fine (make_clause_source "visit");
       expect_fine (make_clause_source "Clock");
@@ -1498,6 +1496,28 @@ let () =
       in
       expect_fine (make_implemented_source "public ");
       expect_fine (make_implemented_source "internal "));
+  Harness.test "an impl whose trait names a private type has clauses no other package reads"
+    (fun () ->
+      let make_converting_source visibility =
+        Fixtures.Infer.helper
+        ^ Printf.sprintf
+            "public trait Converts[Source] {\n\
+            \  fn convert(source: Source) -> Self\n\
+             }\n\n\
+             %stype Secret(value: Int64)\n\n\
+             public type Shown(value: Int64)\n\n\
+             impl Converts[Secret] for Shown {\n\
+            \  fn convert(source: Secret) -> Shown\n\
+            \    cost time O(1)\n\
+            \    requires small(source.value)\n\
+            \  {\n\
+            \    Shown(value: source.value)\n\
+            \  }\n\
+             }\n"
+            visibility
+      in
+      expect_fine (make_converting_source "");
+      expect_one_diagnostic (make_converting_source "public ") "types.private_in_public");
   Harness.test "a function's body can call a function that other packages cannot" (fun () ->
       expect_fine
         (make_helper_source "internal " ^ Fixtures.Infer.public_function_calling_a_private_one))
@@ -1507,8 +1527,10 @@ let () =
       expect_one_diagnostic Fixtures.Infer.bit_vector_assertion_naming_a_list "types.not_bit_vector")
 
 let () =
-  let text = Fixtures.Infer.lambda_and_function_value_that_follow_a_ticker in
-  Harness.test "a function type that follows a method of a bound shows no time clause" (fun () ->
+  let text = Fixtures.Infer.lambda_and_function_value_that_tick_through_a_bound in
+  Harness.test
+    "a lambda and a function value that tick through a bound have no time clause in their type"
+    (fun () ->
       expect_fine text;
       expect_type text "fn(source) { mut source.tick() }" "fn(mut Inner) -> UInt64";
       expect_type text "advance" ~occurrence:2 "fn(mut Inner) -> UInt64");

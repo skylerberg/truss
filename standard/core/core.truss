@@ -28,11 +28,9 @@ public fn Ordering.then(self, next: Ordering) -> Ordering
 
 public trait Equal {
   fn equal(self, other: Self) -> Bool
-    cost time finite
 
   fn not_equal(self, other: Self) -> Bool
     ensures result == !self.equal(other)
-    cost time finite
   {
     !self.equal(other)
   }
@@ -57,12 +55,10 @@ public trait Equal {
 
 public trait Ordered: Equal {
   fn compare(self, other: Self) -> Ordering
-    cost time finite
 
   fn max(own self, other: own Self) -> Self
     ensures identical(result, self) || identical(result, other)
     ensures self <= result && other <= result
-    cost time finite
   {
     if self.compare(other) == Ordering.Less { other } else { self }
   }
@@ -70,7 +66,6 @@ public trait Ordered: Equal {
   fn min(own self, other: own Self) -> Self
     ensures identical(result, self) || identical(result, other)
     ensures result <= self && result <= other
-    cost time finite
   {
     if self.compare(other) == Ordering.Greater { other } else { self }
   }
@@ -81,7 +76,6 @@ public trait Ordered: Equal {
     ensures low <= self && self <= high ==> identical(result, self)
     ensures self < low ==> identical(result, low)
     ensures self > high ==> identical(result, high)
-    cost time finite
   {
     if self.compare(low) == Ordering.Less {
       low
@@ -146,29 +140,24 @@ public fn Hasher.finish(self) -> UInt64
 
 public trait Default {
   fn default() -> Self
-    cost time finite
 }
 
 public trait Display {
   fn display(self, output: mut String)
-    cost time finite
 }
 
 public trait From[Source] {
   fn from(value: own Source) -> Self
-    cost time finite
 }
 
 public trait TryFrom[Source] {
   type Error
   fn try_from(value: own Source) -> Result[Self, Self.Error]
-    cost time finite
 }
 
 public trait Copyable {
   fn copy(self) -> Self
     ensures identical(result, self)
-    cost time finite
 }
 
 public trait Plain: Copyable {}
@@ -179,73 +168,60 @@ public trait Add[Right] {
   type Output
 
   fn add_is_defined(self, right: Right) -> Bool
-    cost time finite
 
   fn add(self, right: Right) -> Self.Output
     requires self.add_is_defined(right)
-    cost time finite
 }
 
 public trait Subtract[Right] {
   type Output
 
   fn subtract_is_defined(self, right: Right) -> Bool
-    cost time finite
 
   fn subtract(self, right: Right) -> Self.Output
     requires self.subtract_is_defined(right)
-    cost time finite
 }
 
 public trait Multiply[Right] {
   type Output
 
   fn multiply_is_defined(self, right: Right) -> Bool
-    cost time finite
 
   fn multiply(self, right: Right) -> Self.Output
     requires self.multiply_is_defined(right)
-    cost time finite
 }
 
 public trait Divide[Right] {
   type Output
 
   fn divide_is_defined(self, right: Right) -> Bool
-    cost time finite
 
   fn divide(self, right: Right) -> Self.Output
     requires self.divide_is_defined(right)
-    cost time finite
 }
 
 public trait Remainder[Right] {
   type Output
 
   fn remainder_is_defined(self, right: Right) -> Bool
-    cost time finite
 
   fn remainder(self, right: Right) -> Self.Output
     requires self.remainder_is_defined(right)
-    cost time finite
 }
 
 public trait Negate {
   type Output
 
   fn negate_is_defined(self) -> Bool
-    cost time finite
 
   fn negate(self) -> Self.Output
     requires self.negate_is_defined()
-    cost time finite
 }
 
 public trait Model {
   type Value
 
   fn model(self) -> Self.Value
-    cost time finite
 }
 
 public trait Index {
@@ -253,37 +229,30 @@ public trait Index {
   type Output
 
   fn contains_key(self, key: Self.Key) -> Bool
-    cost time finite
 
   fn at(self, key: Self.Key) lends Self.Output
     requires self.contains_key(key)
-    cost time finite
 }
 
 public trait IndexMut: Index {
   fn at(mut self, key: Self.Key) lends mut Self.Output
     requires self.contains_key(key)
-    cost time finite
 }
 
 public trait IndexAssign: Index {
   fn accepts_key(self, key: Self.Key) -> Bool
-    cost time finite
 
   fn assign(mut self, key: own Self.Key, value: own Self.Output)
     requires self.accepts_key(key)
-    cost time finite
 }
 
 public trait Iterable {
   type Element
 
   fn count(self) -> UInt64
-    cost time finite
 
   fn element(self, position: UInt64) lends Self.Element
     requires position < self.count()
-    cost time finite
 
   fn fold[Total](
     self,
@@ -383,7 +352,7 @@ public trait Cursor {
     uses Self.Uses
 
   fn to_list(own self) -> List[Self.Element]
-    uses Self.Uses
+    uses Self.Uses, RunForever
   {
     var cursor = own self
     var items: List[Self.Element] = []
@@ -394,7 +363,7 @@ public trait Cursor {
   }
 
   fn count(own self) -> UInt64
-    uses Self.Uses
+    uses Self.Uses, RunForever
   {
     var cursor = own self
     var count: UInt64 = 0
@@ -405,7 +374,7 @@ public trait Cursor {
   }
 
   fn last(own self) -> Option[Self.Element]
-    uses Self.Uses
+    uses Self.Uses, RunForever
   {
     var cursor = own self
     var last: Option[Self.Element] = None
@@ -420,7 +389,7 @@ public trait Cursor {
     initial: own Total,
     combine: (fn(own Total, own Self.Element) -> Total uses generic Granted),
   ) -> Total
-    uses Self.Uses, generic Granted
+    uses Self.Uses, generic Granted, RunForever
   {
     var cursor = own self
     var total = own initial
@@ -431,7 +400,7 @@ public trait Cursor {
   }
 
   fn find(mut self, predicate: fn(Self.Element) -> Bool) -> Option[Self.Element]
-    uses Self.Uses
+    uses Self.Uses, RunForever
   {
     while mut self.next() is Some(item) {
       if predicate(item) {

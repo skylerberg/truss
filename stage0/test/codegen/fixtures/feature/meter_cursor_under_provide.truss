@@ -36,7 +36,7 @@ fn readings(count: Int64) -> Readings {
 }
 
 fn total(count: Int64) -> Int64
-  uses Meter
+  uses Meter, RunForever
 {
   var cursor = readings(count)
   var sum = 0

@@ -1,5 +1,4 @@
-fn tally(measure: (fn(Int64) -> Int64 cost time finite)) -> Int64
-  cost time finite
+fn tally(measure: fn(Int64) -> Int64) -> Int64
 {
   var total = 0
   total = measure(1)

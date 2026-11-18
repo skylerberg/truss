@@ -107,7 +107,7 @@ test "a malformed cron expression is refused" {
 }
 
 fn hourly_runs() -> Int64
-  uses Clock, Tasks, Panic
+  uses Clock, Tasks, Panic, RunForever
 {
   let schedule = cron::Schedule.parse("@hourly").expect("a schedule")
   let runs = tasks::Counter.new()

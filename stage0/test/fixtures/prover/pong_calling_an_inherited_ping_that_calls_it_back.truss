@@ -1,10 +1,7 @@
 trait Ping {
   fn pong(self, steps: UInt32) -> Int64
-    cost time finite
 
-  fn ping(self, steps: UInt32) -> Int64
-    cost time finite
-  {
+  fn ping(self, steps: UInt32) -> Int64 {
     self.pong(steps)
   }
 }

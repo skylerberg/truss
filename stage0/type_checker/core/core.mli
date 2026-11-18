@@ -161,7 +161,7 @@ and calls_target =
   | Capability of Path.t
   | Capability_method of Path.t * string
 
-and bound = Finite | Order_of of expression | At_most of expression | Exactly of expression
+and bound = Order_of of expression | At_most of expression | Exactly of expression
 and condition = { value : expression; executable : bool }
 and arm = { patterns : pattern list; guard : expression option; body : block; origin : origin }
 and pattern = { id : id; origin : origin; type_ : Types.ty; kind : pattern_kind }

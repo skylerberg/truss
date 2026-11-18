@@ -1,4 +1,4 @@
-let check packages = Support.list_diagnostics (Support.make_database packages)
+let check packages = Database.list_file_diagnostics (Support.make_database packages)
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
 
@@ -89,6 +89,11 @@ let () =
   Harness.test "a type that contains itself with growing arguments is an error" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.nested_type_with_growing_arguments
         "package.growing_type");
+  Harness.test
+    "an impl whose associated type grows the type that holds it reaches the recursion limit"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Package_checks.impl_growing_a_type_through_its_associated_type
+        "types.recursion_limit" ~says:"needs more than 64 nested types");
   Harness.test "generic code that instantiates itself with growing arguments is an error" (fun () ->
       let packages =
         Support.setup
@@ -204,26 +209,24 @@ let () =
     | actual when actual = expected -> ()
     | actual -> Harness.fail "found [%s]" (String.concat "; " actual)
   in
-  Harness.test "a type cannot occur in the input of a function type that has a time clause"
-    (fun () ->
-      expect_one_diagnostic "type Knot(run: (fn(Knot) -> Bool cost time finite))\n"
-        "package.not_strictly_positive");
-  Harness.test "a type may occur in the input of a function type that has no time clause" (fun () ->
-      expect_fine "type Button(label: String, on_click: fn(Button))\n");
-  Harness.test "a type may occur in the output of a function type that has a time clause" (fun () ->
-      expect_fine "type Lazy(next: (fn() -> Lazy cost time finite))\n");
+  Harness.test "a type cannot occur in the input of a function type that terminates" (fun () ->
+      expect_one_diagnostic "type Knot(run: fn(Knot) -> Bool)\n" "package.not_strictly_positive");
+  Harness.test "a type may occur in the input of a function type that uses RunForever" (fun () ->
+      expect_fine "type Button(label: String, on_click: (fn(Button) uses RunForever))\n");
+  Harness.test "a type may occur in the output of a function type that terminates" (fun () ->
+      expect_fine "type Lazy(next: fn() -> Lazy)\n");
   Harness.test "a type cannot occur in such an input inside a collection" (fun () ->
-      expect_one_diagnostic "type Knot(runs: List[(fn(Knot) -> Bool cost time finite)])\n"
+      expect_one_diagnostic "type Knot(runs: List[fn(Knot) -> Bool])\n"
         "package.not_strictly_positive");
   Harness.test "a type cannot occur in such an input inside a type without fields" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.knot_in_a_pending_function_input
         "package.not_strictly_positive");
   Harness.test "a type cannot occur in such an input inside another function type's output"
     (fun () ->
-      expect_one_diagnostic "type Knot(make: fn() -> (fn(Knot) -> Bool cost time finite))\n"
+      expect_one_diagnostic "type Knot(make: fn() -> fn(Knot) -> Bool)\n"
         "package.not_strictly_positive");
   Harness.test "a type cannot occur in the input of a function type in such an input" (fun () ->
-      expect_one_diagnostic "type Knot(run: (fn(fn(Knot) -> Bool) -> Bool cost time finite))\n"
+      expect_one_diagnostic "type Knot(run: fn(fn(Knot) -> Bool) -> Bool)\n"
         "package.not_strictly_positive");
   Harness.test "a type cannot occur in such an input of an any type's associated type" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.knot_in_an_any_types_function_input
@@ -367,6 +370,8 @@ let () =
         ~others:[ ("app::helpers", Fixtures.Package_checks.internal_helpers) ]);
   Harness.test "an internal method called with a dot is used" (fun () ->
       expect_used Fixtures.Package_checks.internal_method_called_with_a_dot);
+  Harness.test "a method of an internal trait called through the trait is used" (fun () ->
+      expect_used Fixtures.Package_checks.internal_trait_method_called_with_a_dot);
   Harness.test "an internal function returned as a value is used" (fun () ->
       expect_used Fixtures.Package_checks.internal_function_returned_as_a_value);
   Harness.test "an internal function named only in an `ensures` is used" (fun () ->

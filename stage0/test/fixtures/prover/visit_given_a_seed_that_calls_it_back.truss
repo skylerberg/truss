@@ -1,11 +1,9 @@
 trait Grow {
   fn grow(self) -> Int64
-    cost time finite
 }
 
 trait Visit {
   fn visit[Item: Grow](self, item: Item) -> Int64
-    cost time finite
 }
 
 type Walker()

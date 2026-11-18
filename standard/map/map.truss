@@ -16,12 +16,10 @@ public trait FromEntries {
   fn from_entries(entries: own List[Entry[Self.Key, Self.Value]]) -> Self
     requires forall i in 0..entries.length() => forall j in 0..entries.length() =>
       i < j ==> !(entries.model()[i].key == entries.model()[j].key)
-    cost time finite
 }
 
 internal fn entries_model[Key, Value](entries: Sequence[Entry[Key, Value]]) -> FiniteMap[Key, Value]
   ensures identical(result, entries.to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value }))
-  cost time finite
 {
   entries.to_map(fn(entry) { entry.key }, value: fn(entry) { entry.value })
 }
@@ -31,7 +29,6 @@ impl Model for Map[Key: Hash + Ordered, Value] {
 
   fn model(self) -> FiniteMap[Key, Value]
     ensures identical(result, entries_model(self.entries.model()))
-    cost time finite
   {
     entries_model(self.entries.model())
   }
@@ -39,7 +36,6 @@ impl Model for Map[Key: Hash + Ordered, Value] {
 
 public fn contains_equal_key[Key: Equal, Value](map: FiniteMap[Key, Value], key: Key) -> Bool
   ensures result == (exists other: Key => map.contains_key(other) && other == key)
-  cost time finite
 {
   exists other: Key => map.contains_key(other) && other == key
 }
@@ -285,7 +281,7 @@ public fn Map[Key: Hash + Ordered, Value].seeded() -> Map[Key, Value]
 public fn Map[Key: Hash + Ordered, Value].collect[Source: Cursor[Element = Entry[Key, Value]]](
   source: own Source,
 ) -> Map[Key, Value]
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var map: Map[Key, Value] = [:]
   mut map.extend(own source)
@@ -399,7 +395,7 @@ public fn Map[Key: Hash + Ordered, Value].reserve(mut self, additional: UInt64)
 
 public fn Map[Key: Hash + Ordered, Value].retain(
   mut self,
-  keep: (fn(Entry[Key, Value]) -> Bool cost time finite),
+  keep: fn(Entry[Key, Value]) -> Bool,
 )
   ensures self.length() <= old(self.length())
   ensures forall key: Key =>
@@ -427,7 +423,7 @@ public fn Map[Key: Hash + Ordered, Value].extend[Source: Cursor[Element = Entry[
   mut self,
   entries: own Source,
 )
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var cursor = own entries
   while mut cursor.next() is Some(entry)
@@ -444,7 +440,6 @@ impl Index for Map[Key: Hash + Ordered, Value] {
 
   fn contains_key(self, key: Key) -> Bool
     ensures result == self.contains(key)
-    cost time finite
     cost allocations <= self.length() * allocations(Key.equal)
   {
     self.contains(key)
@@ -638,7 +633,6 @@ internal theorem entries_inclusion_is_transitive[Key: Hash + Ordered, Value: Equ
   requires first.entries_included_in(second)
   requires second.entries_included_in(third)
   ensures first.entries_included_in(third)
-  cost time finite
 {
 }
 

@@ -1,6 +1,5 @@
 trait Grow {
   fn grow(self, steps: UInt32) -> Int64
-    cost time finite
 }
 
 type Seed(height: Int64)

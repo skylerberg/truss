@@ -1,6 +1,8 @@
 fn ready() -> Bool { todo }
 
-fn f() {
+fn f()
+  uses RunForever
+{
   while ready() && make() is Some(text) {
     keep(own text)
   }

@@ -1,15 +1,12 @@
 trait Step {
   fn step(self, node: Node) -> Int64
-    cost time finite
 }
 
 type Node(next: any Step)
 
 type Hop()
 
-fn follow(node: Node) -> Int64
-  cost time finite
-{
+fn follow(node: Node) -> Int64 {
   node.next.step(node)
 }
 

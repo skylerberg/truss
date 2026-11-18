@@ -28,6 +28,15 @@ let read_parameter_name (parameter : Mir.parameter) =
   | Some name -> name
   | None -> raise_bug "a parameter that no definition names"
 
+let rec show_callee (path : Path.t) =
+  match path with
+  | Top { name; _ } -> name
+  | Method { owner = Impl { for_type; _ } | Derived { type_ = for_type; _ }; name; _ }
+  | Method { owner = for_type; name; _ }
+  | Member_constant { owner = for_type; name } ->
+      show_callee for_type ^ "." ^ name
+  | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> Path.show path
+
 let is_in_recursion_group (context : State.context) node =
   let is_inherited_from declaration member =
     match context.lookups.mir.find_form_origin member with
@@ -333,11 +342,10 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
          | Some term when not (is_parameter term) -> [ (term, "result") ]
          | _ -> []));
     template_clause;
-    panic_clause = None;
   }
 
-let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (frame : State.frame)
-    code location message goal =
+let oblige ?template_clause ?cited ?(fixes = []) context (frame : State.frame) code location message
+    goal =
   match
     make_closed_obligation ?template_clause context frame code location message
       (add_quantifier_facts
@@ -353,13 +361,9 @@ let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (fram
             | None -> [])
         | fixes -> fixes
       in
-      context.obligations <- { obligation with cited; fixes; panic_clause } :: context.obligations;
+      context.obligations <- { obligation with cited; fixes } :: context.obligations;
       assume context frame goal
   | None -> ()
-
-let oblige ?template_clause ?cited ?(fixes = []) context frame code location message goal =
-  record_obligation ?template_clause ?cited ~fixes ~panic_clause:None context frame code location
-    message goal
 
 let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
     (statement : Mir.statement) =
@@ -424,34 +428,31 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
           (Printf.sprintf
              "This call to `%s` reaches back here through code that its `impl` %s. No measure can \
               be stated for that code, so the recursion cannot be shown to end."
-             (Path.show target) origin);
+             (show_callee target) origin);
       ]
       (Logic.Boolean false);
     None
   in
   let recursive_callee =
     match resolution.target with
-    | Some target
-      when context.terminates && frame.makes_obligations && is_in_recursion_group context target
-      -> (
+    | Some target when frame.makes_obligations && is_in_recursion_group context target -> (
         match context.lookups.mir.find_form_origin target with
-        | Some (Derived _, _) -> reject target "derives"
-        | Some (Inherited _, _) -> reject target "inherits from its trait"
-        | Some (Written _, _) | None -> Some target)
+        | Some (Derived _, _) when context.terminates -> reject target "derives"
+        | Some (Inherited _, _) when context.terminates -> reject target "inherits from its trait"
+        | Some ((Written _ | Derived _ | Inherited _), _) | None -> Some target)
     | Some _ | None -> None
   in
   (resolution, recursive_callee)
 
-let oblige_safe_operation ?cited ?(fixes = []) (context : State.context) (frame : State.frame) code
-    location message goal =
-  let record panic_clause =
-    record_obligation ?cited ~fixes ~panic_clause context frame code location message goal
-  in
-  match frame.panic with
-  | Declared when frame.source.key = Some context.home ->
-      if frame.makes_obligations then assume context frame goal
-  | Undeclared clause -> record (Some clause)
-  | Declared | Undeclarable -> record None
+let reject_uncompared_recursion (context : State.context) frame location recursive_callee ~describe
+    =
+  if context.terminates then
+    Option.iter
+      (fun callee ->
+        oblige context frame Termination location
+          [ Text (describe (show_callee callee)) ]
+          (Logic.Boolean false))
+      recursive_callee
 
 let quote (source : State.source) origin =
   match source.key with Some key -> State.Quote (key, origin) | None -> Text "this expression"

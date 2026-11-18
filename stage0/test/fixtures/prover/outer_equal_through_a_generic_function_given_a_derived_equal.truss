@@ -5,7 +5,6 @@ type Outer(inner: Inner)
 
 fn same[Item: Equal](left: Item, right: Item) -> Bool
   ensures result == (left == right)
-  cost time finite
 {
   left == right
 }

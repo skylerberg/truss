@@ -1,5 +1,0 @@
-fn f[Inner: Ticker](ticker: mut Inner) -> UInt64
-  cost time finite
-{
-  step_with(mut ticker, step: fn(source) { mut source.tick() })
-}

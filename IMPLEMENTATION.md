@@ -130,7 +130,7 @@ unchecked.
 ### Module names
 
 Code names each module by its path, such as `Resolve.Names` or
-`Emit_c.Builder`, so a reader finds a definition without searching for the
+`Emit_c.Ir_builder`, so a reader finds a definition without searching for the
 module a short name stands for. Code has no `open`: a name from another
 module is qualified, as in `Facts.find_visible_type`, and no `open` can
 shadow a name in scope. Code has no module alias either. Many modules share a name,

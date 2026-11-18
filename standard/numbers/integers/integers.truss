@@ -129,7 +129,6 @@ public trait FixedWidthInteger:
 
   fn exact_sum(items: Slice[Self]) -> Integer
     ensures result == items.model().sum(fn(item) { item })
-    cost time finite
   {
     items.model().sum(fn(item) { item })
   }

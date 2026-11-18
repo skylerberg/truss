@@ -13,7 +13,6 @@ public trait FromElements {
   type Element
 
   fn from_elements(elements: own List[Self.Element]) -> Self
-    cost time finite
 }
 
 public type SplitFirst[Element](first: Element, rest: Slice[Element])
@@ -153,7 +152,6 @@ impl Model for List[Element] {
 
   fn model(self) -> Sequence[Element]
     ensures identical(result, intrinsic::storage_model(self.storage))
-    cost time finite
   {
     intrinsic::storage_model(self.storage)
   }
@@ -164,7 +162,6 @@ impl Model for Slice[Element] {
 
   fn model(self) -> Sequence[Element]
     ensures identical(result, intrinsic::view_model(self.elements))
-    cost time finite
   {
     intrinsic::view_model(self.elements)
   }
@@ -334,7 +331,7 @@ public fn List[Element].reverse(mut self)
   ensures self.length() == old(self.length())
   ensures forall i in 0..self.length() =>
     identical(self.model()[i], old(self.model())[self.length() - 1 - i])
-  ensures forall measure: (fn(Element) -> Integer cost time finite) =>
+  ensures forall measure: fn(Element) -> Integer =>
     self.model().sum(measure) == old(self.model()).sum(measure)
   ensures self.capacity() == old(self.capacity())
   cost time O(self.length())
@@ -350,7 +347,7 @@ public fn List[Element].reverse(mut self)
     invariant forall i in high..self.length() =>
       identical(self.model()[i], old(self.model())[self.length() - 1 - i])
     invariant forall i in low..high => identical(self.model()[i], old(self.model())[i])
-    invariant forall measure: (fn(Element) -> Integer cost time finite) =>
+    invariant forall measure: fn(Element) -> Integer =>
       self.model().sum(measure) == old(self.model()).sum(measure)
     invariant intrinsic::storage_capacity(self.storage) == old(intrinsic::storage_capacity(self.storage))
     decreases high - low
@@ -368,7 +365,6 @@ impl Model for ListCursor[Element] {
 
   fn model(self) -> Sequence[Element]
     ensures identical(result, self.reversed.model().reversed())
-    cost time finite
   {
     self.reversed.model().reversed()
   }
@@ -619,7 +615,7 @@ public fn List[Element: Copyable].filled(value: Element, count: UInt64) -> List[
 
 public fn List[Element].generate(
   count: UInt64,
-  make: (fn(index: UInt64) -> Element requires index < count cost time finite),
+  make: (fn(index: UInt64) -> Element requires index < count),
 ) -> List[Element]
   ensures result.length() == count
   ensures forall i in 0..count => identical(result.model()[i], make(i))
@@ -638,7 +634,7 @@ public fn List[Element].generate(
 }
 
 public fn List[Element].collect[Source: Cursor[Element = Element]](source: own Source) -> List[Element]
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var items: List[Element] = []
   mut items.extend(own source)
@@ -773,7 +769,7 @@ public fn List[Element].split_off(mut self, at: UInt64) -> List[Element]
     invariant intrinsic::storage_capacity(tail) == count
     invariant self.length() == old(self.length()) - index
     invariant intrinsic::storage_capacity(self.storage) == old(intrinsic::storage_capacity(self.storage))
-    invariant forall measure: (fn(Element) -> Integer cost time finite) =>
+    invariant forall measure: fn(Element) -> Integer =>
       self.model().sum(measure) + intrinsic::storage_model(tail).sum(measure) == old(self.model()).sum(measure)
   {
     intrinsic::storage_push(mut tail, value: intrinsic::storage_pop(mut self.storage))
@@ -824,7 +820,7 @@ public fn List[Element: Copyable].append_slice(mut self, items: Slice[Element])
 }
 
 public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, items: own Source)
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var cursor = own items
   while mut cursor.next() is Some(item) {
@@ -832,7 +828,7 @@ public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, item
   }
 }
 
-public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool cost time finite))
+public fn List[Element].retain(mut self, keep: fn(Element) -> Bool)
   ensures self.length() <= old(self.length())
   ensures forall i in 0..self.length() => keep(self.model()[i])
   cost time O(old(self.length()) * time(keep))
@@ -852,7 +848,7 @@ public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool cost time fi
   mut self.truncate(retained_count)
 }
 
-public fn List[Element].filter(own self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
+public fn List[Element].filter(own self, keep: fn(Element) -> Bool) -> List[Element]
   ensures result.length() <= self.length()
   ensures forall i in 0..result.length() => keep(result.model()[i])
   cost time O(self.length() * time(keep))

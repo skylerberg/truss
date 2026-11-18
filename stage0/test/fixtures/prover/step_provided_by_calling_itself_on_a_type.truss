@@ -1,7 +1,5 @@
 trait Step {
-  fn step(self) -> Int64
-    cost time finite
-  {
+  fn step(self) -> Int64 {
     Hop().step()
   }
 }

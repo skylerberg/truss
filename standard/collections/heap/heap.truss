@@ -147,7 +147,6 @@ public fn collections::Heap[Element: Ordered].peek(self) lends Option[Element]
 
 public fn collections::Heap[Element: Ordered].replace_first(mut self, item: own Element) -> Option[Element]
   ensures self.length() == (if old(self.length()) == 0 { 1 } else { old(self.length()) })
-  cost time finite
 {
   if self.items.is_empty() {
     mut self.items.push(own item)
@@ -174,7 +173,7 @@ public fn collections::Heap[Element: Ordered].reserve(mut self, additional: UInt
 }
 
 public fn collections::Heap[Element: Ordered].extend[Source: Cursor[Element = Element]](mut self, items: own Source)
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var cursor = own items
   while mut cursor.next() is Some(item) {

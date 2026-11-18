@@ -34,9 +34,7 @@ let walk_block visit (body : Core.block) =
   Option.iter visit.expression body.value
 
 let walk_cost visit (cost : Core.cost) =
-  match cost.bound with
-  | Finite -> ()
-  | Order_of value | At_most value | Exactly value -> visit.expression value
+  match cost.bound with Order_of value | At_most value | Exactly value -> visit.expression value
 
 let walk_loop_clause visit = function
   | Core.Invariant value -> visit.expression value
@@ -294,7 +292,6 @@ let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Ty
         List.iter mark_used (read_solved variable :> Types.capability list)
     | Capability_error _ ->
         Compiler_bug.raise_bug ~stage:"Core_walk" "a core form uses a capability with an error"
-    | Divergence _ -> ()
   in
   walk_block
     (make_deep_visitor

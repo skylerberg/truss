@@ -1,0 +1,6 @@
+fn f(measure: (fn(Int64) -> Int64 uses RunForever), value: Int64) -> Bool
+  uses RunForever
+  ensures result
+{
+  measure(value) == measure(value)
+}

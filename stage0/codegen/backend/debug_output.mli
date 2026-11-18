@@ -1,6 +1,6 @@
 val emit_debug_call :
   Memory_layout.env ->
-  Emit_c.Builder.t ->
+  Emit_c.Ir_builder.t ->
   output:Lowered.operand ->
   Ground.ty ->
   Lowered.place ->

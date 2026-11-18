@@ -1,17 +1,14 @@
 fn convert[Source, Target: From[Source]](value: own Source) -> Target
-  cost time finite
 {
   Target.from(own value)
 }
 
 fn try_convert[Source, Target: TryFrom[Source]](value: own Source) -> Result[Target, Target.Error]
-  cost time finite
 {
   Target.try_from(own value)
 }
 
 fn make[Value: Default]() -> Value
-  cost time finite
 {
   Value.default()
 }
@@ -26,14 +23,12 @@ fn adjust[Value](value: mut Value)
 
 fn look[Collection: Index](collection: Collection, key: Collection.Key)
   requires collection.contains_key(key)
-  cost time finite
 {
   inspect(collection[key])
 }
 
 fn touch[Collection: IndexMut](collection: mut Collection, key: Collection.Key)
   requires collection.contains_key(key)
-  cost time finite
 {
   adjust(mut collection[key])
 }
@@ -44,7 +39,6 @@ fn store[Collection: IndexAssign](
   value: own Collection.Output,
 )
   requires collection.accepts_key(key)
-  cost time finite
 {
   collection[own key] = own value
 }

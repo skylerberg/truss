@@ -23,7 +23,6 @@ impl Model for String {
 
   fn model(self) -> Sequence[UInt8]
     ensures identical(result, intrinsic::storage_model(self.storage))
-    cost time finite
   {
     intrinsic::storage_model(self.storage)
   }
@@ -34,7 +33,6 @@ impl Model for StringSlice {
 
   fn model(self) -> Sequence[UInt8]
     ensures identical(result, intrinsic::view_model(self.bytes))
-    cost time finite
   {
     intrinsic::view_model(self.bytes)
   }
@@ -45,7 +43,6 @@ impl Model for Literal {
 
   fn model(self) -> Sequence[UInt8]
     ensures identical(result, self.text.model())
-    cost time finite
   {
     self.text.model()
   }
@@ -105,16 +102,14 @@ internal fn String.from_bytes(bytes: own intrinsic::Storage[UInt8]) -> String {
 
 fn valid_utf8(bytes: intrinsic::View[UInt8]) -> Bool {
   var at: UInt64 = 0
-  var valid = true
-  while valid && at < intrinsic::view_length(bytes) {
+  while at < intrinsic::view_length(bytes) {
     let step = utf8_sequence(bytes, at)
     if step == 0 {
-      valid = false
-    } else {
-      at += step
+      return false
     }
+    at += step
   }
-  valid
+  true
 }
 
 fn replaced(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
@@ -205,25 +200,21 @@ internal fn String.push_byte(mut self, byte: UInt8)
 }
 
 internal fn String.push_float32(mut self, value: Float32)
-  cost time finite
 {
   writing::float32(mut self.storage, value: value)
 }
 
 internal fn String.push_float64(mut self, value: Float64)
-  cost time finite
 {
   writing::float64(mut self.storage, value: value)
 }
 
 internal fn String.push_unsigned(mut self, value: UInt64)
-  cost time finite
 {
   writing::unsigned(mut self.storage, value: value)
 }
 
 internal fn String.push_signed(mut self, value: Int64)
-  cost time finite
 {
   writing::signed(mut self.storage, value: value)
 }
@@ -521,7 +512,7 @@ public fn String.from_utf16(units: Slice[UInt16]) -> Result[String, Utf16Error]
 }
 
 public fn String.collect[Source: Cursor[Element = Character]](source: own Source) -> String
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var cursor = own source
   var text: String = ""

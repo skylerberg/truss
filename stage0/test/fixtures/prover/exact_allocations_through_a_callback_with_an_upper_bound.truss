@@ -1,4 +1,4 @@
-fn f(visit: (fn(Int64) cost time finite cost allocations <= 1))
+fn f(visit: (fn(Int64) cost allocations <= 1))
   cost allocations == 1
 {
   visit(1)

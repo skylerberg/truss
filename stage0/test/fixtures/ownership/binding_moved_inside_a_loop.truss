@@ -1,4 +1,6 @@
-fn f(ready: Bool) {
+fn f(ready: Bool)
+  uses RunForever
+{
   while ready {
     let present = make()
     keep_found(own present)

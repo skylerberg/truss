@@ -1,16 +1,11 @@
 trait Level {
   fn height(self) -> Int64
-    cost time finite
 
-  fn raised(self, floor: Int64) -> Int64
-    cost time finite
-  {
+  fn raised(self, floor: Int64) -> Int64 {
     self.height().max(floor)
   }
 
-  fn picked(self) -> Int64
-    cost time finite
-  {
+  fn picked(self) -> Int64 {
     pick(self)
   }
 }
@@ -47,9 +42,7 @@ fn measure(pot: Pot[Stair]) -> Int64 {
   pot.height()
 }
 
-fn pick[Item: Level](item: Item) -> Int64
-  cost time finite
-{
+fn pick[Item: Level](item: Item) -> Int64 {
   item.height()
 }
 

@@ -1,3 +1,5 @@
-fn f(items: List[Int64]) -> List[Int64] {
+fn f(items: List[Int64]) -> List[Int64]
+  uses RunForever
+{
   List.collect(items.cursor())
 }

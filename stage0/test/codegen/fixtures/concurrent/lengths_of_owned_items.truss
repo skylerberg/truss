@@ -34,7 +34,7 @@ fn labels(count: Int64) -> Labels {
 }
 
 fn main(arguments: List[String]) -> ExitCode
-  uses Tasks, Console
+  uses Tasks, Console, RunForever
 {
   var sum = Sum(total: 0)
   provide mut sum {
