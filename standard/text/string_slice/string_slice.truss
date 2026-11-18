@@ -922,7 +922,7 @@ public fn StringSlice.replace(self, pattern: StringSlice, replacement: StringSli
     return self.to_string()
   }
   if replacement.length() > UInt64.maximum / 4 / count || self.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   var budget = count * replacement.length()
   let capacity = self.length() + budget
@@ -968,7 +968,7 @@ public fn StringSlice.replace_first(self, pattern: StringSlice, replacement: Str
   match self.find(pattern) {
     Some(offset) => {
       if replacement.length() > UInt64.maximum / 4 || self.length() > UInt64.maximum / 4 {
-        intrinsic::crash("a string cannot hold that many bytes".slice())
+        intrinsic::crash("a string cannot hold that many bytes")
       }
       var output: intrinsic::Storage[UInt8] =
         intrinsic::storage_with_capacity(self.length() - pattern.length() + replacement.length())
@@ -989,7 +989,7 @@ public fn StringSlice.repeated(self, times: UInt64) -> String
     return String(storage: intrinsic::storage_empty())
   }
   if times > UInt64.maximum / 2 / self.length() {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   let total = self.length() * times
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(total)
@@ -1078,7 +1078,7 @@ internal fn PendingText.push_character(mut self, character: Character)
 internal fn PendingText.flush(mut self, output: mut String)
   cost amortized time O(1)
 {
-  mut output.push(self.text.slice())
+  mut output.push(self.text)
   self.text = ""
 }
 
@@ -1215,7 +1215,7 @@ internal fn StringSlice.padded(self, width: UInt64, fill: Character, at_start: B
   let missing = width - count
   let unit = fill.utf8_length()
   if missing > UInt64.maximum / 16 || self.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   var room: UInt64 = if unit == 1 {
     missing

@@ -12,7 +12,7 @@ impl Display for Host {
   fn display(self, output: mut String)
   {
     match self {
-      Domain(name) => mut output.push(name.slice())
+      Domain(name) => mut output.push(name)
       Address(address) => match address {
         Version4(_) => address.display(mut output)
         Version6(_) => {
@@ -397,7 +397,7 @@ internal fn percent_encode(text: StringSlice, how: EscapeSet) -> String
   cost time O(text.length())
 {
   if text.length() > UInt64.maximum / 8 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   let form = how == EscapeSet.AsForm
   var extra: UInt64 = 0
@@ -578,7 +578,6 @@ internal fn remove_dot_segments(path: StringSlice) -> String
 }
 
 internal fn Url.merge_path(self, relative: StringSlice) -> String
-  cost time finite
 {
   let base = self.path.slice()
   var merged: String = ""
@@ -628,16 +627,15 @@ public fn decode_component(text: StringSlice) -> Result[String, ParseError]
 }
 
 public fn encode_query(parameters: Slice[Parameter]) -> String
-  cost time finite
 {
   var output: String = ""
   for index in 0..parameters.length() {
     if index > 0 {
       mut output.push("&")
     }
-    mut output.push(percent_encode(parameters[index].name.slice(), how: EscapeSet.AsForm))
+    mut output.push(percent_encode(parameters[index].name, how: EscapeSet.AsForm))
     mut output.push("=")
-    mut output.push(percent_encode(parameters[index].value.slice(), how: EscapeSet.AsForm))
+    mut output.push(percent_encode(parameters[index].value, how: EscapeSet.AsForm))
   }
   output
 }
@@ -766,16 +764,14 @@ public fn Url.query(self) -> Option[StringSlice]
 }
 
 public fn Url.query_parameters(self) -> List[Parameter]
-  cost time finite
 {
   match self.query {
-    Some(query) => if decode_query(query.slice()) is Ok(parameters) { parameters } else { [] }
+    Some(query) => if decode_query(query) is Ok(parameters) { parameters } else { [] }
     None => []
   }
 }
 
 public fn Url.query_parameter(self, name: StringSlice) -> Option[String]
-  cost time finite
 {
   let parameters = self.query_parameters()
   for index in 0..parameters.length() {
@@ -793,11 +789,10 @@ public fn Url.fragment(self) -> Option[StringSlice]
 }
 
 public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]
-  cost time finite
 {
   if scheme_end(reference) < reference.length() {
     var absolute = parse(reference)?
-    absolute.path = remove_dot_segments(absolute.path.slice())
+    absolute.path = remove_dot_segments(absolute.path)
     return Ok(own absolute)
   }
   var from: UInt64 = 0
@@ -809,7 +804,7 @@ public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]
   }
   var rest = parse_path_query_fragment(reference, from: from)?
   if authority is Some(_) {
-    rest.path = remove_dot_segments(rest.path.slice())
+    rest.path = remove_dot_segments(rest.path)
     return Ok(build_url(self.scheme.copy(), authority: own authority, rest: own rest))
   }
   var joined = self.copy()
@@ -822,22 +817,21 @@ public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]
   }
   joined.query = own rest.query
   if rest.path.slice().byte(0) == 47 {
-    joined.path = remove_dot_segments(rest.path.slice())
+    joined.path = remove_dot_segments(rest.path)
   } else {
-    let merged = self.merge_path(rest.path.slice())
-    joined.path = remove_dot_segments(merged.slice())
+    let merged = self.merge_path(rest.path)
+    joined.path = remove_dot_segments(merged)
   }
   Ok(own joined)
 }
 
 public fn Url.with_path(own self, path: StringSlice) -> Url
-  cost time finite
 {
   var changed = own self
   let escaped = percent_encode(path, how: EscapeSet.AsPath)
   if changed.host is Some(_) && escaped.length() > 0 && escaped.slice().byte(0) != 47 {
     var rooted: String = "/"
-    mut rooted.push(escaped.slice())
+    mut rooted.push(escaped)
     changed.path = own rooted
   } else {
     changed.path = own escaped
@@ -846,7 +840,6 @@ public fn Url.with_path(own self, path: StringSlice) -> Url
 }
 
 public fn Url.with_path_segment(own self, segment: StringSlice) -> Url
-  cost time finite
 {
   var changed = own self
   let length = changed.path.length()
@@ -858,7 +851,6 @@ public fn Url.with_path_segment(own self, segment: StringSlice) -> Url
 }
 
 public fn Url.with_query(own self, parameters: Slice[Parameter]) -> Url
-  cost time finite
 {
   var changed = own self
   changed.query = if parameters.length() == 0 { None } else { Some(encode_query(parameters)) }
@@ -866,13 +858,12 @@ public fn Url.with_query(own self, parameters: Slice[Parameter]) -> Url
 }
 
 public fn Url.with_query_parameter(own self, name: StringSlice, value: StringSlice) -> Url
-  cost time finite
 {
   var changed = own self
   var query: String = ""
   match changed.query {
     Some(existing) => {
-      mut query.push(existing.slice())
+      mut query.push(existing)
       if existing.length() > 0 {
         mut query.push("&")
       }
@@ -887,11 +878,10 @@ public fn Url.with_query_parameter(own self, name: StringSlice, value: StringSli
 }
 
 public fn Url.with_fragment(own self, fragment: Option[String]) -> Url
-  cost time finite
 {
   var changed = own self
   changed.fragment = match fragment {
-    Some(text) => Some(percent_encode(text.slice(), how: EscapeSet.AsFragment))
+    Some(text) => Some(percent_encode(text, how: EscapeSet.AsFragment))
     None => None
   }
   changed
@@ -908,14 +898,14 @@ public fn Url.with_port(own self, port: Option[UInt16]) -> Url
 impl Display for Url {
   fn display(self, output: mut String)
   {
-    mut output.push(self.scheme.slice())
+    mut output.push(self.scheme)
     mut output.push(":")
     match self.host {
       Some(host) => {
         mut output.push("//")
         match self.user_information {
           Some(user) => {
-            mut output.push(user.slice())
+            mut output.push(user)
             mut output.push("@")
           }
           None => {}
@@ -931,18 +921,18 @@ impl Display for Url {
       }
       None => {}
     }
-    mut output.push(self.path.slice())
+    mut output.push(self.path)
     match self.query {
       Some(query) => {
         mut output.push("?")
-        mut output.push(query.slice())
+        mut output.push(query)
       }
       None => {}
     }
     match self.fragment {
       Some(fragment) => {
         mut output.push("#")
-        mut output.push(fragment.slice())
+        mut output.push(fragment)
       }
       None => {}
     }
@@ -969,7 +959,7 @@ impl From[StringSlice] for Component {
 
 impl From[String] for Component {
   fn from(value: own String) -> Component {
-    Component(text: encode_component(value.slice()))
+    Component(text: encode_component(value))
   }
 }
 
@@ -999,11 +989,11 @@ impl FromTemplate for Url {
     {
       mut text.push(template.literals[index].text())
       if index < template.parts.length() {
-        mut text.push(template.parts[index].text.slice())
+        mut text.push(template.parts[index].text)
       }
       index += 1
     }
-    match parse(text.slice()) {
+    match parse(text) {
       Ok(url) => url
       Err(_) => Url(
         scheme: "",
@@ -1019,7 +1009,6 @@ impl FromTemplate for Url {
 }
 
 internal fn template_text(literals: Slice[text::Literal], part: StringSlice) -> String
-  cost time finite
 {
   var text = ""
   var index: UInt64 = 0
@@ -1053,17 +1042,15 @@ internal fn path_start(text: StringSlice) -> UInt64
 
 internal fn parses_with_parts_after_authority(literals: Slice[text::Literal], part: StringSlice) -> Bool
   requires literals.length() > 0
-  cost time finite
 {
   let text = template_text(literals, part: part)
-  if !(parse(text.slice()) is Ok(_)) {
+  if !(parse(text) is Ok(_)) {
     return false
   }
-  literals.length() == 1 || path_start(text.slice()) <= literals[0].text().length()
+  literals.length() == 1 || path_start(text) <= literals[0].text().length()
 }
 
 public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
-  cost time finite
 {
   literals.length() > 0
     && parses_with_parts_after_authority(literals, part: "~")

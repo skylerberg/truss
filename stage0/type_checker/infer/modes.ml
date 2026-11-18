@@ -9,7 +9,7 @@ let rec find_lent_mode (state : State.state) (value : Syntax.expression) : Types
   | Member (base, _) | Parenthesized base -> find_lent_mode state base
   | Bracket (base, _) when state.resolved.brackets.(value.id) <> Some Type_arguments ->
       find_lent_mode state base
-  | Mode (_, inner) when Option.is_some (State.find_call_with_mode_keyword state inner) ->
+  | Mode (_, inner) when Option.is_some (State.find_keyword_operation state inner) ->
       find_lent_mode state inner
   | _ -> None
 
@@ -32,9 +32,9 @@ let is_borrowed state (value : Syntax.expression) =
 
 let classify_scrutinee_mode state (scrutinee : Syntax.expression) : Types.mode =
   match scrutinee.kind with
-  | Mode (Own, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) -> Own
+  | Mode (Own, inner) when Option.is_none (State.find_keyword_operation state inner) -> Own
   | Mode (Mut, inner)
-    when Option.is_none (State.find_call_with_mode_keyword state inner) && not (is_slice inner) ->
+    when Option.is_none (State.find_keyword_operation state inner) && not (is_slice inner) ->
       Mut
   | _ -> if is_borrowed state scrutinee then Read else Own
 
@@ -64,7 +64,7 @@ let rec find_immutable state (env : State.env) (value : Syntax.expression) : imm
       else if env.self_mode = Types.Mut then None
       else Some (Read_only "self")
   | Member (base, _) | Bracket (base, _) | Parenthesized base -> find_immutable state env base
-  | Mode (Mut, inner) when Option.is_some (State.find_call_with_mode_keyword state inner) ->
+  | Mode (Mut, inner) when Option.is_some (State.find_keyword_operation state inner) ->
       find_immutable state env inner
   | Call _ -> (
       match find_lent_mode state value with
@@ -189,7 +189,7 @@ type argument_form =
 
 let classify_argument state (value : Syntax.expression) =
   match value.kind with
-  | Mode (mode, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
+  | Mode (mode, inner) when Option.is_none (State.find_keyword_operation state inner) ->
       With_mode ((match mode with Mut -> Mut | Own -> Own), inner)
   | _ -> (
       match find_lent_mode state value with

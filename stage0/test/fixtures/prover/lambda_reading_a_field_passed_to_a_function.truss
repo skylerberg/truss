@@ -1,0 +1,12 @@
+type Box(value: Int64)
+
+fn ignore(visit: fn(Box) -> Int64) -> Int64 {
+  0
+}
+
+fn f(x: Int64) -> Int64
+  ensures result <= 0
+{
+  let _ = ignore(fn(e) { e.value })
+  x
+}

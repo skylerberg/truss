@@ -1,6 +1,0 @@
-fn f[Inner: Ticker](ticker: mut Inner) -> UInt64
-  cost time finite
-{
-  let step = advance[Inner]
-  step(mut ticker)
-}

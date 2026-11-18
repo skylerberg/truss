@@ -24,32 +24,32 @@ let () =
         ~fixed:"use c::d\nfn f() {}\n");
   Harness.test "a statement at the top level is one error" (fun () ->
       Parse_support.expect_error "fn f() {}\nx = 1\nfn g() {}" ~code:Statement_at_top_level ~at:"x");
-  Harness.test "a definition records where the parser recovered" (fun () ->
-      let list_recovered text =
+  Harness.test "a definition records where its syntax errors are" (fun () ->
+      let list_syntax_errors text =
         match Parse_support.list_items (fst (Parse_support.parse text)) with
         | [ item ] ->
             List.map
               (fun (span : Source.Definition_span.t) ->
                 String.sub text (item.base + span.start) (span.stop - span.start))
-              item.positions.recovered
+              item.positions.syntax_errors
         | _ -> [ "wrong definitions" ]
       in
-      if list_recovered "fn f() {\n  x as Int64\n}" <> [ "as" ] then
+      if list_syntax_errors "fn f() {\n  x as Int64\n}" <> [ "as" ] then
         Harness.fail "the habit is not recorded";
-      if list_recovered "fn f() {\n  let x = (1 +\n}" = [] then
+      if list_syntax_errors "fn f() {\n  let x = (1 +\n}" = [] then
         Harness.fail "the inserted closer is not recorded";
-      if list_recovered "fn f() {\n  let x = 0755\n}" <> [ "0755" ] then
+      if list_syntax_errors "fn f() {\n  let x = 0755\n}" <> [ "0755" ] then
         Harness.fail "the lexer's error is not recorded";
-      if list_recovered "fn f() {\n  assert true\n}" = [] then
+      if list_syntax_errors "fn f() {\n  assert true\n}" = [] then
         Harness.fail "a rule checked after parsing is not recorded";
-      if list_recovered "fn f(x: Int64) -> Int64" = [] then
+      if list_syntax_errors "fn f(x: Int64) -> Int64" = [] then
         Harness.fail "the missing body is not recorded");
   Harness.test "a lexer error in a method is recorded in the method alone" (fun () ->
       let text = "impl Clock for Fixed {\n  fn now(self) -> Instant {\n    0755\n  }\n}" in
       match Parse_support.list_items (fst (Parse_support.parse text)) with
       | [ container; method_ ] ->
-          if container.positions.recovered <> [] then Harness.fail "recorded in the container";
-          if method_.positions.recovered = [] then Harness.fail "not recorded in the method"
+          if container.positions.syntax_errors <> [] then Harness.fail "recorded in the container";
+          if method_.positions.syntax_errors = [] then Harness.fail "not recorded in the method"
       | items -> Harness.fail "expected a container and a method, got %d items" (List.length items));
   Harness.test "a parser error in a definition with a lexer error has no fix" (fun () ->
       let _, diagnostics = Parse_support.parse "fn f() {\n  let x = 0755\n  count++\n}" in
@@ -74,28 +74,35 @@ let () =
       | Some { fixes = []; _ } -> ()
       | Some _ -> Harness.fail "offered a fix"
       | None -> Harness.fail "no parser.missing_body");
-  Harness.test "a missing body's recovery is where the body starts" (fun () ->
+  Harness.test "a missing body's syntax error is where the body starts" (fun () ->
       let tokens, _ = Lexer.lex (Parse_support.make_source "fn f(x: Int64) -> Int64\nfn g() {}") in
       match
         Parser.For_testing.parse_definition tokens (List.hd (Parser.For_testing.split tokens))
       with
       | ( {
             definition =
-              { value = { kind = Function { body; _ }; _ }; positions = { spans; recovered }; _ };
+              {
+                value = { kind = Function { body; _ }; _ };
+                positions = { spans; syntax_errors };
+                _;
+              };
             _;
           },
           _ ) ->
           let body_start = spans.(body.id).start in
           if
-            List.map (fun (span : Source.Definition_span.t) -> (span.start, span.stop)) recovered
+            List.map
+              (fun (span : Source.Definition_span.t) -> (span.start, span.stop))
+              syntax_errors
             <> [ (body_start, body_start) ]
-          then Harness.fail "recovered at the wrong place"
+          then Harness.fail "the syntax error is at the wrong place"
       | _ -> Harness.fail "the signature was not kept");
-  Harness.test "a recovery at the end of a body lies in the body" (fun () ->
+  Harness.test "a syntax error at the end of a body lies in the body" (fun () ->
       match
         Parse_support.list_items (fst (Parse_support.parse "fn f() {\n  let x = (1 +\nfn g() {}\n"))
       with
-      | { value = { kind = Function { body; _ }; _ }; positions = { spans; recovered }; _ } :: _ ->
+      | { value = { kind = Function { body; _ }; _ }; positions = { spans; syntax_errors }; _ } :: _
+        ->
           let body_span = spans.(body.id) in
           if
             not
@@ -103,18 +110,19 @@ let () =
                  (fun (span : Source.Definition_span.t) ->
                    span.start < span.stop && body_span.start <= span.start
                    && span.start < body_span.stop)
-                 recovered)
-          then Harness.fail "no recovery inside the body"
+                 syntax_errors)
+          then Harness.fail "no syntax error inside the body"
       | _ -> Harness.fail "wrong definitions");
   Harness.test "a failed clause at the end lies in the signature" (fun () ->
       match Parse_support.list_items (fst (Parse_support.parse "fn f() requires")) with
-      | { value = { kind = Function { body; _ }; _ }; positions = { spans; recovered }; _ } :: _ ->
+      | { value = { kind = Function { body; _ }; _ }; positions = { spans; syntax_errors }; _ } :: _
+        ->
           if
             not
               (List.exists
                  (fun (span : Source.Definition_span.t) -> span.start < spans.(body.id).start)
-                 recovered)
-          then Harness.fail "no recovery in the signature"
+                 syntax_errors)
+          then Harness.fail "no syntax error in the signature"
       | _ -> Harness.fail "wrong definitions");
   Harness.test "a definition whose header did not parse keeps its keyword and name" (fun () ->
       Parse_support.expect_recovered_definitions
@@ -475,8 +483,8 @@ let () =
   Harness.test "a function type" (fun () ->
       expect_type "fn(mut Element, Element) -> Ordering" "(fn (mut Element Element) -> Ordering)");
   Harness.test "a function type in parentheses with clauses" (fun () ->
-      expect_type "(fn(Item) uses Clock, Random cost time finite)"
-        "(fn (Item) (uses Clock Random) (cost time finite))");
+      expect_type "(fn(Item) uses Clock, Random cost time O(1))"
+        "(fn (Item) (uses Clock Random) (cost time (O 1)))");
   Harness.test "parentheses around a function type need clauses" (fun () ->
       Parse_support.expect_error "fn f(value: (fn(Item))) {}" ~code:Unexpected_token ~at:"(fn");
   Harness.test "a function type's requires names its inputs" (fun () ->

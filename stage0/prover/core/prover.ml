@@ -443,19 +443,10 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
           let span = resolve obligation.location in
           let message = render lookups obligation.message in
           let others =
-            let show_stopping clause =
-              "allowed to stop the program with "
-              ^ Interface.Impls.show_declaring_clause clause "Panic"
-            in
-            match (obligation.code, obligation.panic_clause) with
-            | (Overflow | Division | Shift), Some clause ->
-                " It can also be checked first with an `if`, done with the checked operation, or "
-                ^ show_stopping clause ^ "."
-            | (Overflow | Division | Shift), None ->
+            match obligation.code with
+            | Overflow | Division | Shift ->
                 " It can also be checked first with an `if`, or done with the checked operation."
-            | _, Some clause ->
-                " It can also be checked first with an `if`, or " ^ show_stopping clause ^ "."
-            | _, None -> ""
+            | _ -> ""
           in
           let find_failure explained =
             Some

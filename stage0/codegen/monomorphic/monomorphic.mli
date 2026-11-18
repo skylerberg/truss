@@ -17,5 +17,4 @@ val make_signature_substitution : Types.signature -> Ground.instantiation -> Typ
 val ground_instantiation :
   context -> Types.substitution -> Types.instantiation -> Ground.instantiation
 
-val panic_capability : Path.t
 val compute_shape : context -> Ground.ty -> Memory_layout.shape

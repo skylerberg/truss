@@ -99,7 +99,6 @@ let check ~root encoding (buffers : (string * string) list) =
       buffers
   in
   let database = Workspace.open_database trial in
-  Database.check database packages;
   let proofs =
     Proofs.check database trial packages (List.filter_map (fun (_, _, file) -> file) opened)
   in

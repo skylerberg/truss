@@ -8,7 +8,6 @@ fn total(count: UInt8) -> UInt64
   ensures count == 0 ==> result == 0
   ensures count > 0 ==> result == total(count - 1) + 1
   decreases count
-  cost time finite
 {
   if count == 0 { 0 } else { total(count - 1) + 1 }
 }

@@ -1,0 +1,24 @@
+type Spinning(count: UInt64)
+
+impl Cursor for Spinning {
+  type Element = UInt64
+  capability Uses = RunForever
+
+  fn next(mut self) -> Option[UInt64]
+    uses Self.Uses
+  {
+    while true {}
+  }
+}
+
+fn first(source: mut Spinning) -> Option[UInt64]
+  uses RunForever
+{
+  mut source.next()
+}
+
+fn first_of[Source: Cursor](source: mut Source) -> Option[Source.Element]
+  uses Source.Uses
+{
+  mut source.next()
+}

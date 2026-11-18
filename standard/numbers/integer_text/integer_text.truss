@@ -77,7 +77,7 @@ internal fn format_magnitude(
   cost time O(minimum_digits + 64)
 {
   if minimum_digits > UInt64.maximum / 2 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   let base: UInt64 = intrinsic::convert(radix)
   let digits = digit_count(magnitude, base: base)

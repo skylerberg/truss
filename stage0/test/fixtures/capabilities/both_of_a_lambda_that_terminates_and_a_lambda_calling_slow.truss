@@ -1,5 +1,0 @@
-fn f(value: Int64) -> Int64
-  cost time finite
-{
-  both(value, first: fn(inner) { inner }, second: fn(inner) { slow(inner) })
-}

@@ -6,42 +6,42 @@ fn field(name: StringSlice, value: StringSlice) -> hpack::Field {
 }
 
 fn check(decoder: mut hpack::Decoder, block: StringSlice, expected: own List[hpack::Field]) -> Bool
-  uses Panic
+  uses Panic, RunForever
 {
   let bytes = hex::decode(block).expect("hexadecimal")
   mut decoder.decode(bytes.slice()) == Ok(own expected)
 }
 
 fn fails(block: StringSlice) -> Bool
-  uses Panic
+  uses Panic, RunForever
 {
   let bytes = hex::decode(block).expect("hexadecimal")
   var decoder = hpack::Decoder.new()
   mut decoder.decode(bytes.slice()) is Err(_)
 }
 
-test "RFC 7541 C.3: requests without Huffman coding" {
+test "RFC 7541 C.3: requests without Huffman coding" uses Panic {
   var decoder = hpack::Decoder.new()
   assert check(mut decoder, block: "828684410f7777772e6578616d706c652e636f6d", expected: [field(":method", value: "GET"), field(":scheme", value: "http"), field(":path", value: "/"), field(":authority", value: "www.example.com")])
   assert check(mut decoder, block: "828684be58086e6f2d6361636865", expected: [field(":method", value: "GET"), field(":scheme", value: "http"), field(":path", value: "/"), field(":authority", value: "www.example.com"), field("cache-control", value: "no-cache")])
   assert check(mut decoder, block: "828785bf400a637573746f6d2d6b65790c637573746f6d2d76616c7565", expected: [field(":method", value: "GET"), field(":scheme", value: "https"), field(":path", value: "/index.html"), field(":authority", value: "www.example.com"), field("custom-key", value: "custom-value")])
 }
 
-test "RFC 7541 C.4: requests with Huffman coding" {
+test "RFC 7541 C.4: requests with Huffman coding" uses Panic {
   var decoder = hpack::Decoder.new()
   assert check(mut decoder, block: "828684418cf1e3c2e5f23a6ba0ab90f4ff", expected: [field(":method", value: "GET"), field(":scheme", value: "http"), field(":path", value: "/"), field(":authority", value: "www.example.com")])
   assert check(mut decoder, block: "828684be5886a8eb10649cbf", expected: [field(":method", value: "GET"), field(":scheme", value: "http"), field(":path", value: "/"), field(":authority", value: "www.example.com"), field("cache-control", value: "no-cache")])
   assert check(mut decoder, block: "828785bf408825a849e95ba97d7f8925a849e95bb8e8b4bf", expected: [field(":method", value: "GET"), field(":scheme", value: "https"), field(":path", value: "/index.html"), field(":authority", value: "www.example.com"), field("custom-key", value: "custom-value")])
 }
 
-test "RFC 7541 C.5: responses that evict entries from a 256-byte table" {
+test "RFC 7541 C.5: responses that evict entries from a 256-byte table" uses Panic {
   var decoder = hpack::Decoder.new(limit: 256)
   assert check(mut decoder, block: "4803333032580770726976617465611d4d6f6e2c203231204f637420323031332032303a31333a323120474d546e1768747470733a2f2f7777772e6578616d706c652e636f6d", expected: [field(":status", value: "302"), field("cache-control", value: "private"), field("date", value: "Mon, 21 Oct 2013 20:13:21 GMT"), field("location", value: "https://www.example.com")])
   assert check(mut decoder, block: "4803333037c1c0bf", expected: [field(":status", value: "307"), field("cache-control", value: "private"), field("date", value: "Mon, 21 Oct 2013 20:13:21 GMT"), field("location", value: "https://www.example.com")])
   assert check(mut decoder, block: "88c1611d4d6f6e2c203231204f637420323031332032303a31333a323220474d54c05a04677a69707738666f6f3d4153444a4b48514b425a584f5157454f50495541585157454f49553b206d61782d6167653d333630303b2076657273696f6e3d31", expected: [field(":status", value: "200"), field("cache-control", value: "private"), field("date", value: "Mon, 21 Oct 2013 20:13:22 GMT"), field("location", value: "https://www.example.com"), field("content-encoding", value: "gzip"), field("set-cookie", value: "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1")])
 }
 
-test "RFC 7541 C.6: responses with Huffman coding and eviction" {
+test "RFC 7541 C.6: responses with Huffman coding and eviction" uses Panic {
   var decoder = hpack::Decoder.new(limit: 256)
   assert check(mut decoder, block: "488264025885aec3771a4b6196d07abe941054d444a8200595040b8166e082a62d1bff6e919d29ad171863c78f0b97c8e9ae82ae43d3", expected: [field(":status", value: "302"), field("cache-control", value: "private"), field("date", value: "Mon, 21 Oct 2013 20:13:21 GMT"), field("location", value: "https://www.example.com")])
   assert check(mut decoder, block: "4883640effc1c0bf", expected: [field(":status", value: "307"), field("cache-control", value: "private"), field("date", value: "Mon, 21 Oct 2013 20:13:21 GMT"), field("location", value: "https://www.example.com")])
@@ -77,7 +77,7 @@ test "an encoder's blocks decode to its fields, and repeated fields shrink to in
   assert mut decoder.decode(emptied.slice()) == Ok(own second)
 }
 
-test "malformed header blocks are rejected" {
+test "malformed header blocks are rejected" uses Panic {
   assert fails("80")
   assert fails("be")
   assert fails("3fe21f")

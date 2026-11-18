@@ -284,7 +284,7 @@ let parse_method_kind cursor ~(container : container) ~name =
   if not (Cursor.is_at_end cursor) then Cursor.fail cursor "a line break or `}` after the method";
   kind
 
-let parse_method cursor ~container ~visibility : Syntax.definition =
+let parse_method cursor ~container : Syntax.definition =
   let start = Cursor.index cursor in
   Cursor.advance cursor;
   let intended = Some Syntax.Intended_function in
@@ -297,7 +297,7 @@ let parse_method cursor ~container ~visibility : Syntax.definition =
         | kind -> kind
         | exception Cursor.Failed -> Definition_error { intended; name = Some name })
   in
-  make_definition_node cursor start visibility kind
+  make_definition_node cursor start Private kind
 
 let parse_fields cursor : Syntax.field list =
   let parse_field cursor : Syntax.field =

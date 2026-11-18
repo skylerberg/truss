@@ -1,4 +1,4 @@
 impl Shown for Marker {
-  type Part = (fn(Knot) -> Bool cost time finite)
+  type Part = fn(Knot) -> Bool
 }
 

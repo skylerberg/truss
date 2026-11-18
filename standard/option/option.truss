@@ -24,7 +24,6 @@ public fn Option[Value: Equal].contains(self, value: Value) -> Bool
       Some(held) => held == value
       None => false
     })
-  cost time finite
 {
   match self {
     Some(held) => held == value

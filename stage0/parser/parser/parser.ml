@@ -34,7 +34,7 @@ let attach_lexer_errors tokens ~lexer_diagnostics ~nested piece
   match errors with
   | [] -> (item, diagnostics)
   | _ ->
-      let recovered =
+      let syntax_errors =
         List.map
           (fun (span : Source.span) ->
             Source.Definition_span.of_file ~base:item.base
@@ -46,7 +46,7 @@ let attach_lexer_errors tokens ~lexer_diagnostics ~nested piece
           positions =
             {
               item.positions with
-              recovered = List.sort_uniq compare (recovered @ item.positions.recovered);
+              syntax_errors = List.sort_uniq compare (syntax_errors @ item.positions.syntax_errors);
             };
         },
         List.map (fun (diagnostic : Diagnostic.t) -> { diagnostic with fixes = [] }) diagnostics )
@@ -70,9 +70,7 @@ let parse_methods tokens ~lexer_diagnostics (container : Syntax.definition) piec
         (fun piece ->
           attach_lexer_errors tokens ~lexer_diagnostics ~nested:[] piece
             (parse_piece tokens piece (fun cursor ->
-                 check_definition cursor
-                   (Parse_definition.parse_method cursor ~container:kind
-                      ~visibility:container.visibility))))
+                 check_definition cursor (Parse_definition.parse_method cursor ~container:kind))))
         pieces
   | None -> []
 

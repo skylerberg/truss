@@ -7,6 +7,7 @@ type ty =
   | Raw of Memory_layout.scalar
   | Environment of int
   | Evidence of int
+  | Capabilities of int
   | Trace
   | Lend
   | Lend_mark
@@ -102,6 +103,8 @@ type intrinsic =
   | Evidence_outer
   | Program_argument
   | Evidence_fill
+  | Capabilities_fill
+  | Capability_find
   | Trace_link
   | Coroutine_start
   | Coroutine_resume

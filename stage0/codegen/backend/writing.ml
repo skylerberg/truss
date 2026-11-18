@@ -19,7 +19,7 @@ let emit_write_call env builder ~output (writer : Well_known.t) ty (place : Lowe
     | Some parameter -> (parameter, Copy place)
     | None -> raise_bug "%s is written, and has no size" (Ground.to_string ty)
   in
-  Emit_c.Builder.emit builder
+  Emit_c.Ir_builder.emit builder
     (Call
        {
          target =
@@ -40,7 +40,7 @@ let emit_write_call env builder ~output (writer : Well_known.t) ty (place : Lowe
        })
 
 let emit_write_bytes_call env builder ~output writer ~elements ~length =
-  let view = Emit_c.Builder.allocate_local builder (Value bytes_ty) in
-  Emit_c.Builder.emit builder
+  let view = Emit_c.Ir_builder.allocate_local builder (Value bytes_ty) in
+  Emit_c.Ir_builder.emit builder
     (Assign (Lowered.make_local_place view, Storage.build_view bytes_ty ~elements ~length));
   emit_write_call env builder ~output writer bytes_ty (Lowered.make_local_place view)

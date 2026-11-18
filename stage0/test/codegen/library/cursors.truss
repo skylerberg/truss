@@ -136,7 +136,6 @@ test "the adapters and the trait's methods work on a list's cursor" {
 }
 
 fn sum_after_the_first(items: own List[Int64], count: UInt64) -> Int64
-  cost time finite
 {
   var cursor = own items.cursor().skip(1).take(count)
   var total = 0
@@ -154,7 +153,6 @@ fn sum_after_the_first(items: own List[Int64], count: UInt64) -> Int64
 }
 
 fn positions_of_the_first_two(items: own List[String]) -> List[UInt64]
-  cost time finite
 {
   var cursor = own items.cursor().enumerate().take(2)
   var positions: List[UInt64] = []
@@ -209,7 +207,7 @@ fn typing(lines: own List[String]) -> simulation::World {
   simulation::World.from(simulation::Setup.new().with_input(own lines))
 }
 
-test "the adapters work on a cursor that uses a capability" {
+test "the adapters work on a cursor that uses a capability" uses Panic {
   let typed = Typed(most: 100)
   provide typing(["a", "bb", "ccc", "dddd", "eeeee", "ffffff"]) {
     let middle: List[UInt64] = [2, 3]

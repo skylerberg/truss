@@ -108,7 +108,6 @@ let part_marker: UInt8 = 1
 let no_parts: List[Value] = []
 
 fn with_position(text: StringSlice, failure: Failure) -> ParseError
-  cost time finite
 {
   var line: UInt64 = 1
   var column: UInt64 = 1
@@ -139,7 +138,6 @@ fn skip_whitespace(text: StringSlice, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
-  cost time finite
 {
   var index = from
   while index < text.length() && is_whitespace(text.byte(index))
@@ -156,7 +154,6 @@ fn skip_digits(text: StringSlice, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
-  cost time finite
 {
   var index = from
   while index < text.length() && 48 <= text.byte(index) && text.byte(index) <= 57
@@ -191,7 +188,6 @@ fn parse_hex4(text: StringSlice, from: UInt64) -> Option[UInt32]
 fn parse_escape(text: StringSlice, from: UInt64, output: mut String) -> Result[UInt64, Failure]
   requires from < text.length()
   ensures !(result is Ok(end) && (end <= from || end > text.length()))
-  cost time finite
 {
   if text.length() - from < 2 {
     return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
@@ -226,7 +222,6 @@ fn parse_unicode_escape(text: StringSlice, from: UInt64, output: mut String) -> 
   requires from < text.length()
   requires text.length() - from >= 2
   ensures !(result is Ok(end) && (end <= from || end > text.length()))
-  cost time finite
 {
   match parse_hex4(text, from: from + 2) {
     None => Err(Failure(kind: ParseErrorKind.InvalidEscape, offset: from))
@@ -259,7 +254,6 @@ fn parse_unicode_escape(text: StringSlice, from: UInt64, output: mut String) -> 
 fn parse_string(text: StringSlice, from: UInt64) -> Result[ParsedString, Failure]
   requires from < text.length()
   ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
-  cost time finite
 {
   var output = ""
   var run = from + 1
@@ -292,7 +286,6 @@ fn parse_string(text: StringSlice, from: UInt64) -> Result[ParsedString, Failure
 fn parse_number(text: StringSlice, from: UInt64) -> Result[ParsedValue, Failure]
   requires from < text.length()
   ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
-  cost time finite
 {
   let negative = text.byte(from) == 45
   let start: UInt64 = if negative { from + 1 } else { from }
@@ -342,7 +335,6 @@ fn parse_literal(text: StringSlice, from: UInt64, word: StringSlice, value: own 
   requires from < text.length()
   requires word.length() > 0
   ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
-  cost time finite
 {
   var index: UInt64 = 0
   while index < word.length()
@@ -373,7 +365,6 @@ fn parse_array(
   requires depth > 0
   ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
   decreases depth, 0
-  cost time finite
 {
   var items: List[Value] = []
   var index = skip_whitespace(text, from: from + 1)
@@ -421,7 +412,6 @@ fn parse_object(
   requires depth > 0
   ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
   decreases depth, 0
-  cost time finite
 {
   var members: Map[String, Value] = [:]
   var index = skip_whitespace(text, from: from + 1)
@@ -479,7 +469,6 @@ fn parse_value(
   requires from <= text.length()
   ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
   decreases depth, 1
-  cost time finite
 {
   if from == text.length() {
     return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: from))
@@ -525,7 +514,6 @@ fn parse_document(
   parts: Slice[Value],
   in_template: Bool,
 ) -> Result[Value, Failure]
-  cost time finite
 {
   var next_part: UInt64 = 0
   let start = skip_whitespace(text, from: 0)
@@ -545,7 +533,6 @@ fn parse_document(
 }
 
 public fn parse(text: StringSlice, maximum_depth: UInt64 = 128) -> Result[Value, ParseError]
-  cost time finite
 {
   match parse_document(text, maximum_depth: maximum_depth, parts: no_parts.slice(), in_template: false) {
     Ok(value) => Ok(own value)
@@ -554,10 +541,9 @@ public fn parse(text: StringSlice, maximum_depth: UInt64 = 128) -> Result[Value,
 }
 
 public fn parse_bytes(bytes: Slice[UInt8], maximum_depth: UInt64 = 128) -> Result[Value, ParseError]
-  cost time finite
 {
   match String.from_utf8(bytes.to_list()) {
-    Ok(text) => parse(text.slice(), maximum_depth: maximum_depth)
+    Ok(text) => parse(text, maximum_depth: maximum_depth)
     Err(error) => Err(with_position(
       StringSlice(bytes: bytes.elements),
       failure: Failure(kind: ParseErrorKind.InvalidUnicode, offset: error.valid_up_to),
@@ -590,7 +576,7 @@ public fn quote(text: StringSlice) -> String
   cost time O(text.length())
 {
   if text.length() > UInt64.maximum / 8 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   var extra: UInt64 = 0
   for index in 0..text.length()
@@ -733,7 +719,6 @@ public fn Value.as_members(self) lends Option[Map[String, Value]]
 }
 
 public fn Value.get(self, name: StringSlice) lends Option[Value]
-  cost time finite
 {
   match self {
     Object(members) => {
@@ -766,7 +751,6 @@ fn pointer_token_end(path: StringSlice) -> UInt64
   requires path.length() > 0
   ensures 1 <= result
   ensures result <= path.length()
-  cost time finite
 {
   var index: UInt64 = 1
   while index < path.length() && path.byte(index) != 47
@@ -780,7 +764,6 @@ fn pointer_token_end(path: StringSlice) -> UInt64
 }
 
 fn unescaped_pointer_token(token: StringSlice) -> Option[String]
-  cost time finite
 {
   var name = ""
   var run: UInt64 = 0
@@ -815,7 +798,6 @@ fn unescaped_pointer_token(token: StringSlice) -> Option[String]
 }
 
 fn pointer_array_index(token: StringSlice) -> Option[UInt64]
-  cost time finite
 {
   if token.length() == 0 || (token.length() > 1 && token.byte(0) == 48) {
     return None
@@ -838,7 +820,6 @@ fn pointer_array_index(token: StringSlice) -> Option[UInt64]
 
 public fn Value.pointer(self, path: StringSlice) lends Option[Value]
   decreases path.length()
-  cost time finite
 {
   if path.length() == 0 {
     return Some(self)
@@ -879,7 +860,6 @@ public fn Value.pointer(self, path: StringSlice) lends Option[Value]
 }
 
 fn push_newline(output: mut String, indent: UInt64, level: UInt64)
-  cost time finite
 {
   mut output.push("\n")
   var left = indent.saturating_multiply(level)
@@ -892,7 +872,6 @@ fn push_newline(output: mut String, indent: UInt64, level: UInt64)
 }
 
 fn write_value(value: Value, output: mut String)
-  cost time finite
 {
   match value {
     Null => mut output.push("null")
@@ -904,7 +883,7 @@ fn write_value(value: Value, output: mut String)
       }
     }
     Number(number) => number.display(mut output)
-    String(text) => mut output.push(quote(text.slice()).slice())
+    String(text) => mut output.push(quote(text))
     Array(items) => {
       mut output.push("[")
       for index in 0..items.length() {
@@ -921,7 +900,7 @@ fn write_value(value: Value, output: mut String)
         if index > 0 {
           mut output.push(",")
         }
-        mut output.push(quote(members.entries[index].key.slice()).slice())
+        mut output.push(quote(members.entries[index].key))
         mut output.push(":")
         write_value(members.entries[index].value, output: mut output)
       }
@@ -931,7 +910,6 @@ fn write_value(value: Value, output: mut String)
 }
 
 fn write_pretty_value(value: Value, output: mut String, indent: UInt64, level: UInt64)
-  cost time finite
 {
   match value {
     Array(items) => {
@@ -961,7 +939,7 @@ fn write_pretty_value(value: Value, output: mut String, indent: UInt64, level: U
           mut output.push(",")
         }
         push_newline(mut output, indent: indent, level: level.saturating_add(1))
-        mut output.push(quote(members.entries[index].key.slice()).slice())
+        mut output.push(quote(members.entries[index].key))
         mut output.push(": ")
         write_pretty_value(
           members.entries[index].value,
@@ -978,13 +956,11 @@ fn write_pretty_value(value: Value, output: mut String, indent: UInt64, level: U
 }
 
 public fn Value.write_pretty(self, output: mut String, indent: UInt64 = 2)
-  cost time finite
 {
   write_pretty_value(self, output: mut output, indent: indent, level: 0)
 }
 
 public fn Value.to_text(self) -> String
-  cost time finite
 {
   var text = ""
   write_value(self, output: mut text)
@@ -992,7 +968,6 @@ public fn Value.to_text(self) -> String
 }
 
 public fn Value.to_pretty_text(self, indent: UInt64 = 2) -> String
-  cost time finite
 {
   var text = ""
   self.write_pretty(mut text, indent: indent)
@@ -1023,7 +998,7 @@ impl FromTemplate for Value {
     match template_text(template.literals) {
       Some(text) => {
         match parse_document(
-          text.slice(),
+          text,
           maximum_depth: text.length(),
           parts: template.parts.slice(),
           in_template: true,
@@ -1038,7 +1013,6 @@ impl FromTemplate for Value {
 }
 
 fn template_text(literals: Slice[text::Literal]) -> Option[String]
-  cost time finite
 {
   var joined = ""
   var index: UInt64 = 0
@@ -1060,11 +1034,10 @@ fn template_text(literals: Slice[text::Literal]) -> Option[String]
 }
 
 public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
-  cost time finite
 {
   match template_text(literals) {
     Some(text) => {
-      parse_document(text.slice(), maximum_depth: text.length(), parts: no_parts.slice(), in_template: true) is Ok(_)
+      parse_document(text, maximum_depth: text.length(), parts: no_parts.slice(), in_template: true) is Ok(_)
     }
     None => false
   }
@@ -1137,7 +1110,7 @@ impl Display for ReadError {
 }
 
 public fn read_from[Source: streams::Reader](source: mut Source, maximum_depth: UInt64 = 128) -> Result[Value, ReadError]
-  uses Handles
+  uses Handles, RunForever
 {
   var bytes: List[UInt8] = []
   match mut source.read_to_end(mut bytes) {
@@ -1267,7 +1240,9 @@ public fn to_value[Item: serialization::Serialize](
 public fn from_value[Item: serialization::Deserialize](
   value: own Value,
   names: serialization::Names = serialization::Names.AsWritten,
-) -> Result[Item, serialization::Error] {
+) -> Result[Item, serialization::Error]
+  uses RunForever
+{
   var reader = serialization::TreeReader.new(own value, names: names)
   Item.deserialize(mut reader)
 }
@@ -1290,7 +1265,9 @@ public fn encode_pretty[Item: serialization::Serialize](
 public fn decode[Item: serialization::Deserialize](
   text: StringSlice,
   names: serialization::Names = serialization::Names.AsWritten,
-) -> Result[Item, Error] {
+) -> Result[Item, Error]
+  uses RunForever
+{
   match parse(text) {
     Ok(value) => match from_value[Item](own value, names: names) {
       Ok(item) => Ok(own item)
@@ -1309,7 +1286,7 @@ impl serialization::Serialize for Value {
         Some(integer) => mut sink.integer(integer)
         None => mut sink.float(number.to_float64())
       }
-      String(text) => mut sink.text(text.slice())
+      String(text) => mut sink.text(text)
       Array(items) => {
         mut sink.begin_list(items.length())
         for item in items {
@@ -1320,7 +1297,7 @@ impl serialization::Serialize for Value {
       Object(members) => {
         mut sink.begin_map(members.length())
         for entry in members {
-          mut sink.key(entry.key.slice())
+          mut sink.key(entry.key)
           entry.value.serialize(mut sink)
         }
         mut sink.end_map()
@@ -1330,7 +1307,9 @@ impl serialization::Serialize for Value {
 }
 
 impl serialization::Deserialize for Value {
-  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[Value, serialization::Error] {
+  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[Value, serialization::Error]
+    uses RunForever
+  {
     match source.kind() {
       Absent => {
         mut source.skip()

@@ -29,8 +29,7 @@ let list_target_declarations (names : Resolve.Names.lookups) packages :
           Resolve.Names.is_public declaration.visibility)
         (list_top_level names (names.list_package_declarations package))
   | Module module_ ->
-      List.filter
-        (Path_argument.is_shown names packages)
+      List.filter (Path_argument.is_shown packages)
         (list_top_level names (names.list_declarations module_))
   | Definition path -> (
       let declared = Option.to_list (Option.map names.read_declaration (names.find_key path)) in
@@ -66,7 +65,7 @@ let find snapshot database names packages ~body text =
 let run ~paths ~body =
   let snapshot, packages = Command_packages.load_current () in
   let database = Workspace.open_database snapshot in
-  let names = Database.make_name_lookups database packages in
+  let names = Database.make_name_lookups database in
   let results =
     List.map (fun path -> (path, find snapshot database names packages ~body path)) paths
   in

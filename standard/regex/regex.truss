@@ -79,7 +79,6 @@ public fn Captures.get(self, index: UInt64) -> Option[Match]
 }
 
 public fn Captures.named(self, name: StringSlice) -> Option[Match]
-  cost time finite
 {
   var index: UInt64 = 0
   while index < self.names.length()
@@ -102,7 +101,6 @@ fn is_meta(byte: UInt8) -> Bool
 }
 
 public fn escape(text: StringSlice) -> String
-  cost time finite
 {
   var output: List[UInt8] = List.with_capacity(text.length())
   var index: UInt64 = 0
@@ -142,7 +140,6 @@ fn Builder.here(self) -> UInt64
 }
 
 fn Builder.emit(mut self, operation: UInt32, first: UInt32, second: UInt32) -> UInt64
-  cost time finite
 {
   let index = self.code.length() / 3
   mut self.code.push(operation)
@@ -161,7 +158,6 @@ fn Builder.set(mut self, instruction: UInt64, field: UInt64, value: UInt32)
 }
 
 fn Builder.group_number(self, offset: UInt64) -> Option[UInt64]
-  cost time finite
 {
   var index: UInt64 = 0
   while index < self.groups.length()
@@ -180,7 +176,6 @@ fn escape_end(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt64, Par
   requires from < to
   requires to <= text.length()
   ensures !(result is Ok(end) && (end <= from || end > to))
-  cost time finite
 {
   if to - from < 2 {
     return Err(ParseError(kind: PatternErrorKind.InvalidEscape, offset: from))
@@ -220,7 +215,6 @@ fn class_end(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt64, Pars
   requires from < to
   requires to <= text.length()
   ensures !(result is Ok(end) && (end <= from || end > to))
-  cost time finite
 {
   var index = from + 1
   while index < to
@@ -245,7 +239,6 @@ fn group_end(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt64, Pars
   requires from < to
   requires to <= text.length()
   ensures !(result is Ok(end) && (end <= from || end > to))
-  cost time finite
 {
   var depth: UInt64 = 0
   var index = from
@@ -283,7 +276,6 @@ fn atom_end(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt64, Parse
   requires from < to
   requires to <= text.length()
   ensures !(result is Ok(end) && (end <= from || end > to))
-  cost time finite
 {
   let byte = text.byte(from)
   if byte == 92 {
@@ -309,7 +301,6 @@ fn branch_end(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt64, Par
   requires from <= to
   requires to <= text.length()
   ensures !(result is Ok(end) && (end < from || end > to))
-  cost time finite
 {
   var index = from
   while index < to
@@ -331,7 +322,6 @@ fn count_at(text: StringSlice, from: UInt64, to: UInt64) -> Option[Count]
   requires from <= to
   requires to <= text.length()
   ensures !(result is Some(count) && (count.value > 1000 || count.end <= from || count.end > to))
-  cost time finite
 {
   var value: UInt64 = 0
   var index = from
@@ -360,7 +350,6 @@ fn repetition_at(text: StringSlice, from: UInt64, to: UInt64) -> Result[Repetiti
   requires to <= text.length()
   ensures !(result is Ok(repetition) && (repetition.end < from || repetition.end > to || repetition.least > 1000 || repetition.most > 1000))
   ensures !(result is Ok(repetition) && repetition.bounded && repetition.most < repetition.least)
-  cost time finite
 {
   let once = Repetition(least: 1, most: 1, bounded: true, lazy: false, end: from)
   if from == to {
@@ -418,7 +407,6 @@ fn repetition_at(text: StringSlice, from: UInt64, to: UInt64) -> Result[Repetiti
 fn escaped_character(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt32, ParseError]
   requires from < to
   requires to <= text.length()
-  cost time finite
 {
   let wrong = ParseError(kind: PatternErrorKind.InvalidEscape, offset: from)
   if to - from < 2 {
@@ -492,14 +480,12 @@ fn escaped_character(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt
 }
 
 fn Builder.push_range(mut self, low: UInt32, high: UInt32)
-  cost time finite
 {
   mut self.ranges.push(low)
   mut self.ranges.push(high)
 }
 
 fn Builder.push_shorthand(mut self, letter: UInt8) -> Bool
-  cost time finite
 {
   if letter == 100 {
     mut self.push_range(48, high: 57)
@@ -558,7 +544,6 @@ fn Builder.class_item(mut self, text: StringSlice, from: UInt64, to: UInt64) -> 
   requires from < to
   requires to <= text.length()
   ensures !(result is Ok(item) && (item.end <= from || item.end > to))
-  cost time finite
 {
   let byte = text.byte(from)
   if self.placeholders && byte == 1 {
@@ -586,7 +571,6 @@ fn Builder.class_item(mut self, text: StringSlice, from: UInt64, to: UInt64) -> 
 fn Builder.compile_class(mut self, text: StringSlice, from: UInt64, to: UInt64) -> Option[ParseError]
   requires from < to
   requires to <= text.length()
-  cost time finite
 {
   if to - from < 2 {
     return failure(PatternErrorKind.UnbalancedBracket, offset: from)
@@ -633,7 +617,6 @@ fn Builder.compile_class(mut self, text: StringSlice, from: UInt64, to: UInt64) 
 fn Builder.compile_escape(mut self, text: StringSlice, from: UInt64, to: UInt64) -> Option[ParseError]
   requires from < to
   requires to <= text.length()
-  cost time finite
 {
   if to - from < 2 {
     return failure(PatternErrorKind.InvalidEscape, offset: from)
@@ -668,7 +651,6 @@ fn Builder.compile_atom(mut self, text: StringSlice, from: UInt64, to: UInt64) -
   requires from < to
   requires to <= text.length()
   decreases to - from, 1
-  cost time finite
 {
   let byte = text.byte(from)
   if byte == 40 {
@@ -752,7 +734,6 @@ fn Builder.compile_concatenation(mut self, text: StringSlice, from: UInt64, to: 
   requires from <= to
   requires to <= text.length()
   decreases to - from, 2
-  cost time finite
 {
   var index = from
   while index < to
@@ -826,7 +807,6 @@ fn Builder.compile_alternation(mut self, text: StringSlice, from: UInt64, to: UI
   requires from <= to
   requires to <= text.length()
   decreases to - from, 3
-  cost time finite
 {
   var jumps: List[UInt64] = []
   var index = from
@@ -867,7 +847,6 @@ fn Builder.compile_alternation(mut self, text: StringSlice, from: UInt64, to: UI
 }
 
 fn Builder.collect_groups(mut self, text: StringSlice) -> Option[ParseError]
-  cost time finite
 {
   let to = text.length()
   var index: UInt64 = 0
@@ -928,7 +907,6 @@ fn Builder.collect_groups(mut self, text: StringSlice) -> Option[ParseError]
 }
 
 fn compile(text: StringSlice, placeholders: Bool) -> Result[Regex, ParseError]
-  cost time finite
 {
   var builder = Builder(code: [], ranges: [], groups: [], names: [], placeholders: placeholders)
   if mut builder.collect_groups(text) is Some(error) {
@@ -962,7 +940,6 @@ fn compile(text: StringSlice, placeholders: Bool) -> Result[Regex, ParseError]
 }
 
 public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
-  cost time finite
 {
   var pattern = ""
   var index: UInt64 = 0
@@ -976,7 +953,7 @@ public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
     mut pattern.push(literals[index].text())
     index += 1
   }
-  literals.length() > 0 && compile(pattern.slice(), placeholders: true) is Ok(_)
+  literals.length() > 0 && compile(pattern, placeholders: true) is Ok(_)
 }
 
 public opaque type Part(source: String)
@@ -989,7 +966,7 @@ impl From[StringSlice] for Part {
 
 impl From[String] for Part {
   fn from(value: own String) -> Part {
-    Part(source: escape(value.slice()))
+    Part(source: escape(value))
   }
 }
 
@@ -997,7 +974,7 @@ impl From[Character] for Part {
   fn from(value: own Character) -> Part {
     var text = ""
     mut text.push_character(value)
-    Part(source: escape(text.slice()))
+    Part(source: escape(text))
   }
 }
 
@@ -1022,12 +999,12 @@ impl FromTemplate for Regex {
       mut pattern.push(template.literals[index].text())
       if index < template.parts.length() {
         mut pattern.push("(?:")
-        mut pattern.push(template.parts[index].source.slice())
+        mut pattern.push(template.parts[index].source)
         mut pattern.push(")")
       }
       index += 1
     }
-    match compile(pattern.slice(), placeholders: false) {
+    match compile(pattern, placeholders: false) {
       Ok(regex) => regex
       Err(_) => Regex(pattern: own pattern, program: [0], group_names: [])
     }
@@ -1076,7 +1053,6 @@ fn Regex.field(self, instruction: UInt64, field: UInt64) -> UInt32
 }
 
 fn Regex.in_ranges(self, first: UInt32, count: UInt32, code: UInt32) -> Bool
-  cost time finite
 {
   let base = 1 + self.instructions() * 3 + intrinsic::convert[UInt32, UInt64](first) * 2
   let pairs: UInt64 = intrinsic::convert(count)
@@ -1117,7 +1093,6 @@ fn assertion_holds(kind: UInt32, text: StringSlice, position: UInt64) -> Bool
 type Threads(instructions: List[UInt64], slots: List[UInt64])
 
 fn popped(stack: mut List[UInt64]) -> UInt64
-  cost time finite
 {
   match mut stack.pop() {
     Some(value) => value
@@ -1137,7 +1112,6 @@ fn Regex.follow(
   stack: mut List[UInt64],
 )
   requires position <= text.length()
-  cost time finite
 {
   mut stack.clear()
   mut stack.push(0)
@@ -1202,7 +1176,6 @@ fn Regex.follow(
 }
 
 fn Regex.consumes(self, instruction: UInt64, code: UInt32) -> Bool
-  cost time finite
 {
   let operation = self.field(instruction, field: 0)
   if operation == 1 {
@@ -1220,7 +1193,6 @@ fn Regex.consumes(self, instruction: UInt64, code: UInt32) -> Bool
 
 fn Regex.run(self, text: StringSlice, from: UInt64, whole: Bool) -> Option[List[UInt64]]
   requires from <= text.length()
-  cost time finite
 {
   let count = self.instructions()
   let width = self.group_names.length().saturating_add(1).saturating_multiply(2)
@@ -1362,7 +1334,6 @@ public fn Regex.find_from(self, text: StringSlice, offset: UInt64) -> Option[Mat
       Some(slots) => match_from(slots.slice(), text: text, offset: offset)
       None => None
     })
-  cost time finite
 {
   match self.run(text, from: offset, whole: false) {
     Some(slots) => match_from(slots.slice(), text: text, offset: offset)
@@ -1372,13 +1343,11 @@ public fn Regex.find_from(self, text: StringSlice, offset: UInt64) -> Option[Mat
 
 public fn Regex.is_match(self, text: StringSlice) -> Bool
   ensures result == (self.find_from(text, offset: 0) is Some(_))
-  cost time finite
 {
   self.find_from(text, offset: 0) is Some(_)
 }
 
 public fn Regex.is_full_match(self, text: StringSlice) -> Bool
-  cost time finite
 {
   self.run(text, from: 0, whole: true) is Some(_)
 }
@@ -1388,7 +1357,6 @@ public fn Regex.find(self, text: StringSlice) -> Option[Match]
     Some(matched) => matched.end <= text.length()
     None => !self.is_match(text)
   }
-  cost time finite
 {
   self.find_from(text, offset: 0)
 }
@@ -1411,7 +1379,6 @@ fn step_after(text: StringSlice, matched: Match) -> UInt64
 }
 
 public fn Regex.find_all(self, text: StringSlice) -> List[Match]
-  cost time finite
 {
   var matches: List[Match] = []
   var position: UInt64 = 0
@@ -1431,7 +1398,6 @@ public fn Regex.find_all(self, text: StringSlice) -> List[Match]
 
 fn Regex.captures_of(self, slots: Slice[UInt64], text: StringSlice, offset: UInt64) -> Option[Captures]
   ensures (result is Some(_)) == (match_from(slots, text: text, offset: offset) is Some(_))
-  cost time finite
 {
   let whole = match match_from(slots, text: text, offset: offset) {
     Some(whole) => whole
@@ -1459,7 +1425,6 @@ fn Regex.captures_of(self, slots: Slice[UInt64], text: StringSlice, offset: UInt
 
 fn Regex.captures_from(self, text: StringSlice, offset: UInt64) -> Option[Captures]
   requires offset <= text.length()
-  cost time finite
 {
   match self.run(text, from: offset, whole: false) {
     Some(slots) => self.captures_of(slots.slice(), text: text, offset: offset)
@@ -1469,7 +1434,6 @@ fn Regex.captures_from(self, text: StringSlice, offset: UInt64) -> Option[Captur
 
 public fn Regex.captures(self, text: StringSlice) -> Option[Captures]
   ensures (result is Some(_)) == self.is_match(text)
-  cost time finite
 {
   match self.run(text, from: 0, whole: false) {
     Some(slots) => self.captures_of(slots.slice(), text: text, offset: 0)
@@ -1478,7 +1442,6 @@ public fn Regex.captures(self, text: StringSlice) -> Option[Captures]
 }
 
 public fn Regex.replace_first(self, text: StringSlice, replacement: StringSlice) -> String
-  cost time finite
 {
   match self.find_from(text, offset: 0) {
     Some(matched) => {
@@ -1492,7 +1455,6 @@ public fn Regex.replace_first(self, text: StringSlice, replacement: StringSlice)
 }
 
 public fn Regex.replace_all(self, text: StringSlice, replacement: StringSlice) -> String
-  cost time finite
 {
   var output = ""
   var copied_up_to: UInt64 = 0
@@ -1522,9 +1484,8 @@ public fn Regex.replace_all(self, text: StringSlice, replacement: StringSlice) -
 public fn Regex.replace_all_with(
   self,
   text: StringSlice,
-  replace: (fn(Captures) -> String cost time finite),
+  replace: fn(Captures) -> String,
 ) -> String
-  cost time finite
 {
   var output = ""
   var copied_up_to: UInt64 = 0
@@ -1542,7 +1503,7 @@ public fn Regex.replace_all_with(
           return output
         }
         mut output.push(text.part(copied_up_to, to: whole.start))
-        mut output.push(replace(captures).slice())
+        mut output.push(replace(captures))
         copied_up_to = whole.end
         position = step_after(text, matched: whole)
       }
@@ -1557,7 +1518,6 @@ public fn Regex.replace_all_with(
 }
 
 public fn Regex.split(self, text: StringSlice) -> List[StringSlice]
-  cost time finite
 {
   var pieces: List[StringSlice] = []
   var copied_up_to: UInt64 = 0
@@ -1596,7 +1556,7 @@ impl Equal for Regex {
 
 impl Display for Regex {
   fn display(self, output: mut String) {
-    mut output.push(self.pattern.slice())
+    mut output.push(self.pattern)
   }
 }
 

@@ -1,5 +1,5 @@
 fn f(start: Countdown) -> UInt8
-  uses Meter
+  uses Meter, RunForever
   cost calls(Meter.tick) <= start.left
 {
   var left = start

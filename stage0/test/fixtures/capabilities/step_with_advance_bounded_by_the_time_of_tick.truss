@@ -1,5 +1,0 @@
-fn f[Inner: Ticker](ticker: mut Inner) -> UInt64
-  cost time O(time(Inner.tick))
-{
-  step_with(mut ticker, step: advance)
-}

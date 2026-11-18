@@ -9,23 +9,21 @@ type context = {
 }
 
 let ground_mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own -> Own
-let panic_capability = Well_known.make_path Panic
 
 let list_capabilities context substitution (set : Types.capability_set) : Path.t list =
   List.sort_uniq Path.compare
-    (List.map
+    (List.filter_map
        (function
-         | Types.Capability path -> path
+         | Types.Capability path when Well_known.is Run_forever path -> None
+         | Types.Capability path -> Some path
          | Capability_parameter parameter ->
              raise_bug "the capability parameter %s of %s is not substituted" parameter.name
                (Path.show parameter.owner)
          | Capability_projection { name; _ } ->
              raise_bug "the associated capability set %s is not normalized" name
          | Capability_variable _ -> raise_bug "a set of capabilities the checker left unsolved"
-         | Capability_error _ -> raise_bug "a capability with an error reached code generation"
-         | Divergence _ -> raise_bug "divergence is passed to compiled code as a capability")
-       (Types.remove_divergence
-          (context.normalize_capabilities (Types.substitute_capabilities substitution set))
+         | Capability_error _ -> raise_bug "a capability with an error reached code generation")
+       (context.normalize_capabilities (Types.substitute_capabilities substitution set)
          :> Types.capability list))
 
 let rec ground context substitution (ty : Types.ty) : Ground.ty =
@@ -68,10 +66,7 @@ and ground_function context substitution (function_type : Types.function_type) :
         (fun (yield_mode, ty) -> (ground_mode yield_mode, ground context Types.no_substitution ty))
         function_type.inputs;
     result = ground context Types.no_substitution function_type.output;
-    uses =
-      List.filter
-        (fun path -> not (Path.equal path panic_capability))
-        (list_capabilities context Types.no_substitution function_type.uses);
+    uses = list_capabilities context Types.no_substitution function_type.uses;
   }
 
 let uint64 = Ground.make_builtin UInt64

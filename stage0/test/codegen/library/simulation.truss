@@ -7,7 +7,7 @@ use standard::simulation
 use standard::tasks
 
 fn collect(numbers: tasks::Channel[Int64]) -> List[Int64]
-  uses Tasks
+  uses Tasks, RunForever
 {
   var received: List[Int64] = []
   for number in numbers.messages() {
@@ -17,7 +17,7 @@ fn collect(numbers: tasks::Channel[Int64]) -> List[Int64]
 }
 
 fn random_numbers(seed: UInt64) -> List[UInt64]
-  uses Panic
+  uses Panic, RunForever
 {
   var numbers: List[UInt64] = []
   provide simulation::World.new(seed: seed) {
@@ -28,7 +28,7 @@ fn random_numbers(seed: UInt64) -> List[UInt64]
   numbers
 }
 
-test "a world captures the text that the console prints" {
+test "a world captures the text that the console prints" uses Panic {
   let world = simulation::World.new()
   provide world {
     Console.print("a")
@@ -39,7 +39,7 @@ test "a world captures the text that the console prints" {
   }
 }
 
-test "a world's console reads the lines of its setup" {
+test "a world's console reads the lines of its setup" uses Panic {
   provide simulation::World.from(simulation::Setup.new().with_input(["first", "second"])) {
     assert Console.read_line() == Some("first")
     assert Console.read_line() == Some("second")
@@ -47,7 +47,7 @@ test "a world's console reads the lines of its setup" {
   }
 }
 
-test "a world answers with the variables and the platform of its setup" {
+test "a world answers with the variables and the platform of its setup" uses Panic {
   provide simulation::World.from(simulation::Setup.new().with_variable("HOME", value: "/home/ada")) {
     assert Environment.variable("HOME") == Some("/home/ada")
     assert Environment.variable("PATH") is None
@@ -56,7 +56,7 @@ test "a world answers with the variables and the platform of its setup" {
   }
 }
 
-test "a world keeps the records that are logged" {
+test "a world keeps the records that are logged" uses Panic {
   let world = simulation::World.new()
   provide world {
     log::information("started")
@@ -68,12 +68,12 @@ test "a world keeps the records that are logged" {
   }
 }
 
-test "a world's random numbers depend only on its seed" {
+test "a world's random numbers depend only on its seed" uses Panic {
   assert random_numbers(5) == random_numbers(5)
   assert random_numbers(5) != random_numbers(6)
 }
 
-test "a world's clock starts at the time of its setup and moves only when a task sleeps" {
+test "a world's clock starts at the time of its setup and moves only when a task sleeps" uses Panic {
   let start = Instant.from_unix_nanoseconds(1700000000000000000)
   let world = simulation::World.from(simulation::Setup.new().with_time(start))
   provide world {
@@ -91,7 +91,7 @@ test "a world's clock starts at the time of its setup and moves only when a task
   }
 }
 
-test "advance moves a world's clock" {
+test "advance moves a world's clock" uses Panic {
   let world = simulation::World.new()
   provide world {
     world.advance(Duration.minutes(5))
@@ -99,7 +99,7 @@ test "advance moves a world's clock" {
   }
 }
 
-test "tasks that sleep wake in the order of their deadlines" {
+test "tasks that sleep wake in the order of their deadlines" uses Panic {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide simulation::World.new(seed: seed) {
@@ -125,7 +125,7 @@ test "tasks that sleep wake in the order of their deadlines" {
   }
 }
 
-test "the clock advances while one task sleeps and another waits for its message" {
+test "the clock advances while one task sleeps and another waits for its message" uses Panic {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide simulation::World.new(seed: seed) {
@@ -143,7 +143,7 @@ test "the clock advances while one task sleeps and another waits for its message
   }
 }
 
-test "with_timeout returns None when the limit passes before the work ends" {
+test "with_timeout returns None when the limit passes before the work ends" uses Panic {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide simulation::World.new(seed: seed) {
@@ -154,7 +154,7 @@ test "with_timeout returns None when the limit passes before the work ends" {
   }
 }
 
-test "with_timeout returns the output of work that ends before the limit, and cancels the timer" {
+test "with_timeout returns the output of work that ends before the limit, and cancels the timer" uses Panic {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide simulation::World.new(seed: seed) {
@@ -168,7 +168,7 @@ test "with_timeout returns the output of work that ends before the limit, and ca
   }
 }
 
-test "tasks in a world print in an order that depends only on the seed" {
+test "tasks in a world print in an order that depends only on the seed" uses Panic {
   var outputs: List[String] = []
   let seeds: UInt64 = 32
   for seed in 0..seeds {
@@ -188,7 +188,7 @@ test "tasks in a world print in an order that depends only on the seed" {
   assert outputs.length() == 2
 }
 
-test "a world holds the files of its setup and the files that are written in it" {
+test "a world holds the files of its setup and the files that are written in it" uses Panic {
   let world = simulation::World.from(simulation::Setup.new().with_file(Path.new("/etc/motd"), contents: "welcome"))
   provide world {
     assert FileRead.read_text(Path.new("/etc/motd")) == Ok("welcome")
@@ -200,7 +200,7 @@ test "a world holds the files of its setup and the files that are written in it"
   }
 }
 
-test "a file written in a world has the time of the world's clock" {
+test "a file written in a world has the time of the world's clock" uses Panic {
   let start = Instant.from_unix_nanoseconds(1000)
   provide simulation::World.from(simulation::Setup.new().with_time(start)) {
     Clock.sleep(Duration.seconds(2))
@@ -210,7 +210,7 @@ test "a file written in a world has the time of the world's clock" {
   }
 }
 
-test "a world answers with the metadata of a path and of an open file" {
+test "a world answers with the metadata of a path and of an open file" uses Panic {
   let setup = simulation::Setup.new().with_file(Path.new("/notes"), contents: "four")
   provide simulation::World.from(own setup) {
     assert FileRead.metadata(Path.new("/notes")) is Ok(of_path) && of_path.length == 4
@@ -221,7 +221,7 @@ test "a world answers with the metadata of a path and of an open file" {
   }
 }
 
-test "fail_next makes the next operation of its kind fail, once" {
+test "fail_next makes the next operation of its kind fail, once" uses Panic {
   let world = simulation::World.new()
   provide world {
     assert FileWrite.write_text(Path.new("/a"), contents: "a") is Ok(_)
@@ -247,7 +247,7 @@ fn append_line(file: Path, line: StringSlice) -> Result[Unit, SystemError]
   own opened.close()
 }
 
-test "tasks in a world append to one file, and each write arrives whole" {
+test "tasks in a world append to one file, and each write arrives whole" uses Panic {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     let world = simulation::World.new(seed: seed)
@@ -281,7 +281,7 @@ fn scripted(code: UInt8, output: StringSlice, error_output: StringSlice) -> proc
   )
 }
 
-test "a world resolves the hosts of its setup and addresses written out" {
+test "a world resolves the hosts of its setup and addresses written out" uses Panic {
   let database = network::IpAddress.Version4([10, 0, 0, 2])
   let world = simulation::World.from(simulation::Setup.new().with_host("database", address: database))
   provide world {
@@ -295,7 +295,7 @@ test "a world resolves the hosts of its setup and addresses written out" {
   }
 }
 
-test "a connection in a world carries bytes both ways, and ends when a side shuts down" {
+test "a connection in a world carries bytes both ways, and ends when a side shuts down" uses Panic {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide simulation::World.new(seed: seed) {
@@ -324,7 +324,7 @@ test "a connection in a world carries bytes both ways, and ends when a side shut
   }
 }
 
-test "a world connects to a local socket by its path, and refuses a path with no listener" {
+test "a world connects to a local socket by its path, and refuses a path with no listener" uses Panic {
   provide simulation::World.new() {
     let path = Path.new("/run/app.socket")
     var listener = NetworkServer.listen_local(path).expect("the path is free")
@@ -346,7 +346,7 @@ test "a world connects to a local socket by its path, and refuses a path with no
   }
 }
 
-test "a world refuses a connection to a port with no listener, and a port taken twice" {
+test "a world refuses a connection to a port with no listener, and a port taken twice" uses Panic {
   let world = simulation::World.new()
   provide world {
     assert NetworkClient.connect(loopback(9), timeout: None) is Err(ConnectionRefused)
@@ -361,7 +361,7 @@ test "a world refuses a connection to a port with no listener, and a port taken 
   }
 }
 
-test "a read with a timeout fails when the time passes with nothing sent" {
+test "a read with a timeout fails when the time passes with nothing sent" uses Panic {
   provide simulation::World.new() {
     var listener = NetworkServer.listen(loopback(7000)).expect("the port is free")
     var connection = network::connect("localhost", port: 7000).expect("the listener accepts")
@@ -376,7 +376,7 @@ test "a read with a timeout fails when the time passes with nothing sent" {
   }
 }
 
-test "datagrams in a world arrive whole, in order, with the address they came from" {
+test "datagrams in a world arrive whole, in order, with the address they came from" uses Panic {
   provide simulation::World.new() {
     var receiver = NetworkServer.bind_datagram(loopback(5353)).expect("the port is free")
     var sender = NetworkClient.open_datagram().expect("a socket opens")
@@ -396,7 +396,7 @@ test "datagrams in a world arrive whole, in order, with the address they came fr
   }
 }
 
-test "a world runs the programs of its setup and keeps the commands that were run" {
+test "a world runs the programs of its setup and keeps the commands that were run" uses Panic {
   var setup = simulation::Setup.new()
   setup = own setup.with_program("git", output: scripted(1, output: "", error_output: "usage"))
   setup = own setup.with_program("git", arguments: ["status"], output: scripted(0, output: "clean\n", error_output: ""))
@@ -418,7 +418,7 @@ test "a world runs the programs of its setup and keeps the commands that were ru
   }
 }
 
-test "a program spawned in a world has pipes that hold its output, and has already exited" {
+test "a program spawned in a world has pipes that hold its output, and has already exited" uses Panic {
   var setup = simulation::Setup.new()
   setup = own setup.with_program("sort", output: scripted(0, output: "a\nb\n", error_output: "warning"))
   provide simulation::World.from(own setup) {
@@ -441,7 +441,7 @@ test "a program spawned in a world has pipes that hold its output, and has alrea
   }
 }
 
-test "a task waiting for a signal wakes when the world delivers one it waits for" {
+test "a task waiting for a signal wakes when the world delivers one it waits for" uses Panic {
   let seeds: UInt64 = 8
   for seed in 0..seeds {
     let world = simulation::World.new(seed: seed)
@@ -461,7 +461,7 @@ test "a task waiting for a signal wakes when the world delivers one it waits for
   }
 }
 
-test "a world's console streams read its input and write its output" {
+test "a world's console streams read its input and write its output" uses Panic {
   let world = simulation::World.from(simulation::Setup.new().with_input(["one", "two"]))
   provide world {
     var input = Console.input()
@@ -478,7 +478,7 @@ test "a world's console streams read its input and write its output" {
   }
 }
 
-test "a world has a terminal whose raw mode is set, used, and restored" {
+test "a world has a terminal whose raw mode is set, used, and restored" uses Panic {
   let world = simulation::World.from(simulation::Setup.new().with_input(["hunter2", "plain"]))
   provide world {
     assert Console.terminal().size() == Ok(console::Size(columns: 80, rows: 24))
@@ -492,7 +492,7 @@ test "a world has a terminal whose raw mode is set, used, and restored" {
   }
 }
 
-test "HostsAllowed lets through the hosts it names and no others" {
+test "HostsAllowed lets through the hosts it names and no others" uses Panic {
   let api = network::IpAddress.Version4([10, 0, 0, 7])
   let other = network::IpAddress.Version4([10, 0, 0, 8])
   var setup = simulation::Setup.new()

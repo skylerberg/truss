@@ -1,0 +1,10 @@
+fn g() -> Int64
+{
+  0
+}
+
+fn f() -> Int64
+  cost time O(1)
+{
+  g()
+}

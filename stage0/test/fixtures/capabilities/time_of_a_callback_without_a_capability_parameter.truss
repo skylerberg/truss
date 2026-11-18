@@ -1,5 +1,0 @@
-fn f(value: Int64, change: fn(Int64) -> Int64) -> Int64
-  cost time O(time(change))
-{
-  change(value)
-}

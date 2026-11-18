@@ -14,7 +14,7 @@ and check_lent_part state env (value : Syntax.expression) : Types.ty =
   | Some (Lends (mode, part)) ->
       let inner =
         match value.kind with
-        | Mode (mode, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
+        | Mode (mode, inner) when Option.is_none (State.find_keyword_operation state inner) ->
             State.note_mode_keyword state value mode inner;
             inner
         | _ -> value
@@ -109,13 +109,13 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Prefix (operator, inner) -> Operators.check_prefix state env ?expected value operator inner
   | Mode (mode, inner) ->
       State.note_mode_keyword state value mode inner;
-      (match State.find_call_with_mode_keyword state inner with
+      (match State.find_keyword_operation state inner with
       | Some (call_id, _) ->
-          state.receiver_modes <-
-            (call_id, match mode with Mut -> Types.Mut | Own -> Types.Own) :: state.receiver_modes
+          state.keyword_modes <-
+            (call_id, match mode with Mut -> Types.Mut | Own -> Types.Own) :: state.keyword_modes
       | None -> ());
       let type_ = check_expression state env ?expected inner in
-      if mode = Mut && Option.is_none (State.find_call_with_mode_keyword state inner) then
+      if mode = Mut && Option.is_none (State.find_keyword_operation state inner) then
         Modes.mutate state env ~by:Passed_mut inner;
       State.alias_expression state value inner;
       type_
@@ -260,7 +260,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Block body ->
       State.register_expression state value (fun () -> Block (State.build_block state body));
       Statements.check_block_value state env ?expected body
-  | Expression_error -> Types.Error (Diagnostic.make_recovered (State.read_span state value.id))
+  | Expression_error -> Types.Error Diagnostic.reported_elsewhere
 
 and check_member_value state env (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) =

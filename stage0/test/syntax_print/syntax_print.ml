@@ -132,7 +132,6 @@ and show_cost { amortized; resource; bound } =
   let bound =
     match bound with
     | Big_o value -> make_form "O" [ show_expression value ]
-    | Finite -> "finite"
     | At_most value -> make_form "<=" [ show_expression value ]
     | Exactly value -> make_form "==" [ show_expression value ]
   in

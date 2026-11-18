@@ -209,7 +209,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   in
   let callee_clauses = contract.callee_clauses in
   if
-    context.terminates && frame.makes_obligations
+    frame.makes_obligations
     && (match invocation.callee with
       | Trait_method _ -> Mir.Call_edges.is_dispatched invocation.callee
       | _ -> true)
@@ -217,7 +217,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   then
     begin match (context.measures, callee_clauses.decreases) with
     | [], []
-      when Path.equal path context.current
+      when context.terminates && Path.equal path context.current
            && list_structural_parameters context frame callee_clauses <> [] ->
         let pairs = list_structural_parameters context frame callee_clauses in
         let before = List.map (fun (ty, entry, _) -> Models.rank context ty entry) pairs in
@@ -236,7 +236,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             conjunction
               (List.map (fun right_term -> Operation ("<=", [ int 0; right_term ])) before)
             &&& Amounts.compare_lexicographically before after)
-    | [], _ | _, [] ->
+    | ([], _ | _, []) when context.terminates ->
         Facts.oblige context frame Termination location
           [
             Text
@@ -246,7 +246,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                  (show_callee path));
           ]
           (Logic.Boolean false)
-    | measures, callee_measures ->
+    | (_ :: _ as measures), (_ :: _ as callee_measures) ->
         let current_frame =
           { frame with makes_obligations = false; locals = frame.old_locals; self = frame.old_self }
         in
@@ -279,12 +279,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                    measures)
           @ [ Text "`." ])
           (Amounts.compare_lexicographically before after)
+    | [], _ | _, [] -> ()
     end;
   let precondition_clauses = Contracts.select_precondition_clauses contract in
-  let is_checked =
-    Mir.is_index_call invocation.callee
-    && Option.is_some (Mir.find_checked_requires context.lookups.mir path)
-  in
   let required =
     let entry = read_entry_frame precondition_clauses in
     List.map
@@ -303,9 +300,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             Text (Printf.sprintf "` may not hold for this call to `%s`." (show_callee path));
           ]
         in
-        if is_checked then
-          Facts.oblige_safe_operation context frame Requires location ?cited ~fixes message term
-        else Facts.oblige context frame Requires location ?cited ~fixes message term;
+        Facts.oblige context frame Requires location ?cited ~fixes message term;
         term)
       precondition_clauses.requires
   in
@@ -835,7 +830,6 @@ let compute_function_value_amount context frame ~location (function_type : Types
             | Types.Capability_parameter _ | Types.Capability_projection _
             | Types.Capability_variable _ ->
                 true
-            | Types.Divergence _ -> false
             | Types.Capability_error _ ->
                 Facts.raise_bug "the prover reads a capability with an error")
           (function_type.uses :> Types.capability list)

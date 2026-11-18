@@ -29,7 +29,7 @@ test "a route matches a method and a path, and gives each parameter's decoded va
   assert http::Route.parse("GET users") is None && http::Route.parse("/a/{b}/{b}") is None
 }
 
-test "an HTTP date is written in IMF-fixdate form and read in all three of its forms" {
+test "an HTTP date is written in IMF-fixdate form and read in all three of its forms" uses Panic {
   let instant = Instant.from_unix_seconds(784111777).expect("in range")
   assert http::format_date(instant) == "Sun, 06 Nov 1994 08:49:37 GMT"
   assert http::parse_date("Sun, 06 Nov 1994 08:49:37 GMT") == Some(instant)
@@ -51,7 +51,7 @@ test "headers are found whatever the case of their names, and set replaces every
 }
 
 fn answer(request: own http::Request) -> http::Response
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if request.matches(http::Route"GET /hello/{name}") is Some(found) {
     let name = found.get("name").unwrap_or("nobody".slice())
@@ -75,7 +75,7 @@ fn answer(request: own http::Request) -> http::Response
 }
 
 fn application(request: own http::Request, responder: mut http::Responder)
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if request.matches(http::Route"POST /count") is Some(_) {
     var body = own request.body
@@ -107,7 +107,7 @@ fn loopback(port: UInt16) -> network::SocketAddress {
 }
 
 fn exchange(raw: StringSlice) -> String
-  uses NetworkClient, Handles, Panic
+  uses NetworkClient, Handles, Panic, RunForever
 {
   var connection = network::connect("localhost", port: 8080).expect("the server accepts")
   let _ = mut connection.write_all(raw.bytes())
@@ -117,7 +117,7 @@ fn exchange(raw: StringSlice) -> String
 }
 
 fn client_and_server() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
   var listener = NetworkServer.listen(loopback(8080)).expect("the port is free")
   var seen: List[String] = []
@@ -198,7 +198,7 @@ fn client_and_server() -> List[String]
   }
 }
 
-test "a server answers a client in a world: JSON, a body, a missing page, keep-alive, chunks, and bad requests" {
+test "a server answers a client in a world: JSON, a body, a missing page, keep-alive, chunks, and bad requests" uses Panic {
   provide simulation::World.new() {
     let seen = client_and_server()
     assert seen.length() == 15

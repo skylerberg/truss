@@ -1,0 +1,25 @@
+trait Walk {
+  fn each(self, visit: (fn(Int64) uses RunForever))
+    uses RunForever
+}
+
+type Pair(first: Int64, second: Int64)
+
+impl Walk for Pair {
+  fn each(self, visit: fn(Int64)) {
+    visit(self.first)
+    visit(self.second)
+  }
+}
+
+fn spin(value: Int64)
+  uses RunForever
+{
+  spin(value)
+}
+
+fn f(pair: Pair)
+  uses RunForever
+{
+  pair.each(spin)
+}

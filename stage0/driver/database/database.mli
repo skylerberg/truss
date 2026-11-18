@@ -3,23 +3,33 @@ module Part = Part
 type t
 type package_database
 
-val create : ?loaded:package_database list -> Project.package list -> t
+val create :
+  ?on_bug:(Compiler_bug.t -> unit) -> ?loaded:package_database list -> Project.package list -> t
+
 val copy : t -> t
-val read_package_database : t -> Path.package -> package_database
+val build_package_database : loaded:package_database list -> Project.package -> package_database
 val list_package_diagnostics : package_database -> (Source.t * Diagnostic.t list) list
-val update : t -> (Path.file * string option) list -> unit
-val relayout : t -> loaded:package_database list -> Project.package list -> unit
-val propagate : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit
+val update : ?on_bug:(Compiler_bug.t -> unit) -> t -> (Path.file * string option) list -> unit
+
+val relayout :
+  ?on_bug:(Compiler_bug.t -> unit) ->
+  t ->
+  loaded:package_database list ->
+  Project.package list ->
+  unit
+
 val list_unsaved : t -> (string * string option) list
 val mark_saved : t -> unit
 
 val restore :
-  loaded:package_database list ->
+  ?on_bug:(Compiler_bug.t -> unit) ->
+  saved:package_database list ->
   find_text:(Path.file -> string option) ->
+  loaded:package_database list ->
+  Project.package list ->
   (string * string) list ->
   t
 
-val check : t -> Path.package list -> unit
 val list_file_diagnostics : t -> Path.file -> Diagnostic.t list
 val list_dependency_diagnostics : t -> Path.package -> (Source.t * Diagnostic.t list) list
 
@@ -32,9 +42,9 @@ val find_code_packages : t -> Path.package -> Path.package list option
 val read_checked_body : t -> Resolve.Names.key -> Infer.checked option
 val read_source : t -> Path.file -> Source.t
 val read_parsed : t -> Path.file -> Syntax.file
-val make_name_lookups : t -> Path.package list -> Resolve.Names.lookups
+val make_name_lookups : t -> Resolve.Names.lookups
 val read_resolved : t -> Resolve.Names.key -> Resolve.resolved option
-val make_interface_lookups : t -> Path.package list -> Interface.Lookups.t
+val make_interface_lookups : t -> Interface.Lookups.t
 val find_lowered_lookups : t -> Path.package list -> (Backend.lowered_lookups, string) result
 val find_main : t -> Path.package -> Path.t option
 
@@ -68,10 +78,10 @@ module For_testing : sig
   type checker = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
 
   val list_diagnostics : checker list -> t -> Path.file -> Diagnostic.t list
-  val make_unchecked_interface_lookups : t -> Path.package list -> Interface.Lookups.t
+  val make_unchecked_interface_lookups : t -> Interface.Lookups.t
   val read_derived_form : t -> Path.t -> Core.t option
   val read_core : t -> Path.t -> (Core.t * Types.substitution) option
-  val make_mir_lookups : t -> Path.package -> Mir.lookups
+  val make_mir_lookups : t -> Mir.lookups
   val read_ownership : t -> Resolve.Names.key -> (Core.origin list * Core.origin list) list part
   val find_proof : proofs -> Resolve.Names.key -> Prover.proof part option
   val list_reads : t -> string -> string list
@@ -80,6 +90,8 @@ module For_testing : sig
 
   type observed = { recomputed : string list; collected : string list }
 
-  val observe : (unit -> unit) -> observed
+  val observe : (unit -> 'a) -> 'a * observed
   val add_root : t -> Lowered.Item.t -> unit
+  val with_failing_part : string -> (unit -> 'a) -> 'a
+  val propagate : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit
 end

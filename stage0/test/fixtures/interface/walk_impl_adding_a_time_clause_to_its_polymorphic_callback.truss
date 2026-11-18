@@ -6,7 +6,7 @@ trait Walk {
 type Pair(first: Int64, second: Int64)
 
 impl Walk for Pair {
-  fn each(self, visit: (fn(Int64) uses generic Granted cost time finite))
+  fn each(self, visit: (fn(Int64) uses generic Granted cost time O(1)))
     uses generic Granted
   {
   }

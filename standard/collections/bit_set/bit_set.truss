@@ -27,7 +27,6 @@ theorem ones_fit_below_the_bit_length(word: UInt64, bits: UInt64)
   requires bits < 64
   requires word < power(2, bits)
   ensures word.count_ones() <= bits
-  cost time finite
 {
 }
 
@@ -36,7 +35,6 @@ theorem lowest_one_is_below_the_bit_length(word: UInt64, bits: UInt64)
   requires word != 0
   requires bits == 64 || word < power(2, bits)
   ensures word.trailing_zeros() < bits
-  cost time finite
 {
 }
 
@@ -44,7 +42,6 @@ theorem all_ones_below_a_bit_are_counted(word: UInt64, bits: UInt64)
   requires bits <= 64
   requires word == power(2, bits) - 1
   ensures word.count_ones() == bits
-  cost time finite
 {
   assert power(2, bits) <= power(2, 64)
 }

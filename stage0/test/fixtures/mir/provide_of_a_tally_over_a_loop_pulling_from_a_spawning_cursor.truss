@@ -1,4 +1,6 @@
-fn g() {
+fn g()
+  uses RunForever
+{
   var tally = Tally(count: 0)
   let scheduler = Scheduler(turn: 0)
   var cursor = Spawning(left: 2)

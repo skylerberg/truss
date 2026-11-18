@@ -2,7 +2,7 @@ type profile = Development | Release
 type linkage = External | Internal
 type failure = C_runtime.failure = Echo | Todo
 
-module Builder = Builder
+module Ir_builder = Ir_builder
 
 val make_symbol : Lowered.Item.t -> string
 val version : int
@@ -25,7 +25,7 @@ val is_small : fragment -> bool
 val failures : fragment -> (failure * Lowered.site) list
 val render_fragment : fragment -> string
 val render_file : Memory_layout.env -> profile -> (fragment * linkage) list -> string
-val site_structs : string
+val shared_structs : string
 
 type position = { file : string; line : int; column : int }
 

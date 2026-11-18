@@ -40,7 +40,7 @@ fn checked(value: Int64) -> Int64
   value
 }
 
-test "counts" {
+test "counts" uses Panic {
   assert counted() == 15
   assert checked(3) == 3
 }
