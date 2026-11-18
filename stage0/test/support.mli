@@ -12,6 +12,7 @@ val parse_errors : Project.package list -> Path.file -> string list
 val make_database : Project.package list -> Database.t
 val make_names : Project.package list -> Resolve.Names.lookups
 val list_declarations : Project.package list -> Path.module_ -> Resolve.Names.declaration list
+val list_fragment_diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val list_codes : Diagnostic.t list -> string list
 
 type core_nodes = {

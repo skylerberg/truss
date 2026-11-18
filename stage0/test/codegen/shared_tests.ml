@@ -18,7 +18,7 @@ let loaded =
      Database.For_testing.add_root database
        (Generated (Program_main (Top { module_ = probe.module_; name = "main" })));
      let text = Source.create ~path:(Path.show_file probe) source in
-     (match Database.list_file_diagnostics database probe with
+     (match Codegen_support.list_fragment_diagnostics database probe with
      | [] -> ()
      | diagnostics ->
          Codegen_support.fail "the source has diagnostics:\n%s"
@@ -87,7 +87,7 @@ let () =
             ( Diagnostic.Code.name diagnostic.code,
               String.sub text diagnostic.span.start (diagnostic.span.stop - diagnostic.span.start)
             ))
-          (Database.list_file_diagnostics database checks)
+          (Codegen_support.list_fragment_diagnostics database checks)
       in
       let expected =
         [
