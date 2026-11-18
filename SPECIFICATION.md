@@ -795,9 +795,48 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 - **A function with a `time` clause makes no call that may not terminate,**
   and neither does a specification. A call may not terminate when its
   callee has no `time` clause, or when it passes a function that may not
-  terminate for a parameter whose type takes one. The one exception is a
-  call through the function's own parameter, where its bound names that
-  parameter's `time` (see [Capability parameters](#capability-parameters)).
+  terminate for a parameter whose type takes one. A callee that is a
+  trait's method is decided as the table below says.
+- **A `time` clause follows a function parameter, or a method of a bound,
+  where each of its bounds names that parameter's or that method's `time`.**
+  The function may then call it, and terminates if the function passed for
+  the parameter does, or if the type argument's `impl` of the method does.
+  `O(items.length() * time(visit))` follows `visit` (see
+  [Capability parameters](#capability-parameters)), and
+  `O(time(Source.next))` follows `Source.next`:
+
+  ```truss
+  fn second[Source: Cursor](source: mut Source) -> Option[Source.Element]
+    uses Source.Uses
+    cost time O(time(Source.next))
+  {
+    let _ = mut source.next()
+    mut source.next()
+  }
+  ```
+
+  `finite` names no `time`, so a function with `cost time finite` follows
+  nothing: it terminates for every argument and every type argument.
+- **A trait's method without a `time` clause leaves termination to each
+  `impl`.** How the method is called decides which declaration says
+  whether the call terminates:
+
+  | The trait's method | The call | Whether the call terminates |
+  |---|---|---|
+  | States a `time` clause | Any | It terminates as the clause says, for every `impl` |
+  | States none | On a type whose `impl` is known | It terminates as the `time` clause of the `impl`'s method says, and may not where that method states none |
+  | States none | Through a bound on a type parameter, on `Self` in a trait, or on an associated type of either | It terminates if the type argument's `impl` of the method does |
+  | States none | Through `any Trait` | It may not terminate: `any` hides the `impl` |
+
+  `second` terminates for a `ListCursor[Int64]`, whose `next` states
+  `cost time O(1)`. For a cursor whose `next` states no `time` clause it may
+  not terminate, and only a function without a `time` clause calls it with
+  that cursor.
+- A call of a generic function terminates if each method that the
+  function's `time` clause follows terminates for the call's type arguments.
+  A type parameter of the caller passes the condition on: the caller's
+  `time` clause follows the method in turn, or the caller has no `time`
+  clause.
 - A loop without a measure may not terminate either, so a function with a
   `time` clause holds none (see [Loops](#loops)).
 - A recursive call on a part of a parameter needs nothing written. A part is
@@ -860,7 +899,7 @@ and `/` and `-` where the result stays at or above zero, and:
 | `log(n)` | The smallest integer at least log₂(n + 1) |
 | `power(base, exponent)` | `base` to the `exponent` |
 | `time(visit)` | A bound on any one call of the function parameter `visit` |
-| `time(Element.equal)` | A bound on any one call of a method of a trait that bounds a type parameter, or `Self` in a trait |
+| `time(Element.equal)` | A bound on any one call of a method of a trait that bounds a type parameter, `Self` in a trait, or an associated type of either, as in `time(Source.Element.equal)` |
 
 - `time(visit)` cannot depend on `visit`'s arguments. It is a constant for a
   parameter of type `(fn(Item) cost time O(1))`, and a fixed bound that is
@@ -872,7 +911,9 @@ and `/` and `-` where the result stays at or above zero, and:
   `time(Element.equal)`, and `<` spends `time(Element.compare)`. If a name has
   several overloads, the term means the read-only one.
 - At a call, the term has the value the type argument gives it: a constant
-  for `Int64`, whose `impl Equal` promises `cost time O(1)`.
+  for `Int64`, whose `impl Equal` promises `cost time O(1)`. It has no value
+  for a type argument whose `impl` of the method may not terminate, and a
+  bound that names it is then unbounded (see [Termination](#termination)).
 - An `impl` that overrides a provided method keeps the provided method's
   bound.
 - `log` and `power` have the same meaning in every specification. The prover
@@ -1006,6 +1047,10 @@ capabilities it uses, and whether it terminates.
   passed, and the function cannot call `visit` unless the type of `visit`
   has a `time` clause. A function with several `time` clauses follows a
   parameter only if each bound names its `time`.
+- A function that terminates only if a bound's method does is passed for a
+  capability parameter, which records the condition as it records that a
+  function may not terminate. A function type with a `time` clause does not
+  take it, and no function type states the condition.
 - A type that holds a function writes the capabilities in the field's type.
 
 ## Methods
@@ -1177,9 +1222,15 @@ impl Cursor for Countdown {
   a `Slice`, is a view. One that owns a collection gives its elements away.
 - `Uses` is the set of capabilities that `next` uses. Each `next` uses the
   implementations provided where it is called.
+- `next` states no `time` clause in the trait, so each `impl` decides
+  whether its `next` terminates (see [Termination](#termination)): a
+  cursor over a list states one, and a cursor that waits for input states
+  none.
 - `Cursor` gives a cursor the methods `to_list`, `count`, `last`, `fold`,
   and `find`, and the adapters of `standard::cursors`, such as `skip`,
-  `take`, and `zip`.
+  `take`, and `zip`. An adapter's `next` follows the `next` of each cursor
+  that it wraps: `items.cursor().skip(2).next()` terminates because the
+  `next` of a list's cursor does.
 
 ## Statements and blocks
 
@@ -1377,7 +1428,9 @@ mut scores.update_each(fn(score) { score = score / 2 })
   not, or holds a loop without a measure. Such a call or loop is an error
   where the lambda's function type takes only a function that terminates,
   or one that terminates if the functions passed for a capability parameter
-  do.
+  do, or if a bound's method does. A lambda that calls a method of a bound
+  without a `time` clause terminates if the type argument's `impl` of the
+  method does.
 - `return` and `?` exit the lambda. `break` and `continue` do not reach a
   loop outside it.
 - A lambda is always passed inside the call's parentheses.
@@ -2039,6 +2092,11 @@ trait Ordered: Equal {
   The trait's `requires` must imply the method's. A call known to reach
   that `impl` is proven against the `impl`'s contract, and a call through a
   bound or `any` against the trait's.
+- **An `impl`'s method terminates wherever its trait's method promises
+  to.** An `impl`'s method without a `time` clause has its trait's. Its own
+  `time` clause follows a method of one of the `impl`'s bounds only where
+  the trait's method states no `time` clause, or states one that follows
+  that method for this `impl`.
 - **Required traits:** a type implements the traits a trait requires before
   it implements the trait, and a bound includes them. A trait cannot
   redeclare a method of a trait it requires, but can add an overload in

@@ -758,6 +758,13 @@ divergence as an effect in the same way. The alternative is a `time` clause
 on every callback's type, which rejects each function that has none, and a
 function has none unless its author wrote one.
 
+**A bound passes on whether its `impl`'s method terminates.** A call
+through a bound of a method without a `time` clause holds a condition in
+its capability set: it terminates if the type argument's `impl` of the
+method does. A type argument settles the condition from that `impl`, so
+`skip` over a list's cursor terminates, and `skip` over a cursor that waits
+on a socket may not.
+
 The check is the capability check. It runs in the type checker, it covers a
 function bound to a local as it covers one passed to a call, and a
 specification, which has no capabilities, calls only functions that
@@ -771,6 +778,9 @@ terminate.
 | A `time` clause follows a function parameter only where its bound names `time(parameter)`. `finite` names none, so it promises termination whatever is passed. | The bound is true as written: it is unbounded exactly where the parameter's time is. A `finite` that followed its callbacks would be a condition that the signature does not show. |
 | No parameter passes on termination alone. A callback that may not terminate is taken through a capability parameter, which also takes its capabilities. | A callee needs a callback without capabilities only to apply it in a contract, and there the callback must terminate too. One mechanism then covers both. |
 | No function type states that a function uses a capability parameter's capabilities and may not terminate. | Non-termination is never written: a function may not terminate unless it states a `time` clause, and a function type that names a capability parameter leaves termination to the parameter. A clause for this type would be the only written form of non-termination, and only a lambda that is bound or returned in the function that declares the parameter would need it. A lambda passed in a call needs no written type. |
+| A trait's method without a `time` clause leaves termination to each `impl`, and a `time` clause follows such a method of a bound where each of its bounds names `time(Type.method)`. | `Cursor.next` terminates for a list's cursor and need not for a cursor over lines read from a socket. One alternative is a `time` clause on the trait's method, which forbids the second cursor. The other is a call through a bound that may not terminate: no adapter such as `skip` then states a `time` clause, and no function with a `time` clause uses an adapter over a list. The bound is true as written for every type argument: the `time` of a method that may not terminate is unbounded. |
+| A call through `any Trait` of a method without a `time` clause may not terminate. | `any` hides the type, so no `impl` is known where the call is checked. A `time` clause that followed the call would be a condition on a type that no signature names. |
+| An `impl`'s `time` clause follows a method of its bounds only where its trait's method lets the `impl` decide. | A call through a bound is checked against the trait's method. If the trait's method promised termination and an `impl` followed `Inner.next`, a function with a `time` clause would call a method that never returns. |
 | A loop without a measure may not terminate, so it stands only where that is allowed, as a call that may not terminate does. | The capability check then covers the loop in every body, as it covers a call. The alternative is an obligation of the prover for each loop in a function with a `time` clause, which states the same fact a second time and leaves a lambda's loop to a rule of its own. |
 | A lambda may not terminate when its body makes a call that may not, or holds a loop without a measure. | Its capabilities are inferred from its body, and so is this. A lambda with neither stays in the logic, so a proof can reason about a call that passes it. |
 

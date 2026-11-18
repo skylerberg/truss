@@ -41,7 +41,17 @@ and capability =
   | Capability_error of Diagnostic.reported
   | Divergence of divergence
 
-and divergence = Always | Of_parameter of parameter | Of_variable of int
+and divergence =
+  | Always
+  | Of_parameter of parameter
+  | Of_impl_method of {
+      self_type : ty;
+      trait : trait_reference;
+      name : string;
+      receiver : Path.receiver;
+    }
+  | Of_variable of int
+
 and capability_set = private capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
 
@@ -124,6 +134,7 @@ val costs_imply : provided:cost list -> required:cost list -> bool
 val show : ty -> string
 val describe : ty -> string
 val show_capability : capability -> string
+val show_impl_method : ty -> trait_reference -> string -> string
 val show_trait : trait_reference -> string
 val show_argument : argument -> string
 val show_capabilities : capability_set -> string

@@ -125,10 +125,16 @@ let assume_laws (context : State.context) frame ~at (trait : Types.trait_referen
 
 let template_trait : Path.t = Well_known.make_path From_template
 
-let signature_terminates (context : State.context) path =
-  match Interface.Impls.read_signature context.lookups.interface path with
-  | Some (signature : Types.signature) -> Types.terminates signature.uses
-  | None -> true
+let has_method_time (context : State.context) (callee : Invocation.callee) (path : Path.t) =
+  match (callee, path) with
+  | Trait_method { trait; evidence = Bound; _ }, Method { owner; _ }
+    when Path.equal owner trait.trait ->
+      true
+  | Trait_method _, _ -> (
+      match Interface.Impls.read_signature context.lookups.interface path with
+      | Some (signature : Types.signature) -> Types.terminates signature.uses
+      | None -> true)
+  | (Function _ | Capability_method _ | Intrinsic _ | Indirect ()), _ -> false
 
 let check_named_callback context (frame : State.frame) (invocation : Invocation.t)
     (passed : State.passed) ~origin path (contract : State.contract) (values : State.passed list) =

@@ -41,7 +41,17 @@ and capability =
   | Capability_error of Diagnostic.reported
   | Divergence of divergence
 
-and divergence = Always | Of_parameter of parameter | Of_variable of int
+and divergence =
+  | Always
+  | Of_parameter of parameter
+  | Of_impl_method of {
+      self_type : ty;
+      trait : trait_reference;
+      name : string;
+      receiver : Path.receiver;
+    }
+  | Of_variable of int
+
 and capability_set = capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
 
@@ -255,6 +265,17 @@ and substitute_capabilities substitution capabilities =
                 name;
               };
           ]
+      | Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
+          [
+            Divergence
+              (Of_impl_method
+                 {
+                   self_type = substitute substitution self_type;
+                   trait = substitute_trait substitution trait;
+                   name;
+                   receiver;
+                 });
+          ]
       | ( Capability _ | Capability_variable _ | Capability_error _
         | Divergence (Always | Of_variable _) ) as capability ->
           [ capability ])
@@ -390,6 +411,8 @@ let has_unsolved_capabilities capabilities =
     (function
       | Capability_variable _ | Divergence (Of_variable _) -> true
       | Capability_projection { base; _ } -> contains_unsolved base
+      | Divergence (Of_impl_method { self_type; trait; _ }) ->
+          contains_unsolved self_type || is_unsolved_trait trait
       | Capability _ | Capability_parameter _ | Capability_error _
       | Divergence (Always | Of_parameter _) ->
           false)
@@ -427,12 +450,17 @@ let show_resource = function
       Printf.sprintf "calls(%s%s)" (show_path_name capability)
         (match method_ with Some method_ -> "." ^ method_ | None -> "")
 
-let rec show_capability = function
+let rec show_impl_method self_type (trait : trait_reference) name =
+  Printf.sprintf "`%s`'s `impl` of `%s.%s`" (show self_type) (show_path_name trait.trait) name
+
+and show_capability = function
   | Capability path -> show_path_name path
   | Capability_parameter { name; _ } | Divergence (Of_parameter { name; _ }) -> "generic " ^ name
   | Capability_projection { base; name; _ } -> show base ^ "." ^ name
   | Capability_variable _ | Capability_error _ | Divergence (Of_variable _) -> "_"
   | Divergence Always -> "may not terminate"
+  | Divergence (Of_impl_method { self_type; name; _ }) ->
+      Printf.sprintf "may not terminate where %s.%s may not" (show self_type) name
 
 and show = function
   | Named { path; arguments = [] } -> show_path_name path

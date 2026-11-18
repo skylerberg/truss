@@ -18,6 +18,17 @@ val record_diagnostic :
   Diagnostic.reported
 
 val list_trait_closure : Lookups.t -> Path.t -> Path.t list
+val find_bounded_type : t -> Syntax.expression -> Types.ty option
+
+type bound_method = {
+  self_type : Types.ty;
+  trait : Types.trait_reference;
+  name : string;
+  receiver : Path.receiver;
+}
+
+val list_bound_methods : t -> Types.ty -> string -> bound_method list
+val find_timed_method : bound_method list -> bound_method option
 val show_path : Syntax.path -> string
 val elaborate_type : t -> Syntax.type_expression -> Types.ty
 

@@ -14,6 +14,17 @@ module Elaborator : sig
   val list_named_types : t -> (Syntax.id * Types.ty) list
   val show_path : Syntax.path -> string
   val elaborate_type : t -> Syntax.type_expression -> Types.ty
+  val find_bounded_type : t -> Syntax.expression -> Types.ty option
+
+  type bound_method = Elaborator.bound_method = {
+    self_type : Types.ty;
+    trait : Types.trait_reference;
+    name : string;
+    receiver : Path.receiver;
+  }
+
+  val list_bound_methods : t -> Types.ty -> string -> bound_method list
+  val find_timed_method : bound_method list -> bound_method option
 
   val elaborate_header :
     Lookups.t -> Resolve.Names.key -> (Environment.header, Diagnostic.in_definition list) result

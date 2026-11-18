@@ -591,19 +591,142 @@ let list_constant_costs (clauses : Syntax.clause list) : Types.cost list =
       | _ -> None)
     clauses
 
-let list_timed_names (bound : Syntax.expression) =
+type timed_operand =
+  | Timed_parameter of string
+  | Timed_bound_method of { type_ : Syntax.expression; method_ : Syntax.name }
+
+let list_timed_operands (bound : Syntax.expression) =
   let timed = ref [] in
   let rec visit (value : Syntax.expression) =
     (match value.kind with
     | Call
         ( { kind = Name { modules = []; last = { text = "time"; _ } }; _ },
-          [ { value = { kind = Name { modules = []; last }; _ }; _ } ] ) ->
-        timed := (value.id, last.text) :: !timed
+          [ { value = operand; _ } ] ) -> (
+        match operand.kind with
+        | Name { modules = []; last } -> timed := (value.id, Timed_parameter last.text) :: !timed
+        | Member (type_, method_) ->
+            timed := (value.id, Timed_bound_method { type_; method_ }) :: !timed
+        | _ -> ())
     | _ -> ());
     Syntax_walk.visit_children visit value
   in
   visit bound;
   List.rev !timed
+
+let find_trait_parts context trait =
+  match Option.bind (context.lookups.names.find_key trait) context.lookups.find_header with
+  | Some { container = Trait_parts { trait_generics; requires; associated_types; _ }; _ } ->
+      Some (trait_generics, requires, associated_types)
+  | Some { container = Capability_parts | Impl_parts _; _ } | None -> None
+
+let list_bound_closure context ~self (bound : Types.trait_reference) =
+  Properties.list_bound_closure_over
+    ~find_requirements:(fun trait ->
+      Option.map
+        (fun (trait_generics, requires, _) -> (trait_generics, requires))
+        (find_trait_parts context trait))
+    ~self bound
+
+let list_direct_bounds context (type_ : Types.ty) =
+  match type_ with
+  | Types.Parameter parameter -> list_bounds context parameter
+  | Types.Projection { base; trait; name } ->
+      List.concat_map
+        (fun (declaring : Types.trait_reference) ->
+          match find_trait_parts context declaring.trait with
+          | Some (trait_generics, _, associated_types) ->
+              let substitution =
+                Types.bind_argument
+                  (Types.make_self_parameter declaring.trait)
+                  (Types.Type base)
+                  (Types.make_substitution trait_generics declaring.trait_arguments)
+              in
+              List.concat_map
+                (fun (associated : Types.associated_type) ->
+                  if associated.associated_name = name then
+                    List.map (Types.substitute_trait substitution) associated.associated_bounds
+                  else [])
+                associated_types
+          | None -> [])
+        (list_bound_closure context ~self:base trait)
+  | _ -> []
+
+let rec find_bounded_type context (written : Syntax.expression) =
+  match written.kind with
+  | Self_type_value -> (
+      match context.self_type with
+      | Some (Types.Parameter _ as self) -> Some self
+      | Some _ | None -> None)
+  | Name { modules = []; last } -> (
+      match find_target context last with
+      | Some (Type_parameter parameter) -> Some (Types.Parameter parameter)
+      | Some _ | None -> None)
+  | Member (base, associated) ->
+      Option.bind (find_bounded_type context base) (fun base ->
+          let bounds = list_direct_bounds context base in
+          match
+            List.find_map
+              (fun (bound : Types.trait_reference) ->
+                List.assoc_opt associated.text bound.associated)
+              bounds
+          with
+          | Some ((Types.Parameter _ | Types.Projection _) as fixed) -> Some fixed
+          | Some _ -> None
+          | None ->
+              List.find_map
+                (fun (bound : Types.trait_reference) ->
+                  Option.map
+                    (fun _ -> Types.Projection { base; trait = bound; name = associated.text })
+                    (find_declaring_trait context bound.trait associated.text))
+                bounds)
+  | Parenthesized inner -> find_bounded_type context inner
+  | _ -> None
+
+type bound_method = {
+  self_type : Types.ty;
+  trait : Types.trait_reference;
+  name : string;
+  receiver : Path.receiver;
+}
+
+let list_bound_methods context (self_type : Types.ty) name =
+  List.fold_left
+    (fun methods (trait : Types.trait_reference) ->
+      List.fold_left
+        (fun methods (member : Resolve.Names.key) ->
+          match member.path with
+          | Method { receiver; _ }
+            when not
+                   (List.exists
+                      (fun (known : bound_method) ->
+                        Path.equal known.trait.trait trait.trait && known.receiver = receiver)
+                      methods) ->
+              methods @ [ { self_type; trait = { trait with associated = [] }; name; receiver } ]
+          | _ -> methods)
+        methods
+        (context.lookups.names.list_members trait.trait name))
+    []
+    (List.concat_map
+       (list_bound_closure context ~self:self_type)
+       (list_direct_bounds context self_type))
+
+let find_timed_method (overloads : bound_method list) =
+  match overloads with
+  | [ only ] -> Some only
+  | several -> (
+      match List.filter (fun (method_ : bound_method) -> method_.receiver = Read) several with
+      | [ read_only ] -> Some read_only
+      | _ -> None)
+
+let states_time_clause context (method_ : bound_method) =
+  List.exists
+    (fun (member : Resolve.Names.key) ->
+      match (member.path, context.lookups.names.read_definition member) with
+      | ( Method { receiver; _ },
+          { kind = Function { signature; _ } | Method_declaration signature; _ } ) ->
+          receiver = method_.receiver && states_time signature.clauses
+      | _ -> false)
+    (context.lookups.names.list_members method_.trait.trait method_.name)
 
 let elaborate_divergence context ~(parameters : Types.parameter_info list)
     (clauses : Syntax.clause list) : Types.capability_set =
@@ -613,7 +736,7 @@ let elaborate_divergence context ~(parameters : Types.parameter_info list)
         match clause.kind with Cost { resource = Time; bound; _ } -> Some bound | _ -> None)
       clauses
   in
-  let read_divergence (id, name) =
+  let read_parameter_divergence id name =
     match
       List.find_opt (fun (parameter : Types.parameter_info) -> parameter.name = name) parameters
     with
@@ -629,6 +752,22 @@ let elaborate_divergence context ~(parameters : Types.parameter_info list)
     | Some { type_ = Function { uses; _ }; _ } -> Types.list_divergence uses
     | Some _ | None -> Types.no_capabilities
   in
+  let read_bound_method_divergence type_ (method_ : Syntax.name) =
+    match
+      Option.bind (find_bounded_type context type_) (fun self_type ->
+          find_timed_method (list_bound_methods context self_type method_.text))
+    with
+    | Some ({ self_type; trait; name; receiver } as followed)
+      when not (states_time_clause context followed) ->
+        Types.make_capability_set
+          [ Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ]
+    | Some _ | None -> Types.no_capabilities
+  in
+  let read_divergence (id, operand) =
+    match operand with
+    | Timed_parameter name -> read_parameter_divergence id name
+    | Timed_bound_method { type_; method_ } -> read_bound_method_divergence type_ method_
+  in
   match time_bounds with
   | [] -> Types.make_capability_set [ Types.unconditional_divergence ]
   | bounds ->
@@ -639,7 +778,7 @@ let elaborate_divergence context ~(parameters : Types.parameter_info list)
              | Finite -> Types.no_capabilities
              | Big_o value | At_most value | Exactly value ->
                  List.fold_left Types.union_capabilities Types.no_capabilities
-                   (List.map read_divergence (list_timed_names value)))
+                   (List.map read_divergence (list_timed_operands value)))
            bounds)
 
 let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signature) :

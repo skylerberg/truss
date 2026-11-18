@@ -243,11 +243,15 @@ let diverges_whatever_it_is_passed (state : State.state) (callee : Core.callee) 
   | Capability_method _ -> not (Types.terminates (State.compute_callee_uses state callee))
   | Intrinsic _ | Indirect _ -> false
 
+let show_trait_method (trait : Types.trait_reference) name =
+  Printf.sprintf "%s.%s"
+    (Types.show_trait { trait with trait_arguments = []; associated = [] })
+    name
+
 let find_callee_name (callee : Core.callee) =
   match callee with
   | Function { path; _ } -> Some (Path.show path)
-  | Trait_method { trait; name; _ } ->
-      Some (Printf.sprintf "%s.%s" (Types.show_trait { trait with trait_arguments = [] }) name)
+  | Trait_method { trait; name; _ } -> Some (show_trait_method trait name)
   | Capability_method { capability; name } ->
       Some (Printf.sprintf "%s.%s" (Types.show_capability (Types.Capability capability)) name)
   | Intrinsic _ | Indirect _ -> None
@@ -282,6 +286,120 @@ let find_divergence_cause checking ~available (lambda : Core.id) =
     (fun requirement -> is_divergence_missing checking.state ~available requirement.required)
     (List.rev (Hashtbl.find_all checking.lambda_requirements lambda))
 
+type followed_method = {
+  self_type : Types.ty;
+  trait : Types.trait_reference;
+  name : string;
+  receiver : Path.receiver;
+}
+
+type follower = Callee | Trait_declaration
+
+let find_missing_followed_method (state : State.state) ~available (callee : Core.callee) =
+  let find_among instantiated =
+    List.find_map
+      (function
+        | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) as divergence
+          when is_divergence_missing state ~available (Types.make_capability_set [ divergence ]) ->
+            Some { self_type = State.finalize_type state self_type; trait; name; receiver }
+        | _ -> None)
+      (instantiated : Types.capability_set :> Types.capability list)
+  in
+  let instantiated = Callee_uses.instantiate state.lookups.interface callee in
+  match (find_among instantiated, callee) with
+  | Some followed, _ -> Some (Callee, followed)
+  | None, Trait_method ({ evidence = Impl _; _ } as method_)
+    when not (Types.terminates instantiated) ->
+      Option.map
+        (fun followed -> (Trait_declaration, followed))
+        (find_among
+           (Callee_uses.instantiate state.lookups.interface
+              (Trait_method { method_ with evidence = Dynamic })))
+  | None, _ -> None
+
+let rec is_bounded_type : Types.ty -> bool = function
+  | Parameter _ -> true
+  | Projection { base; _ } -> is_bounded_type base
+  | _ -> false
+
+let advise_following scope (followed : followed_method) =
+  match scope.kind with
+  | Function_body _ when is_bounded_type followed.self_type ->
+      let shown = Printf.sprintf "%s.%s" (Types.show followed.self_type) followed.name in
+      Some
+        (Printf.sprintf "A `time` clause follows `%s` where its bound names `time(%s)`." shown shown)
+  | Function_body _ | Lambda_body _ | Restricted _ -> None
+
+let describe_followed_method (state : State.state) (followed : followed_method) =
+  let { self_type; trait; name; receiver } = followed in
+  let impl_method = Types.show_impl_method self_type trait name in
+  match
+    ( self_type,
+      Interface.Impls.find_evidence state.lookups.interface ~list_bounds:(State.lookup_bounds state)
+        ~checks_conditions:false self_type trait )
+  with
+  | Types.Any _, _ ->
+      let trait_method = show_trait_method trait name in
+      Printf.sprintf "`%s` through `%s`, where `%s` has no `time` clause" trait_method
+        (Types.show self_type) trait_method
+  | _, Some (From_impl { impl; _ }) -> (
+      match
+        Interface.Impls.read_signature state.lookups.interface
+          (Method { owner = impl; name; receiver })
+      with
+      | Some signature
+        when List.exists
+               (function Types.Divergence (Of_parameter _) -> true | _ -> false)
+               (signature.uses :> Types.capability list) ->
+          Printf.sprintf "%s, whose `time` clause follows a function that it is passed" impl_method
+      | Some signature when Types.terminates signature.uses ->
+          Printf.sprintf "%s, which may not terminate" impl_method
+      | Some _ | None -> Printf.sprintf "%s, which has no `time` clause" impl_method)
+  | _, (Some (From_bound | From_any | Built_in | Accepted _) | None) -> impl_method
+
+let explain_followed_method (state : State.state) scope ~subject ?passed ~available
+    (callee : Core.callee) =
+  Option.map
+    (fun (follower, (followed : followed_method)) ->
+      let explain_follower shown =
+        Printf.sprintf "%s may not terminate, since the `time` clause of %s follows %s" subject
+          shown
+          (describe_followed_method state followed)
+      in
+      make_explanation ?advice:(advise_following scope followed)
+        (match (callee, follower) with
+        | Trait_method { trait; name; receiver; evidence = Bound; _ }, _
+          when Path.equal trait.trait followed.trait.trait
+               && name = followed.name && receiver = followed.receiver ->
+            Printf.sprintf
+              "%s may not terminate, since `%s` has no `time` clause and `%s`'s `impl` decides \
+               whether it terminates"
+              subject (show_trait_method trait name) (Types.show followed.self_type)
+        | Trait_method { trait; name; self_type; evidence = Impl _; _ }, Callee ->
+            explain_follower
+              (Types.show_impl_method (State.finalize_type state self_type) trait name)
+        | Trait_method { trait; name; _ }, (Callee | Trait_declaration) ->
+            explain_follower (Printf.sprintf "`%s`" (show_trait_method trait name))
+        | Function { path; _ }, _ ->
+            explain_follower
+              (Printf.sprintf "`%s`%s" (Path.show path)
+                 (match passed with
+                 | Some parameter_phrase -> Printf.sprintf ", passed %s," parameter_phrase
+                 | None -> ""))
+        | Indirect function_value, _ ->
+            Printf.sprintf "%s may not terminate, since %s terminates only if %s does" subject
+              (match function_value with
+              | Place (Local { local; _ }) -> (
+                  match Core_walk.find_local_name local with
+                  | Some name -> Printf.sprintf "`%s`" name
+                  | None -> "the function called")
+              | Place (Constant _ | Field _ | Lent _ | Temporary _) | Value _ ->
+                  "the function called")
+              (Types.show_impl_method followed.self_type followed.trait followed.name)
+        | (Capability_method _ | Intrinsic _), _ ->
+            State.raise_bug "the time of a capability's method or an intrinsic follows a method"))
+    (find_missing_followed_method state ~available callee)
+
 let explain_call_divergence checking scope (call : Core.call) ~available =
   let state = checking.state in
   let names = list_parameter_names state call.callee in
@@ -310,13 +428,25 @@ let explain_call_divergence checking scope (call : Core.call) ~available =
                   (Printf.sprintf "This call may not terminate, since the lambda passed %s may not"
                      parameter_phrase))
               (find_divergence_cause checking ~available id)
-        | Value { kind = Function_value { path; instantiation }; _ }
-          when diverges_whatever_it_is_passed state (Function { path; instantiation }) ->
-            Some
-              (make_explanation
-                 (Printf.sprintf
-                    "This call may not terminate, since `%s`, passed %s, has no `time` clause"
-                    (Path.show path) parameter_phrase))
+        | Value { kind = Function_value { path; instantiation }; _ } -> (
+            let named : Core.callee = Function { path; instantiation } in
+            match
+              explain_followed_method state scope ~subject:"This call" ~passed:parameter_phrase
+                ~available named
+            with
+            | Some explanation -> Some explanation
+            | None when diverges_whatever_it_is_passed state named ->
+                Some
+                  (make_explanation
+                     (Printf.sprintf
+                        "This call may not terminate, since `%s`, passed %s, has no `time` clause"
+                        (Path.show path) parameter_phrase))
+            | None ->
+                Some
+                  (make_explanation
+                     (Printf.sprintf
+                        "This call may not terminate, since the function passed %s may not"
+                        parameter_phrase)))
         | Place _ | Value _ ->
             Some
               (make_explanation
@@ -328,12 +458,18 @@ let explain_call_divergence checking scope (call : Core.call) ~available =
     List.find_map find_argument_explanation
       (List.mapi (fun index argument -> (index, argument)) call.arguments)
   in
-  match (call.callee, find_callee_name call.callee, argument_explanation) with
-  | callee, Some shown, _ when diverges_whatever_it_is_passed state callee ->
+  match
+    ( explain_followed_method state scope ~subject:"This call" ~available call.callee,
+      call.callee,
+      find_callee_name call.callee,
+      argument_explanation )
+  with
+  | Some explanation, _, _, _ -> explanation
+  | None, callee, Some shown, _ when diverges_whatever_it_is_passed state callee ->
       make_explanation
         (Printf.sprintf "This call may not terminate, since `%s` has no `time` clause" shown)
-  | _, _, Some explanation -> explanation
-  | Indirect function_value, _, None -> (
+  | None, _, _, Some explanation -> explanation
+  | None, Indirect function_value, _, None -> (
       let name =
         match function_value with
         | Place (Local { local; _ }) -> Core_walk.find_local_name local
@@ -364,18 +500,21 @@ let explain_call_divergence checking scope (call : Core.call) ~available =
           make_explanation
             "This call may not terminate, since the type of the function it calls has no `time` \
              clause")
-  | _ -> make_explanation "This call may not terminate"
+  | None, _, _, None -> make_explanation "This call may not terminate"
 
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
   check_callee_grants checking origin callee;
   require_available checking scope origin
-    ~explain_divergence:(fun ~available:_ ->
-      make_explanation
-        (match find_callee_name callee with
-        | Some shown ->
-            Printf.sprintf "This call of `%s` may not terminate, since it has no `time` clause"
-              shown
-        | None -> "This call may not terminate"))
+    ~explain_divergence:(fun ~available ->
+      match find_callee_name callee with
+      | Some shown -> (
+          let subject = Printf.sprintf "This call of `%s`" shown in
+          match explain_followed_method checking.state scope ~subject ~available callee with
+          | Some explanation -> explanation
+          | None ->
+              make_explanation
+                (Printf.sprintf "%s may not terminate, since it has no `time` clause" subject))
+      | None -> make_explanation "This call may not terminate")
     (State.compute_callee_uses checking.state callee);
   match callee with
   | Intrinsic { operation; _ } -> require_intrinsic_uses checking scope origin operation
@@ -390,20 +529,42 @@ let require_divergence_of_unmeasured_loop checking scope (origin : Core.origin)
     (Types.make_capability_set [ Types.unconditional_divergence ])
 
 let describe_lambda_termination_demand (lambda_uses : Types.capability_set) =
-  match
+  let capability_parameters =
     List.filter_map
       (function
         | Types.Divergence (Of_parameter _) as divergence ->
             Some (Printf.sprintf "`%s`" (Types.show_capability divergence))
         | _ -> None)
       (lambda_uses :> Types.capability list)
-  with
+  and followed_methods =
+    List.filter_map
+      (function
+        | Types.Divergence (Of_impl_method { self_type; trait; name; _ }) ->
+            Some (Types.show_impl_method self_type trait name)
+        | _ -> None)
+      (lambda_uses :> Types.capability list)
+  in
+  let conditions =
+    (match capability_parameters with
+      | [] -> []
+      | capability_parameters ->
+          [
+            Printf.sprintf "the functions passed for %s do"
+              (String.concat " and " capability_parameters);
+          ])
+    @
+    match followed_methods with
+    | [] -> []
+    | [ followed_method ] -> [ followed_method ^ " does" ]
+    | followed_methods -> [ String.concat " and " followed_methods ^ " do" ]
+  in
+  match conditions with
   | [] -> "the function type that this lambda is passed as promises that the lambda terminates"
-  | capability_parameters ->
+  | conditions ->
       Printf.sprintf
         "the function type that this lambda is passed as takes only a function that terminates if \
-         the functions passed for %s do"
-        (String.concat " and " capability_parameters)
+         %s"
+        (String.concat " and " conditions)
 
 let rec check_expression checking scope (node : Core.expression) =
   match node.kind with

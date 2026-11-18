@@ -715,10 +715,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             Amounts.compute_step_amount context after invocation values counter
         | _ ->
             let ends_in =
-              match invocation.callee with
-              | Trait_method _ when Laws.signature_terminates context path ->
-                  Some (Amounts.compute_method_time context frame invocation.callee)
-              | _ -> None
+              if Laws.has_method_time context invocation.callee path then
+                Some (Amounts.compute_method_time context frame invocation.callee)
+              else None
             in
             Amounts.compute_callee_amount ?ends_in context after ~path
               ~clauses:(Contracts.list_declared_clauses contract)
