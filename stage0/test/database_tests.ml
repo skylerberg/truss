@@ -278,6 +278,49 @@ let make_level_source ~height =
 
 let raised_of_shelf = "app::main::impl app::main::Level for app::main::Shelf.raised"
 
+let propagate_with_lib ~before ~after =
+  let settle files =
+    let database = Support.make_database (Support.setup ~dependencies:[ ("app", "lib") ] files) in
+    Database.propagate database;
+    database
+  in
+  let hot = settle before in
+  let observed =
+    Database.For_testing.observe (fun () ->
+        Database.update hot (list_changes ~before ~after);
+        Database.propagate hot)
+  in
+  (match Database.For_testing.list_differences hot (settle after) with
+  | [] -> ()
+  | parts ->
+      Harness.fail "the propagated database differs from a cold build in %s"
+        (String.concat ", " parts));
+  observed.recomputed
+
+let make_level_library ~provided =
+  Printf.sprintf
+    "public trait Level {\n\
+    \  fn height(self) -> Int64\n\
+    \    cost time finite\n\
+     %s}\n\n\
+     public type Shelf(height: Int64)\n\n\
+     impl Level for Shelf {\n\
+    \  fn height(self) -> Int64 {\n\
+    \    self.height\n\
+    \  }\n\
+     }\n\n\
+     public fn measure[Item: Level](item: Item) -> Int64\n\
+    \  cost time finite\n\
+     {\n\
+    \  item.height()\n\
+     }\n"
+    provided
+
+let level_user =
+  "use lib::tools\nfn caller(shelf: tools::Shelf) -> Int64 { tools::measure(shelf) }\n"
+
+let raised_of_library_shelf = "lib::tools::impl lib::tools::Level for lib::tools::Shelf.raised"
+
 let callee_and_caller =
   "fn callee(x: Int64) -> Int64 { x + 1 }\nfn caller() -> Int64 { callee(1) }\n"
 
@@ -653,6 +696,37 @@ let () =
            ~before:[ ("app::main", make_level_source ~height:"self.height") ]
            ~after:[ ("app::main", make_level_source ~height:"floor(self)") ])
         ~parts:[ "recursion group " ^ raised_of_shelf; "proof app::main::floor" ]);
+  Harness.test "removing a function that a function of its package calls matches a cold build"
+    (fun () ->
+      ignore
+        (list_propagated
+           ~before:[ ("app::main", callee_and_caller) ]
+           ~after:[ ("app::main", "fn caller() -> Int64 { callee(1) }\n") ]));
+  Harness.test "removing a function that another package calls matches a cold build" (fun () ->
+      ignore
+        (propagate_with_lib ~before:tool_user
+           ~after:[ List.hd tool_user; ("lib::tools", "public fn other() -> Int64 { 2 }\n") ]));
+  Harness.test "removing an impl that a call through `any` reaches matches a cold build" (fun () ->
+      ignore
+        (list_propagated
+           ~before:[ ("app::main", stepper_that_runs) ]
+           ~after:[ ("app::main", stepper) ]));
+  Harness.test
+    "removing a provided method that another package's call graph reaches through an impl matches \
+     a cold build" (fun () ->
+      let provided =
+        "\n  fn raised(self) -> Int64\n    cost time finite\n  {\n    self.height()\n  }\n"
+      in
+      let with_raised = [ ("app::main", level_user); ("lib::tools", make_level_library ~provided) ]
+      and without_raised =
+        [ ("app::main", level_user); ("lib::tools", make_level_library ~provided:"") ]
+      in
+      expect_included
+        (propagate_with_lib ~before:without_raised ~after:with_raised)
+        ~parts:[ "call edges app " ^ raised_of_library_shelf ];
+      expect_included
+        (propagate_with_lib ~before:with_raised ~after:without_raised)
+        ~parts:[ "call edges app " ^ raised_of_library_shelf ]);
   Harness.test
     "adding a file and then removing it recomputes no part of the other file's definitions"
     (fun () ->
