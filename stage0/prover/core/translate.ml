@@ -194,18 +194,18 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
   in
   let pair_up terms =
     match (inherited, parameters, terms) with
-    | Some ((part : State.part), _), { local = Self; _ } :: _, _ :: rest
+    | Some ((clauses : State.clauses), _), { local = Self; _ } :: _, _ :: rest
       when not
              (List.exists
                 (fun (parameter : Mir.parameter) -> parameter.local = Self)
-                part.parameters) ->
+                clauses.parameters) ->
         rest
     | _ -> terms
   in
   let has_trait_frame =
     match inherited with
-    | Some ((part : State.part), _) ->
-        List.length part.parameters = List.length (pair_up parameters)
+    | Some ((clauses : State.clauses), _) ->
+        List.length clauses.parameters = List.length (pair_up parameters)
     | None -> false
   in
   let inherits_precondition =
@@ -302,7 +302,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
   let entry_terms = list_paired_values start in
   let find_trait_frame (at : State.frame) ~result =
     match inherited with
-    | Some ((part : State.part), substitution) when has_trait_frame ->
+    | Some ((clauses : State.clauses), substitution) when has_trait_frame ->
         let locals, types, self, old_locals =
           List.fold_left2
             (fun (locals, types, self, old_locals) (parameter : Mir.parameter) (entry, exit_) ->
@@ -314,14 +314,14 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
                     self,
                     Locals.add (Core_local local) entry old_locals ))
             (Locals.empty, Locals.empty, None, Locals.empty)
-            part.parameters
+            clauses.parameters
             (List.combine entry_terms (list_paired_values at))
         in
         Some
-          ( part,
+          ( clauses,
             {
               at with
-              source = part.callee;
+              source = clauses.callee;
               locals;
               types;
               old_locals;
@@ -336,11 +336,11 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
   in
   let trait_requires =
     match find_trait_frame start ~result:None with
-    | Some (part, inside) ->
+    | Some (clauses, inside) ->
         Logic.conjunction
           (List.map
              (fun requirement -> snd (Validity.read_specification context inside requirement))
-             (Facts.list_clauses part.requires))
+             (Facts.list_clauses clauses.requires))
     | None -> Logic.Boolean true
   in
   let mir =
@@ -352,8 +352,8 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
     list_promises context source start.locals contract.costs ~inherited:false
     @
     match find_trait_frame start ~result:None with
-    | Some (part, inside) ->
-        list_promises context part.callee inside.locals part.costs ~inherited:true
+    | Some (clauses, inside) ->
+        list_promises context clauses.callee inside.locals clauses.costs ~inherited:true
     | None -> []
   in
   context.counters <-
@@ -524,18 +524,18 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
               ~compute_change)
         promised;
       match find_trait_frame frame ~result:returned with
-      | Some (part, inside) ->
+      | Some (clauses, inside) ->
           List.iter
             (fun (clause : Mir.formula) ->
               let _, term = Validity.read_specification context inside clause in
               Facts.oblige context under_trait Ensures Whole_definition
                 [
-                  Text (Printf.sprintf "The %s's `" (show_promiser_kind lookups part.callee));
-                  Facts.quote part.callee clause.origin;
+                  Text (Printf.sprintf "The %s's `" (show_promiser_kind lookups clauses.callee));
+                  Facts.quote clauses.callee clause.origin;
                   Text "` may not hold when this method returns.";
                 ]
                 term)
-            part.ensures
+            clauses.ensures
       | _ -> ())
     returns;
   make_outcome context

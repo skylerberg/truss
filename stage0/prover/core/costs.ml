@@ -227,6 +227,11 @@ let list_varying_parts varies term =
   walk Grows term;
   !parts
 
+let grows_with ~varies term =
+  List.exists
+    (fun (_, polarity) -> polarity <> Shrinks)
+    (list_varying_parts varies (rewrite_choices_as_most term))
+
 let rec list_comparisons fact =
   match fact with
   | Logic.Operation ("and", parts) -> List.concat_map list_comparisons parts

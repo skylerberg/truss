@@ -145,20 +145,21 @@ let make_conditional_amount condition amount =
   | condition -> Logic.ite condition amount Costs.zero
 
 let compute_callee_amount ?(method_cost : (Metric.t -> Logic.term) option) (context : State.context)
-    after ~path ~(parts : State.part list) ~(bind_frame : State.part -> State.frame) ~uses
-    ~(values : State.passed list) ~change (counter : Costs.counter) =
+    after ~path ~clauses:(declared_clauses : State.clauses list)
+    ~(bind_frame : State.clauses -> State.frame) ~uses ~(values : State.passed list) ~change
+    (counter : Costs.counter) =
   let is_recursive_call =
     counter.counting = Units
     && List.mem counter context.bounded_counters
     && Facts.is_in_recursion_group context path
   in
-  let list_clauses (part : State.part) =
-    let frame = bind_frame part in
+  let list_matching_costs (clauses : State.clauses) =
+    let frame = bind_frame clauses in
     List.filter_map
       (fun (cost : Mir.cost) ->
-        if is_same_resource cost ~locals:frame.locals counter then Some (part, frame, cost)
+        if is_same_resource cost ~locals:frame.locals counter then Some (clauses, frame, cost)
         else None)
-      part.costs
+      clauses.costs
   in
   let compute_amount (_, (frame : State.frame), (cost : Mir.cost)) =
     let exact_target =
@@ -180,15 +181,15 @@ let compute_callee_amount ?(method_cost : (Metric.t -> Logic.term) option) (cont
   let find_first_clauses () =
     let amortized_first = Option.is_some change && counter.amortized in
     List.find_map
-      (fun part ->
-        match list_clauses part with
+      (fun clauses ->
+        match list_matching_costs clauses with
         | [] -> None
-        | clauses ->
+        | costs ->
             let amortized, plain =
-              List.partition (fun (_, _, (cost : Mir.cost)) -> cost.amortized) clauses
+              List.partition (fun (_, _, (cost : Mir.cost)) -> cost.amortized) costs
             in
             Some (if amortized_first then amortized @ plain else plain @ amortized))
-      parts
+      declared_clauses
   in
   match counter.resource with
   | Calls target when make_reach_formula context after uses values target = Logic.Boolean false ->
@@ -298,10 +299,10 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
           Logic.int 1
       | Calls (Capability _ | Capability_method _ | Through _) -> Costs.zero
       | Metric _ -> (
-          match Contracts.find_capability_part context.lookups capability name with
-          | Some part ->
+          match Contracts.find_capability_clauses context.lookups capability name with
+          | Some capability_clauses ->
               let inside =
-                Validity.bind_part_arguments frame part
+                Validity.bind_arguments frame capability_clauses
                   ~arguments:
                     (List.map
                        (fun (passed : State.passed) -> (passed.position, passed.term))
@@ -310,7 +311,7 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
               in
               compute_callee_amount context frame
                 ~path:(Path.make_capability_method capability name)
-                ~parts:[ part ]
+                ~clauses:[ capability_clauses ]
                 ~bind_frame:(fun _ -> inside)
                 ~uses:(invocation.uses :> Types.capability list)
                 ~values ~change:None counter
@@ -390,6 +391,23 @@ let declare_potential_measure context element =
              (declare_held_symbol context element (Logic.Symbol each)) ))
   end;
   term
+
+let sum_element_potentials context element sequence =
+  Intrinsics.make_sequence_sum context element sequence (declare_potential_measure context element)
+
+let choose_by_variant ty term shape compute_variant =
+  match shape with
+  | [ (None, fields) ] -> compute_variant (None, fields)
+  | variants -> (
+      match List.rev variants with
+      | last :: earlier ->
+          List.fold_left
+            (fun otherwise ((variant, _) as one) ->
+              Logic.ite
+                (Logic.Is (Facts.make_constructor_symbol ty variant, term))
+                (compute_variant one) otherwise)
+            (compute_variant last) earlier
+      | [] -> Costs.zero)
 
 let rec find_potential_clause context (ty : Types.ty) =
   match Validity.find_type_clauses context ty with
@@ -487,8 +505,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
               | _ -> ());
               let elements =
                 if has_potential context element then
-                  Intrinsics.make_sequence_sum context element sequence
-                    (declare_potential_measure context element)
+                  sum_element_potentials context element sequence
                 else Costs.zero
               in
               Facts.add_frame_fact context frame (Logic.equal held (Costs.plus slack elements))
@@ -504,20 +521,8 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
                        written)
               | None -> Costs.zero
             in
-            let compute_parts = compute_parts_potential context frame ~seen ty term in
             let parts =
-              match shape with
-              | [ (None, fields) ] -> compute_parts (None, fields)
-              | variants -> (
-                  match List.rev variants with
-                  | last :: earlier ->
-                      List.fold_left
-                        (fun otherwise ((variant, _) as one) ->
-                          Logic.ite
-                            (Logic.Is (Facts.make_constructor_symbol ty variant, term))
-                            (compute_parts one) otherwise)
-                        (compute_parts last) earlier
-                  | [] -> Costs.zero)
+              choose_by_variant ty term shape (compute_parts_potential context frame ~seen ty term)
             in
             Facts.add_frame_fact context frame
               (Logic.equal held (Costs.plus declared_potential parts))
@@ -542,6 +547,31 @@ and compute_parts_potential context frame ~seen ty term (variant, fields) =
            else compute_potential context frame ~seen:(ty :: seen) field_type part)
       else total)
     Costs.zero fields
+
+let compute_elements_potential context (ty : Types.ty) term =
+  let rec sum_elements ~enclosing (ty : Types.ty) term =
+    if not (has_potential context ty) then Costs.zero
+    else
+      match Facts.find_constructors context ty with
+      | Some shape -> (
+          let sum_fields (variant, fields) =
+            List.fold_left
+              (fun total (field, field_type) ->
+                if List.exists (Types.equal field_type) (ty :: enclosing) then total
+                else
+                  Costs.plus total
+                    (sum_elements ~enclosing:(ty :: enclosing) field_type
+                       (Validity.select_field context ty variant field term)))
+              Costs.zero fields
+          in
+          try choose_by_variant ty term shape sum_fields with Facts.Unsupported _ -> Costs.zero)
+      | None -> (
+          match (find_potential_clause context ty, find_buffer_elements context ty) with
+          | None, Some (element, model_of) when has_potential context element ->
+              sum_element_potentials context element (model_of term)
+          | _ -> Costs.zero)
+  in
+  sum_elements ~enclosing:[] ty term
 
 let find_literal_bound (metric : Metric.t) (costs : Mir.cost list) =
   let counter = Costs.make_operand_counter metric in
@@ -593,8 +623,8 @@ let find_method_cost_bound context (metric : Metric.t) (method_ : Path.t) ~trait
                 Option.map
                   (fun literal -> Logic.Integer literal)
                   (List.find_map
-                     (fun (part : State.part) -> find_literal_bound metric part.costs)
-                     contract.parts)
+                     (fun (clauses : State.clauses) -> find_literal_bound metric clauses.costs)
+                     (Contracts.list_declared_clauses contract))
             | _ -> None)
         | None -> None)
   | _ -> None

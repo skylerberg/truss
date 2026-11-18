@@ -32,7 +32,7 @@ type obligation = {
 type outcome = { obligations : obligation list; holes : (Resolve.Names.key * location) list }
 type source = { key : Resolve.Names.key option; name : string }
 
-type part = {
+type clauses = {
   callee : source;
   parameters : Mir.parameter list;
   requires : Mir.requirement list;
@@ -43,7 +43,12 @@ type part = {
   inherited : bool;
 }
 
-type contract = { parts : part list; is_logic_function : bool; result_kind : [ `Returns | `Lends ] }
+type contract = {
+  callee_clauses : clauses;
+  trait_clauses : clauses option;
+  is_logic_function : bool;
+  result_kind : [ `Returns | `Lends ];
+}
 
 type slice = {
   made_at : Invocation.site;
