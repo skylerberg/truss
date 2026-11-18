@@ -36,6 +36,7 @@ type context = {
 
 val make_context : Memory_layout.env -> string -> context
 val refer : context -> Lowered.Item.t -> unit
+val list_referenced_items : context -> referrer:Lowered.Item.t -> Lowered.Item.t list
 val use_helper : context -> string -> string
 val register : context -> Keys.key -> unit
 val compute_layout : context -> Ground.ty -> Memory_layout.t

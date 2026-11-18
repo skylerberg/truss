@@ -129,16 +129,13 @@ let make_data_fragment env (data : Lowered.data) =
   let context = C_types.make_context env (Mangling.make_symbol data.data_item) in
   let definition = C_data.render_data context data in
   Fragment.make context ~item:data.data_item ~kind:Static_data ~functions:[] ~definition
+    ~references:(C_types.list_referenced_items context ~referrer:data.data_item)
 
-let make_table_fragment env (table : Lowered.table) : fragment =
+let make_table_fragment env (table : Lowered.table) =
   let context = C_types.make_context env (Mangling.make_symbol table.table_item) in
   let definition = C_data.render_table context table in
-  {
-    (Fragment.make context ~item:table.table_item ~kind:(Table_entries table.capability)
-       ~functions:[] ~definition)
-    with
-    references = List.map fst table.entries;
-  }
+  Fragment.make context ~item:table.table_item ~kind:(Table_entries table.capability) ~functions:[]
+    ~definition ~references:(List.map fst table.entries)
 
 let render_file env profile (fragments : (fragment * linkage) list) =
   let context = C_types.make_context env "" in

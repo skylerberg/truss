@@ -516,11 +516,13 @@ let build builder prototype =
   let enclosing_text =
     write_functions builder ~enclosing_symbol:(Mangling.make_symbol enclosing.code.item) prototype
   in
-  let nested = List.sort compare enclosing.code.nested in
-  Fragment.make enclosing.code.context ~item:enclosing.code.item
+  let { item; context; nested } = enclosing.code in
+  let nested = List.sort compare nested in
+  Fragment.make context ~item
     ~kind:(Functions { nested = List.length nested; weight = enclosing.size })
     ~functions:(List.map snd nested @ [ enclosing_text ])
     ~definition:""
+    ~references:(C_types.list_referenced_items context ~referrer:item)
 
 let build_nested parent ~index ~environment build_body =
   let code = (lookup_current_function parent).code in
