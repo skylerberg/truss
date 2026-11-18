@@ -17,7 +17,6 @@ end
 type t
 
 val create : path:string -> string -> t
-val read_file : string -> t
 val path : t -> string
 val text : t -> string
 val compute_position : t -> int -> int * int
@@ -30,3 +29,7 @@ val compute_line_start : t -> int -> int
 val compute_fragment_line_start : string -> int -> int
 val compute_line_end : t -> int -> int
 val starts_line : t -> int -> bool
+
+module For_testing : sig
+  val read_file : string -> t
+end

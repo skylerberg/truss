@@ -71,7 +71,11 @@ let expect_error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
       let expected = Support.locate_occurrence ~sub:at ~occurrence text in
       if diagnostic.span.start <> expected then
         Harness.fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
-      let results = List.map (Diagnostic.apply_fix text) diagnostic.fixes in
+      let results =
+        List.map
+          (fun (fix : Source.span Diagnostic.fix) -> Diagnostic.apply_edits text fix.edits)
+          diagnostic.fixes
+      in
       match (fixed, results) with
       | None, [] -> ()
       | None, result :: _ -> Harness.fail "expected no fix, got one giving %S" result

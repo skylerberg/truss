@@ -186,7 +186,7 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
           in
           let template_check =
             {
-              State.from_template = path;
+              Obligation.from_template = path;
               literals;
               clauses =
                 List.filter_map Fun.id
@@ -200,7 +200,7 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
             (fun index (requirement : Mir.requirement) ->
               let template_clause =
                 if List.mem index template_check.clauses then
-                  Some { State.check = template_check; clause = index }
+                  Some { Obligation.check = template_check; clause = index }
                 else None
               in
               Facts.oblige ?template_clause context frame Requires location

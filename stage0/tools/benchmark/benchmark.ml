@@ -14,7 +14,7 @@ let time_parsing source =
   measure_best_time (fun () -> ignore (Parser.parse tokens ~lexer_diagnostics))
 
 let benchmark_file path =
-  let source = Source.read_file path in
+  let source = Source.For_testing.read_file path in
   let megabytes = float_of_int (String.length (Source.text source)) /. 1_000_000. in
   let report stage seconds =
     Printf.printf "%s: %s %.2f MB in %.3f s, %.1f MB/s\n" path stage megabytes seconds

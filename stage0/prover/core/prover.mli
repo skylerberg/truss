@@ -1,17 +1,15 @@
-module State = State
-module Facts = Facts
-module Contracts = Contracts
+module Obligation = Obligation
 module Lookups = Lookups
 
 type proof =
-  | Obligations of State.outcome
-  | Unsupported of State.location * string
+  | Obligations of Obligation.outcome
+  | Unsupported of Obligation.location * string
   | Not_proven_here
 
 val prove : Lookups.t -> Resolve.Names.key -> proof
 
 val resolve_location :
-  Resolve.Names.lookups -> Resolve.Names.key -> State.location -> Source.Definition_span.t
+  Resolve.Names.lookups -> Resolve.Names.key -> Obligation.location -> Source.Definition_span.t
 
 type 'span state = {
   code : Diagnostic.Code.prover;
@@ -24,7 +22,7 @@ type 'span state = {
 type verdicts
 
 val decide :
-  runs:(State.template_check * (bool list, string) result) list ->
+  runs:(Obligation.template_check * (bool list, string) result) list ->
   Lookups.t ->
   Solver.t ->
   (Resolve.Names.key * proof) list ->
@@ -33,6 +31,8 @@ val decide :
 val list_states : verdicts -> Path.file -> Source.span state list
 val list_diagnostics : verdicts -> Path.file -> Diagnostic.t list
 
-type query = { code : Diagnostic.Code.prover; span : Source.span; shows : string; input : string }
+module For_testing : sig
+  type query = { code : Diagnostic.Code.prover; span : Source.span; shows : string; input : string }
 
-val list_queries : Lookups.t -> (Resolve.Names.key * proof) list -> Path.file -> query list
+  val list_queries : Lookups.t -> (Resolve.Names.key * proof) list -> Path.file -> query list
+end

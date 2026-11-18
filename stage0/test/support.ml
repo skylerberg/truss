@@ -196,7 +196,7 @@ let expect_one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "a
       | None, _ -> ()
       | Some _, [] -> Harness.fail "no fix"
       | Some expected, fix :: _ -> (
-          let after = Diagnostic.apply_fix text fix in
+          let after = Diagnostic.apply_edits text fix.edits in
           if after <> expected then Harness.fail "fixed to %S" after
           else
             let packages = setup ((file, after) :: others) in
