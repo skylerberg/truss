@@ -287,6 +287,7 @@ public trait Iterable {
   ) -> Total
     uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(combine)))
+    cost allocations <= allocations(Self.count) + self.count() * (allocations(Self.element) + allocations(combine))
   {
     var total = own initial
     for item in self {
@@ -355,6 +356,7 @@ public trait Iterable {
   fn find(self, predicate: (fn(Self.Element) -> Bool uses generic Granted)) lends Option[Self.Element]
     uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(predicate)))
+    cost allocations <= allocations(Self.count) + self.count() * (allocations(Self.element) + allocations(predicate))
   {
     for item in self {
       if predicate(item) {
@@ -431,33 +433,46 @@ public trait Cursor {
     None
   }
 
-  fn skip(own self, count: UInt64) -> cursors::Skip[Self] {
+  fn skip(own self, count: UInt64) -> cursors::Skip[Self]
+    cost time O(1)
+  {
     cursors::Skip(source: own self, left: count)
   }
 
-  fn take(own self, count: UInt64) -> cursors::Take[Self] {
+  fn take(own self, count: UInt64) -> cursors::Take[Self]
+    cost time O(1)
+  {
     cursors::Take(source: own self, left: count)
   }
 
   fn step_by(own self, step: UInt64) -> cursors::StepBy[Self]
     requires step > 0
+    cost time O(1)
   {
     cursors::StepBy(source: own self, step: step, started: false)
   }
 
-  fn chain[Other: Cursor[Element = Self.Element]](own self, other: own Other) -> cursors::Chain[Self, Other] {
+  fn chain[Other: Cursor[Element = Self.Element]](own self, other: own Other) -> cursors::Chain[Self, Other]
+    cost time O(1)
+  {
     cursors::Chain(first: own self, second: own other, first_ended: false)
   }
 
-  fn zip[Other: Cursor](own self, other: own Other) -> cursors::Zip[Self, Other] {
+  fn zip[Other: Cursor](own self, other: own Other) -> cursors::Zip[Self, Other]
+    cost time O(1)
+  {
     cursors::Zip(first: own self, second: own other)
   }
 
-  fn enumerate(own self) -> cursors::Enumerate[Self] {
+  fn enumerate(own self) -> cursors::Enumerate[Self]
+    cost time O(1)
+  {
     cursors::Enumerate(source: own self, index: 0)
   }
 
-  fn peekable(own self) -> cursors::Peekable[Self] {
+  fn peekable(own self) -> cursors::Peekable[Self]
+    cost time O(1)
+  {
     cursors::Peekable(source: own self, peeked: None)
   }
 }
@@ -506,10 +521,13 @@ public trait Countable: Ordered + Plain {
 public type Range[Value](start: Value, stop: Value, inclusive: Bool)
 
 public type Indexed[Element](index: UInt64, element: Element)
+  derives Equal
 
 public type Pair[First, Second](first: First, second: Second)
+  derives Equal
 
 public type ExitCode(code: UInt8)
+  derives Equal
 
 public let ExitCode.success: ExitCode = ExitCode(0)
 

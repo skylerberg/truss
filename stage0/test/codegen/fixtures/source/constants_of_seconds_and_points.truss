@@ -12,5 +12,5 @@ test "constants" {
   assert greeting == "hello"
   assert primes[3] == 7
   assert primes.length() == 4
-  assert ExitCode.failure.code == 1
+  assert ExitCode.failure == ExitCode(1)
 }

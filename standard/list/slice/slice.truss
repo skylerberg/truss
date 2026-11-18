@@ -88,6 +88,7 @@ public fn Slice[Element: Equal].contains(self, item: Element) -> Bool
 
   ensures result == (exists i in 0..self.length() => self.model()[i] == item)
   cost time O(self.length() * time(Element.equal))
+  cost allocations <= self.length() * allocations(Element.equal)
 {
   var index: UInt64 = 0
   while index < self.length()
@@ -112,6 +113,7 @@ public fn Slice[Element: Equal].index_of(self, item: Element) -> Option[UInt64]
     None => !self.contains(item)
   }
   cost time O(self.length() * time(Element.equal))
+  cost allocations <= self.length() * allocations(Element.equal)
 {
   var index: UInt64 = 0
   while index < self.length()
@@ -136,6 +138,7 @@ public fn Slice[Element: Equal].last_index_of(self, item: Element) -> Option[UIn
     None => !self.contains(item)
   }
   cost time O(self.length() * time(Element.equal))
+  cost allocations <= self.length() * allocations(Element.equal)
 {
   var index = self.length()
   while index > 0
@@ -160,6 +163,7 @@ public fn Slice[Element].find_index(self, predicate: (fn(Element) -> Bool cost t
     None => forall i in 0..self.length() => !predicate(self.model()[i])
   }
   cost time O(self.length() * time(predicate))
+  cost allocations <= self.length() * allocations(predicate)
 {
   var index: UInt64 = 0
   while index < self.length()
@@ -181,6 +185,7 @@ public fn Slice[Element: Equal].starts_with(self, prefix: Slice[Element]) -> Boo
   ensures result == (prefix.length() <= self.length()
     && forall i in 0..prefix.length() => self.model()[i] == prefix.model()[i])
   cost time O(prefix.length() * time(Element.equal))
+  cost allocations <= prefix.length() * allocations(Element.equal)
 {
   if prefix.length() > self.length() {
     return false
@@ -205,6 +210,7 @@ public fn Slice[Element: Equal].ends_with(self, suffix: Slice[Element]) -> Bool
   ensures result == (suffix.length() <= self.length()
     && forall i in 0..suffix.length() => self.model()[self.length() - suffix.length() + i] == suffix.model()[i])
   cost time O(suffix.length() * time(Element.equal))
+  cost allocations <= suffix.length() * allocations(Element.equal)
 {
   if suffix.length() > self.length() {
     return false
@@ -843,6 +849,7 @@ public fn Slice[Element].update_each(
   ensures self.length() == old(self.length())
   cost calls(change) == self.length()
   cost time O(self.length() * time(change))
+  cost allocations <= self.length() * allocations(change)
 {
   for index in 0..self.length()
     invariant self.length() == old(self.length())
@@ -1447,6 +1454,7 @@ internal fn Slice[Element].extreme_position(
   requires self.length() > 0
   ensures result < self.length()
   cost time O(self.length() * time(compare))
+  cost allocations <= self.length() * allocations(compare)
 {
   var best: UInt64 = 0
   var index: UInt64 = 1
@@ -1473,6 +1481,7 @@ public fn Slice[Element].min_by(
   uses generic Granted
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
+  cost allocations <= self.length() * allocations(compare)
 {
   if self.length() > 0 {
     let position = self.extreme_position(compare, greatest: false)
@@ -1489,6 +1498,7 @@ public fn Slice[Element].max_by(
   uses generic Granted
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
+  cost allocations <= self.length() * allocations(compare)
 {
   if self.length() > 0 {
     let position = self.extreme_position(compare, greatest: true)

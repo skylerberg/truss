@@ -8,8 +8,13 @@ impl Cursor for Skip[Source: Cursor] {
 
   fn next(mut self) -> Option[Source.Element]
     uses Self.Uses
+    cost amortized time O((self.left + 1) * time(Source.next))
   {
-    while self.left > 0 {
+    let skipped = self.left
+    while self.left > 0
+      invariant self.left <= skipped
+      cost time O((skipped - self.left) * time(Source.next))
+    {
       self.left -= 1
       match mut self.source.next() {
         Some(_) => {}
@@ -28,6 +33,7 @@ impl Cursor for Take[Source: Cursor] {
 
   fn next(mut self) -> Option[Source.Element]
     uses Self.Uses
+    cost time O(time(Source.next))
   {
     if self.left == 0 {
       return None
@@ -45,18 +51,23 @@ impl Cursor for StepBy[Source: Cursor] {
 
   fn next(mut self) -> Option[Source.Element]
     uses Self.Uses
+    cost amortized time O((self.step + 1) * time(Source.next))
   {
     if !self.started {
       self.started = true
       return mut self.source.next()
     }
-    var skipped: UInt64 = 1
-    while skipped < self.step {
+    let step = self.step
+    var left = step
+    while left > 1
+      invariant left <= step
+      cost time O((step - left) * time(Source.next))
+    {
+      left -= 1
       match mut self.source.next() {
         Some(_) => {}
         None => return None
       }
-      skipped += 1
     }
     mut self.source.next()
   }
@@ -74,6 +85,7 @@ impl Cursor for Chain[First: Cursor, Second: Cursor[Element = First.Element]] {
 
   fn next(mut self) -> Option[First.Element]
     uses Self.Uses
+    cost time O(time(First.next) + time(Second.next))
   {
     if !self.first_ended {
       match mut self.first.next() {
@@ -95,6 +107,7 @@ impl Cursor for Zip[First: Cursor, Second: Cursor] {
 
   fn next(mut self) -> Option[core::Pair[First.Element, Second.Element]]
     uses Self.Uses
+    cost time O(time(First.next) + time(Second.next))
   {
     match mut self.first.next() {
       Some(left) => match mut self.second.next() {
@@ -114,6 +127,7 @@ impl Cursor for Enumerate[Source: Cursor] {
 
   fn next(mut self) -> Option[core::Indexed[Source.Element]]
     uses Self.Uses
+    cost time O(time(Source.next))
   {
     match mut self.source.next() {
       Some(element) => {
@@ -136,6 +150,7 @@ impl Cursor for Peekable[Source: Cursor] {
 
   fn next(mut self) -> Option[Source.Element]
     uses Self.Uses
+    cost time O(time(Source.next))
   {
     match mut self.peeked.take() {
       Some(item) => item
@@ -146,6 +161,7 @@ impl Cursor for Peekable[Source: Cursor] {
 
 public fn Peekable[Source: Cursor].peek(mut self) lends Option[Source.Element]
   uses Source.Uses
+  cost time O(time(Source.next))
 {
   if self.peeked is None {
     self.peeked = Some(mut self.source.next())

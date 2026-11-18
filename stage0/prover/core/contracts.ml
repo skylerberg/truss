@@ -17,8 +17,8 @@ let find_source (lookups : Lookups.t) (path : Path.t) =
     (lookups.mir.find_form_origin path)
 
 let make_trait_substitution (lookups : Lookups.t) (trait : Types.trait_reference) (ty : Types.ty) =
-  Interface.Properties.make_trait_substitution
-    (Interface.Definition.read_trait_interface lookups.interface trait.trait)
+  Types.make_trait_substitution
+    (Interface.Definition.read_trait_interface lookups.interface trait.trait).trait_generics
     ~self:ty trait
 
 let find_clauses (lookups : Lookups.t) path callee =
@@ -33,7 +33,7 @@ let find_clauses (lookups : Lookups.t) path callee =
         costs =
           List.filter
             (fun (cost : Mir.cost) ->
-              match cost with { resource = Time; bound = Finite; _ } -> false | _ -> true)
+              match cost with { resource = Metric Time; bound = Finite; _ } -> false | _ -> true)
             contract.costs;
         callbacks = contract.callbacks;
         inherited = false;
@@ -107,7 +107,8 @@ let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
     | Some (signature : Types.signature) -> (
         List.for_all
           (function
-            | Types.Capability_parameter _ | Types.Divergence (Of_parameter _) -> true
+            | Types.Capability_parameter _ | Types.Divergence (Of_parameter _ | Of_impl_method _) ->
+                true
             | Types.Capability _ | Types.Capability_projection _ | Types.Capability_variable _
             | Types.Capability_error _
             | Types.Divergence (Always | Of_variable _) ->
@@ -180,9 +181,7 @@ let deduplicate_counters counters =
 
 let find_resource (cost : Mir.cost) ~locals : Costs.resource option =
   match cost.resource with
-  | Time -> Some Time
-  | Allocations -> Some Allocations
-  | Allocated_bytes -> Some Allocated_bytes
+  | Metric metric -> Some (Metric metric)
   | Calls (Function_parameter local) ->
       Option.map
         (fun term -> Costs.Calls (Through term))

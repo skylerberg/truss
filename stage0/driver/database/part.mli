@@ -53,8 +53,8 @@ type _ stored =
   | Call_edges : Path.t * Path.package -> Path.t list stored
   | Recursion_group : Path.t -> Path.t list stored
   | Proof : Resolve.Names.key -> Prover.proof stored
-  | Lowered : Instance.key -> (Compile.lowered, Compile.unsupported) result stored
-  | Test_key : Instance.key -> (string, Compile.unsupported) result stored
+  | Lowered : Instance.key -> (Backend.lowered, Backend.unsupported) result stored
+  | Test_key : Instance.key -> (string, Backend.unsupported) result stored
 
 type any = Any : 'a stored -> any [@@unboxed]
 type t = Input of input | Name of name | Stored of any

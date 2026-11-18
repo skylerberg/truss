@@ -1,0 +1,5 @@
+fn f(value: Option[Int64]) -> Option[List[Int64]]
+  cost allocations <= 1
+{
+  value.map(fn(inner) { [inner] })
+}

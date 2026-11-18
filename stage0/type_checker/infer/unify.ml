@@ -87,6 +87,17 @@ and zonk_capabilities unifier capabilities =
             Types.Capability_projection
               { base = zonk unifier base; trait = zonk_trait unifier trait; name };
           ]
+      | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
+          [
+            Types.Divergence
+              (Of_impl_method
+                 {
+                   self_type = zonk unifier self_type;
+                   trait = zonk_trait unifier trait;
+                   name;
+                   receiver;
+                 });
+          ]
       | capability -> [ capability ])
     capabilities
 

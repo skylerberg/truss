@@ -352,11 +352,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
           | No_more_than None | Exactly_cost None -> None
         in
         let resource : Costs.resource option =
-          match cost.resource with
-          | Time -> Some Time
-          | Allocations -> Some Allocations
-          | Allocated_bytes -> Some Allocated_bytes
-          | Calls _ -> None
+          match cost.resource with Metric metric -> Some (Metric metric) | Calls _ -> None
         in
         match (resource, counting) with
         | Some resource, Some counting ->
@@ -365,18 +361,24 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         | _ -> None)
       function_type.costs
   in
-  let time_units = { Costs.resource = Time; counting = Units; amortized = false } in
-  let counts_time =
-    List.exists
-      (fun (counter : Costs.counter) -> counter.resource = Time && counter.counting = Units)
-      context.counters
+  let operand_counters =
+    List.filter_map
+      (fun metric ->
+        let counter = Costs.make_operand_counter metric in
+        let is_counted =
+          List.exists
+            (fun (enclosing : Costs.counter) -> enclosing.resource = counter.resource)
+            context.counters
+        in
+        if is_counted && Option.is_none (Costs.find_stated_operand function_type.costs metric) then
+          Some (metric, counter)
+        else None)
+      Metric.all
   in
-  let times_by_type = List.exists (fun (counter, _) -> counter = time_units) promised in
   let saved_counters = context.counters in
   context.counters <-
     Contracts.deduplicate_counters
-      ((if counts_time then [ time_units ] else [])
-      @ List.map fst promised
+      (List.map snd operand_counters @ List.map fst promised
       @ list_loop_counters inside.locals written.code);
   let inside =
     { inside with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
@@ -456,45 +458,53 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                   | Exactly_cost (Some limit) -> Logic.equal spent (Logic.Integer limit)
                   | _ -> Logic.Boolean true
                 in
+                let difference, verb =
+                  match counter.counting with
+                  | Units | At_most -> ("more than", "allows")
+                  | Exactly -> ("more or less than", "states")
+                in
                 Facts.oblige context exit_ Cost location
                   [
                     Text
-                      (Printf.sprintf "This lambda may spend more than its type, `%s`, allows."
-                         (Types.show ty));
+                      (Printf.sprintf "This lambda may spend %s its type, `%s`, %s." difference
+                         (Types.show ty) verb);
                   ]
                   goal)
               promised)
           exits;
-        if counts_time && not times_by_type then
-          let spent = List.map (fun exit_ -> compute_spent exit_ time_units) exits in
-          let most =
-            match spent with
-            | [] -> Costs.zero
-            | first :: rest -> List.fold_left Costs.larger first rest
-          in
-          match
-            Costs.find_cost_bound
-              ~varies:(Facts.mentions_fresh_after context mark)
-              ~facts:
-                (list_facts_since context facts_mark
-                @ List.map (fun (exit_ : State.frame) -> exit_.condition) exits)
-              most
-          with
-          | Some bound ->
-              Some
-                ( bound,
-                  List.filter_map
-                    (fun ((exit_ : State.frame), spent) ->
-                      Facts.make_closed_obligation context exit_ Cost location
-                        [
-                          Text
-                            "The prover cannot show that a call of this lambda takes no more time \
-                             than the bound it found for every call, which a cost here relies on.";
-                        ]
-                        (Costs.at_most spent bound))
-                    (List.combine exits spent) )
-          | None -> None
-        else None)
+        let facts =
+          list_facts_since context facts_mark
+          @ List.map (fun (exit_ : State.frame) -> exit_.condition) exits
+        in
+        List.filter_map
+          (fun ((metric : Metric.t), counter) ->
+            let spent = List.map (fun exit_ -> compute_spent exit_ counter) exits in
+            let most =
+              match spent with
+              | [] -> Costs.zero
+              | first :: rest -> List.fold_left Costs.larger first rest
+            in
+            Option.map
+              (fun bound ->
+                ( metric,
+                  ( bound,
+                    List.filter_map
+                      (fun ((exit_ : State.frame), spent) ->
+                        Facts.make_closed_obligation context exit_ Cost location
+                          [
+                            Text
+                              (Printf.sprintf
+                                 "The prover cannot show that a call of this lambda %s than the \
+                                  bound it found for every call, which a cost here relies on."
+                                 (match metric with
+                                 | Time -> "takes no more time"
+                                 | Allocations -> "makes no more allocations"
+                                 | Allocated_bytes -> "allocates no more bytes"));
+                          ]
+                          (Costs.at_most spent bound))
+                      (List.combine exits spent) ) ))
+              (Costs.find_cost_bound ~varies:(Facts.mentions_fresh_after context mark) ~facts most))
+          operand_counters)
   in
   let end_fresh = context.fresh in
   let term =
@@ -510,9 +520,9 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         term
   in
   context.lambda_captures <- (term, list_captured_locals written) :: context.lambda_captures;
-  (match pending with
-  | Some pending_time -> context.lambda_times <- (term, pending_time) :: context.lambda_times
-  | None -> ());
+  context.lambda_costs <-
+    List.map (fun (metric, pending_cost) -> ((term, metric), pending_cost)) pending
+    @ context.lambda_costs;
   (frame, term)
 
 let translate_lambda context (frame : State.frame) ~(site : Invocation.site)

@@ -416,9 +416,9 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
         let unconverted = List.map compute_unconverted_type arguments in
         let* arguments = lower_operands builder arguments in
         hold (Specification (Applied { function_; arguments; unconverted }))
-    | Method_time callee ->
-        let* callee = lower_callee builder callee in
-        hold (Specification (Method_time callee))
+    | Method_cost { metric; method_ } ->
+        let* method_ = lower_callee builder method_ in
+        hold (Specification (Method_cost { metric; method_ }))
     | Quantified _ -> raise_bug "a quantifier over a type or a collection in code that runs"
 
 and plan_expression builder (node : Core.expression) =

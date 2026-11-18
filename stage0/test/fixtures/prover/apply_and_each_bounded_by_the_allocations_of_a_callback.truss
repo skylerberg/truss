@@ -1,0 +1,32 @@
+type Tree =
+  | Leaf
+  | indirect Node(left: Tree, right: Tree)
+
+fn apply(value: Int64, change: (fn(Int64) -> Int64 uses generic Granted)) -> Int64
+  uses generic Granted
+  cost allocations <= allocations(change)
+  cost allocated_bytes <= allocated_bytes(change)
+{
+  change(value)
+}
+
+fn each(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
+  cost allocations <= items.length() * allocations(visit)
+{
+  for item in items {
+    visit(item)
+  }
+}
+
+fn quiet(value: Int64) -> Int64
+  cost allocations == 0
+  cost allocated_bytes <= 0
+{
+  value
+}
+
+fn unstated(value: Int64) -> Int64 {
+  value
+}
+

@@ -431,7 +431,7 @@ change to its API.
 
 | Rule | Reason |
 |---|---|
-| A name bound to a `Plain` value is a copy, not a view. | A `Plain` value is copied wherever it is moved: into a `var`, an `own` parameter, or a field. If a `let` viewed it, `point.x = 7` would be an error while a `let` of `point` is live, where the same code on an integer is accepted. |
+| A name bound to a `Plain` value, or a compound assignment's `Plain` operand, is a copy, not a view. | A `Plain` value is copied wherever it is moved: into a `var`, an `own` parameter, or a field. If a `let` viewed it, `point.x = 7` would be an error while a `let` of `point` is live, where the same code on an integer is accepted. A built-in operator takes its operand by value before the index keys of the target run, and an operator that is a trait method reads the same value. |
 | A handle is not `Copyable`. | Copying one would duplicate an operating-system handle, which can fail, and `copy()` cannot fail. |
 | Generic code copies only under a `Copyable` bound. | An unbounded type parameter then accepts every type, handles included. |
 | A copy has the original's capacity. | The prover treats a copy as the same value, and a storage's capacity and its potential are functions of the value. A copy shrunk to its length would make `items.copy().capacity() == items.capacity()` false at run time, and give the copy a potential other than the one `copy()` paid for. |
@@ -758,6 +758,13 @@ divergence as an effect in the same way. The alternative is a `time` clause
 on every callback's type, which rejects each function that has none, and a
 function has none unless its author wrote one.
 
+**A bound passes on whether its `impl`'s method terminates.** A call
+through a bound of a method without a `time` clause holds a condition in
+its capability set: it terminates if the type argument's `impl` of the
+method does. A type argument settles the condition from that `impl`, so
+`skip` over a list's cursor terminates, and `skip` over a cursor that waits
+on a socket may not.
+
 The check is the capability check. It runs in the type checker, it covers a
 function bound to a local as it covers one passed to a call, and a
 specification, which has no capabilities, calls only functions that
@@ -771,6 +778,9 @@ terminate.
 | A `time` clause follows a function parameter only where its bound names `time(parameter)`. `finite` names none, so it promises termination whatever is passed. | The bound is true as written: it is unbounded exactly where the parameter's time is. A `finite` that followed its callbacks would be a condition that the signature does not show. |
 | No parameter passes on termination alone. A callback that may not terminate is taken through a capability parameter, which also takes its capabilities. | A callee needs a callback without capabilities only to apply it in a contract, and there the callback must terminate too. One mechanism then covers both. |
 | No function type states that a function uses a capability parameter's capabilities and may not terminate. | Non-termination is never written: a function may not terminate unless it states a `time` clause, and a function type that names a capability parameter leaves termination to the parameter. A clause for this type would be the only written form of non-termination, and only a lambda that is bound or returned in the function that declares the parameter would need it. A lambda passed in a call needs no written type. |
+| A trait's method without a `time` clause leaves termination to each `impl`, and a `time` clause follows such a method of a bound where each of its bounds names `time(Type.method)`. | `Cursor.next` terminates for a list's cursor and need not for a cursor over lines read from a socket. One alternative is a `time` clause on the trait's method, which forbids the second cursor. The other is a call through a bound that may not terminate: no adapter such as `skip` then states a `time` clause, and no function with a `time` clause uses an adapter over a list. The bound is true as written for every type argument: the `time` of a method that may not terminate is unbounded. |
+| A call through `any Trait` of a method without a `time` clause may not terminate. | `any` hides the type, so no `impl` is known where the call is checked. A `time` clause that followed the call would be a condition on a type that no signature names. |
+| An `impl`'s `time` clause follows a method of its bounds only where its trait's method lets the `impl` decide. | A call through a bound is checked against the trait's method. If the trait's method promised termination and an `impl` followed `Inner.next`, a function with a `time` clause would call a method that never returns. |
 | A loop without a measure may not terminate, so it stands only where that is allowed, as a call that may not terminate does. | The capability check then covers the loop in every body, as it covers a call. The alternative is an obligation of the prover for each loop in a function with a `time` clause, which states the same fact a second time and leaves a lambda's loop to a rule of its own. |
 | A lambda may not terminate when its body makes a call that may not, or holds a loop without a measure. | Its capabilities are inferred from its body, and so is this. A lambda with neither stays in the logic, so a proof can reason about a call that passes it. |
 
@@ -808,6 +818,10 @@ worst case instead.
 | A bound can mention `result`. | An output-sensitive bound, such as the bound of a function that returns its matches, cannot be stated otherwise. |
 | `log(n)` is log₂(n + 1) rounded up. | It is defined at 0 and is an integer. Inside `O`, the base makes no difference. |
 | The `time` of a generic function counts the methods of its bounds. | `O(self.length())` would be false for `contains` on a list of strings, where one comparison is not one step. `String` could not keep a promise of `O(1)` on `Equal.equal`, and a second trait for constant-time comparison would give every generic method two overloads. |
+| A function that calls a callback bounds its allocations with `allocations(visit)`, and its allocated bytes with `allocated_bytes(visit)`. | `Option.map` allocates what its callback allocates. Without the term it states no allocation bound, and a function with `cost allocations <= 0` then calls no combinator, even with a lambda that allocates nothing. The alternative is an allocation clause on the type of every callback, which rejects each function that states none. |
+| A cost of a callee, such as `allocations(visit)`, is a bound on any one call, and an `==` bound cannot name it. | A callback's allocations vary with its arguments, so the one number that a signature states for them is an upper bound. An exact count that names an upper bound is false for a call that allocates less. A function that needs an exact count takes a callback whose type states `==`. |
+| A callback whose allocations have no bound makes `allocations(visit)` unbounded, and a bound that names the term holds. | A written clause is true for every argument, as a `time` bound is where `time(visit)` is unbounded. No rule ignores the clause for some argument. A caller that passes such a callback proves no allocation bound through the call. |
+| A cost of a callee is named only in a clause on its own resource, and only `time(...)` follows a callee. | A bound on one resource of a call does not bound another. `allocations(visit)` in a `time` clause would read as if the clause followed `visit`, and allocations do not say whether a call returns. |
 | A loop's cost is never `amortized` and never `finite`. | Potential belongs to the values that the loop mutates, and a loop proves termination with `decreases`. |
 
 ### Function types
@@ -1445,10 +1459,12 @@ Rules: [Method lookup](SPECIFICATION.md#method-lookup).
 |---|---|
 | A trait method needs no import. | A forgotten import is a common error in the languages that need one. |
 | A method call finds only the traits of the standard library, of the calling package, and of the packages that its manifest lists. | An edit deep in the dependency graph cannot break a distant call. |
+| A call skips a method that its module cannot see before it chooses an overload, and reports a hidden method only when it finds nothing it can see. | A private or `internal` method is a detail of its module or package, so adding, renaming, or removing one changes no call outside it. Every other name is looked up the same way. The cost is that one call can reach different methods in different modules: if `String` had a private `trim`, `name.trim()` would call it in its module and `StringSlice.trim` elsewhere. Both are written in one package. |
 | Two candidates for one name are an error, never a silent choice. | In Rust a type's own method wins over a trait's, so adding a method can silently change an existing call. In Truss an upgrade can break a call only with an error that names both candidates. A release that only adds names is still compatible, because otherwise no type could ever gain a method. |
 | A `String` has the methods of `StringSlice`, and a `List` and an `Array` those of `Slice`. | `self` is a parameter, and an argument of the owned type converts to its view. Without the rule, every method of a view needs a forwarding method on the owned type, whose contract is stated and proven a second time, and a view's method that has none cannot be called on the owned value. Rust reaches the methods of `str` from a `String` through `Deref`. |
 | A type's own method hides its view's method of the same name and mode. | The owned type can do better where it owns the storage: `String.to_bytes(own self)` hands over its buffer, and `StringSlice.to_bytes(self)` copies. Both are written in one package, so no other package can change which one a call reaches. |
 | An `impl` gives a type no method that its view has in that mode, and an `impl` in another package gives it none of that name. | Such a method would be found before the view's. A package added to a build could then capture a call that reached the view's method. |
+| The checks of an `impl`'s method names count a method of the type or its view only where the `impl`'s package can see it: every method for an `impl` in the type's package, and the public ones for an `impl` in another package. | A method that the `impl`'s package cannot see is called only in the type's package, and no code there can reach the `impl`: an `impl` in another package lives with its trait or with a type its trait names, so its package depends on the type's. No call can be captured, and an `internal` helper takes no name from other packages: a package may give `String` a trait method `part`, which `StringSlice` has only as `internal`. In the type's own package, the module that declares a private method can see the `impl` too, and a call there would have two methods of one name and mode. |
 
 ### Dynamic dispatch
 
@@ -2077,23 +2093,24 @@ data, and not on the database.
 **A reference is to a fully qualified name, whether or not a definition
 holds the name.** A name that is not local and not in the prelude belongs to
 the body's module, so an unqualified name resolves without a search. A
-method call names one entry of its type's methods, or of its view's methods
-where the type has none of that name and mode:
-[Method lookup](SPECIFICATION.md#method-lookup) rules out a trait method with
-the name and mode of one of the type's own methods or of its view's, and
-makes two traits that give one name an error at the call. An `impl` is named by its trait and its
-type, since `impl`s do not overlap and have one home. A law proof is named by
-its trait, its law, and its type, as `proof Ordered.transitive for Box[Item]`
-writes them, so a proof that assumes a law for a type refers to one name and
-scans no package.
+method call names one entry of the type's methods that its module can see,
+or of its view's methods where the type has none of that name and mode:
+[Method lookup](SPECIFICATION.md#method-lookup) lets no module see both a
+trait method and a method of the type or of its view with one name and mode,
+and makes two traits that give one name an error at the call. An
+`impl` is named by its trait and its type, since `impl`s do not overlap and
+have one home. A law proof is named by its trait, its law, and its type, as
+`proof Ordered.transitive for Box[Item]` writes them, so a proof that
+assumes a law for a type refers to one name and scans no package.
 
 **A namespace is derived state.** The database keeps the definitions that
 hold each name of a module, and each method name of a type. A type's entry
 holds its own methods and the methods of the traits its `impl`s implement. A
-call reads the entry as its package sees it, through the traits of the
+call reads the entry as its module sees it: through the traits of the
 standard library, of its own package, and of the packages its manifest
-lists. Adding or removing a definition changes the entries of its names and
-marks stale the parts that read them. A reference to a name that no
+lists, and without the members that the module cannot see. Adding or
+removing a definition changes the entries of its names and marks stale the
+parts that read them. A reference to a name that no
 definition holds is an error of the referring part, and adding the
 definition clears it.
 

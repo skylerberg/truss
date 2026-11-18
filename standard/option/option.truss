@@ -49,6 +49,8 @@ public fn Option[Value].unwrap_or_else(
 ) -> Value
   uses generic Granted
   cost time O(time(make))
+  cost allocations <= allocations(make)
+  cost allocated_bytes <= allocated_bytes(make)
 {
   match own self {
     Some(value) => value
@@ -62,6 +64,8 @@ public fn Option[Value].map[Output](
 ) -> Option[Output]
   uses generic Granted
   cost time O(time(transform))
+  cost allocations <= allocations(transform)
+  cost allocated_bytes <= allocated_bytes(transform)
 {
   match own self {
     Some(value) => Some(transform(own value))
@@ -75,6 +79,8 @@ public fn Option[Value].map[Output](
 ) -> Option[Output]
   uses generic Granted
   cost time O(time(transform))
+  cost allocations <= allocations(transform)
+  cost allocated_bytes <= allocated_bytes(transform)
 {
   match self {
     Some(value) => Some(transform(value))
@@ -88,6 +94,8 @@ public fn Option[Value].and_then[Output](
 ) -> Option[Output]
   uses generic Granted
   cost time O(time(next))
+  cost allocations <= allocations(next)
+  cost allocated_bytes <= allocated_bytes(next)
 {
   match own self {
     Some(value) => next(own value)
@@ -101,6 +109,8 @@ public fn Option[Value].and_then[Output](
 ) -> Option[Output]
   uses generic Granted
   cost time O(time(next))
+  cost allocations <= allocations(next)
+  cost allocated_bytes <= allocated_bytes(next)
 {
   match self {
     Some(value) => next(value)
@@ -111,6 +121,8 @@ public fn Option[Value].and_then[Output](
 public fn Option[Value].filter(own self, keep: (fn(Value) -> Bool uses generic Granted)) -> Option[Value]
   uses generic Granted
   cost time O(time(keep))
+  cost allocations <= allocations(keep)
+  cost allocated_bytes <= allocated_bytes(keep)
 {
   match own self {
     Some(value) => if keep(value) { Some(own value) } else { None }
@@ -133,6 +145,8 @@ public fn Option[Value].or_else(
 ) -> Option[Value]
   uses generic Granted
   cost time O(time(make))
+  cost allocations <= allocations(make)
+  cost allocated_bytes <= allocated_bytes(make)
 {
   match own self {
     Some(value) => Some(own value)
@@ -164,6 +178,8 @@ public fn Option[Value].ok_or_else[Error](
 ) -> Result[Value, Error]
   uses generic Granted
   cost time O(time(make))
+  cost allocations <= allocations(make)
+  cost allocated_bytes <= allocated_bytes(make)
 {
   match own self {
     Some(value) => Ok(own value)

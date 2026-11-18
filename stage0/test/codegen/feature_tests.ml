@@ -13,6 +13,10 @@ let () =
   Codegen_support.expect_pass
     "a name bound to a `Plain` record, array, or part keeps its value when the original is assigned"
     Fixtures.Feature.plain_bindings_keep_their_values;
+  Codegen_support.expect_pass
+    "a compound assignment's `Plain` operand keeps its value when an index key of the target \
+     assigns the operand's place"
+    Fixtures.Feature.plain_operands_keep_their_values;
   Codegen_support.expect_pass "a cursor gives each value and then None"
     Fixtures.Feature.count_to_cursor;
   Codegen_support.expect_pass "a cursor's next uses the implementation provided where it is called"

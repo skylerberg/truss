@@ -142,7 +142,10 @@ A release is compatible with the one before when:
   an opaque type may change everything inside it
 - a trait or capability has the same methods, associated types, required
   traits, and laws, and gains at most methods that have bodies
-- every `impl` is still there
+- every `impl` is still there, and each of its methods terminates wherever
+  the old one did: a call through a bound terminates if the `impl`'s method
+  does, so a method that loses its `time` clause, or whose `time` clause
+  follows one more method of a bound, breaks the functions that follow it
 - a constant has the same type and value
 
 Bodies are not promised: a release may change a function's results within

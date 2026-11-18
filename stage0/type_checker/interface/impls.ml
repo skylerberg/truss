@@ -74,7 +74,8 @@ let find_implementation_of lookups (impl : Types.impl_interface) =
       {
         impl;
         trait;
-        substitution = Properties.make_trait_substitution trait ~self:impl.for_type impl.implements;
+        substitution =
+          Types.make_trait_substitution trait.trait_generics ~self:impl.for_type impl.implements;
       })
     (Definition.find_trait_interface lookups impl.implements.trait)
 
@@ -193,6 +194,17 @@ let list_required_bounds (generics : Types.generic list) (substitution : Types.s
             generic_bounds
       | _ -> [])
     generics
+
+let list_impl_bounds (impl : Types.impl_interface) ~list_bounds parameter =
+  match
+    List.find_opt (fun (generic : Types.generic) -> generic.generic = parameter) impl.impl_generics
+  with
+  | Some { kind = Type_generic bounds; _ } -> bounds
+  | _ -> list_bounds parameter
+
+let read_trait_signature lookups (implemented : implemented_method) =
+  Definition.read_method_signature lookups ~owner:implemented.implementation.impl.implements.trait
+    implemented.declared
 
 let find_built_in_evidence : Properties.decision -> evidence option = function
   | Holds -> Some Built_in
@@ -416,9 +428,66 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
     | Some From_bound | Some (Accepted (Types.Variable _)) | None -> projection
     | Some (From_any | Built_in | Accepted _) -> Types.no_capabilities
 
+and resolve_impl_method_divergence lookups ~list_bounds ?(depth = 0) self_type
+    (trait : Types.trait_reference) ~name ~receiver =
+  let conditional_divergence =
+    Types.make_capability_set
+      [ Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ]
+  in
+  let may_not_terminate = Types.make_capability_set [ Types.unconditional_divergence ] in
+  if depth > Properties.recursion_limit then
+    raise
+      (Properties.Recursion_limit
+         (Printf.sprintf
+            "Deciding whether `%s.%s` terminates needs more than %d nested impls. The compiler \
+             stops there: `time` clauses that follow each other through ever larger types never \
+             finish."
+            (Types.show self_type) name Properties.recursion_limit))
+  else
+    match find_evidence lookups ~list_bounds ~checks_conditions:false self_type trait with
+    | Some (From_impl { impl; substitution }) -> (
+        match read_signature lookups (Method { owner = impl; name; receiver }) with
+        | Some (implemented : Types.signature) ->
+            let method_generics =
+              List.filter_map
+                (fun (generic : Types.generic) ->
+                  if Option.is_some (Types.find_argument generic.generic substitution) then None
+                  else Some generic.generic)
+                implemented.generics
+            in
+            let names_method_generic =
+              Types.exists (function
+                | Types.Parameter parameter -> List.mem parameter method_generics
+                | _ -> false)
+            in
+            let follows_method_parameter : Types.capability -> bool = function
+              | Divergence (Of_parameter _) -> true
+              | Divergence (Of_impl_method { self_type; trait; _ }) ->
+                  names_method_generic self_type
+                  || List.exists
+                       (function
+                         | Types.Type argument -> names_method_generic argument
+                         | Types.Value _ -> false)
+                       trait.trait_arguments
+              | _ -> false
+            in
+            let divergence = Types.list_divergence implemented.uses in
+            if List.exists follows_method_parameter (divergence :> Types.capability list) then
+              may_not_terminate
+            else
+              normalize_capabilities lookups ~list_bounds ~depth:(depth + 1)
+                (Types.substitute_capabilities substitution divergence)
+        | None -> raise_bug "`%s` has no signature for `%s`" (Path.show impl) name)
+    | Some From_any -> may_not_terminate
+    | Some From_bound | Some (Accepted (Types.Variable _)) | None -> conditional_divergence
+    | Some (Built_in | Accepted _) -> Types.no_capabilities
+
 and normalize_capabilities lookups ~list_bounds ?depth (capabilities : Types.capability_set) =
-  let is_projection = function Types.Capability_projection _ -> true | _ -> false in
-  if not (List.exists is_projection (capabilities :> Types.capability list)) then capabilities
+  let reads_an_impl : Types.capability -> bool = function
+    | Capability_projection _ | Divergence (Of_impl_method _) -> true
+    | _ -> false
+  in
+  if not (List.exists reads_an_impl (capabilities :> Types.capability list)) then capabilities
   else
     Types.flat_map_capabilities
       (function
@@ -427,8 +496,27 @@ and normalize_capabilities lookups ~list_bounds ?depth (capabilities : Types.cap
                (normalize lookups ~list_bounds base)
                { trait with associated = [] } name
               :> Types.capability list)
+        | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
+            (resolve_impl_method_divergence lookups ~list_bounds ?depth
+               (normalize lookups ~list_bounds self_type)
+               (normalize_trait_arguments lookups ~list_bounds trait)
+               ~name ~receiver
+              :> Types.capability list)
         | capability -> [ capability ])
       capabilities
+
+and normalize_trait_arguments lookups ~list_bounds (trait : Types.trait_reference) :
+    Types.trait_reference =
+  {
+    trait = trait.trait;
+    trait_arguments =
+      List.map
+        (function
+          | Types.Type type_ -> Types.Type (normalize lookups ~list_bounds type_)
+          | Types.Value _ as argument -> argument)
+        trait.trait_arguments;
+    associated = [];
+  }
 
 and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
   let normalize = normalize lookups ~list_bounds ?defining in
@@ -454,14 +542,7 @@ and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
       | _ -> None)
     type_
 
-let list_impl_bounds (impl : Types.impl_interface) ~list_bounds parameter =
-  match
-    List.find_opt (fun (generic : Types.generic) -> generic.generic = parameter) impl.impl_generics
-  with
-  | Some { kind = Type_generic bounds; _ } -> bounds
-  | _ -> list_bounds parameter
-
-let normalize_in_impl lookups ~list_bounds ?(missing_associated = []) (impl : Types.impl_interface)
+and normalize_in_impl lookups ~list_bounds ?(missing_associated = []) (impl : Types.impl_interface)
     type_ =
   Types.map
     (function
@@ -481,7 +562,7 @@ let normalize_in_impl lookups ~list_bounds ?(missing_associated = []) (impl : Ty
       | _ -> None)
     type_
 
-let normalize_capabilities_in_impl lookups ~list_bounds (impl : Types.impl_interface) capabilities =
+and normalize_capabilities_in_impl lookups ~list_bounds (impl : Types.impl_interface) capabilities =
   Types.flat_map_capabilities
     (fun capability ->
       let set =
@@ -499,7 +580,7 @@ let normalize_capabilities_in_impl lookups ~list_bounds (impl : Types.impl_inter
       (set :> Types.capability list))
     capabilities
 
-let normalize_signature_in_impl lookups ~list_bounds ?missing_associated
+and normalize_signature_in_impl lookups ~list_bounds ?missing_associated
     (implementation : implementation) (signature : Types.signature) =
   let signature = Types.substitute_signature implementation.substitution signature in
   {
@@ -510,18 +591,14 @@ let normalize_signature_in_impl lookups ~list_bounds ?missing_associated
     uses = normalize_capabilities_in_impl lookups ~list_bounds implementation.impl signature.uses;
   }
 
-let read_trait_signature lookups (implemented : implemented_method) =
-  Definition.read_method_signature lookups ~owner:implemented.implementation.impl.implements.trait
-    implemented.declared
-
-let make_expected_signature lookups (implemented : implemented_method) =
+and make_expected_signature lookups (implemented : implemented_method) =
   let declared = read_trait_signature lookups implemented in
   normalize_signature_in_impl lookups
     ~list_bounds:
       (Types.list_bounds (implemented.implementation.impl.impl_generics @ declared.generics))
     implemented.implementation declared
 
-let read_signature lookups (path : Path.t) =
+and read_signature lookups (path : Path.t) =
   let ( let* ) = Option.bind in
   match path with
   | Method { owner = (Impl _ | Derived _) as owner; _ } ->
@@ -545,7 +622,7 @@ let read_signature lookups (path : Path.t) =
       let declared_by_trait =
         Option.map
           (fun implemented ->
-            let declared = read_trait_signature lookups implemented in
+            let declared = make_expected_signature lookups implemented in
             let rename =
               if List.length declared.generics = List.length own.generics then
                 Types.substitute_capabilities

@@ -2102,3 +2102,139 @@ let () =
     (fun () -> expect_proven (apply ^ Fixtures.Prover.apply_of_a_lambda_looping_without_a_measure));
   Harness.test "an operator on a bound type terminates" (fun () ->
       expect_proven Fixtures.Prover.sum_of_a_bound_type_under_a_time_clause)
+
+let () =
+  let callbacks = Fixtures.Prover.apply_and_each_bounded_by_the_allocations_of_a_callback in
+  Harness.test "one call of a callback spends the callback's allocations" (fun () ->
+      expect_proven callbacks);
+  Harness.test "two calls of a callback are not within the allocations of one" (fun () ->
+      expect_not_proven Fixtures.Prover.apply_twice_bounded_by_the_allocations_of_one_call
+        "prover.cost");
+  Harness.test "two calls of a callback spend its allocations twice" (fun () ->
+      expect_proven Fixtures.Prover.apply_twice_bounded_by_the_allocations_of_two_calls);
+  Harness.test "a loop of calls of a callback is not within the allocations of one call" (fun () ->
+      expect_not_proven Fixtures.Prover.each_bounded_by_the_allocations_of_one_visit "prover.cost");
+  Harness.test "an order bound names the allocations of a callback" (fun () ->
+      expect_proven Fixtures.Prover.each_of_the_order_of_the_allocations_of_visit);
+  Harness.test "a lambda that allocates nothing passes an allocation bound of zero" (fun () ->
+      expect_proven (callbacks ^ Fixtures.Prover.apply_of_a_lambda_that_allocates_nothing));
+  Harness.test "a lambda that allocates does not pass an allocation bound of zero" (fun () ->
+      expect_not_proven (callbacks ^ Fixtures.Prover.apply_of_a_lambda_that_allocates) "prover.cost");
+  Harness.test "a lambda that allocates once passes an allocation bound of one" (fun () ->
+      expect_proven (callbacks ^ Fixtures.Prover.apply_of_a_lambda_that_allocates_once));
+  Harness.test "a lambda that allocates does not pass a bound of zero allocated bytes" (fun () ->
+      expect_not_proven
+        (callbacks ^ Fixtures.Prover.apply_of_a_lambda_that_allocates_bytes)
+        "prover.cost");
+  Harness.test "a named function passed for a callback spends the allocations its clause states"
+    (fun () ->
+      expect_proven (callbacks ^ Fixtures.Prover.apply_of_a_named_function_with_an_allocation_bound));
+  Harness.test "a named function without an allocation bound has unbounded allocations" (fun () ->
+      expect_not_proven
+        (callbacks ^ Fixtures.Prover.apply_of_a_named_function_without_an_allocation_bound)
+        "prover.cost";
+      expect_not_proven
+        (callbacks ^ Fixtures.Prover.apply_of_a_named_function_without_a_bound_on_its_bytes)
+        "prover.cost");
+  Harness.test
+    "a lambda that calls a function without an allocation bound has unbounded allocations"
+    (fun () ->
+      expect_not_proven
+        (callbacks
+       ^ Fixtures.Prover.apply_of_a_lambda_calling_a_function_without_an_allocation_bound)
+        "prover.cost");
+  Harness.test "a callback passed on spends its own allocations" (fun () ->
+      expect_proven
+        (callbacks ^ Fixtures.Prover.apply_forwarding_a_callback_bounded_by_its_allocations));
+  Harness.test "a plain bound does not take a named function's amortized allocations" (fun () ->
+      expect_not_proven
+        (callbacks ^ Fixtures.Prover.apply_of_a_named_function_with_an_amortized_allocation_bound)
+        "prover.cost")
+
+let () =
+  Harness.test "the allocations of a callback are within the bound that its type states" (fun () ->
+      expect_proven Fixtures.Prover.callback_whose_type_states_its_allocations);
+  Harness.test "the allocations of a callback are not below the bound that its type states"
+    (fun () ->
+      expect_not_proven
+        Fixtures.Prover.callback_whose_type_states_its_allocations_counted_below_its_bound
+        "prover.cost");
+  Harness.test "a plain bound does not take the amortized allocations that a callback's type states"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.callback_whose_type_states_amortized_allocations
+        "prover.cost");
+  Harness.test "a plain bound does not take the amortized time that a callback's type states"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.callback_whose_type_states_amortized_time "prover.cost");
+  Harness.test "an exact bound counts a callback whose type states an exact bound" (fun () ->
+      expect_proven Fixtures.Prover.exact_allocations_through_a_callback_with_an_exact_bound);
+  Harness.test "an exact bound does not count a callback that is only bounded above" (fun () ->
+      List.iter
+        (fun text ->
+          let actual = read_message text in
+          if
+            actual
+            <> "Only an upper bound is known for the `allocations` of this call, which may spend \
+                less, so no `==` bound can count it. State the cost with `<=`, or give the type of \
+                the function called an `==` bound."
+          then Harness.fail "message %S" actual)
+        [
+          Fixtures.Prover.exact_allocations_through_a_callback_with_an_upper_bound;
+          Fixtures.Prover.exact_allocations_through_a_callback_without_a_bound;
+        ]);
+  Harness.test "an exact bound that is not met may be above or below the cost" (fun () ->
+      let actual = read_message Fixtures.Prover.exact_allocations_that_are_one_short in
+      if actual <> "This may spend more or less than `cost allocations == 2` states." then
+        Harness.fail "message %S" actual)
+
+let () =
+  let probes =
+    Fixtures.Prover.probe_trait_without_a_time_clause
+    ^ Fixtures.Prover.probe_impls_with_and_without_an_allocation_bound
+  in
+  Harness.test "a call through a bound spends the method's allocations" (fun () ->
+      expect_proven probes;
+      expect_proven
+        (probes ^ Fixtures.Prover.probe_each_bounded_by_the_count_times_the_allocations_of_probe));
+  Harness.test "two calls through a bound are not within the allocations of one" (fun () ->
+      expect_not_proven
+        (probes ^ Fixtures.Prover.probe_twice_bounded_by_the_allocations_of_one_probe)
+        "prover.cost");
+  Harness.test "the allocations of a bound's method are those that the type argument's impl states"
+    (fun () -> expect_proven (probes ^ Fixtures.Prover.probe_of_an_impl_with_an_allocation_bound));
+  Harness.test "the allocations of a bound's method are unbounded where the impl states none"
+    (fun () ->
+      expect_not_proven
+        (probes ^ Fixtures.Prover.probe_of_an_impl_without_an_allocation_bound)
+        "prover.cost");
+  Harness.test "a copy through a bound spends the allocations of the copy" (fun () ->
+      expect_proven Fixtures.Prover.copy_bounded_by_the_allocations_of_copy);
+  Harness.test "two copies through a bound are not within the allocations of one" (fun () ->
+      expect_not_proven Fixtures.Prover.copies_bounded_by_the_allocations_of_one_copy "prover.cost")
+
+let () =
+  Harness.test
+    "the standard combinators pass an allocation bound of zero with lambdas that allocate nothing"
+    (fun () -> expect_proven Fixtures.Prover.standard_combinators_under_an_allocation_bound);
+  Harness.test "a standard combinator spends the allocations of the lambda it is passed" (fun () ->
+      expect_proven Fixtures.Prover.standard_map_of_a_lambda_that_allocates_once;
+      expect_not_proven Fixtures.Prover.standard_map_of_a_lambda_that_allocates "prover.cost")
+
+let () =
+  let ticker = Fixtures.Prover.ticker_without_a_time_clause in
+  let probe = Fixtures.Prover.probe_trait_without_a_time_clause in
+  Harness.test "a call through a bound of a method without a time clause spends the method's time"
+    (fun () ->
+      expect_proven (ticker ^ Fixtures.Prover.tick_thrice_bounded_by_the_time_of_tick);
+      expect_proven (ticker ^ Fixtures.Prover.relay_bounded_by_the_time_of_its_bounds_tick));
+  Harness.test "a loop of calls through a bound spends the method's time once for each call"
+    (fun () ->
+      expect_proven (probe ^ Fixtures.Prover.probe_each_bounded_by_the_count_times_the_time_of_probe);
+      expect_not_proven
+        (probe ^ Fixtures.Prover.probe_each_bounded_by_the_time_of_one_probe)
+        "prover.cost");
+  Harness.test "a call of a method of an associated type's bound spends the method's time"
+    (fun () ->
+      expect_proven (ticker ^ Fixtures.Prover.movement_ticked_twice_bounded_by_the_time_of_its_tick));
+  Harness.test "the time of a followed method is the time that the type argument's impl states"
+    (fun () -> expect_proven (ticker ^ Fixtures.Prover.tick_twice_of_a_countdown_in_constant_time))

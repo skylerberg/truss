@@ -14,14 +14,13 @@ let build_example_database text =
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
-let compiler =
+let c_compiler =
   lazy
-    (match Toolchain.find () with Ok toolchain -> toolchain | Error message -> failwith message)
-
-let cache =
-  lazy (Build.make_cache (Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz"))
-
-let settings : Build.settings = { build = Development; optimization = O1; extra = [] }
+    (match
+       C_compiler.find ~objects:(Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz")
+     with
+    | Ok c_compiler -> c_compiler
+    | Error message -> failwith message)
 
 let load text =
   let database = build_example_database text in
@@ -31,9 +30,9 @@ let load text =
     Some
       ( database,
         lazy
-          (Compile.create ~evaluation_time_limit_ms:2000
+          (Backend.create ~evaluation_time_limit_ms:2000
              (Database.make_lowering_requests database [ example.package ])
-             (Lazy.force compiler) (Lazy.force cache) settings) )
+             (Lazy.force c_compiler) Development) )
 
 let find_integer (ty : Types.ty) =
   if Types.is_builtin Bool ty then Some (1, false) else Types.find_integer_bits ty
@@ -152,13 +151,13 @@ let run_mutant ~samples text =
       in
       match load with_admitting with
       | None -> ()
-      | Some (running, compile) ->
+      | Some (running, backend) ->
           List.iteri
             (fun index candidate ->
               incr functions;
               let call function_ arguments =
                 Database.For_testing.add_root running (Call_evaluation { function_; arguments });
-                Compile.For_testing.evaluate_call (Lazy.force compile) ~function_ ~arguments
+                Backend.For_testing.evaluate_call (Lazy.force backend) ~function_ ~arguments
               in
               let is_admitted arguments =
                 candidate.admits = []

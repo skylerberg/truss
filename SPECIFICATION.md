@@ -120,7 +120,7 @@ log power result old by bit_vector generic
 | Words | Meaning |
 |---|---|
 | `amortized`, `time`, `allocations`, `allocated_bytes`, `calls`, `O`, `finite`, `potential` | The fixed words of a `cost` clause |
-| `time(...)`, `calls(...)` | The cost functions, inside a `cost` bound |
+| `time(...)`, `allocations(...)`, `allocated_bytes(...)`, `calls(...)` | The cost functions, inside a `cost` bound |
 | `log(...)`, `power(...)` | Functions on exact integers, inside a specification |
 | `result` | The return value, inside `ensures` and `cost` |
 | `old(e)` | The value of `e` when the function was called, inside a specification |
@@ -558,9 +558,10 @@ fn Option[Value].take(mut self) -> Option[Value] {
   and records, sum types, and `Array`s built only from those, is `Plain`.
 - **A name bound to a `Plain` value is a copy.** A `let`, or a pattern of a
   `match` or an `is`, that binds a `Plain` value without `mut` copies it, so
-  the place it was bound from can be assigned while the name is live. The
-  variable of a `for` loop is not copied: the loop lends its collection for
-  the body.
+  the place it was bound from can be assigned while the name is live. A
+  compound assignment's `Plain` operand is a copy too, so an index key of
+  the target can assign the operand's place. The variable of a `for` loop is
+  not copied: the loop lends its collection for the body.
 - **`Copyable` types have `copy()`.** An implicit copy never allocates.
 - A copy has the original's capacity.
 - **Handles are not `Copyable`,** nor is a type that holds one.
@@ -795,9 +796,48 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 - **A function with a `time` clause makes no call that may not terminate,**
   and neither does a specification. A call may not terminate when its
   callee has no `time` clause, or when it passes a function that may not
-  terminate for a parameter whose type takes one. The one exception is a
-  call through the function's own parameter, where its bound names that
-  parameter's `time` (see [Capability parameters](#capability-parameters)).
+  terminate for a parameter whose type takes one. A callee that is a
+  trait's method is decided as the table below says.
+- **A `time` clause follows a function parameter, or a method of a bound,
+  where each of its bounds names that parameter's or that method's `time`.**
+  The function may then call it, and terminates if the function passed for
+  the parameter does, or if the type argument's `impl` of the method does.
+  `O(items.length() * time(visit))` follows `visit` (see
+  [Capability parameters](#capability-parameters)), and
+  `O(time(Source.next))` follows `Source.next`:
+
+  ```truss
+  fn second[Source: Cursor](source: mut Source) -> Option[Source.Element]
+    uses Source.Uses
+    cost time O(time(Source.next))
+  {
+    let _ = mut source.next()
+    mut source.next()
+  }
+  ```
+
+  `finite` names no `time`, so a function with `cost time finite` follows
+  nothing: it terminates for every argument and every type argument.
+- **A trait's method without a `time` clause leaves termination to each
+  `impl`.** How the method is called decides which declaration says
+  whether the call terminates:
+
+  | The trait's method | The call | Whether the call terminates |
+  |---|---|---|
+  | States a `time` clause | Any | It terminates as the clause says, for every `impl` |
+  | States none | On a type whose `impl` is known | It terminates as the `time` clause of the `impl`'s method says, and may not where that method states none |
+  | States none | Through a bound on a type parameter, on `Self` in a trait, or on an associated type of either | It terminates if the type argument's `impl` of the method does |
+  | States none | Through `any Trait` | It may not terminate: `any` hides the `impl` |
+
+  `second` terminates for a `ListCursor[Int64]`, whose `next` states
+  `cost time O(1)`. For a cursor whose `next` states no `time` clause it may
+  not terminate, and only a function without a `time` clause calls it with
+  that cursor.
+- A call of a generic function terminates if each method that the
+  function's `time` clause follows terminates for the call's type arguments.
+  A type parameter of the caller passes the condition on: the caller's
+  `time` clause follows the method in turn, or the caller has no `time`
+  clause.
 - A loop without a measure may not terminate either, so a function with a
   `time` clause holds none (see [Loops](#loops)).
 - A recursive call on a part of a parameter needs nothing written. A part is
@@ -859,20 +899,66 @@ and `/` and `-` where the result stays at or above zero, and:
 |---|---|
 | `log(n)` | The smallest integer at least log₂(n + 1) |
 | `power(base, exponent)` | `base` to the `exponent` |
-| `time(visit)` | A bound on any one call of the function parameter `visit` |
-| `time(Element.equal)` | A bound on any one call of a method of a trait that bounds a type parameter, or `Self` in a trait |
+| `time(visit)`, `allocations(visit)`, `allocated_bytes(visit)` | A bound on that resource of any one call of the function parameter `visit` |
+| `time(Element.equal)`, `allocations(Element.equal)`, `allocated_bytes(Element.equal)` | A bound on that resource of any one call of a method of a trait that bounds a type parameter, `Self` in a trait, or an associated type of either, as in `time(Source.Element.equal)` |
 
-- `time(visit)` cannot depend on `visit`'s arguments. It is a constant for a
-  parameter of type `(fn(Item) cost time O(1))`, and a fixed bound that is
-  not known for any other function that terminates. It has no value for a
-  function that may not terminate, and a bound that names it is then
-  unbounded. So a bound names `time(visit)` only where the type of `visit`
-  has a `time` clause, or a capability parameter in its `uses`.
+The terms of the last two rows are the costs of a callee. A cost of a callee
+is one number for the function: it cannot depend on the arguments of a call.
+
+| A cost of a callee is written | Rule |
+|---|---|
+| In an `O(...)` or a `<=` bound of a clause on its own resource | Allowed |
+| In an `==` bound | Rejected. The term is an upper bound and a call may spend less, so an exact amount that names it would be false for that call. |
+| In a clause on another resource | Rejected. `time(visit)` bounds only `time`, `allocations(visit)` only `allocations`, and `allocated_bytes(visit)` only `allocated_bytes`. |
+| With an operand that is neither a function parameter nor a method of a bound | Rejected |
+
+- `time(visit)` is a constant for a parameter of type
+  `(fn(Item) cost time O(1))`, and a fixed bound that is not known for any
+  other function that terminates. It has no value for a function that may
+  not terminate, and a bound that names it is then unbounded. So a bound
+  names `time(visit)` only where the type of `visit` has a `time` clause, or
+  a capability parameter in its `uses`.
+- `allocations(visit)` is `n` for a parameter whose type states
+  `cost allocations <= n` or `== n`, and a fixed bound that is not known for
+  any other function whose allocations are bounded. It has no value for a
+  function whose allocations have no bound, and a bound that names it is
+  then unbounded. `allocated_bytes(visit)` is the same for
+  `cost allocated_bytes`. A bound names either term for any function
+  parameter.
+- **Only `time(...)` follows a callee** (see [Termination](#termination)). A
+  bound that names `allocations(visit)` or `allocated_bytes(visit)` does not
+  make its function terminate, and does not let a function with a `time`
+  clause call a `visit` that may not terminate.
 - An operator counts as the method it calls: `==` spends
-  `time(Element.equal)`, and `<` spends `time(Element.compare)`. If a name has
-  several overloads, the term means the read-only one.
-- At a call, the term has the value the type argument gives it: a constant
-  for `Int64`, whose `impl Equal` promises `cost time O(1)`.
+  `time(Element.equal)` and `allocations(Element.equal)`, and `<` spends
+  `time(Element.compare)`. If a name has several overloads, the term means
+  the read-only one.
+- At a call, the cost of a callback has the value that the function passed
+  gives it:
+
+  | The function passed | The value of the term |
+  |---|---|
+  | A lambda | A bound on its body for every argument |
+  | A named function | For `time`, a constant where its clause is `O(n)` for a literal `n`. For `allocations` and `allocated_bytes`, `n` where its clause is `<= n` or `== n` for a literal `n`. |
+  | A parameter of the caller | The caller's own term for that parameter |
+
+  A function that states no bound on the resource has no value for the
+  term, and neither has one whose bound is `amortized`, which bounds a call
+  together with the potential it changes. A bound that names the term is
+  then unbounded, so the caller proves no bound on that resource through the
+  call.
+- At a call, the cost of a bound's method has the value the type argument
+  gives it: `time(Element.equal)` is a constant for `Int64`, whose
+  `impl Equal` promises `cost time O(1)`, and `allocations(Element.equal)`
+  is 0, since that `impl` promises `cost allocations == 0`. `time(...)` has
+  no value for a type argument whose `impl` of the method may not terminate
+  (see [Termination](#termination)), and `allocations(...)` and
+  `allocated_bytes(...)` have none where the `impl` states no bound on that
+  resource. A bound that names the term is then unbounded.
+- A function with an `==` bound on a resource calls a callback only where
+  the cost of the call is exact: the callback's type states an `==` bound on
+  that resource, or the callback's bound is zero. The cost of any other call
+  is only bounded above.
 - An `impl` that overrides a provided method keeps the provided method's
   bound.
 - `log` and `power` have the same meaning in every specification. The prover
@@ -884,6 +970,21 @@ and `/` and `-` where the result stays at or above zero, and:
 ```truss
 fn Slice[Element: Equal].contains(self, item: Element) -> Bool
   cost time O(self.length() * time(Element.equal))
+  cost allocations <= self.length() * allocations(Element.equal)
+
+fn Option[Value].map[Output](
+  own self,
+  transform: (fn(own Value) -> Output uses generic Granted),
+) -> Option[Output]
+  uses generic Granted
+  cost time O(time(transform))
+  cost allocations <= allocations(transform)
+
+fn halved(value: Option[Int64]) -> Option[Int64]
+  cost allocations <= 0
+{
+  value.map(fn(inner) { inner / 2 })
+}
 ```
 
 #### Amortized costs
@@ -1006,6 +1107,10 @@ capabilities it uses, and whether it terminates.
   passed, and the function cannot call `visit` unless the type of `visit`
   has a `time` clause. A function with several `time` clauses follows a
   parameter only if each bound names its `time`.
+- A function that terminates only if a bound's method does is passed for a
+  capability parameter, which records the condition as it records that a
+  function may not terminate. A function type with a `time` clause does not
+  take it, and no function type states the condition.
 - A type that holds a function writes the capabilities in the field's type.
 
 ## Methods
@@ -1177,9 +1282,15 @@ impl Cursor for Countdown {
   a `Slice`, is a view. One that owns a collection gives its elements away.
 - `Uses` is the set of capabilities that `next` uses. Each `next` uses the
   implementations provided where it is called.
+- `next` states no `time` clause in the trait, so each `impl` decides
+  whether its `next` terminates (see [Termination](#termination)): a
+  cursor over a list states one, and a cursor that waits for input states
+  none.
 - `Cursor` gives a cursor the methods `to_list`, `count`, `last`, `fold`,
   and `find`, and the adapters of `standard::cursors`, such as `skip`,
-  `take`, and `zip`.
+  `take`, and `zip`. An adapter's `next` follows the `next` of each cursor
+  that it wraps: `items.cursor().skip(2).next()` terminates because the
+  `next` of a list's cursor does.
 
 ## Statements and blocks
 
@@ -1377,7 +1488,9 @@ mut scores.update_each(fn(score) { score = score / 2 })
   not, or holds a loop without a measure. Such a call or loop is an error
   where the lambda's function type takes only a function that terminates,
   or one that terminates if the functions passed for a capability parameter
-  do.
+  do, or if a bound's method does. A lambda that calls a method of a bound
+  without a `time` clause terminates if the type argument's `impl` of the
+  method does.
 - `return` and `?` exit the lambda. `break` and `continue` do not reach a
   loop outside it.
 - A lambda is always passed inside the call's parentheses.
@@ -2039,6 +2152,11 @@ trait Ordered: Equal {
   The trait's `requires` must imply the method's. A call known to reach
   that `impl` is proven against the `impl`'s contract, and a call through a
   bound or `any` against the trait's.
+- **An `impl`'s method terminates wherever its trait's method promises
+  to.** An `impl`'s method without a `time` clause has its trait's. Its own
+  `time` clause follows a method of one of the `impl`'s bounds only where
+  the trait's method states no `time` clause, or states one that follows
+  that method for this `impl`.
 - **Required traits:** a type implements the traits a trait requires before
   it implements the trait, and a bound includes them. A trait cannot
   redeclare a method of a trait it requires, but can add an overload in
@@ -2156,6 +2274,10 @@ type Priority =
 - A call with a dot finds the type's own methods, and the methods of the
   traits it implements from the standard library, the calling package, and
   the packages the calling package's manifest lists. No trait is imported.
+- A call finds only the methods and traits that its module can see
+  ([Visibility](#visibility)). A method it cannot see is not a candidate, so
+  a trait's method or the view's method of that name and mode is found
+  instead.
 - A `String` has the methods of `StringSlice` too, and a `List` and an
   `Array` those of `Slice`, in each mode of `self` that its own methods and
   its traits' methods do not take. The receiver becomes a view of itself, so
@@ -2165,11 +2287,14 @@ type Priority =
 - Two of those traits giving one name is an error at a call with a dot,
   which is then written in full: `Ordered.compare(first, second)`. A trait
   and a trait it requires are the exception.
-- A type's own method and a trait method it implements are never the same
-  name with the same mode. An `impl` in the type's own package may add
-  another overload of a name the type has, by writing the method. A provided
-  method that an `impl` does not override, and every method of an `impl` in
-  another package, takes no name that the type's methods have.
+- No module can see both a type's own method and a trait method it
+  implements with the same name and mode. An `impl` in the type's own
+  package may add another overload of a name the type has, by writing the
+  method. A provided method that an `impl` does not override, and every
+  method of an `impl` in another package, takes no name that the type's
+  methods have. These rules count the methods that the `impl`'s package can
+  see: every method of the type for an `impl` in its own package, and the
+  public ones for an `impl` in another package.
 
 ### Dynamic dispatch
 
@@ -2461,6 +2586,12 @@ and the prelude changes only with a language version.
 | `public` | Every package |
 
 - An `impl`, a test, and a law proof take no visibility.
+- A method and a member constant have their own visibility. A use that
+  reaches a member through its type finds it only where it is visible:
+  `Shape.unit`, `shape.area()`, a constant in a pattern, and the `count`,
+  `element`, and `cursor` of a `for` loop or a quantifier. A member that the
+  use cannot see is skipped, as if it did not exist. A use that finds no
+  member except one it cannot see is an error that names that member.
 - `opaque` appears only before `public type`. Outside its package, an opaque
   type's fields cannot be read, built, updated, or matched on. Visibility is
   set for a type as a whole.

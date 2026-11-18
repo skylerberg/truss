@@ -1,0 +1,5 @@
+fn f(ticker: mut any Ticker) -> UInt64
+  cost time finite
+{
+  advance(mut ticker)
+}

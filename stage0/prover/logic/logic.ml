@@ -26,8 +26,9 @@ module Symbol = struct
     | Potential of Types.ty
     | Potential_measure of Types.ty
     | Block_bytes of { type_ : Types.ty; variant : string option }
-    | Time of sort
-    | Method_time of {
+    | Callback_cost of { metric : Metric.t; sort : sort }
+    | Method_cost of {
+        metric : Metric.t;
         method_ : Path.t;
         trait_arguments : Types.argument list;
         self_type : Types.ty;
@@ -128,10 +129,10 @@ let rec show_symbol : symbol -> string = function
   | Potential ty -> "potential." ^ Types.show ty
   | Potential_measure ty -> "potential.measure." ^ Types.show ty
   | Block_bytes { type_; variant } -> "bytes." ^ Types.show type_ ^ "." ^ show_variant variant
-  | Time sort -> "time." ^ show_sort sort
-  | Method_time { method_; trait_arguments; self_type } ->
-      Printf.sprintf "time.method.%s%s[%s]" (Path.show method_) (show_instance trait_arguments)
-        (Types.show self_type)
+  | Callback_cost { metric; sort } -> Metric.show metric ^ "." ^ show_sort sort
+  | Method_cost { metric; method_; trait_arguments; self_type } ->
+      Printf.sprintf "%s.method.%s%s[%s]" (Metric.show metric) (Path.show method_)
+        (show_instance trait_arguments) (Types.show self_type)
   | Opaque_operation { operation; type_; _ } ->
       Printf.sprintf "operation.%s.%s"
         (Intrinsic.show_operation (Scalar operation))

@@ -23,7 +23,7 @@
   mir
   ownership
   package_checks
-  compile
+  backend
   instance
   ground
   libc

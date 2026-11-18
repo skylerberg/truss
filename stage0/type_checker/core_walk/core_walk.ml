@@ -54,7 +54,7 @@ let walk_loop_clause visit = function
 let walk_expression_children visit (node : Core.expression) =
   match node.kind with
   | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _ | Break
-  | Continue | Todo | Unreachable | Result | Current_target | Yielded | Method_time _ ->
+  | Continue | Todo | Unreachable | Result | Current_target | Yielded | Method_cost _ ->
       ()
   | Template { call; _ } -> visit.expression call
   | Use core_place -> walk_place visit core_place

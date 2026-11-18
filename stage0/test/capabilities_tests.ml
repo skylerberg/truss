@@ -105,9 +105,12 @@ let () =
           (list_core_expressions Fixtures.Capabilities.provide_of_a_generic_fixed_clock
              ~of_function:"f")
       with
-      | [ [ [ { capability; impl = Impl _; arguments = { arguments = [ (_, Type tag) ]; _ } } ] ] ]
+      | [ [ [ { capability; impl = Impl _; arguments } ] ] ]
         when Path.equal capability (Support.make_top_path "standard::capabilities" "Clock")
-             && Types.show tag = "Bool" ->
+             &&
+             match Types.For_testing.list_arguments arguments with
+             | [ (_, Type tag) ] -> Types.show tag = "Bool"
+             | _ -> false ->
           ()
       | _ -> Harness.fail "not recorded");
   Harness.test "a specification may not use Panic" (fun () ->
@@ -705,6 +708,22 @@ let () =
   Harness.test "a bound names the time of a callback only if the callback can terminate" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.time_of_a_callback_without_a_capability_parameter
         "types.unbounded_time");
+  Harness.test
+    "a bound that names the allocations of a callback does not make its function terminate"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.each_bounded_by_the_allocations_of_visit_called_under_a_time_clause
+        "capabilities.may_not_terminate"
+        ~says:"This call may not terminate, since `app::main::each` has no `time` clause");
+  Harness.test "a time clause does not follow a callback whose allocations another clause names"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.finite_each_bounded_by_the_allocations_of_visit
+        "capabilities.may_not_terminate"
+        ~says:"This call may not terminate, since the function passed for `visit` may not");
+  Harness.test "a function that terminates names the allocations of a callback that terminates"
+    (fun () ->
+      expect_fine
+        Fixtures.Capabilities.finite_each_of_a_visit_that_terminates_bounded_by_its_allocations);
   Harness.test "a specification calls only functions that terminate" (fun () ->
       expect_one_diagnostic
         (apply ^ Fixtures.Capabilities.ensures_calling_slow)
@@ -858,3 +877,225 @@ let () =
     (fun () ->
       expect_fine
         Fixtures.Capabilities.lambda_looping_without_a_measure_bound_as_using_no_capability)
+
+let () =
+  let tickers = Fixtures.Capabilities.tickers_that_terminate_and_that_may_not in
+  let step_with = tickers ^ Fixtures.Capabilities.step_with_bounded_by_the_time_of_step in
+  let expect_may_not_terminate ?notes text ~says =
+    expect_one_diagnostic text "capabilities.may_not_terminate" ~says ?notes
+  in
+  Harness.test "a time clause follows a method of a bound where its bound names the method's time"
+    (fun () -> expect_fine tickers);
+  Harness.test "a `finite` time clause follows no method of a bound" (fun () ->
+      expect_may_not_terminate
+        (tickers ^ Fixtures.Capabilities.tick_through_a_bound_under_a_finite_time_clause)
+        ~says:
+          "This call may not terminate, since `Ticker.tick` has no `time` clause and `Inner`'s \
+           `impl` decides whether it terminates, and this function has a `time` clause. A `time` \
+           clause follows `Inner.tick` where its bound names `time(Inner.tick)`.");
+  Harness.test "a bound that does not name a method's time does not follow the method" (fun () ->
+      expect_may_not_terminate
+        (tickers ^ Fixtures.Capabilities.tick_through_a_bound_under_a_constant_time_clause)
+        ~says:"since `Ticker.tick` has no `time` clause and `Inner`'s `impl` decides");
+  Harness.test "several time clauses follow a method of a bound only if each bound names its time"
+    (fun () ->
+      expect_fine
+        (tickers ^ Fixtures.Capabilities.tick_through_a_bound_under_two_time_clauses_that_name_it);
+      expect_may_not_terminate
+        (tickers
+       ^ Fixtures.Capabilities.tick_through_a_bound_under_two_time_clauses_of_which_one_is_constant
+        )
+        ~says:"since `Ticker.tick` has no `time` clause and `Inner`'s `impl` decides");
+  Harness.test "a call that follows a method terminates where the type's impl of it does" (fun () ->
+      expect_fine (tickers ^ Fixtures.Capabilities.advance_of_a_countdown_under_a_time_clause));
+  Harness.test "a call that follows a method may not terminate where the type's impl may not"
+    (fun () ->
+      expect_fine (tickers ^ Fixtures.Capabilities.advance_of_forever);
+      expect_may_not_terminate
+        (tickers ^ Fixtures.Capabilities.advance_of_forever_under_a_time_clause)
+        ~says:
+          "This call may not terminate, since the `time` clause of `app::main::advance` follows \
+           `Forever`'s `impl` of `Ticker.tick`, which has no `time` clause, and this function has \
+           a `time` clause.");
+  Harness.test "a call that follows a method of the caller's type parameter follows its impl"
+    (fun () ->
+      expect_may_not_terminate
+        (tickers ^ Fixtures.Capabilities.advance_through_a_bound_under_a_finite_time_clause)
+        ~says:
+          "This call may not terminate, since the `time` clause of `app::main::advance` follows \
+           `Other`'s `impl` of `Ticker.tick`, and this function has a `time` clause. A `time` \
+           clause follows `Other.tick` where its bound names `time(Other.tick)`.");
+  Harness.test "an impl that follows its bound's method is resolved through each impl in turn"
+    (fun () ->
+      expect_fine
+        (tickers ^ Fixtures.Capabilities.tick_of_a_relayed_relayed_countdown_under_a_time_clause);
+      expect_may_not_terminate
+        (tickers ^ Fixtures.Capabilities.tick_of_a_relayed_relayed_forever_under_a_time_clause)
+        ~says:
+          "This call may not terminate, since the `time` clause of `Relay[Relay[Forever]]`'s \
+           `impl` of `Ticker.tick` follows `Relay[Forever]`'s `impl` of `Ticker.tick`, which may \
+           not terminate, and this function has a `time` clause.");
+  Harness.test "a call through `any` of a method without a time clause may not terminate" (fun () ->
+      expect_may_not_terminate
+        (tickers ^ Fixtures.Capabilities.tick_of_any_ticker_under_a_time_clause)
+        ~says:
+          "This call may not terminate, since `Ticker.tick` has no `time` clause, and this \
+           function has a `time` clause.";
+      expect_may_not_terminate
+        (tickers ^ Fixtures.Capabilities.advance_of_any_ticker_under_a_time_clause)
+        ~says:
+          "This call may not terminate, since the `time` clause of `app::main::advance` follows \
+           `Ticker.tick` through `any Ticker`, where `Ticker.tick` has no `time` clause, and this \
+           function has a `time` clause.");
+  Harness.test "a provided method follows a method of `Self` that its bound names" (fun () ->
+      expect_fine (tickers ^ Fixtures.Capabilities.tick_twice_of_a_countdown_under_a_time_clause);
+      expect_fine
+        (tickers ^ Fixtures.Capabilities.tick_twice_through_a_bound_bounded_by_the_time_of_tick);
+      expect_may_not_terminate
+        (tickers ^ Fixtures.Capabilities.tick_twice_of_forever_under_a_time_clause)
+        ~says:
+          "This call may not terminate, since the `time` clause of `Ticker.tick_twice` follows \
+           `Forever`'s `impl` of `Ticker.tick`, which has no `time` clause, and this function has \
+           a `time` clause.";
+      expect_may_not_terminate
+        (tickers ^ Fixtures.Capabilities.tick_twice_through_a_bound_under_a_finite_time_clause)
+        ~says:
+          "This call may not terminate, since the `time` clause of `Ticker.tick_twice` follows \
+           `Inner`'s `impl` of `Ticker.tick`, and this function has a `time` clause. A `time` \
+           clause follows `Inner.tick` where its bound names `time(Inner.tick)`.");
+  Harness.test "a provided method with a `finite` time clause follows no method of `Self`"
+    (fun () ->
+      expect_may_not_terminate
+        Fixtures.Capabilities.provided_method_ticking_under_a_finite_time_clause
+        ~says:
+          "This call may not terminate, since `Metronome.beat` has no `time` clause and `Self`'s \
+           `impl` decides whether it terminates, and this function has a `time` clause. A `time` \
+           clause follows `Self.beat` where its bound names `time(Self.beat)`.");
+  Harness.test "an impl's time clause follows no method that its trait's time clause does not"
+    (fun () ->
+      expect_one_diagnostic
+        (tickers ^ Fixtures.Capabilities.steady_impl_bounded_by_the_time_of_its_bounds_tick)
+        "types.impl_uses"
+        ~says:
+          "The `time` clause of `pulse` follows `Inner`'s `impl` of `Ticker.tick`, which may not \
+           terminate, and the `time` clause that `Steady` declares for `pulse` does not follow it."
+        ~at:("pulse", 2));
+  Harness.test "a lambda that calls a method of a bound terminates where the method's impl does"
+    (fun () ->
+      let followed =
+        step_with ^ Fixtures.Capabilities.step_with_a_lambda_ticking_bounded_by_the_time_of_tick
+      in
+      expect_fine followed;
+      (match
+         List.filter_map
+           (fun (node : Core.expression) ->
+             match (node.kind, node.type_) with
+             | Lambda _, Function { uses; _ } -> Some (uses :> Types.capability list)
+             | _ -> None)
+           (list_core_expressions followed ~of_function:"f")
+       with
+      | [ [ Divergence (Of_impl_method { self_type = Parameter { name = "Inner"; _ }; name; _ }) ] ]
+        when name = "tick" ->
+          ()
+      | _ -> Harness.fail "the lambda's type does not hold the divergence of `Inner.tick` alone");
+      expect_may_not_terminate
+        (step_with ^ Fixtures.Capabilities.step_with_a_lambda_ticking_under_a_finite_time_clause)
+        ~says:
+          "This call may not terminate, since the lambda passed for `step` may not, and this \
+           function has a `time` clause."
+        ~notes:
+          [
+            ( "This call may not terminate, since `Ticker.tick` has no `time` clause and `Inner`'s \
+               `impl` decides whether it terminates.",
+              ("source.tick()", 1) );
+          ];
+      expect_may_not_terminate
+        (step_with ^ Fixtures.Capabilities.step_with_finite_of_a_lambda_ticking)
+        ~says:
+          "This call may not terminate, since `Ticker.tick` has no `time` clause and `Inner`'s \
+           `impl` decides whether it terminates, and the function type that this lambda is passed \
+           as promises that the lambda terminates.");
+  Harness.test "a function named as a value follows the method that its time clause follows"
+    (fun () ->
+      expect_fine (step_with ^ Fixtures.Capabilities.step_with_advance_bounded_by_the_time_of_tick);
+      expect_fine (step_with ^ Fixtures.Capabilities.step_with_finite_of_advance_of_a_countdown);
+      expect_may_not_terminate
+        (step_with ^ Fixtures.Capabilities.step_with_advance_under_a_finite_time_clause)
+        ~says:
+          "This call may not terminate, since the `time` clause of `app::main::advance`, passed \
+           for `step`, follows `Inner`'s `impl` of `Ticker.tick`, and this function has a `time` \
+           clause. A `time` clause follows `Inner.tick` where its bound names `time(Inner.tick)`.";
+      expect_may_not_terminate
+        (step_with ^ Fixtures.Capabilities.step_with_advance_of_forever_under_a_time_clause)
+        ~says:
+          "This call may not terminate, since the `time` clause of `app::main::advance`, passed \
+           for `step`, follows `Forever`'s `impl` of `Ticker.tick`, which has no `time` clause, \
+           and this function has a `time` clause.");
+  Harness.test "a function type with a time clause takes no function that follows a method"
+    (fun () ->
+      expect_one_diagnostic
+        (step_with ^ Fixtures.Capabilities.step_with_finite_of_advance_through_a_bound)
+        "types.mismatch"
+        ~says:
+          "Expected `(fn(mut Inner) -> UInt64 cost time finite)`, found `fn(mut Inner) -> UInt64`, \
+           which terminates only if `Inner`'s `impl` of `Ticker.tick` does.";
+      expect_one_diagnostic
+        (step_with ^ Fixtures.Capabilities.step_with_finite_of_advance_of_forever)
+        "types.mismatch"
+        ~says:
+          "Expected `(fn(mut Forever) -> UInt64 cost time finite)`, found `fn(mut Forever) -> \
+           UInt64`, which may not terminate.");
+  Harness.test "a time clause follows a method of an associated type's bound" (fun () ->
+      let clockwork = tickers ^ Fixtures.Capabilities.clockwork_whose_movement_ticks in
+      expect_fine clockwork;
+      expect_fine (clockwork ^ Fixtures.Capabilities.run_and_wind_of_a_pocket_under_a_time_clause);
+      expect_may_not_terminate
+        (clockwork ^ Fixtures.Capabilities.tick_of_a_movement_under_a_finite_time_clause)
+        ~says:
+          "This call may not terminate, since `Ticker.tick` has no `time` clause and \
+           `Watch.Movement`'s `impl` decides whether it terminates, and this function has a `time` \
+           clause. A `time` clause follows `Watch.Movement.tick` where its bound names \
+           `time(Watch.Movement.tick)`.";
+      expect_may_not_terminate
+        (clockwork ^ Fixtures.Capabilities.run_of_a_broken_watch_under_a_time_clause)
+        ~says:
+          "This call may not terminate, since the `time` clause of `app::main::run` follows \
+           `Forever`'s `impl` of `Ticker.tick`, which has no `time` clause, and this function has \
+           a `time` clause.";
+      expect_may_not_terminate
+        (clockwork ^ Fixtures.Capabilities.wind_of_a_broken_watch_under_a_time_clause)
+        ~says:
+          "This call may not terminate, since the `time` clause of `Clockwork.wind` follows \
+           `Forever`'s `impl` of `Ticker.tick`, which has no `time` clause, and this function has \
+           a `time` clause.");
+  Harness.test
+    "a method that follows its own callback may not terminate for a caller that follows the method \
+     through a bound" (fun () ->
+      let visitors = Fixtures.Capabilities.visitors_that_follow_and_that_ignore_their_callback in
+      expect_fine visitors;
+      expect_fine (visitors ^ Fixtures.Capabilities.visit_once_of_a_silent_under_a_time_clause);
+      expect_may_not_terminate
+        (visitors ^ Fixtures.Capabilities.visit_once_of_a_single_under_a_time_clause)
+        ~says:
+          "This call may not terminate, since the `time` clause of `app::main::visit_once` follows \
+           `Single`'s `impl` of `Visited.visit`, whose `time` clause follows a function that it is \
+           passed, and this function has a `time` clause.");
+  Harness.test
+    "a lambda's function type that follows a method takes no lambda that may not terminate by \
+     itself" (fun () ->
+      expect_may_not_terminate
+        (tickers ^ Fixtures.Capabilities.lambda_calling_forever_assigned_over_advance)
+        ~says:
+          "This call may not terminate, since `app::main::forever` has no `time` clause, and the \
+           function type that this lambda is passed as takes only a function that terminates if \
+           `Inner`'s `impl` of `Ticker.tick` does.");
+  Harness.test "a call through a local that holds a function follows the method that it follows"
+    (fun () ->
+      expect_fine
+        (tickers ^ Fixtures.Capabilities.advance_bound_to_a_local_bounded_by_the_time_of_tick);
+      expect_may_not_terminate
+        (tickers ^ Fixtures.Capabilities.advance_bound_to_a_local_under_a_finite_time_clause)
+        ~says:
+          "This call may not terminate, since `step` terminates only if `Inner`'s `impl` of \
+           `Ticker.tick` does, and this function has a `time` clause. A `time` clause follows \
+           `Inner.tick` where its bound names `time(Inner.tick)`.")
