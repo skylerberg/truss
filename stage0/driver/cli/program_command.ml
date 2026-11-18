@@ -1,14 +1,9 @@
-let find_main snapshot database packages (package : Path.package) =
-  if List.mem { Path.package; modules = [] } (Command_packages.list_modules snapshot packages) then
-    Database.find_main database package
-  else None
-
 let list_mains snapshot packages =
-  List.filter_map (find_main snapshot (Workspace.open_database snapshot) packages) packages
+  List.filter_map (Database.find_main (Workspace.open_database snapshot)) packages
 
-let require_main snapshot database packages =
+let require_main database packages =
   let package = Command_packages.require_one packages in
-  match find_main snapshot database packages package with
+  match Database.find_main database package with
   | Some main -> main
   | None ->
       Outcome.raise_cannot_run
@@ -77,7 +72,7 @@ let build_program ?output snapshot packages (profile : Backend.profile) =
   let database = Workspace.open_database snapshot in
   let report = Report.gather ~proofs:(profile = Release) database snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
-  let main = require_main snapshot database packages in
+  let main = require_main database packages in
   let lookups = Workspace_backend.require_lowered_lookups database packages in
   Option.iter (refuse_unshippable snapshot packages lookups main) (Report.force_proofs report);
   let backend = Workspace_backend.create snapshot packages lookups profile in
