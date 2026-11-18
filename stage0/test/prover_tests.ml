@@ -1,5 +1,7 @@
 let check_file database file =
-  match Support.list_fragment_diagnostics database file with
+  match
+    Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database file
+  with
   | [] -> Support.list_proof_diagnostics database file
   | errors -> errors
 
@@ -251,7 +253,8 @@ let () =
       let main = Support.parse_file "app::main" in
       (match
          Support.list_codes
-           (Support.list_fragment_diagnostics (Support.make_database packages) main)
+           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
+              (Support.make_database packages) main)
        with
       | [] -> ()
       | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
@@ -289,7 +292,8 @@ let () =
       let main = Support.parse_file "app::main" in
       (match
          Support.list_codes
-           (Support.list_fragment_diagnostics (Support.make_database packages) main)
+           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
+              (Support.make_database packages) main)
        with
       | [] -> ()
       | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
@@ -391,11 +395,16 @@ let () =
       let main = Support.parse_file "app::main" in
       (match
          Support.list_codes
-           (Support.list_fragment_diagnostics database (Support.parse_file "app::main/measured"))
+           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database
+              (Support.parse_file "app::main/measured"))
        with
       | [ "resolve.unknown_name" ] -> ()
       | codes -> Harness.fail "the trait reports %s" (String.concat ", " codes));
-      (match Support.list_codes (Support.list_fragment_diagnostics database main) with
+      (match
+         Support.list_codes
+           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database
+              main)
+       with
       | [] -> ()
       | codes -> Harness.fail "a caller does not check: %s" (String.concat ", " codes));
       (match Support.list_codes (Support.list_proof_diagnostics database main) with

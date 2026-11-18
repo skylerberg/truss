@@ -23,7 +23,10 @@ let () =
                  (index + 1))
               (fun () ->
                 let database = Support.make_database packages in
-                let diagnostics = Support.list_fragment_diagnostics database file in
+                let diagnostics =
+                  Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
+                    database file
+                in
                 if
                   not
                     (List.exists
