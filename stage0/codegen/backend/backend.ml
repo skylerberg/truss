@@ -29,10 +29,10 @@ let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
   match item with
   | Code { path; instantiation } -> Compiled (Lower.lower_source_code context ~path ~instantiation)
   | Generated generated -> Compiled (Lower.lower_generated context generated)
-  | Table table -> Compiled (Emit_c.make_fragment env (Table (Lower.lower_table context table)))
+  | Table table -> Compiled (Emit_c.make_table_fragment env (Lower.lower_table context table))
   | Constant path -> (
       match Lower.lower_constant context path with
-      | Folded data -> Folded (data, Emit_c.make_fragment env (Data data))
+      | Folded data -> Folded (data, Emit_c.make_data_fragment env data)
       | Run ty -> Evaluate (path, ty))
   | Drop ty -> Compiled (Drop_and_copy.drop drop_and_copy ty)
   | Copy ty -> Compiled (Drop_and_copy.copy drop_and_copy ty)
@@ -295,7 +295,6 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
   | Stopped report -> Stopped report
 
 and compile_fragment backend item =
-  let emit_data (data : Lowered.data) = Emit_c.make_fragment (make_env backend) (Data data) in
   let compiled =
     match read_lowered backend item with
     | Compiled fragment | Folded (_, fragment) -> fragment
@@ -304,7 +303,8 @@ and compile_fragment backend item =
           run_while_compiling backend (Lowered.Item.Evaluator path) ~read:(fun encoded ->
               Encoding.decode (make_env backend) ty encoded)
         with
-        | Ran value -> emit_data { data_item = Constant path; ty; value }
+        | Ran value ->
+            Emit_c.make_data_fragment (make_env backend) { data_item = Constant path; ty; value }
         | Ran_too_long ->
             raise_cannot_build "Evaluating %s ran past the time limit of %d ms." (Path.show path)
               backend.evaluation_time_limit_ms
