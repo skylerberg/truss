@@ -256,6 +256,7 @@ internal fn TextBuilder.write_signed(mut self, value: Int64)
 impl Equal for String {
   fn equal(self, other: String) -> Bool
     ensures result == identical(self.model(), other.model())
+    cost time O(other.length())
     cost allocations == 0
   {
     self.slice() == other.slice()
@@ -293,9 +294,10 @@ impl Display for String {
 impl Equal for StringSlice {
   fn equal(self, other: StringSlice) -> Bool
     ensures result == identical(self.model(), other.model())
+    cost time O(other.length())
     cost allocations == 0
   {
-    intrinsic::compare_bytes(self.bytes, right: other.bytes) == 0
+    intrinsic::compare_bytes(other.bytes, right: self.bytes) == 0
   }
 }
 

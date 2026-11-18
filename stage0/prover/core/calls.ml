@@ -257,7 +257,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     end;
   let precondition_clauses = Contracts.select_precondition_clauses contract in
   let is_checked =
-    Mir.is_index_call invocation.callee && Mir.list_checked_requires context.lookups.mir path <> []
+    Mir.is_index_call invocation.callee
+    && Option.is_some (Mir.find_checked_requires context.lookups.mir path)
   in
   let required =
     let entry = read_entry_frame precondition_clauses in

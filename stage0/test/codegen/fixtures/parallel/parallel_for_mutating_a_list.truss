@@ -15,12 +15,7 @@ fn main(arguments: List[String]) -> ExitCode
     }
     cell = collatz(cell)
   }
-  var same = true
-  for index in 0..expected.length() {
-    if expected[index] != board.cells[index] {
-      same = false
-    }
-  }
+  let same = expected == board.cells
   var total: Int64 = 0
   for steps in board.cells {
     if steps % 7 != 0 || steps < 7 {

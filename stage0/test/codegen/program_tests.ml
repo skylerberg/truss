@@ -184,10 +184,12 @@ let () =
           ("index", "index out of bounds");
           ("slice", "slice out of bounds");
           ("key", "index out of bounds");
+          ("assignment", "index out of bounds");
+          ("inherited", "index out of bounds");
         ];
       let status, output, _ = run "none" in
       Codegen_support.expect_int ~expected:0 status;
-      Codegen_support.expect_string ~expected:"9223372036854775807 0 1\n" output)
+      Codegen_support.expect_string ~expected:"9223372036854775807 0 1 1 5\n" output)
 
 let () =
   Codegen_support.test "a program writes a file, reads it back, and reports a missing one"

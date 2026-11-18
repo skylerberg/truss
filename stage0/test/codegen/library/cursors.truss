@@ -1,17 +1,5 @@
 use standard::simulation
 
-fn same_items(actual: Slice[Int64], expected: Slice[Int64]) -> Bool {
-  if actual.length() != expected.length() {
-    return false
-  }
-  for index in 0..actual.length() {
-    if actual[index] != expected[index] {
-      return false
-    }
-  }
-  true
-}
-
 type Counter(next: Int64, stop: Int64)
 
 impl Cursor for Counter {
@@ -33,7 +21,7 @@ fn count_to(stop: Int64) -> Counter {
 }
 
 test "a cursor is collected, counted, and folded, and gives its last value" {
-  assert same_items(count_to(3).to_list(), expected: [1, 2, 3])
+  assert count_to(3).to_list() == [1, 2, 3]
   assert count_to(5).count() == 5
   assert count_to(5).last() == Some(5)
   assert count_to(5).fold(0, combine: fn(total, item) { total + item }) == 15
@@ -51,20 +39,20 @@ test "find takes values up to the first that matches, and the cursor continues f
 }
 
 test "skip, take, and step_by choose which values a cursor gives" {
-  assert same_items(count_to(7).skip(2).to_list(), expected: [3, 4, 5, 6, 7])
-  assert same_items(count_to(7).skip(9).to_list(), expected: [])
-  assert same_items(count_to(7).take(3).to_list(), expected: [1, 2, 3])
-  assert same_items(count_to(7).take(0).to_list(), expected: [])
-  assert same_items(count_to(7).take(9).to_list(), expected: [1, 2, 3, 4, 5, 6, 7])
-  assert same_items(count_to(7).step_by(3).to_list(), expected: [1, 4, 7])
-  assert same_items(count_to(7).step_by(1).to_list(), expected: [1, 2, 3, 4, 5, 6, 7])
-  assert same_items(count_to(7).skip(1).step_by(2).take(2).to_list(), expected: [2, 4])
+  assert count_to(7).skip(2).to_list() == [3, 4, 5, 6, 7]
+  assert count_to(7).skip(9).to_list() == []
+  assert count_to(7).take(3).to_list() == [1, 2, 3]
+  assert count_to(7).take(0).to_list() == []
+  assert count_to(7).take(9).to_list() == [1, 2, 3, 4, 5, 6, 7]
+  assert count_to(7).step_by(3).to_list() == [1, 4, 7]
+  assert count_to(7).step_by(1).to_list() == [1, 2, 3, 4, 5, 6, 7]
+  assert count_to(7).skip(1).step_by(2).take(2).to_list() == [2, 4]
 }
 
 test "chain gives one cursor's values and then another's" {
-  assert same_items(count_to(2).chain(Counter(next: 7, stop: 9)).to_list(), expected: [1, 2, 7, 8])
-  assert same_items(count_to(0).chain(count_to(1)).to_list(), expected: [1])
-  assert same_items(count_to(2).chain(count_to(0)).to_list(), expected: [1, 2])
+  assert count_to(2).chain(Counter(next: 7, stop: 9)).to_list() == [1, 2, 7, 8]
+  assert count_to(0).chain(count_to(1)).to_list() == [1]
+  assert count_to(2).chain(count_to(0)).to_list() == [1, 2]
 }
 
 test "zip pairs two cursors up to the shorter, and enumerate counts from zero" {
@@ -115,27 +103,27 @@ impl Cursor for Letters {
 
 test "a list and a string are collected from a cursor, and a list is extended by one" {
   let collected: List[Int64] = List.collect(count_to(4).skip(1))
-  assert same_items(collected, expected: [2, 3, 4])
+  assert collected == [2, 3, 4]
   var longer: List[Int64] = [0]
   mut longer.extend(count_to(9).take(2))
-  assert same_items(longer, expected: [0, 1, 2])
+  assert longer == [0, 1, 2]
   mut longer.extend(count_to(0))
-  assert same_items(longer, expected: [0, 1, 2])
+  assert longer == [0, 1, 2]
   let text: String = String.collect(Letters(left: 4))
   assert text == "h\u{e9}h\u{e9}"
 }
 
 test "the adapters and the trait's methods work on a list's cursor" {
   let items: List[Int64] = [1, 2, 3, 4, 5, 6, 7]
-  assert same_items(items.cursor().skip(2).to_list(), expected: [3, 4, 5, 6, 7])
-  assert same_items(items.cursor().take(3).to_list(), expected: [1, 2, 3])
-  assert same_items(items.cursor().step_by(3).to_list(), expected: [1, 4, 7])
-  assert same_items(items.cursor().skip(1).step_by(2).take(2).to_list(), expected: [2, 4])
+  assert items.cursor().skip(2).to_list() == [3, 4, 5, 6, 7]
+  assert items.cursor().take(3).to_list() == [1, 2, 3]
+  assert items.cursor().step_by(3).to_list() == [1, 4, 7]
+  assert items.cursor().skip(1).step_by(2).take(2).to_list() == [2, 4]
   assert items.cursor().count() == 7
   assert items.cursor().last() == Some(7)
   assert items.cursor().fold(0, combine: fn(total, item) { total + item }) == 28
   let collected: List[Int64] = List.collect(items.cursor().skip(5))
-  assert same_items(collected, expected: [6, 7])
+  assert collected == [6, 7]
   var cursor = items.cursor().peekable()
   assert mut cursor.peek() == Some(1)
   assert mut cursor.next() == Some(1)

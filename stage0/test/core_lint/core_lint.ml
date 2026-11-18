@@ -312,7 +312,9 @@ let is_executable context (condition : Core.expression) =
          Types.equal node.type_ Integer
          ||
          match node.kind with
-         | Quantified _ | Old _ | Result | Specification_function _ | Method_cost _ -> true
+         | Quantified { binder = Over_type _; _ }
+         | Old _ | Result | Specification_function _ | Method_cost _ ->
+             true
          | Call { callee = Function { path; _ }; _ } -> (
              match Interface.Impls.read_signature context.interface path with
              | Some signature -> signature.specification_only
@@ -809,8 +811,9 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  | Bind { is_var = true; _ }, Place _ ->
                      report "a `let` that binds a mutable local receives a place"
                  | _ -> ())
-             | For { iteration = Cursor { cursor; _ }; _ } ->
-                 check_mutable_place "a `for` loop" cursor
+             | For { iteration = Cursor { cursor; uses; _ }; _ } ->
+                 check_mutable_place "a `for` loop" cursor;
+                 check_capabilities "a pulled `next`'s `uses`" uses
              | For { iteration = Elements { count; position; element }; _ } -> (
                  (match count.kind with
                  | Call _ -> ()

@@ -29,9 +29,7 @@ lines(item) = [ item { NEWLINE item } ] ;
 ```
 
 [`grammar/truss.mly`](grammar/truss.mly) is the whole grammar written for
-Menhir. A test checks that it accepts every example in the repository's
-documents and every Truss file of the repository that the parser accepts, and
-that it rejects inputs the parser rejects.
+Menhir.
 
 Some examples show a signature without a body. In a program, every function
 has a body, except a method declared in a trait or a capability.
@@ -82,9 +80,7 @@ A `raw_name` that is a keyword is that keyword. Otherwise it is an
 `_`. It is a `LOWER_NAME` otherwise, and then contains no uppercase letter,
 does not end with `_`, and does not contain `__`.
 
-A letter outside ASCII where a name is written is an error. The lexer reads
-the whole word, as Unicode's `XID_Start` and `XID_Continue` define one, and
-reports it once.
+A letter outside ASCII where a name is written is an error.
 
 Types, constructors, traits, and capabilities are `UpperCamelCase`. Values,
 constants, functions, fields, modules, and files are `lower_snake_case`. In a
@@ -107,15 +103,8 @@ Reserved for later use, and an error if written:
 as async await const defer extern loop macro static unsafe where
 ```
 
-The lexer has no contextual keywords. These words are names to it,
-`LOWER_NAME`s except `O`. The parser recognizes them by their spelling where
-the grammar shows them, and
-name resolution gives the rest their meaning:
-
-```text
-amortized time allocations allocated_bytes calls O finite potential
-log power result old by bit_vector generic
-```
+These words are not reserved. Each has its meaning only where this table
+says, and is an ordinary name elsewhere:
 
 | Words | Meaning |
 |---|---|
@@ -131,10 +120,13 @@ log power result old by bit_vector generic
 | `generic` | In a `uses` list, before the name of a capability parameter |
 
 A parameter cannot be named `result`, a parameter of a lending method cannot
-be named `final`, and no function can be named `old` or `identical`.
-Elsewhere the words are ordinary names: in
+be named `final`, and no function can be named `old` or `identical`. In
 `fn wait(time: Duration) cost time O(time.seconds())`, the second `time` is
 the resource and the third the parameter.
+
+Inside a `cost` bound, a call of `log`, `power`, or a cost function always
+names the function of the table. In any other specification, a local or a
+definition of the module named `log` or `power` takes precedence.
 
 ### Number literals
 
@@ -197,10 +189,7 @@ quotes     = '"""' { '"' } ;
 interpolation = "${" expression "}" ;
 ```
 
-The lexer returns a string literal as one token, with each interpolation
-already split into the tokens of its expression. A `TAGGED_STRING` has no
-whitespace between its tag and the string; a module path before the tag, as
-in `database::SqlQuery"..."`, is ordinary tokens.
+A `TAGGED_STRING` has no whitespace between its tag and the string.
 
 - `\0` is NUL, and `\${` is the text `${`. A `\u{...}` escape names a Unicode
   scalar value.
@@ -219,8 +208,8 @@ in `database::SqlQuery"..."`, is ordinary tokens.
 - In an ordinary string and a raw string opened with no `$`, an
   interpolation starts at `${`. In a raw string opened with *n* `$`s, it
   starts at *n* `$`s followed by `{`. Every other `$`, `{`, and `}` is text.
-- The lexer counts braces inside an interpolation and lexes strings inside
-  it recursively, so `"Players: ${names.join(", ")}"` is one string. An
+- An interpolation ends at the `}` that matches its `{`, and may hold
+  strings, so `"Players: ${names.join(", ")}"` is one string. An
   interpolation contains no line break and is not empty.
 
 ```truss
@@ -263,8 +252,7 @@ divisions.
 ### Line breaks
 
 A line feed becomes a `NEWLINE` token exactly when the token before it can
-end a statement and the token after it can begin one, outside `(` and `[`.
-The lexer keeps a stack of open brackets, `(`, `[`, and `{`:
+end a statement and the token after it can begin one, outside `(` and `[`:
 
 1. While the innermost open bracket is `(` or `[`, line feeds are skipped.
 2. Otherwise, a line feed becomes a `NEWLINE` token when both of these hold:
@@ -284,8 +272,8 @@ The lexer keeps a stack of open brackets, `(`, `[`, and `{`:
    statement.
 
 So no `NEWLINE` comes before a closing `}`, and statements, arms, and members
-are separated by `NEWLINE`s. The parser skips a `NEWLINE` before a `{` that
-must open a body. A line that starts with `.`, `else`, a clause keyword, or a
+are separated by `NEWLINE`s. A `NEWLINE` before a `{` that must open a body
+is ignored. A line that starts with `.`, `else`, a clause keyword, or a
 binary operator other than `-` continues the line before:
 
 ```truss
@@ -393,9 +381,8 @@ let answer = Some(3)
 - A `type_clause` after the last variant belongs to the whole type.
 - The order of a record's fields has no meaning, except to a derived
   `Ordered`.
-- A record with one field has the representation of its field, and none of
-  its methods or operators: `type UserId(number: UInt64)` is a type of its
-  own.
+- A record with one field has none of its field's methods or operators:
+  `type UserId(number: UInt64)` is a type of its own.
 
 ### Recursive types
 
@@ -450,10 +437,9 @@ bound             = path_type { "+" path_type } ;
 
 - A `LOWER_NAME` parameter has type `UInt64`, and its value is known when the
   code is compiled.
-- Generic code is monomorphized: it is compiled once for each set of type
-  arguments. So a generic function cannot call itself, or a function in a
-  cycle with it, with a type argument built from its own type parameters, and
-  a generic type cannot contain itself with other arguments.
+- A generic function cannot call itself, or a function in a cycle with it,
+  with a type argument built from its own type parameters, and a generic
+  type cannot contain itself with other arguments.
 
 ### Invariants
 
@@ -472,7 +458,6 @@ public type Interval =
 
 - `self` names the value, and a record's fields can be named directly.
 - Repeated invariants all hold, and each may rely on the ones before it.
-- A function called in an invariant is pure and has a `time` clause.
 - Invariants are proven, never checked when the program runs. An invariant
   holds wherever other code can observe the value: when it is built,
   directly or with `with`, passed to a call, or returned, and when the
@@ -562,8 +547,8 @@ fn Option[Value].take(mut self) -> Option[Value] {
   compound assignment's `Plain` operand is a copy too, so an index key of
   the target can assign the operand's place. The variable of a `for` loop is
   not copied: the loop lends its collection for the body.
-- **`Copyable` types have `copy()`.** An implicit copy never allocates.
-- A copy has the original's capacity.
+- **`Copyable` types have `copy()`,** whose result is identical to the
+  original. An implicit copy never allocates.
 - **Handles are not `Copyable`,** nor is a type that holds one.
 - `Copyable` and `Plain` are prelude traits that the compiler implements and
   no `impl` can, and `Plain` requires `Copyable`. The compiler derives them
@@ -588,7 +573,7 @@ mut items.push(9)
 
 While a view is live, that is, until its last use, its original cannot be
 mutated or moved. Here `push` is allowed because `middle` is not used after
-it. The compiler checks this within each function.
+it.
 
 - **Being a view is a property of a type.** `Slice`, `StringSlice`, and a
   lambda that reads local variables are views, and so is any type that holds
@@ -645,14 +630,12 @@ public let seconds_per_day: Int64 = 24 * 60 * 60
 
 - The value is a *constant expression*: literals, arithmetic on numbers,
   other constants, and records, variants, collection literals, and strings
-  built from those. It calls no function. The compiler evaluates it, running
-  the compiled `from_elements` or `from_entries` of a collection that takes
-  its literal through one, with no random hash key.
+  built from those. It calls no function except the `from_elements` or
+  `from_entries` of a collection literal, and is evaluated when the program
+  is compiled.
 - A constant's value does not depend on itself, through another constant or
   through the default of a field that a record or variant in it leaves out.
-- A constant lives in static memory. Reading it or taking a view of it costs
-  nothing, an owned value from it is made with `copy()`, and it is never
-  passed `own` or `mut`.
+- Reading a constant or taking a view of it allocates nothing.
 
 ## Functions
 
@@ -716,8 +699,7 @@ let connection = connect(host, port: 8080)?
 
 - A default is a constant expression that refers to no other parameter. An
   argument for a parameter with a default can be left out, and the function
-  fills it in. An owned default is copied, which costs one counted
-  allocation for a non-empty `List`, `Map`, or `Set`.
+  fills it in.
 - Building a record or a variant follows the same rules, except that fields
   may come in any order, evaluated in the order written, and only a record
   or variant with exactly one field takes a bare value, as in `Some(3)`.
@@ -733,11 +715,11 @@ let builder = List[String].with_capacity(64)
 ```
 
 Type arguments that cannot be inferred are written in brackets after the
-function's name. Name resolution decides whether `name[...]` is type
-arguments or an index (see
-[Constructs resolved after parsing](#constructs-resolved-after-parsing)), and
-a diagnostic about `f[X]` says which reading applied.
+function's name.
 
+- `name[...]` holds type arguments when `name` is a generic function, a
+  type, or a trait, and is an index otherwise. After a `.`, it holds type
+  arguments when the name is a method of the receiver.
 - The written arguments give the generic parameters in brackets, in order.
 - A capability parameter takes no type argument, since it is written at its
   uses and not in brackets: `for_each[String](names, visit: greet)` gives
@@ -858,8 +840,7 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 - Other recursion in a function with a `time` clause states `decreases`: an
   integer measure over the parameters that stays at or above zero and that
   every recursive call makes smaller. A list of measures is compared in
-  order. Functions in a cycle of calls each state one. The compiler never
-  guesses a measure.
+  order. Functions in a cycle of calls each state one.
 - A function also reaches itself by naming a function as a value, and by
   using an `impl` where a bound needs one. Inside an `impl`'s methods, using
   that same `impl` is a recursive call to every method of the `impl`, and
@@ -887,7 +868,7 @@ public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
 - The target of `calls` is a function parameter, a capability method, or a
   whole capability, never an associated capability set.
 - `O(f)` means that the cost is at most `c * f + d` for every input, for
-  constants `c` and `d` that the prover finds.
+  some constants `c` and `d`.
 - `time` counts abstract steps: each primitive operation and each call is one.
 - A caller's cost is proven from its callees' cost clauses.
 
@@ -959,13 +940,6 @@ is one number for the function: it cannot depend on the arguments of a call.
   the cost of the call is exact: the callback's type states an `==` bound on
   that resource, or the callback's bound is zero. The cost of any other call
   is only bounded above.
-- An `impl` that overrides a provided method keeps the provided method's
-  bound.
-- `log` and `power` have the same meaning in every specification. The prover
-  knows `log` of a number exactly, and that `log` of a value of an integer
-  type is at most the type's width. Outside a `cost` bound, a local or a
-  definition of the file with either name takes precedence. Neither can be
-  called in code that runs.
 
 ```truss
 fn Slice[Element: Equal].contains(self, item: Element) -> Bool
@@ -1098,9 +1072,6 @@ capabilities it uses, and whether it terminates.
 
 - In the body of `for_each`, `(fn(Item) uses generic Granted)` takes only a
   function that terminates if the functions passed for `generic Granted` do.
-  No function type states that a function uses `generic Granted` and may not
-  terminate. A lambda that does both is passed in a call, which infers a
-  capability parameter of its callee from the lambda.
 - An `impl`'s method names its capability parameters as its trait's method
   does. Capability parameters have no order to rename them by.
 - `(fn(Item) uses generic Granted cost time finite)` takes only functions that
@@ -1283,19 +1254,8 @@ impl Cursor for Countdown {
 
 - `next()` returns `Some` of the next value, which the caller owns, or
   `None` when the cursor has no more.
-- A cursor holds its own state. One that holds a view, such as a cursor over
-  a `Slice`, is a view. One that owns a collection gives its elements away.
 - `Uses` is the set of capabilities that `next` uses. Each `next` uses the
   implementations provided where it is called.
-- `next` states no `time` clause in the trait, so each `impl` decides
-  whether its `next` terminates (see [Termination](#termination)): a
-  cursor over a list states one, and a cursor that waits for input states
-  none.
-- `Cursor` gives a cursor the methods `to_list`, `count`, `last`, `fold`,
-  and `find`, and the adapters of `standard::cursors`, such as `skip`,
-  `take`, and `zip`. An adapter's `next` follows the `next` of each cursor
-  that it wraps: `items.cursor().skip(2).next()` terminates because the
-  `next` of a list's cursor does.
 
 ## Statements and blocks
 
@@ -1418,9 +1378,8 @@ arm   = pattern { "," pattern } [ "if" expression ] "=>" statement ;
 - **A `match` covers every case.** An arm with a guard never counts toward
   covering its patterns.
 - **Every arm is reachable.**
-- A `match` on several values has one pattern per value in each arm. No
-  tuple is made, and coverage and reachability are checked across all the
-  values.
+- A `match` on several values has one pattern per value in each arm.
+  Coverage and reachability are checked across all the values.
 
 ### `is`
 
@@ -1466,8 +1425,7 @@ let production = own config with (server.port: 443, log_level: LogLevel.Warning)
 
 - `base with (updates)` means copying the base into a new variable,
   assigning its fields, and returning it.
-- The base is passed as an `own` argument is. An owned base is reused
-  in place, so the update costs one write per field.
+- The base is passed as an `own` argument is.
 - `with` works on records, and updates only fields visible at that point.
 
 ### Lambdas
@@ -1554,14 +1512,9 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   `>`, or `>=` has the distance between them as its measure, and a `for`
   loop over a cursor whose type has a `remaining(self) -> UInt64` method has
   that method's value.
-- **A loop without a measure may not terminate.** A function with a `time`
-  clause therefore holds none, and neither does a lambda whose function type
-  takes only a function that terminates, or one that terminates if the
-  functions passed for a capability parameter do (see
-  [Termination](#termination)). In
-  both, each `while` loop and each `for` loop over a cursor has a measure,
-  which is proven to decrease. A `for` loop over a range or over a
-  collection's elements always terminates.
+- **A loop without a measure may not terminate** (see
+  [Termination](#termination) and [Lambdas](#lambdas)). A `for` loop over a
+  range or over a collection's elements always terminates.
 - In the clauses of a loop over a range, the loop variable is the index of
   the next iteration: in `for i in start..end`, `i` is `start` on entry and
   `end` where the loop ends, and `end + 1` after `start..=end`.
@@ -1570,9 +1523,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   local named `visited` shadows the word.
 - In a loop that reads a collection, `visited[i]` is the value of the
   collection's `element` at position `i`, so it meets that method's
-  `ensures`. Where the collection's `model()` is the `Sequence` of its
-  elements, as a `List`'s is, `visited` is that model once the loop has
-  visited every element.
+  `ensures`.
 - Where a cursor's `model()` is a `Sequence` of the cursor's `Element`, as a
   `ListCursor`'s is, the model is the values that the cursor has yet to
   give, in order. In a loop that pulls such a cursor, `visited` followed by
@@ -1583,10 +1534,14 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   `visited` proves, of such a cursor, that `next` returns the first value of
   the model and leaves the rest as the model, and that it returns `None`
   only when the model is empty.
-- A loop's `cost` bounds the loop's cost so far, at the start of every
-  iteration and when it ends. It is never `amortized` or `finite`. Its bound
-  can use the variables in scope at the loop, and `visited` or a range's
-  index:
+- A loop's `cost` bounds the loop's cost so far at the start of every
+  iteration and where the loop ends, each time before a `while` loop
+  evaluates its condition or a `for` loop over a cursor calls `next`. It
+  also holds where a `break` leaves the loop, with the iteration that the
+  `break` leaves counted as visited: a range's index is the index after it,
+  and `visited` holds its value. The clause is never `amortized` or
+  `finite`. Its bound can use the variables in scope at the loop, and
+  `visited` or a range's index:
 
   ```truss
   fn sum_all(rows: List[List[Int64]]) -> Int64
@@ -1604,14 +1559,40 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   }
   ```
 
-  `sum` adds a measure of each element of a `Sequence`. The measure is a
-  function that terminates and uses no capabilities, and two lambdas with
-  the same body are the same measure.
+- **A loop's `cost` does not count the evaluation that ends the loop.** That
+  evaluation comes after the last point where the clause holds, and its cost
+  is added to the clause's bound to give the cost after the loop:
+
+  | Loop | Evaluated once more than the body runs |
+  |---|---|
+  | `while` | The condition, as far as `&&` and `\|\|` evaluate it |
+  | `for` over a cursor | `next`, which returns `None` |
+  | `for` over a range or over a collection's elements | Nothing: `count` is called once, before the loop |
+
+  ```truss
+  fn count_heads(limit: UInt32) -> UInt32
+    uses Random
+    cost calls(Random.next) == result + 1
+  {
+    var heads: UInt32 = 0
+    while Random.next() % 2 == 0 && heads < limit
+      invariant heads <= limit
+      cost calls(Random.next) == heads
+    {
+      heads = heads + 1
+    }
+    heads
+  }
+  ```
 
 ### Ranges
 
-- `start..end` excludes `end`, and `start..=end` includes it. A range whose
-  start is at or past its end is empty.
+- `start..end` excludes `end`, and `start..=end` includes it. `start..end` is
+  empty when `start` is at or past `end`, and `start..=end` when `start` is
+  past `end`.
+- Two ranges of a `Countable` type, such as an integer type, `Character`, or
+  `Date`, are equal when they hold the same values: `0..3 == 0..=2`, and
+  every empty range equals every other.
 - A range of characters holds the characters between its ends in the order
   of their code points.
 - A range with no start or no end is allowed only directly in brackets, as in
@@ -1653,8 +1634,7 @@ let pending: Stack[Int64] = [1, 2, 3]
   elements, or of `from_entries` with a `List` of one `map::Entry` for each
   key and value, in the order written. It costs that list and that call.
 - `from_entries` requires keys that are pairwise distinct by `==`, so a map
-  literal's keys are proven distinct. An `impl` for a type that holds a key
-  more than once states a weaker `requires`.
+  literal's keys are proven distinct.
 - A list literal may repeat an element, and `from_elements` decides which of
   two equal elements a collection keeps.
 
@@ -1675,11 +1655,9 @@ let pending: Stack[Int64] = [1, 2, 3]
   `items[i] += 1`, and `mut items[i]` need it.
 - `collection[key] = value` calls `assign` when the type implements
   `IndexAssign`. The collection must accept the key, by its `accepts_key`:
-  a `Map` accepts every key and inserts a missing one, and a `BitSet`
-  accepts the keys it has. For any other type, the assignment replaces the
-  element that `IndexMut` lends, so the key is there.
-- A type that computes its elements, such as a `BitSet`, implements `Index`
-  and `IndexAssign` and not `IndexMut`: it has no place to lend `mut`.
+  a `Map` accepts every key and inserts a missing one. For any other type,
+  the assignment replaces the element that `IndexMut` lends, so the key is
+  there.
 - Each method of the three traits terminates: `contains_key`, `accepts_key`,
   both overloads of `at`, and `assign` have `cost time finite`.
 - Strings cannot be indexed.
@@ -1725,10 +1703,10 @@ postfix    = primary { "." LOWER_NAME
                      | "(" list(argument) ")"
                      | "?"
                      | "with" "(" list(update) ")" } ;
-brackets   = expression
+brackets   = bracket_item { "," bracket_item } [ "," ]
            | [ additive ] ".." [ additive ]
-           | [ additive ] "..=" additive
-           | type_argument { "," type_argument } [ "," ] ;
+           | [ additive ] "..=" additive ;
+bracket_item = expression | UPPER_NAME "=" type ;
 
 primary    = INTEGER | FLOAT | STRING | [ module_path "::" ] TAGGED_STRING
            | "true" | "false" | "todo" | "unreachable" | "break" | "continue"
@@ -1752,8 +1730,7 @@ if         = "if" expression block [ "else" ( if | block ) ] ;
 - The grammar is the precedence: precedence is a partial order. Bitwise
   operators combine only with themselves, `&&` and `||` do not mix,
   comparisons, `is`, ranges, and `==>` do not chain, and `!` cannot be the
-  left operand of `is`. Each of those needs parentheses, and a missing pair
-  is an error with a fix that adds them.
+  left operand of `is`. Each of those needs parentheses.
 - `return` and `echo` take everything after them. A `{` right after
   `return`, on the same line, starts the returned value.
 - The brackets after a name in an expression hold expressions, which cover
@@ -1827,7 +1804,6 @@ public trait Add[Right] {
 - `>>` on a signed integer copies the sign bit, and on an unsigned integer
   shifts in zeros. A shift amount is any unsigned integer type, proven
   smaller than the bit width of the value.
-- Unsigned integers cannot be negated.
 - The traits `FixedWidthInteger`, `SignedInteger`, and `UnsignedInteger` are
   sealed: only the built-in integer types implement them.
 
@@ -1864,11 +1840,10 @@ the unchecked operation would give.
 
 - An overflow, a division by zero, and a shift that is too large are checked
   where they happen.
-- An index runs the `requires` of the `impl`'s own `at` before the call, and
-  a slice runs the `requires` of its slicing method. An index through a
-  trait bound or `any`, an assignment through `IndexAssign`, and an `at`
-  that states no `requires` or one that cannot be evaluated at run time
-  (see [Deriving](#deriving)) are proven.
+- An index, a slice, or an assignment through `IndexAssign` checks the
+  `requires` of the method it calls. One through a trait bound or `any` is
+  proven, and so is a `requires` that cannot be evaluated at run time (see
+  [Deriving](#deriving)).
 - A lambda in that body, a `proof` block, and every clause are proven. A
   lambda's capabilities are inferred from its body, not declared, and a
   `proof` block and a clause do not run.
@@ -2067,9 +2042,6 @@ method with a parameter that can hold a function, or an `any` value, that
 uses a capability, so its mutexes cannot deadlock. An implementation
 provided without `mut` has no mutex.
 
-The standard library's `tasks` module holds channels, limits on how many
-tasks run at once, and cells that tasks update.
-
 ## Strings
 
 - A string literal is a `String` constant without a name. Reading it, taking
@@ -2100,8 +2072,8 @@ let pattern = Regex"[a-z]+@${domain}"
   the converted values.
 - A tag's `from_template` states the rules for valid literal text with
   `requires`. The literal text is known when the code is compiled, so the
-  compiler proves the `requires` by running the check, as compiled code. `Regex"[a-z"` is an
-  error, and so is a check that panics, reaches `todo`, or runs past the time limit.
+  `requires` is evaluated then. `Regex"[a-z"` is an error, and so is a check
+  that panics or reaches `todo`.
 - `from_template` is the one method whose `requires` may be stronger than its
   trait's, and a call of it through a bound or `any` is an error.
 
@@ -2158,8 +2130,7 @@ trait Ordered: Equal {
 ```
 
 - A `law` holds for every implementation and every set of values that meets
-  its `requires`. It uses only methods with a `time` clause and no
-  capabilities, and an `impl`'s method keeps its trait's `time` clause.
+  its `requires`.
 - A trait's contracts bind every `impl` and are proven for each.
 - **An `impl`'s method may promise more than its trait.** Its contract is
   the trait method's, with the method's own `ensures` and `cost` clauses
@@ -2192,8 +2163,7 @@ trait Ordered: Equal {
 - The trait's arguments in an `impl` or a law proof hold no function type
   and no associated type, such as `Items.Element` or `Self.Output`. An
   associated type may stand for any type, so an `impl` with one would overlap
-  every other `impl` of the trait for its type. A record that holds a
-  function can be the argument instead of the function's type.
+  every other `impl` of the trait for its type.
 - The trait of an `impl` or a law proof takes no constraint, such as
   `Element = Int64`. An `impl` chooses its associated types in its body, so a
   constraint on its trait could only repeat or contradict that choice.
@@ -2252,7 +2222,7 @@ fn count[Source: Cursor](source: own Source) -> UInt64
 ### Equality
 
 A type's equality is *structural* when two equal values cannot be distinguished
-by any function, so the prover concludes `f(a) == f(b)` from `a == b`. The
+by any function, so `a == b` implies `f(a) == f(b)`. The
 built-in integers, `Bool`, `Character`, `Unit`, `String`, and the types of
 specifications have it, and so does a type that derives `Equal` when all its
 fields do. A hand-written `Equal`, float equality, and an opaque type's
@@ -2273,9 +2243,9 @@ type Priority =
 | `Equal` | Equal variants with equal fields |
 | `Hash` | Combines the hashes of the fields |
 | `Ordered` | Variants in declaration order, then fields in declaration order |
-| `Default` | For a record, each field's written default, or its type's `default()` for a field without one. The value must meet the type's invariant, which the prover checks |
+| `Default` | For a record, each field's written default, or its type's `default()` for a field without one. The value must meet the type's invariant |
 | `serialization::Serialize` | A record as its fields by name, in declaration order. A variant with no fields as its name, and a variant with fields as a record of them under its name |
-| `serialization::Deserialize` | The same form, read back. A missing field takes its default if it has one, and a missing field of type `Option` is `None`. A value that breaks an `invariant` clause of its type is an error at the value's path that quotes the clause, with each run of whitespace as one space |
+| `serialization::Deserialize` | The same form, read back. A missing field takes its default if it has one, and a missing field of type `Option` is `None`. A value that breaks an `invariant` clause of its type is an error |
 | `Copyable`, `Plain` | Nothing: an opaque type declares that it copies (see [Copying](#copying)) |
 
 - Every field has the trait, and a derived trait's required traits are
@@ -2284,10 +2254,10 @@ type Priority =
 - A derived implementation satisfies the trait's laws; a hand-written one
   proves them.
 - `serialization::Deserialize` is derived only for a type whose `invariant`
-  clauses can be evaluated at run time: none has a quantifier, a value of
-  type `Integer`, or a call of a specification-only function. Data then
-  cannot make a value that breaks its type's invariant, which every proof
-  assumes.
+  clauses can be evaluated at run time: none quantifies over a type, names
+  `identical`, holds a value of a type that exists only in specifications,
+  or calls a function for specifications only. Data then cannot make a value
+  that breaks its type's invariant, which every proof assumes.
 - Every type has debug output, which needs no derive.
 
 ### Method lookup
@@ -2353,21 +2323,15 @@ test "config loads with defaults" {
 - `plain_string` is a `STRING` with no interpolation.
 - A test has `Panic`. It provides every other capability its code uses,
   unless it declares them with `uses`. A test with `uses` is *external*: it
-  gets the real implementations of exactly those capabilities, and runs every
-  time the suite runs. Any other test is deterministic, and its result is
-  cached until its code changes.
+  gets the real implementations of exactly those capabilities. Any other
+  test is deterministic.
 - A test's `uses` names only capabilities with a [real
-  implementation](#standard-capabilities), so it cannot name `Panic`. A panic
-  does not depend on the world, so declaring `Panic` would only stop a
-  deterministic test's result from being cached.
-- A test's standard output and standard error are attached to its report
-  as one text, in the order written. Its standard input is empty.
-- A failed test is never retried.
+  implementation](#standard-capabilities), so it cannot name `Panic`.
+- A test's standard input is empty.
 - A failed `assert` ends the test as failed, and the rest of the test can
   rely on the asserted fact.
-- A test does not wait for proofs. A test build checks every primitive
-  operation that could fail when it runs, and a failed check fails the
-  test. A `requires` is not run.
+- A test build checks every primitive operation that could fail when it
+  runs, and a failed check fails the test. A `requires` is not run.
 - A panic fails only its test. A test that reaches a `todo` is incomplete.
 - A test that runs past the project's time limit fails.
 
@@ -2407,10 +2371,9 @@ proof Ordered.transitive for Box[Item: Ordered] {
 - Calling a theorem makes its `ensures` available. A theorem that calls
   itself on smaller input is a proof by induction.
 - **A theorem is called only in specifications and proofs, and is not a
-  value.** It has no compiled body, so a call in code that runs, or a
-  function value of it, would reach a function the program does not hold.
+  value.** Its body is a proof and never runs.
 - A `proof { }` block in a function body holds the statements that a
-  theorem's body holds, and is removed from the compiled program.
+  theorem's body holds, and does not run.
 - A law proof's body is checked as the law's body is: it names the law's
   read-only parameters, `Self` is its type, and the law's `requires` hold. A
   proof for a generic `impl` names the type as the `impl` does, and is
@@ -2423,9 +2386,7 @@ proof Ordered.transitive for Box[Item: Ordered] {
 
 - Every callee is known to its callers' proofs by its contract, in every
   package: a function, a method of a type, a trait's method, and an
-  `impl`'s method alike. A callee whose body is its
-  definition states the body in its `ensures`:
-  `ensures result == (forall index in 1..items.length() => items[index - 1] <= items[index])`.
+  `impl`'s method alike.
 - An `impl`'s laws are proven from the contracts of its methods.
 - A derived `Ordered` states its comparison in its `ensures`.
 - A clause applies only where every name that it mentions is visible.
@@ -2458,10 +2419,8 @@ an invariant, a law, or a proof.
   on the bound name being in its range, and uses no capabilities.
 - A quantifier over a collection ranges over the values that the
   collection's `element` lends at the positions below its `count()`, in code
-  and in specifications alike. A loop over the collection visits the same
-  values, so what the quantifier says about the collection's `model()`
-  follows from `element`'s `ensures`. A pattern that does not match a value
-  leaves that value out.
+  and in specifications alike. A pattern that does not match a value leaves
+  that value out.
 - A quantifier over a type and `==>` appear only in specifications and in
   functions for specifications only.
 - A quantifier's body runs to the end of the expression.
@@ -2510,13 +2469,12 @@ public opaque type Session = todo
 ```
 
 - `todo` stands for an expression of any type, a body, or a type's
-  definition. The compiler reports each one with its type and the names in
-  scope.
+  definition.
 - Code with a `todo` is type-checked and proven, and callers are checked
   against the signature of an unfinished function.
-- `truss build` and `truss run --release` refuse a program whose `main` can
-  reach a `todo`. In a development build, a `todo` that runs stops the
-  program and reports its position.
+- A release build refuses a program whose `main` can reach a `todo`. In a
+  development build, a `todo` that runs stops the program and reports its
+  position.
 - A type defined as `todo` can be named, but its contents cannot be used.
 
 ## Debug output
@@ -2531,11 +2489,10 @@ fn score(player: Player) -> Int64 {
 - `echo expr` records the value's debug output with its location and text,
   and returns the value. It needs no `uses`, and proofs and cost clauses read
   it as `expr`.
-- In tests, the output is attached to the test's report, grouped by branch or
-  task; otherwise it goes to standard error.
-- It is not allowed in proofs. `truss build` and `truss run --release`
-  refuse a program whose `main` can reach an `echo`, and a package that
-  contains one cannot be published.
+- Outside a test, the output goes to standard error.
+- It is not allowed in proofs. A release build refuses a program whose
+  `main` can reach an `echo`, and a package that contains one cannot be
+  published.
 
 ## Modules and visibility
 
@@ -2553,8 +2510,7 @@ let settings = json::parse(text)?
 - There are no import aliases. A full path works without a `use`, and
   importing two modules with the same last name is an error.
 - An unused `use` is an error. A `use` is used when a module path in the
-  file begins with its last name. A file with a syntax error reports no
-  unused `use`, since the code that did not parse may use it.
+  file begins with its last name.
 
 ### Module paths
 
@@ -2574,7 +2530,6 @@ beside the package's manifest are its root module, `weather`.
   like any other module.
 - Every path starts with a package name, including inside the package.
 - There are no relative paths, and a path holds no version.
-- File and directory names are `lower_snake_case`.
 - The modules of a package may use each other in a cycle.
 
 ### The prelude
@@ -2594,9 +2549,6 @@ The prelude is in scope in every file, and all its names are
 
 No definition can have a prelude name, a project cannot change the prelude,
 and the prelude changes only with a language version.
-
-`From.from`, `TryFrom.try_from`, and `Default.default` terminate: each has
-`cost time finite`.
 
 ### Visibility
 
@@ -2627,30 +2579,4 @@ and the prelude changes only with a language version.
 ## No foreign code
 
 Truss code cannot call code written in other languages. Only the standard
-library reaches the operating system, through the compiler.
-
-## Constructs resolved after parsing
-
-| Construct | Decided by | How |
-|---|---|---|
-| `name[...]` | Name resolution | Type arguments if `name` is a generic function, a type, or a trait; otherwise an index. For a method, type checking decides. |
-| A bare argument after the first | Type checking | Names a parameter or field of the callee |
-| Whether an expression after `mut` or `own` starts with a place | Name resolution | It starts with a variable, a parameter, `self`, or a constant |
-| A variant in a pattern | Type checking | Looked up in the type of the scrutinee |
-| A method call or field | Type checking | Looked up in the type of the receiver |
-| An `impl` of a trait with type parameters | Type checking | Chosen by the argument types, inferred first |
-| The cost words, `log`, `power`, `result`, `old` | The parser and name resolution | The parser checks their spelling where a `cost` clause expects them |
-| The expected type of `[...]` | Type checking | `List` unless another collection type is expected |
-
-## Ambiguities in the grammar
-
-The grammar has three shift/reduce conflicts, all resolved by shifting.
-Precedence declarations in `grammar/truss.mly` resolve them, and the checks of
-the reference parser fail on any other conflict:
-
-- **`else` after `let pattern = if ... { } else { }`** attaches to the `if`.
-  A `let ... else` expression that ends with `}` is rejected after parsing.
-- **`{` after `return`** starts the returned value.
-- **A name after `return`** starts the returned value, so in
-  `assert return by bit_vector`, `by` is `return`'s operand and not the
-  start of `by bit_vector`.
+library reaches the operating system.

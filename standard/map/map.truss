@@ -7,6 +7,7 @@ public opaque type Map[Key: Hash + Ordered, Value](entries: List[Entry[Key, Valu
   derives Copyable
 
 public type Entry[Key, Value](key: Key, value: Value)
+  derives Equal
 
 public trait FromEntries {
   type Key: Equal

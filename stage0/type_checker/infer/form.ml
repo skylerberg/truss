@@ -711,8 +711,8 @@ let is_executable state (condition : Core.expression) =
         (fun (node : Core.expression) ->
           if node.type_ = Types.Integer then executable := false;
           match node.kind with
-          | Quantified _ | Result | Old _ | Yielded | Identical _ | Specification_function _
-          | Method_cost _
+          | Quantified { binder = Over_type _; _ }
+          | Result | Old _ | Yielded | Identical _ | Specification_function _ | Method_cost _
           | Convert { conversion = To_integer | From_integer; _ } ->
               executable := false
           | Call { callee; _ } -> if is_specification_only callee then executable := false
@@ -968,7 +968,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
         For
           {
             pattern;
-            iteration = Cursor { cursor = place; next };
+            iteration = Cursor { cursor = place; next; uses = State.compute_callee_uses state next };
             clauses = clauses @ Option.to_list measure;
             body;
             mode;

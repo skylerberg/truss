@@ -242,6 +242,46 @@ let () =
       | None -> Harness.fail "the caller has no proof")
 
 let () =
+  Harness.test "a proof blocked by an error in a package its package depends on is not a bug"
+    (fun () ->
+      let packages =
+        Support.setup
+          ~dependencies:[ ("app", "lib") ]
+          [
+            ("lib::numbers", Fixtures.Prover.public_double_with_an_ill_typed_ensures);
+            ("app::main", Fixtures.Prover.caller_of_a_dependency_with_an_ill_typed_ensures);
+          ]
+      in
+      let main = Support.parse_file "app::main" in
+      (match
+         Support.list_codes (Support.list_diagnostics (Support.make_database packages) main)
+       with
+      | [] -> ()
+      | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
+      let caller =
+        List.find
+          (fun (declaration : Resolve.Names.declaration) ->
+            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+          (Support.list_declarations packages (Support.parse_module "app::main"))
+      in
+      match
+        Database.For_testing.find_proof
+          (Support.prove (Support.make_database packages) main)
+          (Resolve.Names.make_key caller)
+      with
+      | Some Blocked -> ()
+      | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
+      | None -> Harness.fail "the caller has no proof");
+  Harness.test "a function that passes a derived impl where a bound needs one is proven" (fun () ->
+      expect_not_proven Fixtures.Prover.same_of_a_derived_version_ensured_false "prover.ensures");
+  Harness.test "a function that converts a value with a derived impl to `any` is proven" (fun () ->
+      expect_not_proven Fixtures.Prover.digest_of_a_derived_version_ensured_eight "prover.ensures");
+  Harness.test
+    "a written default that calls a function that calls a derived default is not recursion"
+    (fun () ->
+      expect_proven Fixtures.Prover.person_default_over_a_function_calling_a_derived_default)
+
+let () =
   Harness.test "a type error in a callee's body blocks no caller's proof" (fun () ->
       let packages =
         Support.setup
@@ -984,6 +1024,83 @@ let () =
   Harness.test "an impl's method keeps its trait's cost" (fun () ->
       expect_not_proven Fixtures.Prover.sized_impl_with_the_traits_cost "prover.cost")
 
+let () =
+  let callees = Fixtures.Prover.meter_and_step in
+  let expect_with_the_last ~without ~with_ =
+    expect_not_proven (callees ^ without) "prover.cost";
+    expect_proven (callees ^ with_)
+  in
+  Harness.test
+    "a `while` loop's `<=` clause leaves out the evaluation of the condition that ends it"
+    (fun () ->
+      expect_with_the_last
+        ~without:Fixtures.Prover.polls_of_a_while_condition_bounded_without_the_last
+        ~with_:Fixtures.Prover.polls_of_a_while_condition_bounded_with_the_last);
+  Harness.test
+    "a `while` loop's `==` clause leaves out the evaluation of the condition that ends it"
+    (fun () ->
+      expect_with_the_last
+        ~without:Fixtures.Prover.ticks_of_a_while_condition_counted_without_the_last
+        ~with_:Fixtures.Prover.ticks_of_a_while_condition_counted_with_the_last);
+  Harness.test "the operand of `||` that is evaluated only where a `while` loop ends is counted"
+    (fun () ->
+      expect_with_the_last
+        ~without:Fixtures.Prover.tick_of_the_operand_that_ends_a_while_counted_as_none
+        ~with_:Fixtures.Prover.tick_of_the_operand_that_ends_a_while_counted);
+  Harness.test "an inner loop's last evaluation of its condition is counted in the outer iteration"
+    (fun () ->
+      expect_with_the_last
+        ~without:Fixtures.Prover.ticks_of_an_inner_while_condition_counted_without_the_last
+        ~with_:Fixtures.Prover.ticks_of_an_inner_while_condition_counted_with_the_last);
+  Harness.test "a loop whose condition and whose exit spend nothing keeps its exact count"
+    (fun () ->
+      expect_proven (callees ^ Fixtures.Prover.ticks_in_the_body_of_a_while_with_a_clause_counted);
+      expect_proven
+        (callees ^ Fixtures.Prover.ticks_in_the_body_of_a_list_loop_with_a_clause_counted));
+  Harness.test "the allocations of the evaluation of the condition that ends a `while` are counted"
+    (fun () ->
+      let grows = Fixtures.Prover.grows_allocating_once in
+      expect_not_proven
+        (grows ^ Fixtures.Prover.allocations_of_a_while_condition_bounded_without_the_last)
+        "prover.cost";
+      expect_proven (grows ^ Fixtures.Prover.allocations_of_a_while_condition_bounded_with_the_last));
+  Harness.test "the time of the evaluation of the condition that ends a `while` is counted"
+    (fun () ->
+      let costly = Fixtures.Prover.costly_refusing_in_linear_time in
+      expect_not_proven
+        (costly ^ Fixtures.Prover.time_of_the_operand_that_ends_a_while_left_out)
+        "prover.cost";
+      expect_proven (costly ^ Fixtures.Prover.time_of_the_operand_that_ends_a_while_counted))
+
+let () =
+  let ticking = Fixtures.Prover.ticking_countdown in
+  Harness.test "a pulled `next` that uses a capability makes its calls of the capability's method"
+    (fun () ->
+      expect_not_proven
+        (ticking ^ Fixtures.Prover.ticks_of_a_pulled_next_counted_as_none)
+        "prover.cost";
+      expect_not_proven
+        (ticking ^ Fixtures.Prover.ticks_of_a_pulled_next_bounded_by_none)
+        "prover.cost");
+  Harness.test "a loop over a cursor counts the `next` that returns `None`" (fun () ->
+      expect_not_proven
+        (ticking ^ Fixtures.Prover.ticks_of_a_cursor_loop_bounded_without_the_last_next)
+        "prover.cost";
+      expect_proven (ticking ^ Fixtures.Prover.ticks_of_a_cursor_loop_counted_with_the_last_next));
+  Harness.test "the allocations of the `next` that returns `None` are counted" (fun () ->
+      let allocating = Fixtures.Prover.allocating_countdown in
+      expect_not_proven
+        (allocating ^ Fixtures.Prover.allocations_of_a_cursor_loop_bounded_without_the_last_next)
+        "prover.cost";
+      expect_proven
+        (allocating ^ Fixtures.Prover.allocations_of_a_cursor_loop_bounded_with_the_last_next));
+  Harness.test "the time of the `next` that returns `None` is counted" (fun () ->
+      let weighted = Fixtures.Prover.weighted_countdown in
+      expect_not_proven
+        (weighted ^ Fixtures.Prover.time_of_a_cursor_loop_without_the_last_next)
+        "prover.cost";
+      expect_proven (weighted ^ Fixtures.Prover.time_of_a_cursor_loop_with_the_last_next))
+
 let meter = Fixtures.Prover.meter
 
 let () =
@@ -1277,7 +1394,17 @@ let () =
       | actual ->
           Harness.fail "%s"
             (String.concat "; "
-               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)))
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
+  Harness.test
+    "a caller of another package's function that passes a derived impl where a bound needs one is \
+     proven" (fun () ->
+      match
+        Support.list_codes
+          (check_across Fixtures.Prover.public_same_versions_of_a_derived_version
+             Fixtures.Prover.same_versions_of_a_dependency_ensured_false)
+      with
+      | [ "prover.ensures" ] -> ()
+      | codes -> Harness.fail "codes %s" (String.concat ", " codes))
 
 let () =
   Harness.test

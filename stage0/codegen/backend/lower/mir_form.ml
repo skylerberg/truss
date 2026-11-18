@@ -1069,9 +1069,9 @@ let find_forwarded_call st (call : Mir.call) : Forwarded.t option =
             else None)
   | _ -> None
 
-let list_checked_requires (st : Lowering.state) path =
-  if Types.may_panic st.frame.code.uses then Mir.list_checked_requires st.context.lookups.mir path
-  else []
+let find_checked_requires (st : Lowering.state) path =
+  if Types.may_panic st.frame.code.uses then Mir.find_checked_requires st.context.lookups.mir path
+  else None
 
 let is_forwarded_whole (frame : Lowering.mir_frame) part =
   match frame.body.blocks.(frame.block).terminator with
@@ -1204,7 +1204,9 @@ and lower_statement st (statement : Mir.Graph.statement) =
             destination
         | None -> make_discard_place st
       in
-      lower_call_into st call destination ~origin
+      lower_call_into
+        ?failure:(if Mir.is_index_call call.callee then Some "index out of bounds" else None)
+        st call destination ~origin
   | Lend { part; call } -> lend st part call ~origin
   | Slice { destination; call; _ } ->
       lower_call_into ~failure:"slice out of bounds" st call (lower_place st destination) ~origin
@@ -1663,44 +1665,47 @@ and check_invariant st ~value ~clause ~destination =
       lower_mir_into ~arguments:[ value_place ] st invariant destination)
 
 and check_requires st ~path ~instantiation arguments ~origin ~failure =
-  let requires = list_checked_requires st path in
-  if requires <> [] then begin
-    let site = locate_site st origin and reported = find_reported_site st in
-    let caller = st.frame in
-    st.frame <-
-      { caller with code = Definitions.make_code st.context path instantiation; self_place = None };
-    List.iter
-      (fun (requirement : Mir.requirement) ->
-        let holds = Lowering.allocate_temporary st st.context.bool in
-        lower_mir_into
-          ~arguments:(List.map (fun (_, _, place) -> place) arguments)
-          st
-          (Mir.expand_formula requirement.clause)
-          holds;
-        let failed = Emit_c.Builder.allocate_block st.builder
-        and after = Emit_c.Builder.allocate_block st.builder in
-        Emit_c.Builder.branch st.builder (Copy holds) ~yes:after ~no:failed;
-        Emit_c.Builder.start st.builder failed;
-        Emit_c.Builder.finish st.builder
-          (Fail
-             {
-               failure = Panic;
-               message = Constant (Bytes failure);
-               length = Lowered.make_uint64_constant (String.length failure);
-               site;
-               reported;
-             });
-        Emit_c.Builder.start st.builder after)
-      requires;
-    st.frame <- caller
-  end
+  match find_checked_requires st path with
+  | None -> ()
+  | Some { source; form = requires } ->
+      let site = locate_site st origin and reported = find_reported_site st in
+      let caller = st.frame in
+      let code =
+        if Path.equal source.path path then Definitions.make_code st.context path instantiation
+        else Definitions.make_declaration_code st.context path instantiation
+      in
+      st.frame <- { caller with code; self_place = None };
+      List.iter
+        (fun (requirement : Mir.requirement) ->
+          let holds = Lowering.allocate_temporary st st.context.bool in
+          lower_mir_into
+            ~arguments:(List.map (fun (_, _, place) -> place) arguments)
+            st
+            (Mir.expand_formula requirement.clause)
+            holds;
+          let failed = Emit_c.Builder.allocate_block st.builder
+          and after = Emit_c.Builder.allocate_block st.builder in
+          Emit_c.Builder.branch st.builder (Copy holds) ~yes:after ~no:failed;
+          Emit_c.Builder.start st.builder failed;
+          Emit_c.Builder.finish st.builder
+            (Fail
+               {
+                 failure = Panic;
+                 message = Constant (Bytes failure);
+                 length = Lowered.make_uint64_constant (String.length failure);
+                 site;
+                 reported;
+               });
+          Emit_c.Builder.start st.builder after)
+        requires;
+      st.frame <- caller
 
 and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
   let checks_index =
     forwards = 0 && Mir.is_index_call call.callee
     &&
     match resolve_callee st call.callee with
-    | Some (path, _) -> list_checked_requires st path <> []
+    | Some (path, _) -> Option.is_some (find_checked_requires st path)
     | None -> false
   in
   match
@@ -2095,7 +2100,7 @@ and lower_for_each st ~(schedule : Lowering.schedule) ~(iteration : Mir.iteratio
   match iteration with
   | Range { start = low; stop = high; inclusive } ->
       lower_range_loop st ~schedule ~low ~high ~inclusive ~each
-  | Pull { cursor; next } ->
+  | Pull { cursor; next; uses = _ } ->
       let cursor = lower_place st cursor in
       Targets.pull_loop st ~option:(compute_result_type st next)
         ~call_next:(fun destination -> lower_call_with_places st next [ cursor ] ~destination)

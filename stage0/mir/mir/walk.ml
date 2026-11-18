@@ -54,7 +54,7 @@ let visit_iteration_places visit = function
   | Tree.Range { start; stop; _ } ->
       visit_operand_places visit start;
       visit_operand_places visit stop
-  | Pull { cursor; next } ->
+  | Pull { cursor; next; uses = _ } ->
       visit cursor;
       visit_callee_places visit next
 

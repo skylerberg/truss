@@ -1707,14 +1707,17 @@ type RuleDay(by_weekday: Bool, counts_leap_day: Bool, month: Int64, week: Int64,
   invariant 1 <= week && week <= 5
   invariant 0 <= day && day <= 365
   invariant counts_leap_day || 1 <= day
+  derives Equal
 
 type DaylightRule(offset: Int64, start: RuleDay, start_time: Int64, end: RuleDay, end_time: Int64)
   invariant -7 * 86400 < offset && offset < 7 * 86400 + 3600
   invariant -7 * 86400 < start_time && start_time < 7 * 86400
   invariant -7 * 86400 < end_time && end_time < 7 * 86400
+  derives Equal
 
 type ZoneRule(standard: Int64, daylight: Option[DaylightRule])
   invariant -7 * 86400 < standard && standard < 7 * 86400
+  derives Equal
 
 public opaque type TimeZone(
   name: String,
@@ -1724,7 +1727,7 @@ public opaque type TimeZone(
   rule: Option[ZoneRule],
 )
   invariant offsets.length() == transitions.length()
-  derives Copyable
+  derives Copyable, Equal
 
 fn RuleDay.day_of_year(self, year: Int64) -> Int64
   requires Int32.minimum <= year && year <= Int32.maximum
@@ -2300,7 +2303,7 @@ public fn local_zone() -> TimeZone
 }
 
 public opaque type Layout(parts: List[LayoutPart])
-  derives Copyable
+  derives Copyable, Equal
 
 type LayoutPart =
   | Text(text: String)
@@ -2312,6 +2315,7 @@ type LayoutPart =
   | Second
   | Fraction(digits: UInt8)
   | Weekday
+  derives Equal
 
 fn layout_parts(pattern: StringSlice) -> Option[List[LayoutPart]]
   cost time finite

@@ -122,6 +122,7 @@ public fn standard_deviation(values: Slice[Float64]) -> Option[Float64]
 }
 
 public type Division[Number](quotient: Number, remainder: Number)
+  derives Equal
 
 public opaque type BigInteger(negative: Bool, magnitude: List[UInt64])
   invariant magnitude.length() == 0 || magnitude[magnitude.length() - 1] != 0
