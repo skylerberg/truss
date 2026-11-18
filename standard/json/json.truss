@@ -543,7 +543,7 @@ public fn parse(text: StringSlice, maximum_depth: UInt64 = 128) -> Result[Value,
 public fn parse_bytes(bytes: Slice[UInt8], maximum_depth: UInt64 = 128) -> Result[Value, ParseError]
 {
   match String.from_utf8(bytes.to_list()) {
-    Ok(text) => parse(text.slice(), maximum_depth: maximum_depth)
+    Ok(text) => parse(text, maximum_depth: maximum_depth)
     Err(error) => Err(with_position(
       StringSlice(bytes: bytes.elements),
       failure: Failure(kind: ParseErrorKind.InvalidUnicode, offset: error.valid_up_to),
@@ -576,7 +576,7 @@ public fn quote(text: StringSlice) -> String
   cost time O(text.length())
 {
   if text.length() > UInt64.maximum / 8 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   var extra: UInt64 = 0
   for index in 0..text.length()
@@ -883,7 +883,7 @@ fn write_value(value: Value, output: mut String)
       }
     }
     Number(number) => number.display(mut output)
-    String(text) => mut output.push(quote(text.slice()).slice())
+    String(text) => mut output.push(quote(text))
     Array(items) => {
       mut output.push("[")
       for index in 0..items.length() {
@@ -900,7 +900,7 @@ fn write_value(value: Value, output: mut String)
         if index > 0 {
           mut output.push(",")
         }
-        mut output.push(quote(members.entries[index].key.slice()).slice())
+        mut output.push(quote(members.entries[index].key))
         mut output.push(":")
         write_value(members.entries[index].value, output: mut output)
       }
@@ -939,7 +939,7 @@ fn write_pretty_value(value: Value, output: mut String, indent: UInt64, level: U
           mut output.push(",")
         }
         push_newline(mut output, indent: indent, level: level.saturating_add(1))
-        mut output.push(quote(members.entries[index].key.slice()).slice())
+        mut output.push(quote(members.entries[index].key))
         mut output.push(": ")
         write_pretty_value(
           members.entries[index].value,
@@ -998,7 +998,7 @@ impl FromTemplate for Value {
     match template_text(template.literals) {
       Some(text) => {
         match parse_document(
-          text.slice(),
+          text,
           maximum_depth: text.length(),
           parts: template.parts.slice(),
           in_template: true,
@@ -1037,7 +1037,7 @@ public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
 {
   match template_text(literals) {
     Some(text) => {
-      parse_document(text.slice(), maximum_depth: text.length(), parts: no_parts.slice(), in_template: true) is Ok(_)
+      parse_document(text, maximum_depth: text.length(), parts: no_parts.slice(), in_template: true) is Ok(_)
     }
     None => false
   }
@@ -1286,7 +1286,7 @@ impl serialization::Serialize for Value {
         Some(integer) => mut sink.integer(integer)
         None => mut sink.float(number.to_float64())
       }
-      String(text) => mut sink.text(text.slice())
+      String(text) => mut sink.text(text)
       Array(items) => {
         mut sink.begin_list(items.length())
         for item in items {
@@ -1297,7 +1297,7 @@ impl serialization::Serialize for Value {
       Object(members) => {
         mut sink.begin_map(members.length())
         for index in 0..members.entries.length() {
-          mut sink.key(members.entries[index].key.slice())
+          mut sink.key(members.entries[index].key)
           members.entries[index].value.serialize(mut sink)
         }
         mut sink.end_map()

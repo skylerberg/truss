@@ -494,7 +494,8 @@ and check_place state (written : Syntax.expression) (inner : Syntax.expression) 
         | Some (Index | Method_bracket) -> classify_head base
         | _ -> `Not_a_place value)
     | Call ({ kind = Member (base, _); _ }, _)
-    | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) -> (
+    | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _)
+    | With (base, _) -> (
         match classify_head base with `Place _ -> `Place true | other -> other)
     | Try base -> (
         match classify_head base with `Place false -> `Not_a_place value | other -> other)

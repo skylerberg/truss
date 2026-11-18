@@ -75,7 +75,7 @@ type state = {
   mutable law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
   mutable locals_read : Syntax.id list;
-  mutable receiver_modes : (Syntax.id * Types.mode) list;
+  mutable keyword_modes : (Syntax.id * Types.mode) list;
   mutable places_without_keyword : (Syntax.id * Types.mode) list;
   mutable mode_keywords : Core.mode_keyword list;
   yielded : (Syntax.id, Types.mode) Hashtbl.t;
@@ -211,10 +211,7 @@ val report_mismatch :
   state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> unit
 
 val is_place : state -> Syntax.expression -> bool
-
-val find_call_with_mode_keyword :
-  state -> Syntax.expression -> (Syntax.id * Syntax.expression) option
-
+val find_keyword_operation : state -> Syntax.expression -> (Syntax.id * Syntax.expression) option
 val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val find_local_type : state -> Syntax.name -> Types.ty option
 val check_cost : state -> Syntax.cost -> unit

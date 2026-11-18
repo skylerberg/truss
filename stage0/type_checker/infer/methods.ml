@@ -530,10 +530,10 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
     State.decide_default_literal state ~at:(State.read_span state value.id)
       (State.normalize state (Hooks.check_expression state env base))
   in
-  let has_mode_keyword = List.mem_assoc value.id state.receiver_modes in
+  let has_mode_keyword = List.mem_assoc value.id state.keyword_modes in
   let lent_mode = if has_mode_keyword then None else Modes.find_lent_mode state base in
   let wanted : Path.receiver =
-    match (List.assoc_opt value.id state.receiver_modes, lent_mode) with
+    match (List.assoc_opt value.id state.keyword_modes, lent_mode) with
     | Some Mut, _ | None, Some Mut -> Mut
     | Some Own, _ -> Own
     | _ -> Read

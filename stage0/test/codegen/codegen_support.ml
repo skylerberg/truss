@@ -1,4 +1,11 @@
 let test = Harness.test
+
+let list_fragment_diagnostics database file =
+  List.filter
+    (fun (diagnostic : Diagnostic.t) ->
+      not (Diagnostic.For_testing.is_unused_definition diagnostic.code))
+    (Database.list_file_diagnostics database file)
+
 let fail = Harness.fail
 let expect_string = Harness.expect_string
 
@@ -210,14 +217,14 @@ let make_backend ?results ?evaluation_time_limit_ms ?(profile = Backend.Developm
     | Error message -> failwith message)
     (Lazy.force c_compiler) profile
 
-let load_files ?results ?(roots = []) ?profile files =
+let load_checked ~list_diagnostics ?results ?(roots = []) ?profile files =
   let packages = make_example_package files in
   let database = make_database packages in
   List.iter (Database.For_testing.add_root database) roots;
   List.iter
     (fun ((file : Path.file), text) ->
       let source = Source.create ~path:(Path.show_file file) text in
-      match Database.list_file_diagnostics database file with
+      match list_diagnostics database file with
       | [] ->
           ignore
             (Core_lint.check_file
@@ -233,8 +240,12 @@ let load_files ?results ?(roots = []) ?profile files =
     files;
   (database, make_backend ?results ?profile database)
 
+let load_files ?results ?roots ?profile files =
+  load_checked ~list_diagnostics:Database.list_file_diagnostics ?results ?roots ?profile files
+
 let load ?results ?roots ?profile text =
-  load_files ?results ?roots ?profile [ (example_file, text) ]
+  load_checked ~list_diagnostics:list_fragment_diagnostics ?results ?roots ?profile
+    [ (example_file, text) ]
 
 let list_tests_in database (module_ : Path.module_) =
   List.filter_map

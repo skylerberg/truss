@@ -64,6 +64,12 @@ let parse_errors packages file =
     (let tokens, lexer_diagnostics = Lexer.lex (read_source packages file) in
      lexer_diagnostics @ snd (Parser.parse tokens ~lexer_diagnostics))
 
+let list_fragment_diagnostics database file =
+  List.filter
+    (fun (diagnostic : Diagnostic.t) ->
+      not (Diagnostic.For_testing.is_unused_definition diagnostic.code))
+    (Database.list_file_diagnostics database file)
+
 let list_codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
 

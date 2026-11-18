@@ -253,7 +253,7 @@ impl Hash for String {
 
 impl Display for String {
   fn display(self, output: mut String) {
-    mut output.push(self.slice())
+    mut output.push(self)
   }
 }
 
@@ -410,7 +410,7 @@ public fn String.from_utf8_lossy(bytes: Slice[UInt8]) -> String
 {
   let text = StringSlice(bytes: bytes.elements)
   if text.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   var budget: UInt64 = 0
   var offset: UInt64 = 0
@@ -460,7 +460,7 @@ public fn String.from_utf16(units: Slice[UInt16]) -> Result[String, Utf16Error]
   cost time O(units.length())
 {
   if units.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   var size: UInt64 = 0
   var index: UInt64 = 0

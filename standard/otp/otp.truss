@@ -27,7 +27,7 @@ fn mac(algorithm: Algorithm, key: Slice[UInt8], message: Slice[UInt8]) -> List[U
 
 fn truncated(code: Slice[UInt8]) -> UInt32 {
   if code.length() < 20 {
-    intrinsic::crash("an HMAC is at least 20 bytes".slice())
+    intrinsic::crash("an HMAC is at least 20 bytes")
   }
   let offset: UInt64 = intrinsic::convert(code[code.length() - 1] % 16)
   let high: UInt32 = intrinsic::convert(code[offset] % 128)
@@ -54,7 +54,7 @@ public fn hotp(secret: Slice[UInt8], counter: UInt64, digits: UInt32 = 6, algori
   for _ in number.length()..length {
     mut text.push("0")
   }
-  mut text.push(number.slice())
+  mut text.push(number)
   text
 }
 

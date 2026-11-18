@@ -76,7 +76,7 @@ impl Display for Failure {
         mut output.push("HTTP/2 error ")
         code.display(mut output)
         mut output.push(": ")
-        mut output.push(message.slice())
+        mut output.push(message)
       }
       System(error) => error.display(mut output)
     }
@@ -389,7 +389,7 @@ fn complete_headers(reading: mut Reading, index: UInt64, arrivals: tasks::Channe
   let block = map::exchange(mut reading.inflows[index].block, value: [])
   let fields = match mut reading.decoder.decode(block.slice(), list_limit: reading.header_limit) {
     Ok(fields) => own fields
-    Err(error) => return Err(violation(compression_error, message: error.message.slice()))
+    Err(error) => return Err(violation(compression_error, message: error.message))
   }
   if index >= reading.inflows.length() {
     return Ok(Unit)
@@ -1044,7 +1044,7 @@ fn decode_response[Stream: streams::Duplex](session: mut Session[Stream], index:
   let block = map::exchange(mut session.outstreams[index].block, value: [])
   let fields = match mut session.decoder.decode(block.slice(), list_limit: session.header_limit) {
     Ok(fields) => own fields
-    Err(error) => return Err(violation(compression_error, message: error.message.slice()))
+    Err(error) => return Err(violation(compression_error, message: error.message))
   }
   if index >= session.outstreams.length() {
     return Ok(Unit)

@@ -13,7 +13,7 @@ impl Display for Error {
     match self {
       Malformed(message) => {
         mut output.push("malformed zstd data: ")
-        mut output.push(message.slice())
+        mut output.push(message)
       }
       ChecksumMismatch => mut output.push("the zstd frame's checksum does not match its content")
       TooLarge(limit) => {

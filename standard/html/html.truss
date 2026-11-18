@@ -22,7 +22,7 @@ public fn Html.joined(parts: Slice[Html], separator: StringSlice = "") -> Html
     if index > 0 {
       mut text.push(separator)
     }
-    mut text.push(parts[index].text.slice())
+    mut text.push(parts[index].text)
   }
   Html(text: own text)
 }
@@ -30,7 +30,7 @@ public fn Html.joined(parts: Slice[Html], separator: StringSlice = "") -> Html
 impl Display for Html {
   fn display(self, output: mut String)
   {
-    mut output.push(self.text.slice())
+    mut output.push(self.text)
   }
 }
 
@@ -55,7 +55,7 @@ fn push_escaped(output: mut String, text: StringSlice) {
       if run < index {
         mut output.push(text.part(run, to: index))
       }
-      mut output.push(replacement.slice())
+      mut output.push(replacement)
       run = index + 1
     }
   }
@@ -422,16 +422,16 @@ impl FromTemplate for Html {
         let place = kinds[index]
         match template.parts[index].content {
           Text(text) => match place {
-            InValue(url) => if url && !is_safe_url(text.slice()) {
+            InValue(url) => if url && !is_safe_url(text) {
               mut output.push("about:invalid")
             } else {
-              push_escaped(mut output, text: text.slice())
+              push_escaped(mut output, text: text)
             }
-            _ => push_escaped(mut output, text: text.slice())
+            _ => push_escaped(mut output, text: text)
           }
           Markup(text) => match place {
-            InText => mut output.push(text.slice())
-            _ => push_escaped(mut output, text: text.slice())
+            InText => mut output.push(text)
+            _ => push_escaped(mut output, text: text)
           }
         }
       }

@@ -507,13 +507,15 @@ parameter. A temporary takes no keyword:
 | `push(mut names, item: name.copy())` | `push` gets a copy. |
 
 A mode keyword applies to the longest place expression at the start of its
-operand. The first method call after that place takes it as its receiver,
-and the rest of the expression works on the result of that call:
+operand. The first method call or `with` after that place takes it, a
+method call as its receiver and `with` as its base, and the rest of the
+expression works on the result:
 
 | Expression | Place the keyword applies to |
 |---|---|
 | `mut config.servers.sort()` | `config.servers` |
 | `mut config.load_servers().sort()` | `config`, for `load_servers` |
+| `own config with (port: 443)` | `config`, for `with` |
 | `sort(mut items[..middle])` | `items[..middle]` |
 
 An expression that does not start with a place takes no mode keyword.
@@ -1441,7 +1443,8 @@ let production = own config with (server.port: 443, log_level: LogLevel.Warning)
 
 - `base with (updates)` means copying the base into a new variable,
   assigning its fields, and returning it.
-- The base is passed as an `own` argument is.
+- The base is passed as an `own` argument is: a base that is a place takes
+  `own`, unless it copies implicitly.
 - `with` works on records, and updates only fields visible at that point.
 
 ### Lambdas
@@ -2595,11 +2598,14 @@ and the prelude changes only with a language version.
   use call no private or `internal` function and name no such constant. An
   `ensures` may name any function the definition can, so that callers in its
   package can know its result in terms of private helpers.
-- A function, method, or constant declared `internal` that no definition of
-  its package uses is an error. A use counts when the user is not `internal`
-  or is itself used, so `internal` definitions that use only each other are
-  an error together. A method written in an `internal` trait is not declared
-  `internal`, so the rule does not apply to it.
+- A private or `internal` function, method, or constant that no definition
+  of its package uses is an error. A method or constant written in a trait,
+  a capability, or an impl is not checked. A use counts when the user is
+  public, is a test, an `impl`, or another definition the rule does not
+  check, or is itself used, so definitions that use only each other are an
+  error together. The `main` of a package's root module is exempt, and so
+  is a definition the compiler calls, such as the static `new` of a
+  `system` module's type, which builds the implementation of a capability.
 
 ## No foreign code
 

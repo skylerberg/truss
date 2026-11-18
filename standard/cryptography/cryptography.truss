@@ -1087,7 +1087,7 @@ internal fn Blake3.end_chunk(mut self)
     }
   }
   if self.stack_length == 54 {
-    intrinsic::crash("BLAKE3 cannot hash that many bytes".slice())
+    intrinsic::crash("BLAKE3 cannot hash that many bytes")
   }
   let start = 8 * self.stack_length
   let count: UInt64 = 8
@@ -1632,7 +1632,7 @@ public fn pbkdf2_hmac_sha256(
       }
     }
     if block == UInt32.maximum {
-      intrinsic::crash("a derived key cannot be that long".slice())
+      intrinsic::crash("a derived key cannot be that long")
     }
     block += 1
   }
@@ -1769,7 +1769,7 @@ internal fn push_little_endian_32(output: mut List[UInt8], value: UInt32)
 internal fn push_length_32(output: mut List[UInt8], length: UInt64)
 {
   if !intrinsic::fits[UInt64, UInt32](length) {
-    intrinsic::crash("a password cannot hold that many bytes".slice())
+    intrinsic::crash("a password cannot hold that many bytes")
   }
   push_little_endian_32(mut output, value: intrinsic::convert(length))
 }
@@ -3506,7 +3506,7 @@ public fn seal(
   cost time O(plaintext.length() + associated_data.length())
 {
   if plaintext.length() > UInt64.maximum - 16 {
-    intrinsic::crash("a list cannot hold that many bytes".slice())
+    intrinsic::crash("a list cannot hold that many bytes")
   }
   match cipher {
     ChaCha20Poly1305 => chacha20_poly1305_seal(

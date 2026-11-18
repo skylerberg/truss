@@ -133,7 +133,7 @@ let other_build =
 let is_database_open_elsewhere root = Lock_file.is_held (Filename.concat root ".truss/lock")
 
 let make_package_served_by_other_build () =
-  let root = make_package [ ("one.truss", "fn one() -> Int64 { 1 }\n") ] in
+  let root = make_package [ ("one.truss", "public fn one() -> Int64 { 1 }\n") ] in
   Unix.putenv "TRUSS_NO_SERVER" "";
   (match Process.run (Lazy.force other_build) [ "check"; "-C"; root ] with
   | 0, _, _ -> ()
@@ -1886,7 +1886,7 @@ let () =
           [
             ( "main.truss",
               "use standard::html\n\n\
-               fn page(name: own String, link: own String) -> html::Html {\n\
+               public fn page(name: own String, link: own String) -> html::Html {\n\
               \  html::Html\"<p title='${name.copy()}'><a href=\\\"${own link}\\\">${own \
                name}</a></p>\"\n\
                }\n" );
@@ -1906,7 +1906,7 @@ let () =
                 ( "main.truss",
                   Printf.sprintf
                     "use standard::html\n\n\
-                     fn page(code: own String) -> html::Html {\n\
+                     public fn page(code: own String) -> html::Html {\n\
                     \  html::Html\"%s\"\n\
                      }\n"
                     template );

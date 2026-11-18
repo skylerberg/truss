@@ -688,10 +688,15 @@ let () =
       ( "an argument to an `own` parameter",
         Fixtures.Ownership.own_list_passed_without_own,
         Fixtures.Ownership.own_list_passed_without_own_fixed );
+      ( "the base of a record update",
+        Fixtures.Ownership.record_update_of_an_own_parameter,
+        Fixtures.Ownership.record_update_of_an_own_parameter_fixed );
       ( "the receiver of a method that takes `own self`",
         Fixtures.Ownership.own_receiver_moved_without_own,
         Fixtures.Ownership.own_receiver_moved_without_own_fixed );
     ];
+  Harness.test "the base of a record update that copies implicitly takes no `own`" (fun () ->
+      expect_fine Fixtures.Ownership.record_update_of_a_copied_point);
   Harness.test "a map literal's keys and values must be owned" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.map_literal_of_an_own_name "ownership.needs_owned");
   Harness.test "a constant's value and a default may hold a constant without a copy" (fun () ->

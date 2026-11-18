@@ -27,7 +27,7 @@ impl Display for Error {
       }
       Protocol(message) => {
         mut output.push("TLS: ")
-        mut output.push(message.slice())
+        mut output.push(message)
       }
       Certificate(error) => error.display(mut output)
       System(error) => error.display(mut output)
