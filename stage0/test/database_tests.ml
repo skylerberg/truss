@@ -112,10 +112,7 @@ let lay_out_again ?(loaded = ([], [])) ~before ~after () =
   observed.recomputed
 
 let load_package files =
-  let packages = Support.setup files in
-  Database.read_package_database
-    (Database.create ~loaded:[ Lazy.force standard ] packages)
-    (List.hd packages).name
+  Database.build_package_database ~loaded:[ Lazy.force standard ] (List.hd (Support.setup files))
 
 let list_saved database =
   let entries = Database.list_unsaved database in

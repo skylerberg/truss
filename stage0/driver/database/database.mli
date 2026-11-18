@@ -5,7 +5,7 @@ type package_database
 
 val create : ?loaded:package_database list -> ?checks:bool -> Project.package list -> t
 val copy : t -> t
-val read_package_database : t -> Path.package -> package_database
+val build_package_database : loaded:package_database list -> Project.package -> package_database
 val list_package_diagnostics : package_database -> (Source.t * Diagnostic.t list) list
 val update : t -> (Path.file * string option) list -> unit
 val relayout : t -> loaded:package_database list -> Project.package list -> unit

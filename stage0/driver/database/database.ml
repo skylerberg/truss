@@ -2110,14 +2110,15 @@ let find_code_packages database package =
   if List.mem None used then None
   else Some (List.sort_uniq Path.compare_package (List.concat_map Option.get used))
 
-let read_package_database database package =
-  drain database ~through:Recursion_groups [ package ];
-  match Package_table.find_opt database.package_databases package with
+let build_package_database ~loaded (package : Project.package) =
+  let database = create ~loaded [ package ] in
+  drain database ~through:Recursion_groups [ package.name ];
+  match Package_table.find_opt database.package_databases package.name with
   | Some package_database ->
-      { package_database with diagnostics = list_dependency_diagnostics database package }
+      { package_database with diagnostics = list_dependency_diagnostics database package.name }
   | None ->
-      Compiler_bug.raise_bug ~stage:"Database" "%s is not a package of the build"
-        (Path.show_package package)
+      Compiler_bug.raise_bug ~stage:"Database" "%s is missing from the database built for it"
+        (Path.show_package package.name)
 
 let list_package_diagnostics (package_database : package_database) = package_database.diagnostics
 
