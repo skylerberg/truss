@@ -90,6 +90,7 @@ fn parameter_of(value: StringSlice, name: StringSlice) -> Option[String] {
 }
 
 public type Part(name: String, filename: Option[String], content_type: Option[String], headers: Headers)
+  derives Equal
 
 type Section = Preamble | Between | Body | Finished
   derives Equal
@@ -307,8 +308,10 @@ public fn Multipart.copy_to[Sink: streams::Writer](mut self, sink: mut Sink) -> 
 }
 
 public type FilePart(name: String, filename: String, content_type: String, bytes: List[UInt8])
+  derives Equal
 
 public type Encoded(content_type: String, body: List[UInt8])
+  derives Equal
 
 fn quoted(text: StringSlice) -> String {
   let without_quotes = text.replace("\"", replacement: "%22")

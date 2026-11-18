@@ -1,8 +1,8 @@
 public type OperatingSystem = Linux | MacOs | Windows | FreeBsd | Other
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 public type Architecture = X86With64Bits | Arm64 | X86 | Arm | RiscV64 | WebAssembly32 | Other
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 public type Platform(
   operating_system: OperatingSystem,
@@ -11,8 +11,10 @@ public type Platform(
   host_name: String,
   process_identifier: UInt32,
 )
+  derives Equal
 
 public type Variable(name: String, value: String)
+  derives Equal
 
 public type Location = Home | Temporary | Executable | Configuration | Cache | Data
   derives Equal, Hash, Ordered

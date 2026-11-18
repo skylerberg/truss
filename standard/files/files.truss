@@ -496,10 +496,10 @@ impl Display for Path {
 }
 
 public type FileKind = File | Directory | SymbolicLink | Other
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 public opaque type Permissions(mode: UInt32)
-  derives Plain, Equal, Hash
+  derives Plain, Equal, Hash, Ordered
   invariant mode <= 0o7777
 
 public fn Permissions.from_mode(mode: UInt32) -> Permissions
@@ -927,21 +927,24 @@ public fn walk(root: Path, follow_links: Bool = false) -> Result[List[WalkEntry]
 }
 
 type CharacterRange(first: Character, last: Character)
+  derives Equal
 
 type GlobToken =
   | AnyCharacters
   | AnyCharacter
   | Literal(character: Character)
   | OneOf(ranges: List[CharacterRange], negated: Bool)
+  derives Equal
 
 type GlobComponent =
   | AnyDirectories
   | Name(tokens: List[GlobToken])
+  derives Equal
 
 type ParsedClass(token: GlobToken, end: UInt64)
 
 public opaque type Glob(components: List[GlobComponent], absolute: Bool)
-  derives Copyable
+  derives Copyable, Equal
 
 fn wildcard_matches(
   pattern_length: UInt64,

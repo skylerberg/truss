@@ -1595,8 +1595,12 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 
 ### Ranges
 
-- `start..end` excludes `end`, and `start..=end` includes it. A range whose
-  start is at or past its end is empty.
+- `start..end` excludes `end`, and `start..=end` includes it. `start..end` is
+  empty when `start` is at or past `end`, and `start..=end` when `start` is
+  past `end`.
+- Two ranges of a `Countable` type, such as an integer type, `Character`, or
+  `Date`, are equal when they hold the same values: `0..3 == 0..=2`, and
+  every empty range equals every other.
 - A range of characters holds the characters between its ends in the order
   of their code points.
 - A range with no start or no end is allowed only directly in brackets, as in

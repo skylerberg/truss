@@ -180,32 +180,26 @@ fn push_byte(name: mut List[UInt8], byte: UInt8)
   mut name.push(lowered(byte))
 }
 
-fn named(name: Slice[UInt8], expected: StringSlice) -> Bool
-  cost time finite
-{
-  name == expected.bytes()
-}
-
 fn is_raw_text_tag(tag: Slice[UInt8]) -> Bool
   cost time finite
 {
-  named(tag, expected: "script") || named(tag, expected: "style") || named(tag, expected: "textarea")
-    || named(tag, expected: "title")
+  tag == "script".bytes() || tag == "style".bytes() || tag == "textarea".bytes()
+    || tag == "title".bytes()
 }
 
 fn is_url_attribute(name: Slice[UInt8]) -> Bool
   cost time finite
 {
-  named(name, expected: "href") || named(name, expected: "src") || named(name, expected: "action")
-    || named(name, expected: "formaction") || named(name, expected: "cite") || named(name, expected: "poster")
-    || named(name, expected: "background") || named(name, expected: "manifest") || named(name, expected: "xlink:href")
+  name == "href".bytes() || name == "src".bytes() || name == "action".bytes()
+    || name == "formaction".bytes() || name == "cite".bytes() || name == "poster".bytes()
+    || name == "background".bytes() || name == "manifest".bytes() || name == "xlink:href".bytes()
 }
 
 fn is_unsafe_attribute(name: Slice[UInt8]) -> Bool
   cost time finite
 {
-  (name.length() >= 2 && name[0] == 111 && name[1] == 110) || named(name, expected: "style")
-    || named(name, expected: "srcdoc") || named(name, expected: "srcset")
+  (name.length() >= 2 && name[0] == 111 && name[1] == 110) || name == "style".bytes()
+    || name == "srcdoc".bytes() || name == "srcset".bytes()
 }
 
 fn closes_raw_text(rest: StringSlice, tag: Slice[UInt8]) -> Bool

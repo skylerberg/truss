@@ -524,7 +524,7 @@ public type Indexed[Element](index: UInt64, element: Element)
   derives Equal
 
 public type Pair[First, Second](first: First, second: Second)
-  derives Equal
+  derives Equal, Hash, Ordered
 
 public type ExitCode(code: UInt8)
   derives Equal

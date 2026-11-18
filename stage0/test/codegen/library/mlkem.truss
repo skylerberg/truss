@@ -11,13 +11,6 @@ fn digest_of(bytes: Slice[UInt8]) -> String {
   hex::encode(digest[..])
 }
 
-fn same(decapsulated: Option[cryptography::SecretKey], expected: cryptography::SecretKey) -> Bool {
-  match decapsulated {
-    Some(key) => key.expose() == expected.expose()
-    None => false
-  }
-}
-
 fn seed_of(first: UInt8, step: UInt8) -> Array[UInt8, 64] {
   var seed: Array[UInt8, 64] = Array.filled(0)
   var value = first
@@ -70,7 +63,7 @@ test "ML-KEM-768 keys, ciphertexts, and shared secrets match OpenSSL's for a see
   assert digest_of(sealed.ciphertext) == "57fe559432dbb3c5547c73f155820622f7efdd532e4330360a36ebf7d2ddec55"
   let shared = sealed.shared.expose()
   assert hex_of(shared[..]) == "c5a74110c158acbaf9c01deb86fa6cc10c14533feda54bec1fdd000d61f07e4e"
-  assert same(key.decapsulate(sealed.ciphertext), expected: sealed.shared)
+  assert key.decapsulate(sealed.ciphertext) is Some(decapsulated) && decapsulated.expose() == sealed.shared.expose()
   var tampered = sealed.ciphertext.copy()
   tampered[1087] = tampered[1087] ^ 1
   match key.decapsulate(tampered) {
@@ -106,6 +99,6 @@ test "a generated key decapsulates what its encapsulation key encapsulates" {
   provide random::SeededRandom.new(5) {
     let key = cryptography::DecapsulationKey.generate()
     let sealed = key.encapsulation_key().encapsulate()
-    assert same(key.decapsulate(sealed.ciphertext), expected: sealed.shared)
+    assert key.decapsulate(sealed.ciphertext) is Some(decapsulated) && decapsulated.expose() == sealed.shared.expose()
   }
 }
