@@ -53,14 +53,6 @@ let code_length_limit: UInt64 = 16
 
 let longest_code: UInt64 = 15
 
-let nine_bit_start: UInt64 = 144
-
-let nine_bit_end: UInt64 = 256
-
-let seven_bit_start: UInt64 = 256
-
-let seven_bit_end: UInt64 = 280
-
 let code_length_order: Array[UInt64, 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
 
 type BitReader(position: UInt64, bits: UInt64, count: UInt64)

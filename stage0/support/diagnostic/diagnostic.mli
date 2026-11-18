@@ -314,4 +314,5 @@ val quote : string -> string
 
 module For_testing : sig
   val limit : int
+  val is_unused_definition : Code.t -> bool
 end
