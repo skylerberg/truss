@@ -9,7 +9,7 @@ let make_results cache : Backend.results =
     add = (fun key value -> Cache.add_result cache ~kind:Test_result ~key value);
   }
 
-let create database snapshot packages (profile : Backend.profile) =
+let create snapshot packages lookups (profile : Backend.profile) =
   let cache = Workspace.open_cache () in
   let c_compiler =
     match C_compiler.find ~objects:(Cache.make_objects_directory cache) with
@@ -25,5 +25,4 @@ let create database snapshot packages (profile : Backend.profile) =
   Backend.create ~show_file ~results:(make_results cache)
     ~programs:(Cache.make_programs_directory cache)
     ~is_worked_on:(fun package -> List.mem package own)
-    (require_lowered_lookups database packages)
-    c_compiler profile
+    lookups c_compiler profile

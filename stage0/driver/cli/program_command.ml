@@ -79,12 +79,9 @@ let build_program ?output snapshot packages (profile : Backend.profile) =
   let report = Report.gather ~proofs:is_release database snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
   let main = require_main snapshot database packages in
-  Option.iter
-    (refuse_unshippable snapshot packages
-       (Workspace_backend.require_lowered_lookups database packages)
-       main)
-    (Report.force_proofs report);
-  let backend = Workspace_backend.create database snapshot packages profile in
+  let lookups = Workspace_backend.require_lowered_lookups database packages in
+  Option.iter (refuse_unshippable snapshot packages lookups main) (Report.force_proofs report);
+  let backend = Workspace_backend.create snapshot packages lookups profile in
   let output = Option.value output ~default:(Backend.make_program_path backend) in
   match Backend.build_program backend ~main ~output with
   | Error message -> Outcome.raise_cannot_run "%s" message
