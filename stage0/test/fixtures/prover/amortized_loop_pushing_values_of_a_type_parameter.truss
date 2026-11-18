@@ -1,9 +1,9 @@
-fn f[Output, capability Granted](
+fn f[Output](
   results: mut List[Output],
   source: List[Int64],
-  transform: (fn(Int64) -> Output uses Granted),
+  transform: (fn(Int64) -> Output uses generic Granted),
 )
-  uses Granted
+  uses generic Granted
   cost amortized time O(source.length() * time(transform))
 {
   for index in 0..source.length()

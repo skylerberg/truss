@@ -68,7 +68,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
                                name = "at";
                                receiver = Read;
                                self_type = parts;
-                               type_arguments = [];
+                               instantiation = Types.no_instantiation;
                                evidence;
                              })
                         ~arguments:
@@ -203,7 +203,7 @@ and check_method_time state (value : Syntax.expression) (type_ : Types.ty) (memb
                  name = member.text;
                  receiver = method_.method_receiver;
                  self_type = type_;
-                 type_arguments = [];
+                 instantiation = Types.no_instantiation;
                  evidence = Bound;
                }));
       Types.Integer
@@ -217,6 +217,41 @@ and check_method_time state (value : Syntax.expression) (type_ : Types.ty) (memb
            "`%s` has more than one method `%s`, and none of them is the only one that takes `self` \
             read-only, so `time` cannot tell which one is meant."
            (State.show state type_) member.text)
+
+and report_unknown_static_method state ?expected (value : Syntax.expression) type_
+    (member : Syntax.name) (arguments : Syntax.argument list) =
+  let implements known =
+    Option.is_some
+      (State.find_evidence state type_
+         (State.make_trait_reference ~arguments:[] (Well_known.make_path known)))
+  in
+  let empty_literal =
+    if member.text <> "new" || arguments <> [] then None
+    else if implements From_elements then Some "[]"
+    else if implements From_entries then Some "[:]"
+    else None
+  in
+  let is_expected =
+    match (Option.map (State.normalize state) expected, type_) with
+    | Some (Types.Named { path = expected; _ }), Types.Named { path; _ } -> Path.equal expected path
+    | _ -> false
+  in
+  match empty_literal with
+  | Some literal ->
+      State.make_error_type state Unknown_member (State.read_span state member.id)
+        ~fixes:
+          (if is_expected then
+             [
+               State.fix
+                 (Printf.sprintf "Write `%s`." literal)
+                 [ State.replace (State.read_span state value.id) literal ];
+             ]
+           else [])
+        (Printf.sprintf "`%s` has no method `new`. The literal `%s` is an empty `%s`."
+           (State.show state type_) literal (State.show state type_))
+  | None ->
+      State.make_error_type state Unknown_member (State.read_span state member.id)
+        (Name_lookup.describe_missing_method state type_ member.text)
 
 and check_static_call state env ?expected (value : Syntax.expression) type_ (member : Syntax.name)
     arguments =
@@ -262,7 +297,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                     List.take
                       (List.length
                          (match type_ with Types.Named { arguments; _ } -> arguments | _ -> []))
-                      instance.type_arguments
+                      instance.instantiation.type_arguments
                   in
                   ignore
                     (Unify.unify_arguments state.unifier head
@@ -278,7 +313,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                   | Ok (checked, left_out) ->
                       Name_lookup.finish_call state env value method_path
                         (Tables.Function
-                           { path = method_path; type_arguments = instance.type_arguments })
+                           { path = method_path; instantiation = instance.instantiation })
                         instance checked left_out)
               | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path)))
       | None -> (
@@ -332,9 +367,8 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                         "A method written in full takes its receiver as its first argument."
                   | _ ->
                       Calls.check_arguments_alone state env arguments
-                        (State.make_error_type state Unknown_member
-                           (State.read_span state member.id)
-                           (Name_lookup.describe_missing_method state type_ member.text))))))
+                        (report_unknown_static_method state ?expected value type_ member arguments))
+              )))
   | Types.Parameter parameter -> (
       let without_self =
         List.fold_left
@@ -403,8 +437,10 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) arguments ~trait_generics
     ~trait_arguments =
   let extra =
-    (Types.make_self_parameter trait.trait, Types.Type self_type)
-    :: Types.make_substitution trait_generics trait_arguments
+    Types.bind_argument
+      (Types.make_self_parameter trait.trait)
+      (Types.Type self_type)
+      (Types.make_substitution trait_generics trait_arguments)
   in
   let signature = Members.read_method_signature state.lookups trait.trait method_ in
   let instance =
@@ -435,7 +471,9 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
       let reference = { trait with trait_arguments } in
       let result = Types.extract_result_type instance.signature.output in
       Modes.note_lending state value instance.signature.output;
-      let own_arguments = List.take (List.length signature.generics) instance.type_arguments in
+      let own_arguments =
+        List.take (List.length signature.generics) instance.instantiation.type_arguments
+      in
       state.tables.calls.(value.id) <-
         Some
           {
@@ -446,7 +484,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
                   name = method_.method_name;
                   receiver = method_.method_receiver;
                   self_type;
-                  type_arguments = own_arguments;
+                  instantiation = { instance.instantiation with type_arguments = own_arguments };
                   evidence = Built_in;
                 };
             arguments = receiver_argument @ checked;
@@ -709,7 +747,7 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
                 }
               in
               Name_lookup.finish_call state env value method_path
-                (Tables.Function { path = method_path; type_arguments = instance.type_arguments })
+                (Tables.Function { path = method_path; instantiation = instance.instantiation })
                 instance (receiver_argument :: checked) left_out))
 
 and check_trait_method_with_receiver state env (value : Syntax.expression)
@@ -721,8 +759,10 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
     | None -> []
   in
   let extra =
-    (Types.make_self_parameter trait.trait, Types.Type receiver_type)
-    :: Types.make_substitution trait_generics trait.trait_arguments
+    Types.bind_argument
+      (Types.make_self_parameter trait.trait)
+      (Types.Type receiver_type)
+      (Types.make_substitution trait_generics trait.trait_arguments)
   in
   let not_callable =
     match receiver_type with
@@ -735,9 +775,10 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
             Some
               (State.make_error_type state Not_callable (State.read_span state value.id)
                  (Printf.sprintf
-                    "`%s` has generic parameters of its own, so it cannot be called through `%s`: \
-                     an `any` value holds one instance of each method, and this one has an \
-                     instance for each set of arguments. Call it on a value whose type is known."
+                    "`%s` has generic or capability parameters of its own, so it cannot be called \
+                     through `%s`: an `any` value holds one instance of each method, and this one \
+                     has an instance for each set of arguments. Call it on a value whose type is \
+                     known."
                     method_.method_name (State.show state receiver_type)))
         | Names_self ->
             Some
@@ -786,7 +827,7 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                           name = method_.method_name;
                           receiver = method_.method_receiver;
                           self_type = receiver_type;
-                          type_arguments = instance.type_arguments;
+                          instantiation = instance.instantiation;
                           evidence;
                         };
                     arguments = receiver_argument :: checked;

@@ -70,10 +70,10 @@ let substitute_trait substitution (trait : Types.trait_reference) : Types.trait_
   }
 
 let substitute_callee substitution (callee : Mir.callee) : Mir.callee option =
-  let substitute_arguments = List.map (Types.substitute_argument substitution) in
+  let substitute_instantiation = Types.substitute_instantiation substitution in
   match callee with
-  | Function { path; type_arguments } ->
-      Some (Function { path; type_arguments = substitute_arguments type_arguments })
+  | Function { path; instantiation } ->
+      Some (Function { path; instantiation = substitute_instantiation instantiation })
   | Trait_method method_ ->
       Some
         (Trait_method
@@ -81,7 +81,7 @@ let substitute_callee substitution (callee : Mir.callee) : Mir.callee option =
              method_ with
              trait = substitute_trait substitution method_.trait;
              self_type = Types.substitute substitution method_.self_type;
-             type_arguments = substitute_arguments method_.type_arguments;
+             instantiation = substitute_instantiation method_.instantiation;
              evidence =
                (match method_.evidence with
                | Impl { impl; arguments = impl_arguments } ->
@@ -89,15 +89,24 @@ let substitute_callee substitution (callee : Mir.callee) : Mir.callee option =
                      {
                        impl;
                        arguments =
-                         List.map
-                           (fun (parameter, argument) ->
-                             (parameter, Types.substitute_argument substitution argument))
-                           impl_arguments;
+                         {
+                           impl_arguments with
+                           arguments =
+                             List.map
+                               (fun (parameter, argument) ->
+                                 (parameter, Types.substitute_argument substitution argument))
+                               impl_arguments.arguments;
+                         };
                      }
                | (Bound | Dynamic) as evidence -> evidence);
            })
   | Intrinsic { operation; type_arguments } ->
-      Some (Intrinsic { operation; type_arguments = substitute_arguments type_arguments })
+      Some
+        (Intrinsic
+           {
+             operation;
+             type_arguments = List.map (Types.substitute_argument substitution) type_arguments;
+           })
   | Capability_method _ | Indirect _ -> None
 
 let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit -> Mir.local)

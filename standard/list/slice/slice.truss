@@ -835,11 +835,11 @@ public fn Slice[Element: Copyable].copy_from(mut self, source: Slice[Element])
   }
 }
 
-public fn Slice[Element].update_each[capability Granted](
+public fn Slice[Element].update_each(
   mut self,
-  change: (fn(mut Element) uses Granted),
+  change: (fn(mut Element) uses generic Granted),
 )
-  uses Granted
+  uses generic Granted
   ensures self.length() == old(self.length())
   cost calls(change) == self.length()
   cost time O(self.length() * time(change))
@@ -1358,14 +1358,14 @@ public fn Slice[Element: Ordered].sort(mut self)
   }
 }
 
-fn sift_down_by[Element, capability Granted](
+fn sift_down_by[Element](
   items: mut Slice[Element],
   position: UInt64,
   limit: UInt64,
   room: UInt64,
-  compare: (fn(Element, Element) -> Ordering uses Granted),
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
 )
-  uses Granted
+  uses generic Granted
   requires 1 <= position
   requires limit <= items.length()
   ensures items.length() == old(items.length())
@@ -1384,8 +1384,8 @@ fn sift_down_by[Element, capability Granted](
   }
 }
 
-fn build_heap_by[Element, capability Granted](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering uses Granted))
-  uses Granted
+fn build_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering uses generic Granted))
+  uses generic Granted
   ensures items.length() == old(items.length())
   cost time O(items.length() * log(items.length()) * time(compare))
 {
@@ -1402,8 +1402,8 @@ fn build_heap_by[Element, capability Granted](items: mut Slice[Element], compare
   }
 }
 
-fn drain_heap_by[Element, capability Granted](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering uses Granted))
-  uses Granted
+fn drain_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering uses generic Granted))
+  uses generic Granted
   ensures items.length() == old(items.length())
   cost time O(items.length() * log(items.length()) * time(compare))
 {
@@ -1421,8 +1421,8 @@ fn drain_heap_by[Element, capability Granted](items: mut Slice[Element], compare
   }
 }
 
-public fn Slice[Element].sort_by[capability Granted](mut self, compare: (fn(Element, Element) -> Ordering uses Granted))
-  uses Granted
+public fn Slice[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering uses generic Granted))
+  uses generic Granted
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(compare))
 {
@@ -1430,20 +1430,20 @@ public fn Slice[Element].sort_by[capability Granted](mut self, compare: (fn(Elem
   drain_heap_by(mut self, compare: compare)
 }
 
-public fn Slice[Element].sort_by_key[Key: Ordered, capability Granted](mut self, key: (fn(Element) -> Key uses Granted))
-  uses Granted
+public fn Slice[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key uses generic Granted))
+  uses generic Granted
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * (time(key) + time(Key.compare)))
 {
   mut self.sort_by(fn(first, second) { key(first).compare(key(second)) })
 }
 
-internal fn Slice[Element].extreme_position[capability Granted](
+internal fn Slice[Element].extreme_position(
   self,
-  compare: (fn(Element, Element) -> Ordering uses Granted),
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
   greatest: Bool,
 ) -> UInt64
-  uses Granted
+  uses generic Granted
   requires self.length() > 0
   ensures result < self.length()
   cost time O(self.length() * time(compare))
@@ -1466,11 +1466,11 @@ internal fn Slice[Element].extreme_position[capability Granted](
   best
 }
 
-public fn Slice[Element].min_by[capability Granted](
+public fn Slice[Element].min_by(
   self,
-  compare: (fn(Element, Element) -> Ordering uses Granted),
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
 ) lends Option[Element]
-  uses Granted
+  uses generic Granted
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
 {
@@ -1482,11 +1482,11 @@ public fn Slice[Element].min_by[capability Granted](
   }
 }
 
-public fn Slice[Element].max_by[capability Granted](
+public fn Slice[Element].max_by(
   self,
-  compare: (fn(Element, Element) -> Ordering uses Granted),
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
 ) lends Option[Element]
-  uses Granted
+  uses generic Granted
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
 {

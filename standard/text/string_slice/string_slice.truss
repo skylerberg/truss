@@ -540,11 +540,11 @@ public fn StringSlice.find_last(self, pattern: StringSlice) -> Option[UInt64]
   if has_match { Some(last) } else { None }
 }
 
-public fn StringSlice.find_character[capability Granted](
+public fn StringSlice.find_character(
   self,
-  predicate: (fn(Character) -> Bool uses Granted),
+  predicate: (fn(Character) -> Bool uses generic Granted),
 ) -> Option[UInt64]
-  uses Granted
+  uses generic Granted
   ensures match result {
     Some(offset) => offset < self.length() && self.is_boundary(offset)
     None => true
@@ -686,8 +686,8 @@ public fn StringSlice.trim_end(self) -> StringSlice
   self.part(0, to: self.trailing_whitespace_start())
 }
 
-internal fn StringSlice.leading_matching[capability Granted](self, predicate: (fn(Character) -> Bool uses Granted)) -> UInt64
-  uses Granted
+internal fn StringSlice.leading_matching(self, predicate: (fn(Character) -> Bool uses generic Granted)) -> UInt64
+  uses generic Granted
   ensures result <= self.length()
   cost time O(self.length() * time(predicate))
 {
@@ -706,12 +706,12 @@ internal fn StringSlice.leading_matching[capability Granted](self, predicate: (f
   start
 }
 
-internal fn StringSlice.trailing_matching_start[capability Granted](
+internal fn StringSlice.trailing_matching_start(
   self,
-  predicate: (fn(Character) -> Bool uses Granted),
+  predicate: (fn(Character) -> Bool uses generic Granted),
   from: UInt64,
 ) -> UInt64
-  uses Granted
+  uses generic Granted
   requires from <= self.length()
   ensures from <= result
   ensures result <= self.length()
@@ -733,8 +733,8 @@ internal fn StringSlice.trailing_matching_start[capability Granted](
   end
 }
 
-public fn StringSlice.trim_matching[capability Granted](self, predicate: (fn(Character) -> Bool uses Granted)) -> StringSlice
-  uses Granted
+public fn StringSlice.trim_matching(self, predicate: (fn(Character) -> Bool uses generic Granted)) -> StringSlice
+  uses generic Granted
   ensures result.length() <= self.length()
   cost time O(self.length() * time(predicate))
 {
@@ -818,8 +818,8 @@ public fn StringSlice.split_at_most(self, separator: StringSlice, parts: UInt64)
   pieces
 }
 
-public fn StringSlice.split_matching[capability Granted](self, predicate: (fn(Character) -> Bool uses Granted)) -> List[StringSlice]
-  uses Granted
+public fn StringSlice.split_matching(self, predicate: (fn(Character) -> Bool uses generic Granted)) -> List[StringSlice]
+  uses generic Granted
   ensures result.length() <= self.length() + 1
   cost time O(self.length() * time(predicate))
 {

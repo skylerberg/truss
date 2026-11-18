@@ -24,7 +24,6 @@
   documents_tests
   manifest_tests
   registry_tests
-  compatibility_tests
   prover_tests
   library_use_tests
   database_tests
@@ -70,8 +69,7 @@
   infer
   syntax_walk
   manifest
-  registry
-  cli)
+  registry)
  (deps
   (glob_files %{workspace_root}/*.md)
   (glob_files_rec %{workspace_root}/standard/*.md)

@@ -149,11 +149,11 @@ public fn Array[Element, count: UInt64].element(mut self, position: UInt64) lend
   mut self[position]
 }
 
-public fn Array[Element, count: UInt64].map_each[Output, capability Granted](
+public fn Array[Element, count: UInt64].map_each[Output](
   own self,
-  transform: (fn(own Element) -> Output uses Granted),
+  transform: (fn(own Element) -> Output uses generic Granted),
 ) -> Array[Output, count]
-  uses Granted
+  uses generic Granted
   cost calls(transform) == count
   cost time O(count * time(transform))
 {

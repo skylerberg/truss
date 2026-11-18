@@ -1,8 +1,8 @@
-fn f[Output, capability Granted](
+fn f[Output](
   source: List[Int64],
-  transform: (fn(Int64) -> Output uses Granted),
+  transform: (fn(Int64) -> Output uses generic Granted),
 ) -> List[Output]
-  uses Granted
+  uses generic Granted
   cost time O(source.length() * time(transform))
 {
   var results: List[Output] = []

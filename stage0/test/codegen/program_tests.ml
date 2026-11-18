@@ -693,8 +693,17 @@ let () =
                         ( declaration.path,
                           Interface.Definition.find_declared_signature interface declaration.path )
                       with
-                      | Top _, Some { generics = []; specification_only = false; _ } ->
-                          Some (Instance.Code { path = declaration.path; type_arguments = [] })
+                      | ( Top _,
+                          Some
+                            {
+                              generics = [];
+                              capability_parameters = [];
+                              specification_only = false;
+                              _;
+                            } ) ->
+                          Some
+                            (Instance.Code
+                               { path = declaration.path; instantiation = Ground.no_instantiation })
                       | _ -> None)
                     ((Database.make_name_lookups checked [ Codegen_support.example.package ])
                        .list_declarations Codegen_support.example)

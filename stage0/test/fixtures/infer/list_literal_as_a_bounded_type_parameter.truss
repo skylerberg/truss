@@ -1,0 +1,7 @@
+fn numbers[Collection: FromElements[Element = Int64]]() -> Collection {
+  [1, 2, 3]
+}
+
+fn nothing[Collection: FromElements]() -> Collection {
+  []
+}

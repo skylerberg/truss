@@ -1,9 +1,9 @@
-fn both[capability Granted](
+fn both(
   value: Int64,
-  first: (fn(Int64) -> Int64 uses Granted),
-  second: (fn(Int64) -> Int64 uses Granted),
+  first: (fn(Int64) -> Int64 uses generic Granted),
+  second: (fn(Int64) -> Int64 uses generic Granted),
 ) -> Int64
-  uses Granted
+  uses generic Granted
   cost time O(time(first) + time(second))
 {
   second(first(value))

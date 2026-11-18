@@ -42,9 +42,9 @@ let types =
             "ExitCode";
           ] );
         ([ "text" ], [ "String"; "StringSlice"; "TextBuilder"; "FromTemplate"; "Template" ]);
-        ([ "list" ], [ "List"; "Slice" ]);
+        ([ "list" ], [ "List"; "Slice"; "FromElements" ]);
         ([ "specification" ], [ "Sequence"; "FiniteSet"; "FiniteMap"; "Multiset" ]);
-        ([ "map" ], [ "Map" ]);
+        ([ "map" ], [ "Map"; "FromEntries" ]);
         ([ "set" ], [ "Set" ]);
         ( [ "capabilities" ],
           [

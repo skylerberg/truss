@@ -243,6 +243,10 @@ let () =
       expect_one_diagnostic Fixtures.Interface.clock_impl_method_declaring_uses "types.impl_uses");
   Harness.test "an impl's method can rename its generic parameters" (fun () ->
       expect_no_diagnostics [ ("app::main", Fixtures.Interface.impl_renaming_method_generics) ]);
+  Harness.test "an impl's method names its capability parameters as the trait's method does"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Interface.impl_renaming_a_capability_parameter
+        "types.signature_mismatch");
   Harness.test "traits cannot require each other in a cycle" (fun () ->
       let packages =
         Support.setup [ ("app::main", Fixtures.Interface.traits_requiring_each_other) ]
@@ -717,7 +721,8 @@ let () =
   Harness.test "a trait is not the head of a method" (fun () ->
       expect_one_diagnostic Fixtures.Interface.method_headed_by_a_trait "types.not_a_type");
   Harness.test "a capability parameter is not a type" (fun () ->
-      expect_one_diagnostic "fn f[capability Granted](value: Granted) {}\n" "types.not_a_type");
+      expect_one_diagnostic "fn f(value: Granted, visit: (fn() uses generic Granted)) {}\n"
+        "resolve.unknown_name");
   Harness.test "a method of an unknown type keeps its head's generic parameters" (fun () ->
       expect_one_diagnostic Fixtures.Interface.method_of_an_unknown_generic_type
         "resolve.unknown_name")

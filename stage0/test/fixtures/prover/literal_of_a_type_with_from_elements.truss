@@ -1,0 +1,20 @@
+type Stack[Element](items: List[Element])
+
+impl FromElements for Stack[Element] {
+  type Element = Element
+
+  fn from_elements(elements: own List[Element]) -> Stack[Element]
+    ensures result.items.length() == elements.length()
+    cost time O(1)
+    cost allocations == 0
+  {
+    Stack(items: own elements)
+  }
+}
+
+fn f() -> Stack[Int64]
+  ensures result.items.length() == 3
+  cost allocations == 1
+{
+  [1, 2, 3]
+}

@@ -1,0 +1,5 @@
+use standard::collections
+
+fn f() {
+  let groups: collections::Deque[Set[Int64]] = [[1, 2], [3]]
+}

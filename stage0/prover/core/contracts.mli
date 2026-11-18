@@ -3,9 +3,7 @@ val read_source_at_key : Lookups.t -> Resolve.Names.key -> State.source
 val find_source :
   Lookups.t -> Path.t -> (State.source * Types.substitution * Infer.form_origin) option
 
-val make_trait_substitution :
-  Lookups.t -> Types.trait_reference -> Types.ty -> (Types.parameter * Types.argument) list
-
+val make_trait_substitution : Lookups.t -> Types.trait_reference -> Types.ty -> Types.substitution
 val find_part : ?inherited:bool -> Lookups.t -> Path.t -> State.source -> State.part option
 
 val list_law_proofs :

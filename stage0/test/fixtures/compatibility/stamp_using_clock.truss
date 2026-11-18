@@ -1,5 +1,0 @@
-public fn stamp() -> Int64
-  uses Clock
-{
-  1
-}

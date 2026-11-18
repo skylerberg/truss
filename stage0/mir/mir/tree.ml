@@ -88,7 +88,7 @@ type rvalue =
     }
   | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
   | Copy of operand
-  | Function_value of { path : Path.t; type_arguments : Types.argument list; is_argument : bool }
+  | Function_value of { path : Path.t; instantiation : Types.instantiation; is_argument : bool }
   | Lambda of { body : int; captures : capture list; is_argument : bool }
   | Value_parameter of Types.parameter
   | Specification of specification

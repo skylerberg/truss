@@ -34,7 +34,10 @@ let build ?(roots = []) files =
     (fun name ->
       Database.For_testing.add_root database
         (Code
-           { path = Top { module_ = Support.parse_module "app::main"; name }; type_arguments = [] }))
+           {
+             path = Top { module_ = Support.parse_module "app::main"; name };
+             instantiation = { type_arguments = []; capability_arguments = [] };
+           }))
     roots;
   Database.propagate database;
   database

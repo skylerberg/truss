@@ -206,8 +206,8 @@ public fn Schedule.next_after(self, after: Instant) -> Option[Instant] {
   None
 }
 
-public fn run[capability Granted](schedule: Schedule, work: (fn() uses Granted))
-  uses Clock, Tasks, Granted
+public fn run(schedule: Schedule, work: (fn() uses generic Granted))
+  uses Clock, Tasks, generic Granted
 {
   while true {
     let now = Clock.now()

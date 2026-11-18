@@ -131,11 +131,7 @@ let list_package_databases () =
          Printf.sprintf "%s %s" (Path.show_package package) (String.sub hash 0 16) :: lines)
        loaded_package_databases [])
 
-type kind =
-  | Worktree of string
-  | Trial of { root : string; database : Database.t Lazy.t }
-  | Published
-
+type kind = Worktree of string | Trial of { root : string; database : Database.t Lazy.t }
 type snapshot = { kind : kind; files : (string * string) list; project : Project.t }
 
 let fetch name version ~hash =
@@ -267,10 +263,7 @@ let read_source snapshot (file : Path.file) =
   | Some text -> Source.create ~path:(Path.show_file file) text
   | None -> Compiler_bug.raise_bug ~stage:"Workspace" "%s is not a file" (Path.show_file file)
 
-let locate_root snapshot =
-  match snapshot.kind with
-  | Worktree root | Trial { root; _ } -> root
-  | Published -> Compiler_bug.raise_bug ~stage:"Workspace" "only a worktree's snapshot has a root"
+let locate_root snapshot = match snapshot.kind with Worktree root | Trial { root; _ } -> root
 
 let list_registry_packages snapshot =
   List.map
@@ -535,7 +528,7 @@ let open_database ?(checks = true) snapshot =
       | Some worktree when worktree.snapshot == snapshot -> worktree.database
       | Some _ | None -> copy_database root snapshot)
   | Trial { database; _ } when checks -> Lazy.force database
-  | Worktree _ | Trial _ | Published -> build_cold_database ~checks snapshot
+  | Worktree _ | Trial _ -> build_cold_database ~checks snapshot
 
 let is_under prefix path =
   prefix = "" || path = prefix || String.starts_with ~prefix:(prefix ^ "/") path
@@ -641,9 +634,7 @@ let take_snapshot directory =
           (load_worktree_snapshot root)
 
 let retake snapshot =
-  match snapshot.kind with
-  | Worktree root -> load_worktree_snapshot root
-  | Trial _ | Published -> Ok snapshot
+  match snapshot.kind with Worktree root -> load_worktree_snapshot root | Trial _ -> Ok snapshot
 
 let propagate_changes descriptor =
   Hashtbl.iter
@@ -756,33 +747,6 @@ let plan_lock snapshot ~set ~all =
                 selected
             in
             Ok { text = Registry.Lock.print after; before; after })
-
-let fetch_published name version =
-  match
-    Option.bind (Registry.Index.find_current_registry ()) (fun registry ->
-        Registry.Index.hash_of registry name version)
-  with
-  | None ->
-      Error
-        (Printf.sprintf "The registry has no `%s` %s." (Path.show_package name)
-           (Registry.Version.show version))
-  | Some hash -> (
-      let refuse reason =
-        Error
-          (Printf.sprintf "`%s` %s cannot be read: %s." (Path.show_package name)
-             (Registry.Version.show version) reason)
-      in
-      match load_published name version ~hash with
-      | Error reason -> refuse reason
-      | Ok _ -> (
-          let snapshot =
-            make_snapshot Published
-              (Registry.Content.list_input_files
-                 (Filename.concat (Cache.make_packages_directory (open_cache ())) hash))
-          in
-          match problems snapshot with
-          | [] -> Ok snapshot
-          | problem :: _ -> refuse (Project.show_problem problem)))
 
 let close_all () =
   List.iter

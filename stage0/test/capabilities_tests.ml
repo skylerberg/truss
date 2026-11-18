@@ -105,7 +105,7 @@ let () =
           (list_core_expressions Fixtures.Capabilities.provide_of_a_generic_fixed_clock
              ~of_function:"f")
       with
-      | [ [ [ { capability; impl = Impl _; arguments = [ (_, Type tag) ] } ] ] ]
+      | [ [ [ { capability; impl = Impl _; arguments = { arguments = [ (_, Type tag) ]; _ } } ] ] ]
         when Path.equal capability (Support.make_top_path "standard::capabilities" "Clock")
              && Types.show tag = "Bool" ->
           ()
@@ -436,12 +436,12 @@ let () =
     (fun () ->
       let repeat uses =
         ticks
-        ^ "fn repeat[capability Mine](action: (fn() -> Instant uses Mine), again: Bool) -> Instant\n\
-          \  uses " ^ uses
+        ^ "fn repeat(action: (fn() -> Instant uses generic Mine), again: Bool) -> Instant\n  uses "
+        ^ uses
         ^ "\n{\n  if again {\n    repeat(tick, again: false)\n  } else {\n    action()\n  }\n}\n"
       in
-      expect_one_diagnostic (repeat "Mine") "capabilities.not_available";
-      expect_fine (repeat "Mine, Clock"))
+      expect_one_diagnostic (repeat "generic Mine") "capabilities.not_available";
+      expect_fine (repeat "generic Mine, Clock"))
 
 let later = ticks ^ Fixtures.Capabilities.later
 
@@ -458,6 +458,14 @@ let () =
         (later ^ Fixtures.Capabilities.later_of_tick_bound_without_uses)
         "types.mismatch";
       expect_fine (later ^ Fixtures.Capabilities.later_of_tick_bound_using_clock));
+  Harness.test
+    "a call needs no capability that it passes for a capability parameter its callee only returns"
+    (fun () ->
+      let chosen = Fixtures.Capabilities.chosen in
+      expect_fine (chosen ^ Fixtures.Capabilities.chosen_kept_without_calling);
+      expect_one_diagnostic
+        (chosen ^ Fixtures.Capabilities.chosen_called_without_its_capability)
+        "capabilities.not_available");
   Harness.test "a call's result may widen to more `uses` without requiring them at the call"
     (fun () -> expect_fine (ticks ^ Fixtures.Capabilities.checked_result_widened));
   Harness.test "a variable that is assigned a second function has the capabilities of both"
@@ -466,12 +474,10 @@ let () =
         (later ^ Fixtures.Capabilities.held_still_then_tick_without_uses)
         "capabilities.not_available";
       expect_fine (later ^ Fixtures.Capabilities.held_still_then_tick_using_clock));
-  Harness.test "a type and a trait cannot take a capability parameter" (fun () ->
-      expect_one_diagnostic
-        "type Holder[capability Granted](action: (fn() -> Instant uses Granted))\n"
-        "types.misplaced_capability_parameter";
-      expect_one_diagnostic Fixtures.Capabilities.trait_with_a_capability_parameter
-        "types.misplaced_capability_parameter";
+  Harness.test "only a function, a method, or a theorem names a capability parameter" (fun () ->
+      expect_one_diagnostic "type Holder(action: (fn() -> Instant uses generic Granted))\n"
+        "resolve.unknown_name";
+      expect_one_diagnostic "test \"t\" uses generic Granted {}\n" "resolve.unknown_name";
       expect_fine "type Holder(action: (fn() -> Instant uses Clock))\n")
 
 let () =
@@ -563,7 +569,7 @@ let () =
       expect_one_diagnostic Fixtures.Capabilities.set_of_an_unknown_name
         "resolve.not_a_generic_parameter";
       expect_one_diagnostic Fixtures.Capabilities.set_of_a_capability_parameter
-        "types.unknown_associated_type");
+        "resolve.not_a_generic_parameter");
   Harness.test "a trait's methods can use a set that a required trait declares" (fun () ->
       let rewind = Fixtures.Capabilities.rewind in
       expect_fine (feed ^ rewind ^ Fixtures.Capabilities.rewind_of_a_gauge_using_meter);
@@ -707,6 +713,9 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.spinner_calling_a_function_without_time
         "capabilities.may_not_terminate");
+  Harness.test "an impl of `From` makes no call that may not terminate" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.from_impl_calling_a_function_without_time
+        "capabilities.may_not_terminate");
   Harness.test "an impl's time clause follows no callback that its trait's does not" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.visit_impl_naming_the_time_of_its_callback
         "types.impl_uses")
@@ -766,7 +775,7 @@ let () =
         ~says:
           "This call may not terminate, since the lambda passed for `change` may not, and this \
            function has a `time` clause."
-        ~at:("apply(value", 1)
+        ~at:("apply(value,", 1)
         ~notes:
           [
             ( "This loop may not terminate, since it has no measure. Give the loop a `decreases` \
@@ -782,3 +791,70 @@ let () =
            lambda is passed as promises that the lambda terminates. Give the loop a `decreases` \
            clause."
         ~at:("while", 1))
+
+let () =
+  Harness.test
+    "a function type that names a capability parameter takes no lambda that may not terminate by \
+     itself" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.lambda_looping_without_a_measure_bound_as_using_a_capability_parameter
+        "capabilities.may_not_terminate"
+        ~says:
+          "This loop may not terminate, since it has no measure, and the function type that this \
+           lambda is passed as takes only a function that terminates if the functions passed for \
+           `generic Mine` do. Give the loop a `decreases` clause."
+        ~at:("while", 1);
+      expect_one_diagnostic
+        Fixtures.Capabilities.lambda_calling_slow_bound_as_using_a_capability_parameter
+        "capabilities.may_not_terminate"
+        ~says:
+          "This call may not terminate, since `app::main::slow` has no `time` clause, and the \
+           function type that this lambda is passed as takes only a function that terminates if \
+           the functions passed for `generic Mine` do."
+        ~at:("slow()", 2));
+  Harness.test
+    "a function type that names a capability parameter takes no named function that may not \
+     terminate" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.forever_bound_as_using_a_capability_parameter
+        "types.mismatch"
+        ~says:"Expected `(fn() uses generic Mine)`, found `fn()`, which may not terminate."
+        ~at:("forever", 2));
+  Harness.test
+    "a function type that names a capability parameter takes a lambda that calls a callback of \
+     that parameter" (fun () ->
+      expect_fine
+        Fixtures.Capabilities
+        .lambda_calling_the_enclosing_functions_callback_bound_as_using_a_capability_parameter);
+  Harness.test
+    "a call infers its callee's capability parameter from a lambda that uses the caller's \
+     capability parameter and may not terminate" (fun () ->
+      let text =
+        ticks
+        ^ Fixtures.Capabilities
+          .each_time_of_a_lambda_calling_the_enclosing_functions_callback_then_looping
+      in
+      expect_fine text;
+      match
+        List.filter_map
+          (fun (node : Core.expression) ->
+            match (node.kind, node.type_) with
+            | Lambda _, Function { uses; _ } -> Some (uses :> Types.capability list)
+            | _ -> None)
+          (list_core_expressions text ~of_function:"run")
+      with
+      | [ [ Capability_parameter { name = "Mine"; _ }; Divergence Always ] ] -> ()
+      | _ ->
+          Harness.fail "the lambda's type does not hold `Mine` and unconditional divergence alone");
+  Harness.test
+    "a binding without a type holds a function that uses a capability parameter and may not \
+     terminate" (fun () ->
+      expect_fine
+        (later
+       ^ Fixtures.Capabilities
+         .later_of_a_lambda_calling_the_enclosing_functions_callback_then_looping_bound_without_a_type
+        ));
+  Harness.test
+    "a function type without `uses` and without a time clause takes a lambda that may not terminate"
+    (fun () ->
+      expect_fine
+        Fixtures.Capabilities.lambda_looping_without_a_measure_bound_as_using_no_capability)

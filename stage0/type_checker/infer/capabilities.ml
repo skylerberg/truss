@@ -222,28 +222,24 @@ let rec strip_widening (operand : Core.operand) : Core.operand =
   | Place _ | Value _ -> operand
 
 let diverges_whatever_it_is_passed (state : State.state) (callee : Core.callee) =
-  let empty =
-    List.map (function
-      | Types.Capabilities _ -> Types.Capabilities Types.no_capabilities
-      | argument -> argument)
+  let empty (instantiation : Types.instantiation) =
+    {
+      instantiation with
+      capability_arguments =
+        List.map (fun (name, _) -> (name, Types.no_capabilities)) instantiation.capability_arguments;
+    }
   in
   match callee with
-  | Function { path; type_arguments } ->
+  | Function function_ ->
       not
         (Types.terminates
            (State.compute_callee_uses state
-              (Function { path; type_arguments = empty type_arguments })))
+              (Function { function_ with instantiation = empty function_.instantiation })))
   | Trait_method method_ ->
       not
         (Types.terminates
            (State.compute_callee_uses state
-              (Trait_method
-                 {
-                   method_ with
-                   trait =
-                     { method_.trait with trait_arguments = empty method_.trait.trait_arguments };
-                   type_arguments = empty method_.type_arguments;
-                 })))
+              (Trait_method { method_ with instantiation = empty method_.instantiation })))
   | Capability_method _ -> not (Types.terminates (State.compute_callee_uses state callee))
   | Intrinsic _ | Indirect _ -> false
 
@@ -314,8 +310,8 @@ let explain_call_divergence checking scope (call : Core.call) ~available =
                   (Printf.sprintf "This call may not terminate, since the lambda passed %s may not"
                      parameter_phrase))
               (find_divergence_cause checking ~available id)
-        | Value { kind = Function_value { path; type_arguments }; _ }
-          when diverges_whatever_it_is_passed state (Function { path; type_arguments }) ->
+        | Value { kind = Function_value { path; instantiation }; _ }
+          when diverges_whatever_it_is_passed state (Function { path; instantiation }) ->
             Some
               (make_explanation
                  (Printf.sprintf
@@ -393,18 +389,33 @@ let require_divergence_of_unmeasured_loop checking scope (origin : Core.origin)
         (Printf.sprintf "This loop may not terminate, since %s" (explain_missing_measure ())))
     (Types.make_capability_set [ Types.unconditional_divergence ])
 
+let describe_lambda_termination_demand (lambda_uses : Types.capability_set) =
+  match
+    List.filter_map
+      (function
+        | Types.Divergence (Of_parameter _) as divergence ->
+            Some (Printf.sprintf "`%s`" (Types.show_capability divergence))
+        | _ -> None)
+      (lambda_uses :> Types.capability list)
+  with
+  | [] -> "the function type that this lambda is passed as promises that the lambda terminates"
+  | capability_parameters ->
+      Printf.sprintf
+        "the function type that this lambda is passed as takes only a function that terminates if \
+         the functions passed for %s do"
+        (String.concat " and " capability_parameters)
+
 let rec check_expression checking scope (node : Core.expression) =
   match node.kind with
   | Lambda { body; _ } ->
+      let available =
+        match node.type_ with Types.Function { uses; _ } -> uses | _ -> Types.no_capabilities
+      in
       check_block checking
         {
-          available =
-            (match node.type_ with
-            | Types.Function { uses; _ } -> uses
-            | _ -> Types.no_capabilities);
+          available;
           kind = Lambda_body node.origin;
-          termination_demand =
-            "the function type that this lambda is passed as promises that the lambda terminates";
+          termination_demand = describe_lambda_termination_demand available;
           inferred_lambda = Some node.id;
         }
         body
@@ -412,7 +423,8 @@ let rec check_expression checking scope (node : Core.expression) =
   | Quantified _ ->
       check_children checking (make_quantifier_scope ~enclosing:scope) (`Expression node)
   | Function_value { path; _ } ->
-      check_callee_grants checking node.origin (Function { path; type_arguments = [] })
+      check_callee_grants checking node.origin
+        (Function { path; instantiation = Types.no_instantiation })
   | Call call -> (
       check_children checking scope (`Expression node);
       check_callee_grants checking node.origin call.callee;
@@ -665,7 +677,7 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
   let can_call_arguments =
     List.exists (function
       | Types.Type argument -> can_call_inside argument
-      | Types.Value _ | Types.Capabilities _ -> false)
+      | Types.Value _ -> false)
   in
   match type_ with
   | Types.Function { uses; inputs; output; _ } ->

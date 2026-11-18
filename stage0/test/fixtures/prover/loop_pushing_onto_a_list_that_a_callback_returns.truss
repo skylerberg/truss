@@ -1,8 +1,8 @@
-fn f[capability Granted](
+fn f(
   source: List[Int64],
-  produce: (fn(Int64) -> List[Int64] uses Granted),
+  produce: (fn(Int64) -> List[Int64] uses generic Granted),
 ) -> List[List[Int64]]
-  uses Granted
+  uses generic Granted
   cost time O(source.length() * time(produce))
 {
   var rows: List[List[Int64]] = []

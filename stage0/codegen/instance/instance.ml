@@ -1,5 +1,5 @@
 type key =
-  | Code of { path : Path.t; type_arguments : Ground.argument list }
+  | Code of { path : Path.t; instantiation : Ground.instantiation }
   | Constant of Path.t
   | Drop of Ground.ty
   | Copy of Ground.ty
@@ -19,7 +19,7 @@ and generated =
   | Locked_entry of { capability : Path.t; name : string }
   | Adapter of {
       function_ : Path.t;
-      type_arguments : Ground.argument list;
+      instantiation : Ground.instantiation;
       ty : Ground.function_type;
     }
   | Program_main of Path.t
@@ -39,7 +39,11 @@ and impl_method = {
 let make_method_path { impl; name; receiver; _ } = Path.Method { owner = impl; name; receiver }
 
 let make_method_code (impl_method : impl_method) =
-  Code { path = make_method_path impl_method; type_arguments = impl_method.type_arguments }
+  Code
+    {
+      path = make_method_path impl_method;
+      instantiation = { Ground.no_instantiation with type_arguments = impl_method.type_arguments };
+    }
 
 type t = key
 
@@ -152,10 +156,6 @@ let rec mangle_ty (ty : Ground.ty) =
 and mangle_argument = function
   | Ground.Type ty -> mangle_ty ty
   | Value value -> render_marker "Value" ^ Z.to_string value
-  | Capabilities set ->
-      render_marker "Granted"
-      ^ String.concat (render_marker "And") (List.map mangle_path set)
-      ^ render_marker "End"
 
 and mangle_arguments = function
   | [] -> ""
@@ -164,9 +164,20 @@ and mangle_arguments = function
       ^ String.concat (render_marker "And") (List.map mangle_argument arguments)
       ^ render_marker "End"
 
+let mangle_capability_arguments arguments =
+  String.concat ""
+    (List.map
+       (fun (name, set) ->
+         render_marker "Granted" ^ mangle_text name ^ render_marker "Is"
+         ^ String.concat (render_marker "And") (List.map mangle_path set)
+         ^ render_marker "End")
+       arguments)
+
 let rec mangle = function
-  | Code { path = instance_path; type_arguments } ->
-      mangle_path instance_path ^ mangle_arguments type_arguments
+  | Code { path = instance_path; instantiation } ->
+      mangle_path instance_path
+      ^ mangle_arguments instantiation.type_arguments
+      ^ mangle_capability_arguments instantiation.capability_arguments
   | Constant instance_path -> render_marker "Constant" ^ mangle_path instance_path
   | Drop ty -> render_marker "Drop" ^ mangle_ty ty
   | Copy ty -> render_marker "Copy" ^ mangle_ty ty
@@ -191,9 +202,9 @@ let rec mangle = function
              (fun number -> render_marker "Value" ^ mangle_text (Z.to_string number))
              arguments)
       ^ render_marker "End"
-  | Generated (Adapter { function_; type_arguments; ty }) ->
+  | Generated (Adapter { function_; instantiation; ty }) ->
       render_marker "Adapter"
-      ^ mangle (Code { path = function_; type_arguments })
+      ^ mangle (Code { path = function_; instantiation })
       ^ render_marker "As" ^ mangle_ty (Function ty)
   | Generated (Any_entry impl_method) ->
       render_marker "Dynamic" ^ mangle (make_method_code impl_method)
@@ -219,7 +230,10 @@ let make_symbol key = shorten ("t_" ^ mangle key)
 let make_type_symbol ty = shorten ("t_" ^ mangle_ty ty)
 
 let rec to_string = function
-  | Code { path; type_arguments; _ } -> Path.show path ^ show_arguments type_arguments
+  | Code { path; instantiation } ->
+      Path.show path
+      ^ show_arguments instantiation.type_arguments
+      ^ show_capability_arguments instantiation.capability_arguments
   | Constant path -> Path.show path
   | Drop ty -> "drop " ^ Ground.to_string ty
   | Copy ty -> "copy " ^ Ground.to_string ty
@@ -237,8 +251,8 @@ let rec to_string = function
       "evaluation " ^ Path.show function_ ^ "("
       ^ String.concat ", " (List.map Z.to_string arguments)
       ^ ")"
-  | Generated (Adapter { function_; type_arguments; _ }) ->
-      "adapter " ^ to_string (Code { path = function_; type_arguments })
+  | Generated (Adapter { function_; instantiation; _ }) ->
+      "adapter " ^ to_string (Code { path = function_; instantiation })
   | Generated (Any_entry impl_method) -> "any entry " ^ to_string (make_method_code impl_method)
   | Generated (Locked_entry { capability; name }) ->
       "locked entry " ^ Path.show capability ^ "." ^ name
@@ -253,3 +267,11 @@ let rec to_string = function
 and show_arguments = function
   | [] -> ""
   | arguments -> "[" ^ String.concat ", " (List.map Ground.show_argument arguments) ^ "]"
+
+and show_capability_arguments arguments =
+  String.concat ""
+    (List.map
+       (fun (name, set) ->
+         Printf.sprintf " generic %s = {%s}" name
+           (String.concat ", " (List.map Ground.show_path_name set)))
+       arguments)

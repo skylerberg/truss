@@ -758,12 +758,32 @@ let () =
       expect_proven Fixtures.Prover.word_count_bounded_by_its_index)
 
 let () =
+  Harness.test "a list literal of three hundred elements has its length and each element" (fun () ->
+      expect_proven Fixtures.Prover.list_literal_of_three_hundred_elements);
   Harness.test "a map literal holds each key's value" (fun () ->
       expect_proven Fixtures.Prover.map_literal_read);
   Harness.test "a map literal's keys must be distinct" (fun () ->
       expect_not_proven Fixtures.Prover.map_literal_with_a_repeated_key "prover.requires");
   Harness.test "a set literal contains its listed elements and nothing else" (fun () ->
       expect_proven Fixtures.Prover.set_literal_contains);
+  Harness.test "a set literal of sixteen elements has its members and its length" (fun () ->
+      expect_proven Fixtures.Prover.set_literal_of_sixteen_elements);
+  Harness.test "a map literal of one hundred keys has distinct keys" (fun () ->
+      expect_proven Fixtures.Prover.map_literal_of_one_hundred_keys);
+  Harness.test "a set literal may repeat an element" (fun () ->
+      expect_proven Fixtures.Prover.set_literal_with_a_repeated_element);
+  Harness.test "a sorted map literal's keys must be distinct" (fun () ->
+      expect_not_proven Fixtures.Prover.sorted_map_literal_with_a_repeated_key "prover.requires");
+  Harness.test "an empty map literal allocates nothing" (fun () ->
+      expect_proven Fixtures.Prover.empty_map_literal_without_allocations);
+  Harness.test "a map literal is one allocation" (fun () ->
+      expect_proven Fixtures.Prover.map_literal_with_one_allocation);
+  Harness.test "a deque literal has its length and is one allocation" (fun () ->
+      expect_proven Fixtures.Prover.deque_literal_length);
+  Harness.test "an empty sorted set literal is empty and takes constant time" (fun () ->
+      expect_proven Fixtures.Prover.empty_sorted_set_literal);
+  Harness.test "a literal of a type that implements FromElements is proven against its impl"
+    (fun () -> expect_proven Fixtures.Prover.literal_of_a_type_with_from_elements);
   Harness.test "any is one allocation" (fun () ->
       expect_proven Fixtures.Prover.any_of_a_value_with_one_allocation);
   Harness.test "a provided implementation's calls keep the capability's contract" (fun () ->
@@ -1101,7 +1121,11 @@ let () =
   Harness.test "generic negation needs the trait method's precondition" (fun () ->
       expect_not_proven Fixtures.Prover.generic_negation "prover.requires");
   Harness.test "generic negation proves where the trait method's precondition holds" (fun () ->
-      expect_proven Fixtures.Prover.generic_negation_with_its_precondition)
+      expect_proven Fixtures.Prover.generic_negation_with_its_precondition);
+  Harness.test
+    "a function with a time clause converts, makes a default, and indexes through a bound"
+    (fun () ->
+      expect_proven Fixtures.Prover.conversions_and_indexing_through_bounds_under_a_time_clause)
 
 let () =
   Harness.test "two literals with the same text are the same value" (fun () ->
