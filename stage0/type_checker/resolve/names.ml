@@ -114,7 +114,7 @@ type lookups = {
   read_definition : key -> Syntax.definition;
   read_text : key -> string;
   read_spans : key -> Source.Definition_span.t array;
-  list_recovered : key -> Source.Definition_span.t list;
+  list_syntax_errors : key -> Source.Definition_span.t list;
   read_place : key -> place;
   find_container : key -> key option;
   list_contained : key -> key list;
@@ -187,11 +187,11 @@ let lookup_module lookups ~(from : Path.module_) ~imports first rest =
 
 let make_top_path module_ name : Path.t = Top { module_; name }
 
-let find_recovery_report (lookups : lookups) key part =
-  Parts.find_recovered_report ~spans:(lookups.read_spans key)
-    ~recovered:(lookups.list_recovered key) (lookups.read_definition key) part
+let find_syntax_error (lookups : lookups) key part =
+  Parts.find_syntax_error ~spans:(lookups.read_spans key)
+    ~syntax_errors:(lookups.list_syntax_errors key) (lookups.read_definition key) part
 
-let is_broken lookups key part = Option.is_some (find_recovery_report lookups key part)
+let is_broken lookups key part = Option.is_some (find_syntax_error lookups key part)
 
 let find_definition lookups path =
   Option.map (fun key -> (key, lookups.read_definition key)) (lookups.find_key path)
@@ -1015,8 +1015,8 @@ let list_changes before after =
               list_changed (Declaration key) (fun declared -> declared.declaration)
               @ (if
                    differs before.item.value after.item.value
-                   || List.compare_lengths before.item.positions.recovered
-                        after.item.positions.recovered
+                   || List.compare_lengths before.item.positions.syntax_errors
+                        after.item.positions.syntax_errors
                       <> 0
                  then [ Tree key ]
                  else if differs before.item.positions after.item.positions then [ Positions key ]
@@ -1077,8 +1077,8 @@ let list_changes before after =
   @ list_changed_impls (fun trait -> Impls_of_trait trait) (fun impls -> impls.by_trait)
   @ law_proofs
 
-let of_namespaces ~(read_namespace : Path.package -> namespace) ~module_exists ~split_module
-    ~list_dependency_names : lookups =
+let of_namespaces ~(read_namespace : Path.package -> namespace) ~split_module ~list_dependency_names
+    : lookups =
   let of_module (module_ : Path.module_) =
     Module_map.find_opt module_ (read_namespace module_.package).modules
   in
@@ -1104,7 +1104,7 @@ let of_namespaces ~(read_namespace : Path.package -> namespace) ~module_exists ~
     list_entries =
       (fun module_ -> match of_module module_ with Some names -> names.entries | None -> []);
     list_imports = (fun key -> (read_declared key).imports);
-    module_exists;
+    module_exists = (fun module_ -> Option.is_some (of_module module_));
     split_module;
     list_dependency_names;
     find_key =
@@ -1129,7 +1129,7 @@ let of_namespaces ~(read_namespace : Path.package -> namespace) ~module_exists ~
     read_definition = (fun key -> (read_declared key).item.value);
     read_text = (fun key -> (read_declared key).text);
     read_spans = (fun key -> (read_declared key).item.positions.spans);
-    list_recovered = (fun key -> (read_declared key).item.positions.recovered);
+    list_syntax_errors = (fun key -> (read_declared key).item.positions.syntax_errors);
     read_place = (fun key -> (read_declared key).place);
     find_container = (fun key -> (read_declared key).container);
     list_contained = (fun key -> (read_declared key).contained);

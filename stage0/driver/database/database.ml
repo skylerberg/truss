@@ -471,9 +471,6 @@ let list_dependency_names database name =
       List.map (fun (dependency : Manifest.dependency) -> dependency.package) package.dependencies
   | None -> []
 
-let list_modules database name =
-  match find_package database name with Some package -> package.modules | None -> []
-
 let read_source database (file : Path.file) =
   match File_table.find_opt (obtain_owner database file.module_.package).sources file with
   | Some source -> source
@@ -503,8 +500,6 @@ let read_namespace database package =
 
 let make_name_lookups_over database ~read_namespace =
   Resolve.Names.of_namespaces ~read_namespace
-    ~module_exists:(fun (module_ : Path.module_) ->
-      module_ = Intrinsic.module_ || List.mem module_ (list_modules database module_.package))
     ~split_module:
       (Path.split_module ~is_package:(fun name -> Option.is_some (find_package database name)))
     ~list_dependency_names:(list_dependency_names database)
@@ -549,7 +544,7 @@ let add_recording (names : Resolve.Names.lookups) (note : Part.t -> unit) : Reso
     read_definition = (fun key -> note_name_read (Tree key) (names.read_definition key));
     read_text = (fun key -> note_name_read (Text key) (names.read_text key));
     read_spans = (fun key -> note_name_read (Tree key) (names.read_spans key));
-    list_recovered = (fun key -> note_name_read (Tree key) (names.list_recovered key));
+    list_syntax_errors = (fun key -> note_name_read (Tree key) (names.list_syntax_errors key));
     read_place = (fun key -> note_name_read (Place key) (names.read_place key));
     find_container = (fun key -> note_name_read (Container key) (names.find_container key));
     list_contained = (fun key -> note_name_read (Contained key) (names.list_contained key));

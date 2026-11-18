@@ -550,7 +550,7 @@ let make ?(notes = []) ?(fixes = []) ~code span message = { code; message; span;
 type reported = Reported
 
 let make_reported (_ : _ diagnostic) = Reported
-let make_recovered _ = Reported
+let reported_elsewhere = Reported
 let fix title edits = { title; edits }
 let replace span replacement = { span; replacement }
 let insert at replacement = { span = at; replacement }

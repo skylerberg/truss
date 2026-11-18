@@ -66,7 +66,9 @@ let () =
         fail "exited with %d: %s" status output)
 
 let () =
-  test "a file written in a watched directory is reported after a synchronization" (fun () ->
+  test
+    "a synchronization reports a file written in a watched directory and no skipped directory, or \
+     asks for a rescan where events can arrive late" (fun () ->
       let root = Harness.make_scratch_directory "watched" in
       Unix.mkdir (Filename.concat root "src") 0o755;
       let watcher =
@@ -81,9 +83,12 @@ let () =
           Out_channel.with_open_bin (Filename.concat root "src/main.truss") (fun out ->
               output_string out "fn main() {}\n");
           match Watcher.read_changes watcher with
-          | Changed paths when List.mem "src/main.truss" paths -> ()
+          | Changed paths when List.mem "src/main.truss" paths && not (List.mem "skipped" paths) ->
+              ()
           | Changed paths -> fail "reported %s" (String.concat ", " paths)
-          | Overflow -> fail "reported an overflow"
+          | Rescan when not (Watcher.For_testing.is_delivered_before_synchronizing ()) -> ()
+          | Rescan ->
+              fail "asked for a rescan, though each event arrives before the synchronization"
           | Removed -> fail "reported a removal"));
   test "a watcher reports that its cookie directory was removed" (fun () ->
       let root = Harness.make_scratch_directory "unwatched" in
@@ -96,7 +101,7 @@ let () =
           Unix.rmdir (Filename.concat root ".truss");
           match Watcher.read_changes watcher with
           | Removed -> ()
-          | Changed _ | Overflow -> fail "did not report the removal"))
+          | Changed _ | Rescan -> fail "did not report the removal"))
 
 let () =
   test "a second process reports that the project's database is open elsewhere" (fun () ->

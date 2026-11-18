@@ -9,7 +9,6 @@ type context = {
 }
 
 let ground_mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own -> Own
-let panic_capability = Well_known.make_path Panic
 
 let list_capabilities context substitution (set : Types.capability_set) : Path.t list =
   List.sort_uniq Path.compare
@@ -67,10 +66,7 @@ and ground_function context substitution (function_type : Types.function_type) :
         (fun (yield_mode, ty) -> (ground_mode yield_mode, ground context Types.no_substitution ty))
         function_type.inputs;
     result = ground context Types.no_substitution function_type.output;
-    uses =
-      List.filter
-        (fun path -> not (Path.equal path panic_capability))
-        (list_capabilities context Types.no_substitution function_type.uses);
+    uses = list_capabilities context Types.no_substitution function_type.uses;
   }
 
 let uint64 = Ground.make_builtin UInt64

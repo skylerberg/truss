@@ -159,6 +159,14 @@ _Noreturn void t_runtime_compiler_bug(void) {
   t_end(t_panicked, "compiler bug: ", 101);
 }
 
+void *t_runtime_find_capability(const struct t_capability *capabilities, const uint8_t *name,
+                                uint64_t length) {
+  for (const struct t_capability *entry = capabilities; entry != 0 && entry->name != 0; entry++) {
+    if (entry->length == length && memcmp(entry->name, name, length) == 0) return entry->evidence;
+  }
+  t_runtime_compiler_bug();
+}
+
 static _Noreturn void t_out_of_memory(void) {
   pthread_mutex_lock(&t_text_lock);
   t_text_length = 0;
@@ -439,7 +447,7 @@ struct t_coroutine {
   struct t_context resumer;
   void *stack;
   int finished;
-  void (*code)(void *environment, uint64_t item);
+  void (*code)(void *environment, uint64_t item, void *capabilities);
   void *environment;
   uint64_t item;
 #ifdef T_ADDRESS_SANITIZER
@@ -486,13 +494,13 @@ static void t_coroutine_entry(void) {
   __sanitizer_finish_switch_fiber(NULL, &coroutine->resumer_stack,
                                   &coroutine->resumer_stack_size);
 #endif
-  coroutine->code(coroutine->environment, coroutine->item);
+  coroutine->code(coroutine->environment, coroutine->item, 0);
   coroutine->finished = 1;
   t_coroutine_leave(coroutine);
   t_runtime_compiler_bug();
 }
 
-uint64_t t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item), void *environment,
+uint64_t t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item, void *capabilities), void *environment,
                                   uint64_t item) {
   struct t_coroutine *coroutine = malloc(sizeof *coroutine);
   if (coroutine == NULL) t_out_of_memory();
@@ -915,7 +923,7 @@ struct t_task {
   struct t_context context;
   void *stack;
   struct t_group *group;
-  void (*code)(void *environment, uint64_t item);
+  void (*code)(void *environment, uint64_t item, void *capabilities);
   void *environment;
   uint64_t item;
   struct t_task *next;
@@ -1712,7 +1720,7 @@ static void t_task_entry(void) {
 #ifdef T_ADDRESS_SANITIZER
   __sanitizer_finish_switch_fiber(NULL, &task->thread_stack, &task->thread_stack_size);
 #endif
-  task->code(task->environment, task->item);
+  task->code(task->environment, task->item, 0);
   struct t_group *group = task->group;
   struct t_task *joiner = NULL;
   pthread_mutex_lock(&group->lock);
@@ -1733,7 +1741,7 @@ static void t_task_entry(void) {
   t_runtime_compiler_bug();
 }
 
-static struct t_task *t_task_new(struct t_group *group, void (*code)(void *environment, uint64_t item),
+static struct t_task *t_task_new(struct t_group *group, void (*code)(void *environment, uint64_t item, void *capabilities),
                                  void *environment, uint64_t item) {
   struct t_task *task = malloc(sizeof *task);
   if (task == NULL) t_out_of_memory();
@@ -1765,7 +1773,7 @@ static struct t_task *t_task_new(struct t_group *group, void (*code)(void *envir
   return task;
 }
 
-uint8_t t_runtime_tasks_spawn(uint64_t handle, void (*code)(void *environment, uint64_t item),
+uint8_t t_runtime_tasks_spawn(uint64_t handle, void (*code)(void *environment, uint64_t item, void *capabilities),
                               void *environment, uint64_t item) {
   struct t_group *group = (struct t_group *)(uintptr_t)handle;
   if (atomic_load_explicit(&group->cancelled, memory_order_acquire)) return 0;
@@ -1825,19 +1833,20 @@ int32_t t_runtime_tasks_cancel(uint64_t handle) {
 }
 
 struct t_root {
-  void (*code)(void *environment, uint64_t item);
+  void (*code)(void *environment, uint64_t item, void *capabilities);
   void *environment;
   atomic_int ended;
 };
 
-static void t_root_run(void *argument, uint64_t item) {
+static void t_root_run(void *argument, uint64_t item, void *capabilities) {
   struct t_root *root = argument;
-  root->code(root->environment, item);
+  (void)capabilities;
+  root->code(root->environment, item, 0);
   atomic_store(&root->ended, 1);
   t_wake(1);
 }
 
-void t_runtime_main(void (*code)(void *environment, uint64_t item), void *environment,
+void t_runtime_main(void (*code)(void *environment, uint64_t item, void *capabilities), void *environment,
                     uint32_t requested_workers) {
   t_install_signal_dispositions();
   t_requested_workers = requested_workers;
@@ -2040,7 +2049,7 @@ let render_runtime ~tests =
     [
       (if tests then "#define T_TESTS 1\n" else "");
       headers;
-      Emit_c.site_structs;
+      Emit_c.shared_structs;
       failing;
       allocation;
       threads;
@@ -2053,16 +2062,18 @@ let render_start ?(before_start = "") ~declarations ~requested_workers root_call
     "typedef __INT32_TYPE__ int32_t;\n\
      typedef __UINT32_TYPE__ uint32_t;\n\
      typedef __UINT64_TYPE__ uint64_t;\n\
-     void t_runtime_main(void (*code)(void *environment, uint64_t item), void *environment,\n\
+     void t_runtime_main(void (*code)(void *environment, uint64_t item, void *capabilities), void \
+     *environment,\n\
     \                    uint32_t requested_workers);\n\
      %sstruct t_program {\n\
     \  int32_t count;\n\
     \  void *arguments;\n\
     \  int32_t status;\n\
      };\n\
-     static void t_program_run(void *environment, uint64_t item) {\n\
+     static void t_program_run(void *environment, uint64_t item, void *capabilities) {\n\
     \  struct t_program *program = environment;\n\
     \  (void)item;\n\
+    \  (void)capabilities;\n\
     \  %s;\n\
      }\n\
      int main(int count, char **arguments) {\n\

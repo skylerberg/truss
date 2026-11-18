@@ -1,8 +1,8 @@
 type part = Header | Body | Member_header of int | Member_body of int
 
-val find_recovered_report :
+val find_syntax_error :
   spans:Source.Definition_span.t array ->
-  recovered:Source.Definition_span.t list ->
+  syntax_errors:Source.Definition_span.t list ->
   Syntax.definition ->
   part ->
   Diagnostic.reported option

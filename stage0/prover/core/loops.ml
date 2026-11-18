@@ -715,11 +715,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
            snd (Validity.read_specification context { at with makes_obligations = false } measure)))
       measures
   in
-  let entry_measure =
-    if context.terminates then
-      match find_measured frame with Some [ entry ] -> Some entry | _ -> None
-    else None
-  in
+  let entry_measure = match find_measured frame with Some [ entry ] -> Some entry | _ -> None in
   let is_amortized =
     List.exists
       (fun (next_clauses : State.clauses) ->
@@ -734,19 +730,18 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     ~changed:(for_loop.compute_changed_in frame)
     ~holds ~most:(Option.to_list entry_measure)
     ~prove_iteration:(fun ~head ~ends ->
-      if context.terminates then
-        match find_measured head with
-        | Some before ->
-            List.iter
-              (fun (end_ : State.frame) ->
-                match find_measured end_ with
-                | Some after ->
-                    Facts.oblige context end_ Termination location
-                      [ Text "This loop's measure may not decrease." ]
-                      (Amounts.compare_lexicographically before after)
-                | None -> ())
-              ends
-        | None -> ())
+      match find_measured head with
+      | Some before ->
+          List.iter
+            (fun (end_ : State.frame) ->
+              match find_measured end_ with
+              | Some after ->
+                  Facts.oblige context end_ Termination location
+                    [ Text "This loop's measure may not decrease." ]
+                    (Amounts.compare_lexicographically before after)
+              | None -> ())
+            ends
+      | None -> ())
     ~start:(fun head ->
       let before = declare_some_parts context head element_type in
       (match (entry_measure, find_measured head) with
@@ -966,7 +961,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
     let read measure = snd (Validity.read_specification context at measure) in
     match (find_measures clauses, loop.measure_operands) with
     | Some measures, _ -> Some (List.map read measures)
-    | None, Some (comparison, read_operands) -> (
+    | None, Some (comparison, read_operands) when context.terminates -> (
         let left, right = Validity.run_without_costs context (fun () -> read_operands at) in
         let distance from into = Logic.Operation ("-", [ into; from ]) in
         let through distance = Logic.Operation ("+", [ distance; Logic.int 1 ]) in
@@ -976,9 +971,9 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
         | Greater -> Some [ distance right left ]
         | Greater_equal -> Some [ through (distance right left) ]
         | Equal | Not_equal -> Facts.raise_bug "an equality gives a loop its measure")
-    | None, None -> None
+    | None, _ -> None
   in
-  let start_measures = if context.terminates then measure_terms inside else None in
+  let start_measures = measure_terms inside in
   if context.terminates && start_measures = None then
     Facts.raise_bug "a `while` loop has no measure in a body that terminates";
   let most =

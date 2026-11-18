@@ -161,7 +161,7 @@ let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
       match elaborate_function_type context function_type with
       | Ok function_type -> Types.Function function_type
       | Error report -> Types.Error report)
-  | Type_error -> Types.Error (Diagnostic.make_recovered context.spans.(written.id))
+  | Type_error -> Types.Error Diagnostic.reported_elsewhere
 
 and elaborate_self context (span : Source.Definition_span.t) =
   match context.self_type with
@@ -1125,9 +1125,7 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
            (elaborate_signature
               { context with self_capabilities = [] }
               ~owner:path ~head:[] ~self_type:header.container_scope.self_type signature))
-  | _ ->
-      make_elaborated_interface context
-        (Error_interface (Diagnostic.make_recovered spans.(definition.id)))
+  | _ -> make_elaborated_interface context (Error_interface Diagnostic.reported_elsewhere)
 
 let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let resolved = lookups.read_resolved Interface key in
@@ -1136,16 +1134,15 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let path = key.path in
   Compiler_bug.run_while_doing ~stage:"Interface" (Resolve.Names.show_key key) (fun () ->
       let context = create lookups resolved ~spans empty_scope in
-      let recover () =
-        make_elaborated_interface context
-          (Error_interface (Diagnostic.make_recovered spans.(definition.id)))
+      let make_error_interface () =
+        make_elaborated_interface context (Error_interface Diagnostic.reported_elsewhere)
       in
       match
-        ( Resolve.Names.find_recovery_report lookups.names key Header,
+        ( Resolve.Names.find_syntax_error lookups.names key Header,
           Option.map lookups.find_header (lookups.names.find_container key) )
       with
       | Some report, _ -> make_elaborated_interface context (Error_interface report)
-      | None, Some None -> recover ()
+      | None, Some None -> make_error_interface ()
       | None, Some (Some header) -> elaborate_member lookups ~path ~spans resolved definition header
       | None, None -> (
           match definition.kind with
@@ -1153,7 +1150,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
               match lookups.find_header key with
               | Some header -> make_container_interface lookups key header
               | None -> raise_bug "`%s` has no header" (Resolve.Names.show_key key))
-          | Method_declaration _ | Definition_error _ -> recover ()
+          | Method_declaration _ | Definition_error _ -> make_error_interface ()
           | Function { signature; _ } ->
               let head, self_type =
                 match signature.name with
