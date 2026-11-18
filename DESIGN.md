@@ -720,7 +720,7 @@ argument, so exact highlighting comes from the language server.
 
 ### Termination
 
-Rules: [Termination](SPECIFICATION.md#termination),
+Rules: [Termination](SPECIFICATION.md#termination), [Loops](SPECIFICATION.md#loops),
 [Recursive types](SPECIFICATION.md#recursive-types).
 
 **The recursion check follows every edge of the call graph.** A function
@@ -765,6 +765,7 @@ capabilities, calls only functions that terminate.
 | Rule | Reason |
 |---|---|
 | Structural recursion needs no annotation, and other recursion states `decreases`. | Lean accepts structural recursion in the same way. Dafny infers a measure. A structural check with an explicit clause is more predictable than an inference that may fail. |
+| A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` has the distance between them as its default measure, and a `for` loop over a cursor has the cursor's `remaining()`. | Most loops count toward a bound that their condition names, so `decreases high - low` would only repeat the condition. The default is one measure read from the loop's own code, never chosen by a search among candidates, so a reader knows the measure that the proof uses. Dafny takes the same default for a loop. A cursor's `remaining()` states its measure once, in its type, for every loop over it. |
 | A loop that runs until a capability says to stop has no termination proof. | An implementation could supply data forever. |
 | A function type with a `time` clause takes only functions that terminate, even where its `uses` names a capability parameter. | A written clause holds. If the parameter could carry a function that may not terminate into such a type, `cost time finite` there would promise nothing. |
 | A `time` clause follows a function parameter only where its bound names `time(parameter)`. `finite` names none, so it promises termination whatever is passed. | The bound is true as written: it is unbounded exactly where the parameter's time is. A `finite` that followed its callbacks would be a condition that the signature does not show. |
