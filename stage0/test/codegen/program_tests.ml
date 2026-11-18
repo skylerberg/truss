@@ -678,7 +678,7 @@ let () =
             Codegen_support.make_example_package [ (Codegen_support.example_file, text) ]
           in
           if
-            Codegen_support.list_fragment_diagnostics
+            Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
               (Codegen_support.make_database packages)
               Codegen_support.example_file
             = []

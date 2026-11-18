@@ -1271,7 +1271,10 @@ let () =
 let make_call_edge_lookups text : Mir.Call_edges.lookups =
   let database = Support.make_database (Support.setup [ ("app::main", text) ]) in
   let file = Support.parse_file "app::main" in
-  (match Support.list_codes (Support.list_fragment_diagnostics database file) with
+  (match
+     Support.list_codes
+       (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database file)
+   with
   | [] -> ()
   | codes -> Harness.fail "the program has diagnostics: %s" (String.concat ", " codes));
   {

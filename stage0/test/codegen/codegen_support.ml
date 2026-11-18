@@ -1,11 +1,4 @@
 let test = Harness.test
-
-let list_fragment_diagnostics database file =
-  List.filter
-    (fun (diagnostic : Diagnostic.t) ->
-      not (Diagnostic.For_testing.is_unused_definition diagnostic.code))
-    (Database.list_file_diagnostics database file)
-
 let fail = Harness.fail
 let expect_string = Harness.expect_string
 
@@ -217,7 +210,9 @@ let extend_standard_library files =
 let load_standard_probe ?(roots = []) (file : Path.file) text =
   let database = extend_standard_library [ (file, text) ] in
   List.iter (Database.For_testing.add_root database) roots;
-  (match list_fragment_diagnostics database file with
+  (match
+     Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database file
+   with
   | [] -> ()
   | diagnostics ->
       let source = Source.create ~path:(Path.show_file file) text in
@@ -252,7 +247,9 @@ let load_files ?results ?roots ?profile files =
   load_checked ~list_diagnostics:Database.list_file_diagnostics ?results ?roots ?profile files
 
 let load ?results ?roots ?profile text =
-  load_checked ~list_diagnostics:list_fragment_diagnostics ?results ?roots ?profile
+  load_checked
+    ~list_diagnostics:(Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers)
+    ?results ?roots ?profile
     [ (example_file, text) ]
 
 let list_tests_in database (module_ : Path.module_) =

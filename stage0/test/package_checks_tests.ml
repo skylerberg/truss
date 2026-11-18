@@ -1,4 +1,7 @@
-let check packages = Support.list_fragment_diagnostics (Support.make_database packages)
+let check packages =
+  Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
+    (Support.make_database packages)
+
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
 
