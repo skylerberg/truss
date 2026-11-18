@@ -1,5 +1,6 @@
-let render_c_file env items =
-  Emit_c.render_file env Development (List.map (fun (item, linkage) -> (item env, linkage)) items)
+let render_c_file env program =
+  Emit_c.render_file env Development
+    (List.map (fun (program_fragment, linkage) -> (program_fragment env, linkage)) program)
 
 let () =
   Codegen_support.test "a function that returns a constant runs and exits with it" (fun () ->
@@ -241,7 +242,7 @@ let () =
             ];
         ]);
   let bump =
-    Codegen_support.item "bump"
+    Codegen_support.define_function "bump"
       (Codegen_support.function_ ~parameters:[ 0 ]
          [
            Codegen_support.local ~name:"count"
@@ -470,7 +471,7 @@ let () =
   Codegen_support.test "a copy of a callee is a static inline function, declared before its caller"
     (fun () ->
       let callee =
-        Codegen_support.item "callee"
+        Codegen_support.define_function "callee"
           (Codegen_support.function_ ~parameters:[ 0 ]
              ~result:(Codegen_support.value Codegen_support.int32)
              [ Codegen_support.local (Codegen_support.value Codegen_support.int32) ]
@@ -508,7 +509,7 @@ let () =
             ] )
       in
       let holder =
-        Codegen_support.item "holder"
+        Codegen_support.define_function "holder"
           (Codegen_support.function_
              [ Codegen_support.local (Codegen_support.value Codegen_support.pair) ]
              [
@@ -540,15 +541,15 @@ let () =
       in
       if not (String.includes ~affix:expected c_file) then
         Codegen_support.fail "no %S in:\n%s" expected c_file);
-  Codegen_support.test "emitting the same items twice gives the same C" (fun () ->
-      let items = [ (bump, Emit_c.External) ] in
+  Codegen_support.test "emitting the same program twice gives the same C" (fun () ->
+      let program = [ (bump, Emit_c.External) ] in
       Codegen_support.expect_string
-        ~expected:(render_c_file (Codegen_support.make_shape_env ()) items)
-        (render_c_file (Codegen_support.make_shape_env ()) items));
+        ~expected:(render_c_file (Codegen_support.make_shape_env ()) program)
+        (render_c_file (Codegen_support.make_shape_env ()) program));
   Codegen_support.test "the C has the blocks the entry reaches and the locals their code names"
     (fun () ->
       let entry =
-        Codegen_support.item "entry"
+        Codegen_support.define_function "entry"
           (Codegen_support.function_
              ~result:(Codegen_support.value Codegen_support.int32)
              [
@@ -622,7 +623,7 @@ let () =
 let intrinsic_types : Backend.For_testing.Intrinsics.types =
   { uint64 = Codegen_support.uint64; string_slice = Codegen_support.named "StringSlice" }
 
-let build_entry build_body : Codegen_support.item =
+let build_entry build_body : Codegen_support.program_fragment =
  fun env ->
   let builder = Emit_c.Builder.create env ~item:(Codegen_support.code_item "entry") in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);

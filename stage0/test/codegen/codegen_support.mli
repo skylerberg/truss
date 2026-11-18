@@ -32,7 +32,7 @@ val uint64 : Ground.ty
 type local_info
 type block
 type function_
-type item = Memory_layout.env -> Emit_c.fragment
+type program_fragment = Memory_layout.env -> Emit_c.fragment
 
 val local : ?name:string -> Lowered.ty -> local_info
 val value : Ground.ty -> Lowered.ty
@@ -51,9 +51,9 @@ val function_ :
   function_
 
 val code_item : string -> Lowered.Item.t
-val item : ?nested:function_ list -> string -> function_ -> item
-val entry : ?nested:function_ list -> local_info list -> block list -> item
-val make_constant_item : Emit_c.fragment -> item
+val define_function : ?nested:function_ list -> string -> function_ -> program_fragment
+val entry : ?nested:function_ list -> local_info list -> block list -> program_fragment
+val make_program_fragment : Emit_c.fragment -> program_fragment
 
 val call :
   string ->
@@ -73,10 +73,12 @@ val run_program :
   ?extra:(string * Memory_layout.shape) list ->
   ?env:Memory_layout.env ->
   ?input:string ->
-  item list ->
+  program_fragment list ->
   int * string * string
 
-val expect_status : ?extra:(string * Memory_layout.shape) list -> int -> item list -> unit
+val expect_status :
+  ?extra:(string * Memory_layout.shape) list -> int -> program_fragment list -> unit
+
 val example : Path.module_
 val example_file : Path.file
 val make_database : ?checks:bool -> Project.package list -> Database.t
