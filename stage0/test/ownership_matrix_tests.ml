@@ -167,6 +167,13 @@ let holders =
         [ "let inner = " ^ view; "let held: fn() -> Unit = fn() { look(inner) }" ]);
   ]
 
+let sources_and_holders =
+  match (sources, holders) with
+  | first_source :: other_sources, first_holder :: _ ->
+      List.map (fun holder -> (first_source, holder)) holders
+      @ List.map (fun source -> (source, first_holder)) other_sources
+  | _ -> []
+
 let use = [ "look(held)" ]
 let indent = List.map (fun line -> "  " ^ line)
 let use_after invalidate = invalidate @ use
@@ -201,45 +208,42 @@ let generate (maker : maker) =
       { description; rejected; start; stop = start + String.length text; text } :: !functions
   in
   List.iter
-    (fun (source : source) ->
-      List.iter
-        (fun (holder : holder) ->
-          let first, view = maker.make ~suffix:"" source.place in
-          let needs_other = ref false in
-          let other () =
-            needs_other := true;
-            snd (maker.make ~suffix:"_other" "other")
+    (fun ((source : source), (holder : holder)) ->
+      let first, view = maker.make ~suffix:"" source.place in
+      let needs_other = ref false in
+      let other () =
+        needs_other := true;
+        snd (maker.make ~suffix:"_other" "other")
+      in
+      match holder.hold ~view ~other ~type_:maker.type_ with
+      | None -> ()
+      | Some hold ->
+          let other_first =
+            if !needs_other then
+              "var other: List[Int64] = [7]" :: fst (maker.make ~suffix:"_other" "other")
+            else []
           in
-          match holder.hold ~view ~other ~type_:maker.type_ with
-          | None -> ()
-          | Some hold ->
-              let other_first =
-                if !needs_other then
-                  "var other: List[Int64] = [7]" :: fst (maker.make ~suffix:"_other" "other")
-                else []
+          let before = source.declare @ other_first @ first @ hold in
+          List.iter
+            (fun (invalidation, invalidate) ->
+              let describe shape =
+                Printf.sprintf "%s of %s, held in %s, then %s: %s" maker.maker source.source
+                  holder.holder invalidation shape
               in
-              let before = source.declare @ other_first @ first @ hold in
-              List.iter
-                (fun (invalidation, invalidate) ->
-                  let describe shape =
-                    Printf.sprintf "%s of %s, held in %s, then %s: %s" maker.maker source.source
-                      holder.holder invalidation shape
-                  in
-                  add
-                    ~description:(describe "the use follows the invalidation")
-                    ~rejected:true source
-                    (before @ use_after invalidate);
-                  if invalidation = mut_method then
-                    List.iter
-                      (fun (shape, order) ->
-                        add ~description:(describe shape) ~rejected:true source
-                          (before @ order invalidate))
-                      other_rejected_shapes;
-                  add ~description:(describe "the use comes first") ~rejected:false source
-                    (before @ use_before invalidate))
-                source.invalidations)
-        holders)
-    sources;
+              add
+                ~description:(describe "the use follows the invalidation")
+                ~rejected:true source
+                (before @ use_after invalidate);
+              if invalidation = mut_method then
+                List.iter
+                  (fun (shape, order) ->
+                    add ~description:(describe shape) ~rejected:true source
+                      (before @ order invalidate))
+                  other_rejected_shapes;
+              add ~description:(describe "the use comes first") ~rejected:false source
+                (before @ use_before invalidate))
+            source.invalidations)
+    sources_and_holders;
   (Buffer.contents buffer, List.rev !functions)
 
 let is_ownership (diagnostic : Diagnostic.t) =
