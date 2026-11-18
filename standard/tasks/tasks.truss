@@ -5,10 +5,10 @@ public type SendError = Closed | Cancelled
   derives Equal
 
 impl Display for SendError {
-  fn display(self, output: mut TextBuilder) {
+  fn display(self, output: mut String) {
     match self {
-      Closed => mut output.write("the channel is closed")
-      Cancelled => mut output.write("the task was cancelled")
+      Closed => mut output.push("the channel is closed")
+      Cancelled => mut output.push("the task was cancelled")
     }
   }
 }

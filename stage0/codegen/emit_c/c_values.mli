@@ -6,6 +6,7 @@ val declare_prototype : C_types.context -> string -> string -> unit
 val render_site : C_types.context -> Lowered.site -> string
 val render_bytes_symbol : C_types.context -> int -> string
 val render_bytes_name : C_types.context -> string -> string
+val render_bytes_definition : string * string -> string
 val render_function_ref_symbol : function_context -> Lowered.function_ref -> string
 val render_block_pointer : C_types.context -> string -> Ground.ty -> string -> string
 

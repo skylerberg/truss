@@ -29,9 +29,9 @@ public fn Html.joined(parts: Slice[Html], separator: StringSlice = "") -> Html
 }
 
 impl Display for Html {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write(self.text.slice())
+    mut output.push(self.text.slice())
   }
 }
 

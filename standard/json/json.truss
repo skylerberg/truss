@@ -56,9 +56,13 @@ impl From[Int64] for Number {
 }
 
 impl Display for Number {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write(format_number(self).slice())
+    if self.whole {
+      self.integer.display(mut output)
+    } else {
+      self.fraction.display(mut output)
+    }
   }
 }
 
@@ -76,20 +80,20 @@ public type ParseError(kind: ParseErrorKind, offset: UInt64, line: UInt64, colum
   derives Equal
 
 impl Display for ParseError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self.kind {
-      UnexpectedEnd => mut output.write("the text ends before the value does")
-      UnexpectedCharacter => mut output.write("a character that cannot be here")
-      InvalidNumber => mut output.write("a number that is not written as JSON writes one")
-      InvalidEscape => mut output.write("an escape that JSON does not have")
-      InvalidUnicode => mut output.write("text that is not Unicode")
-      TooDeep => mut output.write("values nested too deeply")
-      TrailingCharacters => mut output.write("text after the value")
+      UnexpectedEnd => mut output.push("the text ends before the value does")
+      UnexpectedCharacter => mut output.push("a character that cannot be here")
+      InvalidNumber => mut output.push("a number that is not written as JSON writes one")
+      InvalidEscape => mut output.push("an escape that JSON does not have")
+      InvalidUnicode => mut output.push("text that is not Unicode")
+      TooDeep => mut output.push("values nested too deeply")
+      TrailingCharacters => mut output.push("text after the value")
     }
-    mut output.write(" at line ")
+    mut output.push(" at line ")
     self.line.display(mut output)
-    mut output.write(", column ")
+    mut output.push(", column ")
     self.column.display(mut output)
   }
 }
@@ -583,17 +587,6 @@ fn escape_overhead(byte: UInt8) -> UInt64
   }
 }
 
-fn format_number(number: Number) -> String
-  cost time finite
-{
-  if number.whole {
-    return number.integer.format()
-  }
-  var storage: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(0)
-  writing::float64(mut storage, value: number.fraction)
-  String(storage: own storage)
-}
-
 public fn quote(text: StringSlice) -> String
   cost time O(text.length())
 {
@@ -912,7 +905,7 @@ fn write_value(value: Value, output: mut String)
         mut output.push("false")
       }
     }
-    Number(number) => mut output.push(format_number(number).slice())
+    Number(number) => number.display(mut output)
     String(text) => mut output.push(quote(text.slice()).slice())
     Array(items) => {
       mut output.push("[")
@@ -986,16 +979,10 @@ fn write_pretty_value(value: Value, output: mut String, indent: UInt64, level: U
   }
 }
 
-public fn Value.write(self, output: mut TextBuilder)
+public fn Value.write_pretty(self, output: mut String, indent: UInt64 = 2)
   cost time finite
 {
-  mut output.write(self.to_text().slice())
-}
-
-public fn Value.write_pretty(self, output: mut TextBuilder, indent: UInt64 = 2)
-  cost time finite
-{
-  mut output.write(self.to_pretty_text(indent: indent).slice())
+  write_pretty_value(self, output: mut output, indent: indent, level: 0)
 }
 
 public fn Value.to_text(self) -> String
@@ -1010,13 +997,13 @@ public fn Value.to_pretty_text(self, indent: UInt64 = 2) -> String
   cost time finite
 {
   var text = ""
-  write_pretty_value(self, output: mut text, indent: indent, level: 0)
+  self.write_pretty(mut text, indent: indent)
   text
 }
 
 impl Display for Value {
-  fn display(self, output: mut TextBuilder) {
-    self.write(mut output)
+  fn display(self, output: mut String) {
+    write_value(self, output: mut output)
   }
 }
 
@@ -1127,7 +1114,7 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       Parse(error) => error.display(mut output)
@@ -1142,7 +1129,7 @@ public type ReadError =
   derives Equal
 
 impl Display for ReadError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       System(error) => error.display(mut output)

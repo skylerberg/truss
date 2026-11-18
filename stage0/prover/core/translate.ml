@@ -682,7 +682,9 @@ let test (lookups : Lookups.t) (source : State.source) ~path =
   in
   (match Mir.find_code (lookups.mir.read_body_part home) with
   | Some (mir : Mir.t) ->
-      Reader.read_body context (make_empty_frame source) ~lambdas:mir.lambdas mir.body
+      Reader.read_body context
+        { (make_empty_frame source) with panic = Declared }
+        ~lambdas:mir.lambdas mir.body
   | None -> Facts.raise_bug "the test `%s` has no MIR" source.name);
   make_outcome context
 

@@ -72,11 +72,9 @@ let () =
       let env = Codegen_support.make_shape_env ~extra () in
       let c =
         Emit_c.For_testing.render_c
-          (Emit_c.make_fragment env
-             (Code
-                (Backend.For_testing.drop
-                   (Backend.For_testing.drop_and_copy env)
-                   (Codegen_support.named "Holder"))))
+          (Backend.For_testing.drop
+             (Backend.For_testing.drop_and_copy env)
+             (Codegen_support.named "Holder"))
       in
       if not (String.includes ~affix:"f_items" c) then
         Codegen_support.fail "the drop does not drop the items:\n%s" c;
@@ -86,10 +84,7 @@ let () =
     (fun () ->
       let c =
         Emit_c.For_testing.render_c
-          (Emit_c.make_fragment
-             (Codegen_support.make_shape_env ())
-             (Code
-                (Backend.For_testing.copy drop_and_copy (make_storage_type Codegen_support.int32))))
+          (Backend.For_testing.copy drop_and_copy (make_storage_type Codegen_support.int32))
       in
       let count sub = String.find_all ~sub (fun _ matches -> matches + 1) c 0 in
       if count "t_runtime_allocate(" <> 1 || count "__builtin_memcpy(" <> 1 then

@@ -14,6 +14,7 @@ val runs : env -> bool
 
 type subset_constraint = {
   subset : Types.capability_set;
+  restriction : Types.capability_set option;
   superset : Types.capability_set;
   report_missing : Types.capability_set -> unit;
 }

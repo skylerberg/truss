@@ -38,6 +38,14 @@ let render_float32_literal bits = render_float_literal ~suffix:"f" (Int32.float_
 let render_bytes_symbol (context : C_types.context) index =
   Printf.sprintf "%s_bytes_%d" context.prefix index
 
+let render_bytes_definition (text, name) =
+  let bytes =
+    List.init (String.length text) (fun index -> string_of_int (Char.code text.[index]))
+  in
+  Printf.sprintf "static const uint8_t %s[%d] = { %s };\n" name
+    (max 1 (String.length text))
+    (if bytes = [] then "0" else String.concat ", " bytes)
+
 let render_bytes_name (context : C_types.context) text =
   match Hashtbl.find_opt context.bytes text with
   | Some index -> render_bytes_symbol context index
@@ -47,7 +55,7 @@ let render_bytes_name (context : C_types.context) text =
       render_bytes_symbol context index
 
 let render_function_ref_symbol fc : Lowered.function_ref -> string = function
-  | Item key -> Mangling.make_symbol key
+  | Item item -> Mangling.make_symbol item
   | Nested nested_index -> Printf.sprintf "%s_Nested_%d" fc.symbol nested_index
 
 let list_environment (context : C_types.context) fc nested_index =
@@ -78,9 +86,9 @@ let rec render_place context fc (place : Lowered.place) : (string * Lowered.ty) 
   let root =
     match place.root with
     | Local local -> fc.render_local local
-    | Static { key; ty } ->
-        C_types.refer context key;
-        let symbol = Mangling.make_symbol key in
+    | Static { item; ty } ->
+        C_types.refer context item;
+        let symbol = Mangling.make_symbol item in
         declare_prototype context symbol
           (Printf.sprintf "extern const %s %s;\n" (C_types.render_value_type context ty) symbol);
         (symbol, Lowered.Value ty)
@@ -128,8 +136,8 @@ and render_address context fc (place : Lowered.place) ~writable =
   | None -> C_runtime.raise_bug "the address of a place of zero size"
 
 and render_operand context fc : Lowered.operand -> (string * Lowered.ty) option = function
-  | Move { root = Static { key; _ }; _ } | Moved_address { root = Static { key; _ }; _ } ->
-      C_runtime.raise_bug "a move out of %s, which is static data" (Lowered.Item.to_string key)
+  | Move { root = Static { item; _ }; _ } | Moved_address { root = Static { item; _ }; _ } ->
+      C_runtime.raise_bug "a move out of %s, which is static data" (Lowered.Item.to_string item)
   | Copy place | Move place -> render_place context fc place
   | Address { place; writable } -> render_address context fc place ~writable
   | Moved_address place -> render_address context fc place ~writable:true
@@ -155,11 +163,11 @@ and render_constant context : Lowered.constant -> string * Lowered.ty = function
       ( Printf.sprintf "((uint64_t)_Alignof(%s))" (C_types.render_value_type context ty),
         Raw (Integer UInt64) )
   | Site site -> ("((void *)" ^ render_site context site ^ ")", Raw (Pointer Opaque))
-  | Symbol_address key ->
-      C_types.refer context key;
-      let symbol = Mangling.make_symbol key in
+  | Symbol_address item ->
+      C_types.refer context item;
+      let symbol = Mangling.make_symbol item in
       declare_prototype context symbol
-        (match key with
+        (match item with
         | Table _ -> Printf.sprintf "extern const void *const %s[];\n" symbol
         | Any_drop _ -> Printf.sprintf "void %s(void *);\n" symbol
         | _ -> Printf.sprintf "extern const struct t_evidence %s;\n" symbol);
@@ -450,8 +458,8 @@ let render_rvalue context fc (target : Lowered.ty) (rvalue : Lowered.rvalue) : b
       in
       let symbol = render_function_ref_symbol fc code in
       (match code with
-      | Item key ->
-          C_types.refer context key;
+      | Item item ->
+          C_types.refer context item;
           declare_prototype context symbol
             (render_prototype context fc.symbol symbol ~linkage:External
                (Convention.make_function_value_signature context.env function_)

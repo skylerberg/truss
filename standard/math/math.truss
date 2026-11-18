@@ -1354,8 +1354,8 @@ impl Default for BigInteger {
 }
 
 impl Display for BigInteger {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write(self.format().slice())
+  fn display(self, output: mut String) {
+    mut output.push(self.format().slice())
   }
 }
 
@@ -1801,7 +1801,7 @@ impl Default for Decimal {
   }
 }
 
-fn write_zeros(output: mut TextBuilder, count: UInt64)
+fn write_zeros(output: mut String, count: UInt64)
   cost time finite
 {
   var written: UInt64 = 0
@@ -1809,36 +1809,36 @@ fn write_zeros(output: mut TextBuilder, count: UInt64)
     invariant written <= count
     decreases count - written
   {
-    mut output.write("0")
+    mut output.push("0")
     written += 1
   }
 }
 
 impl Display for Decimal {
-  fn display(self, output: mut TextBuilder) {
+  fn display(self, output: mut String) {
     if self.coefficient.is_zero() && self.scale <= 0 {
-      mut output.write("0")
+      mut output.push("0")
       return
     }
     let digits = self.coefficient.absolute().format()
     if self.coefficient.is_negative() {
-      mut output.write("-")
+      mut output.push("-")
     }
     if self.scale <= 0 {
-      mut output.write(digits.slice())
+      mut output.push(digits.slice())
       write_zeros(mut output, count: intrinsic::convert(scale_gap(0, smaller: self.scale)))
       return
     }
     let places: UInt64 = intrinsic::convert(scale_gap(self.scale, smaller: 0))
     if digits.length() > places {
       let whole = digits.length() - places
-      mut output.write(digits.slice().part(0, to: whole))
-      mut output.write(".")
-      mut output.write(digits.slice().part(whole, to: digits.length()))
+      mut output.push(digits.slice().part(0, to: whole))
+      mut output.push(".")
+      mut output.push(digits.slice().part(whole, to: digits.length()))
     } else {
-      mut output.write("0.")
+      mut output.push("0.")
       write_zeros(mut output, count: places - digits.length())
-      mut output.write(digits.slice())
+      mut output.push(digits.slice())
     }
   }
 }

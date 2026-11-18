@@ -35,8 +35,8 @@ impl Default for UInt8 {
 }
 
 impl Display for UInt8 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_unsigned(intrinsic::convert(self))
+  fn display(self, output: mut String) {
+    mut output.push_unsigned(intrinsic::convert(self))
   }
 }
 
@@ -265,8 +265,8 @@ impl Default for UInt16 {
 }
 
 impl Display for UInt16 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_unsigned(intrinsic::convert(self))
+  fn display(self, output: mut String) {
+    mut output.push_unsigned(intrinsic::convert(self))
   }
 }
 
@@ -492,8 +492,8 @@ impl Default for UInt32 {
 }
 
 impl Display for UInt32 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_unsigned(intrinsic::convert(self))
+  fn display(self, output: mut String) {
+    mut output.push_unsigned(intrinsic::convert(self))
   }
 }
 
@@ -716,8 +716,8 @@ impl Default for UInt64 {
 }
 
 impl Display for UInt64 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_unsigned(self)
+  fn display(self, output: mut String) {
+    mut output.push_unsigned(self)
   }
 }
 

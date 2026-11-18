@@ -17,12 +17,12 @@ let implements_capability (lookups : Lookups.t) key =
 
 let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
   let elaborated = lookups.interface.read_elaborated_interface key in
+  let scope = Interface.Impls.read_scope lookups.interface key in
   let context : Context.context =
     {
       lookups;
       list_bounds =
-        (fun parameter ->
-          Option.value ~default:[] (List.assoc_opt parameter elaborated.scope.bounds));
+        (fun parameter -> Option.value ~default:[] (List.assoc_opt parameter scope.bounds));
       spans = lazy (lookups.interface.names.read_spans key);
       text = lazy (lookups.interface.names.read_text key);
       mode_keywords = Hashtbl.create 8;

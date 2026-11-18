@@ -472,7 +472,8 @@ let compute_rvalue_held builder (value : Mir.rvalue) : held =
       | Some (Value value), _ :: _ -> Value { value with lent = [] }
       | Some copied, _ -> copied
       | None, _ -> make_value [])
-  | Operand operand ->
+  | Operand ((Use _ | Take _) as moved) -> make_value (list_operand_views builder moved)
+  | Operand ((Borrow _ | Constant _) as operand) ->
       Value
         {
           views = list_operand_views builder operand;

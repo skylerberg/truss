@@ -1,8 +1,7 @@
 type t
-type item_code = Item_code.t
 type prototype = { parameters : Lowered.local list; result : Lowered.ty option; returns : bool }
 
-val create : Memory_layout.env -> key:Lowered.Item.t -> t
+val create : Memory_layout.env -> item:Lowered.Item.t -> t
 
 val build_nested :
   t -> index:int -> environment:(string * Lowered.ty) list -> (t -> prototype) -> unit
@@ -21,4 +20,4 @@ val emit_loop :
   t -> ?integer:Memory_layout.integer -> count:Lowered.operand -> (Lowered.local -> unit) -> unit
 
 val outline : t -> index:int -> parts:Lowered.local list -> (unit -> unit) -> Lowered.local
-val build : t -> prototype -> item_code
+val build : t -> prototype -> Fragment.t

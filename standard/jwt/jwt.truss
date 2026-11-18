@@ -17,24 +17,24 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       Malformed(message) => {
-        mut output.write("a malformed JWT: ")
-        mut output.write(message.slice())
+        mut output.push("a malformed JWT: ")
+        mut output.push(message.slice())
       }
       Algorithm(name) => {
-        mut output.write("a JWT signed with ")
-        mut output.write(name.slice())
-        mut output.write(", which these rules do not accept")
+        mut output.push("a JWT signed with ")
+        mut output.push(name.slice())
+        mut output.push(", which these rules do not accept")
       }
-      NoKey => mut output.write("no key that can verify this JWT")
-      Signature => mut output.write("a JWT whose signature does not verify")
-      Expired => mut output.write("a JWT that has expired")
-      NotYetValid => mut output.write("a JWT that is not valid yet")
-      Issuer => mut output.write("a JWT from another issuer")
-      Audience => mut output.write("a JWT for another audience")
+      NoKey => mut output.push("no key that can verify this JWT")
+      Signature => mut output.push("a JWT whose signature does not verify")
+      Expired => mut output.push("a JWT that has expired")
+      NotYetValid => mut output.push("a JWT that is not valid yet")
+      Issuer => mut output.push("a JWT from another issuer")
+      Audience => mut output.push("a JWT for another audience")
       Claims(error) => error.display(mut output)
       Key(error) => error.display(mut output)
     }

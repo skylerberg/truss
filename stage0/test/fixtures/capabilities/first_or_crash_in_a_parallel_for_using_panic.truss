@@ -1,0 +1,7 @@
+fn f(rows: List[Slice[Int64]])
+  uses Panic
+{
+  parallel for row in rows {
+    let _ = first_or_crash(row)
+  }
+}

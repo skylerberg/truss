@@ -1,0 +1,24 @@
+trait Walk {
+  fn each(self, visit: fn(Int64))
+}
+
+type Pair(first: Int64, second: Int64)
+
+impl Walk for Pair {
+  fn each(self, visit: (fn(Int64) cost time finite))
+    cost time O(time(visit))
+  {
+    visit(self.first)
+    visit(self.second)
+  }
+}
+
+fn spin(value: Int64) {
+  spin(value)
+}
+
+fn f(pair: Pair)
+  cost time finite
+{
+  pair.each(spin)
+}

@@ -1,0 +1,31 @@
+type Shelf(items: List[Int64])
+
+fn is_even(key: UInt64) -> Bool
+  cost time O(1)
+{
+  key % 2 == 0
+}
+
+impl Index for Shelf {
+  type Key = UInt64
+  type Output = Int64
+
+  fn contains_key(self, key: UInt64) -> Bool
+    ensures result == (is_even(key) && key < self.items.length())
+    cost time O(1)
+  {
+    is_even(key) && key < self.items.length()
+  }
+
+  fn at(self, key: UInt64) lends Int64
+    requires is_even(key) && key < self.items.length()
+    cost time O(1)
+  {
+    self.items[key]
+  }
+}
+
+test "an odd key" {
+  let shelf = Shelf(items: [4, 5, 6])
+  let _ = shelf[1]
+}

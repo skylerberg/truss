@@ -7,17 +7,17 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       Malformed(message) => {
-        mut output.write("malformed Brotli data: ")
-        mut output.write(message.slice())
+        mut output.push("malformed Brotli data: ")
+        mut output.push(message.slice())
       }
       TooLarge(limit) => {
-        mut output.write("the decompressed data is longer than ")
+        mut output.push("the decompressed data is longer than ")
         limit.display(mut output)
-        mut output.write(" bytes")
+        mut output.push(" bytes")
       }
     }
   }

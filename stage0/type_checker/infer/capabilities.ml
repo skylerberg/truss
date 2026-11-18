@@ -40,31 +40,30 @@ type scope_kind =
   | Function_body of function_body
   | Lambda_body of Core.origin
   | Restricted of string
+  | Parallel of { description : string; enclosing : scope }
 
-type scope = {
+and scope = {
   available : Types.capability_set;
   kind : scope_kind;
   termination_demand : string;
   inferred_lambda : Core.id option;
 }
 
-let allows_panic scope = List.mem panic (scope.available :> Types.capability list)
-
 let find_implemented_capability scope : Types.capability option =
   match scope.kind with
   | Function_body { implementation = Some { trait = { is_capability = true; _ }; impl; _ }; _ } ->
       Some (Capability impl.implements.trait)
-  | Function_body _ | Lambda_body _ | Restricted _ -> None
+  | Function_body _ | Lambda_body _ | Restricted _ | Parallel _ -> None
 
-let make_panic_only_scope ~enclosing description =
+let make_parallel_scope ~enclosing description =
   {
     available =
       Types.union_capabilities
         (Types.make_capability_set [ panic ])
         (Types.list_divergence enclosing.available);
-    kind = Restricted description;
+    kind = Parallel { description; enclosing };
     termination_demand = enclosing.termination_demand;
-    inferred_lambda = enclosing.inferred_lambda;
+    inferred_lambda = None;
   }
 
 let make_no_capabilities_scope description =
@@ -131,10 +130,10 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
       | Bound | Dynamic -> ())
   | Capability_method _ | Intrinsic _ | Indirect _ -> ()
 
-let require_available checking scope (origin : Core.origin) ?(for_implementation = false)
+let rec require_available checking scope (origin : Core.origin) ?(for_implementation = false)
     ?(indirect_call = false)
     ?(explain_divergence = fun ~available:_ -> make_explanation "This call may not terminate")
-    (required : Types.capability_set) =
+    ?restriction (required : Types.capability_set) =
   let state = checking.state in
   let superset =
     if indirect_call then
@@ -142,6 +141,7 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
         (Types.make_capability_set (Option.to_list (find_implemented_capability scope)))
     else scope.available
   in
+  let subject = if for_implementation then "This implementation" else "This call" in
   let report_missing (missing : Types.capability_set) =
     if Types.list_divergence missing <> Types.no_capabilities then begin
       let explanation =
@@ -159,20 +159,20 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
               (Printf.sprintf
                  "This lambda uses `%s`, which the function type it is passed as does not allow."
                  shown)
-        | Restricted description when not (allows_panic scope) ->
-            report checking Not_available origin
-              (Printf.sprintf
-                 "This call uses `%s`, but %s may use no capabilities, not even `Panic`: its \
-                  meaning must be a value. A function that fails on some inputs says so with \
-                  `requires` instead."
-                 shown description)
         | Restricted description ->
             report checking Not_available origin
               (Printf.sprintf
-                 "This call uses `%s`, but %s may use only `Panic`, whatever the function declares."
-                 shown description)
+                 "%s uses `%s`, but %s may use no capabilities, not even `Panic`: its meaning must \
+                  be a value. A function that fails on some inputs says so with `requires` \
+                  instead."
+                 subject shown description)
+        | Parallel { description; _ } ->
+            report checking Not_available origin
+              (Printf.sprintf
+                 "%s uses `%s`, but %s may use no capability except `Panic`, even one that is \
+                  available outside it. Parallel calls of one implementation could race."
+                 subject shown description)
         | Function_body { path; _ } ->
-            let subject = if for_implementation then "This implementation" else "This call" in
             let can_provide =
               match capability with
               | Types.Capability path -> not (Well_known.is Panic path)
@@ -199,11 +199,18 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
   in
   if required <> Types.no_capabilities then begin
     state.capability_constraints <-
-      { subset = required; superset; report_missing } :: state.capability_constraints;
+      { subset = required; restriction; superset; report_missing } :: state.capability_constraints;
     Option.iter
       (fun lambda ->
         Hashtbl.add checking.lambda_requirements lambda { origin; required; explain_divergence })
-      scope.inferred_lambda
+      scope.inferred_lambda;
+    match scope.kind with
+    | Parallel { enclosing; _ } ->
+        require_available checking enclosing origin ~for_implementation ~indirect_call
+          ~explain_divergence
+          ~restriction:(Types.make_capability_set [ panic ])
+          required
+    | Function_body _ | Lambda_body _ | Restricted _ -> ()
   end
 
 let compute_operand_type : Core.operand -> Types.ty = function
@@ -323,7 +330,7 @@ let advise_following scope (followed : followed_method) =
       let shown = Printf.sprintf "%s.%s" (Types.show followed.self_type) followed.name in
       Some
         (Printf.sprintf "A `time` clause follows `%s` where its bound names `time(%s)`." shown shown)
-  | Function_body _ | Lambda_body _ | Restricted _ -> None
+  | Function_body _ | Lambda_body _ | Restricted _ | Parallel _ -> None
 
 let describe_followed_method (state : State.state) (followed : followed_method) =
   let { self_type; trait; name; receiver } = followed in
@@ -489,7 +496,7 @@ let explain_call_divergence checking scope (call : Core.call) ~available =
                   Some
                     (Printf.sprintf "A `time` clause follows `%s` where its bound names `time(%s)`."
                        name name)
-              | Lambda_body _ | Restricted _ -> None)
+              | Lambda_body _ | Restricted _ | Parallel _ -> None)
             (Printf.sprintf
                "This call may not terminate, since the function passed for `%s` may not" name)
       | None, _ ->
@@ -627,7 +634,7 @@ and check_statement checking scope (statement : Core.statement) =
   match statement.kind with
   | Parallel branches ->
       List.iter
-        (check_statement checking (make_panic_only_scope ~enclosing:scope "a `parallel` branch"))
+        (check_statement checking (make_parallel_scope ~enclosing:scope "a `parallel` branch"))
         branches
   | Concurrent branches ->
       require_available checking scope statement.origin (Types.make_capability_set [ tasks ]);
@@ -647,7 +654,7 @@ and check_statement checking scope (statement : Core.statement) =
       check_loop_clauses checking clauses;
       check_block checking
         (match mode with
-        | Parallel_loop -> make_panic_only_scope ~enclosing:scope "a `parallel for`"
+        | Parallel_loop -> make_parallel_scope ~enclosing:scope "a `parallel for`"
         | Sequential -> scope
         | Concurrent_loop ->
             require_available checking scope statement.origin (Types.make_capability_set [ tasks ]);
@@ -741,6 +748,7 @@ let solve (state : State.state) =
         {
           constraint_ with
           subset = State.finalize_capabilities state constraint_.subset;
+          restriction = Option.map (State.finalize_capabilities state) constraint_.restriction;
           superset = State.finalize_capabilities state constraint_.superset;
         })
       state.capability_constraints;
@@ -757,8 +765,13 @@ let solve (state : State.state) =
       | capability -> [ capability ])
   in
   let compute_missing (constraint_ : State.subset_constraint) =
-    Types.compute_missing_capabilities ~required:(substitute constraint_.subset)
-      ~available:(substitute constraint_.superset)
+    let missing =
+      Types.compute_missing_capabilities ~required:(substitute constraint_.subset)
+        ~available:(substitute constraint_.superset)
+    in
+    match constraint_.restriction with
+    | Some restriction -> Types.intersect_capabilities [ missing; substitute restriction ]
+    | None -> missing
   in
   let add_to_variables (constraint_ : State.subset_constraint) find_variable missing =
     let variables = List.filter_map find_variable (constraint_.superset :> Types.capability list) in

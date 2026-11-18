@@ -126,9 +126,6 @@ let () =
         "capabilities.not_available");
   Harness.test "a law may use no capability" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.law_calling_stamp "capabilities.not_available");
-  Harness.test "a parallel branch has only Panic" (fun () ->
-      expect_one_diagnostic Fixtures.Capabilities.clock_call_in_a_parallel_branch
-        "capabilities.not_available");
   Harness.test "a lambda's uses must fit the function type it is passed as" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.lambda_using_clock_passed_as_plain
         "capabilities.lambda_uses");
@@ -156,6 +153,81 @@ let () =
   Harness.test "a place whose implementation mutates state is provided mut" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.counter_provided_as_tally
         "capabilities.provide_mode")
+
+let first_or_crash = Fixtures.Capabilities.first_or_crash
+let run = first_or_crash ^ Fixtures.Capabilities.run
+
+let () =
+  let declare_panic =
+    "This call uses `Panic`, which is not available here. Declare it with `uses Panic`."
+  in
+  let only_panic description =
+    Printf.sprintf
+      "This call uses `Clock`, but %s may use no capability except `Panic`, even one that is \
+       available outside it. Parallel calls of one implementation could race."
+      description
+  in
+  Harness.test "a call in a parallel branch needs Panic as the same call outside the branch does"
+    (fun () ->
+      expect_one_diagnostic
+        (first_or_crash ^ Fixtures.Capabilities.first_or_crash_in_a_parallel_branch_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("first_or_crash(left)", 1);
+      expect_fine
+        (first_or_crash ^ Fixtures.Capabilities.first_or_crash_in_a_parallel_branch_using_panic));
+  Harness.test "a call in a nested parallel branch needs the function's Panic" (fun () ->
+      expect_one_diagnostic
+        (first_or_crash
+       ^ Fixtures.Capabilities.first_or_crash_in_a_nested_parallel_branch_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("first_or_crash(left)", 1));
+  Harness.test "a call in a parallel for needs Panic as the same call outside the loop does"
+    (fun () ->
+      expect_one_diagnostic
+        (first_or_crash ^ Fixtures.Capabilities.first_or_crash_in_a_parallel_for_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("first_or_crash(row)", 1);
+      expect_fine
+        (first_or_crash ^ Fixtures.Capabilities.first_or_crash_in_a_parallel_for_using_panic));
+  Harness.test "a parallel branch may use no capability but Panic, even one its function declares"
+    (fun () ->
+      expect_not_available Fixtures.Capabilities.clock_call_in_a_parallel_branch
+        ~message:(only_panic "a `parallel` branch");
+      expect_not_available Fixtures.Capabilities.clock_call_in_a_parallel_for
+        ~message:(only_panic "a `parallel for`"));
+  Harness.test "a capability that a parallel branch may not use is reported once, by the branch"
+    (fun () ->
+      expect_not_available Fixtures.Capabilities.clock_call_in_a_parallel_branch_without_uses
+        ~message:(only_panic "a `parallel` branch"));
+  Harness.test "a parallel branch may use a capability that it provides" (fun () ->
+      expect_fine Fixtures.Capabilities.provide_of_a_fixed_clock_in_a_parallel_branch);
+  Harness.test "a parallel branch in a lambda uses Panic only where the lambda's type allows it"
+    (fun () ->
+      expect_one_diagnostic
+        (first_or_crash
+       ^ Fixtures.Capabilities.lambda_with_a_crashing_parallel_branch_passed_as_plain)
+        "capabilities.lambda_uses"
+        ~says:"This lambda uses `Panic`, which the function type it is passed as does not allow."
+        ~at:("fn() {", 1));
+  Harness.test "a parallel branch in a lambda adds Panic to the lambda's inferred uses" (fun () ->
+      expect_one_diagnostic
+        (run ^ Fixtures.Capabilities.run_of_a_lambda_with_a_crashing_parallel_branch_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("run(fn", 1);
+      let text =
+        run ^ Fixtures.Capabilities.run_of_a_lambda_with_a_crashing_parallel_branch_using_panic
+      in
+      expect_fine text;
+      match
+        List.filter_map
+          (fun (node : Core.expression) ->
+            match (node.kind, node.type_) with
+            | Lambda _, Function { uses; _ } -> Some (Types.may_panic uses)
+            | _ -> None)
+          (list_core_expressions text ~of_function:"f")
+      with
+      | [ true ] -> ()
+      | _ -> Harness.fail "the lambda's inferred uses leave out Panic");
+  Harness.test "a call in a parallel branch needs the Panic of a lambda passed to it" (fun () ->
+      expect_one_diagnostic
+        (run ^ Fixtures.Capabilities.run_of_a_crashing_lambda_in_a_parallel_branch_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("run(fn", 1))
 
 let () =
   Harness.test "a dependency can use only the capabilities that it is granted" (fun () ->
@@ -737,7 +809,26 @@ let () =
         "capabilities.may_not_terminate");
   Harness.test "an impl's time clause follows no callback that its trait's does not" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.visit_impl_naming_the_time_of_its_callback
-        "types.impl_uses")
+        "types.impl_uses");
+  Harness.test "an impl cannot take only the callbacks that terminate where its trait takes any"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.spin_passed_to_an_impl_whose_callback_adds_a_time_clause
+        "types.signature_mismatch" ~at:("each", 2));
+  Harness.test "a capability's implementation cannot take only the callbacks that terminate"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.spin_passed_to_a_capability_whose_impl_adds_a_time_clause
+        "types.signature_mismatch" ~at:("run", 2));
+  Harness.test "an impl cannot take only the callbacks that use no capability" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.note_passed_to_an_impl_whose_callback_drops_the_journal
+        "types.signature_mismatch" ~at:("each", 2));
+  Harness.test "an impl cannot swap the capability parameters of its trait's callbacks" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities
+        .note_passed_to_an_impl_that_swaps_the_capability_parameters_of_its_callbacks
+        "types.signature_mismatch" ~at:("each", 2))
 
 let () =
   let apply = Fixtures.Capabilities.apply_bounded_by_the_time_of_change in

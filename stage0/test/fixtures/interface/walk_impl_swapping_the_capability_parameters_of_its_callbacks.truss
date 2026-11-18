@@ -1,0 +1,21 @@
+trait Walk {
+  fn each(
+    self,
+    visit: (fn(Int64) uses generic Visiting),
+    finish: (fn() uses generic Finishing),
+  )
+    uses generic Visiting, generic Finishing
+}
+
+type Pair(first: Int64, second: Int64)
+
+impl Walk for Pair {
+  fn each(
+    self,
+    visit: (fn(Int64) uses generic Finishing),
+    finish: (fn() uses generic Visiting),
+  )
+    uses generic Visiting, generic Finishing
+  {
+  }
+}

@@ -1,0 +1,26 @@
+capability Journal {
+  fn note(value: Int64)
+}
+
+trait Walk {
+  fn each(self, visit: (fn(Int64) uses Journal))
+}
+
+type Pair(first: Int64, second: Int64)
+
+impl Walk for Pair {
+  fn each(self, visit: fn(Int64)) {
+    visit(self.first)
+    visit(self.second)
+  }
+}
+
+fn note(value: Int64)
+  uses Journal
+{
+  Journal.note(value)
+}
+
+fn f(pair: Pair) {
+  pair.each(note)
+}

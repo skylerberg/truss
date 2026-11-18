@@ -128,9 +128,7 @@ val finish_function :
   unit ->
   Emit_c.Builder.prototype
 
-val finish_item :
-  state -> ?returns:bool -> rest:Lowered.local list -> unit -> Emit_c.Builder.item_code
-
+val finish_item : state -> ?returns:bool -> rest:Lowered.local list -> unit -> Emit_c.fragment
 val emit_unreachable_block : state -> unit
 val move_place : state -> Lowered.place -> Lowered.operand
 val make_owned_operand : state -> Lowered.place -> Ground.ty -> Lowered.operand

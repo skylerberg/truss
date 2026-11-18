@@ -1,0 +1,39 @@
+capability Journal {
+  fn note(value: Int64)
+}
+
+trait Walk {
+  fn each(
+    self,
+    visit: (fn(Int64) uses generic Visiting),
+    finish: (fn(Int64) uses generic Finishing),
+  )
+    uses generic Visiting
+}
+
+type Pair(first: Int64, second: Int64)
+
+impl Walk for Pair {
+  fn each(
+    self,
+    visit: (fn(Int64) uses generic Finishing),
+    finish: (fn(Int64) uses generic Visiting),
+  )
+    uses generic Visiting
+  {
+    finish(self.first)
+  }
+}
+
+fn note(value: Int64)
+  uses Journal
+{
+  Journal.note(value)
+}
+
+fn quiet(value: Int64) {
+}
+
+fn f(pair: Pair) {
+  pair.each(quiet, finish: note)
+}

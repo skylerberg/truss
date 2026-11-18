@@ -76,7 +76,7 @@ let emit_condition builder rvalue =
   Lowered.Copy (Lowered.make_local_place flag)
 
 let drop context ty =
-  let builder = Emit_c.Builder.create context.env ~key:(Drop ty) in
+  let builder = Emit_c.Builder.create context.env ~item:(Drop ty) in
   let pointer =
     Emit_c.Builder.allocate_local builder (Pointer { target = Value ty; writable = true })
   in
@@ -210,7 +210,7 @@ let drop context ty =
   Emit_c.Builder.build builder { parameters = [ pointer ]; result = None; returns = true }
 
 let build_any_drop context ty =
-  let builder = Emit_c.Builder.create context.env ~key:(Any_drop ty) in
+  let builder = Emit_c.Builder.create context.env ~item:(Any_drop ty) in
   let untyped = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
   if not (is_trivial context ty) then begin
@@ -264,7 +264,7 @@ let copy_field context builder ~source (name, member) =
       (name, Lowered.Move (Lowered.make_local_place temporary))
 
 let copy context ty =
-  let builder = Emit_c.Builder.create context.env ~key:(Copy ty) in
+  let builder = Emit_c.Builder.create context.env ~item:(Copy ty) in
   let convention = Convention.classify_result context.env ty in
   let result_pointer =
     match convention with
@@ -458,7 +458,7 @@ let copy context ty =
     }
 
 let build_any_copy context ty =
-  let builder = Emit_c.Builder.create context.env ~key:(Any_copy ty) in
+  let builder = Emit_c.Builder.create context.env ~item:(Any_copy ty) in
   let original = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
   let copied = allocate_box context builder ty in
