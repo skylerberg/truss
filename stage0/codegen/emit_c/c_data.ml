@@ -22,7 +22,9 @@ let rec render_initializer (emission : Emission.t) ty (value : Lowered.static_va
       | Struct fields -> fields
       | _ -> []
     in
-    let block_value = render_fields block_fields fields "" in
+    let block_value =
+      match render_fields block_fields fields "" with "" -> "0" | initializers -> initializers
+    in
     let name =
       Emission.add_static emission (fun name ->
           Printf.sprintf "static const %s %s = { %s };\n" (C_types.render_key_name key) name

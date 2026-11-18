@@ -333,7 +333,9 @@ let build_laid_out_c (emission : Emission.t) fc ty variant
     let fields = list_payload_fields (Memory_layout.lay_out_block emission.types.env ty variant) in
     ( key,
       Printf.sprintf "(%s){ %s }" (C_types.render_key_name key)
-        (render_initializers emission fc "" fields values) )
+        (match render_initializers emission fc "" fields values with
+        | "" -> "0"
+        | initializers -> initializers) )
   in
   match (variant, layout.form) with
   | _, Zero_size -> None
