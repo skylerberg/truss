@@ -1280,6 +1280,9 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
 - **Unreachable code is an error:** a statement after an expression of type
   `Never`. The check uses types alone, so `if false { ... }` is not
   reported. Code after a `todo` is exempt.
+- **A comparison of a place with itself is an error,** as in `x != x` or
+  `items[i] < items[i]`, since the laws of `Equal` and `Ordered` decide its
+  result. A specification is exempt.
 - `return`, `break`, `continue`, and `unreachable` have type `Never`. `break`
   and `continue` appear only in loops.
 - `assert` appears only in tests, theorems, and proofs. In a proof it is

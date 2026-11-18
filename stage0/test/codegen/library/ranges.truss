@@ -75,7 +75,7 @@ test "two ranges are equal when they hold the same values" {
   assert (5..5) != (5..=5)
   let whole: Range[UInt64] = UInt64.minimum..=UInt64.maximum
   let nearly: Range[UInt64] = UInt64.minimum..UInt64.maximum
-  assert whole == whole
+  assert whole == (UInt64.minimum..=UInt64.maximum)
   assert whole != nearly
   let letters: Range[Character] = Character"a"..=Character"e"
   assert letters == (Character"a"..Character"f")

@@ -848,6 +848,7 @@ an API toward returning `Unit` when the result is usually not needed.
 |---|---|
 | Every variable is used, and every `match` arm is reachable. | Such code is almost always a mistake, often a typo. The two rules also catch a constant that is written as a bare name in a pattern ([Patterns](#patterns)). A parameter is exempt, because an implementation of a trait may not need every parameter. |
 | Unreachable code is an error. | It is almost always a line left behind by an edit. The check uses types alone, so it never reasons about values. Code after a `todo` is unfinished, not unreachable. |
+| A comparison of a place with itself is an error outside specifications. | `x != x` tests for NaN in C, Java, and JavaScript, and is always false in Truss, where every NaN equals every NaN (*LLM habits*). Any other comparison of a place with itself is a typo, since the laws of `Equal` and `Ordered` decide its result. A law states such a comparison on purpose. |
 
 ### Patterns
 

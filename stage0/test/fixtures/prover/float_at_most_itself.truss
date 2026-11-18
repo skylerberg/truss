@@ -1,5 +1,4 @@
-fn f(value: Float64) -> Bool
-  ensures result
+fn f(value: Float64)
+  ensures value <= value
 {
-  value <= value
 }

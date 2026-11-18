@@ -96,7 +96,8 @@ test "the IEEE comparisons treat a float that is not a number as unordered" {
   let one: Float64 = 1.0
   let two: Float64 = 2.0
   let nothing = Float64.not_a_number
-  assert nothing == nothing
+  let other_nothing = Float64.not_a_number
+  assert nothing == other_nothing
   assert nothing.ieee_not_equal(nothing)
   assert !one.ieee_not_equal(one)
   assert one.ieee_less_or_equal(one)
