@@ -86,11 +86,9 @@ let load_package_database (package : Project.package) ~hash ~visible =
                 | Some package_database -> package_database
                 | None ->
                     let package_database =
-                      Database.read_package_database
-                        (Database.create
-                           ~loaded:(List.map (fun visible -> visible.package_database) visible)
-                           [ package ])
-                        package.name
+                      Database.build_package_database
+                        ~loaded:(List.map (fun visible -> visible.package_database) visible)
+                        package
                     in
                     Cache.add_result (open_cache ()) ~kind:Package_database ~key
                       (Marshal.to_string package_database []);
