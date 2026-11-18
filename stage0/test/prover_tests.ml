@@ -1244,6 +1244,13 @@ let () =
       expect_not_proven Fixtures.Prover.callback_requires_naming_a_mut_limit "prover.requires");
   Harness.test "a forwarded callback must be promised its requires" (fun () ->
       expect_not_proven Fixtures.Prover.callback_forwarded_without_its_requires "prover.requires");
+  Harness.test "an impl's method proves the requires that its callback type states" (fun () ->
+      expect_not_proven Fixtures.Prover.impl_calling_its_callback_outside_its_requires
+        "prover.requires");
+  Harness.test "a lambda passed to a trait's method cannot rely on the callback type's requires"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.lambda_relying_on_the_requires_of_a_trait_methods_callback
+        "prover.requires");
   Harness.test "a call through a function value gives a valid result" (fun () ->
       expect_proven Fixtures.Prover.positive_made_by_a_function_value);
   Harness.test "a lambda returns a valid value" (fun () ->

@@ -102,14 +102,13 @@ val normalize_capabilities_in_impl :
   Types.capability_set
 
 val normalize_signature_in_impl :
-  Lookups.t ->
-  list_bounds:bounds ->
-  ?missing_associated:(string * Diagnostic.in_definition) list ->
-  implementation ->
-  Types.signature ->
-  Types.signature
+  Lookups.t -> list_bounds:bounds -> implementation -> Types.signature -> Types.signature
+
+val make_expected_signature :
+  Lookups.t -> ?written:Types.signature -> implemented_method -> Types.signature
 
 val read_signature : Lookups.t -> Path.t -> Types.signature option
+val read_scope : Lookups.t -> Resolve.Names.key -> Environment.scope
 
 type declaring_clause =
   | Own_uses

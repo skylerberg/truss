@@ -146,6 +146,9 @@ val make_capability_substitution : parameter list -> (string * capability_set) l
 
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 
+val list_capture_free_parameters : parameter_info list -> string list
+val mentions_specification_only_type : parameter_info list -> result -> bool
+
 type signature = {
   generics : generic list;
   capability_parameters : parameter list;
@@ -167,6 +170,7 @@ val no_instantiation : instantiation
 val substitute_instantiation : substitution -> instantiation -> instantiation
 val make_signature_substitution : signature -> instantiation -> substitution
 val make_trait_substitution : generic list -> self:ty -> trait_reference -> substitution
+val map_bounds : (trait_reference list -> trait_reference list) -> generic list -> generic list
 val map_signature : (ty -> ty) -> signature -> signature
 val substitute_signature : substitution -> signature -> signature
 
