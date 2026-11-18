@@ -613,7 +613,7 @@ let declare_some_parts context frame element =
     Logic.(Operation (">=", [ Models.make_sequence_length context element parts; int 0 ]));
   parts
 
-let prove_own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
+let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     (cursor_access : State.passed_place) (next : Invocation.callee) ~cursor_type =
   let location = Facts.locate context frame.source for_loop.for_at in
   let clauses = for_loop.for_clauses in
@@ -869,7 +869,7 @@ let run_for_loop context frame (for_loop : for_loop) =
            (fun (exit_frame : State.frame) -> { exit_frame with yielded = outer_yielded })
            (exit_ :: left))
   | Over_cursor { cursor; cursor_type; next } ->
-      prove_own_cursor_loop ~for_loop context frame cursor next ~cursor_type
+      prove_cursor_loop ~for_loop context frame cursor next ~cursor_type
 
 let run_while_loop context (frame : State.frame) (loop : while_loop) =
   let clauses = loop.while_clauses in
