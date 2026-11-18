@@ -214,7 +214,7 @@ let make_example_package files : Project.package list =
 
 let make_backend ?results ?evaluation_time_limit_ms database =
   Backend.create ?results ?evaluation_time_limit_ms
-    (Database.make_lowering_requests database [ example.package ])
+    (Database.make_lowered_lookups database [ example.package ])
     (Lazy.force c_compiler) Development
 
 let load_files ?results ?(roots = []) ?checks files =
