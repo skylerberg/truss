@@ -75,7 +75,9 @@ let build_debug env ty =
     write_output_text "[";
     Emit_c.Ir_builder.emit_loop builder ~count (fun index ->
         Emit_c.Ir_builder.emit_when builder
-          (Binary (Not_equal, Copy (Lowered.make_local_place index), Lowered.make_uint64_constant 0))
+          (Holds
+             (Binary
+                (Not_equal, Copy (Lowered.make_local_place index), Lowered.make_uint64_constant 0)))
           (fun () -> write_output_text ", ");
         emit_output_call element (index_element (Lowered.Copy (Lowered.make_local_place index))));
     write_output_text "]"

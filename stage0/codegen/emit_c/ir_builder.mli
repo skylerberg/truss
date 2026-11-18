@@ -14,9 +14,17 @@ val emit : t -> Lowered.statement -> unit
 val finish : t -> Lowered.terminator -> unit
 val run_in_block : t -> Lowered.block -> (unit -> unit) -> unit
 val emit_temporary : t -> Lowered.ty -> Lowered.rvalue -> Lowered.operand
-val branch : t -> Lowered.rvalue -> yes:Lowered.block -> no:Lowered.block -> unit
-val emit_when : t -> Lowered.rvalue -> (unit -> unit) -> unit
-val emit_if : t -> Lowered.rvalue -> yes:(unit -> unit) -> no:(unit -> unit) -> unit
+
+type condition =
+  | Holds of Lowered.rvalue
+  | Negation of condition
+  | Conjunction of condition * condition
+  | Disjunction of condition * condition
+
+val branch : t -> condition -> yes:Lowered.block -> no:Lowered.block -> unit
+val evaluate : t -> condition -> Lowered.rvalue
+val emit_when : t -> condition -> (unit -> unit) -> unit
+val emit_if : t -> condition -> yes:(unit -> unit) -> no:(unit -> unit) -> unit
 
 val emit_loop :
   t -> ?integer:Memory_layout.integer -> count:Lowered.operand -> (Lowered.local -> unit) -> unit

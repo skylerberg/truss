@@ -663,7 +663,7 @@ let pull_loop st ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
       Emit_c.Ir_builder.finish st.builder (Goto test);
       Emit_c.Ir_builder.start st.builder test;
       call_next next;
-      Emit_c.Ir_builder.branch st.builder (Is_variant (next, "Some")) ~yes:inside ~no:after;
+      Emit_c.Ir_builder.branch st.builder (Holds (Is_variant (next, "Some"))) ~yes:inside ~no:after;
       Emit_c.Ir_builder.start st.builder inside;
       Lowering.run_in_scope st (fun () ->
           Lowering.run_in_loop st ~continue_:test ~break_:after ~depth (fun () ->

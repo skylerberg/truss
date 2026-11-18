@@ -158,6 +158,7 @@ type statement =
 
 type terminator =
   | Goto of block
+  | Branch of { condition : rvalue; yes : block; no : block }
   | Switch of { value : operand; cases : (Z.t * block) list; default : block }
   | Switch_variant of { place : place; cases : (string * block) list; default : block option }
   | Return of operand option

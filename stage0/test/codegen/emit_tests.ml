@@ -16,7 +16,6 @@ let () =
             [
               Codegen_support.local ~name:"total" (Codegen_support.value Codegen_support.int32);
               Codegen_support.local ~name:"i" (Codegen_support.value Codegen_support.int32);
-              Codegen_support.local (Raw Bool);
             ]
             [
               Codegen_support.block
@@ -25,14 +24,14 @@ let () =
                   Assign (Codegen_support.at 1, Use (Codegen_support.constant_int32 1));
                 ]
                 (Goto 1);
-              Codegen_support.block
-                [
-                  Assign
-                    ( Codegen_support.at 2,
-                      Binary (Less_equal, Codegen_support.copy 1, Codegen_support.constant_int32 10)
-                    );
-                ]
-                (Switch { value = Codegen_support.copy 2; cases = [ (Z.one, 2) ]; default = 3 });
+              Codegen_support.block []
+                (Branch
+                   {
+                     condition =
+                       Binary (Less_equal, Codegen_support.copy 1, Codegen_support.constant_int32 10);
+                     yes = 2;
+                     no = 3;
+                   });
               Codegen_support.block
                 [
                   Assign
