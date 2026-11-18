@@ -3,7 +3,7 @@ val list_diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val fail : ('a, unit, string, unit) format4 -> 'a
 val expect_string : expected:String.t -> String.t -> unit
 val expect_int : expected:int -> int -> unit
-val render_records : Compile.record list -> string
+val render_records : Backend.record list -> string
 val definition : string -> Path.t
 val named : ?arguments:Ground.argument list -> string -> Ground.ty
 val int64 : Ground.ty
@@ -65,11 +65,8 @@ val call :
 
 val make_shape_env : ?extra:(string * Memory_layout.shape) list -> unit -> Memory_layout.env
 val scratch : string lazy_t
-val compiler : Toolchain.t lazy_t
-val strict : string list lazy_t
+val c_compiler : C_compiler.t lazy_t
 val counter : int ref
-val cache : Build.cache lazy_t
-val settings : Build.settings lazy_t
 val worker_counts : int list
 
 val run_program :
@@ -84,21 +81,23 @@ val example : Path.module_
 val example_file : Path.file
 val make_database : ?checks:bool -> Project.package list -> Database.t
 val make_example_package : (Path.file * string) list -> Project.package list
-val compile : ?results:Compile.results -> ?evaluation_time_limit_ms:int -> Database.t -> Compile.t
+
+val make_backend :
+  ?results:Backend.results -> ?evaluation_time_limit_ms:int -> Database.t -> Backend.t
 
 val load_files :
-  ?results:Compile.results ->
+  ?results:Backend.results ->
   ?roots:Instance.key list ->
   ?checks:bool ->
   (Path.file * string) list ->
-  Database.t * Compile.t
+  Database.t * Backend.t
 
 val load :
-  ?results:Compile.results ->
+  ?results:Backend.results ->
   ?roots:Instance.key list ->
   ?checks:bool ->
   string ->
-  Database.t * Compile.t
+  Database.t * Backend.t
 
 val list_tests_in : Database.t -> Path.module_ -> Path.t list
 val list_tests : Database.t -> Path.t list

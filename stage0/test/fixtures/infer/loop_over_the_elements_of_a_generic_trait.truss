@@ -1,0 +1,24 @@
+trait Bag[Item] {
+  fn count(self) -> UInt64
+    cost time finite
+
+  fn element(self, position: UInt64) lends Item
+    requires position < self.count()
+    cost time finite
+}
+
+type Pair(first: Int64, second: Int64)
+
+impl Bag[Int64] for Pair {
+  fn count(self) -> UInt64 { 2 }
+
+  fn element(self, position: UInt64) lends Int64 { todo }
+}
+
+fn sum(pair: Pair) -> Int64 {
+  var total: Int64 = 0
+  for item in pair {
+    total += item
+  }
+  total
+}

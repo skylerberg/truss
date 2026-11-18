@@ -94,6 +94,7 @@ val flat_map_capabilities : (capability -> capability list) -> capability_set ->
 type substitution
 
 val no_substitution : substitution
+val is_empty_substitution : substitution -> bool
 val combine_substitutions : substitution -> substitution -> substitution
 val bind_argument : parameter -> argument -> substitution -> substitution
 val find_argument : parameter -> substitution -> argument option
@@ -165,6 +166,7 @@ type instantiation = {
 val no_instantiation : instantiation
 val substitute_instantiation : substitution -> instantiation -> instantiation
 val make_signature_substitution : signature -> instantiation -> substitution
+val make_trait_substitution : generic list -> self:ty -> trait_reference -> substitution
 val map_signature : (ty -> ty) -> signature -> signature
 val substitute_signature : substitution -> signature -> signature
 

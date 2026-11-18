@@ -527,10 +527,13 @@ public trait Countable: Ordered + Plain {
 public type Range[Value](start: Value, stop: Value, inclusive: Bool)
 
 public type Indexed[Element](index: UInt64, element: Element)
+  derives Equal
 
 public type Pair[First, Second](first: First, second: Second)
+  derives Equal
 
 public type ExitCode(code: UInt8)
+  derives Equal
 
 public let ExitCode.success: ExitCode = ExitCode(0)
 

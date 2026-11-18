@@ -74,7 +74,8 @@ let find_implementation_of lookups (impl : Types.impl_interface) =
       {
         impl;
         trait;
-        substitution = Properties.make_trait_substitution trait ~self:impl.for_type impl.implements;
+        substitution =
+          Types.make_trait_substitution trait.trait_generics ~self:impl.for_type impl.implements;
       })
     (Definition.find_trait_interface lookups impl.implements.trait)
 

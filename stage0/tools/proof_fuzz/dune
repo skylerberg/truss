@@ -17,7 +17,6 @@
   mir
   solver
   prover
-  toolchain
-  build
-  compile
+  c_compiler
+  backend
   database))

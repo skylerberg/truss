@@ -526,17 +526,21 @@ let is_view state type_ =
   Interface.Impls.is_view state.lookups.interface ~list_bounds:(lookup_bounds state)
     (zonk state type_)
 
+let decide_binding_mode state (mode : Types.mode) type_ : Types.mode =
+  match mode with Read when is_plain state type_ -> Own | Read | Mut | Own -> mode
+
 let rec copy_plain_bindings state (pattern : Core.pattern) : Core.pattern =
   let copy_fields = List.map (fun (field, inner) -> (field, copy_plain_bindings state inner)) in
   match pattern.kind with
-  | Bind ({ mode = Read; _ } as bound) when is_plain state pattern.type_ ->
-      { pattern with kind = Bind { bound with mode = Own } }
+  | Bind bound ->
+      let mode = decide_binding_mode state bound.mode pattern.type_ in
+      { pattern with kind = Bind { bound with mode } }
   | Variant { variant; fields } ->
       { pattern with kind = Variant { variant; fields = copy_fields fields } }
   | Record fields -> { pattern with kind = Record (copy_fields fields) }
   | Alternatives alternatives ->
       { pattern with kind = Alternatives (List.map (copy_plain_bindings state) alternatives) }
-  | Bind _ | Wildcard | Literal _ | Range _ | Equal_to _ -> pattern
+  | Wildcard | Literal _ | Range _ | Equal_to _ -> pattern
 
 let build_scrutinee_pattern state written = copy_plain_bindings state (build_pattern state written)
 

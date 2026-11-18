@@ -179,7 +179,8 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
           in
           let is_evaluable (requirement : Mir.requirement) =
             match (evidence, callee_clauses.parameters) with
-            | Impl { substitution; _ }, [ parameter ] when substitution = Types.no_substitution ->
+            | Impl { substitution; _ }, [ parameter ] when Types.is_empty_substitution substitution
+              ->
                 requirement.is_executable && reads_only_literals parameter.local requirement.clause
             | _ -> false
           in

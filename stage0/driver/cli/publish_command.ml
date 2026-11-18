@@ -102,12 +102,12 @@ let list_failed_tests database snapshot packages =
   in
   List.concat
     (List.map2
-       (fun (test : Test_command.test) (record : Compile.record) ->
+       (fun (test : Test_command.test) (record : Backend.record) ->
          if record.outcome = Passed then []
          else
            [
              Printf.sprintf "%s: %s" (Test_command.label_test test)
-               (Compile.show_outcome record.outcome);
+               (Backend.show_outcome record.outcome);
            ])
        tests
        (Test_command.run_tests database snapshot packages tests))

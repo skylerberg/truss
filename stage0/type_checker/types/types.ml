@@ -200,6 +200,7 @@ type substitution = {
 }
 
 let no_substitution = { arguments = []; capability_arguments = [] }
+let is_empty_substitution substitution = substitution = no_substitution
 
 let combine_substitutions left right =
   {
@@ -213,7 +214,7 @@ let bind_argument parameter argument substitution =
 let find_argument parameter substitution = List.assoc_opt parameter substitution.arguments
 
 let rec substitute substitution type_ =
-  if substitution = no_substitution then type_
+  if is_empty_substitution substitution then type_
   else
     match type_ with
     | Named { path; arguments } ->
@@ -615,6 +616,12 @@ let make_signature_substitution (signature : signature) instantiation =
   combine_substitutions
     (make_substitution signature.generics instantiation.type_arguments)
     (make_capability_substitution signature.capability_parameters instantiation.capability_arguments)
+
+let make_trait_substitution generics ~self (reference : trait_reference) =
+  bind_argument
+    (make_self_parameter reference.trait)
+    (Type self)
+    (make_substitution generics reference.trait_arguments)
 
 let map_signature transform (signature : signature) =
   {

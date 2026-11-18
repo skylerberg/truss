@@ -132,8 +132,7 @@ let make_any_substitution (context : Definitions.context) ~(any : Types.trait_re
           Definitions.raise_bug "%s is not a trait of %s" (Path.show trait)
             (Types.show (Types.Any any))
   in
-  Interface.Properties.make_trait_substitution
-    (Definitions.read_trait_interface context trait)
+  Types.make_trait_substitution (Definitions.read_trait_interface context trait).trait_generics
     ~self:(Types.Any any) reference
 
 let make_any_entry_signature context ~any ~trait (signature : Types.signature) =

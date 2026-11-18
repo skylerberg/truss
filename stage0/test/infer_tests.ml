@@ -698,6 +698,11 @@ let () =
       expect_fine Fixtures.Infer.list_literal_as_a_deque);
   Harness.test "a map literal is a sorted map where a sorted map is expected" (fun () ->
       expect_fine Fixtures.Infer.map_literal_as_a_sorted_map);
+  Harness.test
+    "a loop over a generic trait's elements leaves the trait's arguments to inference, not its \
+     parameter" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.loop_over_the_elements_of_a_generic_trait
+        "types.cannot_infer");
   Harness.test "a list literal is a type that implements FromElements" (fun () ->
       expect_fine Fixtures.Infer.list_literal_as_a_type_with_from_elements;
       expect_type Fixtures.Infer.list_literal_as_a_type_with_from_elements "[1, 2, 3]"
@@ -939,6 +944,24 @@ let () =
           ("given", Read);
           ("count", Own);
         ]);
+  Harness.test
+    "a compound assignment copies a `Plain` operand that its operator reads, and views an operand \
+     of another type" (fun () ->
+      let packages = Support.setup [ ("app::main", Fixtures.Infer.compound_assignment_operands) ] in
+      let assigning =
+        List.find
+          (fun (declaration : Resolve.Names.declaration) ->
+            Path.equal declaration.path (Support.make_top_path "app::main" "f"))
+          (Support.list_declarations packages (Support.parse_module "app::main"))
+      in
+      match
+        List.filter_map
+          (fun (node : Core.statement) ->
+            match node.kind with Compound_assign { operand; _ } -> Some operand | _ -> None)
+          (Support.collect_core_nodes packages (Resolve.Names.make_key assigning)).statements
+      with
+      | [ Value _; Place _ ] -> ()
+      | _ -> Harness.fail "the operands are not a copy of `count` and a view of `title`");
   Harness.test "a range pattern on a type that is not an integer or Character is an error"
     (fun () -> expect_one_diagnostic Fixtures.Infer.bool_range_arm "types.mismatch");
   Harness.test "an integer range on a type that is not ordered is one error" (fun () ->

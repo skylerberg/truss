@@ -159,6 +159,7 @@ val decide_property :
 
 val is_plain : state -> Types.ty -> bool
 val is_view : state -> Types.ty -> bool
+val decide_binding_mode : state -> Types.mode -> Types.ty -> Types.mode
 
 val resolve_associated_type :
   state -> Types.ty -> Types.trait_reference -> string -> at:Source.Definition_span.t -> Types.ty
@@ -188,7 +189,6 @@ val find_target : state -> Syntax.name -> Resolve.target option
 val decide_default_literal : state -> at:Source.Definition_span.t -> Types.ty -> Types.ty
 val find_head : state -> Syntax.expression -> Resolve.head option
 val is_variant_name : Syntax.name -> bool
-val is_member_constant : state -> Syntax.expression -> bool
 val show : state -> Types.ty -> string
 val describe : state -> Types.ty -> string
 
