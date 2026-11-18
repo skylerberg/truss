@@ -229,6 +229,7 @@ let show_stored : type a. a stored -> string =
         | Constant declared -> "constant " ^ show_key declared
         | Instantiations -> "instantiations"
         | Tests -> "tests"
+        | Internals -> "internals"
         | Dependencies -> "dependencies")
   | Call_edges (path, package) ->
       Printf.sprintf "call edges %s %s" (Path.show_package package) (Path.show path)
@@ -277,7 +278,7 @@ let find_name_definition = function
 
 let find_stored_definition : type a. a stored -> Path.t option = function
   | Parsed _ | Namespace _ | Grant _ | Import_check _
-  | Package_check (_, (Instantiations | Tests | Dependencies)) ->
+  | Package_check (_, (Instantiations | Tests | Internals | Dependencies)) ->
       None
   | Resolved (key, _)
   | Trait_header key

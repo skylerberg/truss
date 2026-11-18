@@ -185,10 +185,6 @@ internal fn List[Element].from_storage(storage: own intrinsic::Storage[Element])
   List(storage: own storage)
 }
 
-internal fn List[Element].elements(self) -> intrinsic::View[Element] {
-  intrinsic::storage_view(self.storage)
-}
-
 public fn List[Element].length(self) -> UInt64
   ensures result == self.model().length()
   cost time O(1)

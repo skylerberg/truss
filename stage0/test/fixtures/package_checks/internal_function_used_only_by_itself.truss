@@ -1,0 +1,5 @@
+internal fn count_down(steps: UInt64) -> UInt64
+  decreases steps
+{
+  if steps == 0 { 0 } else { count_down(steps - 1) }
+}
