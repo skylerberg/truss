@@ -103,38 +103,10 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
             (State.make_error_type state
                (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
                (State.read_span state value.id) "`identical` takes two values of one type."))
-  | Specification_function function_ -> (
-      let bound_method =
-        match (function_, arguments) with
-        | Time, [ { value = { kind = Member (base, member); _ }; _ } ] ->
-            Option.map
-              (fun type_ -> (type_, member))
-              (Interface.Elaborator.find_bounded_type state.context base)
-        | _ -> None
-      in
-      match bound_method with
-      | Some (type_, member) -> check_method_time state value type_ member
-      | None ->
-          State.register_expression state value (fun () ->
-              Specification_function
-                {
-                  function_ =
-                    (match function_ with
-                    | Log -> Log
-                    | Power -> Power
-                    | Time -> Time
-                    | Calls -> Calls);
-                  arguments =
-                    List.map
-                      (fun (argument : Syntax.argument) ->
-                        State.build_expression state argument.value)
-                      arguments;
-                });
-          List.iter
-            (fun (argument : Syntax.argument) ->
-              ignore (Hooks.check_expression state env argument.value))
-            arguments;
-          Types.Integer)
+  | Specification_function (Call_cost metric) -> check_callee_cost state env value metric arguments
+  | Specification_function Log -> check_specification_function state env value Log arguments
+  | Specification_function Power -> check_specification_function state env value Power arguments
+  | Specification_function Calls -> check_specification_function state env value Calls arguments
   | Definition (Type, path) -> (
       match Instantiation.check_named_type state callee path type_arguments with
       | Types.Named { arguments = type_arguments; _ } ->
@@ -161,21 +133,68 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
       Calls.check_function_value_call state env value callee arguments
   | Binding | Module _ -> State.raise_bug "the name `%s` is not resolved" name.text
 
-and check_method_time state (value : Syntax.expression) (type_ : Types.ty) (member : Syntax.name) =
+and check_specification_function state env (value : Syntax.expression)
+    (function_ : Core.specification_function) (arguments : Syntax.argument list) =
+  State.register_expression state value (fun () ->
+      Specification_function
+        {
+          function_;
+          arguments =
+            List.map
+              (fun (argument : Syntax.argument) -> State.build_expression state argument.value)
+              arguments;
+        });
+  List.iter
+    (fun (argument : Syntax.argument) -> ignore (Hooks.check_expression state env argument.value))
+    arguments;
+  Types.Integer
+
+and check_callee_cost state env (value : Syntax.expression) (metric : Metric.t)
+    (arguments : Syntax.argument list) =
+  let report_not_a_callee operand_description =
+    let cost_function = Metric.show metric in
+    State.make_error_type state Not_callable (State.read_span state value.id)
+      (Printf.sprintf
+         "`%s` takes a function parameter, as in `%s(visit)`, or a method of a bound, as in \
+          `%s(Element.equal)`, and %s."
+         cost_function cost_function cost_function operand_description)
+  in
+  match arguments with
+  | [ { value = { kind = Member (base, member); _ }; _ } ] -> (
+      match Interface.Elaborator.find_bounded_type state.context base with
+      | Some type_ -> check_method_cost state value metric type_ member
+      | None -> report_not_a_callee "its operand is neither")
+  | [ { value = { kind = Name { modules = []; last }; _ }; _ } ] -> (
+      match (State.find_target state last, State.find_local_type state last) with
+      | ( Some (Local _),
+          (Some (Types.Function _ | Types.Variable _ | Types.Hole | Types.Error _) | None) )
+      | Some (Unknown _), _ ->
+          check_specification_function state env value (Callback_cost metric) arguments
+      | Some (Local _), Some other ->
+          report_not_a_callee (Printf.sprintf "`%s` is a `%s`" last.text (State.show state other))
+      | _ -> report_not_a_callee (Printf.sprintf "`%s` is neither" last.text))
+  | _ -> report_not_a_callee "its operand is neither"
+
+and check_method_cost state (value : Syntax.expression) (metric : Metric.t) (type_ : Types.ty)
+    (member : Syntax.name) =
   let overloads = Interface.Elaborator.list_bound_methods state.context type_ member.text in
-  match (Interface.Elaborator.find_timed_method overloads, overloads) with
+  match (Interface.Elaborator.find_operand_method overloads, overloads) with
   | Some { self_type; trait; name; receiver }, _ ->
       State.register_expression state value (fun () ->
-          Method_time
-            (Trait_method
-               {
-                 trait;
-                 name;
-                 receiver;
-                 self_type;
-                 instantiation = Types.no_instantiation;
-                 evidence = Bound;
-               }));
+          Method_cost
+            {
+              metric;
+              method_ =
+                Trait_method
+                  {
+                    trait;
+                    name;
+                    receiver;
+                    self_type;
+                    instantiation = Types.no_instantiation;
+                    evidence = Bound;
+                  };
+            });
       Types.Integer
   | None, [] ->
       State.make_error_type state Unknown_member (State.read_span state member.id)
@@ -185,8 +204,8 @@ and check_method_time state (value : Syntax.expression) (type_ : Types.ty) (memb
       State.make_error_type state Ambiguous_method (State.read_span state member.id)
         (Printf.sprintf
            "`%s` has more than one method `%s`, and none of them is the only one that takes `self` \
-            read-only, so `time` cannot tell which one is meant."
-           (State.show state type_) member.text)
+            read-only, so `%s` cannot tell which one is meant."
+           (State.show state type_) member.text (Metric.show metric))
 
 and report_unknown_static_method state ?expected (value : Syntax.expression) type_
     (member : Syntax.name) (arguments : Syntax.argument list) =

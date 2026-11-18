@@ -120,7 +120,7 @@ log power result old by bit_vector generic
 | Words | Meaning |
 |---|---|
 | `amortized`, `time`, `allocations`, `allocated_bytes`, `calls`, `O`, `finite`, `potential` | The fixed words of a `cost` clause |
-| `time(...)`, `calls(...)` | The cost functions, inside a `cost` bound |
+| `time(...)`, `allocations(...)`, `allocated_bytes(...)`, `calls(...)` | The cost functions, inside a `cost` bound |
 | `log(...)`, `power(...)` | Functions on exact integers, inside a specification |
 | `result` | The return value, inside `ensures` and `cost` |
 | `old(e)` | The value of `e` when the function was called, inside a specification |
@@ -898,22 +898,66 @@ and `/` and `-` where the result stays at or above zero, and:
 |---|---|
 | `log(n)` | The smallest integer at least log₂(n + 1) |
 | `power(base, exponent)` | `base` to the `exponent` |
-| `time(visit)` | A bound on any one call of the function parameter `visit` |
-| `time(Element.equal)` | A bound on any one call of a method of a trait that bounds a type parameter, `Self` in a trait, or an associated type of either, as in `time(Source.Element.equal)` |
+| `time(visit)`, `allocations(visit)`, `allocated_bytes(visit)` | A bound on that resource of any one call of the function parameter `visit` |
+| `time(Element.equal)`, `allocations(Element.equal)`, `allocated_bytes(Element.equal)` | A bound on that resource of any one call of a method of a trait that bounds a type parameter, `Self` in a trait, or an associated type of either, as in `time(Source.Element.equal)` |
 
-- `time(visit)` cannot depend on `visit`'s arguments. It is a constant for a
-  parameter of type `(fn(Item) cost time O(1))`, and a fixed bound that is
-  not known for any other function that terminates. It has no value for a
-  function that may not terminate, and a bound that names it is then
-  unbounded. So a bound names `time(visit)` only where the type of `visit`
-  has a `time` clause, or a capability parameter in its `uses`.
+The terms of the last two rows are the costs of a callee. A cost of a callee
+is one number for the function: it cannot depend on the arguments of a call.
+
+| A cost of a callee is written | Rule |
+|---|---|
+| In an `O(...)` or a `<=` bound of a clause on its own resource | Allowed |
+| In an `==` bound | Rejected. The term is an upper bound and a call may spend less, so an exact amount that names it would be false for that call. |
+| In a clause on another resource | Rejected. `time(visit)` bounds only `time`, `allocations(visit)` only `allocations`, and `allocated_bytes(visit)` only `allocated_bytes`. |
+| With an operand that is neither a function parameter nor a method of a bound | Rejected |
+
+- `time(visit)` is a constant for a parameter of type
+  `(fn(Item) cost time O(1))`, and a fixed bound that is not known for any
+  other function that terminates. It has no value for a function that may
+  not terminate, and a bound that names it is then unbounded. So a bound
+  names `time(visit)` only where the type of `visit` has a `time` clause, or
+  a capability parameter in its `uses`.
+- `allocations(visit)` is `n` for a parameter whose type states
+  `cost allocations <= n` or `== n`, and a fixed bound that is not known for
+  any other function whose allocations are bounded. It has no value for a
+  function whose allocations have no bound, and a bound that names it is
+  then unbounded. `allocated_bytes(visit)` is the same for
+  `cost allocated_bytes`. A bound names either term for any function
+  parameter.
+- **Only `time(...)` follows a callee** (see [Termination](#termination)). A
+  bound that names `allocations(visit)` or `allocated_bytes(visit)` does not
+  make its function terminate, and does not let a function with a `time`
+  clause call a `visit` that may not terminate.
 - An operator counts as the method it calls: `==` spends
-  `time(Element.equal)`, and `<` spends `time(Element.compare)`. If a name has
-  several overloads, the term means the read-only one.
-- At a call, the term has the value the type argument gives it: a constant
-  for `Int64`, whose `impl Equal` promises `cost time O(1)`. It has no value
-  for a type argument whose `impl` of the method may not terminate, and a
-  bound that names it is then unbounded (see [Termination](#termination)).
+  `time(Element.equal)` and `allocations(Element.equal)`, and `<` spends
+  `time(Element.compare)`. If a name has several overloads, the term means
+  the read-only one.
+- At a call, the cost of a callback has the value that the function passed
+  gives it:
+
+  | The function passed | The value of the term |
+  |---|---|
+  | A lambda | A bound on its body for every argument |
+  | A named function | For `time`, a constant where its clause is `O(n)` for a literal `n`. For `allocations` and `allocated_bytes`, `n` where its clause is `<= n` or `== n` for a literal `n`. |
+  | A parameter of the caller | The caller's own term for that parameter |
+
+  A function that states no bound on the resource has no value for the
+  term, and neither has one whose bound is `amortized`, which bounds a call
+  together with the potential it changes. A bound that names the term is
+  then unbounded, so the caller proves no bound on that resource through the
+  call.
+- At a call, the cost of a bound's method has the value the type argument
+  gives it: `time(Element.equal)` is a constant for `Int64`, whose
+  `impl Equal` promises `cost time O(1)`, and `allocations(Element.equal)`
+  is 0, since that `impl` promises `cost allocations == 0`. `time(...)` has
+  no value for a type argument whose `impl` of the method may not terminate
+  (see [Termination](#termination)), and `allocations(...)` and
+  `allocated_bytes(...)` have none where the `impl` states no bound on that
+  resource. A bound that names the term is then unbounded.
+- A function with an `==` bound on a resource calls a callback only where
+  the cost of the call is exact: the callback's type states an `==` bound on
+  that resource, or the callback's bound is zero. The cost of any other call
+  is only bounded above.
 - An `impl` that overrides a provided method keeps the provided method's
   bound.
 - `log` and `power` have the same meaning in every specification. The prover
@@ -925,6 +969,21 @@ and `/` and `-` where the result stays at or above zero, and:
 ```truss
 fn Slice[Element: Equal].contains(self, item: Element) -> Bool
   cost time O(self.length() * time(Element.equal))
+  cost allocations <= self.length() * allocations(Element.equal)
+
+fn Option[Value].map[Output](
+  own self,
+  transform: (fn(own Value) -> Output uses generic Granted),
+) -> Option[Output]
+  uses generic Granted
+  cost time O(time(transform))
+  cost allocations <= allocations(transform)
+
+fn halved(value: Option[Int64]) -> Option[Int64]
+  cost allocations <= 0
+{
+  value.map(fn(inner) { inner / 2 })
+}
 ```
 
 #### Amortized costs

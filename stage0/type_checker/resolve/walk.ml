@@ -1,6 +1,6 @@
 module String_map = Map.Make (String)
 
-type specification_function = Log | Power | Time | Calls
+type specification_function = Log | Power | Call_cost of Metric.t | Calls
 
 type target =
   | Binding
@@ -355,7 +355,7 @@ and resolve_clause state scope (clause : Syntax.clause) =
       | Calls (Call_parameter name) -> resolve_local_value state scope name
       | Calls (Call_capability path) -> resolve_path_type state scope path
       | Calls (Call_method (path, _)) -> resolve_path_type state scope path
-      | Time | Allocations | Allocated_bytes -> ());
+      | Metric _ -> ());
       let bound =
         {
           scope with
@@ -440,6 +440,26 @@ and find_name_target state (value : Syntax.expression) =
   | Parenthesized inner -> find_name_target state inner
   | _ -> None
 
+and find_specification_function state scope name =
+  let is_free_name () =
+    (not (String_map.mem name scope.values))
+    &&
+    match find_module_item state name with
+    | Some item -> not (Names.is_value_kind item.kind)
+    | None -> true
+  in
+  let specification_function =
+    match name with
+    | "log" -> Some Log
+    | "power" -> Some Power
+    | "calls" -> Some Calls
+    | _ -> Option.map (fun metric -> Call_cost metric) (Metric.find name)
+  in
+  match specification_function with
+  | Some _ when scope.specification.cost_bound -> specification_function
+  | Some (Log | Power) when scope.specification.active && is_free_name () -> specification_function
+  | Some (Log | Power | Call_cost _ | Calls) | None -> None
+
 and resolve_bracket state scope (value : Syntax.expression) base items =
   resolve_expression state scope base;
   let decision =
@@ -523,23 +543,13 @@ and resolve_expression state scope (value : Syntax.expression) =
   | Name path -> resolve_name_expression state scope path
   | Member (base, _) -> resolve_expression state scope base
   | Bracket (base, items) -> resolve_bracket state scope value base items
-  | Call ({ kind = Name { modules = []; last }; _ }, arguments)
-    when (scope.specification.cost_bound && List.mem last.text [ "log"; "power"; "time"; "calls" ])
-         || scope.specification.active
-            && List.mem last.text [ "log"; "power" ]
-            && (not (String_map.mem last.text scope.values))
-            &&
-            match find_module_item state last.text with
-            | Some item -> not (Names.is_value_kind item.kind)
-            | None -> true ->
-      set_target state last
-        (Specification_function
-           (match last.text with "log" -> Log | "power" -> Power | "time" -> Time | _ -> Calls));
-      List.iter
-        (fun (argument : Syntax.argument) -> resolve_expression state scope argument.value)
-        arguments
   | Call (callee, arguments) ->
-      resolve_expression state scope callee;
+      (match callee.kind with
+      | Name { modules = []; last } -> (
+          match find_specification_function state scope last.text with
+          | Some function_ -> set_target state last (Specification_function function_)
+          | None -> resolve_expression state scope callee)
+      | _ -> resolve_expression state scope callee);
       List.iter
         (fun (argument : Syntax.argument) -> resolve_expression state scope argument.value)
         arguments

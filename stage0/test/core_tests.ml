@@ -322,7 +322,7 @@ let () =
               (match function_ with
               | Log -> "log"
               | Power -> "power"
-              | Time -> "time"
+              | Callback_cost metric -> Metric.show metric
               | Calls -> "calls")
         | Call call -> Some ("call " ^ Core_lint.show_callee call.callee)
         | _ -> None)
@@ -334,9 +334,7 @@ let () =
         (fun (cost : Core.cost) ->
           let resource =
             match cost.resource with
-            | Time -> "time"
-            | Allocations -> "allocations"
-            | Allocated_bytes -> "allocated bytes"
+            | Metric metric -> Metric.show metric
             | Calls (Function_parameter local) -> "calls through " ^ name local
             | Calls (Capability path) -> "calls of " ^ Path.show path
             | Calls (Capability_method (path, method_)) ->
@@ -359,24 +357,32 @@ let () =
     Fixtures.Core.ensures_with_log_and_power list_applied [ "log"; "power" ];
   expect "a function of the file named `power` is called in a specification"
     Fixtures.Core.function_named_power list_applied [ "call app::main::power" ];
+  let list_method_costs form =
+    List.filter_map
+      (fun (node : Core.expression) ->
+        match node.kind with
+        | Method_cost { metric; method_ = Trait_method { self_type; evidence; _ } as method_ } ->
+            Some
+              (Printf.sprintf "%s(%s) for %s by %s" (Metric.show metric)
+                 (Core_lint.show_callee method_) (Types.show self_type)
+                 (match evidence with Bound -> "a bound" | Impl _ -> "an impl" | Dynamic -> "any"))
+        | Method_cost { metric; method_ } ->
+            Some (Printf.sprintf "%s(%s)" (Metric.show metric) (Core_lint.show_callee method_))
+        | _ -> None)
+      (list_expressions form)
+  in
   expect "the time of a method of a type parameter's bound names the trait method"
-    Fixtures.Core.cost_naming_time_of_a_bounds_method
-    (fun form ->
-      List.filter_map
-        (fun (node : Core.expression) ->
-          match node.kind with
-          | Method_time (Trait_method { self_type; evidence; _ } as callee) ->
-              Some
-                (Printf.sprintf "time(%s) for %s by %s" (Core_lint.show_callee callee)
-                   (Types.show self_type)
-                   (match evidence with
-                   | Bound -> "a bound"
-                   | Impl _ -> "an impl"
-                   | Dynamic -> "any"))
-          | Method_time callee -> Some ("time(" ^ Core_lint.show_callee callee ^ ")")
-          | _ -> None)
-        (list_expressions form))
+    Fixtures.Core.cost_naming_time_of_a_bounds_method list_method_costs
     [ "time(standard::core::Equal.equal) for Element by a bound" ];
+  expect "the allocations of a method of a bound name the trait method and the resource"
+    Fixtures.Core.cost_naming_allocations_of_a_callback_and_a_bounds_method list_method_costs
+    [
+      "allocations(standard::core::Equal.equal) for Element by a bound";
+      "allocated_bytes(standard::core::Equal.equal) for Element by a bound";
+    ];
+  expect "the allocations of a callback are a specification function of the resource"
+    Fixtures.Core.cost_naming_allocations_of_a_callback_and_a_bounds_method list_applied
+    [ "call standard::list::List.length"; "allocations"; "allocated_bytes" ];
   Harness.test "in a trait, `time(Self.method)` names the trait's own method" (fun () ->
       Support.expect_no_diagnostics
         ~check:(fun packages module_ ->

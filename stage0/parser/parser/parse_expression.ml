@@ -377,11 +377,12 @@ and parse_cost cursor =
   let resource =
     match
       Contextual_keyword.expect cursor ~accepted:Contextual_keyword.resources ~category:"a resource"
-        ~expected:"a resource: `time`, `allocations`, `allocated_bytes`, or `calls(...)`"
+        ~expected:
+          (Printf.sprintf "a resource: %s, or `calls(...)`"
+             (String.concat ", "
+                (List.map (fun metric -> "`" ^ Metric.show metric ^ "`") Metric.all)))
     with
-    | Time -> Syntax.Time
-    | Allocations -> Allocations
-    | Allocated_bytes -> Allocated_bytes
+    | Metric metric -> Syntax.Metric metric
     | _ -> Calls (parse_call_target cursor)
   in
   let bound_token = Cursor.peek cursor in
@@ -394,14 +395,16 @@ and parse_cost cursor =
         Cursor.advance cursor;
         Exactly (parse_expression cursor)
     | _ -> (
-        let suggested = if resource = Time then [ Contextual_keyword.O; Finite ] else [ O ] in
+        let suggested =
+          if resource = Metric Time then [ Contextual_keyword.O; Finite ] else [ O ]
+        in
         match
           Contextual_keyword.expect cursor ~accepted:[ O; Finite ] ~suggested ~category:"a bound"
             ~expected:"a bound: `O(...)`, `finite`, `<=`, or `==`"
         with
         | O -> Big_o (parse_parenthesized_expression cursor)
         | _ ->
-            if resource <> Time then
+            if resource <> Metric Time then
               Cursor.report cursor Finite_not_time bound_token.span
                 "`finite` is a bound only for `time`; a countable resource takes `O(...)`, `<=`, \
                  or `==`.";

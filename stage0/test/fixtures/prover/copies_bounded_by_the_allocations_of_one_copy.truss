@@ -1,0 +1,6 @@
+fn f[Element: Copyable](item: Element) -> Element
+  cost allocations <= allocations(Element.copy)
+{
+  let _ = item.copy()
+  item.copy()
+}

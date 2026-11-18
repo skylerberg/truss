@@ -463,7 +463,7 @@ and elaborate_function_type context (written : Syntax.function_type) :
 and states_time (clauses : Syntax.clause list) =
   List.exists
     (fun (clause : Syntax.clause) ->
-      match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
+      match clause.kind with Cost { resource = Metric Time; _ } -> true | _ -> false)
     clauses
 
 and elaborate_uses context clauses =
@@ -504,9 +504,7 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
         | Cost cost ->
             let resource : (Types.resource, Diagnostic.reported) Stdlib.result =
               match cost.resource with
-              | Time -> Ok Time
-              | Allocations -> Ok Allocations
-              | Allocated_bytes -> Ok Allocated_bytes
+              | Metric metric -> Ok (Metric metric)
               | Calls (Call_capability path) -> elaborate_counted path None
               | Calls (Call_method (path, method_)) -> elaborate_counted path (Some method_)
               | Calls (Call_parameter name) ->
@@ -572,11 +570,7 @@ let list_constant_costs (clauses : Syntax.clause list) : Types.cost list =
       match clause.kind with
       | Cost { amortized; resource; bound } -> (
           let resource : Types.resource option =
-            match resource with
-            | Time -> Some Time
-            | Allocations -> Some Allocations
-            | Allocated_bytes -> Some Allocated_bytes
-            | Calls _ -> None
+            match resource with Metric metric -> Some (Metric metric) | Calls _ -> None
           in
           let bound : Types.cost_bound option =
             match bound with
@@ -591,27 +585,40 @@ let list_constant_costs (clauses : Syntax.clause list) : Types.cost list =
       | _ -> None)
     clauses
 
-type timed_operand =
-  | Timed_parameter of string
-  | Timed_bound_method of { type_ : Syntax.expression; method_ : Syntax.name }
+type operand_callee =
+  | Function_parameter of Syntax.name
+  | Bound_method of { type_ : Syntax.expression; method_ : Syntax.name }
+  | Not_a_callee
 
-let list_timed_operands (bound : Syntax.expression) =
-  let timed = ref [] in
+type cost_operand = {
+  written : Syntax.expression;
+  cost_function : Syntax.name;
+  metric : Metric.t;
+  callee : operand_callee;
+}
+
+let list_cost_operands context (bound : Syntax.expression) =
+  let operands = ref [] in
   let rec visit (value : Syntax.expression) =
     (match value.kind with
-    | Call
-        ( { kind = Name { modules = []; last = { text = "time"; _ } }; _ },
-          [ { value = operand; _ } ] ) -> (
-        match operand.kind with
-        | Name { modules = []; last } -> timed := (value.id, Timed_parameter last.text) :: !timed
-        | Member (type_, method_) ->
-            timed := (value.id, Timed_bound_method { type_; method_ }) :: !timed
+    | Call ({ kind = Name { modules = []; last = cost_function }; _ }, arguments) -> (
+        match find_target context cost_function with
+        | Some (Specification_function (Call_cost metric)) ->
+            let callee =
+              match arguments with
+              | [ { value = { kind = Name { modules = []; last }; _ }; _ } ] ->
+                  Function_parameter last
+              | [ { value = { kind = Member (type_, method_); _ }; _ } ] ->
+                  Bound_method { type_; method_ }
+              | _ -> Not_a_callee
+            in
+            operands := { written = value; cost_function; metric; callee } :: !operands
         | _ -> ())
     | _ -> ());
     Syntax_walk.visit_children visit value
   in
   visit bound;
-  List.rev !timed
+  List.rev !operands
 
 let find_trait_parts context trait =
   match Option.bind (context.lookups.names.find_key trait) context.lookups.find_header with
@@ -710,7 +717,7 @@ let list_bound_methods context (self_type : Types.ty) name =
        (list_bound_closure context ~self:self_type)
        (list_direct_bounds context self_type))
 
-let find_timed_method (overloads : bound_method list) =
+let find_operand_method (overloads : bound_method list) =
   match overloads with
   | [ only ] -> Some only
   | several -> (
@@ -733,7 +740,7 @@ let elaborate_divergence context ~(parameters : Types.parameter_info list)
   let time_bounds =
     List.filter_map
       (fun (clause : Syntax.clause) ->
-        match clause.kind with Cost { resource = Time; bound; _ } -> Some bound | _ -> None)
+        match clause.kind with Cost { resource = Metric Time; bound; _ } -> Some bound | _ -> None)
       clauses
   in
   let read_parameter_divergence id name =
@@ -755,7 +762,7 @@ let elaborate_divergence context ~(parameters : Types.parameter_info list)
   let read_bound_method_divergence type_ (method_ : Syntax.name) =
     match
       Option.bind (find_bounded_type context type_) (fun self_type ->
-          find_timed_method (list_bound_methods context self_type method_.text))
+          find_operand_method (list_bound_methods context self_type method_.text))
     with
     | Some ({ self_type; trait; name; receiver } as followed)
       when not (states_time_clause context followed) ->
@@ -763,10 +770,11 @@ let elaborate_divergence context ~(parameters : Types.parameter_info list)
           [ Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ]
     | Some _ | None -> Types.no_capabilities
   in
-  let read_divergence (id, operand) =
-    match operand with
-    | Timed_parameter name -> read_parameter_divergence id name
-    | Timed_bound_method { type_; method_ } -> read_bound_method_divergence type_ method_
+  let read_divergence (operand : cost_operand) =
+    match (operand.metric, operand.callee) with
+    | Time, Function_parameter name -> read_parameter_divergence operand.written.id name.text
+    | Time, Bound_method { type_; method_ } -> read_bound_method_divergence type_ method_
+    | Time, Not_a_callee | (Allocations | Allocated_bytes), _ -> Types.no_capabilities
   in
   match time_bounds with
   | [] -> Types.make_capability_set [ Types.unconditional_divergence ]
@@ -778,7 +786,7 @@ let elaborate_divergence context ~(parameters : Types.parameter_info list)
              | Finite -> Types.no_capabilities
              | Big_o value | At_most value | Exactly value ->
                  List.fold_left Types.union_capabilities Types.no_capabilities
-                   (List.map read_divergence (list_timed_operands value)))
+                   (List.map read_divergence (list_cost_operands context value)))
            bounds)
 
 let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signature) :

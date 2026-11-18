@@ -749,6 +749,46 @@ let () =
             Harness.fail "`%s` is not found by its path" (Path.show (Well_known.make_path known)))
         Well_known.For_testing.all)
 
+let show_divergence (uses : Types.capability_set) =
+  String.concat "; "
+    (List.map
+       (function
+         | Types.Divergence Always -> "always"
+         | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
+             Printf.sprintf "%s: %s.%s(%s)" (Types.show self_type) (Types.show_trait trait) name
+               (Path.show_receiver receiver)
+         | capability -> Types.show_capability capability)
+       (Types.list_divergence uses :> Types.capability list))
+
+let expect_divergence subject uses expected =
+  if show_divergence uses <> expected then
+    Harness.fail "%s has the divergence [%s], not [%s]" subject (show_divergence uses) expected
+
+let read_declared_uses packages name =
+  match Interface.Definition.find_declared_signature (make_interface packages) (app name) with
+  | Some signature -> signature.uses
+  | None -> failwith (name ^ " has no signature")
+
+let () =
+  let packages =
+    Support.setup [ ("app::main", Fixtures.Interface.allocation_bounds_naming_a_callee) ]
+  in
+  let expect_declared_divergence name expected =
+    expect_divergence name (read_declared_uses packages name) expected
+  in
+  Harness.test "a signature whose bounds name the allocations of a callee has no error" (fun () ->
+      expect_no_diagnostics [ ("app::main", Fixtures.Interface.allocation_bounds_naming_a_callee) ]);
+  Harness.test "a bound that names the allocations of a callee leaves the divergence unchanged"
+    (fun () ->
+      expect_declared_divergence "timed_and_counted" "Inner: Ticker.tick(`mut self`)";
+      expect_declared_divergence "timed_and_visited" "generic Granted";
+      expect_declared_divergence "visited_in_finite_time" "");
+  Harness.test
+    "a function without a time clause may not terminate, whatever its allocation bound names"
+    (fun () ->
+      expect_declared_divergence "counted" "always";
+      expect_declared_divergence "visited" "always")
+
 let () =
   let packages =
     Support.setup [ ("app::main", Fixtures.Interface.tickers_followed_by_time_clauses) ]
@@ -759,26 +799,7 @@ let () =
   let countdown = Types.make_named (app "Countdown") [] in
   let forever = Types.make_named (app "Forever") [] in
   let relay inner = Types.make_named (app "Relay") [ inner ] in
-  let show_divergence (uses : Types.capability_set) =
-    String.concat "; "
-      (List.map
-         (function
-           | Types.Divergence Always -> "always"
-           | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
-               Printf.sprintf "%s: %s.%s(%s)" (Types.show self_type) (Types.show_trait trait) name
-                 (Path.show_receiver receiver)
-           | capability -> Types.show_capability capability)
-         (Types.list_divergence uses :> Types.capability list))
-  in
-  let expect_divergence subject uses expected =
-    if show_divergence uses <> expected then
-      Harness.fail "%s has the divergence [%s], not [%s]" subject (show_divergence uses) expected
-  in
-  let read_declared_uses name =
-    match Interface.Definition.find_declared_signature (make_interface packages) (app name) with
-    | Some signature -> signature.uses
-    | None -> failwith (name ^ " has no signature")
-  in
+  let read_declared_uses = read_declared_uses packages in
   let read_impl_method_uses type_name name =
     match
       Interface.Impls.list_impls_of_trait_for_type (make_interface packages) ~trait:(app "Ticker")

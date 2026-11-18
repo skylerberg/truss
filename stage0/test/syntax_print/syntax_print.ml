@@ -123,9 +123,7 @@ and show_clause (clause : Syntax.clause) =
 and show_cost { amortized; resource; bound } =
   let resource =
     match resource with
-    | Time -> "time"
-    | Allocations -> "allocations"
-    | Allocated_bytes -> "allocated_bytes"
+    | Metric metric -> Metric.show metric
     | Calls (Call_parameter name) -> make_form "calls" [ name.text ]
     | Calls (Call_capability capability) -> make_form "calls" [ show_path_type capability ]
     | Calls (Call_method (capability, name)) ->
