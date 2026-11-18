@@ -69,6 +69,7 @@ type frame = {
   result : Logic.term option;
   condition : Logic.term;
   makes_obligations : bool;
+  is_ghost : bool;
   bound : Logic.symbol list;
   binders : (Logic.symbol * Logic.sort * Logic.term) list;
   substitution : Types.substitution;
@@ -167,7 +168,6 @@ type context = {
   mutable equalities : Logic.term list;
   mutable decisions : (string * string option * Logic.term * Logic.term) list;
   mutable entry : Logic.symbol list;
-  mutable proving : bool;
   inherits_precondition : bool;
   mutable holes : (Resolve.Names.key * location) list;
   mutable unfinished : Logic.term list;

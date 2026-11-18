@@ -42,7 +42,7 @@ let refuse_unshippable snapshot packages lookups main proofs =
       let show_hole_kind = function
         | `Todo -> "`todo`"
         | `Echo -> "`echo`"
-        | `Proof_hole -> "`todo` in a proof"
+        | `Proof_hole -> "`todo` in a proof or a contract"
       in
       if Output.json () then
         Json.print

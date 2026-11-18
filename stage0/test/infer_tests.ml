@@ -1657,3 +1657,7 @@ let () =
       expect_one_diagnostic
         Fixtures.Infer.meters_fed_to_an_impl_bounding_its_item_by_another_trait_argument
         "types.signature_mismatch" ~at:("feed", 2))
+
+let () =
+  Harness.test "unreachable is not part of a formula" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.requires_unreachable "types.not_in_specification")

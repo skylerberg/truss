@@ -1,14 +1,12 @@
-let run_ghost_code (context : State.context) frame (code : Mir.t) =
-  let proving = context.proving and unfinished = context.unfinished in
-  context.proving <- true;
+let run_ghost_code (context : State.context) (frame : State.frame) (code : Mir.t) =
+  let unfinished = context.unfinished in
   context.unfinished <- [];
   Fun.protect
-    ~finally:(fun () ->
-      context.proving <- proving;
-      context.unfinished <- unfinished)
+    ~finally:(fun () -> context.unfinished <- unfinished)
     (fun () ->
       ignore
-        (Lambdas.run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_:Types.unit);
+        (Lambdas.run_lambda_body context { frame with is_ghost = true } ~lambdas:code.lambdas
+           code.body ~type_:Types.unit);
       Logic.disjunction context.unfinished)
 
 let finite_map_path : Path.t = Well_known.make_path Finite_map
