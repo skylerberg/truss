@@ -591,7 +591,9 @@ let make_namespace database note (package_database : package_database) =
        package_database.modules)
 
 let list_file_keys (names : Resolve.Names.lookups) file =
-  List.map Resolve.Names.make_key (names.list_declarations_in file)
+  List.map
+    (fun (declaration : Resolve.Names.declaration) -> declaration.key)
+    (names.list_declarations_in file)
 
 let read_resolution database note section key = read_value database note (Resolved (key, section))
 
@@ -659,11 +661,11 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.a
   let package_database = obtain_owner database package in
   let declarations = names.list_package_declarations package in
   let paths =
-    List.map (fun (declaration : Resolve.Names.declaration) -> declaration.path) declarations
+    List.map (fun (declaration : Resolve.Names.declaration) -> declaration.key.path) declarations
   in
   let unwritten_methods = list_unwritten_methods names package in
   let of_declaration (declaration : Resolve.Names.declaration) : Part.any list =
-    let key = Resolve.Names.make_key declaration in
+    let key = declaration.key in
     List.map (fun section -> Part.Any (Resolved (key, section))) Resolve.sections
     @ [
         Part.Any (Interface key);
@@ -683,9 +685,8 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.a
       | _ -> [])
     @
     match declaration.kind with
-    | (Constant | Member_constant) when declaration.ordinal = 0 ->
-        [ Part.Any (Constant_value key.path) ]
-    | Type when declaration.ordinal = 0 -> [ Part.Any (Type_facts key.path) ]
+    | (Constant | Member_constant) when key.ordinal = 0 -> [ Part.Any (Constant_value key.path) ]
+    | Type when key.ordinal = 0 -> [ Part.Any (Type_facts key.path) ]
     | _ -> []
   in
   List.concat_map of_declaration declarations
@@ -1037,9 +1038,9 @@ let find_entry_point (names : Resolve.Names.lookups) package =
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->
       if
-        Path.is_entry_point declaration.path
-        && declaration.kind = Function && declaration.ordinal = 0
-      then Some declaration.path
+        Path.is_entry_point declaration.key.path
+        && declaration.kind = Function && declaration.key.ordinal = 0
+      then Some declaration.key.path
       else None)
     (names.list_declarations { package; modules = [] })
 
@@ -1050,7 +1051,7 @@ let claim_lowering_roots database (names : Resolve.Names.lookups) package =
          ~tests:
            (List.filter_map
               (fun (declaration : Resolve.Names.declaration) ->
-                match declaration.path with Test _ -> Some declaration.path | _ -> None)
+                match declaration.key.path with Test _ -> Some declaration.key.path | _ -> None)
               (names.list_package_declarations package))
          ~mains:(Option.to_list (find_entry_point names package)))
 
@@ -2130,13 +2131,10 @@ let list_manifest_problems database package =
 
 let find_code_packages database package =
   let read_used (declaration : Resolve.Names.declaration) =
-    match declaration.path with
+    match declaration.key.path with
     | Test _ -> Some []
     | _ -> (
-        match
-          read_part database (note_untracked_read database)
-            (Checked_body (Resolve.Names.make_key declaration))
-        with
+        match read_part database (note_untracked_read database) (Checked_body declaration.key) with
         | Value checked -> Some checked.used_packages
         | Failed _ | Blocked -> None)
   in

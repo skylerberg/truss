@@ -217,7 +217,7 @@ let () =
       in
       match
         Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Obligations { obligations = [ obligation ]; _ } ->
           if not (List.exists applies_limited obligation.query.facts) then
@@ -263,13 +263,13 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
         Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Some Blocked -> ()
       | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
@@ -296,13 +296,13 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
         Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Some Blocked -> ()
       | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
@@ -334,13 +334,13 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
         Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Some (Value (Obligations _)) -> ()
       | Some (Value (Unsupported _ | Not_proven_here)) ->
@@ -364,13 +364,13 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
         Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Some (Value (Obligations _)) -> ()
       | Some (Value (Unsupported _ | Not_proven_here)) ->
@@ -404,13 +404,13 @@ let () =
       let proofs = Support.prove database main in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          match Database.For_testing.find_proof proofs (Resolve.Names.make_key declaration) with
+          match Database.For_testing.find_proof proofs declaration.key with
           | Some (Value (Obligations _)) -> ()
           | Some (Value (Unsupported _ | Not_proven_here)) ->
-              Harness.fail "%s has no obligations" (Path.show declaration.path)
+              Harness.fail "%s has no obligations" (Path.show declaration.key.path)
           | Some (Failed _ | Blocked) ->
-              Harness.fail "the proof of %s is blocked" (Path.show declaration.path)
-          | None -> Harness.fail "%s has no proof" (Path.show declaration.path))
+              Harness.fail "the proof of %s is blocked" (Path.show declaration.key.path)
+          | None -> Harness.fail "%s has no proof" (Path.show declaration.key.path))
         ((Support.make_names packages).list_declarations_in main))
 
 let tree = Fixtures.Prover.tree
@@ -1190,8 +1190,8 @@ let count_holes text =
     Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
   in
   List.fold_left
-    (fun total declaration ->
-      match prove_key (Resolve.Names.make_key declaration) with
+    (fun total (declaration : Resolve.Names.declaration) ->
+      match prove_key declaration.key with
       | Obligations outcome -> total + List.length outcome.holes
       | Unsupported _ | Not_proven_here -> total)
     0
@@ -2099,8 +2099,7 @@ let () =
     let packages = Support.setup [ ("app::main", text) ] in
     let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
     match
-      Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-        (Resolve.Names.make_key key)
+      Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main") key.key
     with
     | Obligations { obligations; _ } ->
         List.find_map
@@ -2221,7 +2220,7 @@ let () =
       let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
       match
         Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-          (Resolve.Names.make_key key)
+          key.key
       with
       | Obligations { obligations = [ obligation ]; _ } ->
           let text = Logic.show_query obligation.query in
@@ -2233,7 +2232,7 @@ let () =
         let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
         match
           Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-            (Resolve.Names.make_key key)
+            key.key
         with
         | Obligations { obligations = [ obligation ]; _ } ->
             Solver.For_testing.hash_query obligation.query
@@ -2281,12 +2280,12 @@ let () =
         let key =
           List.find
             (fun (declaration : Resolve.Names.declaration) ->
-              Path.equal declaration.path (Support.make_top_path "app::main" "f"))
+              Path.equal declaration.key.path (Support.make_top_path "app::main" "f"))
             (Support.list_declarations packages (Support.parse_module "app::main"))
         in
         match
           Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-            (Resolve.Names.make_key key)
+            key.key
         with
         | Obligations { obligations; _ } ->
             List.fold_left

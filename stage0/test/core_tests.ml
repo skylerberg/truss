@@ -86,7 +86,7 @@ let make_definition_form text (path : Path.t) =
   let definition =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.make_key declaration in
+        let key = declaration.key in
         if Path.equal key.path path then
           Option.map (fun core -> (key, core)) (find_core packages key)
         else None)
@@ -260,7 +260,7 @@ let () =
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.make_key declaration in
+          let key = declaration.key in
           match
             ( find_core packages key,
               (Support.make_names packages).read_spans key,
@@ -369,7 +369,7 @@ let () =
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.make_key declaration in
+          let key = declaration.key in
           match
             ( find_core packages key,
               (Support.make_names packages).read_spans key,

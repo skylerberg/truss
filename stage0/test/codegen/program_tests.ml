@@ -676,8 +676,9 @@ let () =
                   List.filter_map
                     (fun (declaration : Resolve.Names.declaration) ->
                       match
-                        ( declaration.path,
-                          Interface.Definition.find_declared_signature interface declaration.path )
+                        ( declaration.key.path,
+                          Interface.Definition.find_declared_signature interface
+                            declaration.key.path )
                       with
                       | ( Top _,
                           Some
@@ -689,7 +690,10 @@ let () =
                             } ) ->
                           Some
                             (Lowered.Item.Code
-                               { path = declaration.path; instantiation = Ground.no_instantiation })
+                               {
+                                 path = declaration.key.path;
+                                 instantiation = Ground.no_instantiation;
+                               })
                       | _ -> None)
                     ((Database.make_name_lookups checked).list_declarations Codegen_support.example)
                 in
