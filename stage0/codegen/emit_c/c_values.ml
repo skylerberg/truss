@@ -4,11 +4,6 @@ let render_local_name local = function
   | Some name -> Printf.sprintf "l%d_%s" local name
   | None -> Printf.sprintf "l%d" local
 
-let is_erased (emission : Emission.t) : Lowered.ty -> bool = function
-  | Value ty -> (C_types.compute_layout emission.types ty).size = 0
-  | Pointer _ | Raw _ | Environment _ | Evidence _ | Capabilities _ | Trace | Lend | Lend_mark ->
-      false
-
 let find_field (fields : Memory_layout.field list) name =
   List.find_opt (fun (field : Memory_layout.field) -> field.name = name) fields
 
@@ -107,7 +102,7 @@ let rec render_place (emission : Emission.t) fc (place : Lowered.place) :
         | None -> None
         | Some next -> walk (render_projection current projection, next) rest)
   in
-  if is_erased emission (snd root) then None else walk root place.projections
+  if Lowered.is_erased emission.types.env (snd root) then None else walk root place.projections
 
 and render_address (emission : Emission.t) fc (place : Lowered.place) ~writable =
   match render_place emission fc place with

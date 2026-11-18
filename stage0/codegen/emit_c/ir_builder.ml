@@ -380,7 +380,7 @@ let render_local_declarations builder (function_ : function_) ~locals ~parameter
     (List.filter_map
        (fun local ->
          let ty = lookup_local_type builder local in
-         if List.mem local parameters || C_values.is_erased emission ty then None
+         if List.mem local parameters || Lowered.is_erased emission.types.env ty then None
          else
            let initializer_ =
              if not (Dynarray.get builder.locals local).is_zeroed then ""
