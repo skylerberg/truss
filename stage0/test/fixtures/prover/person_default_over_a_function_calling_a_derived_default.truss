@@ -1,0 +1,16 @@
+type Key(parts: List[Int64])
+  derives Default
+
+fn make_key() -> Key
+  cost time finite
+{
+  Key.default()
+}
+
+type Person(key: Key)
+
+impl Default for Person {
+  fn default() -> Person {
+    Person(key: make_key())
+  }
+}

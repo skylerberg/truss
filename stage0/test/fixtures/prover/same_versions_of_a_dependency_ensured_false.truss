@@ -1,0 +1,6 @@
+fn check(version: numbers::Version) -> Bool
+  ensures result == false
+  cost time finite
+{
+  numbers::same_versions(version, right: version)
+}

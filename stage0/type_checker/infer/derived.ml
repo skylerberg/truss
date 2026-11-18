@@ -1,6 +1,6 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
 
-let gives (trait : Path.t) name =
+let derives (trait : Path.t) name =
   match (Well_known.of_path trait, name) with
   | Some Equal, "equal"
   | Some Hash, "hash"
@@ -23,7 +23,7 @@ let collapse_spaces text =
 
 let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
   match path with
-  | Method { owner = Derived { type_; trait } as impl; name; receiver = _ } when gives trait name
+  | Method { owner = Derived { type_; trait } as impl; name; receiver = _ } when derives trait name
     -> (
       match
         ( Interface.Definition.find_impl_interface lookups.interface impl,

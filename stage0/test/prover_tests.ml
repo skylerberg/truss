@@ -242,6 +242,46 @@ let () =
       | None -> Harness.fail "the caller has no proof")
 
 let () =
+  Harness.test "a proof blocked by an error in a package its package depends on is not a bug"
+    (fun () ->
+      let packages =
+        Support.setup
+          ~dependencies:[ ("app", "lib") ]
+          [
+            ("lib::numbers", Fixtures.Prover.public_double_with_an_ill_typed_ensures);
+            ("app::main", Fixtures.Prover.caller_of_a_dependency_with_an_ill_typed_ensures);
+          ]
+      in
+      let main = Support.parse_file "app::main" in
+      (match
+         Support.list_codes (Support.list_diagnostics (Support.make_database packages) main)
+       with
+      | [] -> ()
+      | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
+      let caller =
+        List.find
+          (fun (declaration : Resolve.Names.declaration) ->
+            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+          (Support.list_declarations packages (Support.parse_module "app::main"))
+      in
+      match
+        Database.For_testing.find_proof
+          (Support.prove (Support.make_database packages) main)
+          (Resolve.Names.make_key caller)
+      with
+      | Some Blocked -> ()
+      | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
+      | None -> Harness.fail "the caller has no proof");
+  Harness.test "a function that passes a derived impl where a bound needs one is proven" (fun () ->
+      expect_not_proven Fixtures.Prover.same_of_a_derived_version_ensured_false "prover.ensures");
+  Harness.test "a function that converts a value with a derived impl to `any` is proven" (fun () ->
+      expect_not_proven Fixtures.Prover.digest_of_a_derived_version_ensured_eight "prover.ensures");
+  Harness.test
+    "a written default that calls a function that calls a derived default is not recursion"
+    (fun () ->
+      expect_proven Fixtures.Prover.person_default_over_a_function_calling_a_derived_default)
+
+let () =
   Harness.test "a type error in a callee's body blocks no caller's proof" (fun () ->
       let packages =
         Support.setup
@@ -1277,7 +1317,17 @@ let () =
       | actual ->
           Harness.fail "%s"
             (String.concat "; "
-               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)))
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
+  Harness.test
+    "a caller of another package's function that passes a derived impl where a bound needs one is \
+     proven" (fun () ->
+      match
+        Support.list_codes
+          (check_across Fixtures.Prover.public_same_versions_of_a_derived_version
+             Fixtures.Prover.same_versions_of_a_dependency_ensured_false)
+      with
+      | [ "prover.ensures" ] -> ()
+      | codes -> Harness.fail "codes %s" (String.concat ", " codes))
 
 let () =
   Harness.test
