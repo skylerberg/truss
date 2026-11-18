@@ -410,7 +410,7 @@ let check (state : Checking.state) =
         (match signature.name with
         | Member_name (head, _) -> check_method_location state head
         | Plain_name name ->
-            if name.text = "main" && state.key.module_.modules = [] then
+            if Path.is_entry_point state.key.path then
               check_main state resolved signature.clauses elaborated state.spans.(name.id));
         let span =
           match signature.name with
