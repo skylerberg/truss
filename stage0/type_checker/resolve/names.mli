@@ -74,8 +74,12 @@ type lookups = {
   list_law_proofs : Path.package -> law_proof_name -> key list;
 }
 
+val is_restricted_module : from:Path.module_ -> Path.module_ -> bool
+val restricted_module_message : string
+
 type module_lookup =
-  | Found_module of Path.module_ * [ `Import of string | `Package ]
+  | Found_module of Path.module_
+  | Restricted_module
   | Ambiguous_module of Path.module_ * Path.module_
   | No_module of string
 
