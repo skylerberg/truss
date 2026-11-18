@@ -23,7 +23,7 @@ let lookup items wanted =
   let env = Codegen_support.make_shape_env () in
   List.find
     (fun fragment -> Lowered.Item.equal (Emit_c.item fragment) wanted)
-    (List.map (fun item -> Emit_c.make_fragment env (Code (item env))) items)
+    (List.map (fun item -> item env) items)
 
 let list_references program item = Emit_c.references (lookup program item)
 
@@ -101,7 +101,7 @@ let () =
       let references =
         Emit_c.references
           (let env = Codegen_support.make_shape_env ~extra:Codegen_support.drop_shapes () in
-           Emit_c.make_fragment env (Code (dropping_item env)))
+           dropping_item env)
       in
       Codegen_support.expect_string ~expected:"drop Text"
         (String.concat " " (List.map Lowered.Item.to_string references)));

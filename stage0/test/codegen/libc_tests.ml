@@ -118,7 +118,7 @@ let () =
            ~destination:(Some (Lowered.make_local_place length))
            ~site:{ definition = Codegen_support.definition "entry"; offset = 0 });
       Emit_c.Builder.finish builder (Return (Some (Copy (Lowered.make_local_place length))));
-      let built =
+      let fragment =
         Emit_c.Builder.build builder
           {
             parameters = [];
@@ -126,7 +126,7 @@ let () =
             returns = true;
           }
       in
-      let c = Emit_c.For_testing.render_c (Emit_c.make_fragment env (Code built)) in
+      let c = Emit_c.For_testing.render_c fragment in
       if not (String.includes ~affix:"t_runtime_panic(" c) then
         Codegen_support.fail "the call does not stop the program:\n%s" c;
       if String.includes ~affix:"proc_pidpath(" c then

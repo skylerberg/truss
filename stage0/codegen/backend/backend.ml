@@ -25,28 +25,26 @@ let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
 
 let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
   let env = Lower.env context in
-  let emit compiled = Compiled (Emit_c.make_fragment env compiled) in
   let drop_and_copy = Lower.drop_and_copy context in
-  let emit_code code = emit (Code code) in
   match item with
-  | Code { path; instantiation } -> emit_code (Lower.lower_source_code context ~path ~instantiation)
-  | Generated generated -> emit_code (Lower.lower_generated context generated)
-  | Table table -> emit (Table (Lower.lower_table context table))
+  | Code { path; instantiation } -> Compiled (Lower.lower_source_code context ~path ~instantiation)
+  | Generated generated -> Compiled (Lower.lower_generated context generated)
+  | Table table -> Compiled (Emit_c.make_fragment env (Table (Lower.lower_table context table)))
   | Constant path -> (
       match Lower.lower_constant context path with
       | Folded data -> Folded (data, Emit_c.make_fragment env (Data data))
       | Run ty -> Evaluate (path, ty))
-  | Drop ty -> emit_code (Drop_and_copy.drop drop_and_copy ty)
-  | Copy ty -> emit_code (Drop_and_copy.copy drop_and_copy ty)
-  | Any_drop ty -> emit_code (Drop_and_copy.build_any_drop drop_and_copy ty)
-  | Any_copy ty -> emit_code (Drop_and_copy.build_any_copy drop_and_copy ty)
-  | Debug ty -> emit_code (Debug_output.build_debug env ty)
-  | Encode ty -> emit_code (Encoding.encode env ty)
-  | Evaluator path -> emit_code (Lower.lower_evaluator context path)
+  | Drop ty -> Compiled (Drop_and_copy.drop drop_and_copy ty)
+  | Copy ty -> Compiled (Drop_and_copy.copy drop_and_copy ty)
+  | Any_drop ty -> Compiled (Drop_and_copy.build_any_drop drop_and_copy ty)
+  | Any_copy ty -> Compiled (Drop_and_copy.build_any_copy drop_and_copy ty)
+  | Debug ty -> Compiled (Debug_output.build_debug env ty)
+  | Encode ty -> Compiled (Encoding.encode env ty)
+  | Evaluator path -> Compiled (Lower.lower_evaluator context path)
   | Template_check { from_template; literals; clauses } ->
-      emit_code (Lower.lower_template_check context ~from_template ~literals ~clauses)
+      Compiled (Lower.lower_template_check context ~from_template ~literals ~clauses)
   | Call_evaluation { function_; arguments } ->
-      emit_code (Lower.lower_call_evaluation context ~function_ ~arguments)
+      Compiled (Lower.lower_call_evaluation context ~function_ ~arguments)
 
 let lower (settings : Lookups.settings) (lookups : Lookups.t) item =
   let env =
@@ -455,9 +453,7 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
 let build_supplied_tests backend ~time_limit_ms supplied ~output =
   capture_failure backend @@ fun () ->
   let supplied_env = make_env backend in
-  let fragments =
-    List.map (fun build -> Emit_c.make_fragment supplied_env (Code (build supplied_env))) supplied
-  in
+  let fragments = List.map (fun build -> build supplied_env) supplied in
   build_test_program backend ~supplied:fragments ~time_limit_ms
     ~roots:(List.map Emit_c.item fragments) ~output
 

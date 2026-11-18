@@ -11,33 +11,12 @@ let site_struct = C_runtime.site_struct
 let version = 28
 
 type failure = C_runtime.failure = Echo | Todo
+type fragment = Fragment.t
 
-type kind =
-  | Functions of { nested : int; weight : int }
-  | Static_data
-  | Table_entries of Path.t option
-
-type fragment = {
-  item : Lowered.Item.t;
-  kind : kind;
-  functions : (string * string) list;
-  definition : string;
-  types : C_types.key list;
-  environments : (C_types.key * C_types.defined) list;
-  prototypes : (string * string) list;
-  statics : string list;
-  sites : Lowered.site list;
-  helpers : string list;
-  references : Lowered.Item.t list;
-  calls : (Path.t * int) list;
-  called : Lowered.Item.t list;
-  failures : (failure * Lowered.site) list;
-}
-
-let item fragment = fragment.item
-let references fragment = fragment.references
-let called fragment = fragment.called
-let failures fragment = fragment.failures
+let item (fragment : fragment) = fragment.item
+let references (fragment : fragment) = fragment.references
+let called (fragment : fragment) = fragment.called
+let failures (fragment : fragment) = fragment.failures
 
 module Item_table = Hashtbl.Make (Lowered.Item)
 
@@ -47,7 +26,7 @@ let walk ~lookup ~follows_only_called_entries roots =
   List.iter (fun root -> Queue.add (root, []) queue) roots;
   let reachable = ref [] in
   let tables = Path_table.create 16 and called_slots = Path_table.create 16 in
-  let enqueue_entry table (slot, chain) =
+  let enqueue_entry (table : fragment) (slot, chain) =
     match List.nth_opt table.references slot with
     | Some entry -> Queue.add (entry, chain) queue
     | None ->
@@ -60,7 +39,7 @@ let walk ~lookup ~follows_only_called_entries roots =
       Item_table.replace visited item ();
       match lookup item with
       | None -> ()
-      | Some fragment -> (
+      | Some (fragment : fragment) -> (
           let chain = item :: chain in
           reachable := (fragment, List.rev chain) :: !reachable;
           let enqueue_references () =
@@ -94,37 +73,12 @@ let list_linked ~lookup roots =
 let trace_reachable ~lookup roots = walk ~lookup ~follows_only_called_entries:true roots
 let small = 24
 
-let is_small fragment =
+let is_small (fragment : fragment) =
   match fragment.kind with
   | Functions { nested; weight } -> nested = 0 && weight <= small
   | Static_data | Table_entries _ -> false
 
-let is_identifier_start character =
-  character = '_' || (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z')
-
-let is_identifier_part character =
-  is_identifier_start character || (character >= '0' && character <= '9')
-
-let iter_identifiers text ~on_identifier ~on_other =
-  let length = String.length text in
-  let rec scan position =
-    if position < length then
-      if is_identifier_start text.[position] then begin
-        let stop = ref position in
-        while !stop < length && is_identifier_part text.[!stop] do
-          incr stop
-        done;
-        on_identifier (String.sub text position (!stop - position));
-        scan !stop
-      end
-      else begin
-        on_other text.[position];
-        scan (position + 1)
-      end
-  in
-  scan 0
-
-let render_fragment fragment =
+let render_fragment (fragment : fragment) =
   let names = Hashtbl.create 64 in
   let number prefix list =
     List.iteri
@@ -162,7 +116,7 @@ let render_fragment fragment =
       @ List.map snd fragment.prototypes @ fragment.statics @ fragment.helpers)
   in
   let buffer = Buffer.create (String.length whole) in
-  iter_identifiers whole
+  Fragment.iter_identifiers whole
     ~on_identifier:(fun identifier -> Buffer.add_string buffer (rename identifier))
     ~on_other:(Buffer.add_char buffer);
   Buffer.contents buffer
@@ -171,78 +125,23 @@ module Builder = Builder
 
 let make_symbol = Mangling.make_symbol
 
-let render_bytes_definition (text, name) =
-  let bytes =
-    List.init (String.length text) (fun index -> string_of_int (Char.code text.[index]))
-  in
-  Printf.sprintf "static const uint8_t %s[%d] = { %s };\n" name
-    (max 1 (String.length text))
-    (if bytes = [] then "0" else String.concat ", " bytes)
+type compiled = Data of Lowered.data | Table of Lowered.table
 
-let name_bytes context ~texts =
-  let named = Hashtbl.create 64 in
-  List.iter
-    (fun text ->
-      iter_identifiers text
-        ~on_identifier:(fun identifier -> Hashtbl.replace named identifier ())
-        ~on_other:ignore)
-    texts;
-  Hashtbl.fold (fun text index entries -> (index, text) :: entries) context.bytes []
-  |> List.sort compare
-  |> List.filter_map (fun (index, text) ->
-      let name = C_values.render_bytes_symbol context index in
-      if Hashtbl.mem named name then Some (render_bytes_definition (text, name)) else None)
-
-type compiled = Code of Builder.item_code | Data of Lowered.data | Table of Lowered.table
-
-let make_fragment env (compiled : compiled) =
-  let item, context =
-    match compiled with
-    | Code code -> (code.Item_code.item, code.context)
-    | Data data -> (data.data_item, C_types.make_context env (Mangling.make_symbol data.data_item))
-    | Table table ->
-        (table.table_item, C_types.make_context env (Mangling.make_symbol table.table_item))
-  in
-  let functions, definition, kind =
-    match compiled with
-    | Code code ->
-        let nested = List.sort compare code.nested in
-        ( List.map snd nested @ [ code.enclosing ],
-          "",
-          Functions { nested = List.length nested; weight = code.weight } )
-    | Data data -> ([], C_data.render_data context data, Static_data)
-    | Table table -> ([], C_data.render_table context table, Table_entries table.capability)
-  in
-  let types = List.rev context.order in
-  let environments =
-    List.filter_map
-      (fun key ->
-        match key with C_types.Environment _ -> Some (key, C_types.define context key) | _ -> None)
-      types
-  in
-  {
-    item;
-    kind;
-    functions;
-    definition;
-    types = List.filter (function C_types.Environment _ -> false | _ -> true) types;
-    environments;
-    prototypes = List.rev context.prototypes;
-    statics =
-      name_bytes context ~texts:(definition :: List.map snd functions) @ List.rev context.statics;
-    sites = List.sort_uniq compare context.sites;
-    helpers = context.helpers_used;
-    references =
-      (match compiled with
-      | Table table -> List.map fst table.entries
-      | Code _ | Data _ ->
-          List.filter
-            (fun other -> not (Lowered.Item.equal other item))
-            (List.rev context.referenced_items));
-    calls = List.rev context.calls;
-    called = List.rev context.called;
-    failures = List.rev context.failures;
-  }
+let make_fragment env (compiled : compiled) : fragment =
+  match compiled with
+  | Data data ->
+      let context = C_types.make_context env (Mangling.make_symbol data.data_item) in
+      let definition = C_data.render_data context data in
+      Fragment.make context ~item:data.data_item ~kind:Static_data ~functions:[] ~definition
+  | Table table ->
+      let context = C_types.make_context env (Mangling.make_symbol table.table_item) in
+      let definition = C_data.render_table context table in
+      {
+        (Fragment.make context ~item:table.table_item ~kind:(Table_entries table.capability)
+           ~functions:[] ~definition)
+        with
+        references = List.map fst table.entries;
+      }
 
 let render_file env profile (fragments : (fragment * linkage) list) =
   let context = C_types.make_context env "" in
@@ -399,7 +298,8 @@ let render_sites_file ~resolve_position:resolve fragments =
   let positions =
     List.map
       (fun site -> (site, resolve site))
-      (List.sort_uniq compare (List.concat_map (fun fragment -> fragment.sites) fragments))
+      (List.sort_uniq compare
+         (List.concat_map (fun (fragment : fragment) -> fragment.sites) fragments))
   in
   let file_symbols =
     List.mapi
@@ -408,7 +308,7 @@ let render_sites_file ~resolve_position:resolve fragments =
          (List.map (fun (_, (position : position)) -> position.file) positions))
   in
   String.concat ""
-    ((C_runtime.runtime_declarations :: List.map render_bytes_definition file_symbols)
+    ((C_runtime.runtime_declarations :: List.map C_values.render_bytes_definition file_symbols)
     @ List.map
         (fun (site, (position : position)) ->
           Printf.sprintf "const struct t_site %s = { %s, %d, %d, %d };\n"
@@ -418,7 +318,7 @@ let render_sites_file ~resolve_position:resolve fragments =
         positions)
 
 module For_testing = struct
-  let render_c fragment =
+  let render_c (fragment : fragment) =
     String.concat ""
       (List.map (fun (header, body) -> header ^ body) fragment.functions @ [ fragment.definition ])
 end

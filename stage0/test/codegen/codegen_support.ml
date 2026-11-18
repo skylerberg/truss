@@ -99,7 +99,7 @@ type function_ = {
   blocks : block list;
 }
 
-type item = Memory_layout.env -> Emit_c.Builder.item_code
+type item = Memory_layout.env -> Emit_c.fragment
 
 let local ?name ty = { ty; name }
 let value ty = Lowered.Value ty
@@ -140,7 +140,7 @@ let item ?(nested = []) name main : item =
     nested;
   Emit_c.Builder.build builder (write builder main)
 
-let make_constant_item code : item = fun _ -> code
+let make_constant_item fragment : item = fun _ -> fragment
 
 let entry ?nested locals blocks =
   item ?nested "entry" (function_ ~result:(value int32) locals blocks)
@@ -177,7 +177,7 @@ let run_program ?(extra = []) ?env ?input (items : item list) =
   incr counter;
   let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "program%d" !counter) in
   let env = match env with Some env -> env | None -> make_shape_env ~extra () in
-  let fragments = List.map (fun item -> Emit_c.make_fragment env (Code (item env))) items in
+  let fragments = List.map (fun item -> item env) items in
   match
     C_compiler.build_executable (Lazy.force c_compiler) O1
       ~units:

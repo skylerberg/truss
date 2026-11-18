@@ -32,7 +32,7 @@ val uint64 : Ground.ty
 type local_info
 type block
 type function_
-type item = Memory_layout.env -> Emit_c.Builder.item_code
+type item = Memory_layout.env -> Emit_c.fragment
 
 val local : ?name:string -> Lowered.ty -> local_info
 val value : Ground.ty -> Lowered.ty
@@ -53,7 +53,7 @@ val function_ :
 val code_item : string -> Lowered.Item.t
 val item : ?nested:function_ list -> string -> function_ -> item
 val entry : ?nested:function_ list -> local_info list -> block list -> item
-val make_constant_item : Emit_c.Builder.item_code -> item
+val make_constant_item : Emit_c.fragment -> item
 
 val call :
   string ->

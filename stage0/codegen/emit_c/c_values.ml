@@ -38,6 +38,14 @@ let render_float32_literal bits = render_float_literal ~suffix:"f" (Int32.float_
 let render_bytes_symbol (context : C_types.context) index =
   Printf.sprintf "%s_bytes_%d" context.prefix index
 
+let render_bytes_definition (text, name) =
+  let bytes =
+    List.init (String.length text) (fun index -> string_of_int (Char.code text.[index]))
+  in
+  Printf.sprintf "static const uint8_t %s[%d] = { %s };\n" name
+    (max 1 (String.length text))
+    (if bytes = [] then "0" else String.concat ", " bytes)
+
 let render_bytes_name (context : C_types.context) text =
   match Hashtbl.find_opt context.bytes text with
   | Some index -> render_bytes_symbol context index

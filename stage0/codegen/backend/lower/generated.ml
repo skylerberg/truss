@@ -16,7 +16,7 @@ let read_impl_capability context impl =
     Definitions.list_evidence context Types.no_substitution interface.impl_uses )
 
 let build_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl_method) :
-    Emit_c.Builder.item_code =
+    Emit_c.fragment =
   let { Lowered.Item.impl; name; receiver; type_arguments } = impl_method in
   let path = Lowered.Item.make_method_path impl_method in
   let interface, capability, captured = read_impl_capability context impl in
@@ -91,8 +91,7 @@ let build_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl
        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
        ())
 
-let build_locked_entry context (item : Lowered.Item.t) ~capability ~name : Emit_c.Builder.item_code
-    =
+let build_locked_entry context (item : Lowered.Item.t) ~capability ~name : Emit_c.fragment =
   let slot, capability_signature = Targets.lookup_capability_method context capability name in
   let c_signature, result = Targets.make_entry_signature context capability_signature in
   let st =
@@ -263,7 +262,7 @@ let list_real_implementations (st : Lowering.state) ~user capabilities =
 
 let text_copied_from = Well_known.make_path Text_copied_from
 
-let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.Builder.item_code =
+let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragment =
   let st =
     make_generated_state context ~item ~definition:main_path ~substitution:Types.no_substitution
   in
@@ -354,7 +353,7 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.Builde
     (Lowering.finish_function st ~first:[ count; arguments_pointer ] ~rest:[] ())
 
 let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instantiation
-    ~(ty : Ground.function_type) : Emit_c.Builder.item_code =
+    ~(ty : Ground.function_type) : Emit_c.fragment =
   let signature = Definitions.read_signature context function_ in
   let substitution = Monomorphic.make_signature_substitution signature instantiation in
   let st = make_generated_state context ~item ~definition:function_ ~substitution in
@@ -382,7 +381,7 @@ let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instant
        ())
 
 let build_any_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl_method) :
-    Emit_c.Builder.item_code =
+    Emit_c.fragment =
   let { Lowered.Item.impl; name; receiver; type_arguments } = impl_method in
   let path = Lowered.Item.make_method_path impl_method in
   let interface = Definitions.read_impl_interface context impl in
@@ -484,7 +483,7 @@ let build_any_table context (item : Lowered.Item.t) ~impl ~type_arguments : Lowe
       @ entries;
   }
 
-let lower context (generated : Lowered.Item.generated) : Emit_c.Builder.item_code =
+let lower context (generated : Lowered.Item.generated) : Emit_c.fragment =
   let item = Lowered.Item.Generated generated in
   match generated with
   | Entry impl_method -> build_entry context item impl_method

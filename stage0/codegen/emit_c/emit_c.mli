@@ -6,11 +6,11 @@ module Builder = Builder
 
 val make_symbol : Lowered.Item.t -> string
 
-type compiled = Code of Builder.item_code | Data of Lowered.data | Table of Lowered.table
+type compiled = Data of Lowered.data | Table of Lowered.table
 
 val version : int
 
-type fragment
+type fragment = Fragment.t
 
 val make_fragment : Memory_layout.env -> compiled -> fragment
 val item : fragment -> Lowered.Item.t

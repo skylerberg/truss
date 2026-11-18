@@ -96,7 +96,7 @@ module For_testing : sig
   val build_supplied_tests :
     t ->
     time_limit_ms:int ->
-    (Memory_layout.env -> Emit_c.Builder.item_code) list ->
+    (Memory_layout.env -> Emit_c.fragment) list ->
     output:string ->
     (unit, string) result
 
@@ -114,7 +114,7 @@ module For_testing : sig
 
   val drop_and_copy : Memory_layout.env -> Drop_and_copy.t
   val is_trivial : Drop_and_copy.t -> Ground.ty -> bool
-  val drop : Drop_and_copy.t -> Ground.ty -> Emit_c.Builder.item_code
-  val copy : Drop_and_copy.t -> Ground.ty -> Emit_c.Builder.item_code
+  val drop : Drop_and_copy.t -> Ground.ty -> Emit_c.fragment
+  val copy : Drop_and_copy.t -> Ground.ty -> Emit_c.fragment
   val copy_signature : Drop_and_copy.t -> Ground.ty -> Lowered.signature
 end

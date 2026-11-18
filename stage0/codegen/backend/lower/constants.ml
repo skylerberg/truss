@@ -352,7 +352,7 @@ let write_output (st : Lowering.state) output =
     ~destination:(Lowering.allocate_temporary st result)
     ()
 
-let build_evaluator context path : Emit_c.Builder.item_code =
+let build_evaluator context path : Emit_c.fragment =
   let st, mir, ty = make_constant_state context path in
   Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
   Lowering.run_in_scope st (fun () ->

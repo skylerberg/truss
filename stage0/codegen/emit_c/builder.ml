@@ -4,7 +4,6 @@ module Locals = Set.Make (Int)
 module Blocks = Set.Make (Int)
 
 type local_info = { ty : Lowered.ty; name : string option; is_zeroed : bool }
-type item_code = Item_code.t
 
 type code = {
   item : Lowered.Item.t;
@@ -512,18 +511,16 @@ let write_functions builder ~enclosing_symbol prototype =
     functions;
   texts.(0)
 
-let build builder prototype : item_code =
+let build builder prototype =
   let enclosing = Dynarray.get builder.functions 0 in
   let enclosing_text =
     write_functions builder ~enclosing_symbol:(Mangling.make_symbol enclosing.code.item) prototype
   in
-  {
-    item = enclosing.code.item;
-    context = enclosing.code.context;
-    enclosing = enclosing_text;
-    nested = enclosing.code.nested;
-    weight = enclosing.size;
-  }
+  let nested = List.sort compare enclosing.code.nested in
+  Fragment.make enclosing.code.context ~item:enclosing.code.item
+    ~kind:(Functions { nested = List.length nested; weight = enclosing.size })
+    ~functions:(List.map snd nested @ [ enclosing_text ])
+    ~definition:""
 
 let build_nested parent ~index ~environment build_body =
   let code = (lookup_current_function parent).code in

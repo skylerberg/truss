@@ -1,6 +1,5 @@
 let render_c_file env items =
-  Emit_c.render_file env Development
-    (List.map (fun (item, linkage) -> (Emit_c.make_fragment env (Code (item env)), linkage)) items)
+  Emit_c.render_file env Development (List.map (fun (item, linkage) -> (item env, linkage)) items)
 
 let () =
   Codegen_support.test "a function that returns a constant runs and exits with it" (fun () ->
