@@ -192,7 +192,9 @@ let run_tests ?rerun ?report_progress database snapshot packages tests =
   else
     match
       Backend.run_tests ?rerun ?report_progress
-        (Workspace_backend.create database snapshot packages Development)
+        (Workspace_backend.create snapshot packages
+           (Workspace_backend.require_lowered_lookups database packages)
+           Development)
         ~time_limit_ms:(Workspace.time_limit_ms snapshot)
         (List.map (fun test -> test.path) tests)
     with

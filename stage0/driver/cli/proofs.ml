@@ -24,7 +24,11 @@ let list_runs database snapshot packages proofs =
   match Database.list_template_checks proofs with
   | [] -> []
   | checks ->
-      run_template_checks (Workspace_backend.create database snapshot packages Development) checks
+      run_template_checks
+        (Workspace_backend.create snapshot packages
+           (Workspace_backend.require_lowered_lookups database packages)
+           Development)
+        checks
 
 let check database snapshot packages files =
   let proofs = Database.prove database files in
