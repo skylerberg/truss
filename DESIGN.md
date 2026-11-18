@@ -824,7 +824,7 @@ or is itself unused, and both are errors.
 
 | Rule | Reason |
 |---|---|
-| A constant in a pattern has a type with structural equality. | Matching the constant and comparing with `==` then agree. |
+| A constant in a pattern has a type with structural equality. | The checks that a `match` covers every case and that every arm is reachable compare constants by their contents. Under float equality or a hand-written `Equal`, two constants with different contents can be equal, so an arm that never runs, such as one for a constant `-0.0` after one for a constant `0.0`, would pass as reachable. |
 | A variant is written under its type in an expression, and bare in a pattern. | The name shows its type, and two types can share a variant name. In a pattern the variant is resolved in the type of the scrutinee, as a method is resolved in the type of its receiver. |
 | A float literal is not a pattern. | `-0.0 == 0.0`, so a pattern `0.0` would silently match both. A guard states which is meant. |
 
@@ -1330,18 +1330,22 @@ value cannot name the capabilities of the type that `any` hides.
 
 Rules: [Equality](SPECIFICATION.md#equality).
 
-**Only structural equality lets the prover substitute.** From `a == b` the
-prover concludes `f(a) == f(b)` only when no function can distinguish equal
-values. Three kinds of equality are not structural:
+**Only equality that is identity lets the prover substitute.** From `a == b`
+the prover concludes `f(a) == f(b)` only when equal values are `identical`,
+so that no function can distinguish them. Four kinds of equality are not
+identity:
 
 | Equality | Reason |
 |---|---|
 | A hand-written `Equal` | It promises only an equivalence relation. |
 | Float equality | `Point(x: 0.0, y: 0.0) == Point(x: -0.0, y: 0.0)`, and `1.0 / x` distinguishes the two. |
+| `String`'s equality | Two equal strings can differ in `capacity()`. |
 | The equality of an opaque type, outside its package | It would depend on fields that other packages cannot see. |
 
-Whether a type's equality is structural is derived from its fields, as
-`Plain` is.
+A constant in a pattern needs only structural equality, which compares
+contents and which `String` has ([Patterns](#patterns)). Whether a type's
+equality is structural, and whether it is identity, is derived from its
+fields, as `Plain` is.
 
 ### Deriving
 
@@ -1515,7 +1519,7 @@ Rules: [Writing specifications](SPECIFICATION.md#writing-specifications).
 contract about a whole collection needs a value to state it in. Stated with
 `length()` and indexing alone, "`push` appends an element" takes a
 quantifier in every clause, and a collection's own `Equal` may be
-hand-written and so not structural. The prelude therefore has mathematical
+hand-written and so not identity. The prelude therefore has mathematical
 collections that exist only in specifications, such as `Sequence`, and a
 type gives its value in their terms through the trait `Model`:
 
@@ -1526,7 +1530,7 @@ fn List[Element].push(mut self, item: own Element)
 
 | Rule | Reason |
 |---|---|
-| The mathematical types have structural equality. | The prover substitutes through a model where the collection's own `Equal` is hand-written. |
+| The equality of the mathematical types is identity. | The prover substitutes through a model where the collection's own `Equal` is hand-written. |
 | An opaque type has a model. | Other packages reason about the type through its model, without its fields. |
 | `identical(a, b)` is identity, and is separate from `==`. | A generic contract must say that an element is a given value, whatever its type. `==` cannot say that: it is the type's `Equal`, which `List[Element]` does not require, and which is an equivalence and not identity for a set stored as an unsorted list. `==` therefore keeps one meaning everywhere. |
 

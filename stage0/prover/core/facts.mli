@@ -95,7 +95,7 @@ val find_constructors :
   State.context -> Types.ty -> (string option * (string * Types.ty) list) list option
 
 val declare_sort : State.context -> Types.ty -> Logic.sort
-val is_structural : State.context -> ?seen:Types.ty list -> Types.ty -> bool
+val is_equality_identity : State.context -> ?seen:Types.ty list -> Types.ty -> bool
 val make_in_range : Types.ty -> Logic.term -> Logic.term
 val run_once : State.context -> State.stated -> (unit -> unit) -> unit
 val arrive : State.context -> State.frame -> string -> Types.ty -> Logic.term
