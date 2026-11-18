@@ -1067,9 +1067,6 @@ capabilities it uses, and whether it terminates.
 
 - In the body of `for_each`, `(fn(Item) uses generic Granted)` takes only a
   function that terminates if the functions passed for `generic Granted` do.
-  No function type states that a function uses `generic Granted` and may not
-  terminate. A lambda that does both is passed in a call, which infers a
-  capability parameter of its callee from the lambda.
 - An `impl`'s method names its capability parameters as its trait's method
   does. Capability parameters have no order to rename them by.
 - `(fn(Item) uses generic Granted cost time finite)` takes only functions that
@@ -1804,11 +1801,10 @@ the unchecked operation would give.
 
 - An overflow, a division by zero, and a shift that is too large are checked
   where they happen.
-- An index runs the `requires` of the `impl`'s own `at` before the call, and
-  a slice runs the `requires` of its slicing method. An index through a
-  trait bound or `any`, an assignment through `IndexAssign`, and an `at`
-  that states no `requires` or one that cannot be evaluated at run time
-  (see [Deriving](#deriving)) are proven.
+- An index, a slice, or an assignment through `IndexAssign` checks the
+  `requires` of the method it calls. One through a trait bound or `any` is
+  proven, and so is a `requires` that cannot be evaluated at run time (see
+  [Deriving](#deriving)).
 - A lambda in that body, a `proof` block, and every clause are proven. A
   lambda's capabilities are inferred from its body, not declared, and a
   `proof` block and a clause do not run.
