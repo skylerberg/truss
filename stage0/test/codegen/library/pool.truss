@@ -20,7 +20,7 @@ fn borrow(pool: tasks::Pool[Connection], opened: tasks::Counter, fails: Bool) ->
   }
 }
 
-test "a pool reuses an idle resource, discards one whose work failed, and forgets one that idled too long" uses Panic {
+test "a pool reuses an idle resource, discards one whose work failed, and forgets one that idled too long" uses Panic, RunForever {
   provide simulation::World.new() {
     let opened = tasks::Counter.new()
     let pool = tasks::Pool[Connection].new(tasks::PoolOptions(maximum: 2, idle_seconds: 60))
@@ -53,7 +53,7 @@ fn hold(pool: tasks::Pool[Connection], opened: tasks::Counter, active: tasks::Co
   })
 }
 
-test "a pool lends at most its maximum at once, and the others wait for one to come back" uses Panic {
+test "a pool lends at most its maximum at once, and the others wait for one to come back" uses Panic, RunForever {
   provide simulation::World.new() {
     let opened = tasks::Counter.new()
     let active = tasks::Counter.new()
@@ -73,7 +73,7 @@ test "a pool lends at most its maximum at once, and the others wait for one to c
 
 type Seen(checks: String, path: String)
 
-test "a temporary directory is writable while the work runs and is removed afterwards" uses Panic {
+test "a temporary directory is writable while the work runs and is removed afterwards" uses Panic, RunForever {
   provide simulation::World.from(simulation::Setup.new().with_file(Path.new("/tmp/.keep"), contents: "")) {
     let outcome = files::with_temporary_directory(fn(directory) {
       let file = directory.join("note.txt")

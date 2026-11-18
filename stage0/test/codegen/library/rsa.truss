@@ -48,7 +48,7 @@ test "RSA signatures OpenSSL made verify with PKCS #1 v1.5 and PSS, and changed 
   assert !key.verify_pkcs1(cryptography::HashFunction.Sha256, message: message, signature: bytes_of(pss_signature.slice()))
 }
 
-test "an RSA private key signs with PKCS #1 v1.5 as OpenSSL does, and with PSS that verifies" uses Panic {
+test "an RSA private key signs with PKCS #1 v1.5 as OpenSSL does, and with PSS that verifies" uses Panic, RunForever {
   let key = private_key()
   let message = "hello truss".bytes()
   assert hex::encode(key.sign_pkcs1(cryptography::HashFunction.Sha256, message: message)) == pkcs1_signature

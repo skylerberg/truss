@@ -67,7 +67,7 @@ impl Tally for Sum {
   }
 }
 
-test "a computed value is dropped by its task or by the loop" {
+test "a computed value is dropped by its task or by the loop" uses RunForever {
   var tasks = InOrder(opened: 0, cancelled: [])
   provide mut tasks {
     assert label_lengths(Counter(count: 4), stop: 2) == 7
@@ -75,7 +75,7 @@ test "a computed value is dropped by its task or by the loop" {
   }
 }
 
-test "a plain value pulled from a cursor in a mut parameter is copied" {
+test "a plain value pulled from a cursor in a mut parameter is copied" uses RunForever {
   var tasks = InOrder(opened: 0, cancelled: [])
   var sum = Sum(total: 0)
   var counter = Counter(count: 4)

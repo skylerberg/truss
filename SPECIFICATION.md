@@ -2328,7 +2328,7 @@ test = "test" plain_string [ "uses" capability_list ] block ;
 ```
 
 ```truss
-test "config loads with defaults" {
+test "config loads with defaults" uses RunForever {
   let disk = files::MemoryFiles.new().with_text(Path.new("app.toml"), contents: "")
   let config = provide disk, log::DiscardLog() {
     load_config(Path.new("app.toml"))
@@ -2338,11 +2338,11 @@ test "config loads with defaults" {
 ```
 
 - `plain_string` is a `STRING` with no interpolation.
-- A test has `RunForever` whether or not it declares it. It provides every
-  other capability its code uses, unless it declares them with `uses`, as a
-  function does. A test whose `uses` names a capability other than `Panic`
-  or `RunForever` is *external*: it gets the real implementations of exactly
-  those capabilities. Any other test is deterministic.
+- A test declares the capabilities its code uses with `uses`, as a
+  function does, or provides them. A test whose `uses` names a capability
+  other than `Panic` or `RunForever` is *external*: it gets the real
+  implementations of exactly those capabilities. Any other test is
+  deterministic.
 - A test's `uses` names only capabilities with a [real
   implementation](#standard-capabilities).
 - A test's standard input is empty.

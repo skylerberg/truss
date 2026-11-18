@@ -1388,7 +1388,7 @@ Rules: [Dynamic dispatch](SPECIFICATION.md#dynamic-dispatch).
 Rules: [Tests](SPECIFICATION.md#tests).
 
 ```truss
-test "config loads with defaults" {
+test "config loads with defaults" uses RunForever {
   let disk = files::MemoryFiles.new().with_text(Path.new("app.toml"), contents: "")
   let config = provide disk, log::DiscardLog() {
     load_config(Path.new("app.toml"))
@@ -1397,8 +1397,9 @@ test "config loads with defaults" {
 }
 ```
 
-A test provides every capability that its code uses, so its result is
-deterministic and is cached until the code it runs changes.
+A test provides every capability that its code uses other than `Panic` and
+`RunForever`, which it declares, so its result is deterministic and is
+cached until the code it runs changes.
 
 **A test does not wait for proofs.** A program is built only when every
 proof obligation that it reaches is proven. A test build instead inserts a
@@ -1418,8 +1419,7 @@ in a test build takes constant time.
 | Rule | Reason |
 |---|---|
 | A test with `uses` is external: it gets the real implementations, and its result is never cached. | Its result depends on the world. It gets no hidden isolation: a test that wants a scratch directory narrows file access where a reader can see it. |
-| A test declares `Panic` as a function does, and a test that declares only `Panic` is deterministic. | A test's signature states its effects like any other. A panic does not depend on the world, so the suite caches the result of such a test. |
-| A test has `RunForever` whether or not it declares it. | A test has a time limit, so a test that runs forever fails at the limit instead of stopping the suite. No code calls a test, so its termination proves nothing that a caller relies on. |
+| A test declares `Panic` and `RunForever` as a function does, and a test that declares only those is deterministic. | A test's signature states its effects like any other. Neither a panic nor a loop that runs forever depends on the world, so the suite caches the result of such a test. |
 | A failed test is never retried. | A retry hides exactly the failures that an external test exists to catch. |
 | A test cannot expect a panic. | That would treat a panic as intended behavior, which is the job of `Result`. The misuse that other languages test this way, such as a violated precondition, does not compile. To check that a program crashes on bad input, an external test runs the program through `Processes`. |
 | A test has a time limit. | A loop that never ends fails its test. |

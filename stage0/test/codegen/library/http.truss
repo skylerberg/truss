@@ -198,7 +198,7 @@ fn client_and_server() -> List[String]
   }
 }
 
-test "a server answers a client in a world: JSON, a body, a missing page, keep-alive, chunks, and bad requests" uses Panic {
+test "a server answers a client in a world: JSON, a body, a missing page, keep-alive, chunks, and bad requests" uses Panic, RunForever {
   provide simulation::World.new() {
     let seen = client_and_server()
     assert seen.length() == 15

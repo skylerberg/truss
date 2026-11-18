@@ -31,7 +31,7 @@ fn first_and_rest(limit: Int64) -> Int64
   first * 100 + rest
 }
 
-test "cursors" {
+test "cursors" uses RunForever {
   assert first_and_rest(4) == 109
   assert first_and_rest(0) == 0
 }

@@ -21,7 +21,7 @@ test "a traceparent header parses, round-trips, and refuses the forms the W3C fo
   assert trace::Context.parse("00-4bf92f35") == None
 }
 
-test "a started trace parses back, and a child keeps the trace and takes a new span" uses Panic {
+test "a started trace parses back, and a child keeps the trace and takes a new span" uses Panic, RunForever {
   provide simulation::World.new() {
     let root = trace::Context.start()
     assert trace::Context.parse(root.header().slice()) == Some(root.copy())
@@ -30,7 +30,7 @@ test "a started trace parses back, and a child keeps the trace and takes a new s
   }
 }
 
-test "a registry counts, gauges, and buckets observations, one series per name and labels" uses Panic {
+test "a registry counts, gauges, and buckets observations, one series per name and labels" uses Panic, RunForever {
   provide simulation::World.new() {
     let registry = metrics::Registry.new()
     let requests = registry.counter("requests", labels: [metrics::Label(name: "route", value: "/a")])
@@ -63,7 +63,7 @@ test "a registry counts, gauges, and buckets observations, one series per name a
   }
 }
 
-test "concurrent tasks add to one counter without losing an increment" uses Panic {
+test "concurrent tasks add to one counter without losing an increment" uses Panic, RunForever {
   provide simulation::World.new() {
     let registry = metrics::Registry.new()
     let total = registry.counter("total")
@@ -122,7 +122,7 @@ fn hourly_runs() -> Int64
   }
 }
 
-test "run calls the work at each time the schedule names" uses Panic {
+test "run calls the work at each time the schedule names" uses Panic, RunForever {
   provide simulation::World.new() {
     assert hourly_runs() == 3
   }

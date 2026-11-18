@@ -39,7 +39,7 @@ fn count_to(limit: Int64) -> CountTo {
   CountTo(index: 0, count: limit)
 }
 
-test "a cursor given to generic code" {
+test "a cursor given to generic code" uses RunForever {
   let items: List[Int64] = [3, 1, 4]
   assert total(items.cursor()) == 8
   assert counted(items.cursor()) == 3

@@ -152,6 +152,11 @@ let () =
   Harness.test "a test that crashes declares Panic, as a function does" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.test_calling_panic "capabilities.not_available";
       expect_fine Fixtures.Capabilities.test_declaring_panic);
+  Harness.test "a test that runs a loop without a measure declares RunForever, as a function does"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.test_running_a_loop_without_a_measure
+        "capabilities.not_available";
+      expect_fine Fixtures.Capabilities.test_declaring_run_forever);
   Harness.test "a place whose implementation mutates state is provided mut" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.counter_provided_as_tally
         "capabilities.provide_mode")

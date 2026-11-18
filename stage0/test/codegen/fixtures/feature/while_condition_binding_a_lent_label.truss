@@ -5,7 +5,7 @@ fn Holder.label(self) lends Option[String] {
   Some(text)
 }
 
-test "lent" {
+test "lent" uses RunForever {
   let holder = Holder(id: 1)
   var count: UInt64 = 0
   while count < 3 && holder.label() is Some(text) {

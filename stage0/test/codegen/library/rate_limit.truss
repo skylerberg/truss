@@ -2,7 +2,7 @@ use standard::http
 use standard::network
 use standard::simulation
 
-test "a token bucket allows its burst, refills over time, and says how long to wait" uses Panic {
+test "a token bucket allows its burst, refills over time, and says how long to wait" uses Panic, RunForever {
   provide simulation::World.new() {
     let limiter = http::RateLimiter.new(http::RateLimit(requests: 2, per_seconds: 1))
     assert limiter.take("a") == http::Decision.Allowed(remaining: 1)
@@ -22,7 +22,7 @@ test "a token bucket allows its burst, refills over time, and says how long to w
   }
 }
 
-test "a policy keeps a large burst and a long window, and the integer limits overflow nothing" uses Panic {
+test "a policy keeps a large burst and a long window, and the integer limits overflow nothing" uses Panic, RunForever {
   provide simulation::World.new() {
     let large = http::RateLimiter.new(http::RateLimit(requests: 1, per_seconds: 60, burst: 2000000000))
     assert large.take("a") == http::Decision.Allowed(remaining: 1999999999)
@@ -35,7 +35,7 @@ test "a policy keeps a large burst and a long window, and the integer limits ove
   }
 }
 
-test "a rate limiter forgets the least recently seen key when it holds too many" uses Panic {
+test "a rate limiter forgets the least recently seen key when it holds too many" uses Panic, RunForever {
   provide simulation::World.new() {
     let limiter = http::RateLimiter.new(http::RateLimit(requests: 1, per_seconds: 60, keys: 2))
     assert limiter.take("a") == http::Decision.Allowed(remaining: 0)
@@ -72,7 +72,7 @@ fn limited_statuses() -> List[String]
   }
 }
 
-test "the rate_limit middleware answers 429 with Retry-After once a peer spends its burst" uses Panic {
+test "the rate_limit middleware answers 429 with Retry-After once a peer spends its burst" uses Panic, RunForever {
   provide simulation::World.new() {
     let seen = limited_statuses()
     assert seen.length() == 3

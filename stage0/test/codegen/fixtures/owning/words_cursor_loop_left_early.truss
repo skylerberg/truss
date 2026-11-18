@@ -8,7 +8,7 @@ impl Cursor for Words {
   }
 }
 
-test "left early" {
+test "left early" uses RunForever {
   var each = Words(left: ["a${1}", "b${2}"])
   for _ in each {
     break

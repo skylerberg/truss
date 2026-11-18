@@ -78,7 +78,7 @@ test "an ECDSA signature goes to DER and back" {
   assert x509::ecdsa_signature_from_der(encoded, size: 32) == Some(own raw)
 }
 
-test "the system's roots are read from the first bundle present" uses Panic {
+test "the system's roots are read from the first bundle present" uses Panic, RunForever {
   var disk = files::MemoryFiles.new().with_text(Path.new("/etc/ssl/cert.pem"), contents: root_pem.slice())
   provide mut disk {
     assert x509::system_roots() is Ok(roots) && roots.length() == 1

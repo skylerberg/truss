@@ -20,7 +20,7 @@ fn count_to(stop: Int64) -> Counter {
   Counter(next: 1, stop: stop + 1)
 }
 
-test "a cursor is collected, counted, and folded, and gives its last value" {
+test "a cursor is collected, counted, and folded, and gives its last value" uses RunForever {
   assert count_to(3).to_list() == [1, 2, 3]
   assert count_to(5).count() == 5
   assert count_to(5).last() == Some(5)
@@ -30,7 +30,7 @@ test "a cursor is collected, counted, and folded, and gives its last value" {
   assert count_to(0).to_list().length() == 0
 }
 
-test "find takes values up to the first that matches, and the cursor continues from there" {
+test "find takes values up to the first that matches, and the cursor continues from there" uses RunForever {
   var cursor = count_to(6)
   assert mut cursor.find(fn(item) { item > 3 }) == Some(4)
   assert mut cursor.next() == Some(5)
@@ -38,7 +38,7 @@ test "find takes values up to the first that matches, and the cursor continues f
   assert mut cursor.next() is None
 }
 
-test "skip, take, and step_by choose which values a cursor gives" {
+test "skip, take, and step_by choose which values a cursor gives" uses RunForever {
   assert count_to(7).skip(2).to_list() == [3, 4, 5, 6, 7]
   assert count_to(7).skip(9).to_list() == []
   assert count_to(7).take(3).to_list() == [1, 2, 3]
@@ -49,13 +49,13 @@ test "skip, take, and step_by choose which values a cursor gives" {
   assert count_to(7).skip(1).step_by(2).take(2).to_list() == [2, 4]
 }
 
-test "chain gives one cursor's values and then another's" {
+test "chain gives one cursor's values and then another's" uses RunForever {
   assert count_to(2).chain(Counter(next: 7, stop: 9)).to_list() == [1, 2, 7, 8]
   assert count_to(0).chain(count_to(1)).to_list() == [1]
   assert count_to(2).chain(count_to(0)).to_list() == [1, 2]
 }
 
-test "zip pairs two cursors up to the shorter, and enumerate counts from zero" {
+test "zip pairs two cursors up to the shorter, and enumerate counts from zero" uses RunForever {
   var total = 0
   var pairs: UInt64 = 0
   var zipped = Counter(next: 10, stop: 13).zip(count_to(2))
@@ -101,7 +101,7 @@ impl Cursor for Letters {
   }
 }
 
-test "a list and a string are collected from a cursor, and a list is extended by one" {
+test "a list and a string are collected from a cursor, and a list is extended by one" uses RunForever {
   let collected: List[Int64] = List.collect(count_to(4).skip(1))
   assert collected == [2, 3, 4]
   var longer: List[Int64] = [0]
@@ -113,7 +113,7 @@ test "a list and a string are collected from a cursor, and a list is extended by
   assert text == "h\u{e9}h\u{e9}"
 }
 
-test "the adapters and the trait's methods work on a list's cursor" {
+test "the adapters and the trait's methods work on a list's cursor" uses RunForever {
   let items: List[Int64] = [1, 2, 3, 4, 5, 6, 7]
   assert items.cursor().skip(2).to_list() == [3, 4, 5, 6, 7]
   assert items.cursor().take(3).to_list() == [1, 2, 3]
@@ -207,7 +207,7 @@ fn typing(lines: own List[String]) -> simulation::World {
   simulation::World.from(simulation::Setup.new().with_input(own lines))
 }
 
-test "the adapters work on a cursor that uses a capability" uses Panic {
+test "the adapters work on a cursor that uses a capability" uses Panic, RunForever {
   let typed = Typed(most: 100)
   provide typing(["a", "bb", "ccc", "dddd", "eeeee", "ffffff"]) {
     let middle: List[UInt64] = [2, 3]
