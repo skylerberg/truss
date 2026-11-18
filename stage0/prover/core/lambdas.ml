@@ -122,9 +122,7 @@ let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.f
   Fun.protect
     ~finally:(fun () -> context.returns <- saved_returns)
     (fun () ->
-      let inside =
-        enter { frame with locals = remove_temporaries frame.locals; panic = Undeclarable }
-      in
+      let inside = enter { frame with locals = remove_temporaries frame.locals } in
       Facts.run_in_source context frame.source (fun () -> context.run_body inside ~lambdas body);
       match Facts.join context ~value_type:type_ (List.rev context.returns) with
       | Some (returned, Some term) -> Some ({ frame with spent = returned.spent }, term)
@@ -399,9 +397,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         context.counters <- saved_counters)
       (fun () ->
         let finished =
-          let inside =
-            { inside with locals = remove_temporaries inside.locals; panic = Undeclarable }
-          in
+          let inside = { inside with locals = remove_temporaries inside.locals } in
           let inside =
             List.fold_left2
               (fun inside parameter argument ->

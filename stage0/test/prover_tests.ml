@@ -93,51 +93,43 @@ let () =
       expect_not_proven Fixtures.Prover.unreachable_that_can_be_reached "prover.unreachable");
   Harness.test "an unreachable after a check" (fun () ->
       expect_proven Fixtures.Prover.unreachable_after_a_check);
-  Harness.test "an overflow names `uses Panic` as a way to stop the program" (fun () ->
-      let actual = read_message Fixtures.Prover.addition_that_can_overflow in
-      if not (String.includes ~affix:"allowed to stop the program with `uses Panic`" actual) then
-        Harness.fail "message %S" actual);
-  Harness.test "an index that may be out of bounds names `uses Panic` as a way to stop the program"
+  Harness.test "an overflow's message offers a guard or the checked operation, not `Panic`"
     (fun () ->
-      let actual = read_message Fixtures.Prover.index_that_may_be_out_of_bounds in
-      if not (String.includes ~affix:"allowed to stop the program with `uses Panic`" actual) then
-        Harness.fail "message %S" actual);
-  Harness.test "a function that declares `uses Panic` stops at an operation that fails" (fun () ->
-      expect_proven Fixtures.Prover.failing_operations_of_a_function_that_may_panic);
+      let actual = read_message Fixtures.Prover.addition_that_can_overflow in
+      if
+        (not
+           (String.includes
+              ~affix:
+                "It can also be checked first with an `if`, or done with the checked operation."
+              actual))
+        || String.includes ~affix:"Panic" actual
+      then Harness.fail "message %S" actual);
+  Harness.test "a function that declares `uses Panic` proves each operation that could fail"
+    (fun () ->
+      let codes = list_codes Fixtures.Prover.failing_operations_of_a_function_that_may_panic in
+      List.iter
+        (fun code ->
+          if not (List.mem code codes) then
+            Harness.fail "%s is not reported, only %s" code (String.concat ", " codes))
+        [ "prover.overflow"; "prover.division"; "prover.shift"; "prover.requires" ]);
   Harness.test "expect returns the payload of an Option or a Result" (fun () ->
       expect_proven Fixtures.Prover.payloads_through_expect);
   Harness.test "expect lends the payload of an Option it is lent" (fun () ->
       expect_proven Fixtures.Prover.elements_lent_through_expect);
-  Harness.test "a test that declares `Panic` checks an operation it cannot prove when it runs"
-    (fun () -> expect_proven Fixtures.Prover.test_indexing_by_a_sum_from_a_loop);
-  Harness.test "a lambda proves its operations, since it has no `uses` of its own" (fun () ->
+  Harness.test "a test that declares `Panic` proves its operations, as a function does" (fun () ->
+      let codes = list_codes Fixtures.Prover.test_indexing_by_a_sum_from_a_loop in
+      if not (List.mem "prover.overflow" codes) then
+        Harness.fail "the overflow is not reported, only %s" (String.concat ", " codes));
+  Harness.test "a lambda in a function that declares `uses Panic` proves its operations" (fun () ->
       let actual = read_message Fixtures.Prover.overflow_in_a_lambda_of_a_function_that_may_panic in
       if
         (not (String.includes ~affix:"may overflow `UInt8`" actual))
         || String.includes ~affix:"uses Panic" actual
       then Harness.fail "message %S" actual);
-  Harness.test "a lambda in a test proves its operations, as one in a function with `Panic` does"
-    (fun () -> expect_not_proven Fixtures.Prover.overflow_in_a_lambda_of_a_test "prover.overflow");
-  Harness.test "an overflow in an impl names where the impl can declare `Panic`" (fun () ->
-      List.iter
-        (fun (text, declaration) ->
-          let actual = read_message text in
-          if not (String.includes ~affix:("allowed to stop the program with " ^ declaration) actual)
-          then Harness.fail "message %S" actual)
-        [
-          (Fixtures.Prover.increment_in_a_greeter_impl, "`uses Panic` on the `impl`.");
-          (Fixtures.Prover.increment_in_a_describe_impl_whose_trait_allows_panic, "`uses Panic`.");
-          ( Fixtures.Prover.decrement_in_a_countdown_cursor,
-            "`capability Uses = Panic` in the `impl`." );
-        ]);
-  Harness.test "an overflow in an impl of a trait that fixes its method's capabilities omits Panic"
+  Harness.test "a lambda in a test proves its operations" (fun () ->
+      expect_not_proven Fixtures.Prover.overflow_in_a_lambda_of_a_test "prover.overflow");
+  Harness.test "an index through a bound is proven in a function that declares `uses Panic`"
     (fun () ->
-      let actual = read_message Fixtures.Prover.increment_in_a_describe_impl in
-      if
-        (not (String.includes ~affix:"may overflow `Int64`" actual))
-        || String.includes ~affix:"Panic" actual
-      then Harness.fail "message %S" actual);
-  Harness.test "an index through a bound is proven, since its precondition cannot run" (fun () ->
       expect_not_proven Fixtures.Prover.index_through_a_bound_of_a_function_that_may_panic
         "prover.requires");
   Harness.test "an unreachable is proven in a function that declares `uses Panic`" (fun () ->

@@ -1,3 +1,0 @@
-fn second(items: Slice[Int64]) -> Int64 {
-  items[1]
-}

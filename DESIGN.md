@@ -1071,22 +1071,18 @@ memory and overflowing the stack, which no language rules out.
 
 Every operation that can fail is a proof obligation: an integer overflow, a
 division by zero, an index out of bounds, a shift that is too large, and
-`unreachable`. Code meets an obligation in one of four ways. It establishes
-the fact locally, requires the fact of its caller, calls a checked variant
-that returns an `Option` or a `Result`, or declares `uses Panic`.
+`unreachable`. Code meets an obligation in one of three ways. It establishes
+the fact locally, requires the fact of its caller, or calls a checked variant
+that returns an `Option` or a `Result`.
 
-**`Panic` turns a proof into a check.** In code that has `Panic`, an
-operation that is not proven safe is checked when it runs, and the proof goes
-on as though it held, since a failed check ends the program. The check is in
-every build, so a release build panics where a test build does. An index
-checks the precondition of the `impl`'s `at`. An index through a bound is
-proven: the prover reads the trait's precondition there, and the call would
-check the `impl`'s, so a check would not be the fact the proof assumed.
-
-**A lambda proves its operations.** Its capabilities are inferred before the
-prover runs. A lambda that could panic where its type allows no `Panic` would
-end a program that relies on the type, such as a server whose handler type
-has no `Panic`.
+**`Panic` permits a crash and changes nothing else.** `uses Panic` lets code
+call `Panic.crash`, directly or through a callee such as `expect`, as
+`uses Clock` lets it call `Clock`. The body's operations are proven as
+anywhere else. Code that crashes on a failure writes the crash where it
+happens: `total.checked_add(price).expect("the total fits Int64")`
+(*nothing hidden*). If declaring `Panic` turned unproven operations into
+run-time checks, the declaration would stand in for every proof in the body,
+and a crash would hide at each operator.
 
 **A panic cannot be caught.** Code that caught a panic could hold a value
 whose invariant was broken partway through an update. A program that must
@@ -1142,11 +1138,12 @@ A function without `uses` is pure. Two goals rest on that rule:
   signatures allow, which limits the damage that a compromised package can
   do ([Grants](#grants)).
 
-**A capability method always returns to its caller, once.** A capability
-call therefore compiles as a function call, Truss needs no stack unwinding,
-and no computation is abandoned with a value half updated. An early exit
-goes through `Result` and `?`, where each step is written. For the same
-reason there is no `exit`.
+**A capability method returns to its caller once, unless its result type
+is `Never`.** A capability call therefore compiles as a function call, Truss
+needs no stack unwinding, and no computation is abandoned with a value half
+updated. `Panic.crash` returns `Never` and ends the program, so no code
+observes the values it abandons. An early exit goes through `Result` and
+`?`, where each step is written. For the same reason there is no `exit`.
 
 **A view never crosses into or out of an implementation.** A caller cannot
 see which implementation its call reaches, so it cannot know whether a view

@@ -96,7 +96,6 @@ let enter context ?(nested = ref 0) ~builder frame =
   }
 
 let may_fork st = st.frame.exit = None
-let may_panic st = Types.may_panic st.frame.code.uses
 
 let allocate_local st ?name ty : Lowered.place =
   Lowered.make_local_place (Emit_c.Builder.allocate_local st.builder ?name ty)
