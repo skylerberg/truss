@@ -169,6 +169,10 @@ let c_compiler =
 
 let counter = ref 0
 
+let make_scratch_path prefix =
+  incr counter;
+  Filename.concat (Lazy.force scratch) (Printf.sprintf "%s%d" prefix !counter)
+
 let list_worker_counts () =
   if C_compiler.For_testing.has_sanitizer (Lazy.force c_compiler) then [ 8 ] else [ 1; 2; 8; 32 ]
 
@@ -176,8 +180,7 @@ let test_position (site : Lowered.site) : Emit_c.position =
   { file = "test.truss"; line = 1; column = site.offset + 1 }
 
 let run_program ?(extra = []) ?env ?input (program : program_fragment list) =
-  incr counter;
-  let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "program%d" !counter) in
+  let output = make_scratch_path "program" in
   let env = match env with Some env -> env | None -> make_shape_env ~extra () in
   let fragments = List.map (fun program_fragment -> program_fragment env) program in
   match
@@ -202,6 +205,7 @@ let expect_status ?extra expected program =
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
+let example_main : Path.t = Top { module_ = example; name = "main" }
 let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
 
 let make_database packages =
@@ -275,24 +279,28 @@ let list_tests_in database (module_ : Path.module_) =
 
 let list_tests database = list_tests_in database example
 
-let run_source text =
-  let database, backend = load text in
+let run_example_tests database backend =
   match Backend.run_tests backend ~time_limit_ms:2000 (list_tests database) with
   | Ok records -> render_records records
   | Error message -> failwith message
 
-let expect_output text expected = expect_string ~expected (run_source text)
-let expect_pass name source = test name (fun () -> expect_output source "test 0 passed\n")
+let run_source text =
+  let database, backend = load text in
+  run_example_tests database backend
 
-let run_main ?(arguments = []) ?input text =
-  let _, backend = load text in
-  match
-    Backend.For_testing.run_program ?input backend
-      ~main:(Top { module_ = example; name = "main" })
-      ~arguments
-  with
-  | Ok result -> result
+let expect_output text expected = expect_string ~expected (run_source text)
+
+let build_program backend ~main =
+  let output = make_scratch_path "program" in
+  Result.map (fun () -> output) (Backend.build_program backend ~main ~output)
+
+let build_main ?profile text =
+  let _, backend = load ?profile text in
+  match build_program backend ~main:example_main with
+  | Ok program -> program
   | Error message -> failwith message
+
+let run_main ?(arguments = []) ?input text = Process.run ?input (build_main text) arguments
 
 let drop_shapes =
   [

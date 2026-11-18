@@ -105,13 +105,6 @@ module For_testing : sig
   val evaluate_call :
     t -> function_:Path.t -> arguments:Z.t list -> (Lowered.static_value ran, string) result
 
-  val run_program :
-    ?input:string ->
-    t ->
-    main:Path.t ->
-    arguments:string list ->
-    (int * string * string, string) result
-
   val drop_and_copy : Memory_layout.env -> Drop_and_copy.t
   val is_trivial : Drop_and_copy.t -> Ground.ty -> bool
   val drop : Drop_and_copy.t -> Ground.ty -> Emit_c.fragment
