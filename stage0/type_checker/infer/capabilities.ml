@@ -89,7 +89,7 @@ let check_grant checking (origin : Core.origin) ~subject package (uses : Types.c
     (Interface.Grants.list_missing checking.state.lookups.interface ~package:checking.state.package
        ~of_:package uses)
 
-let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
+let check_callee_grants checking (origin : Core.origin) (callee : Core.operand Core.target) =
   let state = checking.state in
   match callee with
   | Function { path; _ } ->
@@ -212,12 +212,6 @@ let rec require_available checking scope (origin : Core.origin) ?(for_implementa
     | Function_body _ | Lambda_body _ | Restricted _ -> ()
   end
 
-let require_intrinsic_uses checking scope (origin : Core.origin) operation =
-  if Option.is_none (find_implemented_capability scope) then
-    require_available checking scope origin
-      (Types.make_capability_set
-         (List.map (fun capability -> Types.Capability capability) (Intrinsic.list_uses operation)))
-
 let compute_operand_type : Core.operand -> Types.ty = function
   | Place core_place -> Core_walk.compute_place_type core_place
   | Value value -> value.type_
@@ -227,7 +221,7 @@ let rec strip_widening (operand : Core.operand) : Core.operand =
   | Value { kind = Convert { conversion = Widen; value }; _ } -> strip_widening (Value value)
   | Place _ | Value _ -> operand
 
-let diverges_whatever_it_is_passed (state : State.state) (callee : Core.callee) =
+let diverges_whatever_it_is_passed (state : State.state) (callee : Core.operand Core.target) =
   let empty (instantiation : Types.instantiation) =
     {
       instantiation with
@@ -254,7 +248,7 @@ let show_trait_method (trait : Types.trait_reference) name =
     (Types.show_trait { trait with trait_arguments = []; associated = [] })
     name
 
-let find_callee_name (callee : Core.callee) =
+let find_callee_name (callee : Core.operand Core.target) =
   match callee with
   | Function { path; _ } -> Some (Path.show path)
   | Trait_method { trait; name; _ } -> Some (show_trait_method trait name)
@@ -262,7 +256,7 @@ let find_callee_name (callee : Core.callee) =
       Some (Printf.sprintf "%s.%s" (Types.show_capability (Types.Capability capability)) name)
   | Intrinsic _ | Indirect _ -> None
 
-let list_parameter_names (state : State.state) (callee : Core.callee) =
+let list_parameter_names (state : State.state) (callee : Core.operand Core.target) =
   let list_names (signature : Types.signature) =
     (match signature.receiver with Some ((Read | Mut | Own), _) -> [ "self" ] | _ -> [])
     @ List.map (fun (parameter : Types.parameter_info) -> parameter.name) signature.parameters
@@ -301,7 +295,8 @@ type followed_method = {
 
 type follower = Callee | Trait_declaration
 
-let find_missing_followed_method (state : State.state) ~available (callee : Core.callee) =
+let find_missing_followed_method (state : State.state) ~available
+    (callee : Core.operand Core.target) =
   let find_among instantiated =
     List.find_map
       (function
@@ -364,7 +359,7 @@ let describe_followed_method (state : State.state) (followed : followed_method) 
   | _, (Some (From_bound | From_any | Built_in | Accepted _) | None) -> impl_method
 
 let explain_followed_method (state : State.state) scope ~subject ?passed ~available
-    (callee : Core.callee) =
+    (callee : Core.operand Core.target) =
   Option.map
     (fun (follower, (followed : followed_method)) ->
       let explain_follower shown =
@@ -408,7 +403,8 @@ let explain_followed_method (state : State.state) scope ~subject ?passed ~availa
 
 let explain_call_divergence checking scope (call : Core.call) ~available =
   let state = checking.state in
-  let names = list_parameter_names state call.callee in
+  let callee = call.callee.target in
+  let names = list_parameter_names state callee in
   let passes_missing_divergence (function_ : Core.operand) =
     match compute_operand_type function_ with
     | Types.Function { uses; _ } -> is_divergence_missing state ~available uses
@@ -435,7 +431,7 @@ let explain_call_divergence checking scope (call : Core.call) ~available =
                      parameter_phrase))
               (find_divergence_cause checking ~available id)
         | Value { kind = Function_value { path; instantiation }; _ } -> (
-            let named : Core.callee = Function { path; instantiation } in
+            let named : Core.operand Core.target = Function { path; instantiation } in
             match
               explain_followed_method state scope ~subject:"This call" ~passed:parameter_phrase
                 ~available named
@@ -465,9 +461,9 @@ let explain_call_divergence checking scope (call : Core.call) ~available =
       (List.mapi (fun index argument -> (index, argument)) call.arguments)
   in
   match
-    ( explain_followed_method state scope ~subject:"This call" ~available call.callee,
-      call.callee,
-      find_callee_name call.callee,
+    ( explain_followed_method state scope ~subject:"This call" ~available callee,
+      callee,
+      find_callee_name callee,
       argument_explanation )
   with
   | Some explanation, _, _, _ -> explanation
@@ -508,23 +504,31 @@ let explain_call_divergence checking scope (call : Core.call) ~available =
              clause")
   | None, _, _, None -> make_explanation "This call may not terminate"
 
-let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
-  check_callee_grants checking origin callee;
+let explain_callee_divergence checking scope (callee : Core.operand Core.target) ~available =
+  match find_callee_name callee with
+  | Some shown -> (
+      let subject = Printf.sprintf "This call of `%s`" shown in
+      match explain_followed_method checking.state scope ~subject ~available callee with
+      | Some explanation -> explanation
+      | None ->
+          make_explanation
+            (Printf.sprintf "%s may not terminate, since it has no `time` clause" subject))
+  | None -> make_explanation "This call may not terminate"
+
+let compute_required_uses scope (callee : Core.callee) =
+  match (callee.target, find_implemented_capability scope) with
+  | Intrinsic _, Some _ -> Types.no_capabilities
+  | (Function _ | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _), _ -> callee.uses
+
+let require_callee_uses checking scope (origin : Core.origin) ?explain_divergence
+    (callee : Core.callee) =
+  check_callee_grants checking origin callee.target;
   require_available checking scope origin
-    ~explain_divergence:(fun ~available ->
-      match find_callee_name callee with
-      | Some shown -> (
-          let subject = Printf.sprintf "This call of `%s`" shown in
-          match explain_followed_method checking.state scope ~subject ~available callee with
-          | Some explanation -> explanation
-          | None ->
-              make_explanation
-                (Printf.sprintf "%s may not terminate, since it has no `time` clause" subject))
-      | None -> make_explanation "This call may not terminate")
-    (State.compute_callee_uses checking.state callee);
-  match callee with
-  | Intrinsic { operation; _ } -> require_intrinsic_uses checking scope origin operation
-  | Function _ | Trait_method _ | Capability_method _ | Indirect _ -> ()
+    ~indirect_call:(match callee.target with Indirect _ -> true | _ -> false)
+    ~explain_divergence:
+      (Option.value explain_divergence
+         ~default:(explain_callee_divergence checking scope callee.target))
+    (compute_required_uses scope callee)
 
 let require_divergence_of_unmeasured_loop checking scope (origin : Core.origin)
     ~explain_missing_measure =
@@ -572,6 +576,11 @@ let describe_lambda_termination_demand (lambda_uses : Types.capability_set) =
          %s"
         (String.concat " and " conditions)
 
+let compute_node_origin = function
+  | `Expression (inner : Core.expression) -> inner.origin
+  | `Statement (inner : Core.statement) -> inner.origin
+  | `Pattern (inner : Core.pattern) -> inner.origin
+
 let rec check_expression checking scope (node : Core.expression) =
   match node.kind with
   | Lambda { body; _ } ->
@@ -592,34 +601,25 @@ let rec check_expression checking scope (node : Core.expression) =
   | Function_value { path; _ } ->
       check_callee_grants checking node.origin
         (Function { path; instantiation = Types.no_instantiation })
-  | Call call -> (
-      check_children checking scope (`Expression node);
-      check_callee_grants checking node.origin call.callee;
-      require_available checking scope node.origin
-        ~indirect_call:(match call.callee with Indirect _ -> true | _ -> false)
-        ~explain_divergence:(explain_call_divergence checking scope call)
-        call.uses;
-      match call.callee with
-      | Intrinsic { operation; _ } -> require_intrinsic_uses checking scope node.origin operation
-      | Function _ | Trait_method _ | Capability_method _ | Indirect _ -> ())
   | _ -> check_children checking scope (`Expression node)
 
-and check_children checking scope node =
-  let origin =
+and make_visitor checking scope node : Core_walk.visit =
+  let explain_divergence =
     match node with
-    | `Expression (inner : Core.expression) -> inner.origin
-    | `Statement (inner : Core.statement) -> inner.origin
-    | `Pattern (inner : Core.pattern) -> inner.origin
+    | `Expression ({ kind = Call call; _ } : Core.expression) ->
+        Some (explain_call_divergence checking scope call)
+    | `Expression _ | `Statement _ | `Pattern _ -> None
   in
-  let visit : Core_walk.visit =
-    {
-      expression = check_expression checking scope;
-      statement = check_statement checking scope;
-      pattern = (fun inner -> check_children checking scope (`Pattern inner));
-      callee = require_callee_uses checking scope origin;
-      place = ignore;
-    }
-  in
+  {
+    expression = check_expression checking scope;
+    statement = check_statement checking scope;
+    pattern = (fun inner -> check_children checking scope (`Pattern inner));
+    callee = require_callee_uses checking scope (compute_node_origin node) ?explain_divergence;
+    place = ignore;
+  }
+
+and check_children checking scope node =
+  let visit = make_visitor checking scope node in
   match node with
   | `Expression inner -> Core_walk.walk_expression_children visit inner
   | `Statement inner -> Core_walk.walk_statement_children visit inner
@@ -639,27 +639,16 @@ and check_statement checking scope (statement : Core.statement) =
       require_available checking scope statement.origin (Types.make_capability_set [ tasks ]);
       List.iter (check_statement checking scope) branches
   | For { mode; pattern; iteration; clauses; body } ->
+      Core_walk.walk_iteration (make_visitor checking scope (`Statement statement)) iteration;
       (match iteration with
-      | Integer_range { start; stop; _ } ->
-          check_expression checking scope start;
-          check_expression checking scope stop
-      | Elements { count; element; _ } ->
-          check_expression checking scope count;
-          Core_walk.walk_place
-            { Core_walk.ignore_all with expression = check_expression checking scope }
-            element
-      | Cursor { cursor; next; uses = _ } ->
-          Core_walk.walk_place
-            { Core_walk.ignore_all with expression = check_expression checking scope }
-            cursor;
-          require_callee_uses checking scope statement.origin next;
-          if not (Core_walk.states_measure clauses) then
-            require_divergence_of_unmeasured_loop checking scope statement.origin
-              ~explain_missing_measure:(fun () ->
-                Printf.sprintf
-                  "`%s` has no `remaining(self) -> UInt64` method to give the loop a measure"
-                  (Types.show
-                     (State.finalize_type checking.state (Core_walk.compute_place_type cursor)))));
+      | Cursor { cursor; _ } when not (Core_walk.states_measure clauses) ->
+          require_divergence_of_unmeasured_loop checking scope statement.origin
+            ~explain_missing_measure:(fun () ->
+              Printf.sprintf
+                "`%s` has no `remaining(self) -> UInt64` method to give the loop a measure"
+                (Types.show
+                   (State.finalize_type checking.state (Core_walk.compute_place_type cursor))))
+      | Integer_range _ | Elements _ | Cursor _ -> ());
       check_children checking scope (`Pattern pattern);
       check_loop_clauses checking clauses;
       check_block checking

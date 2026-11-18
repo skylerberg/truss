@@ -80,7 +80,15 @@ let is_view : Core.argument -> bool = function
       {
         value =
           Value
-            { kind = Call { callee = Function { path = Method { name = "slice"; _ }; _ }; _ }; _ };
+            {
+              kind =
+                Call
+                  {
+                    callee = { target = Function { path = Method { name = "slice"; _ }; _ }; _ };
+                    _;
+                  };
+              _;
+            };
         _;
       } ->
       true
@@ -231,7 +239,11 @@ let () =
   Harness.test "an operator chooses the impl by both operands" (fun () ->
       let text = Fixtures.Infer.additions_of_meters_and_integers in
       match locate_core_call text "length + extra" 1 with
-      | { callee = Trait_method { evidence = Impl { impl; _ }; name = "add"; _ }; _ }, _ -> (
+      | ( {
+            callee = { target = Trait_method { evidence = Impl { impl; _ }; name = "add"; _ }; _ };
+            _;
+          },
+          _ ) -> (
           match impl with
           | Impl { trait = { arguments = [ Named { path = Top { name = "Int64"; _ }; _ } ]; _ }; _ }
             ->
@@ -243,7 +255,8 @@ let () =
       List.iter
         (fun written ->
           match locate_core_call text written 1 with
-          | { callee = Trait_method { name = "compare"; evidence = Bound; _ }; _ }, result ->
+          | ( { callee = { target = Trait_method { name = "compare"; evidence = Bound; _ }; _ }; _ },
+              result ) ->
               if Types.show result <> "Ordering" then
                 Harness.fail "`%s` calls a `compare` that gives `%s`" written (Types.show result)
           | _ -> Harness.fail "`%s` is another call" written)
@@ -377,7 +390,12 @@ let () =
                           kind =
                             Slice
                               {
-                                callee = Function { path = Method { name = "slice_from"; _ }; _ };
+                                callee =
+                                  {
+                                    target =
+                                      Function { path = Method { name = "slice_from"; _ }; _ };
+                                    _;
+                                  };
                                 _;
                               };
                           _;
@@ -416,7 +434,7 @@ let () =
       let text = Fixtures.Infer.to_bytes_of_a_string_read_and_owned in
       let find_owner occurrence =
         match locate_core_call text "name.to_bytes()" occurrence with
-        | { callee = Function { path = Method { owner; receiver; _ }; _ }; _ }, _ ->
+        | { callee = { target = Function { path = Method { owner; receiver; _ }; _ }; _ }; _ }, _ ->
             (Well_known.of_path owner, receiver)
         | _ -> failwith "the callee is not a method"
       in
@@ -554,7 +572,7 @@ let () =
             | (Top { name; _ } | Method { name; _ }) when name = definition_name ->
                 List.filter_map
                   (fun (node : Core.expression) ->
-                    match node.kind with Call { callee; _ } -> Some callee | _ -> None)
+                    match node.kind with Call { callee; _ } -> Some callee.target | _ -> None)
                   (Support.collect_core_nodes packages (Resolve.Names.make_key declaration))
                     .expressions
             | _ -> [])

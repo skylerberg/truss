@@ -689,13 +689,21 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
   in
   let called = ref evidence_packages in
   Core_walk.walk_definition
-    (Core_walk.make_callee_visitor (function
-      | Trait_method { trait; evidence; _ } ->
-          called :=
-            Path.locate_package trait.trait
-            :: (match evidence with Impl { impl; _ } -> [ Path.locate_package impl ] | _ -> [])
-            @ !called
-      | _ -> ()))
+    {
+      Core_walk.ignore_all with
+      callee =
+        (fun callee ->
+          match callee.target with
+          | Trait_method { trait; evidence; _ } ->
+              called :=
+                Path.locate_package trait.trait
+                ::
+                (match evidence with
+                | Impl { impl; _ } -> [ Path.locate_package impl ]
+                | _ -> [])
+                @ !called
+          | _ -> ());
+    }
     form.definition;
   List.sort_uniq compare (named @ !called)
 

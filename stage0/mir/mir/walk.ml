@@ -40,12 +40,12 @@ let visit_operand_places visit = function
   | Tree.Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> visit place
   | Constant _ -> ()
 
-let visit_callee_places visit : Tree.callee -> unit = function
-  | Indirect callee -> visit_operand_places visit callee
+let visit_target_places visit : Tree.operand Core.target -> unit = function
+  | Indirect function_value -> visit_operand_places visit function_value
   | _ -> ()
 
 let visit_call_places visit (call : Tree.call) =
-  visit_callee_places visit call.callee;
+  visit_target_places visit call.callee.target;
   List.iter
     (function Tree.Passed { value; _ } -> visit_operand_places visit value | Default -> ())
     call.arguments
@@ -54,9 +54,9 @@ let visit_iteration_places visit = function
   | Tree.Range { start; stop; _ } ->
       visit_operand_places visit start;
       visit_operand_places visit stop
-  | Pull { cursor; next; uses = _ } ->
+  | Pull { cursor; next } ->
       visit cursor;
-      visit_callee_places visit next
+      visit_target_places visit next.target
 
 let rec visit_yielded_places visit = function
   | Tree.Part part -> visit_operand_places visit part
@@ -72,7 +72,7 @@ let visit_rvalue_places visit rvalue =
         visit_operand first;
         visit_operand second
     | Applied { arguments; _ } -> List.iter visit_operand arguments
-    | Method_cost { method_; _ } -> visit_callee_places visit method_
+    | Method_cost { method_; _ } -> visit_target_places visit method_
     | Map entries ->
         List.iter
           (fun (key, value) ->
@@ -172,6 +172,18 @@ and visit_code visit (code : Tree.t) =
 
 let iter_code = visit_code
 let iter_formula = visit_formula
+
+let find_callee (statement : Tree.statement) : Tree.callee option =
+  match statement.kind with
+  | Basic (Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ }) ->
+      Some call.callee
+  | For { iteration = Pull { next; _ }; _ } -> Some next
+  | Basic
+      ( Assign _ | Live _ | Dead _ | Assert _ | Echo _ | Provide _ | Provide_end | Loan_start _
+      | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ )
+  | For { iteration = Range _; _ }
+  | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Resume _ | Yield _ | Jump _ ->
+      None
 
 let extract_operand_type : Tree.operand -> Types.ty = function
   | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Constant { type_; _ } -> type_

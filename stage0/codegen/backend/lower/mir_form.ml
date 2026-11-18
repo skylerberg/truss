@@ -203,7 +203,7 @@ let make_body_frame (st : Lowering.state) ?owner ?returns_into ?lending
         (fun _ -> true)
         (fun (statement : Mir.Graph.statement) ->
           match statement.kind with
-          | Lend { call = { callee = Intrinsic _; _ }; _ } -> []
+          | Lend { call = { callee = { target = Intrinsic _; _ }; _ }; _ } -> []
           | Lend { part; _ } -> [ part ]
           | _ -> []);
     lent_calls = Hashtbl.create 4;
@@ -617,7 +617,7 @@ let ground_instantiation (st : Lowering.state) instantiation =
   Monomorphic.ground_instantiation st.context.monomorphic st.frame.code.substitution instantiation
 
 let resolve_callee st (callee : Mir.callee) : (Path.t * Ground.instantiation) option =
-  match callee with
+  match callee.target with
   | Function { path; instantiation } -> Some (path, ground_instantiation st instantiation)
   | Trait_method { evidence = Dynamic; _ } -> None
   | Trait_method { trait; name; receiver; self_type; instantiation; evidence } -> (
@@ -1203,7 +1203,7 @@ and lower_statement st (statement : Mir.Graph.statement) =
         | None -> make_discard_place st
       in
       lower_call_into
-        ?failure:(if Mir.is_index_call call.callee then Some "index out of bounds" else None)
+        ?failure:(if Mir.is_index_call call.callee.target then Some "index out of bounds" else None)
         st call destination ~origin
   | Lend { part; call } -> lend st part call ~origin
   | Slice { destination; call; _ } ->
@@ -1517,7 +1517,7 @@ and lower_mir_into ?(arguments = []) st (expression_mir : Mir.Graph.t) (destinat
   st.frame <- caller
 
 and lower_call_into ?failure st (call : Mir.call) destination ~origin =
-  match (resolve_callee st call.callee, call.callee) with
+  match (resolve_callee st call.callee, call.callee.target) with
   | Some (path, instantiation), _ -> (
       let signature, substitution = read_callee_signature st path instantiation in
       let arguments, mask = evaluate_arguments st signature substitution call.arguments in
@@ -1706,14 +1706,16 @@ and check_requires st ~path ~instantiation arguments ~origin ~failure =
 
 and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
   let checks_index =
-    forwards = 0 && Mir.is_index_call call.callee
+    forwards = 0
+    && Mir.is_index_call call.callee.target
     &&
     match resolve_callee st call.callee with
     | Some (path, _) -> Option.is_some (find_checked_requires st path)
     | None -> false
   in
   match
-    (call.callee, if forwards < 8 && not checks_index then find_forwarded_call st call else None)
+    ( call.callee.target,
+      if forwards < 8 && not checks_index then find_forwarded_call st call else None )
   with
   | Intrinsic { operation; type_arguments }, _ ->
       Hashtbl.replace (require_mir_frame st).placed_parts part ();
@@ -1771,7 +1773,7 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
         end
       in
       let place =
-        match (resolve_callee st callee, callee) with
+        match (resolve_callee st call.callee, callee) with
         | Some (path, instantiation), _ ->
             let signature, substitution = read_callee_signature st path instantiation in
             let arguments, mask = evaluate_arguments st signature substitution call.arguments in
@@ -2104,7 +2106,7 @@ and lower_for_each st ~(schedule : Lowering.schedule) ~(iteration : Mir.iteratio
   match iteration with
   | Range { start = low; stop = high; inclusive } ->
       lower_range_loop st ~schedule ~low ~high ~inclusive ~each
-  | Pull { cursor; next; uses = _ } ->
+  | Pull { cursor; next } ->
       let cursor = lower_place st cursor in
       Targets.pull_loop st ~option:(compute_result_type st next)
         ~call_next:(fun destination -> lower_call_with_places st next [ cursor ] ~destination)

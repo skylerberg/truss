@@ -677,7 +677,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
   | Lend { part; call = called } -> (
       let is_loop_element = List.mem part builder.loop_elements in
       let selects_element (receiver : Mir.operand) =
-        match called.callee with
+        match called.callee.target with
         | Trait_method { trait; name = "at"; self_type; _ } ->
             (Well_known.is Index trait.trait || Well_known.is Index_mut trait.trait)
             && Place.is_storage_type self_type
