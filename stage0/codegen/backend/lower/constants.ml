@@ -234,7 +234,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
     | None -> Some ()
   in
   let fold_call (destination : Mir.place option) (called : Mir.call) =
-    match (called.callee, called.arguments) with
+    match (called.callee.target, called.arguments) with
     | Intrinsic { operation = Buffer Storage_with_capacity; type_arguments = [ Type element ] }, _
       ->
         assign destination

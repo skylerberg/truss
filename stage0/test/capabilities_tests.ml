@@ -776,7 +776,7 @@ let () =
           (fun (node : Core.expression) ->
             match (node.kind, node.type_) with
             | Lambda _, Function { uses; _ } -> Some (Types.terminates uses)
-            | Call { callee = Function { path; _ }; uses; _ }, _
+            | Call { callee = { target = Function { path; _ }; uses }; _ }, _
               when Path.equal path (Support.make_top_path "app::main" "apply") ->
                 Some (Types.terminates uses)
             | _ -> None)
@@ -1099,3 +1099,23 @@ let () =
           "This call may not terminate, since `step` terminates only if `Inner`'s `impl` of \
            `Ticker.tick` does, and this function has a `time` clause. A `time` clause follows \
            `Inner.tick` where its bound names `time(Inner.tick)`.")
+
+let () =
+  let spawning = Fixtures.Infer.tally ^ Fixtures.Capabilities.spawning_cursor in
+  Harness.test
+    "a monitor needs `Tasks` where its body uses `Tasks` through the `next` of a cursor, pulled by \
+     a loop or called" (fun () ->
+      expect_one_diagnostic
+        (spawning
+       ^ Fixtures.Capabilities.spawning_cursor_pulled_under_a_tally_provided_without_tasks)
+        "capabilities.monitor_needs_tasks" ~at:("mut tally {", 1);
+      expect_one_diagnostic
+        (spawning
+       ^ Fixtures.Capabilities.next_of_a_spawning_cursor_called_under_a_tally_provided_without_tasks
+        )
+        "capabilities.monitor_needs_tasks" ~at:("mut tally {", 1));
+  Harness.test
+    "a monitor that is provided with `Tasks` holds a cursor whose `next` uses `Tasks`, pulled by a \
+     loop or called" (fun () ->
+      expect_fine
+        (spawning ^ Fixtures.Capabilities.spawning_cursor_under_a_tally_provided_with_tasks))

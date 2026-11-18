@@ -35,7 +35,8 @@ and show_expression (node : Core.expression) =
   | Integer number -> Z.to_string number
   | Use place -> "use " ^ show_access_path place
   | Slice { base; callee; bounds } ->
-      Printf.sprintf "slice %s(%s)" (Core_lint.show_callee callee)
+      Printf.sprintf "slice %s(%s)"
+        (Core_lint.show_target callee.target)
         (list show_argument (Passed { mode = Read; value = Place base } :: bounds))
   | Operator { operation; arguments } ->
       Printf.sprintf "%s(%s)"
@@ -43,7 +44,7 @@ and show_expression (node : Core.expression) =
         (list show_expression arguments)
   | Call { callee; arguments; _ } ->
       let dispatch =
-        match callee with
+        match callee.target with
         | Trait_method { self_type; evidence; _ } ->
             Printf.sprintf " for %s by %s" (Types.show self_type)
               (match evidence with
@@ -52,8 +53,9 @@ and show_expression (node : Core.expression) =
               | Dynamic -> "any")
         | _ -> ""
       in
-      Printf.sprintf "%s%s(%s)" (Core_lint.show_callee callee) dispatch
-        (list show_argument arguments)
+      Printf.sprintf "%s%s(%s)"
+        (Core_lint.show_target callee.target)
+        dispatch (list show_argument arguments)
   | _ -> "a value of the type " ^ Types.show node.type_
 
 and show_operand (value : Core.operand) =
@@ -149,7 +151,7 @@ let () =
     (fun form ->
       List.filter_map
         (fun (call : Core.call) ->
-          if Core_lint.show_callee call.callee = "app::main::clear" then
+          if Core_lint.show_target call.callee.target = "app::main::clear" then
             Some (String.concat ", " (List.map show_argument call.arguments))
           else None)
         (list_calls form))
@@ -206,7 +208,7 @@ let () =
   let list_granted form =
     List.concat_map
       (fun (call : Core.call) ->
-        match call.callee with
+        match call.callee.target with
         | Function { path; instantiation }
           when Path.equal path (Support.make_top_path "app::main" "apply") ->
             List.concat_map
@@ -241,7 +243,7 @@ let () =
                     expression =
                       (fun (node : Core.expression) ->
                         match node.kind with
-                        | Call { callee = Function { path; _ }; uses; _ }
+                        | Call { callee = { target = Function { path; _ }; uses }; _ }
                           when Path.equal path (Support.make_top_path "app::main" "apply") ->
                             actual := ("needs " ^ Types.show_capabilities uses) :: !actual
                         | Lambda _ -> actual := Types.show node.type_ :: !actual
@@ -324,7 +326,7 @@ let () =
               | Power -> "power"
               | Callback_cost metric -> Metric.show metric
               | Calls -> "calls")
-        | Call call -> Some ("call " ^ Core_lint.show_callee call.callee)
+        | Call call -> Some ("call " ^ Core_lint.show_target call.callee.target)
         | _ -> None)
       (list_expressions form)
   in
@@ -364,10 +366,10 @@ let () =
         | Method_cost { metric; method_ = Trait_method { self_type; evidence; _ } as method_ } ->
             Some
               (Printf.sprintf "%s(%s) for %s by %s" (Metric.show metric)
-                 (Core_lint.show_callee method_) (Types.show self_type)
+                 (Core_lint.show_target method_) (Types.show self_type)
                  (match evidence with Bound -> "a bound" | Impl _ -> "an impl" | Dynamic -> "any"))
         | Method_cost { metric; method_ } ->
-            Some (Printf.sprintf "%s(%s)" (Metric.show metric) (Core_lint.show_callee method_))
+            Some (Printf.sprintf "%s(%s)" (Metric.show metric) (Core_lint.show_target method_))
         | _ -> None)
       (list_expressions form)
   in
@@ -598,4 +600,61 @@ let () =
       "first: Pair, trait parameter 0";
       "second: Pair, trait parameter 1";
       "app::main::only_equal(place first, place second)";
+    ]
+
+let () =
+  let show_callee (callee : Core.callee) =
+    Printf.sprintf "%s uses [%s]"
+      (Core_lint.show_target callee.target)
+      (String.concat ", " (list_capabilities callee.uses))
+  in
+  let text = Fixtures.Core.slice_match_on_a_constant_and_loop_over_a_ticking_countdown in
+  expect
+    "a slice, a pattern that compares with a constant, and a loop over a cursor each hold their \
+     callee with the capability set that the callee gives"
+    text
+    (fun form ->
+      let held = ref [] in
+      Core_walk.walk_definition
+        {
+          Core_walk.ignore_all with
+          expression =
+            (fun node ->
+              match node.kind with
+              | Slice { callee; _ } -> held := ("a slice holds " ^ show_callee callee) :: !held
+              | _ -> ());
+          statement =
+            (fun node ->
+              match node.kind with
+              | For { iteration = Cursor { next; _ }; _ } ->
+                  held := ("a loop holds " ^ show_callee next) :: !held
+              | _ -> ());
+          pattern =
+            (fun node ->
+              match node.kind with
+              | Equal_to { equal; _ } -> held := ("a pattern holds " ^ show_callee equal) :: !held
+              | _ -> ());
+        }
+        form.definition;
+      List.rev !held)
+    [
+      "a loop holds standard::core::Cursor.next uses [app::main::Meter, may not terminate]";
+      "a slice holds standard::list::List.slice_from uses []";
+      "a pattern holds standard::core::Equal.equal uses []";
+    ];
+  expect "the walker hands every callee that a body invokes to its callee hook" text
+    (fun form ->
+      let invoked = ref [] in
+      Core_walk.walk_definition
+        {
+          Core_walk.ignore_all with
+          callee = (fun callee -> invoked := show_callee callee :: !invoked);
+        }
+        form.definition;
+      List.rev !invoked)
+    [
+      "standard::core::Cursor.next uses [app::main::Meter, may not terminate]";
+      "standard::list::List.slice_from uses []";
+      "standard::core::Equal.equal uses []";
+      "standard::list::Slice.length uses []";
     ]

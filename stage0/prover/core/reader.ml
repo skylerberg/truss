@@ -22,8 +22,8 @@ let make_unit_callee : _ Core.target -> Invocation.callee = function
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
   | Indirect _ -> Indirect ()
 
-let make_invocation (call : Mir.call) ~lends : Invocation.t =
-  { callee = make_unit_callee call.callee; lends; uses = call.uses }
+let make_invocation (callee : Mir.callee) ~lends : Invocation.t =
+  { callee = make_unit_callee callee.target; lends; uses = callee.uses }
 
 let find_declared_fields context ty variant =
   match Facts.find_visible_type context ty with
@@ -466,7 +466,7 @@ let evaluate_call_values context frame run (invocation : Invocation.t)
           arguments))
 
 let read_call context frame run (call : Mir.call) ~result_type =
-  let invocation = make_invocation call ~lends:None in
+  let invocation = make_invocation call.callee ~lends:None in
   match (invocation.callee, call.arguments) with
   | ( Trait_method { trait; name = "equal"; _ },
       [
@@ -484,7 +484,7 @@ let read_call context frame run (call : Mir.call) ~result_type =
             text )
   | _ ->
       let through =
-        match call.callee with
+        match call.callee.target with
         | Indirect callee ->
             Some
               ( compute_operand_type context frame callee,
@@ -500,7 +500,7 @@ let read_call context frame run (call : Mir.call) ~result_type =
 
 let read_lend context (frame : State.frame) run part (call : Mir.call) =
   let mode = match run.infos.(part).kind with Lent mode -> mode | _ -> Types.Read in
-  let invocation = make_invocation call ~lends:(Some mode) in
+  let invocation = make_invocation call.callee ~lends:(Some mode) in
   let site : Invocation.site = { origin = call.origin; type_ = run.infos.(part).type_ } in
   let location = Facts.locate context frame.source call.origin in
   let values = evaluate_call_values context frame run invocation call.arguments in
@@ -1149,12 +1149,12 @@ and read_statement context frame run (statement : Mir.statement) =
         | Range { start; stop; inclusive } ->
             Loops.Over_range
               { low = translate_operand start; high = translate_operand stop; inclusive }
-        | Pull { cursor; next; uses } ->
+        | Pull { cursor; next } ->
             Over_cursor
               {
                 cursor = make_passed_place context run cursor;
                 cursor_type = compute_place_type context frame run cursor;
-                next = { callee = make_unit_callee next; lends = None; uses };
+                next = make_invocation next ~lends:None;
               }
       in
       let for_loop =
@@ -1341,7 +1341,9 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       Some frame
   | Slice { destination; base; base_type; call } ->
       let values =
-        evaluate_call_values context frame run (make_invocation call ~lends:None) call.arguments
+        evaluate_call_values context frame run
+          (make_invocation call.callee ~lends:None)
+          call.arguments
       in
       let find_argument position =
         Option.map
@@ -1355,7 +1357,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       let base_type = Facts.substitute_type context frame base_type in
       let collection = read_place context frame run base in
       let is_checked =
-        match call.callee with
+        match call.callee.target with
         | Function { path; _ } ->
             Option.is_some (Mir.find_checked_requires context.lookups.mir path)
         | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
@@ -1381,7 +1383,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
             }
         | _ -> written)
   | Template { destination; literals; call } -> (
-      match (call.callee, call.arguments) with
+      match (call.callee.target, call.arguments) with
       | Trait_method { trait; name; receiver; evidence; _ }, [ Passed { value = template; _ } ] ->
           let frame, tagged =
             Values.apply_template context frame

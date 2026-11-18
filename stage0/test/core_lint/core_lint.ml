@@ -2,7 +2,7 @@ module Local_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Core.local
 end))
 
-let show_callee : Core.callee -> string = function
+let show_target : Core.operand Core.target -> string = function
   | Function { path; _ } -> Path.show path
   | Trait_method { trait; name; _ } -> Path.show trait.trait ^ "." ^ name
   | Capability_method { capability; name } -> Path.show capability ^ "." ^ name
@@ -82,8 +82,8 @@ let make_capability_substitution context (signature : Types.signature) arguments
       (String.concat ", " parameters);
   Types.make_capability_substitution signature.capability_parameters arguments
 
-let instantiate context (callee : Core.callee) =
-  let subject = "a call of `" ^ show_callee callee ^ "`" in
+let instantiate context (target : Core.operand Core.target) =
+  let subject = "a call of `" ^ show_target target ^ "`" in
   let of_signature ?(has_receiver = true) substitution (signature : Types.signature) =
     let signature = Types.substitute_signature substitution signature in
     let receiver =
@@ -96,7 +96,7 @@ let instantiate context (callee : Core.callee) =
         @ List.map (fun (parameter : Types.parameter_info) -> parameter.type_) signature.parameters,
         signature.output )
   in
-  match callee with
+  match target with
   | Function { path; instantiation } -> (
       match Interface.Impls.read_signature context.interface path with
       | Some signature ->
@@ -136,8 +136,8 @@ let instantiate context (callee : Core.callee) =
       | _ -> None)
 
 let check_call_types context (node : Core.expression) (call : Core.call) =
-  let callee = show_callee call.callee in
-  match instantiate context call.callee with
+  let callee = show_target call.callee.target in
+  match instantiate context call.callee.target with
   | None -> ()
   | Some (parameters, output) ->
       if List.length parameters = List.length call.arguments then
@@ -315,7 +315,7 @@ let is_executable context (condition : Core.expression) =
          | Quantified { binder = Over_type _; _ }
          | Old _ | Result | Specification_function _ | Method_cost _ ->
              true
-         | Call { callee = Function { path; _ }; _ } -> (
+         | Call { callee = { target = Function { path; _ }; _ }; _ } -> (
              match Interface.Impls.read_signature context.interface path with
              | Some signature -> signature.specification_only
              | None -> false)
@@ -346,7 +346,7 @@ let check_semantics context (form : Core.t) =
              match node.kind with
              | Call call -> (
                  check_call_types context node call;
-                 match call.callee with
+                 match call.callee.target with
                  | Trait_method { trait; self_type; _ }
                    when List.exists
                           (fun known -> Well_known.is known trait.trait)
@@ -354,14 +354,14 @@ let check_semantics context (form : Core.t) =
                         && Option.is_some (Types.find_builtin self_type) ->
                      context.report
                        "an arithmetic operator on `%s` is a call of `%s`, not an Operator"
-                       (Types.show self_type) (show_callee call.callee)
+                       (Types.show self_type) (show_target call.callee.target)
                  | Trait_method { self_type = Any _; evidence = Impl _ | Bound; _ } ->
                      context.report "a call of `%s` on an `any` value is not dynamic"
-                       (show_callee call.callee)
+                       (show_target call.callee.target)
                  | Trait_method { self_type; evidence = Dynamic; _ }
                    when match self_type with Any _ -> false | _ -> true ->
-                     context.report "a call of `%s` on `%s` is dynamic" (show_callee call.callee)
-                       (Types.show self_type)
+                     context.report "a call of `%s` on `%s` is dynamic"
+                       (show_target call.callee.target) (Types.show self_type)
                  | _ -> ())
              | To_any { evidence = Dynamic; _ } ->
                  context.report "a conversion to `any` has dynamic evidence"
@@ -377,7 +377,7 @@ let check_semantics context (form : Core.t) =
                       function's"
                      (List.length captures) (List.length free)
              | Slice { callee; bounds; _ } ->
-                 let name = show_callee callee in
+                 let name = show_target callee.target in
                  let ends suffix =
                    String.length name >= String.length suffix
                    && String.sub name
@@ -536,8 +536,8 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
       (fun (_, argument) -> check_capabilities (subject ^ "'s capability argument") argument)
       instantiation.capability_arguments
   in
-  let check_callee (callee : Core.callee) =
-    match callee with
+  let check_target (target : Core.operand Core.target) =
+    match target with
     | Function { instantiation; _ } -> check_instantiation "a call" instantiation
     | Trait_method { trait = reference; self_type; instantiation; evidence; _ } -> (
         check_trait "a call's trait" reference;
@@ -553,7 +553,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         List.iter (check_argument "an intrinsic's type argument") type_arguments
     | Capability_method _ | Indirect _ -> ()
   in
-  let find_callee_parameters (callee : Core.callee) : (Types.mode * bool) list option =
+  let find_parameters (target : Core.operand Core.target) : (Types.mode * bool) list option =
     let of_signature ~has_receiver (signature : Types.signature) =
       let receiver =
         match signature.receiver with
@@ -568,7 +568,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
           (fun (parameter : Types.parameter_info) -> (parameter.mode, parameter.has_default))
           signature.parameters
     in
-    match callee with
+    match target with
     | Function { path; _ } ->
         Option.map (of_signature ~has_receiver:true) (Interface.Impls.read_signature interface path)
     | Trait_method { trait = reference; name; receiver; _ } ->
@@ -591,8 +591,8 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         | _ -> None)
   in
   let check_arguments_fit (call : Core.call) =
-    let callee = show_callee call.callee in
-    match find_callee_parameters call.callee with
+    let callee = show_target call.callee.target in
+    match find_parameters call.callee.target with
     | None -> report "a call of `%s` has a callee with no signature" callee
     | Some parameters when List.length parameters <> List.length call.arguments ->
         report "a call of `%s` has %d arguments for %d parameters" callee
@@ -720,15 +720,13 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                          report "a construct that no `Yield` lends has a field that is a place"
                      | _ -> ())
                    fields
-             | Slice { base; callee = sliced; bounds } ->
+             | Slice { base; callee; bounds } ->
                  check_place base;
-                 check_callee sliced;
                  check_arguments_fit
                    {
-                     callee = sliced;
+                     callee;
                      arguments = Passed { mode = Read; value = Place base } :: bounds;
                      lends = None;
-                     uses = Types.no_capabilities;
                    }
              | Matches { value; pattern } -> check_binds_own "an `is`" value pattern
              | Match { scrutinees; arms; _ } ->
@@ -741,7 +739,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
              | Function_value { instantiation; _ } ->
                  check_instantiation "a function value" instantiation
              | Value_parameter named -> check_parameter "a value" named
-             | Method_cost { method_; _ } -> check_callee method_
+             | Method_cost { method_; _ } -> check_target method_
              | Lambda { result; captures; _ } ->
                  check_type "a lambda's result" result;
                  List.iter
@@ -760,9 +758,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
              | Current_target -> incr current_targets
              | Call call ->
                  check_arguments_fit call;
-                 check_callee call.callee;
-                 check_capabilities "a call's `uses`" call.uses;
-                 (match call.callee with
+                 (match call.callee.target with
                  | Indirect function_value -> check_operand function_value
                  | _ -> ());
                  List.iter
@@ -780,7 +776,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                          report
                            "a read-only parameter of `%s` receives a `Use`, which moves or copies \
                             the place"
-                           (show_callee call.callee)
+                           (show_target call.callee.target)
                      | Passed { value; _ } -> check_operand value
                      | Default -> ())
                    call.arguments
@@ -811,9 +807,8 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  | Bind { is_var = true; _ }, Place _ ->
                      report "a `let` that binds a mutable local receives a place"
                  | _ -> ())
-             | For { iteration = Cursor { cursor; uses; _ }; _ } ->
-                 check_mutable_place "a `for` loop" cursor;
-                 check_capabilities "a pulled `next`'s `uses`" uses
+             | For { iteration = Cursor { cursor; _ }; _ } ->
+                 check_mutable_place "a `for` loop" cursor
              | For { iteration = Elements { count; position; element }; _ } -> (
                  (match count.kind with
                  | Call _ -> ()
@@ -836,7 +831,10 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  if List.exists (fun alternative -> list_bound alternative <> expected) rest then
                    report "the alternatives of a pattern do not bind the same locals"
              | _ -> ());
-         callee = check_callee;
+         callee =
+           (fun callee ->
+             check_target callee.target;
+             check_capabilities "a callee's `uses`" callee.uses);
          place = ignore;
        })
     form.definition;

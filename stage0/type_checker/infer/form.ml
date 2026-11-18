@@ -14,7 +14,7 @@ let convert_evidence : Tables.evidence -> Core.evidence = function
   | Dynamic -> Dynamic
   | Built_in -> State.raise_bug "a built-in method has no core evidence"
 
-let convert_callee (callee : Tables.callee) : Core.callee =
+let convert_callee (callee : Tables.callee) : Core.operand Core.target =
   match callee with
   | Function { path; instantiation } -> Function { path; instantiation }
   | Trait_method { trait; name; receiver; self_type; instantiation; evidence = inferred } ->
@@ -319,7 +319,7 @@ let build_provide state (implementations : Syntax.expression list) (body : Synta
   in
   Provide { implementations; body = State.build_block state body }
 
-let build_text_builder_callee name receiver : Core.callee =
+let build_text_builder_callee name receiver : Core.operand Core.target =
   Function
     {
       path = Method { owner = Well_known.make_path Text_builder; name; receiver };
@@ -539,15 +539,16 @@ let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant
           {
             value;
             equal =
-              Trait_method
-                {
-                  trait = equal;
-                  name = "equal";
-                  receiver = Read;
-                  self_type = type_;
-                  instantiation = Types.no_instantiation;
-                  evidence = convert_evidence (State.convert_evidence implementation);
-                };
+              State.make_callee state
+                (Trait_method
+                   {
+                     trait = equal;
+                     name = "equal";
+                     receiver = Read;
+                     self_type = type_;
+                     instantiation = Types.no_instantiation;
+                     evidence = convert_evidence (State.convert_evidence implementation);
+                   });
           }
     | None ->
         State.raise_bug "a pattern compares values of `%s`, which does not implement `Equal`"
@@ -691,7 +692,7 @@ let binds_lent_part state (condition : Core.expression) =
 let is_executable state (condition : Core.expression) =
   let executable = ref true in
   let is_specification_only (callee : Core.callee) =
-    match callee with
+    match callee.target with
     | Function { path; _ } -> (
         match Instantiation.find_function_signature state path with
         | Some signature -> signature.specification_only
@@ -715,8 +716,8 @@ let is_executable state (condition : Core.expression) =
           | Result | Old _ | Yielded | Identical _ | Specification_function _ | Method_cost _
           | Convert { conversion = To_integer | From_integer; _ } ->
               executable := false
-          | Call { callee; _ } -> if is_specification_only callee then executable := false
           | _ -> ());
+      callee = (fun callee -> if is_specification_only callee then executable := false);
     }
     condition;
   !executable
@@ -902,15 +903,16 @@ let build_cursor_next state (cursor : Types.ty) : Core.callee =
   let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
   match State.find_evidence state cursor trait with
   | Some implementation ->
-      Trait_method
-        {
-          trait;
-          name = "next";
-          receiver = Mut;
-          self_type = cursor;
-          instantiation = Types.no_instantiation;
-          evidence = convert_evidence (State.convert_evidence implementation);
-        }
+      State.make_callee state
+        (Trait_method
+           {
+             trait;
+             name = "next";
+             receiver = Mut;
+             self_type = cursor;
+             instantiation = Types.no_instantiation;
+             evidence = convert_evidence (State.convert_evidence implementation);
+           })
   | None ->
       State.raise_bug "a loop iterates over `%s`, which does not implement `Cursor`"
         (Types.show cursor)
@@ -968,7 +970,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
         For
           {
             pattern;
-            iteration = Cursor { cursor = place; next; uses = State.compute_callee_uses state next };
+            iteration = Cursor { cursor = place; next };
             clauses = clauses @ Option.to_list measure;
             body;
             mode;

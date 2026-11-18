@@ -1,0 +1,12 @@
+fn f() {
+  var tally = Tally(count: 0)
+  let scheduler = Scheduler(turn: 0)
+  var cursor = Spawning(left: 2)
+  provide mut tally {
+    provide scheduler {
+      for value in cursor {
+        let _ = value
+      }
+    }
+  }
+}

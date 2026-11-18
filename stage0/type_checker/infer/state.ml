@@ -564,8 +564,11 @@ let resolve_associated_type state type_ (trait : Types.trait_reference) name
         (Printf.sprintf "`%s` gives no `%s` as a `%s`." (Types.show type_) name
            (Types.show_trait trait))
 
-let compute_callee_uses state (callee : Core.callee) =
-  Callee_uses.compute state.lookups.interface ~list_bounds:(lookup_bounds state) callee
+let compute_callee_uses state (target : Core.operand Core.target) =
+  Callee_uses.compute state.lookups.interface ~list_bounds:(lookup_bounds state) target
+
+let make_callee state (target : Core.operand Core.target) =
+  Callee_uses.make_callee state.lookups.interface ~list_bounds:(lookup_bounds state) target
 
 let make_call state ~callee ~arguments ~lends =
   Callee_uses.make_call state.lookups.interface ~list_bounds:(lookup_bounds state) ~callee
@@ -1164,18 +1167,20 @@ let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
     | Types.Named { path; arguments } -> (path, arguments)
     | type_ -> raise_bug "a slice of `%s`" (Types.show type_)
   in
-  let make_callee name : Core.callee =
-    Function
-      {
-        path = Method { owner = path; name; receiver = Read };
-        instantiation = { Types.no_instantiation with type_arguments };
-      }
+  let make_method_callee name =
+    make_callee state
+      (Function
+         {
+           path = Method { owner = path; name; receiver = Read };
+           instantiation = { Types.no_instantiation with type_arguments };
+         })
   in
   let build_read_argument = Operands.build_argument Read in
   let start = match start with Some start -> start | None -> make uint64 (Integer Z.zero) in
   match stop with
   | None ->
-      Slice { base; callee = make_callee "slice_from"; bounds = [ build_read_argument start ] }
+      Slice
+        { base; callee = make_method_callee "slice_from"; bounds = [ build_read_argument start ] }
   | Some stop ->
       let stop =
         if inclusive then
@@ -1186,7 +1191,7 @@ let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
       Slice
         {
           base;
-          callee = make_callee "slice_range";
+          callee = make_method_callee "slice_range";
           bounds = [ build_read_argument start; build_read_argument stop ];
         }
 

@@ -9,14 +9,6 @@ type visit = {
 let ignore_all =
   { expression = ignore; statement = ignore; pattern = ignore; callee = ignore; place = ignore }
 
-let make_callee_visitor on_callee =
-  {
-    ignore_all with
-    expression =
-      (fun node -> match node.kind with Call { callee; _ } -> on_callee callee | _ -> ());
-    callee = on_callee;
-  }
-
 let compute_place_type : Core.place -> Types.ty = function
   | Local { type_; _ } | Constant { type_; _ } | Field { type_; _ } -> type_
   | Lent value | Temporary value -> value.type_
@@ -81,12 +73,13 @@ let walk_expression_children visit (node : Core.expression) =
         (function Core.Passed { value; _ } -> walk_operand visit value | Default -> ())
         bounds
   | Call call ->
-      (match call.callee with
+      (match call.callee.target with
       | Indirect function_value -> walk_operand visit function_value
       | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> ());
       List.iter
         (function Core.Passed { value; _ } -> walk_operand visit value | Default -> ())
-        call.arguments
+        call.arguments;
+      visit.callee call.callee
   | Operator { arguments; _ } | Specification_function { arguments; _ } ->
       List.iter visit.expression arguments
   | Compare { left; right; _ }
@@ -134,6 +127,18 @@ let walk_expression_children visit (node : Core.expression) =
           visit.pattern pattern);
       visit.expression body
 
+let walk_iteration visit : Core.iteration -> unit = function
+  | Integer_range { start; stop; _ } ->
+      visit.expression start;
+      visit.expression stop
+  | Elements { count; position; element } ->
+      visit.expression count;
+      visit.pattern position;
+      walk_place visit element
+  | Cursor { cursor; next } ->
+      walk_place visit cursor;
+      visit.callee next
+
 let walk_statement_children visit (node : Core.statement) =
   match node.kind with
   | Let { pattern; value; else_ } ->
@@ -149,17 +154,7 @@ let walk_statement_children visit (node : Core.statement) =
       walk_place visit target;
       visit.expression value
   | For { pattern; iteration; clauses; body; _ } ->
-      (match iteration with
-      | Integer_range { start; stop; _ } ->
-          visit.expression start;
-          visit.expression stop
-      | Elements { count; position; element } ->
-          visit.expression count;
-          visit.pattern position;
-          walk_place visit element
-      | Cursor { cursor; next; uses = _ } ->
-          walk_place visit cursor;
-          visit.callee next);
+      walk_iteration visit iteration;
       visit.pattern pattern;
       List.iter (walk_loop_clause visit) clauses;
       walk_block visit body
@@ -305,11 +300,7 @@ let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Ty
     (make_deep_visitor
        {
          ignore_all with
-         expression =
-           (fun node ->
-             match node.kind with
-             | Call call -> List.iter mark_used (call.uses :> Types.capability list)
-             | _ -> ());
+         callee = (fun callee -> List.iter mark_used (callee.uses :> Types.capability list));
          statement =
            (fun node ->
              match node.kind with

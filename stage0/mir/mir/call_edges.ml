@@ -100,7 +100,8 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
   let add paths = callees := List.rev_append paths !callees in
   let add_impl_uses impls = add (List.concat_map (list_impl_methods lookups.interface) impls) in
   let list_package_impls_for = list_impls_for lookups.interface package in
-  let add_callee (called : Tree.callee) =
+  let add_callee (callee : Tree.callee) =
+    let called = callee.target in
     match called with
     | Function { path; _ } ->
         add [ path ];
@@ -140,19 +141,15 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
       true)
   in
   let rec visit_statement (statement : Tree.statement) =
+    Option.iter add_callee (Walk.find_callee statement);
     match statement.kind with
     | Basic (Call { call; _ } | Lend { call; _ }) ->
-        add_callee call.callee;
         add_invariant_check call;
         add_index_requires_check call
-    | Basic (Template { call; _ }) ->
-        add_callee call.callee;
-        add_invariant_check call
+    | Basic (Template { call; _ }) -> add_invariant_check call
     | Basic (Slice { call; _ }) -> (
-        add_callee call.callee;
         add_invariant_check call;
-        match call.callee with Function { path; _ } -> add_requires_check path | _ -> ())
-    | For { iteration = Pull { next; _ }; _ } -> add_callee next
+        match call.callee.target with Function { path; _ } -> add_requires_check path | _ -> ())
     | Basic (Assign { value = Function_value { path; _ }; _ }) -> add [ path ]
     | Basic (Assign { value = To_any { value; trait; _ }; _ }) ->
         add_impl_uses
@@ -187,7 +184,7 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
             }
         | Live _ | Dead _ | Assert _ | Echo _ | Provide_end | Loan_start _ | Loan_end _
         | Ghost_assert _ | Matched _ | Proof _ )
-    | For { iteration = Range _; _ }
+    | For _
     | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
     | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Resume _ | Yield _ ->
         ()
@@ -203,9 +200,9 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
           defaults
     | Some { form = Parameter_defaults _; _ } | None -> ()
   and add_index_requires_check (call : Tree.call) =
-    match call.callee with
+    match call.callee.target with
     | Trait_method { evidence = Impl { impl; _ }; name; receiver; _ }
-      when Parts.is_index_call call.callee ->
+      when Parts.is_index_call call.callee.target ->
         add_requires_check (Path.Method { owner = impl; name; receiver })
     | _ -> ()
   and add_requires_check path =
@@ -218,7 +215,7 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
             requires)
         (Parts.find_checked_requires lookups.mir path)
   and add_invariant_check (call : Tree.call) =
-    match (call.callee, call.arguments) with
+    match (call.callee.target, call.arguments) with
     | ( Intrinsic { operation = Runtime Holds_invariant; type_arguments = [ Type checked ] },
         [ _; Passed { value = Constant { value = Integer index; _ }; _ } ] ) -> (
         match

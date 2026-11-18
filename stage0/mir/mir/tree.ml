@@ -24,7 +24,7 @@ type operand =
   | Take of { place : place; type_ : Types.ty; origin : Core.origin }
   | Constant of { value : constant; type_ : Types.ty }
 
-type callee = operand Core.target
+type callee = { target : operand Core.target; uses : Types.capability_set }
 
 type function_argument =
   | Function_reference of { path : Path.t; origin : Core.origin }
@@ -34,14 +34,7 @@ type argument =
   | Passed of { mode : Types.mode; value : operand; function_ : function_argument option }
   | Default
 
-type call = {
-  callee : callee;
-  arguments : argument list;
-  uses : Types.capability_set;
-  node : Core.id;
-  origin : Core.origin;
-}
-
+type call = { callee : callee; arguments : argument list; node : Core.id; origin : Core.origin }
 type capture = { local : Core.local; type_ : Types.ty; place : place }
 
 type yielded =
@@ -61,7 +54,7 @@ type task = Branch of { block : Core.origin; index : int } | Iteration of { loop
 
 type iteration =
   | Range of { start : operand; stop : operand; inclusive : bool }
-  | Pull of { cursor : place; next : callee; uses : Types.capability_set }
+  | Pull of { cursor : place; next : callee }
 
 type connective = And | Or | Implies
 
@@ -113,7 +106,7 @@ and specification =
       arguments : operand list;
       unconverted : Types.ty list;
     }
-  | Method_cost of { metric : Metric.t; method_ : callee }
+  | Method_cost of { metric : Metric.t; method_ : operand Core.target }
   | Map of (operand * operand) list
   | Quantified of {
       quantifier : Core.quantifier;

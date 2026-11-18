@@ -1,6 +1,7 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
 
-let instantiate (interface : Interface.Lookups.t) (callee : Core.callee) : Types.capability_set =
+let instantiate (interface : Interface.Lookups.t) (target : Core.operand Core.target) :
+    Types.capability_set =
   let read_method_divergence ~owner ~name ~receiver =
     match Interface.Definition.find_trait_method interface owner ~name ~receiver with
     | Some method_ ->
@@ -8,7 +9,7 @@ let instantiate (interface : Interface.Lookups.t) (callee : Core.callee) : Types
           (Interface.Definition.read_method_signature interface ~owner method_).uses
     | None -> raise_bug "`%s` has no method `%s`" (Path.show owner) name
   in
-  match callee with
+  match target with
   | Function { path; instantiation } -> (
       let signature =
         match Intrinsic.find_operation path with
@@ -89,9 +90,12 @@ let instantiate (interface : Interface.Lookups.t) (callee : Core.callee) : Types
       | Types.Error _ -> Types.no_capabilities
       | other -> raise_bug "a call through a value of type `%s`" (Types.show other))
 
-let compute (interface : Interface.Lookups.t) ~list_bounds (callee : Core.callee) :
+let compute (interface : Interface.Lookups.t) ~list_bounds (target : Core.operand Core.target) :
     Types.capability_set =
-  Interface.Impls.normalize_capabilities interface ~list_bounds (instantiate interface callee)
+  Interface.Impls.normalize_capabilities interface ~list_bounds (instantiate interface target)
 
-let make_call interface ~list_bounds ~(callee : Core.callee) ~arguments ~lends : Core.call =
-  { callee; arguments; lends; uses = compute interface ~list_bounds callee }
+let make_callee interface ~list_bounds (target : Core.operand Core.target) : Core.callee =
+  { target; uses = compute interface ~list_bounds target }
+
+let make_call interface ~list_bounds ~callee ~arguments ~lends : Core.call =
+  { callee = make_callee interface ~list_bounds callee; arguments; lends }
