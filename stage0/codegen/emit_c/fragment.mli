@@ -28,4 +28,5 @@ val make :
   kind:kind ->
   functions:(string * string) list ->
   definition:string ->
+  references:Lowered.Item.t list ->
   t

@@ -66,6 +66,11 @@ let refer context item =
   if not (List.exists (Lowered.Item.equal item) context.referenced_items) then
     context.referenced_items <- item :: context.referenced_items
 
+let list_referenced_items context ~referrer =
+  List.filter
+    (fun item -> not (Lowered.Item.equal item referrer))
+    (List.rev context.referenced_items)
+
 let use_helper context name =
   if not (List.mem name context.helpers_used) then
     context.helpers_used <- name :: context.helpers_used;
