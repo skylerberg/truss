@@ -294,12 +294,6 @@ let record state (value : Syntax.expression) type_ =
   | Some frame -> frame.recorded_expressions <- value.id :: frame.recorded_expressions
   | None -> ()
 
-let record_loop state ~loop ~(iterable : Syntax.expression) record =
-  state.tables.loops.(loop) <- Some record;
-  match find_current_frame state with
-  | Some frame -> frame.recorded_loops <- (loop, iterable.id) :: frame.recorded_loops
-  | None -> ()
-
 let note_compiled_expression state env (value : Syntax.expression) =
   match find_current_frame state with
   | Some frame when is_compiled env ->
@@ -521,6 +515,51 @@ let solve_trait_arguments state type_ (trait : Types.trait_reference) =
       | _ -> trait)
   | _ -> trait
 
+let read_evidence state type_ trait : Core.evidence =
+  match find_evidence state type_ trait with
+  | Some (From_impl { impl; substitution }) -> Impl { impl; substitution }
+  | Some From_bound -> Bound
+  | Some From_any -> Dynamic
+  | Some (Built_in | Accepted _) | None ->
+      raise_bug "`%s` has no impl of `%s`, and a checked call needs one"
+        (Types.show (normalize state type_))
+        (Types.show_trait trait)
+
+let require_impl state (span : Source.Definition_span.t) self_type (trait : Types.trait_reference) =
+  defer state (fun () ->
+      let self_type = zonk state self_type in
+      let trait = solve_trait_arguments state self_type trait in
+      if
+        Types.contains_unsolved self_type
+        || List.exists Types.is_unsolved_argument trait.trait_arguments
+      then false
+      else begin
+        if Option.is_none (find_evidence state self_type trait) && not (Types.is_error self_type)
+        then
+          report state No_impl span
+            (Printf.sprintf "`%s` does not implement `%s`." (Types.show self_type)
+               (Types.show_trait trait));
+        true
+      end)
+
+let list_loop_calls : Tables.loop -> Tables.call list = function
+  | Elements { count; element; _ } -> [ count; element ]
+  | Pulled { cursor_call; remaining; _ } -> List.filter_map Fun.id [ cursor_call; remaining ]
+  | Integer_range _ -> []
+
+let record_loop state ~loop ~(iterable : Syntax.expression) record =
+  state.tables.loops.(loop) <- Some record;
+  List.iter
+    (fun (call : Tables.call) ->
+      match call.callee with
+      | Trait_method { trait; self_type; _ } ->
+          require_impl state (read_span state iterable.id) self_type trait
+      | _ -> ())
+    (list_loop_calls record);
+  match find_current_frame state with
+  | Some frame -> frame.recorded_loops <- (loop, iterable.id) :: frame.recorded_loops
+  | None -> ()
+
 let decide_property state property type_ =
   Interface.Impls.decide_property property state.lookups.interface
     ~list_bounds:(lookup_bounds state) (zonk state type_)
@@ -570,12 +609,6 @@ let compute_callee_uses state (callee : Core.callee) =
 let make_call state ~callee ~arguments ~lends =
   Callee_uses.make_call state.lookups.interface ~list_bounds:(lookup_bounds state) ~callee
     ~arguments ~lends
-
-let convert_evidence = function
-  | Interface.Impls.From_impl { impl; substitution } -> Tables.Impl { impl; substitution }
-  | Interface.Impls.From_bound -> Tables.Bound
-  | Interface.Impls.From_any -> Tables.Dynamic
-  | Interface.Impls.Built_in | Interface.Impls.Accepted _ -> Tables.Built_in
 
 let make_trait_reference ~arguments trait : Types.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }
@@ -635,23 +668,45 @@ let settle state frame =
     list_types frame.recorded_expressions state.tables.types
     @ list_types frame.bindings state.tables.local_types
   in
+  let list_call_sites () =
+    List.filter_map
+      (fun id ->
+        Option.map
+          (fun call ->
+            ( id,
+              Printf.sprintf
+                "This call does not determine the arguments of `%s`. Write the call in full with \
+                 them.",
+              [ call ] ))
+          state.tables.calls.(id))
+      frame.recorded_expressions
+    @ List.filter_map
+        (fun (loop, iterable) ->
+          Option.map
+            (fun record ->
+              ( iterable,
+                Printf.sprintf
+                  "This loop does not determine the arguments of `%s`, whose methods give its \
+                   elements.",
+                list_loop_calls record ))
+            state.tables.loops.(loop))
+        frame.recorded_loops
+  in
   let list_call_arguments () =
     List.concat_map
-      (fun id ->
-        match state.tables.calls.(id) with
-        | Some { callee = Trait_method { trait; instantiation; _ }; _ } ->
-            trait.trait_arguments @ instantiation.type_arguments
-        | Some
-            {
-              callee =
-                ( Function { instantiation = { type_arguments; _ }; _ }
-                | Constructor { type_arguments; _ }
-                | Intrinsic { type_arguments; _ } );
-              _;
-            } ->
-            type_arguments
-        | _ -> [])
-      frame.recorded_expressions
+      (fun (_, _, calls) ->
+        List.concat_map
+          (fun (call : Tables.call) ->
+            match call.callee with
+            | Trait_method { trait; instantiation; _ } ->
+                trait.trait_arguments @ instantiation.type_arguments
+            | Function { instantiation = { type_arguments; _ }; _ }
+            | Constructor { type_arguments; _ }
+            | Intrinsic { type_arguments; _ } ->
+                type_arguments
+            | Capability_method _ | Indirect | Built_in_operator -> [])
+          calls)
+      (list_call_sites ())
   in
   let list_unknowns () =
     List.concat_map (Unify.list_unknowns state.unifier) (list_all_types ())
@@ -718,47 +773,29 @@ let settle state frame =
           Some trait
       | _ -> None
     in
-    let list_loop_calls : Tables.loop -> Tables.call list = function
-      | Elements { count; element; _ } -> [ count; element ]
-      | Pulled { cursor_call; remaining; _ } -> List.filter_map Fun.id [ cursor_call; remaining ]
-      | Integer_range _ -> []
-    in
     let undetermined =
       List.filter_map
-        (fun id ->
-          Option.bind state.tables.calls.(id) (fun (call : Tables.call) ->
-              Option.map
-                (fun trait ->
-                  ( id,
-                    trait,
-                    Printf.sprintf
-                      "This call does not determine the arguments of `%s`. Write the call in full \
-                       with them." ))
-                (find_undetermined_trait call.callee)))
-        frame.recorded_expressions
-      @ List.filter_map
-          (fun (loop, iterable) ->
-            Option.bind state.tables.loops.(loop) (fun record ->
-                Option.map
-                  (fun trait ->
-                    ( iterable,
-                      trait,
-                      Printf.sprintf
-                        "This loop does not determine the arguments of `%s`, whose methods give \
-                         its elements." ))
-                  (List.find_map
-                     (fun (call : Tables.call) -> find_undetermined_trait call.callee)
-                     (list_loop_calls record))))
-          frame.recorded_loops
+        (fun (id, describe, calls) ->
+          match
+            List.filter_map (fun (call : Tables.call) -> find_undetermined_trait call.callee) calls
+          with
+          | [] -> None
+          | (first : Types.trait_reference) :: _ as traits ->
+              Some
+                ( id,
+                  describe
+                    (match first.trait with Top { name; _ } -> name | path -> Path.show path),
+                  traits ))
+        (list_call_sites ())
     in
     let trait_reports =
       List.map
-        (fun (id, (trait : Types.trait_reference), describe) ->
-          add_diagnostic state Cannot_infer (read_span state id)
-            (describe (match trait.trait with Top { name; _ } -> name | path -> Path.show path)))
+        (fun (id, message, _) -> add_diagnostic state Cannot_infer (read_span state id) message)
         undetermined
     in
-    let explained = List.concat_map (fun (_, trait, _) -> list_trait_unknowns trait) undetermined in
+    let explained =
+      List.concat_map (fun (_, _, traits) -> List.concat_map list_trait_unknowns traits) undetermined
+    in
     let report =
       match trait_reports with
       | first :: _ when List.for_all (fun unknown -> List.mem unknown explained) unsolved -> first

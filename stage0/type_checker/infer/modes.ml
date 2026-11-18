@@ -87,19 +87,12 @@ let rec use_mutable_indexes (state : State.state) ~(report_with : Diagnostic.Cod
             State.make_trait_reference ~arguments:[] (Well_known.make_path Index_mut)
           in
           match State.find_evidence state self_type index_mut with
-          | Some evidence ->
+          | Some _ ->
               state.tables.calls.(value.id) <-
                 Some
                   {
                     call with
-                    callee =
-                      Trait_method
-                        {
-                          method_ with
-                          trait = index_mut;
-                          receiver = Mut;
-                          evidence = State.convert_evidence evidence;
-                        };
+                    callee = Trait_method { method_ with trait = index_mut; receiver = Mut };
                     arguments =
                       List.map
                         (fun (argument : Tables.argument) ->

@@ -22,13 +22,12 @@ let record_conversion (state : State.state) (value : Syntax.expression) (collect
               receiver = Static;
               self_type = collection;
               instantiation = Types.no_instantiation;
-              evidence = Built_in;
             };
         arguments = [];
         omitted_defaults = [];
         callee_result = collection;
       };
-  Name_lookup.resolve_evidence state value collection trait
+  State.require_impl state (State.read_span state value.id) collection trait
 
 let rec check_string_literal state env ?expected (value : Syntax.expression)
     (literal : Syntax.string_literal) =
@@ -57,19 +56,10 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
             }
     | None -> ()
   in
-  let trait_call ?(mode = Types.Read) trait name receiver self_type evidence arguments result :
-      Tables.call =
+  let trait_call ?(mode = Types.Read) trait name receiver self_type arguments result : Tables.call =
     {
       callee =
-        Trait_method
-          {
-            trait;
-            name;
-            receiver;
-            self_type;
-            instantiation = Types.no_instantiation;
-            evidence = State.convert_evidence evidence;
-          };
+        Trait_method { trait; name; receiver; self_type; instantiation = Types.no_instantiation };
       arguments =
         List.mapi
           (fun index (written : Syntax.expression) ->
@@ -93,9 +83,9 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                   State.make_trait_reference ~arguments:[] (Well_known.make_path Display)
                 in
                 (match State.find_evidence state part_type display with
-                | Some evidence ->
+                | Some _ ->
                     set_part index
-                      (trait_call display "display" Path.Read part_type evidence [ part ] Types.unit)
+                      (trait_call display "display" Path.Read part_type [ part ] Types.unit)
                 | None ->
                     State.report state No_impl (State.read_span state part.id)
                       (Printf.sprintf
@@ -143,7 +133,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
               if Types.contains_unsolved tag_type then false
               else begin
                 (match State.find_evidence state tag_type template_trait with
-                | Some evidence ->
+                | Some _ ->
                     (match state.tables.templates.(literal.id) with
                     | Some template ->
                         state.tables.templates.(literal.id) <-
@@ -153,7 +143,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                               from_template =
                                 Some
                                   (trait_call template_trait "from_template" Path.Static tag_type
-                                     evidence [] tag_type);
+                                     [] tag_type);
                             }
                     | None -> ());
                     let part =
@@ -170,9 +160,9 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                               (Well_known.make_path From)
                           in
                           match State.find_evidence state part from with
-                          | Some evidence ->
+                          | Some _ ->
                               set_part index
-                                (trait_call ~mode:Own from "from" Path.Static part evidence
+                                (trait_call ~mode:Own from "from" Path.Static part
                                    [ part_expression ] part)
                           | None ->
                               State.report state No_impl

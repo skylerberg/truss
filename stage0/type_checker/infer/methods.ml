@@ -48,11 +48,6 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
             Named { path = Well_known.make_path Sequence; arguments = [ Types.Type part ] }
           in
           let index = State.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
-          let evidence =
-            match State.find_evidence state parts index with
-            | Some evidence -> Form.convert_evidence (State.convert_evidence evidence)
-            | None -> State.raise_bug "`Sequence` does not implement `Index`"
-          in
           state.tables.resolutions.(value.id) <- Some Specification_value;
           State.register_expression state value (fun () ->
               let make = State.make_synthetic_expression state ~origin:value.id in
@@ -69,7 +64,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
                                receiver = Read;
                                self_type = parts;
                                instantiation = Types.no_instantiation;
-                               evidence;
+                               evidence = State.read_evidence state parts index;
                              })
                         ~arguments:
                           [
@@ -422,7 +417,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
   let reference = { trait with trait_arguments } in
   let instance, callee =
     Name_lookup.instantiate_trait_method state (State.read_span state value.id) ~self_type reference
-      method_ ~evidence:Built_in
+      method_
   in
   let receiver_argument, arguments =
     match instance.signature.receiver with
@@ -457,7 +452,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
             callee_result = result;
           };
       Form.register_call state value;
-      Name_lookup.resolve_evidence state value self_type reference;
+      State.require_impl state (State.read_span state value.id) self_type reference;
       State.normalize state result
 
 and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_arguments
@@ -748,7 +743,6 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
       let instance, callee =
         Name_lookup.instantiate_trait_method state (State.read_span state value.id)
           ~self_type:receiver_type trait method_
-          ~evidence:(match receiver_type with Types.Any _ -> Dynamic | _ -> Built_in)
       in
       match Name_lookup.check_explicit_type_arguments state value instance type_arguments with
       | Error error -> Calls.check_arguments_alone state env arguments error
@@ -777,5 +771,5 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                     callee_result = result;
                   };
               Form.register_call state value;
-              Name_lookup.resolve_evidence state value receiver_type trait;
+              State.require_impl state (State.read_span state value.id) receiver_type trait;
               State.normalize state result))

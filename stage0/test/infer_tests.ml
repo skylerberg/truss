@@ -757,6 +757,41 @@ let () =
         ~says:
           "This loop does not determine the arguments of `Bag`, whose methods give its elements."
         ~at:("pair {", 1));
+  Harness.test
+    "an annotated loop over a generic trait's elements is an error at the loop, since nothing \
+     gives the arguments of its count" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.annotated_loop_over_the_elements_of_a_generic_trait
+        "types.cannot_infer"
+        ~says:
+          "This loop does not determine the arguments of `Bag`, whose methods give its elements."
+        ~at:("pair {", 1));
+  Harness.test "a loop's annotation chooses the impl whose element gives that type" (fun () ->
+      let text = Fixtures.Infer.loop_annotated_with_one_of_two_element_types in
+      expect_fine text;
+      match
+        List.find_map
+          (fun (node : Core.expression) ->
+            match node.kind with
+            | Call { callee = Trait_method { name = "element"; evidence; _ }; _ } -> Some evidence
+            | _ -> None)
+          (list_core_at text "pair {" 1)
+      with
+      | Some
+          (Impl
+             {
+               impl =
+                 Impl { trait = { arguments = [ Named { path = Top { name = "String"; _ }; _ } ]; _ }; _ };
+               _;
+             }) ->
+          ()
+      | Some (Impl { impl; _ }) -> Harness.fail "the loop calls the `element` of %s" (Path.show impl)
+      | Some (Bound | Dynamic) -> Harness.fail "the loop calls an `element` of no impl"
+      | None -> Harness.fail "the loop calls no `element`");
+  Harness.test "a loop whose element type has no impl of the trait is an error at the loop"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.loop_annotated_with_an_element_type_without_an_impl
+        "types.no_impl" ~says:"`Pair` does not implement `Positioned[Float64]`."
+        ~at:("pair {", 1));
   Harness.test "a list literal is a type that implements FromElements" (fun () ->
       expect_fine Fixtures.Infer.list_literal_as_a_type_with_from_elements;
       expect_type Fixtures.Infer.list_literal_as_a_type_with_from_elements "[1, 2, 3]"

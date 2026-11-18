@@ -582,18 +582,6 @@ let finalize (state : State.state) =
       associated = List.map (fun (name, type_) -> (name, finalize_type type_)) reference.associated;
     }
   in
-  let finalize_evidence : Tables.evidence -> Tables.evidence = function
-    | Impl { impl; substitution } ->
-        Impl
-          {
-            impl;
-            substitution =
-              Types.map_substitution ~argument:finalize_argument
-                ~capabilities:(State.finalize_capabilities state)
-                substitution;
-          }
-    | other -> other
-  in
   let finalize_call (written : Tables.call) : Tables.call =
     {
       written with
@@ -608,7 +596,6 @@ let finalize (state : State.state) =
                 trait = finalize_trait method_.trait;
                 self_type = finalize_type method_.self_type;
                 instantiation = finalize_instantiation method_.instantiation;
-                evidence = finalize_evidence method_.evidence;
               }
         | Constructor constructor ->
             Constructor

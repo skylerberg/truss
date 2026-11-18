@@ -244,7 +244,6 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
               receiver = Read;
               self_type = left;
               instantiation = Types.no_instantiation;
-              evidence = Built_in;
             };
         arguments = operands;
         omitted_defaults = [];
@@ -261,7 +260,7 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
       then false
       else begin
         (match State.find_evidence state left reference with
-        | Some evidence ->
+        | Some _ ->
             let output =
               State.resolve_associated_type state left reference "Output"
                 ~at:(State.read_span state value.id)
@@ -271,24 +270,7 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
               State.report state Mismatch (State.read_span state value.id)
                 (Printf.sprintf "This operator gives `%s`, and `%s` is expected."
                    (Types.show (State.zonk state output))
-                   (Types.show decided));
-            state.tables.calls.(value.id) <-
-              Some
-                {
-                  callee =
-                    Trait_method
-                      {
-                        trait = reference;
-                        name = method_;
-                        receiver = Read;
-                        self_type = left;
-                        instantiation = Types.no_instantiation;
-                        evidence = State.convert_evidence evidence;
-                      };
-                  arguments = operands;
-                  omitted_defaults = [];
-                  callee_result = output;
-                }
+                   (Types.show decided))
         | None ->
             let unknown =
               if Types.is_error left then left
@@ -422,7 +404,6 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                     receiver = Read;
                     self_type = left_type;
                     instantiation = Types.no_instantiation;
-                    evidence = Built_in;
                   };
               arguments =
                 [
@@ -432,7 +413,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
               omitted_defaults = [];
               callee_result = result;
             };
-        Name_lookup.resolve_evidence state value left_type
+        State.require_impl state (State.read_span state value.id) left_type
           (State.make_trait_reference ~arguments:[] trait);
         Types.bool
       end
@@ -575,15 +556,10 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
       let inner_type = Hooks.check_expression state env inner in
       State.register_expression state value (fun () ->
           let inner = State.build_expression state inner in
-          match (Form.read_type state value, State.find_evidence state inner.type_ trait) with
-          | Types.Any trait, Some implementation ->
-              To_any
-                {
-                  value = inner;
-                  trait;
-                  evidence = Form.convert_evidence (State.convert_evidence implementation);
-                }
-          | _ -> State.raise_bug "`any` of a value whose type does not implement the trait");
+          match Form.read_type state value with
+          | Types.Any trait ->
+              To_any { value = inner; trait; evidence = State.read_evidence state inner.type_ trait }
+          | _ -> State.raise_bug "a conversion to `any` has a type that is not `any`");
       Instantiation.require state ~at:(State.read_span state value.id) inner_type trait
         ~on_unmet:(fun inner_type other ->
           State.report state No_impl (State.read_span state value.id)

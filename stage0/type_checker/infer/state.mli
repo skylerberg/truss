@@ -154,7 +154,8 @@ val finalize_instantiation : state -> Types.instantiation -> Types.instantiation
 val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
 val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impls.evidence option
-val solve_trait_arguments : state -> Types.ty -> Types.trait_reference -> Types.trait_reference
+val read_evidence : state -> Types.ty -> Types.trait_reference -> Core.evidence
+val require_impl : state -> Source.Definition_span.t -> Types.ty -> Types.trait_reference -> unit
 
 val decide_property :
   state -> Interface.Properties.property -> Types.ty -> Interface.Properties.decision
@@ -175,7 +176,6 @@ val make_call :
   lends:Types.mode option ->
   Core.call
 
-val convert_evidence : Interface.Impls.evidence -> Tables.evidence
 val make_trait_reference : arguments:Types.argument list -> Path.t -> Types.trait_reference
 val string_type : Types.ty
 val run_in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) -> 'a
