@@ -751,14 +751,17 @@ let () =
              (option opaque) (trait "Equal" []))
       then Harness.fail "found an impl");
   Harness.test "an impl of a conversion is found by the argument's type" (fun () ->
-      let packages = Support.setup [] in
-      if
-        Option.is_none
-          (Interface.Impls.find_evidence (make_interface packages)
-             ~list_bounds:(fun _ -> [])
-             int64
-             (trait "From" [ Types.make_builtin Int32 ]))
-      then Harness.fail "no impl")
+      let packages = Support.setup [ ("app::main", Fixtures.Interface.meters_from_numbers) ] in
+      let interface = make_interface packages in
+      let meters = Types.make_named (app "Meters") [] in
+      let find_from source =
+        Interface.Impls.find_evidence interface
+          ~list_bounds:(fun _ -> [])
+          meters (trait "From" [ source ])
+      in
+      if Option.is_none (find_from int64) then Harness.fail "no impl of From[Int64]";
+      if Option.is_some (find_from (Types.make_builtin Int32)) then
+        Harness.fail "an impl of From[Int32]")
 
 let () =
   let text = Fixtures.Interface.described in
