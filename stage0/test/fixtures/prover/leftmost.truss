@@ -1,5 +1,4 @@
 fn leftmost(tree: Tree) -> Int64
-  cost time finite
 {
   match tree {
     Leaf => 0

@@ -4,7 +4,6 @@ fn triangle(limit_count: Int64) -> Int64
   ensures limit_count == 0 ==> result == 0
   ensures limit_count > 0 ==> result == limit_count + triangle(limit_count - 1)
   decreases limit_count
-  cost time finite
 {
   if limit_count == 0 { 0 } else { limit_count + triangle(limit_count - 1) }
 }
@@ -13,7 +12,6 @@ theorem triangle_at_least(limit_count: Int64)
   requires limit_count >= 0 && limit_count <= 1000
   ensures triangle(limit_count) >= limit_count
   decreases limit_count
-  cost time finite
 {
   if limit_count > 0 {
     triangle_at_least(limit_count - 1)
@@ -23,7 +21,6 @@ theorem triangle_at_least(limit_count: Int64)
 trait Bounded {
   fn amount(self) -> Int64
     ensures result >= 0 && result <= 1000
-    cost time finite
 
   law covered(value: Self) {
     triangle(value.amount()) >= value.amount()
@@ -36,7 +33,6 @@ type Box[Item](item: Item, amount: Int64)
 impl Bounded for Box[Element] {
   fn amount(self) -> Int64
     ensures result >= 0 && result <= 1000
-    cost time finite
   {
     self.amount
   }

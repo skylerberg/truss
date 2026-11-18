@@ -22,11 +22,11 @@ impl Display for Error {
     match self {
       Malformed(message) => {
         mut output.push("a malformed JWT: ")
-        mut output.push(message.slice())
+        mut output.push(message)
       }
       Algorithm(name) => {
         mut output.push("a JWT signed with ")
-        mut output.push(name.slice())
+        mut output.push(name)
         mut output.push(", which these rules do not accept")
       }
       NoKey => mut output.push("no key that can verify this JWT")
@@ -108,7 +108,7 @@ fn curve_of(algorithm: Algorithm) -> cryptography::Curve {
 }
 
 fn sign_with(key: jwk::Key, algorithm: Algorithm, input: Slice[UInt8]) -> Result[List[UInt8], Error]
-  uses Random, Panic
+  uses Random, Panic, RunForever
 {
   let function = hash_of(algorithm)
   match key.material {
@@ -189,7 +189,7 @@ public fn sign[Item: serialization::Serialize](
   key: jwk::Key,
   algorithm: Algorithm,
 ) -> Result[String, Error]
-  uses Random, Panic
+  uses Random, Panic, RunForever
 {
   var header: Map[String, json::Value] = [:]
   mut header.insert("alg", value: json::Value.String(value: algorithm.name().to_string()))
@@ -200,10 +200,10 @@ public fn sign[Item: serialization::Serialize](
   }
   var input = segment(json::Value.Object(members: own header))
   mut input.push(".")
-  mut input.push(segment(json::to_value(claims)).slice())
+  mut input.push(segment(json::to_value(claims)))
   let signature = sign_with(key, algorithm: algorithm, input: input.slice().bytes())?
   mut input.push(".")
-  mut input.push(jwk::encoded(signature.slice()).slice())
+  mut input.push(jwk::encoded(signature.slice()))
   Ok(own input)
 }
 
@@ -222,7 +222,9 @@ public type Header(algorithm: Algorithm, key_id: Option[String], kind: Option[St
 public type Token(header: Header, claims: json::Value)
   derives Equal
 
-public fn Token.claims[Item: serialization::Deserialize](self) -> Result[Item, Error] {
+public fn Token.claims[Item: serialization::Deserialize](self) -> Result[Item, Error]
+  uses RunForever
+{
   match json::from_value[Item](self.claims.copy()) {
     Ok(item) => Ok(own item)
     Err(error) => Err(Error.Claims(error: json::Error.Deserialize(error: own error)))
@@ -320,7 +322,7 @@ public fn verify(token: StringSlice, keys: Slice[jwk::Key], rules: Validation) -
     Some(name) => own name
     None => return Err(malformed("a header without a text \"alg\""))
   }
-  let algorithm = match Algorithm.from_name(name.slice()) {
+  let algorithm = match Algorithm.from_name(name) {
     Some(algorithm) => algorithm
     None => return Err(Error.Algorithm(name: own name))
   }
@@ -388,7 +390,7 @@ public fn verify(token: StringSlice, keys: Slice[jwk::Key], rules: Validation) -
   }
   match rules.audience {
     Some(audience) => {
-      if !has_audience(claims, audience: audience.slice()) {
+      if !has_audience(claims, audience: audience) {
         return Err(Error.Audience)
       }
     }

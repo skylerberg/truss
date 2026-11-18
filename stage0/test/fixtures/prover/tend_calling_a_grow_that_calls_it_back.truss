@@ -1,13 +1,11 @@
 trait Grow {
   fn grow(self, steps: UInt32) -> Int64
-    cost time finite
 }
 
 type Seed(height: Int64)
 
 fn tend(seed: Seed, steps: UInt32) -> Int64
   decreases steps
-  cost time finite
 {
   if steps >= 100 { return 0 }
   seed.grow(steps + 1)

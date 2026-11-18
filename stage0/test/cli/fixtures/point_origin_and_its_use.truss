@@ -2,6 +2,6 @@ type Point(x: Int64)
 
 let Point.origin: Point = Point(x: 0)
 
-fn read() -> Int64 {
+public fn read() -> Int64 {
   Point.origin.x
 }

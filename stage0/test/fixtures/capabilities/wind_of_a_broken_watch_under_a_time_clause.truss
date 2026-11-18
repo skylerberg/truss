@@ -1,5 +1,0 @@
-fn f(watch: Broken, movement: mut Forever) -> UInt64
-  cost time finite
-{
-  watch.wind(mut movement)
-}

@@ -167,14 +167,16 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
 let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
     ~(used : string list option) =
   let module_ = path.module_ in
-  let is_recovered (item : Syntax.definition Syntax.item) =
-    match item.value.kind with Definition_error _ -> true | _ -> item.positions.recovered <> []
+  let has_syntax_error (item : Syntax.definition Syntax.item) =
+    match item.value.kind with
+    | Definition_error _ -> true
+    | _ -> item.positions.syntax_errors <> []
   in
   let used =
     if
       List.exists
         (fun (top_level : Syntax.top_level) ->
-          is_recovered top_level.definition || List.exists is_recovered top_level.methods)
+          has_syntax_error top_level.definition || List.exists has_syntax_error top_level.methods)
         file.definitions
     then None
     else used

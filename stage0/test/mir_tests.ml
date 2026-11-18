@@ -1,7 +1,4 @@
-let make_mir_parts packages package =
-  Database.For_testing.make_mir_lookups (Support.make_database packages) package
-
-let make_app_parts packages = make_mir_parts packages (Support.parse_module "app::main").package
+let make_mir_parts packages = Database.For_testing.make_mir_lookups (Support.make_database packages)
 let find_graph (parts : Mir.lookups) key = Mir.find_graph (parts.read_body_part key)
 let find_code (parts : Mir.lookups) key = Mir.find_code (parts.read_body_part key)
 
@@ -428,7 +425,7 @@ let validate definition (body : Mir.Graph.body) =
 
 let () =
   let packages = Support.setup [] in
-  let parts = lazy (make_mir_parts packages Path.standard_package) in
+  let parts = lazy (make_mir_parts packages) in
   let built = ref 0 in
   List.iter
     (fun ((file : Path.file), _) ->
@@ -450,7 +447,7 @@ let () =
                   validate definition mir.body;
                   Array.iter (validate definition) mir.lambdas
               | None -> ())
-            ((Support.make_names packages file.module_.package).list_declarations_in file)))
+            ((Support.make_names packages).list_declarations_in file)))
     Standard_library.files;
   Harness.test "the standard library has MIR" (fun () ->
       if !built < 500 then Harness.fail "only %d of its definitions have MIR" !built)
@@ -467,7 +464,7 @@ let lower_tree_and_graph text =
       (Support.list_declarations packages (Support.parse_module "app::main"))
   with
   | Some key -> (
-      let parts = make_app_parts packages in
+      let parts = make_mir_parts packages in
       match (find_code parts key, find_graph parts key) with
       | Some built, Some graph ->
           validate "g" graph.body;
@@ -917,7 +914,7 @@ let () =
             for_type = Top { module_; name = type_name };
           }
       in
-      let parts = make_app_parts packages in
+      let parts = make_mir_parts packages in
       let read_form path =
         match Mir.read_graph parts path with
         | Some { form; _ } -> form
@@ -926,10 +923,7 @@ let () =
       let default_method = make_method_path (Top { module_; name = "Shape" }) "doubled" in
       let default_mir =
         match
-          Option.bind
-            ((Support.make_names packages (Path.locate_package default_method)).find_key
-               default_method)
-            (find_graph parts)
+          Option.bind ((Support.make_names packages).find_key default_method) (find_graph parts)
         with
         | Some mir -> mir
         | None -> failwith "the default method has no MIR"
@@ -952,7 +946,7 @@ let () =
       in
       let module_ = Support.parse_module "app::main" in
       let make_top_path name : Path.t = Top { module_; name } in
-      let parts = make_app_parts packages in
+      let parts = make_mir_parts packages in
       let read_defaults path =
         match Mir.read_default_graphs parts path with
         | Some { form; _ } -> form
@@ -1028,7 +1022,7 @@ let () =
             match statement.kind with Basic (Assign { value = Compare _; _ }) -> true | _ -> false)
           block.statements
       in
-      match Mir.read_contract (make_app_parts packages) g with
+      match Mir.read_contract (make_mir_parts packages) g with
       | Some
           { form = { requires = [ quantified; connected; chosen ]; ensures = [ ensured ]; _ }; _ }
         -> (
@@ -1076,7 +1070,7 @@ let () =
         Support.setup [ ("app::main", Fixtures.Mir.contract_with_a_quantified_clause_that_runs) ]
       in
       let f : Path.t = Top { module_ = Support.parse_module "app::main"; name = "f" } in
-      match Mir.read_contract (make_app_parts packages) f with
+      match Mir.read_contract (make_mir_parts packages) f with
       | Some { form = { requires = [ quantified ]; _ }; _ } ->
           if not quantified.is_executable then Harness.fail "the quantified clause cannot run";
           let loops = ref 0 in
@@ -1097,12 +1091,12 @@ let () =
       let module_ = Support.parse_module "app::main" in
       let g : Path.t = Top { module_; name = "g" } in
       let key =
-        match (Support.make_names packages (Path.locate_package g)).find_key g with
+        match (Support.make_names packages).find_key g with
         | Some key -> key
         | None -> failwith "the program has no g"
       in
       let mir =
-        match find_code (make_app_parts packages) key with
+        match find_code (make_mir_parts packages) key with
         | Some mir -> mir
         | None -> failwith "g has no MIR"
       in
@@ -1277,12 +1271,12 @@ let () =
 let make_call_edge_lookups text : Mir.Call_edges.lookups =
   let database = Support.make_database (Support.setup [ ("app::main", text) ]) in
   let file = Support.parse_file "app::main" in
-  (match Support.list_codes (Support.list_diagnostics database file) with
+  (match Support.list_codes (Support.list_fragment_diagnostics database file) with
   | [] -> ()
   | codes -> Harness.fail "the program has diagnostics: %s" (String.concat ", " codes));
   {
-    interface = Database.make_interface_lookups database [ file.module_.package ];
-    mir = Database.For_testing.make_mir_lookups database file.module_.package;
+    interface = Database.make_interface_lookups database;
+    mir = Database.For_testing.make_mir_lookups database;
   }
 
 let make_derived_impl type_name trait : Path.t =
@@ -1503,7 +1497,7 @@ let () =
       expect_shown (List.rev !carried)
         ~expected:
           [
-            "a loop carries standard::core::Cursor.next uses {Meter, may not terminate}";
+            "a loop carries standard::core::Cursor.next uses {Meter}";
             "a slice carries standard::list::List.slice_from uses {}";
             "a pattern carries standard::core::Equal.equal uses {}";
           ]);
@@ -1520,7 +1514,7 @@ let () =
       expect_shown (List.rev !invoked)
         ~expected:
           [
-            "standard::core::Cursor.next uses {Meter, may not terminate}";
+            "standard::core::Cursor.next uses {Meter}";
             "standard::list::List.slice_from uses {}";
             "standard::core::Equal.equal uses {}";
             "standard::list::Slice.length uses {}";

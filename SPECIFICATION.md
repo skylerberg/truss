@@ -108,7 +108,7 @@ says, and is an ordinary name elsewhere:
 
 | Words | Meaning |
 |---|---|
-| `amortized`, `time`, `allocations`, `allocated_bytes`, `calls`, `O`, `finite`, `potential` | The fixed words of a `cost` clause |
+| `amortized`, `time`, `allocations`, `allocated_bytes`, `calls`, `O`, `potential` | The fixed words of a `cost` clause |
 | `time(...)`, `allocations(...)`, `allocated_bytes(...)`, `calls(...)` | The cost functions, inside a `cost` bound |
 | `log(...)`, `power(...)` | Functions on exact integers, inside a specification |
 | `result` | The return value, inside `ensures` and `cost` |
@@ -400,10 +400,10 @@ type Expression =
   variant or a collection. A record cannot contain itself.
 - A variant that is not recursive may be `indirect` too.
 - In its own fields, at any depth, a type does not occur in the input of a
-  function type with a `time` clause:
-  `type Knot(run: (fn(Knot) -> Bool cost time finite))` is an error. A
-  function stored in a `Knot` could call itself through it, so its `time`
-  clause would be proven for a function that does not terminate.
+  function type without `RunForever`: `type Knot(run: fn(Knot) -> Bool)` is
+  an error. A function stored in a `Knot` could call itself through it, so
+  it would be proven to terminate without a measure.
+  `type Knot(run: (fn(Knot) -> Bool uses RunForever))` is legal.
 
 ### Type expressions
 
@@ -507,13 +507,15 @@ parameter. A temporary takes no keyword:
 | `push(mut names, item: name.copy())` | `push` gets a copy. |
 
 A mode keyword applies to the longest place expression at the start of its
-operand. The first method call after that place takes it as its receiver,
-and the rest of the expression works on the result of that call:
+operand. The first method call or `with` after that place takes it, a
+method call as its receiver and `with` as its base, and the rest of the
+expression works on the result:
 
 | Expression | Place the keyword applies to |
 |---|---|
 | `mut config.servers.sort()` | `config.servers` |
 | `mut config.load_servers().sort()` | `config`, for `load_servers` |
+| `own config with (port: 443)` | `config`, for `with` |
 | `sort(mut items[..middle])` | `items[..middle]` |
 
 An expression that does not start with a place takes no mode keyword.
@@ -622,9 +624,8 @@ it.
   associated type takes a `Slice` where the call instantiates that type to
   a `List`, and a `StringSlice` where it instantiates it to `String`. So
   `counts.get(word)` and `counts[word]` look up a `Map[String, Int64]` with
-  a `StringSlice`. The call allocates nothing: the callee reads a `List` or
-  a `String` that holds the view's elements and owns no storage, and a view
-  that the call returns views what the argument views. `self` is no such
+  a `StringSlice`. The call allocates nothing, and a view that the call
+  returns views what the argument views. `self` is no such
   parameter, and neither is a parameter declared as `List` or `String`,
   which takes no view. The receiver and the other arguments instantiate the
   type parameter first, in whatever order the arguments are written.
@@ -787,55 +788,37 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 
 ### Termination
 
-- A function with a `time` clause terminates; `cost time finite` promises
-  termination without a bound. A function without one may not terminate.
-- **A function with a `time` clause makes no call that may not terminate,**
-  and neither does a specification. A call may not terminate when its
-  callee has no `time` clause, or when it passes a function that may not
-  terminate for a parameter whose type takes one. A callee that is a
-  trait's method is decided as the table below says.
-- **A `time` clause follows a function parameter, or a method of a bound,
-  where each of its bounds names that parameter's or that method's `time`.**
-  The function may then call it, and terminates if the function passed for
-  the parameter does, or if the type argument's `impl` of the method does.
-  `O(items.length() * time(visit))` follows `visit` (see
-  [Capability parameters](#capability-parameters)), and
-  `O(time(Source.next))` follows `Source.next`:
-
-  ```truss
-  fn second[Source: Cursor](source: mut Source) -> Option[Source.Element]
-    uses Source.Uses
-    cost time O(time(Source.next))
-  {
-    let _ = mut source.next()
-    mut source.next()
+```truss
+fn serve(listener: mut Listener)
+  uses NetworkServer, Handles, RunForever
+{
+  while true {
+    respond(mut listener.accept())
   }
-  ```
+}
+```
 
-  `finite` names no `time`, so a function with `cost time finite` follows
-  nothing: it terminates for every argument and every type argument.
-- **A trait's method without a `time` clause leaves termination to each
-  `impl`.** How the method is called decides which declaration says
-  whether the call terminates:
-
-  | The trait's method | The call | Whether the call terminates |
-  |---|---|---|
-  | States a `time` clause | Any | It terminates as the clause says, for every `impl` |
-  | States none | On a type whose `impl` is known | It terminates as the `time` clause of the `impl`'s method says, and may not where that method states none |
-  | States none | Through a bound on a type parameter, on `Self` in a trait, or on an associated type of either | It terminates if the type argument's `impl` of the method does |
-  | States none | Through `any Trait` | It may not terminate: `any` hides the `impl` |
-
-  `second` terminates for a `ListCursor[Int64]`, whose `next` states
-  `cost time O(1)`. For a cursor whose `next` states no `time` clause it may
-  not terminate, and only a function without a `time` clause calls it with
-  that cursor.
-- A call of a generic function terminates if each method that the
-  function's `time` clause follows terminates for the call's type arguments.
-  A type parameter of the caller passes the condition on: the caller's
-  `time` clause follows the method in turn, or the caller has no `time`
-  clause.
-- A loop without a measure may not terminate either, so a function with a
-  `time` clause holds none (see [Loops](#loops)).
+- **A function terminates unless its `uses` names `RunForever`.** A loop
+  without a measure uses `RunForever` (see [Loops](#loops)), and so does a
+  call of a function that uses it. `RunForever` is otherwise a capability
+  like any other: a function type without it takes only functions that
+  terminate, and a capability parameter holds it where a function passed for
+  the parameter may run forever (see
+  [Capability parameters](#capability-parameters)).
+- `RunForever` has no methods, and nothing implements it, since a `provide`
+  of it would let a function that does not declare it run forever. A
+  `parallel` branch or a quantifier may run forever where its function may.
+- A function that uses `RunForever` has no `time` clause.
+- A call of a capability's method terminates unless the method's `uses`
+  names `RunForever`. A method that waits for the world, such as
+  `Console.read_line`, returns once the world answers, so waiting is not
+  running forever. An implementation whose method may run forever declares
+  `uses RunForever` on its `impl`, and providing it requires `RunForever`.
+- A trait's method runs forever only where its `uses` names `RunForever`, or
+  names an associated capability set that an `impl` puts `RunForever` in
+  (see [Associated capability sets](#associated-capability-sets)). `any`
+  fixes those sets to the empty set, so a method called through `any`
+  terminates unless its trait's method names `RunForever`.
 - A recursive call on a part of a parameter needs nothing written. A part is
   a field taken out by a pattern, or an element of a collection that is
   itself a part:
@@ -851,10 +834,13 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
   }
   ```
 
-- Other recursion in a function with a `time` clause states `decreases`: an
+- Other recursion in a function without `RunForever` states `decreases`: an
   integer measure over the parameters that stays at or above zero and that
   every recursive call makes smaller. A list of measures is compared in
   order. Functions in a cycle of calls each state one.
+- A function that uses `RunForever` may state `decreases` as well. Each of
+  its recursive calls to a function that states one then makes the measure
+  smaller.
 - **A recursion is followed through each call to the code that the call
   runs.** The callee decides which code that is:
 
@@ -881,7 +867,7 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
   | A conversion to `any Trait` | Every method of the value's `impl` of the trait |
   | A `provide` | Every method of the provided `impl` |
 
-- **A recursion that leads back to a function with a `time` clause is proven
+- **A recursion that leads back to a function without `RunForever` is proven
   to terminate, or is rejected.** The way back decides:
 
   | The way back to the function | The requirement |
@@ -889,6 +875,10 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
   | A call of a function, of a method written in an `impl`, or of a trait's method through `any Trait` or on `Self` | The call is on a part of a parameter, or each function in the cycle states `decreases` |
   | A call of a method that its `impl` derives or inherits | Rejected. The `impl` states no measure for that code, so nothing proves that the recursion through it terminates |
   | Supplied code | Rejected. A use of supplied code passes no arguments to compare with a measure |
+
+  A function that uses `RunForever` is not rejected for any of these. Its
+  recursive call is compared only where it and its callee both state
+  `decreases`.
 
   With `type Tree(children: List[Tree])`, an `equal` of `Tree` written as
   `self.children == other.children` supplies the `impl` of `Equal` for `Tree`
@@ -902,8 +892,7 @@ cost        = [ "amortized" ] resource bound ;
 resource    = "time" | "allocations" | "allocated_bytes"
             | "calls" "(" call_target ")" ;
 call_target = LOWER_NAME | path_type [ "." LOWER_NAME ] ;
-bound       = "O" "(" expression ")" | "finite"
-            | ( "<=" | "==" ) expression ;
+bound       = "O" "(" expression ")" | ( "<=" | "==" ) expression ;
 ```
 
 ```truss
@@ -913,7 +902,6 @@ public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
   cost time O(paths.length())
 ```
 
-- `finite` is a bound only of `time`.
 - The target of `calls` is a function parameter, a capability method, or a
   whole capability, never an associated capability set.
 - `O(f)` means that the cost is at most `c * f + d` for every input, for
@@ -922,8 +910,8 @@ public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
 - A caller's cost is proven from its callees' cost clauses.
 
 A bound is an expression on exact integers. It can use the parameters,
-`self`, their fields, pure methods with a `time` clause, `result`, `+`, `*`,
-and `/` and `-` where the result stays at or above zero, and:
+`self`, their fields, pure methods, `result`, `+`, `*`, and `/` and `-`
+where the result stays at or above zero, and:
 
 | Term | Value |
 |---|---|
@@ -945,9 +933,9 @@ is one number for the function: it cannot depend on the arguments of a call.
 - `time(visit)` is a constant for a parameter of type
   `(fn(Item) cost time O(1))`, and a fixed bound that is not known for any
   other function that terminates. It has no value for a function that may
-  not terminate, and a bound that names it is then unbounded. So a bound
-  names `time(visit)` only where the type of `visit` has a `time` clause, or
-  a capability parameter in its `uses`.
+  run forever, and a bound that names it is then unbounded. So a bound
+  names `time(visit)` only where the type of `visit` does not name
+  `RunForever`.
 - `allocations(visit)` is `n` for a parameter whose type states
   `cost allocations <= n` or `== n`, and a fixed bound that is not known for
   any other function whose allocations are bounded. It has no value for a
@@ -955,10 +943,6 @@ is one number for the function: it cannot depend on the arguments of a call.
   then unbounded. `allocated_bytes(visit)` is the same for
   `cost allocated_bytes`. A bound names either term for any function
   parameter.
-- **Only `time(...)` follows a callee** (see [Termination](#termination)). A
-  bound that names `allocations(visit)` or `allocated_bytes(visit)` does not
-  make its function terminate, and does not let a function with a `time`
-  clause call a `visit` that may not terminate.
 - An operator counts as the method it calls: `==` spends
   `time(Element.equal)` and `allocations(Element.equal)`, and `<` spends
   `time(Element.compare)`. If a name has several overloads, the term means
@@ -981,7 +965,7 @@ is one number for the function: it cannot depend on the arguments of a call.
   gives it: `time(Element.equal)` is a constant for `Int64`, whose
   `impl Equal` promises `cost time O(1)`, and `allocations(Element.equal)`
   is 0, since that `impl` promises `cost allocations == 0`. `time(...)` has
-  no value for a type argument whose `impl` of the method may not terminate
+  no value for a type argument whose `impl` of the method may run forever
   (see [Termination](#termination)), and `allocations(...)` and
   `allocated_bytes(...)` have none where the `impl` states no bound on that
   resource. A bound that names the term is then unbounded.
@@ -1041,16 +1025,14 @@ function_type_clause = "uses" capability_list | "cost" cost | "requires" express
 
 ```truss
 fn sort_by(items: mut List[Item], compare: fn(Item, Item) -> Ordering)
-fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
+fn serve(handle: (fn(Request) -> Response uses Database, Log))
 ```
 
 - A function type without `uses` uses no capability. Its `uses` and `cost`
   clauses cannot mention its inputs.
-- **A function type with a `time` clause takes only functions that
-  terminate.** One without a `time` clause takes any function, and a call
-  through it may not terminate. Where its `uses` names a capability
-  parameter, the parameter records whether the function terminates (see
-  [Capability parameters](#capability-parameters)).
+- **A function type takes only functions whose capabilities its `uses`
+  names,** so one without `RunForever` takes only functions that terminate
+  (see [Termination](#termination)).
 - Clauses after a definition's result type belong to the definition.
 - A function type names its inputs exactly when it has a `requires`. Only
   the type of a definition's parameter may have one, at the top level of
@@ -1063,7 +1045,7 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
   ```truss
   fn List[Element].generate(
     count: UInt64,
-    make: (fn(index: UInt64) -> Element requires index < count cost time finite),
+    make: (fn(index: UInt64) -> Element requires index < count),
   ) -> List[Element]
     ensures result.length() == count
 
@@ -1086,8 +1068,8 @@ public fn for_each[Item](
   cost time O(items.length() * time(visit))
 ```
 
-A capability parameter passes on whatever a callback may do: the
-capabilities it uses, and whether it terminates.
+A capability parameter passes on the capabilities a callback uses,
+`RunForever` among them.
 
 - `generic Granted` names a capability parameter of the enclosing function,
   method, or theorem, and is written at each use. Every `generic Granted` in
@@ -1102,8 +1084,8 @@ capabilities it uses, and whether it terminates.
   capabilities, and the name is a misspelling.
 - A call infers `Granted` from the functions it passes, and writes no type
   argument for it (see [Explicit type arguments](#explicit-type-arguments)).
-  Where the type of `visit` has no `time` clause and the function passed may
-  not terminate, `Granted` records that, and so the call may not terminate.
+  Where the function passed may run forever, `Granted` holds `RunForever`,
+  and so does the call.
 - A function declares `uses generic Granted` only where it calls a function
   that uses it. One that returns or stores such a function does not, and its
   caller needs the capabilities only where it calls the result:
@@ -1114,23 +1096,15 @@ capabilities it uses, and whether it terminates.
   }
   ```
 
-- In the body of `for_each`, `(fn(Item) uses generic Granted)` takes only a
-  function that terminates if the functions passed for `generic Granted` do.
+- `for_each` terminates where the functions passed for `generic Granted` do.
+  In its body, a lambda that calls `visit` and also runs forever has the type
+  `(fn() uses generic Granted, RunForever)`, and only a function that uses
+  `RunForever` itself calls it.
 - An `impl`'s method names its capability parameters as its trait's method
   does. Capability parameters have no order to rename them by.
-- `(fn(Item) uses generic Granted cost time finite)` takes only functions that
-  terminate, whatever capabilities they use.
-- A `time` clause follows a function parameter only through its bound.
-  `O(items.length() * time(visit))` is unbounded where `visit` may not
-  terminate, so `for_each` can call `visit`. A bound that does not name
-  `time(visit)`, as `finite` does not, promises termination whatever is
-  passed, and the function cannot call `visit` unless the type of `visit`
-  has a `time` clause. A function with several `time` clauses follows a
-  parameter only if each bound names its `time`.
-- A function that terminates only if a bound's method does is passed for a
-  capability parameter, which records the condition as it records that a
-  function may not terminate. A function type with a `time` clause does not
-  take it, and no function type states the condition.
+- `O(items.length() * time(visit))` is unbounded where `visit` may run
+  forever, so the bound holds for every `Granted`. A bound that does not name
+  `time(visit)` is proven only where the type of `visit` bounds its time.
 - A type that holds a function writes the capabilities in the field's type.
 
 ## Methods
@@ -1161,8 +1135,8 @@ fn Slice[Element].zip[Other](self, other: Slice[Other]) -> Zipped[Element, Other
 ### Overloads by receiver mode
 
 ```truss
-fn Slice[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
-fn List[Element].filter(own self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
+fn Slice[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
+fn List[Element].filter(own self, keep: fn(Element) -> Bool) -> List[Element]
 ```
 
 A method can have up to three overloads that differ only in the mode of
@@ -1469,7 +1443,8 @@ let production = own config with (server.port: 443, log_level: LogLevel.Warning)
 
 - `base with (updates)` means copying the base into a new variable,
   assigning its fields, and returning it.
-- The base is passed as an `own` argument is.
+- The base is passed as an `own` argument is: a base that is a place takes
+  `own`, unless it copies implicitly.
 - `with` works on records, and updates only fields visible at that point.
 
 ### Lambdas
@@ -1490,14 +1465,9 @@ mut scores.update_each(fn(score) { score = score / 2 })
 - A lambda captures local variables by view and cannot mutate them. A
   lambda that captures a variable is a view; one that captures none can be
   returned, stored, and moved.
-- A lambda's capabilities are inferred from its body, and so is whether it
-  terminates: a lambda may not terminate when its body makes a call that may
-  not, or holds a loop without a measure. Such a call or loop is an error
-  where the lambda's function type takes only a function that terminates,
-  or one that terminates if the functions passed for a capability parameter
-  do, or if a bound's method does. A lambda that calls a method of a bound
-  without a `time` clause terminates if the type argument's `impl` of the
-  method does.
+- A lambda's capabilities are inferred from its body, `RunForever` among
+  them: a lambda uses it when its body holds a loop without a measure or
+  calls a function that uses it.
 - `return` and `?` exit the lambda. `break` and `continue` do not reach a
   loop outside it.
 - A lambda is always passed inside the call's parentheses.
@@ -1551,14 +1521,17 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   exits, has type `Never`.
 - `invariant` holds at the start of every iteration and when the loop ends.
 - `decreases` names a measure that every iteration makes smaller and that
-  never goes below zero. Where a loop states no measure, a `while` loop
-  whose condition compares two sides that mutate nothing with `<`, `<=`,
-  `>`, or `>=` has the distance between them as its measure, and a `for`
-  loop over a cursor whose type has a `remaining(self) -> UInt64` method has
-  that method's value.
-- **A loop without a measure may not terminate** (see
-  [Termination](#termination) and [Lambdas](#lambdas)). A `for` loop over a
-  range or over a collection's elements always terminates.
+  never goes below zero. It holds in every function, including one that
+  uses `RunForever`.
+- Where a `for` loop over a cursor states no measure, and the cursor's type
+  has a `remaining(self) -> UInt64` method, that method's value is the
+  loop's measure, and it holds as a written one does.
+- In a function without `RunForever`, a `while` loop that states no measure,
+  and whose condition compares two sides that mutate nothing with `<`, `<=`,
+  `>`, or `>=`, has the distance between them as its measure.
+- **A loop without a measure uses `RunForever`** (see
+  [Termination](#termination)). A `for` loop over a range or over a
+  collection's elements always terminates.
 - In the clauses of a loop over a range, the loop variable is the index of
   the next iteration: in `for i in start..end`, `i` is `start` on entry and
   `end` where the loop ends, and `end + 1` after `start..=end`.
@@ -1583,8 +1556,8 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   evaluates its condition or a `for` loop over a cursor calls `next`. It
   also holds where a `break` leaves the loop, with the iteration that the
   `break` leaves counted as visited: a range's index is the index after it,
-  and `visited` holds its value. The clause is never `amortized` or
-  `finite`. Its bound can use the variables in scope at the loop, and
+  and `visited` holds its value. The clause is never `amortized`. Its bound
+  can use the variables in scope at the loop, and
   `visited` or a range's index:
 
   ```truss
@@ -1621,6 +1594,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
     var heads: UInt32 = 0
     while Random.next() % 2 == 0 && heads < limit
       invariant heads <= limit
+      decreases limit - heads
       cost calls(Random.next) == heads
     {
       heads = heads + 1
@@ -1702,8 +1676,7 @@ let pending: Stack[Int64] = [1, 2, 3]
   a `Map` accepts every key and inserts a missing one. For any other type,
   the assignment replaces the element that `IndexMut` lends, so the key is
   there.
-- Each method of the three traits terminates: `contains_key`, `accepts_key`,
-  both overloads of `at`, and `assign` have `cost time finite`.
+- Each method of the three traits terminates: none uses `RunForever`.
 - Strings cannot be indexed.
 
 ## Expressions
@@ -1805,11 +1778,9 @@ public trait Add[Right] {
   type Output
 
   fn add_is_defined(self, right: Right) -> Bool
-    cost time finite
 
   fn add(self, right: Right) -> Self.Output
     requires self.add_is_defined(right)
-    cost time finite
 }
 ```
 
@@ -1863,48 +1834,30 @@ public trait Add[Right] {
 
 ## Failure
 
-Code panics only where it has `Panic`. Running out of memory and overflowing
-the stack are the exceptions.
+Code panics only where it calls `Panic.crash`, directly or through a
+callee such as `expect`, so only code that has `Panic` panics. Running out
+of memory and overflowing the stack are the exceptions.
 
-Every operation that can fail is a proof obligation: integer overflow,
-division by zero, indexing or slicing out of bounds, a shift that is too
-large, and `unreachable`. Where the compiler cannot prove one safe, the code
-is an error, and one of these makes it compile:
+Every operation that can fail is a proof obligation, in every function and
+every test: integer overflow, division by zero, indexing or slicing out of
+bounds, a shift that is too large, and `unreachable`. Where the compiler
+cannot prove one safe, the code is an error, and one of these makes it
+compile:
 
 1. Establish the fact locally, as with an `if`.
 2. Require it with `requires`.
-3. Call a method that returns an `Option` or a `Result`.
-4. Declare `uses Panic`.
+3. Call a method that returns an `Option` or a `Result`, such as
+   `checked_add` or `get`.
 
-`unreachable` admits only the first.
-
-In code that has `Panic`, an operation that is not proven safe is checked
-when it runs, in every build, and panics when it fails. The check prevents
-the out-of-bounds read or the wrapped result that the unchecked operation
-would give.
-
-- An overflow, a division by zero, and a shift that is too large are checked
-  where they happen.
-- An index, a slice, or an assignment through `IndexAssign` checks the
-  `requires` of the method it calls. One through a trait bound or `any` is
-  proven, and so is a `requires` that cannot be evaluated at run time (see
-  [Deriving](#deriving)).
-- A lambda in that code, a `proof` block, and every clause are proven. A
-  lambda's capabilities are inferred from its body, not declared, and a
-  `proof` block and a clause do not run.
+`unreachable` admits only the first. Code that crashes when the operation
+would fail calls the third kind of method and `expect` on its result, as in
+`left.checked_add(right).expect("the total fits Int64")`, and declares
+`uses Panic`.
 
 `Panic` is a built-in capability. `Panic.crash(message)` prints its message
 and location to standard error and ends the process with a nonzero exit
 code, and no Truss code runs afterward. No code can `provide` `Panic`, so a
 panic cannot be caught.
-
-A panic also prints its call chain: the site of each call that led to it,
-back to `main` or the test, through `parallel` branches and tasks.
-
-- The chain of a panic in an `impl`'s method continues from the `provide`
-  of the implementation, where the `impl` gets its `Panic`.
-- The chain of a panic in a lambda or in a function used as a value starts
-  in that function's body, because a function type passes no `Panic`.
 
 ## Capabilities
 
@@ -1951,7 +1904,8 @@ let rolled = provide LoadedDie(face: 5) {
 - **Inside an implementation, a call of the capability it implements goes to
   the next provider out.** So an implementation can check each call and pass
   it on, which narrows the capability.
-- **A capability method always returns to its caller,** once.
+- **A capability method returns to its caller once,** unless its result
+  type is `Never`, as for `Panic.crash`.
 - A capability's method keeps no view it is given, and returns no view of its
   implementation's state.
 - A capability cannot be declared as a bundle of others.
@@ -1976,10 +1930,11 @@ These capabilities are in the prelude:
 | `Tasks` | Running `concurrent` code |
 | `Log` | Writing to the program's log |
 | `Panic` | Ending the program |
+| `RunForever` | Running a loop or a recursion that no measure bounds (see [Termination](#termination)) |
 
 The runtime holds a *real implementation* of every standard capability.
-`Panic`'s is built in, and no `impl` implements it. A capability that a
-package declares has no real implementation.
+Those of `Panic` and `RunForever` are built in, and no `impl` implements
+either. A capability that a package declares has no real implementation.
 
 ### Handles
 
@@ -2031,9 +1986,9 @@ fn total_score(players: Slice[Player]) -> Int64
   scope after the block.
 - **Branches cannot race.** Any branch may read any place, and a place that
   one branch mutates is used by no other branch.
-- A branch uses no capability except `Panic`, and uses `Panic` only where
-  the enclosing function has it, so a function that contains `parallel` is
-  still pure.
+- A branch uses no capability except `Panic` and `RunForever`, and uses
+  each only where the enclosing function has it, so a function that
+  contains `parallel` is still pure.
 - A branch cannot exit the block with `return`, `break`, `continue`, or `?`.
 - A `parallel` block has the result of running its branches in order, and
   its `time` is the sum of theirs.
@@ -2206,11 +2161,7 @@ trait Ordered: Equal {
   The trait's `requires` must imply the method's. A call known to reach
   that `impl` is proven against the `impl`'s contract, and a call through a
   bound or `any` against the trait's.
-- **An `impl`'s method terminates wherever its trait's method promises
-  to.** An `impl`'s method without a `time` clause has its trait's. Its own
-  `time` clause follows a method of one of the `impl`'s bounds only where
-  the trait's method states no `time` clause, or states one that follows
-  that method for this `impl`.
+- An `impl`'s method without a `time` clause has its trait's.
 - **Required traits:** a type implements the traits a trait requires before
   it implements the trait, and a bound includes them. A trait cannot
   redeclare a method of a trait it requires, but can add an overload in
@@ -2253,10 +2204,8 @@ trait Index {
   type Key
   type Output
   fn contains_key(self, key: Self.Key) -> Bool
-    cost time finite
   fn at(self, key: Self.Key) lends Self.Output
     requires self.contains_key(key)
-    cost time finite
 }
 ```
 
@@ -2389,10 +2338,11 @@ test "config loads with defaults" {
 ```
 
 - `plain_string` is a `STRING` with no interpolation.
-- A test provides every capability its code uses, unless it declares them
-  with `uses`, as a function does. A test whose `uses` names a capability
-  other than `Panic` is *external*: it gets the real implementations of
-  exactly those capabilities. Any other test is deterministic.
+- A test has `RunForever` whether or not it declares it. It provides every
+  other capability its code uses, unless it declares them with `uses`, as a
+  function does. A test whose `uses` names a capability other than `Panic`
+  or `RunForever` is *external*: it gets the real implementations of exactly
+  those capabilities. Any other test is deterministic.
 - A test's `uses` names only capabilities with a [real
   implementation](#standard-capabilities).
 - A test's standard input is empty.
@@ -2465,9 +2415,9 @@ proof Ordered.transitive for Box[Item: Ordered] {
 A *specification* is a `requires`, `ensures`, `decreases`, or `cost` clause,
 an invariant, a law, or a proof.
 
-- A call in a specification uses no capability and terminates. Its callee
-  has a `time` clause, and a capability parameter in the callee's `uses`
-  stands for nothing at that call: `values.map(fn(value) { value + 1 })` is
+- A call in a specification uses no capability, so it terminates. A
+  capability parameter in the callee's `uses` stands for nothing at that
+  call: `values.map(fn(value) { value + 1 })` is
   such a call, although `map` passes a capability parameter on.
 - Every specification is well defined: each call meets its callee's
   `requires`, and each index is in bounds. `&&`, `||`, `==>`, and `if` read
@@ -2626,13 +2576,18 @@ and the prelude changes only with a language version.
 | `internal` | The whole package |
 | `public` | Every package |
 
-- An `impl`, a test, and a law proof take no visibility.
-- A method and a member constant have their own visibility. A use that
-  reaches a member through its type finds it only where it is visible:
-  `Shape.unit`, `shape.area()`, a constant in a pattern, and the `count`,
-  `element`, and `cursor` of a `for` loop or a quantifier. A member that the
-  use cannot see is skipped, as if it did not exist. A use that finds no
-  member except one it cannot see is an error that names that member.
+- An `impl`, a test, and a law proof take no visibility. An `impl` is as
+  visible as the least visible of its trait and the types it names, since
+  it applies only where all of them are visible.
+- A method or constant written in a trait, a capability, or an `impl` takes
+  no visibility, and is as visible as the definition it is written in.
+- A method or member constant defined on its own, such as `fn Shape.area`,
+  has its own visibility. A use that reaches a member through its type
+  finds it only where it is visible: `Shape.unit`, `shape.area()`, a
+  constant in a pattern, and the `count`, `element`, and `cursor` of a `for`
+  loop or a quantifier. A member that the use cannot see is skipped, as if
+  it did not exist. A use that finds no member except one it cannot see is
+  an error that names that member.
 - `opaque` appears only before `public type`. Outside its package, an opaque
   type's fields cannot be read, built, updated, or matched on. Visibility is
   set for a type as a whole.
@@ -2643,12 +2598,14 @@ and the prelude changes only with a language version.
   use call no private or `internal` function and name no such constant. An
   `ensures` may name any function the definition can, so that callers in its
   package can know its result in terms of private helpers.
-- An `internal` function, method, or constant that no definition of its
-  package uses is an error. A use counts when the user is not `internal` or
-  is itself used, so `internal` definitions that use only each other are an
-  error together. A definition the compiler calls is exempt, such as the
-  static `new` of a `system` module's type, which builds the implementation
-  of a capability.
+- A private or `internal` function, method, or constant that no definition
+  of its package uses is an error. A method or constant written in a trait,
+  a capability, or an impl is not checked. A use counts when the user is
+  public, is a test, an `impl`, or another definition the rule does not
+  check, or is itself used, so definitions that use only each other are an
+  error together. The `main` of a package's root module is exempt, and so
+  is a definition the compiler calls, such as the static `new` of a
+  `system` module's type, which builds the implementation of a capability.
 
 ## No foreign code
 

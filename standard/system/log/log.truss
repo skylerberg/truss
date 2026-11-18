@@ -4,7 +4,9 @@ use standard::system::calls
 
 internal type SystemLog()
 
-impl Log for SystemLog {
+impl Log for SystemLog
+  uses RunForever
+{
   fn record(self, record: log::Record) {
     var line = ""
     mut line.push("level=")
@@ -15,13 +17,13 @@ impl Log for SystemLog {
       Error => mut line.push("error")
     }
     mut line.push(" message=")
-    quoted(mut line, text: record.message.slice())
+    quoted(mut line, text: record.message)
     for field in record.fields {
       mut line.push(" ")
-      mut line.push(field.name.slice())
+      mut line.push(field.name)
       mut line.push("=")
       match field.value {
-        String(value) => quoted(mut line, text: value.slice())
+        String(value) => quoted(mut line, text: value)
         Integer(value) => mut line.push_signed(value)
         Float(value) => mut line.push_float64(value)
         Bool(value) => if value { mut line.push("true") } else { mut line.push("false") }

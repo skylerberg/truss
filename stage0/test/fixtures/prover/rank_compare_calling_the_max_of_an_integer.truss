@@ -1,6 +1,5 @@
 trait Ranked {
   fn outranks(self, other: Self) -> Bool
-    cost time finite
 }
 
 type Rank(value: Int64)

@@ -12,7 +12,7 @@ impl Display for Error {
     match self {
       Malformed(message) => {
         mut output.push("malformed Brotli data: ")
-        mut output.push(message.slice())
+        mut output.push(message)
       }
       TooLarge(limit) => {
         mut output.push("the decompressed data is longer than ")
@@ -266,6 +266,7 @@ fn read_complex_code(bits: mut Bits, alphabet_size: UInt64, skipped: UInt64) -> 
   var repeat_length: UInt8 = 0
   var space: Int64 = 32768
   while symbol < alphabet_size && space > 0
+    invariant repeat <= symbol
     decreases alphabet_size - symbol
   {
     let code = length_code.decode(bits: mut bits)?
@@ -295,12 +296,13 @@ fn read_complex_code(bits: mut Bits, alphabet_size: UInt64, skipped: UInt64) -> 
         return malformed("a code length repeat past its alphabet")
       }
       let added = repeat - earlier
-      for _ in 0..added {
-        if symbol < lengths.length() {
-          lengths[symbol] = repeat_length
+      let stop = symbol + added
+      for index in symbol..stop {
+        if index < lengths.length() {
+          lengths[index] = repeat_length
         }
-        symbol = symbol.saturating_add(1)
       }
+      symbol = stop
       if repeat_length != 0 && repeat_length <= 15 {
         let weight: Int64 = 32768 >> intrinsic::convert[UInt8, UInt64](repeat_length)
         let count: Int64 = intrinsic::convert(if added > 65536 { 65536 } else { added })
@@ -513,7 +515,7 @@ fn dictionary_word(stream: mut Stream, length: UInt64, word_id: UInt64, output: 
     return malformed("a dictionary reference with an unknown transform")
   }
   if stream.dictionary is None {
-    match base64::decode(dictionary_text().slice()) {
+    match base64::decode(dictionary_text()) {
       Ok(bytes) => stream.dictionary = Some(own bytes)
       Err(_) => return malformed("the static dictionary")
     }
@@ -552,6 +554,7 @@ fn dictionary_word(stream: mut Stream, length: UInt64, word_id: UInt64, output: 
 
 fn ferment(word: mut List[UInt8], at: UInt64) -> UInt64
   ensures result >= 1
+  ensures word.length() == old(word.length())
 {
   if at >= word.length() {
     return 1

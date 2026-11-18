@@ -75,7 +75,6 @@ type ParserState(
 fn advance(state: mut ParserState, text: StringSlice, index: UInt64, options: Options) -> Result[UInt64, ParseError]
   requires index < text.length()
   ensures !(result is Ok(next) && (next <= index || next > text.length()))
-  cost time finite
 {
   let decoded = text.decode(index)
   let character = decoded.character
@@ -154,7 +153,6 @@ fn advance(state: mut ParserState, text: StringSlice, index: UInt64, options: Op
 }
 
 public fn parse(text: StringSlice, options: Options = Options()) -> Result[List[List[String]], ParseError]
-  cost time finite
 {
   var state = ParserState(
     rows: [],
@@ -197,7 +195,6 @@ public fn parse(text: StringSlice, options: Options = Options()) -> Result[List[
 }
 
 fn needs_quotes(field: StringSlice, options: Options) -> Bool
-  cost time finite
 {
   if field.length() == 0 {
     return false
@@ -219,7 +216,6 @@ fn needs_quotes(field: StringSlice, options: Options) -> Bool
 }
 
 fn push_field(text: mut String, field: StringSlice, options: Options, alone: Bool)
-  cost time finite
 {
   if !(needs_quotes(field, options: options) || (alone && field.length() == 0)) {
     mut text.push(field)
@@ -242,18 +238,16 @@ fn push_field(text: mut String, field: StringSlice, options: Options, alone: Boo
 }
 
 fn push_row(text: mut String, fields: Slice[String], options: Options)
-  cost time finite
 {
   for index in 0..fields.length() {
     if index > 0 {
       mut text.push_character(options.delimiter)
     }
-    push_field(mut text, field: fields[index].slice(), options: options, alone: fields.length() == 1)
+    push_field(mut text, field: fields[index], options: options, alone: fields.length() == 1)
   }
 }
 
 public fn format(rows: Slice[List[String]], options: Options = Options()) -> String
-  cost time finite
 {
   var text = ""
   for index in 0..rows.length() {
@@ -264,18 +258,16 @@ public fn format(rows: Slice[List[String]], options: Options = Options()) -> Str
 }
 
 public fn format_row(fields: Slice[String], output: mut String, options: Options = Options())
-  cost time finite
 {
   var text = ""
   push_row(mut text, fields: fields, options: options)
-  mut output.push(text.slice())
+  mut output.push(text)
 }
 
 public type Table(header: List[String], rows: List[List[String]])
   derives Equal
 
 public fn parse_table(text: StringSlice, options: Options = Options()) -> Result[Table, ParseError]
-  cost time finite
 {
   var rows = parse(text, options: options)?
   if rows.length() == 0 {
@@ -322,12 +314,11 @@ public fn Table.cell(self, row: UInt64, name: StringSlice) -> Option[StringSlice
 }
 
 public fn Table.format(self, options: Options = Options()) -> String
-  cost time finite
 {
   var text = ""
   push_row(mut text, fields: self.header.slice(), options: options)
   mut text.push("\n")
-  mut text.push(format(self.rows.slice(), options: options).slice())
+  mut text.push(format(self.rows.slice(), options: options))
   text
 }
 
@@ -338,7 +329,6 @@ public fn RowReader[Source: streams::Reader].new(source: own Source, options: Op
 }
 
 fn quotes_in(text: StringSlice, quote: Character) -> UInt64
-  cost time finite
 {
   var count: UInt64 = 0
   var index: UInt64 = 0
@@ -357,7 +347,7 @@ fn quotes_in(text: StringSlice, quote: Character) -> UInt64
 }
 
 public fn RowReader[Source: streams::Reader].next_row(mut self) -> Result[Option[List[String]], ReadError]
-  uses Handles
+  uses Handles, RunForever
 {
   var record = ""
   var in_quotes = false
@@ -373,10 +363,10 @@ public fn RowReader[Source: streams::Reader].next_row(mut self) -> Result[Option
           mut record.push("\n")
         }
         has_line = true
-        if quotes_in(line.slice(), quote: self.options.quote) % 2 == 1 {
+        if quotes_in(line, quote: self.options.quote) % 2 == 1 {
           in_quotes = !in_quotes
         }
-        mut record.push(line.slice())
+        mut record.push(line)
         more = in_quotes
       }
       Ok(None) => {
@@ -388,7 +378,7 @@ public fn RowReader[Source: streams::Reader].next_row(mut self) -> Result[Option
   if !has_line {
     return Ok(None)
   }
-  match parse(record.slice(), options: self.options) {
+  match parse(record, options: self.options) {
     Ok(rows) => {
       var read = own rows
       if read.length() == 0 {

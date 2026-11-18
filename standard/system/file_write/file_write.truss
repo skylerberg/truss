@@ -5,7 +5,9 @@ use standard::system::handles
 
 internal type SystemFileWrite()
 
-impl FileWrite for SystemFileWrite {
+impl FileWrite for SystemFileWrite
+  uses RunForever
+{
   fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
     var handle = handles::open_to_write_from_empty(file)?
     handles::write_all(mut handle, bytes: contents.elements)

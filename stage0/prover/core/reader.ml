@@ -1362,15 +1362,9 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       in
       let base_type = Facts.substitute_type context frame base_type in
       let collection = read_place context frame run base in
-      let is_checked =
-        match call.callee.target with
-        | Function { path; _ } ->
-            Option.is_some (Mir.find_checked_requires context.lookups.mir path)
-        | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
-      in
       let frame, viewed, low, high =
         Intrinsics.apply_slice context frame site ~base_type ~collection ~low
-          ~high:(find_argument 2) ~is_checked
+          ~high:(find_argument 2)
       in
       let collection = expand_place frame run base in
       let written = write_place context frame run destination viewed in
@@ -1391,18 +1385,12 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
   | Template { destination; literals; call } -> (
       match (call.callee.target, call.arguments) with
       | Trait_method { trait; name; receiver; evidence; _ }, [ Passed { value = template; _ } ] ->
-          Option.iter
-            (fun recursive_callee ->
-              Facts.oblige context frame Termination location
-                [
-                  State.Text
-                    (Printf.sprintf
-                       "This template calls `%s`, which calls back here, and a template passes no \
-                        arguments the prover can compare, so the recursion cannot be shown to end."
-                       (Path.show recursive_callee));
-                ]
-                (Logic.Boolean false))
-            (snd (Facts.find_recursive_callee context frame location call.callee.target));
+          Facts.reject_uncompared_recursion context frame location
+            (snd (Facts.find_recursive_callee context frame location call.callee.target))
+            ~describe:
+              (Printf.sprintf
+                 "This template calls `%s`, which calls back here, and a template passes no \
+                  arguments the prover can compare, so the recursion cannot be shown to end.");
           let frame, tagged =
             Values.apply_template context frame
               { origin = call.origin; type_ = compute_target_type context frame run destination }
@@ -1478,7 +1466,6 @@ let read_formula context (frame : State.frame) (formula : Mir.formula) ~argument
       aliases = Locals.empty;
       slices = Locals.empty;
       lends = Locals.empty;
-      panic = Undeclarable;
     }
   in
   let inside =

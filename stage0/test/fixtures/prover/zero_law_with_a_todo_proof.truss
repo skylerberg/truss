@@ -1,13 +1,11 @@
 trait Zero {
   fn zero(self) -> UInt8
-    cost time finite
 
   law is_zero(value: Self) { value.zero() == 0 }
 }
 
 impl Zero for UInt8 {
   fn zero(self) -> UInt8
-    cost time finite
   {
     self
   }

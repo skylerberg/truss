@@ -42,14 +42,15 @@ let begin_body (st : Lowering.state) ~(body : Mir.Graph.body) ~defaults =
   let bound = bind_parameters st body ~defaults in
   let places = List.map (fun (_, _, place) -> place) bound in
   let mask =
-    if code.has_defaults then Some (Emit_c.Builder.allocate_local st.builder (Raw (Integer UInt64)))
+    if code.has_defaults then
+      Some (Emit_c.Ir_builder.allocate_local st.builder (Raw (Integer UInt64)))
     else None
   in
   let evidence =
     Lowering.list_evidence_parameters st
       (Definitions.list_evidence st.context code.substitution code.uses)
   in
-  Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
+  Emit_c.Ir_builder.start st.builder (Emit_c.Ir_builder.allocate_block st.builder);
   let places =
     match mask with
     | Some mask -> Mir_form.fill_defaults st (Lowered.make_local_place mask) body ~defaults places
@@ -60,7 +61,7 @@ let begin_body (st : Lowering.state) ~(body : Mir.Graph.body) ~defaults =
 let make_code_state context ~item path =
   let code = Definitions.make_code context path Ground.no_instantiation in
   ( Lowering.enter context
-      ~builder:(Emit_c.Builder.create context.env ~item)
+      ~builder:(Emit_c.Ir_builder.create context.env ~item)
       (Lowering.make_frame code),
     code )
 
@@ -74,7 +75,7 @@ let lower_template_check context ~from_template ~literals ~clauses : Emit_c.frag
     | [ (_, template_type) ] -> template_type
     | _ -> Definitions.raise_bug "%s does not take one template" (Path.show from_template)
   in
-  Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
+  Emit_c.Ir_builder.start st.builder (Emit_c.Ir_builder.allocate_block st.builder);
   Lowering.run_in_scope st (fun () ->
       let template =
         Targets.lower_template_value st
@@ -98,7 +99,7 @@ let lower_template_check context ~from_template ~literals ~clauses : Emit_c.frag
 let lower_call_evaluation context ~function_ ~arguments : Emit_c.fragment =
   let item = Lowered.Item.Call_evaluation { function_; arguments } in
   let st, _ = make_code_state context ~item function_ in
-  Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
+  Emit_c.Ir_builder.start st.builder (Emit_c.Ir_builder.allocate_block st.builder);
   let signature = Definitions.read_signature context function_ in
   Lowering.run_in_scope st (fun () ->
       let passed =
@@ -114,7 +115,7 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.fragment =
                   Definitions.raise_bug "an evaluated call's argument of type %s"
                     (Ground.to_string ty)
             in
-            Emit_c.Builder.emit st.builder (Assign (place, Use constant));
+            Emit_c.Ir_builder.emit st.builder (Assign (place, Use constant));
             (mode, ty, place))
           (Definitions.list_interface_parameters signature)
           arguments
@@ -142,7 +143,7 @@ let lower_source_code context ~path ~instantiation : Emit_c.fragment =
   let body = (Mir_form.read_mir_graph context path).body in
   let st =
     Lowering.enter context
-      ~builder:(Emit_c.Builder.create context.env ~item)
+      ~builder:(Emit_c.Ir_builder.create context.env ~item)
       (Lowering.make_frame code)
   in
   let convention, returns = Definitions.classify_result context code.substitution code.result in
@@ -152,7 +153,7 @@ let lower_source_code context ~path ~instantiation : Emit_c.fragment =
   in
   let lending_locals =
     List.map
-      (fun ty -> Emit_c.Builder.allocate_local st.builder ty)
+      (fun ty -> Emit_c.Ir_builder.allocate_local st.builder ty)
       (Definitions.list_lending_parameters context code.substitution code.result)
   in
   let lending : Lowering.lending option =

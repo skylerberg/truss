@@ -1,8 +1,10 @@
 let test = Harness.test
 
-let list_diagnostics database (file : Path.file) =
-  Database.check database [ file.module_.package ];
-  Database.list_file_diagnostics database file
+let list_fragment_diagnostics database file =
+  List.filter
+    (fun (diagnostic : Diagnostic.t) ->
+      not (Diagnostic.For_testing.is_unused_definition diagnostic.code))
+    (Database.list_file_diagnostics database file)
 
 let fail = Harness.fail
 let expect_string = Harness.expect_string
@@ -118,27 +120,27 @@ let code_item name =
 let write builder (function_ : function_) =
   List.iter
     (fun (info : local_info) ->
-      ignore (Emit_c.Builder.allocate_local builder ?name:info.name info.ty))
+      ignore (Emit_c.Ir_builder.allocate_local builder ?name:info.name info.ty))
     function_.locals;
-  List.iter (fun _ -> ignore (Emit_c.Builder.allocate_block builder)) function_.blocks;
+  List.iter (fun _ -> ignore (Emit_c.Ir_builder.allocate_block builder)) function_.blocks;
   List.iteri
     (fun index (block : block) ->
-      Emit_c.Builder.start builder index;
-      List.iter (Emit_c.Builder.emit builder) block.statements;
-      Emit_c.Builder.finish builder block.terminator)
+      Emit_c.Ir_builder.start builder index;
+      List.iter (Emit_c.Ir_builder.emit builder) block.statements;
+      Emit_c.Ir_builder.finish builder block.terminator)
     function_.blocks;
   ({ parameters = function_.parameters; result = function_.result; returns = function_.returns }
-    : Emit_c.Builder.prototype)
+    : Emit_c.Ir_builder.prototype)
 
 let define_function ?(nested = []) name main : program_fragment =
  fun env ->
-  let builder = Emit_c.Builder.create env ~item:(code_item name) in
+  let builder = Emit_c.Ir_builder.create env ~item:(code_item name) in
   List.iteri
     (fun index (function_ : function_) ->
-      Emit_c.Builder.build_nested builder ~index ~environment:function_.environment (fun nested ->
-          write nested function_))
+      Emit_c.Ir_builder.build_nested builder ~index ~environment:function_.environment
+        (fun nested -> write nested function_))
     nested;
-  Emit_c.Builder.build builder (write builder main)
+  Emit_c.Ir_builder.build builder (write builder main)
 
 let make_program_fragment fragment : program_fragment = fun _ -> fragment
 
@@ -215,7 +217,7 @@ let make_backend ?results ?evaluation_time_limit_ms ?(profile = Backend.Developm
     | Error message -> failwith message)
     (Lazy.force c_compiler) profile
 
-let load_files ?results ?(roots = []) ?profile files =
+let load_checked ~list_diagnostics ?results ?(roots = []) ?profile files =
   let packages = make_example_package files in
   let database = make_database packages in
   List.iter (Database.For_testing.add_root database) roots;
@@ -226,7 +228,7 @@ let load_files ?results ?(roots = []) ?profile files =
       | [] ->
           ignore
             (Core_lint.check_file
-               (Database.make_interface_lookups database [ file.module_.package ])
+               (Database.make_interface_lookups database)
                ~find_core:(fun key ->
                  Option.map
                    (fun (checked : Infer.checked) -> checked.form)
@@ -238,14 +240,18 @@ let load_files ?results ?(roots = []) ?profile files =
     files;
   (database, make_backend ?results ?profile database)
 
+let load_files ?results ?roots ?profile files =
+  load_checked ~list_diagnostics:Database.list_file_diagnostics ?results ?roots ?profile files
+
 let load ?results ?roots ?profile text =
-  load_files ?results ?roots ?profile [ (example_file, text) ]
+  load_checked ~list_diagnostics:list_fragment_diagnostics ?results ?roots ?profile
+    [ (example_file, text) ]
 
 let list_tests_in database (module_ : Path.module_) =
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       match declaration.path with Test _ -> Some declaration.path | _ -> None)
-    ((Database.make_name_lookups database [ module_.package ]).list_declarations module_)
+    ((Database.make_name_lookups database).list_declarations module_)
 
 let list_tests database = list_tests_in database example
 
@@ -281,8 +287,7 @@ let drop_shapes =
     ("Counter", Record [ ("target", Raw (Pointer (Data int32))) ]);
   ]
 
-let standard_interface =
-  lazy (Database.make_interface_lookups (make_database []) [ Path.standard_package ])
+let standard_interface = lazy (Database.make_interface_lookups (make_database []))
 
 let standard_context : Monomorphic.context =
   {

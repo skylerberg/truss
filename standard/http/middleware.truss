@@ -31,7 +31,7 @@ fn joined(parts: Slice[String]) -> String {
     if !text.is_empty() {
       mut text.push(", ")
     }
-    mut text.push(part.slice())
+    mut text.push(part)
   }
   text
 }
@@ -42,7 +42,7 @@ public fn cors(
   policy: CorsPolicy,
   next: (fn(own Request, mut Responder) uses generic Granted),
 )
-  uses Tasks, generic Granted
+  uses Tasks, generic Granted, RunForever
 {
   let origin = match request.header("Origin") {
     Some(origin) => origin.to_string()
@@ -52,11 +52,11 @@ public fn cors(
     }
   }
   mut responder.add_header("Vary", value: "Origin")
-  let allowed = allowed_origin(policy, origin: origin.slice())
+  let allowed = allowed_origin(policy, origin: origin)
   let is_preflight = request.method == Method.Options && request.header("Access-Control-Request-Method") is Some(_)
   match allowed {
     Some(value) => {
-      mut responder.set_header("Access-Control-Allow-Origin", value: value.slice())
+      mut responder.set_header("Access-Control-Allow-Origin", value: value)
       if policy.allow_credentials {
         mut responder.set_header("Access-Control-Allow-Credentials", value: "true")
       }
@@ -65,14 +65,14 @@ public fn cors(
         for method in policy.methods {
           mut methods.push("${method}")
         }
-        mut responder.set_header("Access-Control-Allow-Methods", value: joined(methods.slice()).slice())
-        mut responder.set_header("Access-Control-Allow-Headers", value: joined(policy.headers.slice()).slice())
-        mut responder.set_header("Access-Control-Max-Age", value: "${policy.max_age_seconds}".slice())
+        mut responder.set_header("Access-Control-Allow-Methods", value: joined(methods.slice()))
+        mut responder.set_header("Access-Control-Allow-Headers", value: joined(policy.headers.slice()))
+        mut responder.set_header("Access-Control-Max-Age", value: "${policy.max_age_seconds}")
         let _ = mut responder.send(Response.new(status: Status.no_content))
         return
       }
       if !policy.exposed.is_empty() {
-        mut responder.set_header("Access-Control-Expose-Headers", value: joined(policy.exposed.slice()).slice())
+        mut responder.set_header("Access-Control-Expose-Headers", value: joined(policy.exposed.slice()))
       }
     }
     None => {
@@ -104,23 +104,23 @@ public fn secure_headers(
 {
   mut responder.set_header("X-Content-Type-Options", value: "nosniff")
   match policy.content_security_policy {
-    Some(value) => mut responder.set_header("Content-Security-Policy", value: value.slice())
+    Some(value) => mut responder.set_header("Content-Security-Policy", value: value)
     None => {}
   }
   match policy.frame_options {
-    Some(value) => mut responder.set_header("X-Frame-Options", value: value.slice())
+    Some(value) => mut responder.set_header("X-Frame-Options", value: value)
     None => {}
   }
   match policy.referrer_policy {
-    Some(value) => mut responder.set_header("Referrer-Policy", value: value.slice())
+    Some(value) => mut responder.set_header("Referrer-Policy", value: value)
     None => {}
   }
   match policy.transport_security_seconds {
-    Some(seconds) => mut responder.set_header("Strict-Transport-Security", value: "max-age=${seconds}; includeSubDomains".slice())
+    Some(seconds) => mut responder.set_header("Strict-Transport-Security", value: "max-age=${seconds}; includeSubDomains")
     None => {}
   }
   match policy.opener_policy {
-    Some(value) => mut responder.set_header("Cross-Origin-Opener-Policy", value: value.slice())
+    Some(value) => mut responder.set_header("Cross-Origin-Opener-Policy", value: value)
     None => {}
   }
   next(own request, mut responder)
@@ -151,8 +151,8 @@ public fn request_id(
     Some(given) => if is_request_id(given) { given.to_string() } else { Random.next().format(radix: 16, minimum_digits: 16) }
     None => Random.next().format(radix: 16, minimum_digits: 16)
   }
-  mut incoming.headers.set("X-Request-ID", value: id.slice())
-  mut responder.set_header("X-Request-ID", value: id.slice())
+  mut incoming.headers.set("X-Request-ID", value: id)
+  mut responder.set_header("X-Request-ID", value: id)
   next(own incoming, mut responder)
 }
 
@@ -177,14 +177,14 @@ public fn log_requests(
     None => 200
   }
   var fields: List[log::Field] = [
-    log::Field.string("method", value: method.slice()),
-    log::Field.string("path", value: path.slice()),
+    log::Field.string("method", value: method),
+    log::Field.string("path", value: path),
     log::Field.integer("status", value: code),
     log::Field.integer("bytes", value: intrinsic::convert(responder.bytes_sent() & 9223372036854775807)),
     log::Field.duration("duration", value: elapsed),
   ]
   if !id.is_empty() {
-    mut fields.push(log::Field.string("request_id", value: id.slice()))
+    mut fields.push(log::Field.string("request_id", value: id))
   }
   log::information("request", fields: own fields)
 }
@@ -298,13 +298,13 @@ public fn rate_limit(
   key: fn(Request) -> String,
   next: (fn(own Request, mut Responder) uses generic Granted),
 )
-  uses Tasks, Clock, generic Granted
+  uses Tasks, Clock, generic Granted, RunForever
 {
-  match limiter.take(key(request).slice()) {
+  match limiter.take(key(request)) {
     Allowed(_) => next(own request, mut responder)
     Limited(retry_after_seconds) => {
       var response = Response.text(Status.too_many_requests.reason(), status: Status.too_many_requests)
-      mut response.headers.set("Retry-After", value: "${retry_after_seconds}".slice())
+      mut response.headers.set("Retry-After", value: "${retry_after_seconds}")
       let _ = mut responder.send(own response)
     }
   }
@@ -369,7 +369,7 @@ public fn csrf(
   policy: CsrfPolicy,
   next: (fn(own Request, mut Responder) uses generic Granted),
 )
-  uses Tasks, generic Granted
+  uses Tasks, generic Granted, RunForever
 {
   if is_cross_origin(request, policy: policy) {
     let _ = mut responder.send(Response.text("cross-origin request refused", status: Status.forbidden))

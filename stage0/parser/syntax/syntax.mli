@@ -72,7 +72,7 @@ and call_target =
   | Call_capability of path_type
   | Call_method of path_type * name
 
-and bound = Big_o of expression | Finite | At_most of expression | Exactly of expression
+and bound = Big_o of expression | At_most of expression | Exactly of expression
 and expression = expression_kind node
 
 and expression_kind =
@@ -304,7 +304,7 @@ type definition = { visibility : visibility; kind : definition_kind; id : id }
 
 type positions = {
   spans : Source.Definition_span.t array;
-  recovered : Source.Definition_span.t list;
+  syntax_errors : Source.Definition_span.t list;
 }
 
 type 'value item = { base : int; stop : int; value : 'value; positions : positions }

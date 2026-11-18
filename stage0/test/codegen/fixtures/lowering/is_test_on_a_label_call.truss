@@ -5,7 +5,9 @@ fn label(count: Int64) -> Option[String] {
   None
 }
 
-fn total_length(count: Int64) -> UInt64 {
+fn total_length(count: Int64) -> UInt64
+  uses RunForever
+{
   var total: UInt64 = 0
   var left = count
   while label(left) is Some(text) {

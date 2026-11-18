@@ -4,13 +4,13 @@ use standard::network
 use standard::simulation
 
 fn site(request: own http::Request, responder: mut http::Responder)
-  uses FileRead, Handles, Tasks
+  uses FileRead, Handles, Tasks, RunForever
 {
   let _ = http::serve_directory(request, responder: mut responder, root: Path.new("/site"), prefix: "/static")
 }
 
 fn exchange_bytes(raw: StringSlice) -> List[UInt8]
-  uses NetworkClient, Handles, Tasks, Panic
+  uses NetworkClient, Handles, Tasks, Panic, RunForever
 {
   let connection = network::connect("localhost", port: 8092).expect("the server accepts")
   let _ = connection.send_all(raw.bytes())
@@ -20,7 +20,7 @@ fn exchange_bytes(raw: StringSlice) -> List[UInt8]
 }
 
 fn exchange(raw: StringSlice) -> String
-  uses NetworkClient, Handles, Tasks, Panic
+  uses NetworkClient, Handles, Tasks, Panic, RunForever
 {
   String.from_utf8_lossy(exchange_bytes(raw).slice())
 }
@@ -35,7 +35,7 @@ fn body_bytes_of(reply: Slice[UInt8]) -> List[UInt8] {
 }
 
 fn get(path: StringSlice, extra: StringSlice = "") -> String
-  uses NetworkClient, Handles, Tasks, Panic
+  uses NetworkClient, Handles, Tasks, Panic, RunForever
 {
   exchange("GET ${path} HTTP/1.1\r\nHost: x\r\n${extra}Connection: close\r\n\r\n".slice())
 }
@@ -57,7 +57,7 @@ fn body_of(reply: StringSlice) -> String {
 }
 
 fn browse() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Panic, RunForever
 {
   var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8092)).expect("the port is free")
   concurrent {

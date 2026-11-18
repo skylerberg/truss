@@ -2,7 +2,7 @@ type direction = Dependents | Dependencies
 
 let list_definitions snapshot database argument =
   let packages = List.map snd (Workspace.list_packages snapshot) in
-  let names = Database.make_name_lookups database packages in
+  let names = Database.make_name_lookups database in
   List.filter_map
     (function
       | Path_argument.Definition path when Option.is_some (names.find_key path) -> Some path
@@ -84,6 +84,11 @@ let run ~direction ~name =
   match list_definitions snapshot database argument with
   | [] -> Outcome.raise_cannot_run "No definition named %s is visible here." name
   | targets ->
+      ignore
+        (Database.prove database
+           (List.concat_map
+              (Workspace.list_package_files snapshot)
+              (List.map snd (Workspace.list_packages snapshot))));
       let lines =
         list_lines
           (match direction with

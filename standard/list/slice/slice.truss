@@ -155,7 +155,7 @@ public fn Slice[Element: Equal].last_index_of(self, item: Element) -> Option[UIn
   None
 }
 
-public fn Slice[Element].find_index(self, predicate: (fn(Element) -> Bool cost time finite)) -> Option[UInt64]
+public fn Slice[Element].find_index(self, predicate: fn(Element) -> Bool) -> Option[UInt64]
 
   ensures match result {
     Some(index) => index < self.length() && predicate(self.model()[index])
@@ -345,7 +345,6 @@ public fn Slice[Element: Equal].find_slice(self, needle: Slice[Element]) -> Opti
 
 public fn Slice[Element: Ordered].is_sorted(self) -> Bool
   ensures result == (forall index in 1..self.length() => self[index - 1] <= self[index])
-  cost time finite
 {
   forall i in 1..self.length() => self[i - 1] <= self[i]
 }
@@ -354,7 +353,6 @@ internal theorem at_most_then_less[Element: Ordered](first: Element, second: Ele
   requires first <= second
   requires second < third
   ensures first < third
-  cost time finite
 {
 }
 
@@ -362,7 +360,6 @@ internal theorem less_then_at_most[Element: Ordered](first: Element, second: Ele
   requires first < second
   requires second <= third
   ensures first < third
-  cost time finite
 {
 }
 
@@ -370,35 +367,30 @@ internal theorem less_is_not_equal[Element: Ordered](first: Element, second: Ele
   requires first < second
   ensures !(first == second)
   ensures !(second == first)
-  cost time finite
 {
 }
 
 internal theorem greater_is_less_reversed[Element: Ordered](first: Element, second: Element)
   requires first.compare(second) == Ordering.Greater
   ensures second < first
-  cost time finite
 {
 }
 
 internal theorem equal_by_compare[Element: Ordered](first: Element, second: Element)
   requires first.compare(second) == Ordering.Equal
   ensures first == second
-  cost time finite
 {
 }
 
 internal theorem equal_is_at_most_reversed[Element: Ordered](first: Element, second: Element)
   requires first.compare(second) == Ordering.Equal
   ensures second <= first
-  cost time finite
 {
 }
 
 internal theorem at_most_is_not_less_reversed[Element: Ordered](first: Element, second: Element)
   requires first <= second
   ensures !(second < first)
-  cost time finite
 {
 }
 
@@ -408,7 +400,6 @@ theorem sorted_between[Element: Ordered](items: Slice[Element], first: UInt64, s
   requires second < items.length()
   ensures items[first] <= items[second]
   decreases second - first
-  cost time finite
 {
   if first < second {
     sorted_between(items, first: first, second: second - 1)
@@ -425,7 +416,6 @@ theorem sorted_below[Element: Ordered](items: Slice[Element], target: Element, l
   ensures forall i in 0..bound => items[i] < target
   ensures forall i in 0..items.length() => i < bound ==> !(items.model()[i] == target)
   decreases bound
-  cost time finite
 {
   if bound > 0 {
     sorted_below(items, target: target, last: last, bound: bound - 1)
@@ -444,7 +434,6 @@ theorem sorted_above[Element: Ordered](items: Slice[Element], target: Element, f
   ensures forall i in bound..items.length() => target < items[i]
   ensures forall i in bound..items.length() => !(items.model()[i] == target)
   decreases items.length() - bound
-  cost time finite
 {
   if bound < items.length() {
     sorted_above(items, target: target, first: first, bound: bound + 1)
@@ -459,7 +448,6 @@ theorem excluded_below[Element: Ordered](items: Slice[Element], target: Element,
   requires middle < items.length()
   requires items[middle] < target
   ensures forall position in 0..middle + 1 => !(items.model()[position] == target)
-  cost time finite
 {
   sorted_from_model(items, bound: items.length())
   sorted_below(items, target: target, last: middle, bound: middle + 1)
@@ -470,7 +458,6 @@ theorem excluded_above[Element: Ordered](items: Slice[Element], target: Element,
   requires middle < items.length()
   requires target < items[middle]
   ensures forall position in middle..items.length() => !(items.model()[position] == target)
-  cost time finite
 {
   sorted_from_model(items, bound: items.length())
   sorted_above(items, target: target, first: middle, bound: middle)
@@ -520,7 +507,7 @@ public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option
   None
 }
 
-public fn Slice[Element].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> UInt64
+public fn Slice[Element].partition_point(self, before: fn(Element) -> Bool) -> UInt64
   requires forall i in 0..self.length() => forall j in i..self.length() =>
     before(self.model()[j]) ==> before(self.model()[i])
   ensures result <= self.length()
@@ -602,7 +589,7 @@ public fn Slice[Element: Copyable].to_list(self) -> List[Element]
   List(storage: own copy)
 }
 
-public fn Slice[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
+public fn Slice[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
   ensures result.length() <= self.length()
   ensures forall i in 0..result.length() => keep(result.model()[i])
   cost time O(self.length() * (time(keep) + time(Element.copy)))
@@ -648,12 +635,11 @@ public fn Slice[Element: Copyable].repeated(self, times: UInt64) -> List[Element
       }
       List(storage: own elements)
     }
-    None => intrinsic::crash("a list cannot hold that many elements".slice())
+    None => intrinsic::crash("a list cannot hold that many elements")
   }
 }
 
 public fn Slice[Element: Display].join(self, separator: StringSlice) -> String
-  cost time finite
 {
   var output = ""
   var index: UInt64 = 0
@@ -706,7 +692,6 @@ public fn Slice[Element].chunks(self, size: UInt64) -> list::Chunks[Element]
 
 public fn Slice[Element: Equal].split(self, separator: Element) -> List[Slice[Element]]
   ensures result.length() <= self.length() + 1
-  cost time finite
 {
   var parts: List[Slice[Element]] = []
   var start: UInt64 = 0
@@ -863,7 +848,6 @@ fn parent_holds[Element: Ordered](items: Sequence[Element], limit: Integer, pare
   requires 0 <= parent
   requires parent < limit / 2
   ensures result == (items[2 * parent + 1] <= items[parent] && (2 * parent + 2 >= limit || items[2 * parent + 2] <= items[parent]))
-  cost time finite
 {
   items[2 * parent + 1] <= items[parent] && (2 * parent + 2 >= limit || items[2 * parent + 2] <= items[parent])
 }
@@ -872,7 +856,6 @@ fn is_heap_from[Element: Ordered](items: Sequence[Element], limit: Integer, floo
   requires limit <= items.length()
   requires 0 <= floor
   ensures result == (forall parent in floor..limit / 2 => parent_holds(items, limit: limit, parent: parent))
-  cost time finite
 {
   forall parent in floor..limit / 2 => parent_holds(items, limit: limit, parent: parent)
 }
@@ -881,7 +864,6 @@ fn is_heap_except[Element: Ordered](items: Sequence[Element], limit: Integer, fl
   requires limit <= items.length()
   requires 0 <= floor
   ensures result == (forall parent in floor..limit / 2 => parent == hole || parent_holds(items, limit: limit, parent: parent))
-  cost time finite
 {
   forall parent in floor..limit / 2 => parent == hole || parent_holds(items, limit: limit, parent: parent)
 }
@@ -893,7 +875,6 @@ fn children_are_at_most[Element: Ordered](items: Sequence[Element], limit: Integ
   requires above < items.length()
   ensures result == (hole >= limit / 2
       || (items[2 * hole + 1] <= items[above] && (2 * hole + 2 >= limit || items[2 * hole + 2] <= items[above])))
-  cost time finite
 {
   hole >= limit / 2
     || (items[2 * hole + 1] <= items[above] && (2 * hole + 2 >= limit || items[2 * hole + 2] <= items[above]))
@@ -902,14 +883,12 @@ fn children_are_at_most[Element: Ordered](items: Sequence[Element], limit: Integ
 theorem less_is_at_most[Element: Ordered](first: Element, second: Element)
   requires first < second
   ensures first <= second
-  cost time finite
 {
 }
 
 theorem not_less_is_at_least[Element: Ordered](first: Element, second: Element)
   requires !(first < second)
   ensures second <= first
-  cost time finite
 {
 }
 
@@ -917,7 +896,6 @@ theorem at_most_chain[Element: Ordered](first: Element, second: Element, third: 
   requires first <= second
   requires second <= third
   ensures first <= third
-  cost time finite
 {
 }
 
@@ -946,7 +924,6 @@ theorem swap_keeps_heap_except[Element: Ordered](
   ensures forall parent in floor..limit =>
     parent >= bound || parent == child || parent_holds(after.model(), limit: limit, parent: parent)
   decreases bound
-  cost time finite
 {
   if bound > floor {
     swap_keeps_heap_except(
@@ -986,7 +963,6 @@ theorem swap_keeps_bound[Element: Ordered](
   requires forall i in 0..before.length() => i == first || i == second || identical(after.model()[i], before.model()[i])
   ensures forall i in 0..limit => i >= bound || after[i] <= after[top]
   decreases bound
-  cost time finite
 {
   if bound > 0 {
     swap_keeps_bound(
@@ -1143,7 +1119,6 @@ theorem heap_item_is_at_most_root[Element: Ordered](items: Slice[Element], limit
   requires index < limit
   ensures items[index] <= items[0]
   decreases index
-  cost time finite
 {
   if index > 0 {
     let parent = (index - 1) / 2
@@ -1161,7 +1136,6 @@ theorem heap_root_is_largest[Element: Ordered](items: Slice[Element], limit: UIn
   requires bound <= limit
   ensures forall i in 0..items.length() => i < bound ==> items[i] <= items[0]
   decreases bound
-  cost time finite
 {
   if bound > 0 {
     heap_root_is_largest(items, limit: limit, bound: bound - 1)
@@ -1197,7 +1171,6 @@ theorem moving_root_keeps_heap[Element: Ordered](before: Slice[Element], after: 
   requires forall i in 0..before.length() => i == 0 || i == limit - 1 || identical(after.model()[i], before.model()[i])
   ensures forall parent in 0..limit => parent >= bound || parent == 0 || parent_holds(after.model(), limit: limit - 1, parent: parent)
   decreases bound
-  cost time finite
 {
   if bound > 0 {
     moving_root_keeps_heap(before, after: after, limit: limit, bound: bound - 1)
@@ -1219,7 +1192,6 @@ theorem moved_root_is_largest[Element: Ordered](before: Slice[Element], after: S
   requires forall i in 0..before.length() => i == 0 || i == limit - 1 || identical(after.model()[i], before.model()[i])
   ensures forall i in 0..limit - 1 => i >= bound || after[i] <= after[limit - 1]
   decreases bound
-  cost time finite
 {
   if bound > 0 {
     moved_root_is_largest(before, after: after, limit: limit, bound: bound - 1)
@@ -1237,7 +1209,6 @@ theorem unchanged_tail_stays_sorted[Element: Ordered](before: Slice[Element], af
   requires forall i in from..before.length() => identical(after.model()[i], before.model()[i])
   ensures forall i in 1..after.length() => i > from && i < bound ==> after[i - 1] <= after[i]
   decreases bound - from
-  cost time finite
 {
   if bound > from {
     unchanged_tail_stays_sorted(before, after: after, from: from, bound: bound - 1)
@@ -1321,7 +1292,6 @@ theorem sorted_in_model[Element: Ordered](items: Slice[Element], bound: UInt64)
   requires bound <= items.length()
   ensures forall i in 1..items.length() => i < bound ==> items.model()[i - 1] <= items.model()[i]
   decreases bound
-  cost time finite
 {
   if bound > 1 {
     sorted_in_model(items, bound: bound - 1)
@@ -1333,7 +1303,6 @@ theorem sorted_in_model[Element: Ordered](items: Slice[Element], bound: UInt64)
 public theorem is_sorted_orders_model[Element: Ordered](items: Slice[Element])
   requires items.is_sorted()
   ensures forall i in 1..items.length() => items.model()[i - 1] <= items.model()[i]
-  cost time finite
 {
   sorted_in_model(items, bound: items.length())
 }
@@ -1343,7 +1312,6 @@ internal theorem sorted_from_model[Element: Ordered](items: Slice[Element], boun
   requires bound <= items.length()
   ensures forall i in 1..items.length() => i < bound ==> items[i - 1] <= items[i]
   decreases bound
-  cost time finite
 {
   if bound > 1 {
     sorted_from_model(items, bound: bound - 1)
@@ -1552,7 +1520,6 @@ public fn lexicographic[Element: Ordered](
       Ordering.Equal
     })
   decreases first.length() - from
-  cost time finite
 {
   if from < first.length() && from < second.length() {
     if first[from].compare(second[from]) == Ordering.Equal {
@@ -1578,7 +1545,6 @@ internal theorem lexicographic_agrees_with_equal[Element: Ordered](
   ensures (lexicographic(first, second: second, from: from) == Ordering.Equal)
     == (first.length() == second.length() && forall i in from..first.length() => first[i] == second[i])
   decreases first.length() - from
-  cost time finite
 {
   if from < first.length() && from < second.length() {
     lexicographic_agrees_with_equal(first, second: second, from: from + 1)
@@ -1595,7 +1561,6 @@ internal theorem lexicographic_is_antisymmetric[Element: Ordered](
   ensures (lexicographic(first, second: second, from: from) == Ordering.Less)
     == (lexicographic(first: second, second: first, from: from) == Ordering.Greater)
   decreases first.length() - from
-  cost time finite
 {
   if from < first.length() && from < second.length() {
     assert (first[from].compare(second[from]) == Ordering.Less)
@@ -1617,7 +1582,6 @@ internal theorem lexicographic_is_transitive[Element: Ordered](
   requires lexicographic(first: second, second: third, from: from) != Ordering.Greater
   ensures lexicographic(first, second: third, from: from) != Ordering.Greater
   decreases first.length() - from
-  cost time finite
 {
   if from < first.length() && from < second.length() && from < third.length() {
     assert first[from] <= second[from]

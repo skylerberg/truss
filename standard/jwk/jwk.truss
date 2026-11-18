@@ -9,7 +9,7 @@ impl Display for Error {
   fn display(self, output: mut String)
   {
     mut output.push("JWK: ")
-    mut output.push(self.message.slice())
+    mut output.push(self.message)
   }
 }
 
@@ -53,7 +53,7 @@ fn text_of(value: json::Value, name: StringSlice) -> Option[String] {
 
 fn bytes_of(value: json::Value, name: StringSlice) -> Result[List[UInt8], Error] {
   match text_of(value, name: name) {
-    Some(text) => decoded(text.slice())
+    Some(text) => decoded(text)
     None => Err(Error(message: "a key without its \"${name}\" member"))
   }
 }
@@ -123,7 +123,7 @@ fn material_of(value: json::Value) -> Result[Material, Error]
     }
   }
   if kind == "EC" {
-    let curve = curve_named(text_of(value, name: "crv").unwrap_or("").slice())?
+    let curve = curve_named(text_of(value, name: "crv").unwrap_or(""))?
     let x = bytes_of(value, name: "x")?
     let y = bytes_of(value, name: "y")?
     var point: List[UInt8] = [4]
@@ -196,7 +196,7 @@ fn put(members: mut Map[String, json::Value], name: StringSlice, text: StringSli
 }
 
 fn put_bytes(members: mut Map[String, json::Value], name: StringSlice, bytes: Slice[UInt8]) {
-  put(mut members, name: name, text: encoded(bytes).slice())
+  put(mut members, name: name, text: encoded(bytes))
 }
 
 public fn Key.to_value(self) -> json::Value
@@ -247,15 +247,15 @@ public fn Key.to_value(self) -> json::Value
     }
   }
   match self.id {
-    Some(id) => put(mut members, name: "kid", text: id.slice())
+    Some(id) => put(mut members, name: "kid", text: id)
     None => {}
   }
   match self.algorithm {
-    Some(algorithm) => put(mut members, name: "alg", text: algorithm.slice())
+    Some(algorithm) => put(mut members, name: "alg", text: algorithm)
     None => {}
   }
   match self.usage {
-    Some(usage) => put(mut members, name: "use", text: usage.slice())
+    Some(usage) => put(mut members, name: "use", text: usage)
     None => {}
   }
   json::Value.Object(members: own members)
@@ -300,7 +300,7 @@ public fn Key.is_private(self) -> Bool {
 
 fn member_text(value: json::Value, name: StringSlice) -> String {
   let member = text_of(value, name: name).unwrap_or("")
-  "\"${name}\":${json::quote(member.slice())}"
+  "\"${name}\":${json::quote(member)}"
 }
 
 public fn Key.thumbprint(self) -> String

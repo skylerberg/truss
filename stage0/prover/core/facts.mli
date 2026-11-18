@@ -37,6 +37,8 @@ val oblige :
   Logic.term ->
   unit
 
+val show_callee : Path.t -> string
+
 val reject_recursion_through_supplied_code :
   State.context -> State.frame -> State.location -> Mir.statement -> unit
 
@@ -47,15 +49,12 @@ val find_recursive_callee :
   'operand Core.target ->
   Mir.Call_edges.resolution * Path.t option
 
-val oblige_safe_operation :
-  ?cited:Resolve.Names.key * Core.origin ->
-  ?fixes:State.fix list ->
+val reject_uncompared_recursion :
   State.context ->
   State.frame ->
-  Diagnostic.Code.prover ->
   State.location ->
-  State.message ->
-  Logic.term ->
+  Path.t option ->
+  describe:(string -> string) ->
   unit
 
 val make_closed_obligation :

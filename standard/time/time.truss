@@ -245,7 +245,6 @@ impl Default for Duration {
 }
 
 internal fn write_fixed_point(output: mut String, whole: UInt64, fraction: UInt64, digits: UInt64)
-  cost time finite
 {
   whole.display(mut output)
   if fraction != 0 {
@@ -818,7 +817,6 @@ internal fn DateTime.instant(self, offset_seconds: Int64) -> Option[Instant]
 }
 
 internal fn write_fraction(output: mut String, value: UInt64, digits: UInt64)
-  cost time finite
 {
   let padded = value.format(minimum_digits: digits)
   let text = padded.slice()
@@ -1373,7 +1371,6 @@ internal fn iso_week(ordinal: Int64, weekday: Int64, year: Int64) -> Int64
 
 internal fn write_two_digits(output: mut String, value: Int64)
   requires 0 <= value && value <= 99
-  cost time finite
 {
   if value < 10 {
     mut output.push("0")
@@ -1814,7 +1811,6 @@ public fn TimeZone.utc() -> TimeZone
 
 fn write_offset(output: mut String, seconds: Int64)
   requires -100 * 3600 < seconds && seconds < 100 * 3600
-  cost time finite
 {
   if seconds == 0 {
     mut output.push("Z")
@@ -1836,7 +1832,6 @@ fn write_offset(output: mut String, seconds: Int64)
 }
 
 public fn TimeZone.fixed(offset: Duration) -> Option[TimeZone]
-  cost time finite
 {
   let nanoseconds = offset.nanoseconds
   if nanoseconds % 1000000000 != 0 || nanoseconds <= -86400000000000 || nanoseconds >= 86400000000000 {
@@ -1918,7 +1913,6 @@ fn posix_number(bytes: Slice[UInt8], from: UInt64, to: UInt64, most: Int64) -> O
   requires to <= bytes.length()
   requires 0 <= most && most * 10 + 9 <= Int64.maximum
   ensures !(result is Some(number) && (number.value < 0 || number.value > most || number.end <= from || number.end > to))
-  cost time finite
 {
   var value: Int64 = 0
   var index = from
@@ -1946,7 +1940,6 @@ fn posix_time(bytes: Slice[UInt8], from: UInt64, to: UInt64) -> Option[ParsedNum
   requires to <= bytes.length()
   ensures !(result is Some(time) && (time.value <= -7 * 86400 || time.value >= 7 * 86400 || time.end <= from
     || time.end > to))
-  cost time finite
 {
   var index = from
   var negative = false
@@ -1974,7 +1967,6 @@ fn posix_name_end(bytes: Slice[UInt8], from: UInt64, to: UInt64) -> Option[UInt6
   requires from <= to
   requires to <= bytes.length()
   ensures !(result is Some(end) && (end <= from || end > to))
-  cost time finite
 {
   var index = from
   if index < to && bytes[index] == 60 {
@@ -2010,7 +2002,6 @@ fn posix_rule_day(bytes: Slice[UInt8], from: UInt64, to: UInt64) -> Option[Parse
   requires to <= bytes.length()
   ensures !(result is Some(parsed) && (parsed.time <= -7 * 86400 || parsed.time >= 7 * 86400 || parsed.end <= from
     || parsed.end > to))
-  cost time finite
 {
   if from == to {
     return None
@@ -2051,7 +2042,6 @@ fn posix_rule_day(bytes: Slice[UInt8], from: UInt64, to: UInt64) -> Option[Parse
 fn posix_rule(bytes: Slice[UInt8], from: UInt64, to: UInt64) -> Option[ZoneRule]
   requires from <= to
   requires to <= bytes.length()
-  cost time finite
 {
   let standard_name = posix_name_end(bytes, from: from, to: to)?
   let standard = posix_time(bytes, from: standard_name, to: to)?
@@ -2090,7 +2080,6 @@ fn posix_rule(bytes: Slice[UInt8], from: UInt64, to: UInt64) -> Option[ZoneRule]
 }
 
 fn footer_rule(rules: Slice[UInt8], from: UInt64) -> Result[Option[ZoneRule], ZoneError]
-  cost time finite
 {
   if from >= rules.length() || rules[from] != 10 {
     return Err(ZoneError.MalformedRules)
@@ -2116,7 +2105,6 @@ fn footer_rule(rules: Slice[UInt8], from: UInt64) -> Result[Option[ZoneRule], Zo
 }
 
 public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[TimeZone, ZoneError]
-  cost time finite
 {
   var header = match read_header(rules, at: 0, time_width: 4) {
     Some(header) => header
@@ -2256,7 +2244,6 @@ public fn TimeZone.to_instant(self, local: DateTime) -> Option[LocalInstant]
 }
 
 public fn TimeZone.format(self, instant: Instant) -> String
-  cost time finite
 {
   var output = ""
   self.to_local(instant).display(mut output)
@@ -2294,7 +2281,7 @@ public fn local_zone() -> TimeZone
   uses Environment
 {
   match Environment.local_zone() {
-    Some(name) => match zone(name.slice()) {
+    Some(name) => match zone(name) {
       Ok(named_zone) => named_zone
       Err(_) => TimeZone.utc()
     }
@@ -2318,7 +2305,6 @@ type LayoutPart =
   derives Equal
 
 fn layout_parts(pattern: StringSlice) -> Option[List[LayoutPart]]
-  cost time finite
 {
   var parts: List[LayoutPart] = []
   var run: UInt64 = 0
@@ -2396,13 +2382,11 @@ impl FromTemplate for Layout {
 }
 
 public fn is_valid_layout(literals: Slice[text::Literal]) -> Bool
-  cost time finite
 {
   literals.length() == 1 && layout_parts(literals[0].text()) is Some(_)
 }
 
 public fn DateTime.format(self, layout: Layout) -> String
-  cost time finite
 {
   let civil = self.date.civil()
   let nanoseconds_of_day: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
@@ -2414,13 +2398,13 @@ public fn DateTime.format(self, layout: Layout) -> String
     decreases layout.parts.length() - index
   {
     match layout.parts[index] {
-      Text(text) => mut output.push(text.slice())
+      Text(text) => mut output.push(text)
       Year => {
         let year = if civil.year < 0 { -civil.year } else { civil.year }
         if civil.year < 0 {
           mut output.push("-")
         }
-        mut output.push(year.format(minimum_digits: 4).slice())
+        mut output.push(year.format(minimum_digits: 4))
       }
       Month => write_two_digits(mut output, value: civil.month)
       Day => write_two_digits(mut output, value: civil.day)
@@ -2447,7 +2431,6 @@ fn weekday_name_end(text: StringSlice, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
-  cost time finite
 {
   var index = from
   while index < text.length() && ((65 <= text.byte(index) && text.byte(index) <= 90)
@@ -2462,7 +2445,6 @@ fn weekday_name_end(text: StringSlice, from: UInt64) -> UInt64
 }
 
 public fn Layout.parse_date_time(self, text: StringSlice) -> Result[DateTime, ParseTimeError]
-  cost time finite
 {
   var fields = LayoutFields(year: 1970, month: 1, day: 1, hour: 0, minute: 0, second: 0, nanosecond: 0)
   var weekday: Option[String] = None
@@ -2482,7 +2464,7 @@ public fn Layout.parse_date_time(self, text: StringSlice) -> Result[DateTime, Pa
   {
     match self.parts[index] {
       Text(expected) => {
-        if expected.length() > text.length() - position || !text.matches_at(expected.slice(), offset: position) {
+        if expected.length() > text.length() - position || !text.matches_at(expected, offset: position) {
           return Err(ParseTimeError.Malformed(offset: position))
         }
         position += expected.length()

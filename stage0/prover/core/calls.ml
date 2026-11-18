@@ -7,15 +7,6 @@ let lookup_argument_at_index (values : State.passed list) index =
   | Some term -> term
   | None -> Logic.Boolean false
 
-let rec show_callee (path : Path.t) =
-  match path with
-  | Top { name; _ } -> name
-  | Method { owner = Impl { for_type; _ } | Derived { type_ = for_type; _ }; name; _ }
-  | Method { owner = for_type; name; _ }
-  | Member_constant { owner = for_type; name } ->
-      show_callee for_type ^ "." ^ name
-  | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> Path.show path
-
 let list_type_names substitution =
   let shown =
     List.map
@@ -211,7 +202,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let is_self_call = Option.equal Path.equal recursive_callee (Some context.node) in
   if Option.is_some recursive_callee then
     begin match (context.measures, callee_clauses.decreases) with
-    | [], [] when is_self_call && list_structural_parameters context frame callee_clauses <> [] ->
+    | [], []
+      when context.terminates && is_self_call
+           && list_structural_parameters context frame callee_clauses <> [] ->
         let pairs = list_structural_parameters context frame callee_clauses in
         let before = List.map (fun (ty, entry, _) -> Models.rank context ty entry) pairs in
         let after =
@@ -229,7 +222,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             conjunction
               (List.map (fun right_term -> Operation ("<=", [ int 0; right_term ])) before)
             &&& Amounts.compare_lexicographically before after)
-    | [], _ | _, [] ->
+    | ([], _ | _, []) when context.terminates ->
         Facts.oblige context frame Termination location
           [
             Text
@@ -240,10 +233,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                  Printf.sprintf
                    "This call to `%s` may not end: it calls back here, and both need a `decreases` \
                     clause for the prover to show that the recursion ends."
-                   (show_callee path));
+                   (Facts.show_callee path));
           ]
           (Logic.Boolean false)
-    | measures, callee_measures ->
+    | (_ :: _ as measures), (_ :: _ as callee_measures) ->
         let current_frame =
           { frame with makes_obligations = false; locals = frame.old_locals; self = frame.old_self }
         in
@@ -276,12 +269,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                    measures)
           @ [ Text "`." ])
           (Amounts.compare_lexicographically before after)
+    | [], _ | _, [] -> ()
     end;
   let precondition_clauses = Contracts.select_precondition_clauses contract in
-  let is_checked =
-    Mir.is_index_call invocation.callee
-    && Option.is_some (Mir.find_checked_requires context.lookups.mir path)
-  in
   let required =
     let entry = read_entry_frame precondition_clauses in
     List.map
@@ -297,12 +287,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           [
             Text "`";
             Facts.quote precondition_clauses.callee clause.origin;
-            Text (Printf.sprintf "` may not hold for this call to `%s`." (show_callee path));
+            Text (Printf.sprintf "` may not hold for this call to `%s`." (Facts.show_callee path));
           ]
         in
-        if is_checked then
-          Facts.oblige_safe_operation context frame Requires location ?cited ~fixes message term
-        else Facts.oblige context frame Requires location ?cited ~fixes message term;
+        Facts.oblige context frame Requires location ?cited ~fixes message term;
         term)
       precondition_clauses.requires
   in
@@ -833,7 +821,6 @@ let compute_function_value_amount context frame ~location (function_type : Types
             | Types.Capability_parameter _ | Types.Capability_projection _
             | Types.Capability_variable _ ->
                 true
-            | Types.Divergence _ -> false
             | Types.Capability_error _ ->
                 Facts.raise_bug "the prover reads a capability with an error")
           (function_type.uses :> Types.capability list)
@@ -1095,16 +1082,9 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
   match modelled with
   | By_contract (frame, result) -> Some (frame, result)
   | Without_contract result ->
-      Option.iter
-        (fun recursive_callee ->
-          Facts.oblige context frame Termination location
-            [
-              Text
-                (Printf.sprintf
-                   "This call to `%s` may not end: it calls back here, and the prover reads this \
-                    call without the callee's `decreases` clause."
-                   (Path.show recursive_callee));
-            ]
-            (Logic.Boolean false))
-        recursive_callee;
+      Facts.reject_uncompared_recursion context frame location recursive_callee
+        ~describe:
+          (Printf.sprintf
+             "This call to `%s` may not end: it calls back here, and the prover reads this call \
+              without the callee's `decreases` clause.");
       result

@@ -92,7 +92,7 @@ let compute_promised_amount context frame (counter : Costs.counter) (bound : Mir
   | Exactly amount, (At_most | Exactly) ->
       let amount = Costs.minus (evaluate amount) change in
       if exact_target then amount else declare_bounded_amount context frame amount
-  | (Order_of _ | Finite), _ -> Operations.declare_unknown_amount context frame counter
+  | Order_of _, _ -> Operations.declare_unknown_amount context frame counter
 
 let compute_growth compute_change =
   try Costs.at_least_zero (compute_change ()) with Facts.Unsupported _ -> Costs.zero
@@ -133,7 +133,6 @@ let make_reach_formula context frame uses (values : State.passed list) (target :
              | Types.Capability_parameter _ | Types.Capability_projection _
              | Types.Capability_variable _ ->
                  true
-             | Types.Divergence _ -> false
              | Types.Capability_error _ ->
                  Facts.raise_bug "the prover reads a capability with an error")
            uses)
@@ -225,12 +224,9 @@ let compute_callee_amount ?(method_cost : (Metric.t -> Logic.term) option) (cont
             compute_amount_within context after counter (compute_cost metric)
         | _ -> Operations.declare_unknown_amount context after counter
       in
-      match (find_first_clauses (), counter.resource, counter.counting) with
-      | Some ((_, _, { bound = Finite; _ }) :: _), Metric Time, Units
-        when Option.is_some method_cost ->
-          compute_method_amount ()
-      | Some (clause :: _), _, _ -> compute_amount clause
-      | (Some [] | None), _, _ -> compute_method_amount ())
+      match find_first_clauses () with
+      | Some (clause :: _) -> compute_amount clause
+      | Some [] | None -> compute_method_amount ())
 
 let find_generic_argument context frame (operation : Intrinsic.operation) type_arguments name =
   let generics = (Intrinsic_signatures.make_signature operation).generics in
@@ -579,7 +575,7 @@ let find_literal_bound (metric : Metric.t) (costs : Mir.cost list) =
         match (counter.counting, cost.bound) with
         | Units, Order_of amount | (At_most | Exactly), (At_most amount | Exactly amount) ->
             Contracts.find_integer_literal amount
-        | (Units | At_most | Exactly), (Finite | Order_of _ | At_most _ | Exactly _) -> None)
+        | (Units | At_most | Exactly), (Order_of _ | At_most _ | Exactly _) -> None)
     costs
 
 let find_method_cost_bound context (metric : Metric.t) (method_ : Path.t) ~trait_arguments self_type

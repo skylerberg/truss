@@ -1,6 +1,6 @@
 
 fn echoed(through: mut processes::Child, count: UInt64) -> UInt64
-  uses Tasks, Handles, Panic
+  uses Tasks, Handles, Panic, RunForever
 {
   var input = mut through.take_input().expect("the child was spawned with a piped input")
   var output = mut through.take_output().expect("the child was spawned with a piped output")
@@ -32,7 +32,7 @@ fn echoed(through: mut processes::Child, count: UInt64) -> UInt64
 }
 
 fn main(arguments: List[String]) -> ExitCode
-  uses Tasks, Console, Processes, Handles, Panic
+  uses Tasks, Console, Processes, Handles, Panic, RunForever
 {
   match Processes.run(lines(8000)) {
     Ok(output) => Console.print_line("captured ${output.output.length()} and ${output.error_output.length()}")

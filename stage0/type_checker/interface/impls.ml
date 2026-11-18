@@ -463,63 +463,9 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
     | Some From_bound | Some (Accepted (Types.Variable _)) | None -> projection
     | Some (From_any | Built_in | Accepted _) -> Types.no_capabilities
 
-and resolve_impl_method_divergence lookups ~list_bounds ?(depth = 0) self_type
-    (trait : Types.trait_reference) ~name ~receiver =
-  let conditional_divergence =
-    Types.make_capability_set
-      [ Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ]
-  in
-  let may_not_terminate = Types.make_capability_set [ Types.unconditional_divergence ] in
-  if depth > Properties.recursion_limit then
-    raise
-      (Properties.Recursion_limit
-         (Printf.sprintf
-            "Deciding whether `%s.%s` terminates needs more than %d nested impls. The compiler \
-             stops there: `time` clauses that follow each other through ever larger types never \
-             finish."
-            (Types.show self_type) name Properties.recursion_limit))
-  else
-    match find_evidence lookups ~list_bounds ~checks_conditions:false self_type trait with
-    | Some (From_impl { impl; substitution }) -> (
-        match read_signature lookups (Method { owner = impl; name; receiver }) with
-        | Some (implemented : Types.signature) ->
-            let method_generics =
-              List.filter_map
-                (fun (generic : Types.generic) ->
-                  if Option.is_some (Types.find_argument generic.generic substitution) then None
-                  else Some generic.generic)
-                implemented.generics
-            in
-            let names_method_generic =
-              Types.exists (function
-                | Types.Parameter parameter -> List.mem parameter method_generics
-                | _ -> false)
-            in
-            let follows_method_parameter : Types.capability -> bool = function
-              | Divergence (Of_parameter _) -> true
-              | Divergence (Of_impl_method { self_type; trait; _ }) ->
-                  names_method_generic self_type
-                  || List.exists
-                       (function
-                         | Types.Type argument -> names_method_generic argument
-                         | Types.Value _ -> false)
-                       trait.trait_arguments
-              | _ -> false
-            in
-            let divergence = Types.list_divergence implemented.uses in
-            if List.exists follows_method_parameter (divergence :> Types.capability list) then
-              may_not_terminate
-            else
-              normalize_capabilities lookups ~list_bounds ~depth:(depth + 1)
-                (Types.substitute_capabilities substitution divergence)
-        | None -> raise_bug "`%s` has no signature for `%s`" (Path.show impl) name)
-    | Some From_any -> may_not_terminate
-    | Some From_bound | Some (Accepted (Types.Variable _)) | None -> conditional_divergence
-    | Some (Built_in | Accepted _) -> Types.no_capabilities
-
 and normalize_capabilities lookups ~list_bounds ?depth (capabilities : Types.capability_set) =
   let reads_an_impl : Types.capability -> bool = function
-    | Capability_projection _ | Divergence (Of_impl_method _) -> true
+    | Capability_projection _ -> true
     | _ -> false
   in
   if not (List.exists reads_an_impl (capabilities :> Types.capability list)) then capabilities
@@ -531,27 +477,8 @@ and normalize_capabilities lookups ~list_bounds ?depth (capabilities : Types.cap
                (normalize lookups ~list_bounds base)
                { trait with associated = [] } name
               :> Types.capability list)
-        | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
-            (resolve_impl_method_divergence lookups ~list_bounds ?depth
-               (normalize lookups ~list_bounds self_type)
-               (normalize_trait_arguments lookups ~list_bounds trait)
-               ~name ~receiver
-              :> Types.capability list)
         | capability -> [ capability ])
       capabilities
-
-and normalize_trait_arguments lookups ~list_bounds (trait : Types.trait_reference) :
-    Types.trait_reference =
-  {
-    trait = trait.trait;
-    trait_arguments =
-      List.map
-        (function
-          | Types.Type type_ -> Types.Type (normalize lookups ~list_bounds type_)
-          | Types.Value _ as argument -> argument)
-        trait.trait_arguments;
-    associated = [];
-  }
 
 and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
   let normalize = normalize lookups ~list_bounds ?defining in
@@ -586,7 +513,7 @@ and normalize_in_impl lookups ~list_bounds (impl : Types.impl_interface) type_ =
           if Path.equal projected.trait impl.implements.trait then
             match List.assoc_opt name impl.implements.associated with
             | Some chosen -> Some chosen
-            | None -> Some (Types.Error (Diagnostic.make_recovered name))
+            | None -> Some (Types.Error Diagnostic.reported_elsewhere)
           else
             project_associated_type lookups
               ~list_bounds:(list_impl_bounds impl ~list_bounds)
@@ -668,12 +595,7 @@ and read_signature lookups (path : Path.t) =
       Some
         {
           signature with
-          uses =
-            (match declared with
-            | Some declared when not (Types.terminates uses) ->
-                Types.union_capabilities (Types.remove_divergence uses)
-                  (Types.list_divergence declared.uses)
-            | Some _ | None -> uses);
+          uses;
           costs =
             (match declared with
             | Some declared -> List.sort_uniq compare (signature.costs @ declared.costs)

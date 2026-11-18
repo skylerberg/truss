@@ -4,9 +4,7 @@ type Holder(outer: Outer)
 type Outer(size: Int64)
 
 impl Default for Outer {
-  fn default() -> Outer
-    cost time finite
-  {
+  fn default() -> Outer {
     Holder.default().outer
   }
 }

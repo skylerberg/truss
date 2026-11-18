@@ -221,7 +221,7 @@ fn deflate_parameters(parameters: Slice[Parameter], is_response: Bool) -> Option
     } else if name == "server_max_window_bits" || name == "client_max_window_bits" {
       let value = match parameter.value {
         Some(value) => {
-          if !is_window_bits(value.slice()) {
+          if !is_window_bits(value) {
             return None
           }
           Some(value.copy())
@@ -260,7 +260,7 @@ internal fn accepted_deflate(offers: Option[StringSlice]) -> Option[DeflateAccep
           match settings.server_window {
             Some(bits) => {
               mut response.push("; server_max_window_bits=")
-              mut response.push(bits.slice())
+              mut response.push(bits)
               compresses = bits == "15"
             }
             None => {}

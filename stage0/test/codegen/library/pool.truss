@@ -5,7 +5,7 @@ use standard::tasks
 type Connection(serial: Int64)
 
 fn borrow(pool: tasks::Pool[Connection], opened: tasks::Counter, fails: Bool) -> String
-  uses Tasks, Clock
+  uses Tasks, Clock, RunForever
 {
   let outcome = pool.using(open: fn() {
     let serial = opened.add(1)
@@ -37,7 +37,7 @@ test "a pool reuses an idle resource, discards one whose work failed, and forget
 }
 
 fn hold(pool: tasks::Pool[Connection], opened: tasks::Counter, active: tasks::Counter, peak: tasks::Counter)
-  uses Tasks, Clock
+  uses Tasks, Clock, RunForever
 {
   let _ = pool.using(open: fn() {
     let serial = opened.add(1)

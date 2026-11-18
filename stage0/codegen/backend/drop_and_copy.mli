@@ -8,9 +8,9 @@ val build_any_copy : t -> Ground.ty -> Emit_c.fragment
 val copy : t -> Ground.ty -> Emit_c.fragment
 
 val copy_into :
-  t -> Emit_c.Builder.t -> destination:Lowered.place -> source:Lowered.place -> Ground.ty -> unit
+  t -> Emit_c.Ir_builder.t -> destination:Lowered.place -> source:Lowered.place -> Ground.ty -> unit
 
-val allocate_box : t -> Emit_c.Builder.t -> Ground.ty -> Lowered.local
+val allocate_box : t -> Emit_c.Ir_builder.t -> Ground.ty -> Lowered.local
 val list_any_entries : Ground.ty -> is_copyable:bool -> (Lowered.Item.t * Lowered.signature) list
 val compute_first_method_slot : is_copyable:bool -> int
 

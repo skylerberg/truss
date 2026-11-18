@@ -97,8 +97,8 @@ let read_impl_interface lookups path =
 let is_external_test lookups path =
   match find_interface lookups path with
   | Some (Test_interface signature) ->
-      Types.remove_divergence
-        (Types.subtract_capabilities signature.uses (Types.make_capability_set [ Types.panic ]))
+      Types.subtract_capabilities signature.uses
+        (Types.make_capability_set [ Types.panic; Types.run_forever ])
       <> Types.no_capabilities
   | _ -> Compiler_bug.raise_bug ~stage:"Interface" "%s has no test interface" (Path.show path)
 

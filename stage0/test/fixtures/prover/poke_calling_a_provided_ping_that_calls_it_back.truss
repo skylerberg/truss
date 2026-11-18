@@ -1,7 +1,6 @@
 trait Ping {
   fn ping(self, steps: UInt32) -> Int64
     decreases steps
-    cost time finite
   {
     if steps == 0 { return 0 }
     poke(steps - 1)
@@ -14,7 +13,6 @@ impl Ping for Foo {}
 
 fn poke(steps: UInt32) -> Int64
   decreases steps
-  cost time finite
 {
   Foo().ping(steps)
 }

@@ -84,7 +84,7 @@ public fn encode(bytes: Slice[UInt8], padding: Bool = true) -> String
 {
   let count = bytes.length()
   if count > UInt64.maximum / 16 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   let groups = (count + 4) / 5
   let symbol_count = (8 * count + 4) / 5
@@ -136,7 +136,7 @@ fn byte_of(text: Slice[UInt8], symbol_count: UInt64, index: UInt64) -> UInt8
 public fn decode(text: StringSlice) -> Result[List[UInt8], DecodeError] {
   let symbols = text.bytes()
   if symbols.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   var symbol_count = symbols.length()
   while symbol_count > 0 && symbols[symbol_count - 1] == 61

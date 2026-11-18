@@ -25,7 +25,6 @@ let () =
     Database.create
       [ { name = Path.standard_package; dependencies = []; files = Standard_library.files } ]
   in
-  Database.check database [ Path.standard_package ];
   let show channel (name, queries, seconds, failed) =
     Printf.fprintf channel "%8.2f s %6d queries  %s%s\n%!" seconds queries name
       (if failed = 0 then "" else Printf.sprintf " (%d not proven)" failed)

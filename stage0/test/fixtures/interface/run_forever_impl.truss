@@ -1,0 +1,4 @@
+type Fuel(steps: UInt64)
+
+impl RunForever for Fuel {
+}

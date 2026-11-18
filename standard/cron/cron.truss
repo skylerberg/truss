@@ -8,7 +8,7 @@ impl Display for Error {
   fn display(self, output: mut String)
   {
     mut output.push("not a cron expression: ")
-    mut output.push(self.message.slice())
+    mut output.push(self.message)
   }
 }
 
@@ -207,7 +207,7 @@ public fn Schedule.next_after(self, after: Instant) -> Option[Instant] {
 }
 
 public fn run(schedule: Schedule, work: (fn() uses generic Granted))
-  uses Clock, Tasks, generic Granted
+  uses Clock, Tasks, generic Granted, RunForever
 {
   while true {
     let now = Clock.now()

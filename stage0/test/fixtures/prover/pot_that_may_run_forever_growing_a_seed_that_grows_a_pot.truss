@@ -1,0 +1,24 @@
+trait Grow {
+  fn grow(self, steps: UInt32) -> Int64
+    uses RunForever
+}
+
+type Pot[Item](item: Item)
+
+type Seed()
+
+impl Grow for Pot[Item: Grow] {
+  fn grow(self, steps: UInt32) -> Int64
+    uses RunForever
+  {
+    self.item.grow(steps)
+  }
+}
+
+impl Grow for Seed {
+  fn grow(self, steps: UInt32) -> Int64
+    uses RunForever
+  {
+    Pot(item: Seed()).grow(steps)
+  }
+}

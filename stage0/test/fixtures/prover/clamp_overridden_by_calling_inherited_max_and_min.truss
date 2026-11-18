@@ -1,22 +1,15 @@
 trait Level {
   fn height(self) -> Int64
-    cost time finite
 
-  fn raised(self, floor: Int64) -> Int64
-    cost time finite
-  {
+  fn raised(self, floor: Int64) -> Int64 {
     self.height().max(floor)
   }
 
-  fn lowered(self, ceiling: Int64) -> Int64
-    cost time finite
-  {
+  fn lowered(self, ceiling: Int64) -> Int64 {
     self.height().min(ceiling)
   }
 
-  fn clamped(self, floor: Int64, ceiling: Int64) -> Int64
-    cost time finite
-  {
+  fn clamped(self, floor: Int64, ceiling: Int64) -> Int64 {
     self.height().max(floor).min(ceiling)
   }
 }

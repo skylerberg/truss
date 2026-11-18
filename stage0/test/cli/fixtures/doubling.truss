@@ -4,7 +4,7 @@ internal fn double(value: Int64) -> Int64
   value * 2
 }
 
-fn four() -> Int64 {
+public fn four() -> Int64 {
   double(2)
 }
 

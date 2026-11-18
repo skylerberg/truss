@@ -1,8 +1,7 @@
-fn f(visit: (fn(Item) cost time finite))
+fn f(visit: (fn(Item) cost time O(1)))
   cost amortized time O(items.length() * time(visit))
   cost allocations <= 1
   cost calls(visit) == 2
   cost calls(FileRead.read) == 3
   cost calls(FileRead) == 4
-  cost time finite
 {}

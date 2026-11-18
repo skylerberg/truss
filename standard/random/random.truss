@@ -214,7 +214,6 @@ public fn Generator.sample(mut self, population: UInt64, count: UInt64) -> List[
   requires count <= population
   ensures result.length() == count
   ensures forall i in 0..result.length() => result.model()[i] < population
-  cost time finite
 {
   var chosen: List[UInt64] = List.with_capacity(count)
   let start = population - count

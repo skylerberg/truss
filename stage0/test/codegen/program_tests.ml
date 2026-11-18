@@ -678,7 +678,7 @@ let () =
             Codegen_support.make_example_package [ (Codegen_support.example_file, text) ]
           in
           if
-            Codegen_support.list_diagnostics
+            Codegen_support.list_fragment_diagnostics
               (Codegen_support.make_database packages)
               Codegen_support.example_file
             = []
@@ -687,10 +687,7 @@ let () =
               (Printf.sprintf "%s block %d lowers, and its tests pass" name (index + 1))
               (fun () ->
                 let checked = Codegen_support.make_database packages in
-                let interface =
-                  Database.make_interface_lookups checked
-                    [ Codegen_support.example_file.module_.package ]
-                in
+                let interface = Database.make_interface_lookups checked in
                 let functions =
                   List.filter_map
                     (fun (declaration : Resolve.Names.declaration) ->
@@ -710,8 +707,7 @@ let () =
                             (Lowered.Item.Code
                                { path = declaration.path; instantiation = Ground.no_instantiation })
                       | _ -> None)
-                    ((Database.make_name_lookups checked [ Codegen_support.example.package ])
-                       .list_declarations Codegen_support.example)
+                    ((Database.make_name_lookups checked).list_declarations Codegen_support.example)
                 in
                 let database, backend = Codegen_support.load ~roots:functions text in
                 List.iter
@@ -793,3 +789,23 @@ let () =
           Fixtures.Program.pure_function_variable_passed_where_panic_is_allowed
       in
       if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors)
+
+let () =
+  Codegen_support.test
+    "a function value is called with the capabilities of a type that allows more than it uses"
+    (fun () ->
+      let status, output, errors =
+        Codegen_support.run_main
+          Fixtures.Program.function_values_passed_where_more_capabilities_are_allowed
+      in
+      if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors;
+      Codegen_support.expect_string ~expected:"12\n" output);
+  Codegen_support.test "a panic's call chain continues through a call of a function value"
+    (fun () ->
+      expect_panic_with Fixtures.Program.crash_in_a_lambda_called_through_a_function_value
+        [
+          "panic: the lambda got more than 1";
+          "  at example/main.truss:12:7";
+          "  called at example/main.truss:4:3";
+          "  called at example/main.truss:10:16";
+        ])

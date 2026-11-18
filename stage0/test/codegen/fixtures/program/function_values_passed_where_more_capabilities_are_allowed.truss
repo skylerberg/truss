@@ -1,0 +1,43 @@
+capability Coin {
+  fn flip() -> Bool
+}
+
+capability Dice {
+  fn roll() -> UInt64
+}
+
+type HeadsCoin(is_heads: Bool)
+
+impl Coin for HeadsCoin {
+  fn flip(self) -> Bool { self.is_heads }
+}
+
+type LoadedDice(face: UInt64)
+
+impl Dice for LoadedDice {
+  fn roll(self) -> UInt64 { self.face }
+}
+
+fn apply(action: (fn() -> UInt64 uses Coin, Dice)) -> UInt64
+  uses Coin, Dice
+{
+  action()
+}
+
+fn rolled_twice() -> UInt64
+  uses Dice
+{
+  Dice.roll().saturating_add(Dice.roll())
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  let by_lambda: (fn() -> UInt64 uses Dice) = fn() { Dice.roll() }
+  let by_name: (fn() -> UInt64 uses Dice) = rolled_twice
+  let total = provide HeadsCoin(is_heads: true), LoadedDice(face: 4) {
+    apply(by_lambda).saturating_add(apply(by_name))
+  }
+  Console.print_line("${total}")
+  ExitCode.success
+}

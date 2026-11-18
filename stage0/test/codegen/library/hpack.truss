@@ -6,14 +6,14 @@ fn field(name: StringSlice, value: StringSlice) -> hpack::Field {
 }
 
 fn check(decoder: mut hpack::Decoder, block: StringSlice, expected: own List[hpack::Field]) -> Bool
-  uses Panic
+  uses Panic, RunForever
 {
   let bytes = hex::decode(block).expect("hexadecimal")
   mut decoder.decode(bytes.slice()) == Ok(own expected)
 }
 
 fn fails(block: StringSlice) -> Bool
-  uses Panic
+  uses Panic, RunForever
 {
   let bytes = hex::decode(block).expect("hexadecimal")
   var decoder = hpack::Decoder.new()

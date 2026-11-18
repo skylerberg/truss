@@ -69,7 +69,7 @@ impl Feed for Twice[Source: Feed] {
 }
 
 fn drain[Source: Feed](source: mut Source) -> Int64
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var total = 0
   while mut source.pull() is Some(value) {
@@ -152,7 +152,7 @@ fn doubled[Source: Cursor[Element = Int64]](source: own Source) -> Doubled[Sourc
 }
 
 fn added[Source: Cursor[Element = Int64]](source: own Source) -> Int64
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var total = 0
   for value in own source {
