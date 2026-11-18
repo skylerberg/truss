@@ -690,7 +690,14 @@ let () =
         (span ^ Fixtures.Prover.span_passed_after_breaking_its_invariant)
         "prover.invariant");
   Harness.test "a private method that takes mut self is a step of an update" (fun () ->
-      expect_proven (span ^ Fixtures.Prover.span_restore))
+      expect_proven (span ^ Fixtures.Prover.span_restore));
+  Harness.test "a public method that takes mut self is not a step of an update" (fun () ->
+      expect_not_proven (span ^ Fixtures.Prover.span_restored_by_a_public_method) "prover.invariant");
+  Harness.test "a method of a private trait that takes mut self is not a step of an update"
+    (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_restored_by_a_method_of_a_private_trait)
+        "prover.invariant")
 
 let run = Fixtures.Prover.run
 

@@ -22,11 +22,6 @@ let check_callback_requires context frame (site : Invocation.site) through
       | _ -> ())
   | _ -> ()
 
-let calls_updating_helper (context : State.context) (invocation : Invocation.t) =
-  match invocation.callee with
-  | Function { path; _ } -> Contracts.is_updating_helper context.lookups path
-  | _ -> false
-
 let list_laws (context : State.context) trait =
   match context.lookups.interface.names.find_key trait with
   | Some key ->

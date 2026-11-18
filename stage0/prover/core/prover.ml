@@ -129,7 +129,6 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
         | Function | Method | Test -> (
             let prove_with substitution =
               Translate.translate_function
-                ~is_updating_helper:(Contracts.is_updating_helper lookups key.path)
                 ?inherited:(find_inherited_clauses lookups key.path)
                 ~substitution lookups source ~path:key.path
             in

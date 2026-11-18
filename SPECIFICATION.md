@@ -464,8 +464,11 @@ public type Interval =
   function that holds it ends. A `with` is checked after all of its updates.
 - A private method that takes `mut self` is a step of an update: the
   invariant of its `self` is neither assumed when it is called nor required
-  when it returns. It states its precondition and postcondition with
-  `requires` and `ensures`:
+  when it returns. A method written in a trait, a capability, or an `impl`
+  is never one: a caller that reaches it through the trait assumes that
+  `self` meets its invariant when the call returns, and would otherwise
+  observe a broken value. A step states its precondition and postcondition
+  with `requires` and `ensures`:
 
   ```truss
   fn SortedList[Element: Ordered].sift_into_place(mut self, index: UInt64)

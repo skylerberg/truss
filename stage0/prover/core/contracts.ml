@@ -183,22 +183,6 @@ let find_resource (cost : Mir.cost) ~locals : Costs.resource option =
   | Calls (Capability path) -> Some (Calls (Capability path))
   | Calls (Capability_method (path, name)) -> Some (Calls (Capability_method (path, name)))
 
-let is_updating_helper (lookups : Lookups.t) (path : Path.t) =
-  match path with
-  | Method { receiver = Mut; _ } -> (
-      let names = lookups.interface.names in
-      match
-        Option.map
-          (fun key -> (names.read_declaration key, names.read_definition key))
-          (names.find_key path)
-      with
-      | Some
-          ( { visibility = Private; _ },
-            { kind = Function { signature = { name = Member_name _; _ }; _ }; _ } ) ->
-          true
-      | _ -> false)
-  | _ -> false
-
 let find_comparison_operator (comparison : Core.comparison) =
   match comparison with
   | Equal -> Some "="
