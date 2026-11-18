@@ -2,7 +2,7 @@ fn f(code: UInt32) -> UInt32
   requires code < 55296
   ensures result == code
 {
-  match Character.try_from(code) {
+  match Character.try_from_code(code) {
     Ok(character) => character.code()
     Err(_) => unreachable
   }
@@ -12,7 +12,7 @@ fn g(character: Character) -> UInt8
   requires character.is_ascii()
   ensures result == character.code()
 {
-  match UInt8.try_from(character) {
+  match UInt8.try_from_integer(character.code()) {
     Ok(byte) => byte
     Err(_) => unreachable
   }

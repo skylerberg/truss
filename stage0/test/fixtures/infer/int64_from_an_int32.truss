@@ -1,3 +1,0 @@
-fn f(count: Int32) -> Int64 {
-  Int64.from(count)
-}

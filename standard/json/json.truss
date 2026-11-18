@@ -25,7 +25,7 @@ public fn Number.from_float64(value: Float64) -> Option[Number]
   }
   let fits = value >= -9223372036854775808.0 && value < 9223372036854775808.0
   if fits && value == value.truncate() && !(value == 0.0 && value.is_negative()) {
-    return Some(Number(whole: true, integer: Int64.saturating_from(value), fraction: 0.0))
+    return Some(Number(whole: true, integer: Int64.saturating_from_float64(value), fraction: 0.0))
   }
   Some(Number(whole: false, integer: 0, fraction: value))
 }
@@ -1224,7 +1224,7 @@ impl serialization::Tree for Value {
   }
 
   fn from_unsigned(value: UInt64) -> Option[Value] {
-    match Int64.try_from(value) {
+    match Int64.try_from_integer(value) {
       Ok(integer) => Some(Value.Number(value: Number.from(integer)))
       Err(_) => match Number.from_float64(value.to_float64()) {
         Some(number) => Some(Value.Number(value: number))
