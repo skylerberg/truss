@@ -7,7 +7,7 @@ module Path_table = Hashtbl.Make (Path)
 type profile = Development | Release
 type linkage = C_runtime.linkage = External | Internal
 
-let site_structs = C_runtime.site_structs
+let shared_structs = C_runtime.shared_structs
 let version = 28
 
 type failure = C_runtime.failure = Echo | Todo
@@ -266,7 +266,7 @@ let render_file env profile (fragments : (fragment * linkage) list) =
         match key with
         | C_types.Type ty -> Some (Memory_layout.of_type env ty)
         | Block (ty, variant) -> Some (Memory_layout.lay_out_block env ty variant)
-        | Code _ | Environment _ | Evidence _ -> None
+        | Code _ | Environment _ | Evidence _ | Capabilities _ -> None
       in
       Option.iter
         (fun (layout : Memory_layout.t) ->

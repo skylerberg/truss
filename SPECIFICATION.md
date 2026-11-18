@@ -1813,12 +1813,9 @@ code, and no Truss code runs afterward. No code can `provide` `Panic`, so a
 panic cannot be caught.
 
 A panic also prints its call chain: the site of each call that led to it,
-back to `main` or the test, through `parallel` branches and tasks.
-
-- The chain of a panic in an `impl`'s method continues from the `provide`
-  of the implementation, where the `impl` gets its `Panic`.
-- The chain of a panic in a lambda or in a function used as a value starts
-  in that function's body, because a function type passes no `Panic`.
+back to `main` or the test, through calls of function values, `parallel`
+branches, and tasks. The chain of a panic in an `impl`'s method continues
+from the `provide` of the implementation, where the `impl` gets its `Panic`.
 
 ## Capabilities
 

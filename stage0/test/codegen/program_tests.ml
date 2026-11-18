@@ -793,3 +793,23 @@ let () =
           Fixtures.Program.pure_function_variable_passed_where_panic_is_allowed
       in
       if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors)
+
+let () =
+  Codegen_support.test
+    "a function value is called with the capabilities of a type that allows more than it uses"
+    (fun () ->
+      let status, output, errors =
+        Codegen_support.run_main
+          Fixtures.Program.function_values_passed_where_more_capabilities_are_allowed
+      in
+      if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors;
+      Codegen_support.expect_string ~expected:"12\n" output);
+  Codegen_support.test "a panic's call chain continues through a call of a function value"
+    (fun () ->
+      expect_panic_with Fixtures.Program.crash_in_a_lambda_called_through_a_function_value
+        [
+          "panic: the lambda got more than 1";
+          "  at example/main.truss:12:7";
+          "  called at example/main.truss:4:3";
+          "  called at example/main.truss:10:16";
+        ])

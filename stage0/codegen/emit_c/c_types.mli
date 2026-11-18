@@ -4,6 +4,7 @@ type key =
   | Code of Ground.function_type
   | Environment of string * int
   | Evidence of int
+  | Capabilities of int
 
 module Keys : Map.S with type key = key
 

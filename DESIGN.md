@@ -824,6 +824,10 @@ A function type puts its clauses after its result, inside parentheses, as in
 whole clauses, not one or two effect keywords, so the clauses come in the
 order they have in a definition, and the parentheses mark where they end.
 
+| Rule | Reason |
+|---|---|
+| A call of a function value passes the caller's capabilities as one table, and the function finds each capability it uses in the table by name. | A value of `fn()` can be passed where `(fn() uses Clock)` is allowed, and stored or returned there, with no wrapper and no change to how it is called. A wrapper would need storage that lives as long as the value, which a function value that captures nothing does not have. |
+
 ## Methods
 
 Rules: [Methods](SPECIFICATION.md#methods).
@@ -1088,7 +1092,6 @@ process fails anyway, a supervisor restarts it.
 | Rule | Reason |
 |---|---|
 | A panic prints the site of each call that led to it. | `expect` and the other functions of the standard library crash in their own bodies, so the site of the crash alone names a line of the library, not the caller's mistake. |
-| The chain starts again in the body of a function value. | A function type passes no `Panic`, so a value of `fn()` can be passed where `fn() uses Panic` is allowed without a change to how it is called. |
 
 `unreachable` must be proven. Code that claims a point is unreachable must
 not panic when the point is reached. Code that panics on purpose calls

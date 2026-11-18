@@ -110,7 +110,7 @@ val allocate_parameter :
   Lowered.local option * Lowered.place
 
 val list_evidence_parameters : state -> Path.t list -> Lowered.local list
-val start_trace : state -> unit
+val look_up_capabilities : state -> table:Lowered.operand -> Path.t list -> unit
 val find_panic_trace : state -> Lowered.operand option
 val set_result_slot : state -> Convention.result -> unit
 val find_result_place : state -> Lowered.place option

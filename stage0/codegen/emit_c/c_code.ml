@@ -73,14 +73,14 @@ let render_intrinsic context (intrinsic : Lowered.intrinsic)
   | Run_test -> "t_runtime_run_test(" ^ all ^ ")"
   | Coroutine_start ->
       Printf.sprintf
-        "t_runtime_coroutine_start((void (*)(void *, uint64_t))%s.f_code, (void \
+        "t_runtime_coroutine_start((void (*)(void *, uint64_t, void *))%s.f_code, (void \
          *)%s.f_environment, %s)"
         (render_argument 0) (render_argument 0) (render_argument 1)
   | Coroutine_resume -> "t_runtime_coroutine_resume(" ^ all ^ ")"
   | Coroutine_suspend -> "t_runtime_coroutine_suspend()"
   | Tasks_spawn ->
       Printf.sprintf
-        "t_runtime_tasks_spawn(%s, (void (*)(void *, uint64_t))%s.f_code, (void \
+        "t_runtime_tasks_spawn(%s, (void (*)(void *, uint64_t, void *))%s.f_code, (void \
          *)%s.f_environment, %s)"
         (render_argument 0) (render_argument 1) (render_argument 1) (render_argument 2)
   | (Shared_allocate | Shared_retain | Shared_release | Shared_free | Shared_lock | Shared_unlock)
@@ -136,6 +136,23 @@ let render_intrinsic context (intrinsic : Lowered.intrinsic)
         "(%s->evidence.implementation = (void *)%s, %s->evidence.table = (const void *const *)%s, \
          %s%s->evidence.outer = %s->outer)"
         slot (render_argument 1) slot (render_argument 2) (String.concat "" outer) slot slot
+  | Capabilities_fill ->
+      let table = render_argument 0 in
+      let rec fill index = function
+        | name :: length :: evidence :: rest ->
+            Printf.sprintf
+              "%s->entries[%d].name = (const uint8_t *)%s, %s->entries[%d].length = %s, \
+               %s->entries[%d].evidence = (void *)%s, %s"
+              table index (fst name) table index (fst length) table index (fst evidence)
+              (fill (index + 1) rest)
+        | [] -> Printf.sprintf "%s->entries[%d].name = 0" table index
+        | _ -> C_runtime.raise_bug "a table of capabilities with an incomplete entry"
+      in
+      "(" ^ fill 0 (List.drop 1 arguments) ^ ")"
+  | Capability_find ->
+      Printf.sprintf
+        "t_runtime_find_capability((const struct t_capability *)%s, (const uint8_t *)%s, %s)"
+        (render_argument 0) (render_argument 1) (render_argument 2)
   | Trace_link ->
       Printf.sprintf "(%s->site = %s, %s->caller = (const struct t_trace *)%s)" (render_argument 0)
         (render_argument 1) (render_argument 0) (render_argument 2)

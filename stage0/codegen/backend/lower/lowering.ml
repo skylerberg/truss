@@ -191,7 +191,22 @@ let list_evidence_parameters st capabilities =
       arriving;
   List.map snd arriving
 
-let start_trace st = st.evidence <- (Definitions.panic_path, Lowered.Constant Null) :: st.evidence
+let look_up_capabilities st ~table capabilities =
+  st.evidence <-
+    List.map
+      (fun capability ->
+        let evidence = Emit_c.Builder.allocate_local st.builder Convention.evidence in
+        let name = Path.show capability in
+        Emit_c.Builder.emit st.builder
+          (Call
+             {
+               target = Intrinsic Capability_find;
+               arguments =
+                 [ table; Constant (Bytes name); Lowered.make_uint64_constant (String.length name) ];
+               result = Returned (Lowered.make_local_place evidence);
+             });
+        (capability, Lowered.Copy (Lowered.make_local_place evidence)))
+      capabilities
 
 let find_panic_trace st =
   Option.map snd
