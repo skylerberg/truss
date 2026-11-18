@@ -1384,3 +1384,121 @@ let () =
 let () =
   Harness.test "a bit-vector assertion names only integers and booleans" (fun () ->
       expect_one_diagnostic Fixtures.Infer.bit_vector_assertion_naming_a_list "types.not_bit_vector")
+
+let () =
+  let text = Fixtures.Infer.lambda_and_function_value_that_follow_a_ticker in
+  Harness.test "a function type that follows a method of a bound shows no time clause" (fun () ->
+      expect_fine text;
+      expect_type text "fn(source) { mut source.tick() }" "fn(mut Inner) -> UInt64";
+      expect_type text "advance" ~occurrence:2 "fn(mut Inner) -> UInt64");
+  Harness.test "the time of a method that no bound of the type declares is an error" (fun () ->
+      expect_one_diagnostic
+        "trait Ticker {\n\
+        \  fn tick(mut self) -> UInt64\n\
+         }\n\n\
+         fn f[Inner: Ticker](ticker: mut Inner) -> UInt64\n\
+        \  cost time O(time(Inner.tock))\n\
+         {\n\
+        \  mut ticker.tick()\n\
+         }\n"
+        "types.unknown_member"
+        ~says:"`Inner` has no method `tock`: no trait that bounds it declares one.");
+  Harness.test "the time of a method with two overloads that mutate or take `self` is ambiguous"
+    (fun () ->
+      expect_one_diagnostic
+        "trait Opened {\n\
+        \  fn open(mut self) -> UInt64\n\n\
+        \  fn open(own self) -> UInt64\n\
+         }\n\n\
+         fn f[Door: Opened](door: mut Door) -> UInt64\n\
+        \  cost time O(time(Door.open))\n\
+         {\n\
+        \  mut door.open()\n\
+         }\n"
+        "types.ambiguous_method" ~says:"`Door` has more than one method `open`")
+
+let () =
+  let make_each_source ?(loop_clause = "") clause =
+    Printf.sprintf
+      "fn each(items: List[Int64], count: UInt64, visit: (fn(Int64) uses generic Granted))\n\
+      \  uses generic Granted\n\
+      \  %s\n\
+       {\n\
+      \  for item in items%s {\n\
+      \    visit(item)\n\
+      \  }\n\
+       }\n"
+      clause loop_clause
+  in
+  let expect_rejected ?fixed ?loop_clause clause code ~says =
+    expect_one_diagnostic
+      ?fixed:(Option.map make_each_source fixed)
+      (make_each_source ?loop_clause clause)
+      code ~says
+  in
+  Harness.test "a bound names the allocations of a callee in `O(...)` and in `<=`" (fun () ->
+      expect_fine Fixtures.Infer.bounds_naming_the_allocations_of_a_callee);
+  Harness.test "an exact bound does not name the allocations of a callback" (fun () ->
+      expect_rejected "cost allocations == items.length() * allocations(visit)"
+        "types.upper_bound_in_exact_bound"
+        ~says:
+          "`allocations(visit)` is an upper bound on one call, and a call may spend less, so an \
+           exact amount that names it would be false for that call. State this bound with `<=` or \
+           `O(...)`.");
+  Harness.test "an exact bound does not name the allocated bytes of a callback" (fun () ->
+      expect_rejected "cost allocated_bytes == allocated_bytes(visit)"
+        "types.upper_bound_in_exact_bound"
+        ~says:"`allocated_bytes(visit)` is an upper bound on one call");
+  Harness.test "an exact bound does not name the time of a callback" (fun () ->
+      expect_rejected "cost time == time(visit)" "types.upper_bound_in_exact_bound"
+        ~says:"`time(visit)` is an upper bound on one call");
+  Harness.test "a loop's exact bound does not name the allocations of a callback" (fun () ->
+      expect_rejected "cost allocations <= items.length() * allocations(visit)"
+        ~loop_clause:"\n    cost allocations == visited.length() * allocations(visit)\n "
+        "types.upper_bound_in_exact_bound"
+        ~says:"`allocations(visit)` is an upper bound on one call");
+  Harness.test "an allocation bound does not name the time of a callback" (fun () ->
+      expect_rejected "cost allocations <= time(visit)" "types.cost_of_other_resource"
+        ~fixed:"cost allocations <= allocations(visit)"
+        ~says:
+          "`time(visit)` bounds the `time` of one call, not its `allocations`, which this clause \
+           bounds. Write `allocations(visit)`.");
+  Harness.test "a time bound does not name the allocations of a callback" (fun () ->
+      expect_rejected "cost time O(allocations(visit))" "types.cost_of_other_resource"
+        ~fixed:"cost time O(time(visit))"
+        ~says:"`allocations(visit)` bounds the `allocations` of one call, not its `time`");
+  Harness.test "an allocation bound does not name the allocated bytes of a callback" (fun () ->
+      expect_rejected "cost allocations <= allocated_bytes(visit)" "types.cost_of_other_resource"
+        ~fixed:"cost allocations <= allocations(visit)"
+        ~says:"`allocated_bytes(visit)` bounds the `allocated_bytes` of one call");
+  Harness.test "a bound on calls does not name the allocations of a callback" (fun () ->
+      expect_rejected "cost calls(visit) <= allocations(visit)" "types.cost_of_other_resource"
+        ~says:
+          "`allocations(visit)` bounds the `allocations` of one call, not the calls it makes, \
+           which this clause counts.");
+  Harness.test "the allocations of a parameter that is not a function are an error" (fun () ->
+      expect_rejected "cost allocations <= allocations(count)" "types.not_callable"
+        ~says:
+          "`allocations` takes a function parameter, as in `allocations(visit)`, or a method of a \
+           bound, as in `allocations(Element.equal)`, and `count` is a `UInt64`.");
+  Harness.test "the allocated bytes of a named function are an error" (fun () ->
+      expect_rejected "cost allocated_bytes <= allocated_bytes(each)" "types.not_callable"
+        ~says:"and `each` is neither.");
+  Harness.test "the allocations of an expression are an error" (fun () ->
+      expect_rejected "cost allocations <= allocations(count + 1)" "types.not_callable"
+        ~says:"and its operand is neither.");
+  Harness.test "the allocations of a method of a type that no bound names are an error" (fun () ->
+      expect_rejected "cost allocations <= allocations(Int64.equal)" "types.not_callable"
+        ~says:"and its operand is neither.");
+  Harness.test "the time of a parameter that is not a function is an error" (fun () ->
+      expect_rejected "cost time O(time(count))" "types.not_callable"
+        ~says:"`time` takes a function parameter, as in `time(visit)`");
+  Harness.test "the allocations of a method that no bound of the type declares are an error"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.cost_naming_allocations_of_an_undeclared_method
+        "types.unknown_member"
+        ~says:"`Element` has no method `compare`: no trait that bounds it declares one.");
+  Harness.test "the allocations of a method with two overloads that take `self` are ambiguous"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.cost_naming_allocations_of_an_overloaded_method
+        "types.ambiguous_method" ~says:"so `allocations` cannot tell which one is meant.")

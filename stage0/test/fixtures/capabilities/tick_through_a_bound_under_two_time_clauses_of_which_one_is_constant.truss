@@ -1,0 +1,6 @@
+fn f[Inner: Ticker](ticker: mut Inner) -> UInt64
+  cost time O(time(Inner.tick))
+  cost amortized time O(1)
+{
+  mut ticker.tick()
+}

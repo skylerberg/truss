@@ -312,7 +312,7 @@ let is_executable context (condition : Core.expression) =
          Types.equal node.type_ Integer
          ||
          match node.kind with
-         | Quantified _ | Old _ | Result | Specification_function _ | Method_time _ -> true
+         | Quantified _ | Old _ | Result | Specification_function _ | Method_cost _ -> true
          | Call { callee = Function { path; _ }; _ } -> (
              match Interface.Impls.read_signature context.interface path with
              | Some signature -> signature.specification_only
@@ -476,7 +476,16 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
             report "%s contains a capability inference variable" subject
         | Types.Capability_error _ -> report "%s contains a capability with an error" subject
         | Types.Divergence Always -> ()
-        | Types.Divergence (Of_parameter mentioned) -> check_capability_parameter subject mentioned)
+        | Types.Divergence (Of_parameter mentioned) -> check_capability_parameter subject mentioned
+        | Types.Divergence (Of_impl_method { self_type; trait = reference; name; _ }) ->
+            (match self_type with
+            | Parameter _ | Projection _ -> ()
+            | _ ->
+                report
+                  "%s holds the divergence of `%s.%s`, which is not resolved through the `impl`"
+                  subject (Types.show self_type) name);
+            check_type subject self_type;
+            check_trait subject reference)
       (set :> Types.capability list)
   and check_type subject (ty : Types.ty) =
     match ty with
@@ -533,10 +542,10 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         check_type "a call's `Self`" self_type;
         check_instantiation "a call" instantiation;
         match evidence with
-        | Impl { arguments; _ } ->
+        | Impl { substitution; _ } ->
             List.iter
               (fun (_, inner) -> check_argument "an `impl`'s type argument" inner)
-              arguments.arguments
+              (Types.For_testing.list_arguments substitution)
         | Bound | Dynamic -> ())
     | Intrinsic { type_arguments; _ } ->
         List.iter (check_argument "an intrinsic's type argument") type_arguments
@@ -730,7 +739,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
              | Function_value { instantiation; _ } ->
                  check_instantiation "a function value" instantiation
              | Value_parameter named -> check_parameter "a value" named
-             | Method_time method_ -> check_callee method_
+             | Method_cost { method_; _ } -> check_callee method_
              | Lambda { result; captures; _ } ->
                  check_type "a lambda's result" result;
                  List.iter

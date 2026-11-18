@@ -1,0 +1,5 @@
+fn f(ticker: mut Forever) -> UInt64
+  cost time finite
+{
+  step_with(mut ticker, step: advance)
+}

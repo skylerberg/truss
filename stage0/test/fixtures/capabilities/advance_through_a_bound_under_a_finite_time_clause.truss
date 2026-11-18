@@ -1,0 +1,5 @@
+fn f[Other: Ticker](ticker: mut Other) -> UInt64
+  cost time finite
+{
+  advance(mut ticker)
+}

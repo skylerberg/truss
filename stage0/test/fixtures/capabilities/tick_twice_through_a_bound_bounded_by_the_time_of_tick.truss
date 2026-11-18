@@ -1,0 +1,5 @@
+fn f[Inner: Ticker](ticker: mut Inner) -> UInt64
+  cost time O(time(Inner.tick))
+{
+  mut ticker.tick_twice()
+}

@@ -714,13 +714,13 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         | Capability_method _, Calls _ ->
             Amounts.compute_step_amount context after invocation values counter
         | _ ->
-            let ends_in =
-              match invocation.callee with
-              | Trait_method _ when Laws.signature_terminates context path ->
-                  Some (Amounts.compute_method_time context frame invocation.callee)
-              | _ -> None
+            let method_cost =
+              if Laws.has_method_cost context invocation.callee path then
+                Some
+                  (fun metric -> Amounts.compute_method_cost context frame metric invocation.callee)
+              else None
             in
-            Amounts.compute_callee_amount ?ends_in context after ~path
+            Amounts.compute_callee_amount ?method_cost context after ~path
               ~clauses:(Contracts.list_declared_clauses contract)
               ~bind_frame:(fun clauses ->
                 {
@@ -733,46 +733,66 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   in
   (after, result)
 
-let make_time_term context frame (ty : Types.ty) term =
-  let sort = Facts.declare_sort context ty in
-  let symbol = Logic.Symbol.Time sort in
-  Facts.declare context (Logic.Function (symbol, [ sort ], Logic.Int));
-  let time = Logic.Apply (symbol, [ term ]) in
-  Facts.add_frame_fact context frame (Logic.Operation ("<=", [ Logic.int 1; time ]));
-  (match ty with
-  | Types.Function { costs; _ }
-    when List.exists
-           (fun (cost : Types.cost) -> cost.resource = Types.Time && cost.bound = Order_of)
-           costs ->
-      Facts.add_frame_fact context frame (Logic.equal time (Logic.int 1))
-  | _ -> ());
-  (match List.assoc_opt term context.lambda_times with
-  | Some (bound, showing) ->
-      context.lambda_times <- List.remove_assoc term context.lambda_times;
-      context.obligations <- List.rev_append showing context.obligations;
-      Facts.add_frame_fact context frame (Logic.equal time (Costs.larger (Logic.int 1) bound))
-  | None -> ());
-  time
-
-let compute_function_value_amount context frame (function_type : Types.function_type) callee_term
-    (counter : Costs.counter) =
-  let find_clause resource =
-    List.find_opt (fun (cost : Types.cost) -> cost.resource = resource) function_type.costs
+let make_callback_cost (context : State.context) frame (metric : Metric.t) (ty : Types.ty) term =
+  let stated_by_type =
+    match ty with
+    | Types.Function { costs; _ } -> Costs.find_stated_operand costs metric
+    | _ -> None
   in
-  let compute_clause_amount resource =
-    match (find_clause resource, counter.counting) with
-    | Some { bound = Order_of; _ }, Units -> Logic.int 1
-    | Some { bound = No_more_than (Some limit) | Exactly_cost (Some limit); _ }, Units ->
-        Logic.Integer limit
-    | Some { bound = No_more_than (Some limit); _ }, (At_most | Exactly) ->
-        Amounts.declare_bounded_amount context frame (Logic.Integer limit)
-    | Some { bound = Exactly_cost (Some limit); _ }, (At_most | Exactly) -> Logic.Integer limit
-    | _ -> Operations.declare_unknown_amount context frame counter
+  match stated_by_type with
+  | Some stated -> stated
+  | None ->
+      let sort = Facts.declare_sort context ty in
+      let symbol = Logic.Symbol.Callback_cost { metric; sort } in
+      Facts.declare context (Logic.Function (symbol, [ sort ], Logic.Int));
+      let cost = Logic.Apply (symbol, [ term ]) in
+      let least = Costs.least_amount (Metric metric) in
+      Facts.add_frame_fact context frame (Logic.Operation ("<=", [ least; cost ]));
+      let state_value value =
+        Facts.add_frame_fact context frame (Logic.equal cost (Costs.larger least value))
+      in
+      (match term with
+      | Logic.Symbol (Function_value { callee; _ }) ->
+          Option.iter state_value
+            (Option.bind (Interface.Impls.read_signature context.lookups.interface callee)
+               (fun (signature : Types.signature) ->
+                 Costs.find_stated_operand signature.costs metric))
+      | _ -> ());
+      (match List.assoc_opt (term, metric) context.lambda_costs with
+      | Some (bound, showing) ->
+          context.lambda_costs <- List.remove_assoc (term, metric) context.lambda_costs;
+          context.obligations <- List.rev_append showing context.obligations;
+          state_value bound
+      | None -> ());
+      cost
+
+let compute_function_value_amount context frame ~location (function_type : Types.function_type)
+    callee_term (counter : Costs.counter) =
+  let compute_call_amount metric =
+    let make_cost () =
+      make_callback_cost context frame metric (Types.Function function_type) callee_term
+    in
+    match (Costs.list_stated_bounds function_type.costs metric, counter.counting) with
+    | Order_of :: _, Units -> Logic.int 1
+    | Exactly_cost (Some amount) :: _, (At_most | Exactly) -> Logic.Integer amount
+    | _, (Units | At_most) -> Amounts.compute_amount_within context frame counter (make_cost ())
+    | _, Exactly ->
+        let cost = make_cost () in
+        if cost <> Costs.zero then
+          Facts.oblige context frame Cost location
+            [
+              Text
+                (Printf.sprintf
+                   "Only an upper bound is known for the `%s` of this call, which may spend less, \
+                    so no `==` bound can count it. State the cost with `<=`, or give the type of \
+                    the function called an `==` bound."
+                   (Metric.show metric));
+            ]
+            (Logic.equal cost Costs.zero);
+        cost
   in
   match counter.resource with
-  | Time -> make_time_term context frame (Types.Function function_type) callee_term
-  | Allocations -> compute_clause_amount Types.Allocations
-  | Allocated_bytes -> compute_clause_amount Types.Allocated_bytes
+  | Metric metric -> compute_call_amount metric
   | Calls (Through term) ->
       if Amounts.lambda_captures_target context callee_term term then
         Operations.declare_unknown_amount context frame counter
@@ -859,17 +879,17 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | None -> []
   in
   let pair parameters arguments ~fixed =
-    let parameters =
-      List.filter (fun parameter -> Option.is_none (Types.find_argument parameter fixed)) parameters
-    in
-    let rec pair_remaining parameters arguments =
+    let rec bind_remaining substitution parameters arguments =
       match (parameters, arguments) with
       | parameter :: parameters, argument :: arguments ->
-          (parameter, argument) :: pair_remaining parameters arguments
-      | _ -> []
+          bind_remaining (Types.bind_argument parameter argument substitution) parameters arguments
+      | _ -> substitution
     in
-    Types.combine_substitutions fixed
-      { Types.no_substitution with arguments = pair_remaining parameters arguments }
+    bind_remaining fixed
+      (List.filter
+         (fun parameter -> Option.is_none (Types.find_argument parameter fixed))
+         parameters)
+      arguments
   in
   if context.terminates && frame.makes_obligations then
     List.iter
@@ -924,7 +944,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         match evidence with
         | Bound -> (
             match Operations.find_concrete_impl context trait self_type with
-            | Some (impl, arguments) -> Impl { impl; arguments }
+            | Some (impl, substitution) -> Impl { impl; substitution }
             | None -> evidence)
         | _ -> evidence
       in
@@ -969,16 +989,9 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           in
           let path, callee_substitution =
             match evidence with
-            | Impl { impl; arguments = impl_arguments } ->
+            | Impl { impl; substitution } ->
                 let impl_substitution =
-                  {
-                    impl_arguments with
-                    arguments =
-                      List.map
-                        (fun (parameter, argument) ->
-                          (parameter, Types.substitute_argument frame.substitution argument))
-                        impl_arguments.arguments;
-                  }
+                  Types.substitute_substitution frame.substitution substitution
                 in
                 let path = Path.Method { owner = impl; name; receiver } in
                 ( path,
@@ -1003,7 +1016,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         | _ when context.counters = [] -> frame
         | Some (Types.Function function_type, callee_term, _) ->
             Operations.spend context frame
-              (compute_function_value_amount context frame function_type callee_term)
+              (compute_function_value_amount context frame ~location function_type callee_term)
         | _ -> Operations.spend context frame (Operations.declare_unknown_amount context frame)
       in
       let result =

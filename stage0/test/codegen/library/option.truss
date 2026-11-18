@@ -1,0 +1,46 @@
+fn halved(value: Option[Int64]) -> Option[Int64]
+  cost allocations <= 0
+  cost allocated_bytes <= 0
+{
+  value.map(fn(inner) { inner / 2 })
+}
+
+fn positive_half(value: Option[Int64]) -> Int64
+  cost allocations <= 0
+  cost allocated_bytes <= 0
+{
+  value.and_then(fn(inner) { if inner > 0 { Some(inner / 2) } else { None } }).filter(fn(inner) { inner > 3 }).or_else(fn() { Some(-1) }).unwrap_or_else(fn() { 0 })
+}
+
+test "an option's combinators with lambdas that allocate nothing keep an allocation bound of zero" {
+  assert halved(Some(8)) == Some(4)
+  assert halved(None) is None
+  assert positive_half(Some(10)) == 5
+  assert positive_half(Some(6)) == -1
+  assert positive_half(Some(-4)) == -1
+  assert positive_half(None) == -1
+}
+
+test "an option maps, chains, and filters its value" {
+  let three: Option[Int64] = Some(3)
+  let none: Option[Int64] = None
+  assert three.map(fn(value) { value * 2 }) == Some(6)
+  assert none.map(fn(value) { value * 2 }) is None
+  assert three.and_then(fn(value) { if value > 2 { Some(value - 2) } else { None } }) == Some(1)
+  assert three.and_then(fn(value) { if value > 5 { Some(value) } else { None } }) is None
+  assert three.filter(fn(value) { value % 2 == 1 }) == Some(3)
+  assert three.filter(fn(value) { value % 2 == 0 }) is None
+}
+
+test "an option without a value takes the value that a function makes" {
+  let three: Option[Int64] = Some(3)
+  let none: Option[Int64] = None
+  assert three.unwrap_or_else(fn() { 7 }) == 3
+  assert none.unwrap_or_else(fn() { 7 }) == 7
+  assert three.or_else(fn() { Some(7) }) == Some(3)
+  assert none.or_else(fn() { Some(7) }) == Some(7)
+  let made: Result[Int64, Int64] = none.ok_or_else(fn() { 7 })
+  assert made == Err(7)
+  let kept: Result[Int64, Int64] = three.ok_or_else(fn() { 7 })
+  assert kept == Ok(3)
+}

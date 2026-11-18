@@ -41,16 +41,20 @@ and capability =
   | Capability_error of Diagnostic.reported
   | Divergence of divergence
 
-and divergence = Always | Of_parameter of parameter | Of_variable of int
+and divergence =
+  | Always
+  | Of_parameter of parameter
+  | Of_impl_method of {
+      self_type : ty;
+      trait : trait_reference;
+      name : string;
+      receiver : Path.receiver;
+    }
+  | Of_variable of int
+
 and capability_set = capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
-
-and resource =
-  | Time
-  | Allocations
-  | Allocated_bytes
-  | Calls of { capability : Path.t; method_ : string option }
-
+and resource = Metric of Metric.t | Calls of { capability : Path.t; method_ : string option }
 and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
 let is_divergence = function Divergence _ -> true | _ -> false
@@ -255,6 +259,17 @@ and substitute_capabilities substitution capabilities =
                 name;
               };
           ]
+      | Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
+          [
+            Divergence
+              (Of_impl_method
+                 {
+                   self_type = substitute substitution self_type;
+                   trait = substitute_trait substitution trait;
+                   name;
+                   receiver;
+                 });
+          ]
       | ( Capability _ | Capability_variable _ | Capability_error _
         | Divergence (Always | Of_variable _) ) as capability ->
           [ capability ])
@@ -276,6 +291,20 @@ and substitute_function substitution (function_type : function_type) =
     uses = substitute_capabilities substitution function_type.uses;
     costs = function_type.costs;
   }
+
+let map_substitution ~argument ~capabilities substitution =
+  {
+    arguments =
+      List.map (fun (parameter, bound) -> (parameter, argument bound)) substitution.arguments;
+    capability_arguments =
+      List.map
+        (fun (parameter, bound) -> (parameter, capabilities bound))
+        substitution.capability_arguments;
+  }
+
+let substitute_substitution outer =
+  map_substitution ~argument:(substitute_argument outer)
+    ~capabilities:(substitute_capabilities outer)
 
 let extract_result_type = function Returns type_ | Lends (_, type_) -> type_
 let show_mode = function Read -> "" | Mut -> "mut " | Own -> "own "
@@ -376,6 +405,8 @@ let has_unsolved_capabilities capabilities =
     (function
       | Capability_variable _ | Divergence (Of_variable _) -> true
       | Capability_projection { base; _ } -> contains_unsolved base
+      | Divergence (Of_impl_method { self_type; trait; _ }) ->
+          contains_unsolved self_type || is_unsolved_trait trait
       | Capability _ | Capability_parameter _ | Capability_error _
       | Divergence (Always | Of_parameter _) ->
           false)
@@ -406,19 +437,22 @@ let costs_imply ~(provided : cost list) ~(required : cost list) =
 let show_path_name = function Path.Top { name; _ } -> name | path -> Path.show path
 
 let show_resource = function
-  | Time -> "time"
-  | Allocations -> "allocations"
-  | Allocated_bytes -> "allocated_bytes"
+  | Metric metric -> Metric.show metric
   | Calls { capability; method_ } ->
       Printf.sprintf "calls(%s%s)" (show_path_name capability)
         (match method_ with Some method_ -> "." ^ method_ | None -> "")
 
-let rec show_capability = function
+let rec show_impl_method self_type (trait : trait_reference) name =
+  Printf.sprintf "`%s`'s `impl` of `%s.%s`" (show self_type) (show_path_name trait.trait) name
+
+and show_capability = function
   | Capability path -> show_path_name path
   | Capability_parameter { name; _ } | Divergence (Of_parameter { name; _ }) -> "generic " ^ name
   | Capability_projection { base; name; _ } -> show base ^ "." ^ name
   | Capability_variable _ | Capability_error _ | Divergence (Of_variable _) -> "_"
   | Divergence Always -> "may not terminate"
+  | Divergence (Of_impl_method { self_type; name; _ }) ->
+      Printf.sprintf "may not terminate where %s.%s may not" (show self_type) name
 
 and show = function
   | Named { path; arguments = [] } -> show_path_name path
@@ -469,7 +503,7 @@ and show_function (function_type : function_type) =
   let uses = List.map show_capability (remove_divergence function_type.uses) in
   let is_finite =
     list_divergence function_type.uses = []
-    && not (List.exists (fun (cost : cost) -> cost.resource = Time) function_type.costs)
+    && not (List.exists (fun (cost : cost) -> cost.resource = Metric Time) function_type.costs)
   in
   let costs =
     (if is_finite then [ "cost time finite" ] else [])
@@ -721,3 +755,7 @@ let find_implementing_receiver trait (impl : impl_interface) declared =
        impl.impl_methods)
 
 type constant_interface = { constant_type : ty }
+
+module For_testing = struct
+  let list_arguments substitution = substitution.arguments
+end

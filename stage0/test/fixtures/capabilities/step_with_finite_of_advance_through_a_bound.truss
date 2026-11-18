@@ -1,0 +1,3 @@
+fn f[Inner: Ticker](ticker: mut Inner) -> UInt64 {
+  step_with_finite(mut ticker, step: advance)
+}

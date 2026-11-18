@@ -213,7 +213,8 @@ val find_call_with_mode_keyword :
   state -> Syntax.expression -> (Syntax.id * Syntax.expression) option
 
 val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
-val check_resource : state -> Syntax.resource -> unit
+val find_local_type : state -> Syntax.name -> Types.ty option
+val check_cost : state -> Syntax.cost -> unit
 
 val make_slice :
   state ->

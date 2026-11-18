@@ -180,7 +180,7 @@ and check_variant_value state (value : Syntax.expression) type_path variant ~arg
               inputs = [ (Types.Own, field.field_type) ];
               output = type_;
               uses = Types.no_capabilities;
-              costs = [ { amortized = false; resource = Time; bound = Order_of } ];
+              costs = [ { amortized = false; resource = Metric Time; bound = Order_of } ];
             }
       | Some { fields = Some fields; _ } ->
           State.make_error_type state Not_a_value (State.read_span state value.id)

@@ -84,19 +84,11 @@ let substitute_callee substitution (callee : Mir.callee) : Mir.callee option =
              instantiation = substitute_instantiation method_.instantiation;
              evidence =
                (match method_.evidence with
-               | Impl { impl; arguments = impl_arguments } ->
+               | Impl { impl; substitution = impl_substitution } ->
                    Impl
                      {
                        impl;
-                       arguments =
-                         {
-                           impl_arguments with
-                           arguments =
-                             List.map
-                               (fun (parameter, argument) ->
-                                 (parameter, Types.substitute_argument substitution argument))
-                               impl_arguments.arguments;
-                         };
+                       substitution = Types.substitute_substitution substitution impl_substitution;
                      }
                | (Bound | Dynamic) as evidence -> evidence);
            })

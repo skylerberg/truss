@@ -1,0 +1,12 @@
+trait Steady {
+  fn pulse(mut self) -> UInt64
+    cost time finite
+}
+
+impl Steady for Relay[Inner: Ticker] {
+  fn pulse(mut self) -> UInt64
+    cost time O(time(Inner.tick))
+  {
+    mut self.inner.tick()
+  }
+}

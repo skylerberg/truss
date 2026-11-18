@@ -1,0 +1,26 @@
+type Quiet(value: Int64)
+
+impl Probe for Quiet {
+  fn probe(self) -> Bool
+    cost allocations == 0
+    cost allocated_bytes <= 0
+  {
+    self.value > 0
+  }
+}
+
+type Unstated(value: Int64)
+
+impl Probe for Unstated {
+  fn probe(self) -> Bool {
+    self.value > 0
+  }
+}
+
+fn probe_once[Source: Probe](source: Source) -> Bool
+  cost allocations <= allocations(Source.probe)
+  cost allocated_bytes <= allocated_bytes(Source.probe)
+{
+  source.probe()
+}
+
