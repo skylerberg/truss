@@ -33,6 +33,12 @@ let () =
         Fixtures.Ownership.element_of_a_range_of_a_view_of_a_read_only_list_assigned );
       ( "an element of a range of a view of it passed `mut`",
         Fixtures.Ownership.element_of_a_range_of_a_view_of_a_read_only_list_passed_mut );
+      ( "an assigned element of an element of a view of it",
+        Fixtures.Ownership.element_of_an_element_of_a_view_of_a_read_only_list_assigned );
+      ( "an element of an element of a view of it passed `mut`",
+        Fixtures.Ownership.element_of_an_element_of_a_view_of_a_read_only_list_passed_mut );
+      ( "a range of an element of a view of it",
+        Fixtures.Ownership.range_of_an_element_of_a_view_of_a_read_only_list_sorted );
       ( "the variable of a `mut` loop over a view of it",
         Fixtures.Ownership.loop_variable_over_a_view_of_a_read_only_list_passed_mut );
       ( "the assigned variable of a `mut` loop over a view of it",
@@ -43,8 +49,8 @@ let () =
         Fixtures.Ownership.match_binding_of_an_element_of_a_view_of_a_read_only_list_passed_mut );
     ];
   Harness.test
-    "a `mut` parameter can be written through ranges of, and `mut` loops over, a view of it"
-    (fun () ->
+    "a `mut` parameter can be written through ranges of, elements of, and `mut` loops over, a view \
+     of it" (fun () ->
       expect_fine Fixtures.Ownership.writes_through_ranges_and_loops_of_views_of_a_mut_list);
   Harness.test "a read-only `Slice` parameter cannot be written through" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.read_only_slice_written "types.not_assignable")
@@ -1041,6 +1047,16 @@ let () =
       let actual =
         count_disjoint_obligations Fixtures.Ownership.two_mut_elements_of_two_ranges_of_one_list
       in
+      if actual <> 1 then Harness.fail "%d obligations" actual);
+  Harness.test "elements of two ranges of ranges of one list can be passed `mut` to one call"
+    (fun () -> expect_fine Fixtures.Ownership.two_mut_elements_of_two_ranges_of_ranges_of_one_list);
+  Harness.test
+    "elements of two ranges of ranges of one list passed `mut` to one call produce one `Disjoint` \
+     obligation" (fun () ->
+      let actual =
+        count_disjoint_obligations
+          Fixtures.Ownership.two_mut_elements_of_two_ranges_of_ranges_of_one_list
+      in
       if actual <> 1 then Harness.fail "%d obligations" actual)
 
 let grid = Fixtures.Ownership.grid
@@ -1129,6 +1145,9 @@ let () =
       expect_fine Fixtures.Ownership.data_pushed_after_its_views_die);
   Harness.test "a `mut` argument of a function stores the function's view arguments" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.mut_list_keeping_a_view_argument
+        "ownership.mutated_while_viewed");
+  Harness.test "a `mut` range argument stores the call's view arguments in its list" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.mut_range_keeping_a_view_argument
         "ownership.mutated_while_viewed");
   Harness.test "a view stored in a place inside a branch is still stored after the branch"
     (fun () ->

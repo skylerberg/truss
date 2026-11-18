@@ -17,7 +17,7 @@ type context = {
   implements_capability : bool;
   mutable mutable_locals : Core.local list;
   mutable diagnostics : Diagnostic.in_definition list;
-  mutable must_be_disjoint : (Core.origin * Core.origin) list;
+  mutable must_be_disjoint : (Core.origin list * Core.origin list) list;
 }
 
 let is_plain context type_ =
@@ -121,7 +121,9 @@ let show_root context (root : Place.root) =
 let show context (place : Place.t) =
   show_root context place.root
   ^ String.concat ""
-      (List.map (function Place.Field name -> "." ^ name | Element _ -> "[...]") place.steps)
+      (List.map
+         (function Place.Field name -> "." ^ name | Element _ | Range _ -> "[...]")
+         place.steps)
 
 let collect context (mir : Mir.Graph.t) ~mode_keywords =
   List.iter
