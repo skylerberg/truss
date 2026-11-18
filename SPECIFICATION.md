@@ -1828,35 +1828,25 @@ public trait Add[Right] {
 
 ## Failure
 
-Code panics only where it has `Panic`. Running out of memory and overflowing
-the stack are the exceptions.
+Code panics only where it calls `Panic.crash`, directly or through a
+callee such as `expect`, so only code that has `Panic` panics. Running out
+of memory and overflowing the stack are the exceptions.
 
-Every operation that can fail is a proof obligation: integer overflow,
-division by zero, indexing or slicing out of bounds, a shift that is too
-large, and `unreachable`. Where the compiler cannot prove one safe, the code
-is an error, and one of these makes it compile:
+Every operation that can fail is a proof obligation, in every function and
+every test: integer overflow, division by zero, indexing or slicing out of
+bounds, a shift that is too large, and `unreachable`. Where the compiler
+cannot prove one safe, the code is an error, and one of these makes it
+compile:
 
 1. Establish the fact locally, as with an `if`.
 2. Require it with `requires`.
-3. Call a method that returns an `Option` or a `Result`.
-4. Declare `uses Panic`.
+3. Call a method that returns an `Option` or a `Result`, such as
+   `checked_add` or `get`.
 
-`unreachable` admits only the first.
-
-In code that has `Panic`, an operation that is not proven safe is checked
-when it runs, in every build, and panics when it fails. The check prevents
-the out-of-bounds read or the wrapped result that the unchecked operation
-would give.
-
-- An overflow, a division by zero, and a shift that is too large are checked
-  where they happen.
-- An index, a slice, or an assignment through `IndexAssign` checks the
-  `requires` of the method it calls. One through a trait bound or `any` is
-  proven, and so is a `requires` that cannot be evaluated at run time (see
-  [Deriving](#deriving)).
-- A lambda in that code, a `proof` block, and every clause are proven. A
-  lambda's capabilities are inferred from its body, not declared, and a
-  `proof` block and a clause do not run.
+`unreachable` admits only the first. Code that crashes when the operation
+would fail calls the third kind of method and `expect` on its result, as in
+`left.checked_add(right).expect("the total fits Int64")`, and declares
+`uses Panic`.
 
 `Panic` is a built-in capability. `Panic.crash(message)` prints its message
 and location to standard error and ends the process with a nonzero exit
@@ -1916,7 +1906,8 @@ let rolled = provide LoadedDie(face: 5) {
 - **Inside an implementation, a call of the capability it implements goes to
   the next provider out.** So an implementation can check each call and pass
   it on, which narrows the capability.
-- **A capability method always returns to its caller,** once.
+- **A capability method returns to its caller once,** unless its result
+  type is `Never`, as for `Panic.crash`.
 - A capability's method keeps no view it is given, and returns no view of its
   implementation's state.
 - A capability cannot be declared as a bundle of others.

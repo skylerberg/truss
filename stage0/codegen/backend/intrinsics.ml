@@ -22,8 +22,8 @@ let list_consumed_places : Intrinsic.operation -> int list = function
   | Buffer Array_from_storage -> [ 0 ]
   | _ -> []
 
-let lower ~may_panic ?(value_arguments = []) ?reported env builder types operation ~type_arguments
-    arguments ~destination ~site ~trace =
+let lower ?(value_arguments = []) ?reported env builder types operation ~type_arguments arguments
+    ~destination ~site ~trace =
   let set rvalue =
     Option.iter
       (fun destination_place -> Emit_c.Builder.emit builder (Assign (destination_place, rvalue)))
@@ -64,8 +64,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
     fail failure message;
     Emit_c.Builder.start builder after
   in
-  let check_failure : Lowered.failure = if may_panic then Panic else Obligation in
-  let check_when condition message = fail_when check_failure condition message in
+  let check_when condition message = fail_when Obligation condition message in
   let check_if (condition : Lowered.rvalue) message =
     let decided =
       let is_unsigned_zero : Lowered.operand -> bool = function
@@ -91,7 +90,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
     match decided with
     | Some false -> ()
     | Some true ->
-        fail check_failure message;
+        fail Obligation message;
         Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder)
     | None ->
         let is_failed = Emit_c.Builder.allocate_local builder (Raw Bool) in

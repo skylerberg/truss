@@ -281,10 +281,6 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           (Amounts.compare_lexicographically before after)
     end;
   let precondition_clauses = Contracts.select_precondition_clauses contract in
-  let is_checked =
-    Mir.is_index_call invocation.callee
-    && Option.is_some (Mir.find_checked_requires context.lookups.mir path)
-  in
   let required =
     let entry = read_entry_frame precondition_clauses in
     List.map
@@ -303,9 +299,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             Text (Printf.sprintf "` may not hold for this call to `%s`." (show_callee path));
           ]
         in
-        if is_checked then
-          Facts.oblige_safe_operation context frame Requires location ?cited ~fixes message term
-        else Facts.oblige context frame Requires location ?cited ~fixes message term;
+        Facts.oblige context frame Requires location ?cited ~fixes message term;
         term)
       precondition_clauses.requires
   in

@@ -760,9 +760,8 @@ let lower_intrinsic st ?reported (operation : Intrinsic.operation) ~type_argumen
           | Intrinsics.Place place -> ignore (Lowering.move_place st place)
           | Value _ -> ())
         (Intrinsics.list_consumed_places operation);
-      Intrinsics.lower ~may_panic:(Lowering.may_panic st) ~value_arguments ?reported st.context.env
-        st.builder st.context.types operation ~type_arguments arguments ~destination ~site
-        ~trace:(Lowering.find_panic_trace st)
+      Intrinsics.lower ~value_arguments ?reported st.context.env st.builder st.context.types
+        operation ~type_arguments arguments ~destination ~site ~trace:(Lowering.find_panic_trace st)
 
 let read_field_default (st : Lowering.state) (ty : Ground.ty) ~variant ~field :
     Mir.Graph.t Mir.field_default Mir.sourced =
@@ -1070,9 +1069,6 @@ let find_forwarded_call st (call : Mir.call) : Forwarded.t option =
             else None)
   | _ -> None
 
-let find_checked_requires (st : Lowering.state) path =
-  if Lowering.may_panic st then Mir.find_checked_requires st.context.lookups.mir path else None
-
 let is_forwarded_whole (frame : Lowering.mir_frame) part =
   match frame.body.blocks.(frame.block).terminator with
   | Yield { part = Part (Borrow { place = { root = Local lent; projections = [] }; _ }); _ } ->
@@ -1204,12 +1200,9 @@ and lower_statement st (statement : Mir.Graph.statement) =
             destination
         | None -> make_discard_place st
       in
-      lower_call_into
-        ?failure:(if Mir.is_index_call call.callee.target then Some "index out of bounds" else None)
-        st call destination ~origin
+      lower_call_into st call destination ~origin
   | Lend { part; call } -> lend st part call ~origin
-  | Slice { destination; call; _ } ->
-      lower_call_into ~failure:"slice out of bounds" st call (lower_place st destination) ~origin
+  | Slice { destination; call; _ } -> lower_call_into st call (lower_place st destination) ~origin
   | Template { destination; call; _ } ->
       lower_call_into st call (lower_place st destination) ~origin
   | Live _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ()
@@ -1391,9 +1384,9 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
   | Operation { operation; type_arguments; operands } ->
       let type_arguments, value_arguments = split_arguments st type_arguments in
       ignore
-        (Intrinsics.lower ~may_panic:(Lowering.may_panic st) ~value_arguments
-           ?reported:(find_reported_site st) ~trace:(Lowering.find_panic_trace st) st.context.env
-           st.builder st.context.types (Scalar operation) ~type_arguments
+        (Intrinsics.lower ~value_arguments ?reported:(find_reported_site st)
+           ~trace:(Lowering.find_panic_trace st) st.context.env st.builder st.context.types
+           (Scalar operation) ~type_arguments
            (List.map
               (fun operand ->
                 let operand_ty = compute_operand_type st operand in
@@ -1520,14 +1513,11 @@ and lower_mir_into ?(arguments = []) st (expression_mir : Mir.Graph.t) (destinat
   Emit_c.Builder.start st.builder exit;
   st.frame <- caller
 
-and lower_call_into ?failure st (call : Mir.call) destination ~origin =
+and lower_call_into st (call : Mir.call) destination ~origin =
   match (resolve_callee st call.callee, call.callee.target) with
   | Some (path, instantiation), _ -> (
       let signature, substitution = read_callee_signature st path instantiation in
       let arguments, mask = evaluate_arguments st signature substitution call.arguments in
-      Option.iter
-        (fun failure -> check_requires st ~path ~instantiation arguments ~origin ~failure)
-        failure;
       match signature.output with
       | Returns _ ->
           Targets.lower_item_call st
@@ -1559,9 +1549,9 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
         match (arguments, Lowering.find_panic_trace st) with
         | [ (_, _, message) ], Some trace ->
             ignore
-              (Intrinsics.lower ~may_panic:(Lowering.may_panic st) st.context.env st.builder
-                 st.context.types (Runtime Crash) ~type_arguments:[] [ Intrinsics.Place message ]
-                 ~destination:None ~site:(locate_site st origin) ~trace:(Some trace))
+              (Intrinsics.lower st.context.env st.builder st.context.types (Runtime Crash)
+                 ~type_arguments:[] [ Intrinsics.Place message ] ~destination:None
+                 ~site:(locate_site st origin) ~trace:(Some trace))
         | [ _ ], None -> Definitions.raise_bug "Panic.crash where Panic has no evidence"
         | _ -> Definitions.raise_bug "Panic.crash takes one message"
       else begin
@@ -1678,56 +1668,8 @@ and check_invariant st ~value ~clause ~destination =
   Targets.run_in_type_definition st ~source value_ty (fun () ->
       lower_mir_into ~arguments:[ value_place ] st invariant destination)
 
-and check_requires st ~path ~instantiation arguments ~origin ~failure =
-  match find_checked_requires st path with
-  | None -> ()
-  | Some { source; form = requires } ->
-      let site = locate_site st origin and reported = find_reported_site st in
-      let caller = st.frame in
-      let code =
-        if Path.equal source.path path then Definitions.make_code st.context path instantiation
-        else Definitions.make_declaration_code st.context path instantiation
-      in
-      st.frame <- { caller with code; self_place = None };
-      List.iter
-        (fun (requirement : Mir.requirement) ->
-          let holds = Lowering.allocate_temporary st st.context.bool in
-          lower_mir_into
-            ~arguments:(List.map (fun (_, _, place) -> place) arguments)
-            st
-            (Mir.expand_formula requirement.clause)
-            holds;
-          let failed = Emit_c.Builder.allocate_block st.builder
-          and after = Emit_c.Builder.allocate_block st.builder in
-          Emit_c.Builder.branch st.builder (Copy holds) ~yes:after ~no:failed;
-          Emit_c.Builder.start st.builder failed;
-          Emit_c.Builder.finish st.builder
-            (Fail
-               {
-                 failure = Panic;
-                 message = Constant (Bytes failure);
-                 length = Lowered.make_uint64_constant (String.length failure);
-                 site;
-                 reported;
-                 trace = Lowering.find_panic_trace st;
-               });
-          Emit_c.Builder.start st.builder after)
-        requires;
-      st.frame <- caller
-
 and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
-  let checks_index =
-    forwards = 0
-    && Mir.is_index_call call.callee.target
-    &&
-    match resolve_callee st call.callee with
-    | Some (path, _) -> Option.is_some (find_checked_requires st path)
-    | None -> false
-  in
-  match
-    ( call.callee.target,
-      if forwards < 8 && not checks_index then find_forwarded_call st call else None )
-  with
+  match (call.callee.target, if forwards < 8 then find_forwarded_call st call else None) with
   | Intrinsic { operation; type_arguments }, _ ->
       Hashtbl.replace (require_mir_frame st).placed_parts part ();
       Lowering.run_in_statement st (fun () ->
@@ -1788,9 +1730,6 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
         | Some (path, instantiation), _ ->
             let signature, substitution = read_callee_signature st path instantiation in
             let arguments, mask = evaluate_arguments st signature substitution call.arguments in
-            if checks_index then
-              check_requires st ~path ~instantiation arguments ~origin
-                ~failure:"index out of bounds";
             compute_lent_place signature.output substitution (fun ~lending destination ->
                 Targets.lower_item_call st
                   (Code { path; instantiation })

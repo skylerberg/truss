@@ -96,7 +96,8 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
   let lookups = state.lookups in
   if Well_known.is Panic impl.implements.trait then
     Checking.report state Implements_panic state.spans.(trait_path.id)
-      "Nothing can implement `Panic`, since a panic cannot be caught."
+      "Nothing can implement `Panic`: no Truss code runs after a panic, and two `parallel` \
+       branches that called one implementation with state would race."
   else if compiler_implements impl then
     Checking.report state Implements_built_in state.spans.(trait_path.id)
       (Printf.sprintf

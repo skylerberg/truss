@@ -12,7 +12,7 @@ let intrinsic_types : Backend.For_testing.Intrinsics.types =
 
 let operate builder ?destination ?(type_arguments = []) operation arguments =
   ignore
-    (Backend.For_testing.Intrinsics.lower ~may_panic:false
+    (Backend.For_testing.Intrinsics.lower
        (Codegen_support.make_shape_env ~extra ())
        builder intrinsic_types operation ~type_arguments arguments ~destination
        ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
@@ -109,7 +109,7 @@ let () =
       in
       let path = Emit_c.Builder.allocate_local builder (Codegen_support.value bytes_ty) in
       ignore
-        (Backend.For_testing.Intrinsics.lower ~may_panic:false env builder intrinsic_types
+        (Backend.For_testing.Intrinsics.lower env builder intrinsic_types
            (Runtime (Libc Proc_pidpath)) ~type_arguments:[]
            [
              Value (Codegen_support.constant_int32 1);
@@ -444,7 +444,7 @@ let () =
       let extra = extra @ [ (Ground.to_string uint32, Memory_layout.Scalar (Integer UInt32)) ] in
       let operate builder ~destination operation arguments =
         ignore
-          (Backend.For_testing.Intrinsics.lower ~may_panic:false
+          (Backend.For_testing.Intrinsics.lower
              (Codegen_support.make_shape_env ~extra ())
              builder intrinsic_types operation ~type_arguments:[] arguments
              ~destination:(Some destination)
@@ -468,7 +468,7 @@ let () =
               let name = Emit_c.Builder.allocate_local builder (Codegen_support.value bytes_ty) in
               let operate_on_bytes ?destination operation arguments =
                 ignore
-                  (Backend.For_testing.Intrinsics.lower ~may_panic:false
+                  (Backend.For_testing.Intrinsics.lower
                      (Codegen_support.make_shape_env ~extra ())
                      builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ]
                      arguments ~destination
@@ -680,8 +680,8 @@ let () =
         let open_test_file () =
           let descriptor = Emit_c.Builder.allocate_local builder (Codegen_support.value int32) in
           ignore
-            (Backend.For_testing.Intrinsics.lower ~may_panic:false env builder types
-               (Runtime (Libc Open)) ~type_arguments:[]
+            (Backend.For_testing.Intrinsics.lower env builder types (Runtime (Libc Open))
+               ~type_arguments:[]
                [
                  Place (Lowered.make_local_place name);
                  Value
@@ -736,7 +736,7 @@ let () =
 
 let operate_checked builder ?destination ?(type_arguments = []) operation arguments =
   ignore
-    (Backend.For_testing.Intrinsics.lower ~may_panic:false
+    (Backend.For_testing.Intrinsics.lower
        (Codegen_support.make_shape_env ~extra ())
        builder intrinsic_types operation ~type_arguments arguments ~destination
        ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
@@ -851,7 +851,7 @@ let () =
           Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
         in
         ignore
-          (Backend.For_testing.Intrinsics.lower ~may_panic:false
+          (Backend.For_testing.Intrinsics.lower
              (Codegen_support.make_shape_env ~extra ())
              builder intrinsic_types (Scalar Convert)
              ~type_arguments:[ float64; Codegen_support.int32 ]
