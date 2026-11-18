@@ -290,7 +290,7 @@ fn read_tag(bytes: Slice[UInt8], at: UInt64) -> Option[Tag]
     }
     let attribute_name = String.from_utf8_lossy(bytes[attribute_start..index]).slice().to_ascii_lowercase()
     while index < bytes.length() && is_whitespace(bytes[index])
-      invariant index <= bytes.length()
+      invariant index <= bytes.length() && index > attribute_start
       decreases bytes.length() - index
     {
       index += 1
@@ -299,7 +299,7 @@ fn read_tag(bytes: Slice[UInt8], at: UInt64) -> Option[Tag]
     if index < bytes.length() && bytes[index] == 61 {
       index += 1
       while index < bytes.length() && is_whitespace(bytes[index])
-        invariant index <= bytes.length()
+        invariant index <= bytes.length() && index > attribute_start
         decreases bytes.length() - index
       {
         index += 1
@@ -339,7 +339,7 @@ fn read_tag(bytes: Slice[UInt8], at: UInt64) -> Option[Tag]
 
 fn find_from(bytes: Slice[UInt8], start: UInt64, pattern: Slice[UInt8]) -> Option[UInt64]
   ensures match result {
-    Some(found) => found <= bytes.length() && bytes.length() - found >= pattern.length()
+    Some(found) => found >= start && found <= bytes.length() && bytes.length() - found >= pattern.length()
     None => true
   }
 {
@@ -348,6 +348,7 @@ fn find_from(bytes: Slice[UInt8], start: UInt64, pattern: Slice[UInt8]) -> Optio
   }
   var index = start
   while index < bytes.length() && bytes.length() - index >= pattern.length()
+    invariant index >= start
     decreases bytes.length() - index
   {
     var is_match = true
@@ -444,6 +445,7 @@ public fn sanitize(input: StringSlice, policy: SanitizePolicy = SanitizePolicy()
     if index + 1 < bytes.length() && (bytes[index + 1] == 33 || bytes[index + 1] == 63) {
       var end = index + 1
       while end < bytes.length() && bytes[end] != 62
+        invariant end > index
         decreases bytes.length() - end
       {
         end += 1

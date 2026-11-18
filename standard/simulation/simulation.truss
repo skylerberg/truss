@@ -427,7 +427,9 @@ internal fn State.timeout_of(self, blocking: Blocking) -> Option[Duration] {
   }
 }
 
-internal fn State.close(mut self, endpoint: UInt64) -> Result[Unit, SystemError] {
+internal fn State.close(mut self, endpoint: UInt64) -> Result[Unit, SystemError]
+  uses RunForever
+{
   match self.endpoint(endpoint) {
     Closed => return Err(SystemError.Closed)
     Connected(stream) => {

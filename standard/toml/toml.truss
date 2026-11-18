@@ -1104,7 +1104,9 @@ public fn decode[Item: serialization::Deserialize](
 public fn encode[Item: serialization::Serialize](
   item: Item,
   names: serialization::Names = serialization::Names.AsWritten,
-) -> Result[String, serialization::Error] {
+) -> Result[String, serialization::Error]
+  uses RunForever
+{
   Ok(to_text(to_table(item, names: names)?))
 }
 
@@ -1178,7 +1180,9 @@ fn write_float(output: mut String, value: Float64) {
   }
 }
 
-fn write_inline(output: mut String, value: Value) {
+fn write_inline(output: mut String, value: Value)
+  uses RunForever
+{
   match value {
     String(text) => write_string(mut output, text: text.slice())
     Integer(number) => number.display(mut output)
@@ -1259,7 +1263,9 @@ fn write_header(output: mut String, path: Slice[String], opening: StringSlice, c
   mut output.push("\n")
 }
 
-fn write_table(output: mut String, table: Map[String, Value], path: mut List[String]) {
+fn write_table(output: mut String, table: Map[String, Value], path: mut List[String])
+  uses RunForever
+{
   for entry in table {
     if !(entry.value is Table(_)) && !is_array_of_tables(entry.value) {
       write_key(mut output, key: entry.key.slice())
@@ -1296,7 +1302,9 @@ fn write_table(output: mut String, table: Map[String, Value], path: mut List[Str
   }
 }
 
-public fn to_text(table: Map[String, Value]) -> String {
+public fn to_text(table: Map[String, Value]) -> String
+  uses RunForever
+{
   var text = ""
   var path: List[String] = []
   write_table(mut text, table: table, path: mut path)
