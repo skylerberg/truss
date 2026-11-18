@@ -409,11 +409,10 @@ let locate_citation (lookups : Lookups.t) ((key : Resolve.Names.key), origin) =
       (Source.Definition_span.locate (lookups.interface.names.read_spans key) origin) )
 
 type answer = Solved of Solver.answer | Ran of bool | Run_failed of string
+type 'span site = { code : Diagnostic.Code.prover; span : 'span; shows : string }
 
 type 'span state = {
-  code : Diagnostic.Code.prover;
-  span : 'span;
-  shows : string;
+  site : 'span site;
   failure : 'span Diagnostic.diagnostic option;
   trusts_compiled_code : bool;
 }
@@ -429,72 +428,6 @@ let explain_unknown = function
          proof or a counterexample. Z3 gives the reason `%s`."
         reason
 
-let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof answers =
-  let resolve location = resolve_location lookups.interface.names key location in
-  match proof with
-  | Not_proven_here -> []
-  | Unsupported (location, construct) ->
-      let message =
-        Printf.sprintf "The prover cannot read %s yet, so nothing in this definition is proven."
-          construct
-      in
-      [
-        ( {
-            code = Unsupported;
-            span = resolve location;
-            shows = message;
-            failure = Some (make_diagnostic Unsupported (resolve location) message);
-            trusts_compiled_code = false;
-          },
-          None );
-      ]
-  | Obligations outcome ->
-      List.map2
-        (fun (obligation : Obligation.t) answer ->
-          let span = resolve obligation.location in
-          let message = render lookups obligation.message in
-          let others =
-            match obligation.code with
-            | Overflow | Division | Shift ->
-                " It can also be checked first with an `if`, or done with the checked operation."
-            | _ -> ""
-          in
-          let find_failure explained =
-            Some
-              {
-                (make_diagnostic obligation.code span (message ^ explained ^ others)) with
-                fixes = List.map (render_fix lookups) obligation.fixes;
-              }
-          in
-          ( {
-              code = obligation.code;
-              span;
-              shows = message;
-              failure =
-                (match answer with
-                | Solved Proven | Ran true -> None
-                | Ran false -> find_failure " Running it on this template's text gives `false`."
-                | Run_failed report ->
-                    find_failure
-                      (" Running it on this template's text failed, so it is not known: " ^ report)
-                | Solved (Counterexample values) ->
-                    find_failure
-                      (show_counterexample (Logic.list_members obligation.query) obligation values)
-                | Solved (Unknown unknown) ->
-                    find_failure
-                      (explain_unknown unknown
-                     ^ " If the code is correct, a `proof` block or a theorem can lead the solver \
-                        to the proof."
-                      ^
-                      if Logic.has_untriggered_fact obligation.query then
-                        " A quantified fact in the query has no trigger, so an `assert` of that \
-                         fact at the term the proof needs may be enough."
-                      else ""));
-              trusts_compiled_code = (match answer with Ran true -> true | _ -> false);
-            },
-            obligation.cited ))
-        outcome.obligations answers
-
 let make_request (obligation : Obligation.t) =
   let terms =
     List.map (fun (term, _) -> (Logic.Symbol.Named_term term, term)) obligation.locals
@@ -509,6 +442,14 @@ let make_request (obligation : Obligation.t) =
 
 type question = Decided of answer | Asked of (Solver.request * Logic.query)
 
+type posed = {
+  site : Source.Definition_span.t site;
+  obligation : Obligation.t;
+  question : question;
+}
+
+type posed_proof = Unreadable of Source.Definition_span.t site | Posed of posed list
+
 let run_answer runs ({ check; clause } : Obligation.template_clause) =
   Option.map
     (function
@@ -516,57 +457,143 @@ let run_answer runs ({ check; clause } : Obligation.template_clause) =
       | Error report -> Run_failed report)
     (Template_check_table.find_opt runs check)
 
+let pose_proof (lookups : Lookups.t) runs key proof =
+  let resolve location = resolve_location lookups.interface.names key location in
+  match proof with
+  | Not_proven_here -> Posed []
+  | Unsupported (location, construct) ->
+      Unreadable
+        {
+          code = Unsupported;
+          span = resolve location;
+          shows =
+            Printf.sprintf "The prover cannot read %s yet, so nothing in this definition is proven."
+              construct;
+        }
+  | Obligations outcome ->
+      Posed
+        (List.map
+           (fun (obligation : Obligation.t) ->
+             {
+               site =
+                 {
+                   code = obligation.code;
+                   span = resolve obligation.location;
+                   shows = render lookups obligation.message;
+                 };
+               obligation;
+               question =
+                 (match Option.bind obligation.template_clause (run_answer runs) with
+                 | Some answer -> Decided answer
+                 | None -> Asked (make_request obligation));
+             })
+           outcome.obligations)
+
+let pose_proofs ~runs lookups proofs =
+  let runs = Template_check_table.of_seq (List.to_seq runs) in
+  List.map (fun (key, proof) -> (key, pose_proof lookups runs key proof)) proofs
+
+let list_asked = function
+  | Unreadable _ -> []
+  | Posed posed ->
+      List.filter_map
+        (fun ({ site; question; _ } : posed) ->
+          match question with Asked asked -> Some (site, asked) | Decided _ -> None)
+        posed
+
+let make_state (lookups : Lookups.t) ({ site; obligation; _ } : posed) answer =
+  let others =
+    match site.code with
+    | Overflow | Division | Shift ->
+        " It can also be checked first with an `if`, or done with the checked operation."
+    | _ -> ""
+  in
+  let find_failure explained =
+    Some
+      {
+        (make_diagnostic site.code site.span (site.shows ^ explained ^ others)) with
+        fixes = List.map (render_fix lookups) obligation.fixes;
+      }
+  in
+  ( {
+      site;
+      failure =
+        (match answer with
+        | Solved Proven | Ran true -> None
+        | Ran false -> find_failure " Running it on this template's text gives `false`."
+        | Run_failed report ->
+            find_failure
+              (" Running it on this template's text failed, so it is not known: " ^ report)
+        | Solved (Counterexample values) ->
+            find_failure
+              (show_counterexample (Logic.list_members obligation.query) obligation values)
+        | Solved (Unknown unknown) ->
+            find_failure
+              (explain_unknown unknown
+             ^ " If the code is correct, a `proof` block or a theorem can lead the solver to the \
+                proof."
+              ^
+              if Logic.has_untriggered_fact obligation.query then
+                " A quantified fact in the query has no trigger, so an `assert` of that fact at \
+                 the term the proof needs may be enough."
+              else ""));
+      trusts_compiled_code = (match answer with Ran true -> true | _ -> false);
+    },
+    obligation.cited )
+
 type verdicts = { lookups : Lookups.t; verdicts : verdict Key_table.t }
 
 let decide ~runs lookups solver proofs =
-  let runs = Template_check_table.of_seq (List.to_seq runs) in
-  let make_question (obligation : Obligation.t) =
-    match Option.bind obligation.template_clause (run_answer runs) with
-    | Some answer -> Decided answer
-    | None -> Asked (make_request obligation)
-  in
-  let questions =
-    List.map
-      (fun (key, proof) ->
-        let obligations =
-          match proof with
-          | Obligations (outcome : Obligation.outcome) -> outcome.obligations
-          | Unsupported _ | Not_proven_here -> []
-        in
-        (key, proof, List.map make_question obligations))
-      proofs
-  in
+  let posed_proofs = pose_proofs ~runs lookups proofs in
   let solved =
     Queue.of_seq
       (List.to_seq
          (Solver.solve_all solver
             (List.concat_map
-               (fun (_, _, questions) ->
-                 List.filter_map
-                   (function Asked asked -> Some asked | Decided _ -> None)
-                   questions)
-               questions)))
+               (fun (_, posed_proof) -> List.map snd (list_asked posed_proof))
+               posed_proofs)))
   in
   let verdicts = Key_table.create (List.length proofs) in
   List.iter
-    (fun (key, proof, questions) ->
-      let answers =
-        List.map
-          (function Decided answer -> answer | Asked _ -> Solved (Queue.pop solved))
-          questions
-      in
-      Key_table.replace verdicts key (list_definition_states lookups key proof answers))
-    questions;
+    (fun (key, posed_proof) ->
+      Key_table.replace verdicts key
+        (match posed_proof with
+        | Unreadable site ->
+            [
+              ( {
+                  site;
+                  failure = Some (make_diagnostic site.code site.span site.shows);
+                  trusts_compiled_code = false;
+                },
+                None );
+            ]
+        | Posed posed ->
+            List.map
+              (fun (posed : posed) ->
+                make_state lookups posed
+                  (match posed.question with
+                  | Decided answer -> answer
+                  | Asked _ -> Solved (Queue.pop solved)))
+              posed))
+    posed_proofs;
   { lookups; verdicts }
 
-let list_file_states { lookups; verdicts } file =
-  let read_verdict key = Option.value (Key_table.find_opt verdicts key) ~default:[] in
-  List.map
+let list_file_definitions (lookups : Lookups.t) table file =
+  List.filter_map
     (fun declaration ->
       let key = Resolve.Names.make_key declaration in
-      let ({ base; _ } : Resolve.Names.place) = lookups.interface.names.read_place key in
+      Option.map
+        (fun recorded -> ((lookups.interface.names.read_place key).base, recorded))
+        (Key_table.find_opt table key))
+    (lookups.interface.names.list_declarations_in file)
+
+let locate_site ~base site = { site with span = Source.Definition_span.to_file ~base site.span }
+
+let list_file_states { lookups; verdicts } file =
+  List.map
+    (fun (base, verdict) ->
       List.map
-        (fun (state, cited) ->
+        (fun ((state : Source.Definition_span.t state), cited) ->
           let cited = Option.map (locate_citation lookups) cited in
           let note =
             match cited with
@@ -587,7 +614,7 @@ let list_file_states { lookups; verdicts } file =
           in
           {
             state with
-            span = Source.Definition_span.to_file ~base state.span;
+            site = locate_site ~base state.site;
             failure =
               Option.map
                 (fun failure ->
@@ -600,8 +627,10 @@ let list_file_states { lookups; verdicts } file =
                   | None -> failure)
                 state.failure;
           })
-        (read_verdict key))
-    (lookups.interface.names.list_declarations_in file)
+        verdict)
+    (list_file_definitions lookups verdicts file)
+
+let compare_sites left right = compare (left.span, left.code) (right.span, right.code)
 
 let sort_diagnostics list =
   List.sort
@@ -611,7 +640,8 @@ let sort_diagnostics list =
 
 let list_states verdicts file =
   List.concat (list_file_states verdicts file)
-  |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
+  |> List.sort (fun (left : Source.span state) (right : Source.span state) ->
+      compare_sites left.site right.site)
 
 let list_diagnostics verdicts file =
   List.concat_map
@@ -619,8 +649,8 @@ let list_diagnostics verdicts file =
       List.fold_left
         (fun (reported, diagnostics) state ->
           match state.failure with
-          | Some failure when not (List.mem (state.code, state.shows) reported) ->
-              ((state.code, state.shows) :: reported, failure :: diagnostics)
+          | Some failure when not (List.mem (state.site.code, state.site.shows) reported) ->
+              ((state.site.code, state.site.shows) :: reported, failure :: diagnostics)
           | _ -> (reported, diagnostics))
         ([], []) states
       |> snd)
@@ -628,28 +658,14 @@ let list_diagnostics verdicts file =
   |> sort_diagnostics
 
 module For_testing = struct
-  type query = { code : Diagnostic.Code.prover; span : Source.span; shows : string; input : string }
-
-  let list_queries (lookups : Lookups.t) proofs file =
-    let proofs = Key_table.of_seq (List.to_seq proofs) in
+  let list_queries ~runs lookups proofs file =
     List.concat_map
-      (fun declaration ->
-        let key = Resolve.Names.make_key declaration in
-        match Key_table.find_opt proofs key with
-        | Some (Obligations outcome) ->
-            let ({ base; _ } : Resolve.Names.place) = lookups.interface.names.read_place key in
-            List.map
-              (fun (obligation : Obligation.t) ->
-                {
-                  code = obligation.code;
-                  span =
-                    Source.Definition_span.to_file ~base
-                      (resolve_location lookups.interface.names key obligation.location);
-                  shows = render lookups obligation.message;
-                  input = Solver.show_input (make_request obligation);
-                })
-              outcome.obligations
-        | Some (Unsupported _ | Not_proven_here) | None -> [])
-      (lookups.interface.names.list_declarations_in file)
-    |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
+      (fun (base, posed_proof) ->
+        List.map
+          (fun (site, asked) -> (locate_site ~base site, Solver.show_input asked))
+          (list_asked posed_proof))
+      (list_file_definitions lookups
+         (Key_table.of_seq (List.to_seq (pose_proofs ~runs lookups proofs)))
+         file)
+    |> List.sort (fun (left, _) (right, _) -> compare_sites left right)
 end

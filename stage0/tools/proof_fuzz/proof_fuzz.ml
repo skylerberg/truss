@@ -102,8 +102,8 @@ let is_proven (names : Resolve.Names.lookups) key states =
   let base = (names.read_place key).base and text = names.read_text key in
   List.for_all
     (fun (state : Source.span Prover.state) ->
-      state.span.stop <= base
-      || state.span.start >= base + String.length text
+      state.site.span.stop <= base
+      || state.site.span.start >= base + String.length text
       || state.failure = None)
     states
 

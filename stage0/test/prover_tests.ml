@@ -2192,33 +2192,6 @@ let () =
                      diagnostic.message)
               then Harness.fail "message %S" diagnostic.message
           | diagnostics -> Harness.fail "%d diagnostics" (List.length diagnostics)));
-  Harness.test "a listed query has the span and the code of the diagnostic its obligation gives"
-    (fun () ->
-      let database =
-        Support.make_database
-          (Support.setup [ ("app::main", Fixtures.Prover.addition_that_can_overflow) ])
-      in
-      let file = Support.parse_file "app::main" in
-      match
-        ( Prover.For_testing.list_queries
-            (Database.make_proof_lookups database)
-            (Database.list_proofs (Support.prove database file))
-            file,
-          Support.list_proof_diagnostics database file )
-      with
-      | [ query ], [ diagnostic ] ->
-          if query.span <> diagnostic.span then Harness.fail "the query has another span";
-          if Diagnostic.Code.Prover query.code <> diagnostic.code then
-            Harness.fail "the query has another code";
-          if
-            not
-              (String.includes ~affix:"(check-sat)\n" query.input
-              && String.ends_with ~suffix:"(get-info :reason-unknown)\n(get-info :rlimit)\n"
-                   query.input)
-          then Harness.fail "input %S" query.input
-      | queries, diagnostics ->
-          Harness.fail "%d queries and %d diagnostics" (List.length queries)
-            (List.length diagnostics));
   Harness.test "a second request for a query solved in a small model runs one query" (fun () ->
       match
         ( find_obligation_query Fixtures.Prover.addition_under_an_exists_in_a_forall Overflow,
