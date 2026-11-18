@@ -32,7 +32,7 @@ fn now() -> Instant
   Instant.from_unix_seconds(1900000000).expect("in range")
 }
 
-test "a certificate is read: names, validity, key, and extensions" {
+test "a certificate is read: names, validity, key, and extensions" uses Panic {
   let leaf = one(leaf_pem.slice())
   assert leaf.common_name() == Some("example.test".slice())
   assert leaf.dns_names().length() == 2 && !leaf.is_authority()
@@ -43,7 +43,7 @@ test "a certificate is read: names, validity, key, and extensions" {
   assert der::parse(leaf.encoded()) is Ok(_)
 }
 
-test "a chain verifies up to a trusted root, and fails for another host, time, or root" {
+test "a chain verifies up to a trusted root, and fails for another host, time, or root" uses Panic {
   let chain: List[x509::Certificate] = [one(leaf_pem.slice()), one(intermediate_pem.slice())]
   let roots: List[x509::Certificate] = [one(root_pem.slice())]
   assert x509::verify_chain(chain, roots: roots, host: "example.test", now: now()) == Ok(Unit)
@@ -61,7 +61,7 @@ test "a chain verifies up to a trusted root, and fails for another host, time, o
   assert x509::verify_chain(leaf_as_issuer, roots: roots, host: "example.test", now: now()) is Err(_)
 }
 
-test "PKCS #8 keys are read, and sign what their certificates' keys verify" {
+test "PKCS #8 keys are read, and sign what their certificates' keys verify" uses Panic {
   let blocks = x509::pem_blocks(leaf_key_pem.slice(), label: "PRIVATE KEY")
   assert blocks.length() == 1
   assert x509::parse_private_key(blocks[0]) is Some(Ecdsa(key)) && key.verifying_key().curve() == cryptography::Curve.P384
@@ -78,14 +78,14 @@ test "an ECDSA signature goes to DER and back" {
   assert x509::ecdsa_signature_from_der(encoded, size: 32) == Some(own raw)
 }
 
-test "the system's roots are read from the first bundle present" {
+test "the system's roots are read from the first bundle present" uses Panic {
   var disk = files::MemoryFiles.new().with_text(Path.new("/etc/ssl/cert.pem"), contents: root_pem.slice())
   provide mut disk {
     assert x509::system_roots() is Ok(roots) && roots.length() == 1
   }
 }
 
-test "a root self-signed with SHA-1 is read, and anchors a chain whose links use SHA-256" {
+test "a root self-signed with SHA-1 is read, and anchors a chain whose links use SHA-256" uses Panic {
   let root = one(sha1_root_pem.slice())
   assert !root.is_signed_by(root)
   let chain: List[x509::Certificate] = [one(sha1_signed_leaf_pem.slice())]

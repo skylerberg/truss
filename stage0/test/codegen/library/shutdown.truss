@@ -57,7 +57,7 @@ fn drained_over_http_one() -> List[String]
   seen
 }
 
-test "a shutdown over HTTP/1.1 finishes the request in flight, closes an idle connection, and ends serve" {
+test "a shutdown over HTTP/1.1 finishes the request in flight, closes an idle connection, and ends serve" uses Panic {
   provide simulation::World.new() {
     let seen = drained_over_http_one()
     assert seen.length() == 2
@@ -88,7 +88,7 @@ fn cut_short() -> String
   reply
 }
 
-test "a shutdown cancels a request that outlasts the grace period" {
+test "a shutdown cancels a request that outlasts the grace period" uses Panic {
   provide simulation::World.new() {
     let started = Clock.monotonic()
     assert cut_short() == ""
@@ -152,14 +152,14 @@ fn drained_over_http_two() -> List[String]
   frame_kinds(reply.slice())
 }
 
-test "a shutdown over HTTP/2 sends GOAWAY naming the stream in flight, finishes it, and closes" {
+test "a shutdown over HTTP/2 sends GOAWAY naming the stream in flight, finishes it, and closes" uses Panic {
   provide simulation::World.new() {
     let kinds = drained_over_http_two()
     assert kinds == ["GOAWAY 1 0", "HEADERS 1", "DATA done"]
   }
 }
 
-test "begin_on_signal begins the shutdown when SIGTERM arrives" {
+test "begin_on_signal begins the shutdown when SIGTERM arrives" uses Panic {
   let world = simulation::World.new()
   provide world {
     let shutdown = http::Shutdown.new()

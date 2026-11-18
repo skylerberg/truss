@@ -29,7 +29,7 @@ test "a route matches a method and a path, and gives each parameter's decoded va
   assert http::Route.parse("GET users") is None && http::Route.parse("/a/{b}/{b}") is None
 }
 
-test "an HTTP date is written in IMF-fixdate form and read in all three of its forms" {
+test "an HTTP date is written in IMF-fixdate form and read in all three of its forms" uses Panic {
   let instant = Instant.from_unix_seconds(784111777).expect("in range")
   assert http::format_date(instant) == "Sun, 06 Nov 1994 08:49:37 GMT"
   assert http::parse_date("Sun, 06 Nov 1994 08:49:37 GMT") == Some(instant)
@@ -198,7 +198,7 @@ fn client_and_server() -> List[String]
   }
 }
 
-test "a server answers a client in a world: JSON, a body, a missing page, keep-alive, chunks, and bad requests" {
+test "a server answers a client in a world: JSON, a body, a missing page, keep-alive, chunks, and bad requests" uses Panic {
   provide simulation::World.new() {
     let seen = client_and_server()
     assert seen.length() == 15

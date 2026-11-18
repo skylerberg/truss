@@ -114,7 +114,7 @@ fn sent() -> List[String]
   seen
 }
 
-test "send speaks SMTP: AUTH PLAIN, every recipient including Bcc, and a dot-stuffed MIME message" {
+test "send speaks SMTP: AUTH PLAIN, every recipient including Bcc, and a dot-stuffed MIME message" uses Panic {
   provide simulation::World.new() {
     let seen = sent()
     assert seen.length() == 10
@@ -142,7 +142,7 @@ test "send speaks SMTP: AUTH PLAIN, every recipient including Bcc, and a dot-stu
   }
 }
 
-test "a message refuses a line break in a header field, which would let a caller add headers" {
+test "a message refuses a line break in a header field, which would let a caller add headers" uses Panic {
   provide simulation::World.new() {
     let injected = mail::Message(
       from: mail::Address(email: "ada@example.test"),

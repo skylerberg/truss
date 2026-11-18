@@ -97,7 +97,7 @@ fn browse() -> List[String]
   }
 }
 
-test "a directory is served with index pages, validators, ranges, compressed siblings, and no escapes" {
+test "a directory is served with index pages, validators, ranges, compressed siblings, and no escapes" uses Panic {
   let data = "0123456789".slice().repeated(100)
   let setup = simulation::Setup.new()
     .with_file(Path.new("/site/index.html"), contents: "<h1>home</h1>")
