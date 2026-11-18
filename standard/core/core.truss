@@ -303,10 +303,13 @@ public trait Iterable {
 
   fn map[Output](self, transform: (fn(Self.Element) -> Output uses generic Granted)) -> List[Output]
     uses generic Granted
+    ensures result.length() == self.count()
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
     var outputs: List[Output] = List.with_capacity(self.count())
-    for item in self {
+    for item in self
+      invariant outputs.length() == visited.length()
+    {
       mut outputs.push(transform(item))
     }
     outputs
