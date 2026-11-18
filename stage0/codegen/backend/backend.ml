@@ -457,13 +457,7 @@ let build_supplied_tests backend ~time_limit_ms supplied ~output =
   build_test_program backend ~supplied:fragments ~time_limit_ms
     ~roots:(List.map Emit_c.item fragments) ~output
 
-type unshippable = {
-  failure : [ `Todo | `Echo ];
-  file : Path.file;
-  line : int;
-  column : int;
-  way : Path.t list;
-}
+type unshippable = { failure : [ `Todo | `Echo ]; location : location; way : Path.t list }
 
 let make_root_key (root : Path.t) : Lowered.Item.t =
   match root with Test _ -> make_test_root root | _ -> Generated (Program_main root)
@@ -506,36 +500,27 @@ let list_unshippable (lookups : lowered_lookups) ~main =
     let reports =
       List.map
         (fun path ->
-          let ({ file; line; column } : location) = locate_todo_type lookups path in
-          { failure = `Todo; file; line; column; way = [ main; path ] })
+          { failure = `Todo; location = locate_todo_type lookups path; way = [ main; path ] })
         (lookups.list_reached_todo_types (make_root_key main))
       @ List.concat_map
           (fun (compiled, keys) ->
             List.map
               (fun (failure, site) ->
-                let ({ file; line; column } : location) = locate_site lookups site in
                 {
                   failure = (match failure with Emit_c.Echo -> `Echo | Todo -> `Todo);
-                  file;
-                  line;
-                  column;
+                  location = locate_site lookups site;
                   way = list_definitions keys;
                 })
               (Emit_c.failures compiled))
           reached
     in
     List.sort_uniq
-      (fun left right ->
-        compare
-          (left.file, left.line, left.column, left.failure)
-          (right.file, right.line, right.column, right.failure))
+      (fun left right -> compare (left.location, left.failure) (right.location, right.failure))
       reports
     |> List.fold_left
          (fun acc report ->
            match acc with
-           | last :: _
-             when (last.file, last.line, last.column) = (report.file, report.line, report.column) ->
-               acc
+           | last :: _ when last.location = report.location -> acc
            | _ -> report :: acc)
          []
     |> List.rev
