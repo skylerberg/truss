@@ -102,9 +102,9 @@ Rules: [Lexical elements](SPECIFICATION.md#lexical-elements).
 
 ### Comments
 
-Truss has no comments. A comment goes stale without the compiler noticing,
-and LLMs fill code with comments that repeat it. The content of a comment
-moves into a form that the compiler checks:
+Truss has no comments. A comment goes stale without the compiler noticing, and
+LLMs fill code with comments. The content of a comment moves into a form that
+the compiler checks:
 
 | Content of a comment | Form in Truss |
 |---|---|
@@ -114,22 +114,12 @@ moves into a form that the compiler checks:
 | The cost of a call | A `cost` clause |
 | An example of use, or a requirement | A test and its name |
 | The reason for a piece of code | A name, such as `treat_missing_account_as_empty` |
-| A description of a package | A Markdown file beside the code |
 
 ### Names
 
 Rules: [Names](SPECIFICATION.md#names).
 
-**Names are ASCII.** A homoglyph, such as a Cyrillic `а` in place of a Latin
-`a`, slips a malicious edit past review. Allowing every script safely takes
-normalization, rules about mixed scripts, and Unicode's list of confusable
-characters checked against every name. Those rules change with each Unicode
-version and still leave gaps. The cost is that a team cannot name things in
-its own language. Strings and documentation take any language.
-
-| Rule | Reason |
-|---|---|
-| A constant is `lower_snake_case`, as a value is. | A third case would give the lexer a third class of name, and an `UpperCamelCase` constant would be indistinguishable from a type. |
+**Names are ASCII.** This avoids confusable character attacks and is simple.
 
 ### Keywords
 
@@ -137,8 +127,6 @@ Rules: [Keywords](SPECIFICATION.md#keywords).
 
 | Rule | Reason |
 |---|---|
-| A keyword is reserved everywhere. | The lexer tells a keyword from a name without the parser. The lexer alone can then decide whether a line break ends a statement ([Line breaks](#line-breaks)). |
-| The words of specifications, such as `result` and `time`, are not reserved. | Each is a common name that a clause needs in one position, and reserving it would ban it from all code. |
 | Keywords of other languages, such as `loop` and `async`, are reserved for later use. | Adding one later breaks no code. |
 
 ### Number literals
@@ -177,14 +165,12 @@ In `script`, `${HOME}` is text and `folder` is interpolated.
 
 Rules: [Rejected sequences](SPECIFICATION.md#rejected-sequences).
 
-This is the *LLM habits* principle applied to tokens. `--x` could mean
-`-(-x)`, and `//` could be two divisions. Both are errors, so a habit from
-another language never compiles to a different program. Rejecting a sequence
-also keeps it free: a later language version can give `//` a meaning without
-changing existing code.
+`--x` could mean `-(-x)`, and `//` could be two divisions. Both are errors, so a
+habit from another language never compiles to a different program. Rejecting a
+sequence also keeps it free: a later language version can give `//` a meaning
+without changing existing code.
 
-A stray `;` is rejected, not ignored. Ignoring it would give each statement
-two spellings (*one spelling*).
+A stray `;` is rejected, not ignored.
 
 ### Line breaks
 
@@ -249,19 +235,7 @@ Rules: [Built-in types](SPECIFICATION.md#built-in-types).
 **A size, a length, and an index are `UInt64`, and an offset is `Int64`.**
 Truss has no integer type of the pointer's width. A proof about a size
 therefore holds on every target, and every package runs on every target. A
-target with 32-bit pointers, such as 32-bit WebAssembly, keeps 64-bit sizes:
-a length never exceeds the address space, and the target's allocator fails a
-size that does not fit in a pointer, as it fails any request it cannot meet.
-
-A size type of the pointer's width would need every proof to hold for both
-widths. Each package would then carry overflow obligations for 32-bit
-targets that most never run on, or would declare that it runs only on 64-bit
-targets and split the registry by target. A separate size type of 64 bits
-would need a conversion wherever a length meets another count, such as a
-file offset, and would prevent no error: an element count, a byte count, and
-an index would all have that type. A newtype, such as
-`type ByteCount(number: UInt64)`, separates two counts where an author needs
-it. The cost on a 32-bit target is 4 more bytes per length.
+target with 32-bit pointers, such as 32-bit WebAssembly, keeps 64-bit sizes.
 
 | Rule | Reason |
 |---|---|
@@ -274,33 +248,14 @@ Rules: [Type definitions](SPECIFICATION.md#type-definitions).
 
 **A record with one field is how Truss writes a newtype.** Values with
 different meanings get different types, as in
-`type UserId(number: UInt64)`, with no syntax of their own:
-
-- Construction, field access, `with`, invariants, and `opaque` work as they
-  do for any record.
-- The author names the field. `port.number` names the contents of the
-  record, and a built-in name such as `.value` would not.
-- The new type inherits no operations, because many would be meaningless:
-  adding two `UserId`s is.
-
-**Truss has no tuples.** An element that is read by position has no name, so
-nothing stops a caller from reading a width and a height in the wrong order,
-and `-> Option[(Int64, Int64)]` says less than `-> Option[Extremes]`. A
-record pattern omits the type name, so destructuring stays short, as in
-`for (index, element) in scores.enumerate()`. The pattern matches fields by
-name. `(i, item)` is therefore an error that names the fields, not a silent
-positional match.
-
-Truss has no type aliases, so a type name always means one type.
+`type UserId(number: UInt64)`.
 
 ### Recursive types
 
 Rules: [Recursive types](SPECIFICATION.md#recursive-types).
 
 A recursive variant is marked `indirect`, so the allocation is written where
-the type is declared (*nothing hidden*). Rust writes the same allocation as
-`Box`, which every pattern must then dereference. `indirect` leaves patterns
-unchanged.
+the type is declared (*nothing hidden*).
 
 ### Generic parameters
 
@@ -1709,39 +1664,16 @@ hardware is available only through the standard library.
 
 ## The standard library
 
-The signatures and contracts in [`standard/`](standard) describe the
-library. This section gives the reasons for its scope and conventions.
-
-Truss is batteries included: the standard library holds the modules that a
-command-line tool or a network service needs, so most programs need no other
-dependency. Every dependency is a target for a supply-chain attack, and the
-standard library is the one package that every program already trusts.
-
-The standard library holds the modules that most programs would otherwise
-take from a package:
-
-- code that needs the compiler or the operating system, such as
-  cryptographic primitives, which need processor instructions
-- types that packages share to interoperate, such as `Path` and
-  `http::Request`
-- implementations of published standards, such as JSON, TLS, and the
-  cryptographic algorithms
-- the protocols of a network service
+Truss is batteries included, so most programs need no other dependency. Every
+dependency is a target for a supply-chain attack.
 
 A client for a product, such as `truss::postgres`, is an approved package
-instead, owned by `truss` on the registry. A client follows the releases of
-a product, not a published standard, and few programs need any one client.
+instead, owned by `truss` on the registry.
 
-The standard library is part of the toolchain: it has no version of its own,
-and it appears in no manifest and no lock file. A package instead names the
-language version that it is written for, as in `truss = "1.4"`. That is both
-the version that its files are read as and the minimum toolchain that builds
-it. Packages written for different versions build together, as Rust's
-editions allow.
-
-The standard library never makes a breaking change. A module that must break
-gets a successor beside it, named with `_v2`, which fixes the module without
-removing it.
+The standard library is part of the toolchain: it has no version of its own, and
+it appears in no manifest and no lock file. A package instead names the language
+version that it is written for, as in `truss = "1.4"`. Packages written for
+different versions build together, as Rust's editions allow.
 
 ### Maps and sets
 
@@ -1749,25 +1681,22 @@ removing it.
 to run, so tests stay deterministic and their results can be cached.
 
 **A `Map` resists hash flooding deterministically.** Keys that are chosen to
-collide can turn each operation into a scan of the whole map. The usual
-defense is a random hash key for each process. That is randomness that no
-signature shows: it would change timing and allocation counts from run to
-run, and make a test near its time limit flaky. Instead, a bucket that fills
-up becomes a balanced tree, so the worst case is O(log n), which a `cost`
-clause can promise. This is why a key is `Ordered` as well as `Hash`. Code
-that must stay fast under attack gets random hashing through a capability,
-as every source of randomness is a capability.
+collide can turn each operation into a scan of the whole map. The usual defense
+is a random hash key for each process. That would change timing and allocation
+counts from run to run, and make a test near its time limit flaky. Instead, a
+bucket that fills up becomes a balanced tree, so the worst case is O(log n),
+which a `cost` clause can promise. This is why a key is `Ordered` as well as
+`Hash`.
 
 ### Conventions
 
 | Convention | Reason |
 |---|---|
-| Each module is one subject, one level below `standard`. | Code writes a name with its module, so the name of a type does not repeat the module: `json::Value`. A category above the module, as in Go's `encoding/json`, is not written at the use site, so it only adds something to remember. |
 | A method that needs no ownership of the storage is declared once, on the view type. | A `String`, a `List`, and an `Array` have the methods of their views ([Method lookup](#method-lookup)), so `mut names.sort()` works without `names[..]`, and a second declaration on the owning type would only forward. The owning type declares a method of that name where it uses its storage: `List.reverse` keeps the list's capacity. |
-| A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write, and every helper works with every implementation. |
+| A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write. |
 | Every failure of the operating system is a `SystemError`. | Code that reads a file and sends it over a connection handles one error type. |
 | Text in an embedded language is a tagged template, and a `processes::Command` is a program and a list of arguments. | Neither is a string that is passed to an interpreter, so neither allows an injection. |
-| A fake of a standard capability, such as `files::MemoryFiles`, returns the error that the operating system returns for each misuse. | A test of error handling is only as good as the errors that the fake can produce. |
+| A fake of a standard capability, such as `files::MemoryFiles`, returns the error that the operating system returns for each misuse. | Keeps error handling in tests consistent. |
 
 ## Packages
 
@@ -1793,10 +1722,6 @@ Rules: [Choosing versions](PACKAGES.md#choosing-versions),
 thing. Where two versions share a build, one path names two types, which is
 Rust's "expected `Vector`, found `Vector`".
 
-**A release therefore never breaks the API of an earlier release of the same
-name.** A breaking change is published under a new name with `_v2`, as Go
-requires `/v2` for the second major version of a module.
-
 **A build uses the newest version that any of its packages was checked with,
 and nothing newer.** This is Go's minimal version selection. Selecting the
 newest release that a range allows puts a release that was published an hour
@@ -1807,8 +1732,6 @@ of machines before anyone has read it.
 |---|---|
 | There are no version ranges and no solver. | Selecting versions under ranges is NP-complete, and its answer changes as packages are published. The answer of minimal version selection depends only on the lock file, so it is the same on every machine, every day. |
 | Two edits to a lock file merge by taking the higher version of each package. | A solver's lock file cannot be merged without solving again (*parallel agents*). |
-| A version is written only in the lock file. | An LLM does not know which versions exist today, so no file that is written by hand holds one. |
-| There are no 0.x versions. | A version that may break at any release cannot be the one version of its name in a build. |
 | A release may change a function's result within its contract. | This is how a fix reaches its users. A guarantee that users are meant to rely on goes in an `ensures`. |
 
 ### The registry
@@ -1820,7 +1743,6 @@ Rules: [The registry](PACKAGES.md#the-registry).
 | A package is published as its source. | The code that a reviewer reads in the registry is the code that compiles. |
 | The registry keeps an append-only public log of the hash of every version, as Go's checksum database does. | The registry cannot give two users different code under one version. |
 | The registry signs the proofs and test results that it computed for a release. | Proving a whole dependency tree on a machine that starts with nothing, such as an agent's new container, is the cost that GOALS.md sets out to remove. Each signed result is a function of its key, so a registry that signed a false result is caught by anyone who recomputes it. |
-| A yanked release, one that is marked as not to use, still builds. | If yanking broke builds, one compromised account could stop every project that depends on the package. |
 
 ## Incremental builds
 
@@ -1939,3 +1861,5 @@ compiler, and the tests are cache hits.
 | A separate list of dependencies for tests | The dependencies that only tests reach are computed when a package is published. |
 | A dependency on a git repository or a directory | Unpublished code is worked on in the project that uses it. |
 | Build scripts, install scripts, and code generators | [Grants](#grants) |
+| Tuples | Naming by position allows users to mix up which is which. destructuring suffices |
+| Type aliases | A type name always means one type |
