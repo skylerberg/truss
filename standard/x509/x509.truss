@@ -503,10 +503,10 @@ public fn pem_blocks(text: StringSlice, label: StringSlice) -> List[List[UInt8]]
   var body = ""
   for line in text.lines() {
     let trimmed = line.trim()
-    if trimmed == begin.slice() {
+    if trimmed == begin {
       inside = true
       body = ""
-    } else if trimmed == end.slice() {
+    } else if trimmed == end {
       if inside {
         match base64::decode(body.slice()) {
           Ok(bytes) => mut blocks.push(own bytes)

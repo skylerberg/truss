@@ -369,7 +369,7 @@ fn zone_of(name: StringSlice, rules: List[UInt8]) -> time::TimeZone {
 }
 
 fn shows_local(zone: time::TimeZone, seconds: Int64, expected: StringSlice, offset: Int64) -> Bool {
-  "${zone.to_local(at(seconds))}" == expected.to_string() && zone.offset(at(seconds)) == time::Duration.seconds(offset)
+  "${zone.to_local(at(seconds))}" == expected && zone.offset(at(seconds)) == time::Duration.seconds(offset)
 }
 
 test "a zone with daylight time gives the local time, and the instants of a local time" {

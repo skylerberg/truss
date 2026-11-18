@@ -101,7 +101,7 @@ test "an encoder writes integers in either byte order" {
   mut encoder.int8(-1)
   mut encoder.uint8(254)
   assert encoder.length() == 10
-  assert encoder.written().to_list() == [1, 2, 3, 4, 5, 6, 7, 8, 255, 254]
+  assert encoder.written() == [1, 2, 3, 4, 5, 6, 7, 8, 255, 254]
 }
 
 test "an encoder appends to the bytes it starts with, and returns them all" {

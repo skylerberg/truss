@@ -471,5 +471,5 @@ internal fn is_valid_decapsulation_key(decapsulation: Slice[UInt8]) -> Bool {
     return false
   }
   let digest = hash_256(decapsulation[1152..2336])
-  digest.slice() == decapsulation[2336..2368]
+  digest == decapsulation[2336..2368]
 }

@@ -2203,20 +2203,17 @@ let read_resolved database (key : Resolve.Names.key) =
   | [] -> None
   | parts -> Some (Resolve.merge parts)
 
-let request database packages ~through ~list_needs keys =
-  drain database ~through packages;
-  List.iter
-    (fun key ->
-      if not (List.for_all (is_current database) (list_needs key)) then
-        Compiler_bug.raise_bug ~stage:"Database"
-          "%s is requested, and no root of lowering reaches it" (Lowered.Item.to_string key))
-    keys
+let check_reached database part =
+  if not (is_current database part) then
+    Compiler_bug.raise_bug ~stage:"Database" "%s is read, and no root of lowering reaches it"
+      (Part.show (Stored part))
 
-let read_requested database typed =
+let read_reached database typed =
+  check_reached database (Part.Any typed);
   match read_part database (note_untracked_read database) typed with
   | Value value -> value
   | Failed _ | Blocked ->
-      Compiler_bug.raise_bug ~stage:"Database" "%s is requested from code with errors"
+      Compiler_bug.raise_bug ~stage:"Database" "%s is read from code with errors"
         (Part.show (Stored (Part.Any typed)))
 
 let make_interface_lookups database packages =
@@ -2284,6 +2281,7 @@ let find_lowered_lookups database packages : (Backend.lowered_lookups, string) r
   match database.lowering with
   | Error message -> Error message
   | Ok { system; _ } ->
+      drain database ~through:Test_keys packages;
       let interface = make_interface_lookups database packages in
       Ok
         {
@@ -2295,25 +2293,16 @@ let find_lowered_lookups database packages : (Backend.lowered_lookups, string) r
           interface;
           find_lowered =
             (fun key ->
-              request database packages ~through:Lowered_code
-                ~list_needs:(fun key -> [ Part.Any (Lowered key) ])
-                [ key ];
+              check_reached database (Part.Any (Lowered key));
               match read_part database (note_untracked_read database) (Lowered key) with
               | Value lowered ->
                   check_calls database interface packages key lowered;
                   Some lowered
               | Failed _ | Blocked -> None);
-          read_test_key =
-            (fun key ->
-              request database packages ~through:Test_keys
-                ~list_needs:(fun key -> [ Part.Any (Test_key key) ])
-                [ key ];
-              read_requested database (Test_key key));
+          read_test_key = (fun key -> read_reached database (Test_key key));
           list_reached_todo_types =
             (fun key ->
-              request database packages ~through:Test_keys
-                ~list_needs:(fun key -> [ Part.Any (Test_key key) ])
-                [ key ];
+              check_reached database (Part.Any (Test_key key));
               list_reached_todo_types database key);
         }
 

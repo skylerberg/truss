@@ -204,6 +204,12 @@ let () =
   Harness.test "comparing integer types that differ is an error with a fix that converts" (fun () ->
       expect_one_diagnostic Fixtures.Infer.comparison_of_uint64_and_uint32
         "types.mismatched_integers" ~fixed:Fixtures.Infer.comparison_of_uint64_and_uint32_fixed);
+  Harness.test "a comparison views a list, an array, or a string that meets its view" (fun () ->
+      expect_fine Fixtures.Infer.comparisons_of_owners_and_views);
+  Harness.test "a comparison of a list with a slice of another element type is a mismatch"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.comparison_of_a_list_and_a_slice_of_another_element
+        "types.mismatch");
   Harness.test "+ on strings is an error with a fix to interpolation" (fun () ->
       expect_one_diagnostic Fixtures.Infer.string_plus_a_string "types.string_addition"
         ~fixed:Fixtures.Infer.string_plus_a_string_fixed);
@@ -792,6 +798,9 @@ let () =
 let () =
   Harness.test "deriving Deserialize needs every invariant clause to run" (fun () ->
       expect_one_diagnostic Fixtures.Infer.deserialize_of_digits_with_an_invariant_over_a_type
+        "types.cannot_derive");
+  Harness.test "deriving Deserialize needs an invariant that names no `identical`" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.deserialize_of_rivals_with_an_invariant_naming_identical
         "types.cannot_derive");
   Harness.test "deriving Deserialize accepts an invariant that runs" (fun () ->
       expect_fine Fixtures.Infer.deserialize_of_bounds_with_an_invariant);

@@ -75,12 +75,12 @@ internal fn parse(text: StringSlice) -> Option[Instant] {
   var month: Option[UInt8] = None
   var year: Option[UInt32] = None
   var clock: Option[time::TimeOfDay] = None
-  if words.length() == 6 && words[5] == "GMT".slice() {
+  if words.length() == 6 && words[5] == "GMT" {
     day = number_of(words[1])
     month = month_number(words[2])
     year = number_of(words[3])
     clock = clock_of(words[4])
-  } else if words.length() == 4 && words[3] == "GMT".slice() {
+  } else if words.length() == 4 && words[3] == "GMT" {
     let parts: List[StringSlice] = words[1].split("-")
     if parts.length() == 3 {
       day = number_of(parts[0])

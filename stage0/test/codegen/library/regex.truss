@@ -123,13 +123,13 @@ test "every match is found, and text is split and replaced around matches" {
   let commas = compiled(",\\s*")
   let pieces = commas.split("a, b,c,  d")
   assert pieces.length() == 4
-  assert pieces[0] == "a".slice()
-  assert pieces[1] == "b".slice()
-  assert pieces[2] == "c".slice()
-  assert pieces[3] == "d".slice()
+  assert pieces[0] == "a"
+  assert pieces[1] == "b"
+  assert pieces[2] == "c"
+  assert pieces[3] == "d"
   let comma = compiled(",")
   let whole = comma.split("abc")
-  assert whole.length() == 1 && whole[0] == "abc".slice()
+  assert whole.length() == 1 && whole[0] == "abc"
   assert compiled("\\s+").replace_all("a  b \t c", replacement: " ") == "a b c"
   assert compiled("b+").replace_first("abbcbb", replacement: "-") == "a-cbb"
   assert compiled("x").replace_all("abc", replacement: "-") == "abc"
@@ -170,7 +170,7 @@ test "a match of the whole text, a search from an offset, and escaped text" {
   assert compiled("a").find_from("abc", offset: 3) is None
   assert regex::escape("a.b*c(d)[e]{f}|g^h\u{24}i\\j-k") == "a\\.b\\*c\\(d\\)\\[e\\]\\{f\\}\\|g\\^h\\\u{24}i\\\\j\\-k"
   assert compiled(regex::escape("1+1=2?").slice()).is_full_match("1+1=2?")
-  assert compiled("a+").pattern() == "a+".slice() && compiled("a+") == compiled("a+") && compiled("a+") != compiled("a*")
+  assert compiled("a+").pattern() == "a+" && compiled("a+") == compiled("a+") && compiled("a+") != compiled("a*")
   assert "${compiled("[a-z]+")}" == "[a-z]+"
 }
 

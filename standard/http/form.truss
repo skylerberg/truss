@@ -18,7 +18,7 @@ public fn Form.parse(text: StringSlice) -> Result[Form, Error] {
 
 public fn Form.get(self, name: StringSlice) -> Option[StringSlice] {
   for field in self.fields {
-    if field.name.slice() == name {
+    if field.name == name {
       return Some(field.value.slice())
     }
   }
@@ -28,7 +28,7 @@ public fn Form.get(self, name: StringSlice) -> Option[StringSlice] {
 public fn Form.all(self, name: StringSlice) -> List[StringSlice] {
   var values: List[StringSlice] = []
   for field in self.fields {
-    if field.name.slice() == name {
+    if field.name == name {
       mut values.push(field.value.slice())
     }
   }
@@ -171,10 +171,10 @@ fn content_piece(multipart: mut Multipart, limit: UInt64) -> Result[Option[List[
         }
         let _ = drop_front(mut multipart.buffer, count: multipart.delimiter.length())
         let suffix = drop_front(mut multipart.buffer, count: 2)
-        if suffix.slice() == [45, 45].slice() {
+        if suffix == [45, 45] {
           multipart.section = Section.Finished
           mut multipart.buffer.clear()
-        } else if suffix.slice() == [13, 10].slice() {
+        } else if suffix == [13, 10] {
           multipart.section = Section.Between
         } else {
           return Err(malformed("a multipart boundary followed by neither a line break nor --"))

@@ -60,7 +60,7 @@ public fn media_type_of(file: Path) -> StringSlice {
 let sibling_codings: Array[String, 3] = ["br", "zstd", "gzip"]
 
 fn sibling_of(file: Path, coding: StringSlice) -> Path {
-  let suffix = if coding == "br".slice() { ".br" } else if coding == "zstd".slice() { ".zst" } else { ".gz" }
+  let suffix = if coding == "br" { ".br" } else if coding == "zstd" { ".zst" } else { ".gz" }
   Path.new("${file}${suffix}".slice())
 }
 
@@ -125,7 +125,7 @@ fn matches_tag(header: StringSlice, tag: StringSlice) -> Bool {
   for part in header.split(",") {
     let candidate = part.trim()
     let bare = if candidate.starts_with("W/") { candidate.part(2, to: candidate.length()) } else { candidate }
-    if candidate == "*".slice() || bare == tag {
+    if candidate == "*" || bare == tag {
       return true
     }
   }
@@ -169,7 +169,7 @@ public fn serve_file(request: Request, responder: mut Responder, file: Path, opt
   mut headers.add("Content-Type", value: media_type)
   mut headers.add("Accept-Ranges", value: "bytes")
   let is_range_allowed = match request.headers.get("If-Range") {
-    Some(condition) => condition.trim() == tag.slice()
+    Some(condition) => condition.trim() == tag
     None => true
   }
   let ranged = if is_range_allowed { range_of(request.headers.get("Range"), length: length) } else { Ranged.Whole }
