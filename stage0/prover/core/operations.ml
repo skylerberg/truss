@@ -478,6 +478,12 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
     (operation : Intrinsic.scalar) types operands ~(arguments : Core.origin option list) ~fallback =
   let source = frame.source in
   let location = Facts.locate context frame.source site.origin in
+  (match List.find_opt (function Types.Parameter _ | Projection _ -> true | _ -> false) types with
+  | Some parameter ->
+      Facts.raise_unsupported location "`intrinsic::%s` at the type parameter `%s`"
+        (Intrinsic.show_operation (Scalar operation))
+        (Types.show parameter)
+  | None -> ());
   let find_argument index = Option.join (List.nth_opt arguments index) in
   let is_float = match types with ty :: _ -> Facts.find_float_format ty <> None | [] -> false in
   let exact operation left right =
