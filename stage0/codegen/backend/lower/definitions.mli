@@ -22,7 +22,6 @@ type code = {
   result : Types.result;
   substitution : Types.substitution;
   uses : Types.capability_set;
-  real : Path.t list;
   has_defaults : bool;
 }
 

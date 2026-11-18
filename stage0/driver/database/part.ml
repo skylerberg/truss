@@ -103,7 +103,10 @@ let locate_item_package : Lowered.Item.t -> Path.package = function
   | Template_check { from_template = path; _ }
   | Call_evaluation { function_ = path; _ }
   | Generated
-      (Locked_entry { capability = path; _ } | Adapter { function_ = path; _ } | Program_main path)
+      ( Locked_entry { capability = path; _ }
+      | Adapter { function_ = path; _ }
+      | Program_main path
+      | Test_main path )
   | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
       Path.locate_package path
   | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> locate_type_package ty
@@ -254,7 +257,10 @@ let find_item_definition : Lowered.Item.t -> Path.t option = function
   | Template_check { from_template = path; _ }
   | Call_evaluation { function_ = path; _ }
   | Generated
-      (Locked_entry { capability = path; _ } | Adapter { function_ = path; _ } | Program_main path)
+      ( Locked_entry { capability = path; _ }
+      | Adapter { function_ = path; _ }
+      | Program_main path
+      | Test_main path )
   | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
       Some path
   | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> find_type_definition ty

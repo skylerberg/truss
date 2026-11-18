@@ -123,10 +123,10 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
       lookups.read_patterns key;
       try
         match declaration.kind with
-        | (Function | Method) when Mir.find_code (lookups.mir.read_body_part key) = None ->
+        | (Function | Method | Test) when Mir.find_code (lookups.mir.read_body_part key) = None ->
             Not_proven_here
         | Theorem -> Obligations (Translate.translate_theorem lookups source ~path:key.path)
-        | Function | Method -> (
+        | Function | Method | Test -> (
             let prove_with substitution =
               Translate.translate_function
                 ~is_updating_helper:(Contracts.is_updating_helper lookups key.path)
@@ -161,7 +161,6 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                       List.sort_uniq compare
                         (List.concat_map (fun (outcome : State.outcome) -> outcome.holes) outcomes);
                   })
-        | Test -> Obligations (Translate.test lookups source ~path:key.path)
         | Constant -> Obligations (Translate.translate_constant lookups source ~path:key.path)
         | Impl ->
             let outcomes = translate_impl_laws lookups key source in

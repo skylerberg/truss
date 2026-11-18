@@ -66,7 +66,8 @@ let find_type_interface lookups (path : Path.t) =
 
 let find_declared_signature lookups (path : Path.t) =
   match find_interface lookups path with
-  | Some (Function_interface signature | Theorem_interface signature) -> Some signature
+  | Some (Function_interface signature | Theorem_interface signature | Test_interface signature) ->
+      Some signature
   | _ -> None
 
 let find_trait_interface lookups (path : Path.t) =
@@ -93,12 +94,13 @@ let read_impl_interface lookups path =
   | Some interface -> interface
   | None -> Compiler_bug.raise_bug ~stage:"Interface" "%s is not an impl" (Path.show path)
 
-let read_test_uses lookups path =
+let is_external_test lookups path =
   match find_interface lookups path with
-  | Some (Test_interface uses) -> uses
+  | Some (Test_interface signature) ->
+      Types.remove_divergence
+        (Types.subtract_capabilities signature.uses (Types.make_capability_set [ Types.panic ]))
+      <> Types.no_capabilities
   | _ -> Compiler_bug.raise_bug ~stage:"Interface" "%s has no test interface" (Path.show path)
-
-let is_external_test lookups path = read_test_uses lookups path <> Types.no_capabilities
 
 let find_real_implementation (lookups : Lookups.t) capability =
   match
@@ -139,9 +141,11 @@ let find_trait_method lookups trait ~name ~receiver =
         interface.methods)
 
 let is_specification = function
-  | Environment.Function_interface signature | Theorem_interface signature ->
+  | Environment.Function_interface signature
+  | Theorem_interface signature
+  | Test_interface signature ->
       signature.specification_only
   | Law_proof_interface _ -> true
   | Type_interface _ | Trait_interface _ | Impl_interface _ | Constant_interface _
-  | Test_interface _ | Error_interface _ ->
+  | Error_interface _ ->
       false

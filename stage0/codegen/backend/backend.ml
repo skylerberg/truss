@@ -191,7 +191,7 @@ let list_small_callees ~find ~is_worked_on fragment =
 let test_runner : Lowered.Item.t =
   Code { path = Well_known.make_path Run_tests; instantiation = Ground.no_instantiation }
 
-let make_test_root path = Lowered.Item.Code { path; instantiation = Ground.no_instantiation }
+let make_test_root path = Lowered.Item.Generated (Test_main path)
 
 let list_roots ~tests ~mains =
   (if tests = [] then [] else test_runner :: List.map make_test_root tests)
@@ -482,7 +482,10 @@ let list_reached_definitions lookups root =
     (List.filter_map
        (fun (_, way) ->
          match List.rev way with
-         | (Lowered.Item.Code { path; _ } | Constant path | Generated (Program_main path)) :: _ ->
+         | ( Lowered.Item.Code { path; _ }
+           | Constant path
+           | Generated (Program_main path | Test_main path) )
+           :: _ ->
              Some path
          | _ -> None)
        (trace_root lookups root))
