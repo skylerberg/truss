@@ -2,9 +2,6 @@ exception Recursion_limit of string
 
 val recursion_limit : int
 
-val make_trait_substitution :
-  Types.trait_interface -> self:Types.ty -> Types.trait_reference -> Types.substitution
-
 val list_bound_closure_over :
   find_requirements:(Path.t -> (Types.generic list * Types.trait_reference list) option) ->
   self:Types.ty ->

@@ -118,7 +118,7 @@ let instantiate context (callee : Core.callee) =
       | Some signature, Some interface ->
           of_signature
             (Types.combine_substitutions
-               (Interface.Properties.make_trait_substitution interface ~self:self_type reference)
+               (Types.make_trait_substitution interface.trait_generics ~self:self_type reference)
                (Types.combine_substitutions
                   (make_substitution context signature.generics instantiation.type_arguments
                      ~subject)

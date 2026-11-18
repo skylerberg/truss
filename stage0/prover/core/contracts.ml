@@ -17,8 +17,8 @@ let find_source (lookups : Lookups.t) (path : Path.t) =
     (lookups.mir.find_form_origin path)
 
 let make_trait_substitution (lookups : Lookups.t) (trait : Types.trait_reference) (ty : Types.ty) =
-  Interface.Properties.make_trait_substitution
-    (Interface.Definition.read_trait_interface lookups.interface trait.trait)
+  Types.make_trait_substitution
+    (Interface.Definition.read_trait_interface lookups.interface trait.trait).trait_generics
     ~self:ty trait
 
 let find_clauses (lookups : Lookups.t) path callee =

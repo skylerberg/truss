@@ -584,9 +584,9 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
       let instance =
         Instantiation.instantiate state span
           ~extra:
-            (Types.bind_argument
-               (Types.make_self_parameter trait.trait)
-               (Types.Type type_) Types.no_substitution)
+            (Types.make_trait_substitution
+               (Members.list_trait_generics state.lookups trait.trait)
+               ~self:type_ trait)
           (Members.read_method_signature state.lookups trait.trait method_)
       in
       Some
@@ -596,7 +596,7 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
               name;
               receiver;
               self_type = type_;
-              instantiation = Types.no_instantiation;
+              instantiation = instance.instantiation;
               evidence =
                 (match type_ with
                 | Types.Any _ -> Dynamic

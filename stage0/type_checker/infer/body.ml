@@ -525,7 +525,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
         (match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
         | Some interface ->
             let substitution =
-              Interface.Properties.make_trait_substitution interface ~self:for_type trait
+              Types.make_trait_substitution interface.trait_generics ~self:for_type trait
             in
             state.law_parameters <-
               List.map

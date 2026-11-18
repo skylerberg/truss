@@ -878,7 +878,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | Some (signature : Types.signature) -> signature.capability_parameters
     | None -> []
   in
-  let pair parameters arguments ~fixed =
+  let bind_parameters parameters arguments ~fixed =
     let rec bind_remaining substitution parameters arguments =
       match (parameters, arguments) with
       | parameter :: parameters, argument :: arguments ->
@@ -927,7 +927,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       let arguments = list_arguments instantiation.type_arguments in
       let substitution =
         Types.combine_substitutions
-          (pair (list_generics path) arguments ~fixed:Types.no_substitution)
+          (bind_parameters (list_generics path) arguments ~fixed:Types.no_substitution)
           (Types.make_capability_substitution (list_capability_parameters path)
              (list_capability_arguments instantiation))
       in
@@ -981,7 +981,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           let trait_path = Path.Method { owner = trait.trait; name; receiver } in
           let trait_substitution =
             Types.combine_substitutions
-              (pair (list_generics trait_path) arguments
+              (bind_parameters (list_generics trait_path) arguments
                  ~fixed:(Contracts.make_trait_substitution context.lookups trait self_type))
               (Types.make_capability_substitution
                  (list_capability_parameters trait_path)
@@ -996,7 +996,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                 let path = Path.Method { owner = impl; name; receiver } in
                 ( path,
                   Types.combine_substitutions
-                    (pair (list_generics path) arguments ~fixed:impl_substitution)
+                    (bind_parameters (list_generics path) arguments ~fixed:impl_substitution)
                     (Types.make_capability_substitution (list_capability_parameters path)
                        capability_arguments) )
             | _ -> (trait_path, trait_substitution)
