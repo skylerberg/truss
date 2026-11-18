@@ -857,10 +857,10 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
   | Some _, _ :: index :: _ -> Validity.note_place context frame site.origin (One index.term)
   | _ -> ());
   let result_type = Facts.substitute_type context frame site.type_ in
+  let is_update_step = calls_update_step context invocation in
   (match invocation.callee with
   | Intrinsic _ -> ()
   | _ ->
-      let is_update_step = calls_update_step context invocation in
       List.iter
         (fun (passed : State.passed) ->
           if not (is_update_step && passed.position = 0) then
@@ -872,6 +872,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       (fun frame (passed : State.passed) ->
         match (passed.mode, passed.passed_place) with
         | Types.Mut, Some place ->
+            if is_update_step && passed.position = 0 then place.note_changed_in_place ();
             place.write frame (Facts.arrive context frame "changed" passed.type_)
         | _ -> frame)
       frame values

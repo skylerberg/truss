@@ -107,6 +107,7 @@ let slice_place context (site : Invocation.site) ~(owner : State.passed_place) ~
             ~stop:high
         with Facts.Unsupported _ ->
           owner.write frame (Facts.arrive context frame "changed" (owner_type frame)));
+    note_changed_in_place = owner.note_changed_in_place;
   }
 
 let handle_descriptor context handle =

@@ -1,10 +1,9 @@
 type Positive(n: Int64)
   invariant n > 0
 
-type Source()
+type Source(positive: Positive)
 
-fn Source.part(self) lends Positive {
-  var p = Positive(n: 1)
-  p.n = -5
-  p
+fn Source.part(mut self) lends mut Positive {
+  self.positive.n = -5
+  mut self.positive
 }
