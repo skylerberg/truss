@@ -1657,3 +1657,15 @@ let () =
       expect_one_diagnostic
         Fixtures.Infer.meters_fed_to_an_impl_bounding_its_item_by_another_trait_argument
         "types.signature_mismatch" ~at:("feed", 2))
+
+let () =
+  Harness.test "the shorthand of with names its value, whatever the name resolves to" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_shorthand_naming_a_function
+        "types.mismatch");
+  Harness.test "with names fields as a construction does" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_of_an_unknown_field "types.unknown_label"
+        ~says:"`Config` has no field `nme`.");
+  Harness.test "with updates a field once" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_of_a_field_twice "types.repeated_argument";
+      expect_one_diagnostic Fixtures.Infer.record_update_of_a_field_and_its_part
+        "types.repeated_argument")

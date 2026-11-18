@@ -743,17 +743,25 @@ and parse_argument cursor =
 
 and update cursor : Syntax.update =
   let start = Cursor.index cursor in
-  let field = Atoms.lower_name cursor "a field name" in
-  let rec parse_field_path fields =
-    if Cursor.accept_punctuation cursor Dot then
-      parse_field_path (Atoms.lower_name cursor "a field name" :: fields)
-    else List.rev fields
+  let first = parse_expression cursor in
+  let rec read_path (written : Syntax.expression) =
+    match written.kind with
+    | Name { modules = []; last } -> Some [ last ]
+    | Member (base, field) -> Option.map (fun path -> path @ [ field ]) (read_path base)
+    | _ -> None
   in
-  let path = parse_field_path [] in
-  let value =
-    if Cursor.accept_punctuation cursor Colon then Some (parse_expression cursor) else None
+  let path, value =
+    if Cursor.accept_punctuation cursor Colon then (
+      match read_path first with
+      | Some path -> (path, parse_expression cursor)
+      | None ->
+          Cursor.report cursor Unexpected_token
+            (Cursor.read_file_span cursor first.id)
+            "The label of an update is a field or a path of fields, such as `server.port`.";
+          raise Cursor.Failed)
+    else ([], first)
   in
-  { kind = Update { field; path; value }; id = Cursor.allocate_id_from cursor start }
+  { kind = Update { path; value }; id = Cursor.allocate_id_from cursor start }
 
 and parse_primary cursor : Syntax.expression =
   let start = Cursor.index cursor in

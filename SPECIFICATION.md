@@ -1439,7 +1439,7 @@ greet(user)
 ### Updating records
 
 ```ebnf
-update = LOWER_NAME { "." LOWER_NAME } ":" expression | LOWER_NAME ;
+update = [ LOWER_NAME { "." LOWER_NAME } ":" ] expression ;
 ```
 
 ```truss
@@ -1451,6 +1451,12 @@ let production = own config with (server.port: 443, log_level: LogLevel.Warning)
   assigning its fields, and returning it.
 - The base is passed as an `own` argument is: a base that is a place takes
   `own`, unless it copies implicitly.
+- The updates follow the rules of a construction's arguments, with a path
+  of fields for a label: each names a field of the record once, a bare name
+  goes to the field it names, as in `with (own name)`, and each value is
+  passed to its field as an `own` argument is.
+- `a.b: value` builds `a` anew with `b` updated, so it names `a`, and no
+  other update names `a` itself.
 - `with` works on records, and updates only fields visible at that point.
 
 ### Lambdas

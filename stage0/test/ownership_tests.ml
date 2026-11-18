@@ -1257,3 +1257,11 @@ let () =
   Harness.test "a move in the right operand is the only move of the place" (fun () ->
       expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_and);
       expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_or))
+
+let () =
+  Harness.test "the shorthand of with in a lambda captures its name" (fun () ->
+      expect_fine Fixtures.Ownership.record_update_shorthand_captured_by_a_lambda);
+  Harness.test "a value of with that is not Plain is passed own, as to a construction" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.record_update_moving_a_value_without_own
+        "ownership.needs_owned";
+      expect_fine Fixtures.Ownership.record_update_shorthand_passed_own)

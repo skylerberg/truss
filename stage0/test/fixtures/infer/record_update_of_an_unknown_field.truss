@@ -1,0 +1,5 @@
+type Config(name: String, port: UInt16)
+
+fn f(config: own Config) -> Config {
+  own config with (nme: "x")
+}
