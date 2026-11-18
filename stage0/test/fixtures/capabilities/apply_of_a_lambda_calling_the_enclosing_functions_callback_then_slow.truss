@@ -1,0 +1,6 @@
+fn f(value: Int64, run: (fn(Int64) -> Int64 uses generic Mine)) -> Int64
+  uses generic Mine
+  cost time O(time(run))
+{
+  apply(value, change: fn(inner) { slow(run(inner)) })
+}

@@ -598,17 +598,93 @@ let () =
 
 let () =
   let apply = Fixtures.Capabilities.apply_bounded_by_the_time_of_change in
+  let both = Fixtures.Capabilities.both_bounded_by_the_times_of_first_and_second in
   Harness.test "a function with a time clause cannot call one without" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.function_with_time_calling_forever
         "capabilities.may_not_terminate");
   Harness.test "a call that passes a function without a time clause may not terminate" (fun () ->
       expect_one_diagnostic
         (apply ^ Fixtures.Capabilities.apply_of_slow_under_a_time_clause)
-        "capabilities.may_not_terminate");
+        "capabilities.may_not_terminate"
+        ~says:
+          "This call may not terminate, since `app::main::slow`, passed for `change`, has no \
+           `time` clause, and this function has a `time` clause.");
   Harness.test "a lambda that calls a function without a time clause may not terminate" (fun () ->
       expect_one_diagnostic
         (apply ^ Fixtures.Capabilities.apply_of_a_lambda_calling_slow_under_a_time_clause)
-        "capabilities.may_not_terminate");
+        "capabilities.may_not_terminate"
+        ~notes:
+          [
+            ( "This call may not terminate, since `app::main::slow` has no `time` clause.",
+              ("slow(inner)", 1) );
+          ]);
+  Harness.test "a call that passes a lambda cites each lambda down to a cause that is not a lambda"
+    (fun () ->
+      expect_one_diagnostic
+        (apply
+       ^ Fixtures.Capabilities.apply_of_a_lambda_applying_a_lambda_calling_slow_under_a_time_clause
+        )
+        "capabilities.may_not_terminate"
+        ~notes:
+          [
+            ( "This call may not terminate, since the lambda passed for `change` may not.",
+              ("apply(outer", 1) );
+            ( "This call may not terminate, since `app::main::slow` has no `time` clause.",
+              ("slow(inner)", 1) );
+          ]);
+  Harness.test "a call that passes a lambda cites the first cause in the lambda" (fun () ->
+      expect_one_diagnostic
+        (apply
+       ^ Fixtures.Capabilities.apply_of_a_lambda_looping_then_calling_slow_under_a_time_clause)
+        "capabilities.may_not_terminate"
+        ~notes:
+          [
+            ( "This loop may not terminate, since it has no measure. Give the loop a `decreases` \
+               clause.",
+              ("while", 1) );
+          ]);
+  Harness.test "a call that passes a lambda cites a cause in a `parallel` branch of the lambda"
+    (fun () ->
+      expect_one_diagnostic
+        (apply
+       ^ Fixtures.Capabilities.apply_of_a_lambda_looping_in_a_parallel_branch_under_a_time_clause)
+        "capabilities.may_not_terminate"
+        ~notes:
+          [
+            ( "This loop may not terminate, since it has no measure. Give the loop a `decreases` \
+               clause.",
+              ("while", 1) );
+          ]);
+  Harness.test
+    "a call that passes a lambda cites no call of a callback that the enclosing function's time \
+     clause follows" (fun () ->
+      expect_one_diagnostic
+        (apply
+       ^ Fixtures.Capabilities.apply_of_a_lambda_calling_the_enclosing_functions_callback_then_slow
+        )
+        "capabilities.may_not_terminate"
+        ~notes:
+          [
+            ( "This call may not terminate, since `app::main::slow` has no `time` clause.",
+              ("slow(run", 1) );
+          ]);
+  Harness.test "a call names the lambda that may not terminate among the lambdas it passes"
+    (fun () ->
+      expect_one_diagnostic
+        (apply ^ both
+       ^ Fixtures.Capabilities.both_of_a_lambda_that_terminates_and_a_lambda_calling_slow)
+        "capabilities.may_not_terminate" ~says:"since the lambda passed for `second` may not"
+        ~notes:
+          [
+            ( "This call may not terminate, since `app::main::slow` has no `time` clause.",
+              ("slow(inner)", 1) );
+          ]);
+  Harness.test "a call names no callback that the enclosing function's time clause follows"
+    (fun () ->
+      expect_one_diagnostic
+        (apply ^ both ^ Fixtures.Capabilities.both_of_the_enclosing_functions_callback_and_slow)
+        "capabilities.may_not_terminate"
+        ~says:"since `app::main::slow`, passed for `second`, has no `time` clause");
   Harness.test "a `finite` function cannot call a callback whose type has no time clause" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.finite_function_calling_a_callback_without_time
         "capabilities.may_not_terminate");
@@ -632,6 +708,9 @@ let () =
   Harness.test "a capability's implementation terminates when the capability's method does"
     (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.spinner_calling_a_function_without_time
+        "capabilities.may_not_terminate");
+  Harness.test "an impl of `From` makes no call that may not terminate" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.from_impl_calling_a_function_without_time
         "capabilities.may_not_terminate");
   Harness.test "an impl's time clause follows no callback that its trait's does not" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.visit_impl_naming_the_time_of_its_callback
@@ -692,7 +771,13 @@ let () =
         ~says:
           "This call may not terminate, since the lambda passed for `change` may not, and this \
            function has a `time` clause."
-        ~at:("apply(value,", 1));
+        ~at:("apply(value,", 1)
+        ~notes:
+          [
+            ( "This loop may not terminate, since it has no measure. Give the loop a `decreases` \
+               clause.",
+              ("while", 1) );
+          ]);
   Harness.test "a lambda whose function type has a time clause holds no loop without a measure"
     (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.lambda_looping_without_a_measure_passed_as_finite
@@ -702,3 +787,70 @@ let () =
            lambda is passed as promises that the lambda terminates. Give the loop a `decreases` \
            clause."
         ~at:("while", 1))
+
+let () =
+  Harness.test
+    "a function type that names a capability parameter takes no lambda that may not terminate by \
+     itself" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.lambda_looping_without_a_measure_bound_as_using_a_capability_parameter
+        "capabilities.may_not_terminate"
+        ~says:
+          "This loop may not terminate, since it has no measure, and the function type that this \
+           lambda is passed as takes only a function that terminates if the functions passed for \
+           `generic Mine` do. Give the loop a `decreases` clause."
+        ~at:("while", 1);
+      expect_one_diagnostic
+        Fixtures.Capabilities.lambda_calling_slow_bound_as_using_a_capability_parameter
+        "capabilities.may_not_terminate"
+        ~says:
+          "This call may not terminate, since `app::main::slow` has no `time` clause, and the \
+           function type that this lambda is passed as takes only a function that terminates if \
+           the functions passed for `generic Mine` do."
+        ~at:("slow()", 2));
+  Harness.test
+    "a function type that names a capability parameter takes no named function that may not \
+     terminate" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.forever_bound_as_using_a_capability_parameter
+        "types.mismatch"
+        ~says:"Expected `(fn() uses generic Mine)`, found `fn()`, which may not terminate."
+        ~at:("forever", 2));
+  Harness.test
+    "a function type that names a capability parameter takes a lambda that calls a callback of \
+     that parameter" (fun () ->
+      expect_fine
+        Fixtures.Capabilities
+        .lambda_calling_the_enclosing_functions_callback_bound_as_using_a_capability_parameter);
+  Harness.test
+    "a call infers its callee's capability parameter from a lambda that uses the caller's \
+     capability parameter and may not terminate" (fun () ->
+      let text =
+        ticks
+        ^ Fixtures.Capabilities
+          .each_time_of_a_lambda_calling_the_enclosing_functions_callback_then_looping
+      in
+      expect_fine text;
+      match
+        List.filter_map
+          (fun (node : Core.expression) ->
+            match (node.kind, node.type_) with
+            | Lambda _, Function { uses; _ } -> Some (uses :> Types.capability list)
+            | _ -> None)
+          (list_core_expressions text ~of_function:"run")
+      with
+      | [ [ Capability_parameter { name = "Mine"; _ }; Divergence Always ] ] -> ()
+      | _ ->
+          Harness.fail "the lambda's type does not hold `Mine` and unconditional divergence alone");
+  Harness.test
+    "a binding without a type holds a function that uses a capability parameter and may not \
+     terminate" (fun () ->
+      expect_fine
+        (later
+       ^ Fixtures.Capabilities
+         .later_of_a_lambda_calling_the_enclosing_functions_callback_then_looping_bound_without_a_type
+        ));
+  Harness.test
+    "a function type without `uses` and without a time clause takes a lambda that may not terminate"
+    (fun () ->
+      expect_fine
+        Fixtures.Capabilities.lambda_looping_without_a_measure_bound_as_using_no_capability)

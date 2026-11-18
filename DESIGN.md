@@ -770,6 +770,7 @@ terminate.
 | A function type with a `time` clause takes only functions that terminate, even where its `uses` names a capability parameter. | A written clause holds. If the parameter could carry a function that may not terminate into such a type, `cost time finite` there would promise nothing. |
 | A `time` clause follows a function parameter only where its bound names `time(parameter)`. `finite` names none, so it promises termination whatever is passed. | The bound is true as written: it is unbounded exactly where the parameter's time is. A `finite` that followed its callbacks would be a condition that the signature does not show. |
 | No parameter passes on termination alone. A callback that may not terminate is taken through a capability parameter, which also takes its capabilities. | A callee needs a callback without capabilities only to apply it in a contract, and there the callback must terminate too. One mechanism then covers both. |
+| No function type states that a function uses a capability parameter's capabilities and may not terminate. | Non-termination is never written: a function may not terminate unless it states a `time` clause, and a function type that names a capability parameter leaves termination to the parameter. A clause for this type would be the only written form of non-termination, and only a lambda that is bound or returned in the function that declares the parameter would need it. A lambda passed in a call needs no written type. |
 | A loop without a measure may not terminate, so it stands only where that is allowed, as a call that may not terminate does. | The capability check then covers the loop in every body, as it covers a call. The alternative is an obligation of the prover for each loop in a function with a `time` clause, which states the same fact a second time and leaves a lambda's loop to a rule of its own. |
 | A lambda may not terminate when its body makes a call that may not, or holds a loop without a measure. | Its capabilities are inferred from its body, and so is this. A lambda with neither stays in the logic, so a proof can reason about a call that passes it. |
 
@@ -955,9 +956,12 @@ Rules: [Ranges](SPECIFICATION.md#ranges),
 | Rule | Reason |
 |---|---|
 | A range with no start or no end appears only in brackets. | `0..` anywhere else would allow a `for` loop with no end. |
-| Each collection has one literal form, `[a, b, c]` or `[key: value]`, which takes its type from its context. | *One spelling:* there is no `List.new()` or `List.of(...)`. A map uses brackets because `{` starts a block. |
+| Each collection has one literal form, `[a, b, c]` or `[key: value]`, which takes its type from its context. | *One spelling:* a collection that takes a literal has no `new()` and no `of(...)`. A map uses brackets because `{` starts a block. |
+| A type takes a literal by implementing `FromElements` or `FromEntries`. | Indexing, `for`, the operators, and tagged templates each belong to a prelude trait, so a package's collection is written as a standard one is. A literal for the compiler's types alone leaves every other collection to name a constructor of its own. |
+| `from_elements` and `from_entries` take a `List`. | The compiler builds one collection, and a collection that stores a list keeps the literal's storage. A trait of `with_capacity` and `insert` would give a `Deque` a second name for `push_back`. A cursor has no model, so nothing could be proven of the literal's elements. |
 | A non-empty list literal counts as one allocation. | A `cost` clause does not depend on whether an optimization keeps the list in static memory. |
-| A set or map literal desugars to calls of `insert`. | A `cost` clause is checked against the code that runs. Distinct keys are the `requires` of `insert`, so a duplicate key is a failed proof. Letting the last key win would hide a mistake. |
+| A literal of another collection costs its list and its call of `from_elements` or `from_entries`. | A `cost` clause is checked against the code that runs. |
+| Distinct keys are the `requires` of `from_entries`. | A duplicate key is a failed proof for every map type. Letting the last key win would hide a mistake. A repeated element of a set drops nothing, so `from_elements` requires nothing. |
 | A string cannot be indexed. | In UTF-8, byte `i` and character `i` differ, so code says which one it means. |
 
 ## Expressions
@@ -1184,10 +1188,10 @@ each dependency its capabilities.
 
 Grants need no rule for transitive dependencies. The `uses` of a function
 includes every capability that its callees use, so a package cannot pass its
-own dependencies more than it holds. A new release cannot take more
-capabilities for a function that is already called, because adding a
-capability to a function's `uses` is not a compatible release
-([Versions](#versions)).
+own dependencies more than it holds. A new release cannot give a function
+that is already called more capabilities unnoticed: each caller's `uses` must
+name them, so the upgrade fails to compile until the caller's author adds
+them.
 
 Grants cannot stop a wrong answer: a pure dependency can still return a
 result that its user acts on. Contracts narrow that risk, and a project's
@@ -1568,16 +1572,16 @@ fn is_sorted(items: Slice[Int64]) -> Bool
   ensures result == (forall index in 1..items.length() => items[index - 1] <= items[index])
 ```
 
-The dependency is then in the signature, where a reader and the registry's
-compatibility check see it, and an edit to the body re-proves that function
-alone. Verus knows an `exec fn` by its contract in the same way. Truss needs
-no second function, for specifications only, to state the definition.
+The dependency is then in the signature, where a reader sees it, and an edit
+to the body re-proves that function alone. Verus knows an `exec fn` by its
+contract in the same way. Truss needs no second function, for specifications
+only, to state the definition.
 
 | Rule | Reason |
 |---|---|
-| A method of a trait or of an `impl` is known by its contract too. | An `impl` states what it adds to the trait's contract in its own `ensures`: `Int64.compare` ensures the order of the integers. An edit to a provided body then changes no fact that callers know, so the compatibility check compares a method's contract and whether it has a body, never the body. An edit to an `impl`'s body re-proves that method and the `impl`'s laws alone. |
+| A method of a trait or of an `impl` is known by its contract too. | An `impl` states what it adds to the trait's contract in its own `ensures`: `Int64.compare` ensures the order of the integers. An edit to a provided body then changes no fact that callers know. An edit to an `impl`'s body re-proves that method and the `impl`'s laws alone. |
 | A clause applies only where every name it mentions is visible. | An `ensures` that reads the fields of an opaque type is a fact inside the type's package and no fact elsewhere, so `opaque` hides the representation from proofs too. |
-| A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The contract of a function that other packages cannot see is not compared between releases. The `ensures` lets callers inside the package know a result in terms of private helpers. |
+| A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The proofs of callers in other packages read a `requires` and a `cost`, and a clause applies only where every name it mentions is visible. The `ensures` lets callers inside the package know a result in terms of private helpers. |
 | A bit-level fact is requested with `assert ... by bit_vector`. | The assertion is proven alone by bit-blasting, universally over the integers and booleans it names, as Verus's `by (bit_vector)` is. Elsewhere the prover knows a bitwise operation by a few facts, and it never retries a query with bit-blasting. |
 | A quantifier over a range or a collection is also an expression in code. | The binder carries its range, so the body may rely on it. A lambda passed to a method would know nothing about its argument. The standard library therefore has no `all` or `any` methods, and a test of every element has *one spelling*. |
 
@@ -1818,6 +1822,7 @@ as every source of randomness is a capability.
 | Each module is one subject, one level below `standard`. | Code writes a name with its module, so the name of a type does not repeat the module: `json::Value`. A category above the module, as in Go's `encoding/json`, is not written at the use site, so it only adds something to remember. |
 | A method that needs no ownership of the storage is declared once, on the view type. | A `String`, a `List`, and an `Array` have the methods of their views ([Method lookup](#method-lookup)), so `mut names.sort()` works without `names[..]`, and a second declaration on the owning type would only forward. The owning type declares a method of that name where it uses its storage: `List.reverse` keeps the list's capacity. |
 | A method that works on any collection is a provided method of `Iterable`. | A user's collection gets the method by implementing `count` and `element`. |
+| A collection that is made from its elements alone takes a literal and has no `new()`. | *One spelling.* A constructor is for a collection that needs more than its elements: a `Heap` needs an order, and an `LruCache` a capacity. |
 | A collection method takes a pure callback. A method of `Option` or `Result` takes a callback that may use capabilities. | `map` and `sort_by` may later run their callback in parallel. `Option.map` calls its callback at most once, in place of an `if`. |
 | A lookup that can miss lends an `Option`. | Nothing is copied, whatever the element type. |
 | A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write, and every helper works with every implementation. |
@@ -1853,12 +1858,7 @@ Rust's "expected `Vector`, found `Vector`".
 
 **A release therefore never breaks the API of an earlier release of the same
 name.** A breaking change is published under a new name with `_v2`, as Go
-requires `/v2` for the second major version of a module. Where compatibility
-is left to the care of each author, breaking changes are routine in releases
-that claim to be compatible. So the registry checks compatibility from the
-signatures and numbers each release itself, and a version number is never
-wrong about a change. Elm's registry checks releases in the same way, from
-types alone. A Truss signature holds more, so the check covers more.
+requires `/v2` for the second major version of a module.
 
 **A build uses the newest version that any of its packages was checked with,
 and nothing newer.** This is Go's minimal version selection. Selecting the

@@ -1,0 +1,18 @@
+use standard::map
+
+type Table[Key: Equal, Value](entries: List[map::Entry[Key, Value]])
+
+impl FromEntries for Table[Key: Equal, Value] {
+  type Key = Key
+  type Value = Value
+
+  fn from_entries(entries: own List[map::Entry[Key, Value]]) -> Table[Key, Value]
+    cost time O(1)
+  {
+    Table(entries: own entries)
+  }
+}
+
+fn f() -> Table[String, Int64] {
+  ["http": 80, "https": 443]
+}

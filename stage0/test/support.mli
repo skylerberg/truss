@@ -35,6 +35,7 @@ val expect_one_diagnostic :
   ?fixed:string ->
   ?says:string ->
   ?at:string * int ->
+  ?notes:(string * (string * int)) list ->
   string ->
   string ->
   unit

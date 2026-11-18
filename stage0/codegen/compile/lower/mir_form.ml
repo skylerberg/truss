@@ -1424,10 +1424,8 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
   | Array elements ->
       List.iteri
         (fun index element ->
-          Emit_c.Builder.emit st.builder
-            (Assign
-               ( Lowered.project destination (Index (Lowered.make_uint64_constant index)),
-                 Use (lower_operand st element) )))
+          write_operand st element
+            (Lowered.project destination (Index (Lowered.make_uint64_constant index))))
         elements
   | Is_variant { place = tested; variant } -> assign (Is_variant (lower_place st tested, variant))
   | Convert { conversion = Widen; value = inner; _ } -> write_operand st inner destination

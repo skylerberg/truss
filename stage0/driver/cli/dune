@@ -28,8 +28,5 @@
   workspace
   cache
   project
-  types
   infer
-  core
-  core_equivalence
   file_system))

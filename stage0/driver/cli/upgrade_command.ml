@@ -1,5 +1,11 @@
 module Path_table = Hashtbl.Make (Path)
 
+let read_version text =
+  match Registry.Version.parse text with
+  | Some version -> version
+  | None ->
+      Outcome.raise_cannot_run "`%s` is not a version, which is three numbers, such as 1.4.2." text
+
 let parse_wanted text =
   let written, version =
     match String.split_first ~sep:"@" text with
@@ -15,15 +21,7 @@ let parse_wanted text =
            `acme::geometry`."
           written
   in
-  ( name,
-    Option.map
-      (fun version ->
-        match Registry.Version.parse version with
-        | Some version -> version
-        | None ->
-            Outcome.raise_cannot_run "`%s` is not a version, which is three numbers, such as 1.4.2."
-              version)
-      version )
+  (name, Option.map read_version version)
 
 type change =
   | Entered of Registry.Lock.entry

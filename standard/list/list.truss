@@ -9,6 +9,13 @@ public opaque type List[Element](storage: intrinsic::Storage[Element])
 public opaque type Slice[Element](elements: intrinsic::View[Element])
   derives Plain
 
+public trait FromElements {
+  type Element
+
+  fn from_elements(elements: own List[Self.Element]) -> Self
+    cost time finite
+}
+
 public type SplitFirst[Element](first: Element, rest: Slice[Element])
 
 public type SplitLast[Element](last: Element, rest: Slice[Element])
@@ -863,6 +870,18 @@ public fn List[Element: Equal].deduplicate(mut self)
 impl Default for List[Element] {
   fn default() -> List[Element] {
     []
+  }
+}
+
+impl FromElements for List[Element] {
+  type Element = Element
+
+  fn from_elements(elements: own List[Element]) -> List[Element]
+    ensures identical(result.model(), elements.model())
+    cost time O(1)
+    cost allocations == 0
+  {
+    elements
   }
 }
 

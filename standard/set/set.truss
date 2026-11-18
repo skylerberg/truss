@@ -483,15 +483,72 @@ impl Default for Set[Element: Hash + Ordered] {
   }
 }
 
-impl From[List[Element]] for Set[Element: Hash + Ordered] {
-  fn from(value: own List[Element]) -> Set[Element] {
-    var set: Set[Element] = Set.with_capacity(value.length())
-    for element in own value
-      invariant forall i in 0..set.elements.length() => forall j in 0..set.elements.length() =>
-      i < j ==> !(set.elements.model()[i] == set.elements.model()[j])
+internal fn index_of_earlier_equal[Element: Equal](elements: List[Element], index: UInt64) -> UInt64
+  requires index < elements.length()
+  ensures result <= index
+  ensures result < index ==> elements.model()[result] == elements.model()[index]
+  ensures result == index ==> forall j in 0..index => !(elements.model()[j] == elements.model()[index])
+  cost time O(index * time(Element.equal))
+{
+  var earlier: UInt64 = 0
+  while earlier < index && !(elements[earlier] == elements[index])
+    invariant earlier <= index
+    invariant forall j in 0..earlier => !(elements.model()[j] == elements.model()[index])
+    decreases index - earlier
+    cost time O(earlier * time(Element.equal))
+  {
+    earlier += 1
+  }
+  earlier
+}
+
+impl FromElements for Set[Element: Hash + Ordered] {
+  type Element = Element
+
+  fn from_elements(elements: own List[Element]) -> Set[Element]
+    ensures forall i in 0..elements.length() => contains_equal(result.model(), value: elements.model()[i])
+    ensures forall member: Element => result.model().contains(member) ==> elements.model().contains(member)
+    ensures result.length() <= elements.length()
+    ensures (forall i in 0..elements.length() => forall j in 0..elements.length() =>
+      i < j ==> !(elements.model()[i] == elements.model()[j])) ==> result.length() == elements.length()
+    cost time O(elements.length() * elements.length() * (1 + time(Element.equal)))
+  {
+    var kept = own elements
+    var index: UInt64 = 0
+    while index < kept.length()
+      invariant index <= kept.length()
+      invariant kept.length() <= old(elements.length())
+      invariant forall i in index..kept.length() =>
+        identical(kept.model()[i], old(elements.model())[i + (old(elements.length()) - kept.length())])
+      invariant kept.length() == old(elements.length()) ==>
+        forall i in 0..kept.length() => identical(kept.model()[i], old(elements.model())[i])
+      invariant forall i in 0..index => forall j in 0..index => i < j ==> !(kept.model()[i] == kept.model()[j])
+      invariant forall j in 0..index => old(elements.model()).contains(kept.model()[j])
+      invariant forall i in 0..(index + (old(elements.length()) - kept.length())) =>
+        exists j in 0..index => kept.model()[j] == old(elements.model())[i]
+      invariant (forall i in 0..old(elements.length()) => forall j in 0..old(elements.length()) =>
+        i < j ==> !(old(elements.model())[i] == old(elements.model())[j])) ==>
+          kept.length() == old(elements.length())
+      decreases kept.length() - index
+      cost time O((index + (old(elements.length()) - kept.length())) * old(elements.length()) * (1 + time(Element.equal)))
     {
-      mut set.insert(own element)
+      let earlier = index_of_earlier_equal(kept, index: index)
+      if earlier < index {
+        let _ = mut kept.remove_at(index)
+        proof {
+          assert kept.model()[earlier]
+            == old(elements.model())[index + (old(elements.length()) - kept.length()) - 1]
+        }
+      } else {
+        proof {
+          assert kept.model()[index] == old(elements.model())[index + (old(elements.length()) - kept.length())]
+        }
+        index += 1
+      }
     }
-    set
+    proof {
+      assert forall j in 0..kept.model().length() => kept.model().elements().contains(kept.model()[j])
+    }
+    Set(elements: own kept)
   }
 }
