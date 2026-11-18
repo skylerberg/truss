@@ -1,7 +1,6 @@
 type function_context = { symbol : string; render_local : Lowered.local -> string * Lowered.ty }
 
 val render_local_name : Lowered.local -> string option -> string
-val is_erased : Emission.t -> Lowered.ty -> bool
 val render_bytes_definition : string * string -> string
 val render_function_ref_symbol : function_context -> Lowered.function_ref -> string
 val render_block_pointer : Emission.t -> string -> Ground.ty -> string -> string
