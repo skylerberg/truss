@@ -57,7 +57,7 @@ let () =
           | Ok (0, output, _) -> Codegen_support.expect_string ~expected:"released\n" output
           | Ok (status, _, errors) -> Codegen_support.fail "ended with status %d: %s" status errors
           | Error message -> failwith message)
-        Codegen_support.worker_counts)
+        (Codegen_support.list_worker_counts ()))
 
 let checks : Path.file =
   { module_ = { package = Path.standard_package; modules = [ "shared_checks" ] }; name = "checks" }

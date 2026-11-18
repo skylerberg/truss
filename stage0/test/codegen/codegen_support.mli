@@ -67,7 +67,7 @@ val make_shape_env : ?extra:(string * Memory_layout.shape) list -> unit -> Memor
 val scratch : string lazy_t
 val c_compiler : C_compiler.t lazy_t
 val counter : int ref
-val worker_counts : int list
+val list_worker_counts : unit -> int list
 
 val run_program :
   ?extra:(string * Memory_layout.shape) list ->
