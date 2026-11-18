@@ -256,7 +256,7 @@ let access_operand builder ~is_use_by_reference (operand : Mir.operand) =
   | Use { place; type_; _ } ->
       access_place builder place ~borrowed_as:(if is_use_by_reference then Some type_ else None)
   | Take { place; _ } -> access_place builder place ~borrowed_as:None
-  | Constant _ -> { reach = Views []; written_slices = [] }
+  | Immediate _ -> { reach = Views []; written_slices = [] }
 
 let access_value builder operand = access_operand builder ~is_use_by_reference:false operand
 
@@ -269,15 +269,15 @@ let find_reached_place = function
 
 let find_operand_type : Mir.operand -> Types.ty option = function
   | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } -> Some type_
-  | Constant _ -> None
+  | Immediate _ -> None
 
 let find_operand_place : Mir.operand -> Mir.place option = function
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> Some place
-  | Constant _ -> None
+  | Immediate _ -> None
 
 let find_operand_origin : Mir.operand -> Core.origin option = function
   | Use { origin; _ } | Borrow { origin; _ } | Take { origin; _ } -> Some origin
-  | Constant _ -> None
+  | Immediate _ -> None
 
 let is_view_operand builder operand =
   match find_operand_type operand with
@@ -292,7 +292,7 @@ let list_argument_views builder mode operand =
 let list_given_views builder (operand : Mir.operand) =
   match operand with
   | (Use _ | Take _) when not (is_view_operand builder operand) -> []
-  | Use _ | Take _ | Borrow _ | Constant _ -> list_operand_views builder operand
+  | Use _ | Take _ | Borrow _ | Immediate _ -> list_operand_views builder operand
 
 let find_lent_place builder (mode : Types.mode) operand =
   match ((access_argument builder mode operand).reach, mode) with
@@ -310,7 +310,7 @@ let list_lent_places builder (operand : Mir.operand) =
   | Place_of view, _ -> [ extract_viewed_place view ]
   | (Elements_of _ | Views _), Use { place = { root = Local local; projections = [] }; _ } -> (
       match Hashtbl.find_opt builder.held local with Some (Value { lent; _ }) -> lent | _ -> [])
-  | (Elements_of _ | Views _), (Use _ | Borrow _ | Take _ | Constant _) -> []
+  | (Elements_of _ | Views _), (Use _ | Borrow _ | Take _ | Immediate _) -> []
 
 let result_may_view builder (mode : Types.mode) type_ =
   (mode <> Own && not (Context.lends_nothing builder.context type_))
@@ -353,7 +353,7 @@ let evaluate builder ~is_returned (use : Moves.use) =
   | Some (Borrow { place; mode = Read | Own; origin; _ }) -> (
       match place.root with Local local when is_alias builder local -> () | _ -> read place origin)
   | None -> read use.place use.origin
-  | Some (Borrow { mode = Mut; _ } | Constant _) -> ()
+  | Some (Borrow { mode = Mut; _ } | Immediate _) -> ()
 
 let borrow_mut builder (operand : Mir.operand) =
   Option.iter

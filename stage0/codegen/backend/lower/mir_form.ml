@@ -220,7 +220,7 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
     match operand with
     | Borrow { place; type_; _ } | Use { place; type_; _ } | Take { place; type_; _ } ->
         Some (place, is_view type_)
-    | Constant _ -> None
+    | Immediate _ -> None
   in
   let list_viewed_by (call : Mir.call) =
     List.filter_map
@@ -348,7 +348,7 @@ let lower_constant st ty (value : Mir.constant) : Lowered.operand =
 let lower_operand st (operand : Mir.operand) : Lowered.operand =
   let ty = compute_operand_type st operand in
   match operand with
-  | Constant { value; _ } -> lower_constant st ty value
+  | Immediate { value; _ } -> lower_constant st ty value
   | Use { place = written; _ } -> Lowering.make_owned_operand st (lower_owned_place st written) ty
   | Take { place = written; _ } -> Lowering.make_owned_operand st (take_place st written) ty
   | Borrow { place = written; _ } -> Copy (lower_place st written)
@@ -368,8 +368,8 @@ let lower_operand_place st (operand : Mir.operand) : Lowered.place =
       let held = Lowering.allocate_temporary st ty in
       Lowering.take st (take_place st written) ty ~destination:held;
       held
-  | Constant { value = Unit; _ } -> Lowering.allocate_temporary st ty
-  | Constant { value; _ } ->
+  | Immediate { value = Unit; _ } -> Lowering.allocate_temporary st ty
+  | Immediate { value; _ } ->
       let held = Lowering.allocate_temporary st ty in
       Emit_c.Ir_builder.emit st.builder (Assign (held, Use (lower_constant st ty value)));
       held
@@ -377,8 +377,8 @@ let lower_operand_place st (operand : Mir.operand) : Lowered.place =
 let write_operand st (operand : Mir.operand) (destination : Lowered.place) =
   let ty = compute_operand_type st operand in
   match operand with
-  | Constant { value = Unit; _ } -> ()
-  | Constant { value; _ } ->
+  | Immediate { value = Unit; _ } -> ()
+  | Immediate { value; _ } ->
       Emit_c.Ir_builder.emit st.builder (Assign (destination, Use (lower_constant st ty value)))
   | Use { place = written; _ } -> Lowering.take st (lower_owned_place st written) ty ~destination
   | Take { place = written; _ } -> Lowering.take st (take_place st written) ty ~destination
@@ -1356,7 +1356,7 @@ and reads (value : Mir.rvalue) local =
   let is_in_operand (operand : Mir.operand) =
     match operand with
     | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> is_in_place place
-    | Constant _ -> false
+    | Immediate _ -> false
   in
   match value with
   | Operand operand | Not operand | Copy operand -> is_in_operand operand
@@ -1668,7 +1668,7 @@ and check_invariant st ~value ~clause ~destination =
   let _, value_ty, value_place = lower_argument_place st value in
   let index =
     match clause with
-    | Passed { value = Constant { value = Integer index; _ }; _ } -> Z.to_int index
+    | Passed { value = Immediate { value = Integer index; _ }; _ } -> Z.to_int index
     | _ -> Definitions.raise_bug "holds_invariant with a clause that is not a literal"
   in
   let path =
@@ -1837,7 +1837,7 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
                   Definitions.raise_bug "a lent part of %s that the method owns"
                     (Ground.to_string ty);
                 [])
-        | Use _ | Take _ | Constant _ ->
+        | Use _ | Take _ | Immediate _ ->
             write_operand st operand destination;
             list_deferred_drops ())
     | Built { variant; fields; type_; _ } ->

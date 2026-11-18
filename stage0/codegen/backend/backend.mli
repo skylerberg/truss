@@ -49,13 +49,8 @@ val run_tests :
   Path.t list ->
   (Test_report.record list, string) result
 
-type unshippable = {
-  failure : [ `Todo | `Echo ];
-  file : Path.file;
-  line : int;
-  column : int;
-  way : Path.t list;
-}
+type location = { file : Path.file; line : int; column : int }
+type unshippable = { failure : [ `Todo | `Echo ]; location : location; way : Path.t list }
 
 val list_unshippable : lowered_lookups -> main:Path.t -> unshippable list
 val list_reached_definitions : lowered_lookups -> Path.t -> Path.t list
