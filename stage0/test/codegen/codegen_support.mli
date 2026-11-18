@@ -3,7 +3,7 @@ val list_diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val fail : ('a, unit, string, unit) format4 -> 'a
 val expect_string : expected:String.t -> String.t -> unit
 val expect_int : expected:int -> int -> unit
-val render_records : Backend.record list -> string
+val render_records : Backend.Test_report.record list -> string
 val definition : string -> Path.t
 val named : ?arguments:Ground.argument list -> string -> Ground.ty
 val int64 : Ground.ty
@@ -67,7 +67,7 @@ val make_shape_env : ?extra:(string * Memory_layout.shape) list -> unit -> Memor
 val scratch : string lazy_t
 val c_compiler : C_compiler.t lazy_t
 val counter : int ref
-val worker_counts : int list
+val list_worker_counts : unit -> int list
 
 val run_program :
   ?extra:(string * Memory_layout.shape) list ->

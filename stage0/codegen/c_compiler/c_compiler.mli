@@ -15,6 +15,7 @@ val build_executable :
 
 module For_testing : sig
   val reject_warnings : t -> t
+  val has_sanitizer : t -> bool
   val compile : t -> optimization -> source:string -> output:string -> (unit, string) result
   val compile_objects : t -> optimization -> (string * string) list -> (string list, string) result
 end

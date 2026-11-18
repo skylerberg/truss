@@ -138,7 +138,7 @@ let expect_with_each_thread_count ~expected text =
     (fun workers ->
       Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
       expect_threaded ~expected text)
-    Codegen_support.worker_counts
+    (Codegen_support.list_worker_counts ())
 
 let tally = Fixtures.Concurrent.tally
 

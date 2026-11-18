@@ -68,7 +68,7 @@ type t = {
   stale : unit Stored_table.t Package_stage_table.t;
   implied : Part.any list Package_table.t;
   graphs : Call_graph.t Package_table.t;
-  lowering : Backend.Lookups.settings option;
+  lowering : (Backend.Lookups.settings, string) result;
   instance_values : binding Stored_table.t;
   references : References.t;
   claimants : Part.t list Instance_table.t;
@@ -189,7 +189,7 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       stale = Package_stage_table.create 64;
       implied = Package_table.create 8;
       graphs = Package_table.create 8;
-      lowering = Option.map (fun system -> { Backend.Lookups.checks; system }) Libc.host;
+      lowering = Result.map (fun system -> { Backend.Lookups.checks; system }) Libc.host;
       instance_values = Stored_table.create 2048;
       references = References.create ~tracks_blocked:false;
       claimants = Instance_table.create 64;
@@ -990,8 +990,8 @@ let is_drained ~ready (Part.Any part) =
 
 let read_lowering_settings database =
   match database.lowering with
-  | Some settings -> settings
-  | None -> Compiler_bug.raise_bug ~stage:"Database" "this host has no lowering settings"
+  | Ok settings -> settings
+  | Error _ -> Compiler_bug.raise_bug ~stage:"Database" "this host has no lowering settings"
 
 let list_proof_template_checks : Prover.proof part -> _ = function
   | Value (Obligations { obligations; _ }) ->
@@ -1007,7 +1007,7 @@ let make_template_check_root ({ from_template; literals; clauses } : Prover.Stat
   Instance.Template_check { from_template; literals; clauses }
 
 let claim_template_check_roots database (key : Resolve.Names.key) =
-  if Option.is_some database.lowering then
+  if Result.is_ok database.lowering then
     claim_roots database (Stored (Any (Proof key)))
       (List.map make_template_check_root
          (list_proof_template_checks (read_stored database (Proof key))))
@@ -1022,7 +1022,7 @@ let find_entry_point (names : Resolve.Names.lookups) package =
     (names.list_declarations { package; modules = [] })
 
 let claim_lowering_roots database (names : Resolve.Names.lookups) package =
-  if Option.is_some database.lowering then
+  if Result.is_ok database.lowering then
     claim_roots database (Stored (Any (Namespace package)))
       (Backend.list_roots
          ~tests:
@@ -2281,39 +2281,42 @@ let list_reached_todo_types database key =
   in
   List.sort_uniq Path.compare (visit [] (Stored (Any (Test_key key))))
 
-let make_lowering_requests database packages : Backend.requests =
-  let interface = make_interface_lookups database packages in
-  {
-    settings = read_lowering_settings database;
-    read_source =
-      (fun file ->
-        note_untracked_read database (Input (Source file));
-        read_source database file);
-    interface;
-    mir = make_recording_mir_lookups database (note_untracked_read database);
-    find_lowered =
-      (fun key ->
-        request database packages ~through:Lowered_code
-          ~list_needs:(fun key -> [ Part.Any (Lowered key) ])
-          [ key ];
-        match read_part database (note_untracked_read database) (Lowered key) with
-        | Value lowered ->
-            check_calls database interface packages key lowered;
-            Some lowered
-        | Failed _ | Blocked -> None);
-    read_test_key =
-      (fun key ->
-        request database packages ~through:Test_keys
-          ~list_needs:(fun key -> [ Part.Any (Test_key key) ])
-          [ key ];
-        read_requested database (Test_key key));
-    list_reached_todo_types =
-      (fun key ->
-        request database packages ~through:Test_keys
-          ~list_needs:(fun key -> [ Part.Any (Test_key key) ])
-          [ key ];
-        list_reached_todo_types database key);
-  }
+let find_lowered_lookups database packages : (Backend.lowered_lookups, string) result =
+  match database.lowering with
+  | Error message -> Error message
+  | Ok { system; _ } ->
+      let interface = make_interface_lookups database packages in
+      Ok
+        {
+          system;
+          read_source =
+            (fun file ->
+              note_untracked_read database (Input (Source file));
+              read_source database file);
+          interface;
+          find_lowered =
+            (fun key ->
+              request database packages ~through:Lowered_code
+                ~list_needs:(fun key -> [ Part.Any (Lowered key) ])
+                [ key ];
+              match read_part database (note_untracked_read database) (Lowered key) with
+              | Value lowered ->
+                  check_calls database interface packages key lowered;
+                  Some lowered
+              | Failed _ | Blocked -> None);
+          read_test_key =
+            (fun key ->
+              request database packages ~through:Test_keys
+                ~list_needs:(fun key -> [ Part.Any (Test_key key) ])
+                [ key ];
+              read_requested database (Test_key key));
+          list_reached_todo_types =
+            (fun key ->
+              request database packages ~through:Test_keys
+                ~list_needs:(fun key -> [ Part.Any (Test_key key) ])
+                [ key ];
+              list_reached_todo_types database key);
+        }
 
 let find_main database package =
   drain database ~through:Namespaces [ package ];

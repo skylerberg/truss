@@ -41,7 +41,7 @@ let () =
       | Error message -> fail_unbuilt message
       | Ok records ->
           List.iter2
-            (fun path (record : Backend.record) ->
+            (fun path (record : Backend.Test_report.record) ->
               Codegen_support.test (name_of path) (fun () ->
                   match (find_expected_panic path, record.outcome, record.message) with
                   | None, Passed, _ -> ()
@@ -49,6 +49,7 @@ let () =
                     when String.includes ~affix:expected message ->
                       ()
                   | _, outcome, message ->
-                      Codegen_support.fail "%s%s" (Backend.show_outcome outcome)
+                      Codegen_support.fail "%s%s"
+                        (Backend.Test_report.show_outcome outcome)
                         (match message with Some message -> ": " ^ message | None -> "")))
             tests records)
