@@ -68,7 +68,7 @@ type t = {
   stale : unit Stored_table.t Package_stage_table.t;
   implied : Part.any list Package_table.t;
   graphs : Call_graph.t Package_table.t;
-  lowering : Compile.Lookups.settings option;
+  lowering : Backend.Lookups.settings option;
   instance_values : binding Stored_table.t;
   references : References.t;
   claimants : Part.t list Instance_table.t;
@@ -189,7 +189,7 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       stale = Package_stage_table.create 64;
       implied = Package_table.create 8;
       graphs = Package_table.create 8;
-      lowering = Option.map (fun system -> { Compile.Lookups.checks; system }) Libc.host;
+      lowering = Option.map (fun system -> { Backend.Lookups.checks; system }) Libc.host;
       instance_values = Stored_table.create 2048;
       references = References.create ~tracks_blocked:false;
       claimants = Instance_table.create 64;
@@ -376,7 +376,7 @@ let list_call_edges = function
   | Some (Failed _ | Blocked) | None -> []
 
 let list_lowered_references = function
-  | Some (Value (Ok lowered)) -> List.sort_uniq Instance.compare (Compile.list_references lowered)
+  | Some (Value (Ok lowered)) -> List.sort_uniq Instance.compare (Backend.list_references lowered)
   | Some (Value (Error _) | Failed _ | Blocked) | None -> []
 
 let update_indexes (type a) database (part : a Part.stored) ~(before : a part option)
@@ -814,13 +814,13 @@ let make_recording_proof_lookups database note : Prover.Lookups.t =
     list_recursion_group = read_recursion_group database note;
   }
 
-let make_recording_lowering_lookups database note : Compile.Lookups.t =
+let make_recording_lowering_lookups database note : Backend.Lookups.t =
   {
     interface = make_recording_interface_lookups database note ~is_checked:true;
     mir = make_recording_mir_lookups database note;
   }
 
-exception Reaches_unsupported of Compile.unsupported
+exception Reaches_unsupported of Backend.unsupported
 
 let compute_test_keys database keys =
   let outcome =
@@ -832,7 +832,7 @@ let compute_test_keys database keys =
           | Error unsupported -> raise (Reaches_unsupported unsupported)
         in
         match
-          Compile.derive_test_keys
+          Backend.derive_test_keys
             ~read_lowered:(fun key -> require_supported (read_value database note (Lowered key)))
             ~read_known_key:(fun key -> require_supported (read_value database note (Test_key key)))
             keys
@@ -1022,7 +1022,7 @@ let find_entry_point (names : Resolve.Names.lookups) package =
 let claim_lowering_roots database (names : Resolve.Names.lookups) package =
   if Option.is_some database.lowering then
     claim_roots database (Stored (Any (Namespace package)))
-      (Compile.list_roots
+      (Backend.list_roots
          ~tests:
            (List.filter_map
               (fun (declaration : Resolve.Names.declaration) ->
@@ -1348,13 +1348,13 @@ let compute_part database (Part.Any typed as part) =
   | Lowered key ->
       compute_value (Lowered key) (fun note ->
           match
-            Compile.lower (read_lowering_settings database)
+            Backend.lower (read_lowering_settings database)
               (make_recording_lowering_lookups database note)
               key
           with
           | lowered -> Value lowered
           | exception Reads_failed_part -> Blocked
-          | exception (Compile.Todo_type _ | Compile.Infinite_size _) -> Failed []);
+          | exception (Backend.Todo_type _ | Backend.Infinite_size _) -> Failed []);
       settle_references database
   | Test_key key -> compute_test_keys database [ key ]
 
@@ -2205,7 +2205,7 @@ let check_calls database interface viewers key = function
       List.iter
         (fun calling_package ->
           if Package_table.mem database.graphs calling_package then
-            Compile.check_calls interface
+            Backend.check_calls interface
               ~find_call_edges:(fun path ->
                 match
                   find_part database (note_untracked_read database)
@@ -2257,7 +2257,7 @@ let list_reached_todo_types database key =
   in
   List.sort_uniq Path.compare (visit [] (Stored (Any (Test_key key))))
 
-let make_lowering_requests database packages : Compile.requests =
+let make_lowering_requests database packages : Backend.requests =
   let interface = make_interface_lookups database packages in
   {
     settings = read_lowering_settings database;

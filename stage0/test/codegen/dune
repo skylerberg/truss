@@ -36,7 +36,6 @@
   lowering_tests
   library_tests)
  (libraries
-  structural_key
   harness
   core_lint
   compiler_bug
@@ -49,10 +48,9 @@
   lowered
   convention
   emit_c
-  toolchain
+  c_compiler
   process
   startup
-  build
   workspace
   cache
   project
@@ -69,7 +67,7 @@
   resolve
   diagnostic
   source
-  compile
+  backend
   database
   strongly_connected
   prover

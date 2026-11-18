@@ -4,7 +4,7 @@ end))
 
 module Path_table = Hashtbl.Make (Path)
 
-type build = C_runtime.build = Development | Release
+type profile = Development | Release
 type linkage = C_runtime.linkage = External | Internal
 
 let site_struct = C_runtime.site_struct
@@ -240,7 +240,7 @@ let make_fragment env (compiled : compiled) =
     failures = List.rev context.failures;
   }
 
-let render_file env build (fragments : (fragment * linkage) list) =
+let render_file env profile (fragments : (fragment * linkage) list) =
   let context = C_types.make_context env "" in
   let local_types = Key_table.create 16 in
   List.iter
@@ -309,7 +309,7 @@ let render_file env build (fragments : (fragment * linkage) list) =
   let buffer = Buffer.create 4096 in
   Buffer.add_string buffer C_runtime.runtime_declarations;
   Buffer.add_string buffer
-    (match build with
+    (match profile with
     | Development -> "#define T_UNREACHABLE() t_runtime_compiler_bug()\n"
     | Release -> "#define T_UNREACHABLE() __builtin_unreachable()\n");
   let helpers_used =

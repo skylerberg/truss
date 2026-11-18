@@ -1,0 +1,29 @@
+let make_lowering_requests database packages =
+  match Libc.host with
+  | Some _ -> Database.make_lowering_requests database packages
+  | None -> Outcome.raise_cannot_run "Stage0 builds programs only for Linux and macOS."
+
+let make_results cache : Backend.results =
+  {
+    find = (fun key -> Cache.find_result cache ~kind:Test_result ~key);
+    add = (fun key value -> Cache.add_result cache ~kind:Test_result ~key value);
+  }
+
+let create database snapshot packages (profile : Backend.profile) =
+  let cache = Workspace.open_cache () in
+  let c_compiler =
+    match C_compiler.find ~objects:(Cache.make_objects_directory cache) with
+    | Ok c_compiler -> c_compiler
+    | Error message -> Outcome.raise_cannot_run "%s" message
+  in
+  let show_file =
+    match profile with
+    | Development -> Command_packages.show_file snapshot packages
+    | Release -> Path.show_file
+  in
+  let own = List.map snd (Workspace.list_packages snapshot) in
+  Backend.create ~show_file ~results:(make_results cache)
+    ~programs:(Cache.make_programs_directory cache)
+    ~is_worked_on:(fun package -> List.mem package own)
+    (make_lowering_requests database packages)
+    c_compiler profile
