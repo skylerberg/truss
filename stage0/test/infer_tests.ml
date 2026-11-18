@@ -562,6 +562,9 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.cost_naming_time_of_an_undeclared_method
         "types.unknown_member");
+  Harness.test "the base of a record update cannot be passed `mut`" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_of_a_base_passed_mut "types.wrong_mode"
+        ~says:"so the base is passed `own`, not `mut`");
   Harness.test "a let cannot be assigned" (fun () ->
       expect_one_diagnostic Fixtures.Infer.assignment_to_a_let "types.not_assignable");
   List.iter

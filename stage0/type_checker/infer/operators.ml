@@ -79,6 +79,13 @@ let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
 
 and check_record_update state env (value : Syntax.expression) (base : Syntax.expression) updates =
   let base_type = State.normalize state (Hooks.check_expression state env base) in
+  (match List.assoc_opt value.id state.keyword_modes with
+  | None -> Modes.note_owned_value state env base
+  | Some Own -> ()
+  | Some Mut ->
+      State.report state Wrong_mode (State.read_span state base.id)
+        "`with` takes ownership of its base, so the base is passed `own`, not `mut`."
+  | Some Read -> State.raise_bug "a mode keyword recorded as `Read`");
   (match base_type with
   | Types.Named { path; _ }
     when not (Members.are_fields_visible state.lookups ~package:state.package path) ->

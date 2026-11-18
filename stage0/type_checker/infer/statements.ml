@@ -150,7 +150,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       State.reject_in_formula state env (State.read_span state written.id) "A `for` loop";
       let mode, inner =
         match iterable.kind with
-        | Mode (mode, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
+        | Mode (mode, inner) when Option.is_none (State.find_keyword_operation state inner) ->
             State.note_mode_keyword state iterable mode inner;
             ((match mode with Mut -> Types.Mut | Own -> Types.Own), inner)
         | _ -> (Types.Read, iterable)

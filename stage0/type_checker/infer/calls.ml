@@ -102,7 +102,7 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
 and check_argument state env (value : Syntax.expression) (parameter : Types.parameter_info) =
   let inner =
     match value.kind with
-    | Mode (mode, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
+    | Mode (mode, inner) when Option.is_none (State.find_keyword_operation state inner) ->
         State.note_mode_keyword state value mode inner;
         inner
     | _ -> value
