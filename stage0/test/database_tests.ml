@@ -1099,6 +1099,40 @@ let () =
                ("app::main/second", "fn second() -> Int64 { first() }\n");
              ])
         ~parts:[ "namespace app"; "checked body app::main::second" ]);
+  let read_callee_ownership database =
+    let file = Support.parse_file "app::main" in
+    Database.For_testing.read_ownership database
+      (Resolve.Names.make_key
+         (List.find
+            (fun (declaration : Resolve.Names.declaration) ->
+              Path.show declaration.path = "app::main::callee")
+            ((Database.make_name_lookups database [ file.module_.package ]).list_declarations_in
+               file)))
+  in
+  let propagate_with_failing_callee () =
+    let database = build [ ("app::main", callee_and_caller) ] in
+    Database.update database
+      [
+        ( Support.parse_file "app::main",
+          Some "fn callee(x: Int64) -> Int64 { x + 2 }\nfn caller() -> Int64 { callee(1) }\n" );
+      ];
+    Database.For_testing.with_failing_part "ownership app::main::callee" (fun () ->
+        Database.propagate ~on_bug:ignore database);
+    database
+  in
+  Harness.test "a read of a part whose computation raised a compiler bug raises that bug" (fun () ->
+      match read_callee_ownership (propagate_with_failing_callee ()) with
+      | _ -> Harness.fail "the part was read"
+      | exception Compiler_bug.Bug bug when String.includes ~affix:"fails for a test" bug.message ->
+          ()
+      | exception Compiler_bug.Bug bug -> Harness.fail "raised %s" (Compiler_bug.to_string bug));
+  Harness.test "a part whose computation raised a compiler bug is computed at the next propagation"
+    (fun () ->
+      let database = propagate_with_failing_callee () in
+      Database.propagate database;
+      match read_callee_ownership database with
+      | Value _ -> ()
+      | Failed _ | Blocked -> Harness.fail "the part did not compute");
   Harness.test "a request that reads a name whose namespace is stale is a compiler bug" (fun () ->
       let database = build [ ("app::main", callee_and_caller) ] in
       Database.update database

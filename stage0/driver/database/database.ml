@@ -74,6 +74,7 @@ type t = {
   claimants : Part.t list Item_table.t;
   claimed_roots : Lowered.Item.t list Part_table.t;
   unsaved : unit Entry_table.t;
+  bugs : Compiler_bug.t Stored_table.t;
 }
 
 type observation =
@@ -160,6 +161,7 @@ let is_stale database part =
   | None -> false
 
 let unmark database part =
+  Stored_table.remove database.bugs part;
   Option.iter
     (fun parts ->
       if Stored_table.mem parts part then begin
@@ -195,6 +197,7 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       claimants = Item_table.create 64;
       claimed_roots = Part_table.create 64;
       unsaved = Entry_table.create 4096;
+      bugs = Stored_table.create 8;
     }
   in
   List.iter
@@ -249,6 +252,7 @@ let copy database =
     claimants = Item_table.copy database.claimants;
     claimed_roots = Part_table.copy database.claimed_roots;
     unsaved = Entry_table.create 64;
+    bugs = Stored_table.copy database.bugs;
   }
 
 let add_reads database part read_parts =
@@ -416,19 +420,24 @@ let make_value_slot database typed =
 let report_uncomputed (part : Part.any) =
   Compiler_bug.raise_bug ~stage:"Database" "%s is not computed" (Part.show (Stored part))
 
+let raise_stale_read database (part : Part.any) message =
+  match Stored_table.find_opt database.bugs part with
+  | Some bug -> raise (Compiler_bug.Bug bug)
+  | None -> Compiler_bug.raise_bug ~stage:"Database" "%s" message
+
 let note_read database note (part : Part.any) =
   note (Part.Stored part);
   if is_stale database part then
-    Compiler_bug.raise_bug ~stage:"Database" "%s is read while it is stale"
-      (Part.show (Stored part))
+    raise_stale_read database part (Part.show (Stored part) ^ " is read while it is stale")
 
 let note_untracked_read database (part : Part.t) =
   !observer (Untracked_read part);
   match part with
   | Name name ->
-      if is_stale database (Any (Namespace (Part.locate_name_package name))) then
-        Compiler_bug.raise_bug ~stage:"Database" "%s is read while its namespace is stale"
-          (Part.show part)
+      let namespace = Part.Any (Namespace (Part.locate_name_package name)) in
+      if is_stale database namespace then
+        raise_stale_read database namespace
+          (Part.show part ^ " is read while its namespace is stale")
   | Input _ | Stored _ -> ()
 
 let make_part compute argument =
@@ -1372,7 +1381,17 @@ let list_component_parts = function
   | Type_fact_component paths -> List.map (fun path -> Part.Any (Type_facts path)) paths
   | Test_key_component items -> List.map (fun item -> Part.Any (Test_key item)) items
 
+let failing_part : string option ref = ref None
+
 let compute database unit =
+  Option.iter
+    (fun shown ->
+      if
+        List.exists
+          (fun part -> String.equal (Part.show (Stored part)) shown)
+          (list_component_parts unit)
+      then Compiler_bug.raise_bug ~stage:"Database" "%s fails for a test" shown)
+    !failing_part;
   try
     match unit with
     | Single part -> compute_part database part
@@ -1494,6 +1513,10 @@ let drain_stage database ~is_drained ~on_raise (stage : Stage.t) packages =
               | () -> ()
               | exception raised ->
                   List.iter (mark_stale database) parts;
+                  (match raised with
+                  | Compiler_bug.Bug bug ->
+                      List.iter (fun part -> Stored_table.replace database.bugs part bug) parts
+                  | _ -> ());
                   on_raise parts raised
             end)
       in
@@ -2435,6 +2458,10 @@ module For_testing = struct
       recomputed = List.sort_uniq compare !recomputed;
       collected = List.sort_uniq compare !collected;
     }
+
+  let with_failing_part shown run =
+    failing_part := Some shown;
+    Fun.protect ~finally:(fun () -> failing_part := None) run
 
   let add_root database key =
     claim_roots database (Input Packages)

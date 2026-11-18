@@ -81,4 +81,5 @@ module For_testing : sig
 
   val observe : (unit -> unit) -> observed
   val add_root : t -> Lowered.Item.t -> unit
+  val with_failing_part : string -> (unit -> 'a) -> 'a
 end
