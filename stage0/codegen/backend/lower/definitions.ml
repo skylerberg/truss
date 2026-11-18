@@ -141,6 +141,7 @@ let make_code context (path : Path.t) (instantiation : Ground.instantiation) : c
                ~result:(Returns Types.unit))
             with
             written = Some (read_written context key);
+            uses = Types.make_capability_set [ Capability Monomorphic.panic_capability ];
             real =
               Monomorphic.list_evidence context.monomorphic Types.no_substitution
                 (Interface.Definition.read_test_uses context.lookups.interface path);
