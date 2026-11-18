@@ -23,7 +23,7 @@ type t = {
 val iter_identifiers : string -> on_identifier:(string -> unit) -> on_other:(char -> unit) -> unit
 
 val make :
-  C_types.context ->
+  Emission.t ->
   item:Lowered.Item.t ->
   kind:kind ->
   functions:(string * string) list ->

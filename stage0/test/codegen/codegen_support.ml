@@ -113,27 +113,27 @@ let code_item name =
 let write builder (function_ : function_) =
   List.iter
     (fun (info : local_info) ->
-      ignore (Emit_c.Builder.allocate_local builder ?name:info.name info.ty))
+      ignore (Emit_c.Ir_builder.allocate_local builder ?name:info.name info.ty))
     function_.locals;
-  List.iter (fun _ -> ignore (Emit_c.Builder.allocate_block builder)) function_.blocks;
+  List.iter (fun _ -> ignore (Emit_c.Ir_builder.allocate_block builder)) function_.blocks;
   List.iteri
     (fun index (block : block) ->
-      Emit_c.Builder.start builder index;
-      List.iter (Emit_c.Builder.emit builder) block.statements;
-      Emit_c.Builder.finish builder block.terminator)
+      Emit_c.Ir_builder.start builder index;
+      List.iter (Emit_c.Ir_builder.emit builder) block.statements;
+      Emit_c.Ir_builder.finish builder block.terminator)
     function_.blocks;
   ({ parameters = function_.parameters; result = function_.result; returns = function_.returns }
-    : Emit_c.Builder.prototype)
+    : Emit_c.Ir_builder.prototype)
 
 let define_function ?(nested = []) name main : program_fragment =
  fun env ->
-  let builder = Emit_c.Builder.create env ~item:(code_item name) in
+  let builder = Emit_c.Ir_builder.create env ~item:(code_item name) in
   List.iteri
     (fun index (function_ : function_) ->
-      Emit_c.Builder.build_nested builder ~index ~environment:function_.environment (fun nested ->
-          write nested function_))
+      Emit_c.Ir_builder.build_nested builder ~index ~environment:function_.environment
+        (fun nested -> write nested function_))
     nested;
-  Emit_c.Builder.build builder (write builder main)
+  Emit_c.Ir_builder.build builder (write builder main)
 
 let make_program_fragment fragment : program_fragment = fun _ -> fragment
 

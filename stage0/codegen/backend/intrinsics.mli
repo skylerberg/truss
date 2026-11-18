@@ -7,7 +7,7 @@ val lower :
   ?value_arguments:Z.t list ->
   ?reported:Lowered.operand ->
   Memory_layout.env ->
-  Emit_c.Builder.t ->
+  Emit_c.Ir_builder.t ->
   types ->
   Intrinsic.operation ->
   type_arguments:Ground.ty list ->

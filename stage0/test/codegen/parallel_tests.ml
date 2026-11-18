@@ -80,35 +80,36 @@ let () =
         Lowered.Binary (Add, Codegen_support.copy left, Codegen_support.copy right)
       in
       let env = Codegen_support.make_shape_env () in
-      let builder = Emit_c.Builder.create env ~item:(Codegen_support.code_item "entry") in
-      let parameter = Emit_c.Builder.allocate_local builder int in
-      let sum = Emit_c.Builder.allocate_local builder int in
-      let other = Emit_c.Builder.allocate_local builder int in
-      Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
-      Emit_c.Builder.emit builder
+      let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
+      let parameter = Emit_c.Ir_builder.allocate_local builder int in
+      let sum = Emit_c.Ir_builder.allocate_local builder int in
+      let other = Emit_c.Ir_builder.allocate_local builder int in
+      Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
+      Emit_c.Ir_builder.emit builder
         (Assign (Codegen_support.at parameter, Use (Codegen_support.constant_int32 5)));
       let first =
-        Emit_c.Builder.outline builder ~index:0 ~parts:[] (fun () ->
-            let own = Emit_c.Builder.allocate_local builder ~name:"own" int in
-            Emit_c.Builder.emit builder (Assign (Codegen_support.at own, add parameter parameter));
-            Emit_c.Builder.emit builder (Assign (Codegen_support.at sum, add own parameter));
-            Emit_c.Builder.finish builder (Return None))
+        Emit_c.Ir_builder.outline builder ~index:0 ~parts:[] (fun () ->
+            let own = Emit_c.Ir_builder.allocate_local builder ~name:"own" int in
+            Emit_c.Ir_builder.emit builder
+              (Assign (Codegen_support.at own, add parameter parameter));
+            Emit_c.Ir_builder.emit builder (Assign (Codegen_support.at sum, add own parameter));
+            Emit_c.Ir_builder.finish builder (Return None))
       in
       let second =
-        Emit_c.Builder.outline builder ~index:1 ~parts:[] (fun () ->
-            Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.outline builder ~index:1 ~parts:[] (fun () ->
+            Emit_c.Ir_builder.emit builder
               (Assign (Codegen_support.at other, Use (Codegen_support.copy parameter)));
-            Emit_c.Builder.finish builder (Return None))
+            Emit_c.Ir_builder.finish builder (Return None))
       in
       let take_address holder =
         Lowered.Address { place = Codegen_support.at holder; writable = false }
       in
-      Emit_c.Builder.emit builder
+      Emit_c.Ir_builder.emit builder
         (Fork { branches = [ (0, take_address first); (1, take_address second) ] });
-      Emit_c.Builder.emit builder (Assign (Codegen_support.at sum, add sum other));
-      Emit_c.Builder.finish builder (Return (Some (Codegen_support.copy sum)));
+      Emit_c.Ir_builder.emit builder (Assign (Codegen_support.at sum, add sum other));
+      Emit_c.Ir_builder.finish builder (Return (Some (Codegen_support.copy sum)));
       let fragment =
-        Emit_c.Builder.build builder { parameters = []; result = Some int; returns = true }
+        Emit_c.Ir_builder.build builder { parameters = []; result = Some int; returns = true }
       in
       let c = Emit_c.For_testing.render_c fragment in
       List.iter
