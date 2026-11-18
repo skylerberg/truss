@@ -842,14 +842,13 @@ let () =
       {
         name = Path.standard_package;
         dependencies = [];
-        files =
-          Standard_library.files
-          @ List.map (fun (name, text) -> (Support.parse_file name, text)) files;
+        files = List.map (fun (name, text) -> (Support.parse_file name, text)) files;
       };
     ]
   in
   let check_in_standard packages =
-    Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ] (Database.create packages)
+    Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
+      (Support.extend_standard_library packages)
   in
   let expect_one_in_standard =
     Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard::probe"

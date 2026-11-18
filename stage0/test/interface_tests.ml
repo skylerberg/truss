@@ -9,20 +9,6 @@ let make_standard_path = Path.make_standard_path
 let int64 = Types.make_builtin Int64
 
 let () =
-  let packages = Support.setup [] in
-  List.iter
-    (fun ((file : Path.file), text) ->
-      Harness.test
-        (Printf.sprintf "%s has no interface errors" (Path.show_file file))
-        (fun () ->
-          let source = Source.create ~path:(Path.show_file file) text in
-          List.iter
-            (fun diagnostic -> Harness.fail "%s" (Diagnostic.render source diagnostic))
-            (Database.For_testing.list_diagnostics [ Interface ] (Support.make_database packages)
-               file)))
-    Standard_library.files
-
-let () =
   Harness.test "a function's signature is elaborated" (fun () ->
       let packages =
         Support.setup

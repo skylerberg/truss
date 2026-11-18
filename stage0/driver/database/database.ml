@@ -2479,6 +2479,24 @@ module For_testing = struct
 
   let read_ownership database key =
     read_part database (note_untracked_read database) (Ownership key)
+
+  let extend_package ~loaded ~package files =
+    let database =
+      make
+        ~loaded:
+          (List.map
+             (fun (package_database : package_database) ->
+               if package_database.name = package then copy_package_database package_database
+               else package_database)
+             loaded)
+        []
+    in
+    database.project <- [ package ];
+    restore_namespaces database;
+    record_changes database (List.map (fun (file, text) -> (file, Some text)) files);
+    mark_stale database (Any (Namespace package));
+    propagate_checks database;
+    database
 end
 
 type counts = {
