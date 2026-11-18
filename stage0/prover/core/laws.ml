@@ -133,7 +133,7 @@ let signature_terminates (context : State.context) path =
 let check_named_callback context (frame : State.frame) (invocation : Invocation.t)
     (passed : State.passed) ~origin path (contract : State.contract) (values : State.passed list) =
   let location = Facts.locate context frame.source origin in
-  let own = List.hd contract.parts in
+  let callee_clauses = contract.callee_clauses in
   match Validity.find_parameter_type context frame invocation passed.position with
   | Some (Types.Function expected) ->
       let inputs = Validity.declare_callback_arguments context frame expected.inputs in
@@ -143,9 +143,9 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
           (Validity.list_callback_facts context frame invocation passed.position known inputs)
       in
       let at_call = Facts.restrict frame promised in
-      if List.length own.parameters = List.length inputs then
+      if List.length callee_clauses.parameters = List.length inputs then
         let inside =
-          Validity.bind_part_arguments frame own
+          Validity.bind_arguments frame callee_clauses
             ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
             ~substitution:Types.no_substitution
         in
@@ -157,12 +157,12 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
                   (Printf.sprintf
                      "`%s` may not accept every argument this parameter's type promises it: its `"
                      (Path.show path));
-                Facts.quote own.callee requirement.origin;
+                Facts.quote callee_clauses.callee requirement.origin;
                 Text "` may not hold.";
               ]
               (snd (Validity.read_specification context inside requirement)))
-          (Facts.list_clauses own.requires)
+          (Facts.list_clauses callee_clauses.requires)
   | _ ->
-      if own.requires <> [] then
+      if callee_clauses.requires <> [] then
         Facts.raise_unsupported location
           "a function passed for a parameter whose type the prover cannot read"

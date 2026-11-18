@@ -668,8 +668,9 @@ let prove_own_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   in
   let is_amortized =
     List.exists
-      (fun (part : State.part) -> List.exists (fun (cost : Mir.cost) -> cost.amortized) part.costs)
-      contract.parts
+      (fun (next_clauses : State.clauses) ->
+        List.exists (fun (cost : Mir.cost) -> cost.amortized) next_clauses.costs)
+      (Contracts.list_declared_clauses contract)
   in
   let holds =
     if is_amortized then for_loop.compute_changed_in frame

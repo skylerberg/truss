@@ -1,7 +1,7 @@
 val translate_function :
   ?proof:bool ->
   ?is_updating_helper:bool ->
-  ?inherited:State.part * Types.substitution ->
+  ?inherited:State.clauses * Types.substitution ->
   ?substitution:Types.substitution ->
   Lookups.t ->
   State.source ->
