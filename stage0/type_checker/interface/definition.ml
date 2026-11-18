@@ -101,18 +101,41 @@ let is_external_test lookups path =
       <> Types.no_capabilities
   | _ -> Compiler_bug.raise_bug ~stage:"Interface" "%s has no test interface" (Path.show path)
 
+type real_implementation = { impl : Path.t; constructor : Path.t }
+
+let make_real_implementation lookups (impl : Path.t) =
+  match impl with
+  | Impl { module_; trait = { path = trait; _ }; for_type } when Well_known.is_system_module module_
+    -> (
+      match find_trait_interface lookups trait with
+      | Some { is_capability = true; _ } ->
+          Some { impl; constructor = Method { owner = for_type; name = "new"; receiver = Static } }
+      | Some { is_capability = false; _ } | None -> None)
+  | _ -> None
+
 let find_real_implementation (lookups : Lookups.t) capability =
   match
-    List.filter
-      (function Path.Impl { module_; _ } -> Well_known.is_system_module module_ | _ -> false)
+    List.filter_map
+      (make_real_implementation lookups)
       (lookups.names.list_impls_of_trait Path.standard_package capability)
   with
   | [] -> None
-  | [ impl ] -> Some impl
-  | impls ->
+  | [ real ] -> Some real
+  | reals ->
       Compiler_bug.raise_bug ~stage:"Interface" "%s has %d real implementations: %s"
-        (Path.show capability) (List.length impls)
-        (String.concat ", " (List.map Path.show impls))
+        (Path.show capability) (List.length reals)
+        (String.concat ", " (List.map (fun real -> Path.show real.impl) reals))
+
+let is_real_implementation_constructor (lookups : Lookups.t) (path : Path.t) =
+  match path with
+  | Method { owner; _ } ->
+      List.exists
+        (fun (_, impl) ->
+          match make_real_implementation lookups impl with
+          | Some real -> Path.equal real.constructor path
+          | None -> false)
+        (lookups.names.list_impls_of_type Path.standard_package owner)
+  | _ -> false
 
 let find_constant_type lookups (path : Path.t) =
   match find_interface lookups path with

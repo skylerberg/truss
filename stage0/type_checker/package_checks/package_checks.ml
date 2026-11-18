@@ -757,7 +757,8 @@ let must_be_used (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
   && declaration.ordinal = 0
   && Option.is_none (lookups.interface.names.find_container (Resolve.Names.make_key declaration))
   && Option.is_none (Well_known.of_path declaration.path)
-  && (not (Well_known.is_runtime_constructor declaration.path))
+  && (not
+        (Interface.Definition.is_real_implementation_constructor lookups.interface declaration.path))
   && (not (Path.is_entry_point declaration.path))
   &&
   match declaration.kind with

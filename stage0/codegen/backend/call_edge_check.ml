@@ -1,7 +1,8 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
 
-let is_runtime_call (path : Path.t) =
-  Well_known.is Write_fully path || Well_known.is_runtime_constructor path
+let is_runtime_call interface (path : Path.t) =
+  Well_known.is Write_fully path
+  || Interface.Definition.is_real_implementation_constructor interface path
 
 let list_code_supplied_to (interface : Interface.Lookups.t) path instantiation =
   match Interface.Impls.read_signature interface path with
@@ -27,7 +28,9 @@ let check (interface : Interface.Lookups.t) ~find_call_edges (item : Lowered.Ite
             (fun (called : Lowered.Item.t) ->
               match called with
               | Code { path = callee; _ }
-                when not (is_runtime_call callee || List.exists (Path.equal callee) allowed) ->
+                when not
+                       (is_runtime_call interface callee || List.exists (Path.equal callee) allowed)
+                ->
                   raise_bug "%s calls %s, which is not among its call edges"
                     (Lowered.Item.to_string item) (Lowered.Item.to_string called)
               | _ -> ())

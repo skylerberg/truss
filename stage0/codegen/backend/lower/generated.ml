@@ -224,34 +224,30 @@ let build_impl_table context (item : Lowered.Item.t) ~impl ~type_arguments : Low
   { table_item = item; capability = Some capability; entries }
 
 let build_real_implementation (st : Lowering.state) ~user capability =
-  let impl =
+  let real =
     match Interface.Definition.find_real_implementation st.context.lookups.interface capability with
-    | Some impl -> impl
+    | Some real -> real
     | None ->
         Definitions.raise_bug "%s uses %s, which has no real implementation" user
           (Path.show capability)
   in
   let ty =
     Monomorphic.ground st.context.monomorphic Types.no_substitution
-      (Definitions.read_impl_interface st.context impl).for_type
+      (Definitions.read_impl_interface st.context real.impl).for_type
   in
   let implementation =
     if Lowering.is_zero_size st ty then Lowered.Constant Null
     else begin
       let value = Lowering.allocate_binding st ty in
-      let constructor : Path.t =
-        match ty with
-        | Named { path; _ } -> Method { owner = path; name = "new"; receiver = Static }
-        | _ -> Definitions.raise_bug "%s implements %s" (Ground.to_string ty) (Path.show capability)
-      in
       Targets.lower_item_call st
-        (Code { path = constructor; instantiation = Ground.no_instantiation })
-        ~signature:(Definitions.read_signature st.context constructor)
+        (Code { path = real.constructor; instantiation = Ground.no_instantiation })
+        ~signature:(Definitions.read_signature st.context real.constructor)
         ~substitution:Types.no_substitution ~arguments:[] ~destination:value ~site:None ();
       Address { place = value; writable = true }
     end
   in
-  Targets.lower_implementation_evidence st ~impl ~type_arguments:[] ~implementation ~site:None
+  Targets.lower_implementation_evidence st ~impl:real.impl ~type_arguments:[] ~implementation
+    ~site:None
 
 let list_real_implementations (st : Lowering.state) ~user capabilities =
   List.map

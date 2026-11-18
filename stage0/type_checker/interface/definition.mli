@@ -15,7 +15,11 @@ val read_impl_interface : Lookups.t -> Path.t -> Types.impl_interface
 val find_constant_type : Lookups.t -> Path.t -> Types.ty option
 val read_constant_type : Lookups.t -> Path.t -> Types.ty
 val is_external_test : Lookups.t -> Path.t -> bool
-val find_real_implementation : Lookups.t -> Path.t -> Path.t option
+
+type real_implementation = { impl : Path.t; constructor : Path.t }
+
+val find_real_implementation : Lookups.t -> Path.t -> real_implementation option
+val is_real_implementation_constructor : Lookups.t -> Path.t -> bool
 
 val find_trait_method :
   Lookups.t -> Path.t -> name:string -> receiver:Path.receiver -> Types.trait_method option
