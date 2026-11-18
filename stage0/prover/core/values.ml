@@ -1,15 +1,8 @@
 let run_ghost_code (context : State.context) frame (code : Mir.t) =
-  let proving = context.proving and unfinished = context.unfinished in
-  context.proving <- true;
-  context.unfinished <- [];
-  Fun.protect
-    ~finally:(fun () ->
-      context.proving <- proving;
-      context.unfinished <- unfinished)
-    (fun () ->
-      ignore
-        (Lambdas.run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_:Types.unit);
-      Logic.disjunction context.unfinished)
+  Logic.disjunction
+    (Scope.with_ghost_run context.scope (fun () ->
+         ignore
+           (Lambdas.run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_:Types.unit)))
 
 let finite_map_path : Path.t = Well_known.make_path Finite_map
 
@@ -169,7 +162,9 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
   match evidence with
   | Core.Impl { impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
-      match Contracts.find_method_contract context.lookups trait name receiver evidence with
+      match
+        Contracts.find_method_contract context.definition.lookups trait name receiver evidence
+      with
       | Some contract ->
           let callee_clauses = contract.callee_clauses in
           let entry =
@@ -329,7 +324,8 @@ let make_text_value context frame (ty : Types.ty) text =
       | _ -> ());
   literal
 
-let make_owner_of_view context frame ~(view : Types.ty) ~(owner : Types.ty) viewed =
+let make_owner_of_view (context : State.context) frame ~(view : Types.ty) ~(owner : Types.ty) viewed
+    =
   let symbol = Logic.Symbol.Owner_of_view owner in
   Facts.declare context
     (Logic.Function (symbol, [ Facts.declare_sort context view ], Facts.declare_sort context owner));
@@ -353,7 +349,7 @@ let make_owner_of_view context frame ~(view : Types.ty) ~(owner : Types.ty) view
 let project_field context frame ty variant field field_type term =
   let part = Validity.select_field context ty variant field term in
   Amounts.assume_typed context frame (Facts.make_in_range field_type part);
-  if context.ranking then begin
+  if context.definition.ranking then begin
     let below = Models.rank context field_type part in
     Facts.assume context frame
       Logic.(
@@ -467,7 +463,7 @@ let translate_named_function (context : State.context) (frame : State.frame)
 
 let translate_global_value (context : State.context) frame (site : Invocation.site) path
     type_arguments ~is_argument =
-  match Contracts.find_function_contract context.lookups path with
+  match Contracts.find_function_contract context.definition.lookups path with
   | Some contract ->
       translate_named_function context frame site path type_arguments contract ~is_argument
   | None ->
@@ -477,7 +473,8 @@ let translate_global_value (context : State.context) frame (site : Invocation.si
 
 let evaluate_constant (context : State.context) frame path =
   match
-    (Contracts.find_source context.lookups path, Mir.read_initializer context.lookups.mir path)
+    ( Contracts.find_source context.definition.lookups path,
+      Mir.read_initializer context.definition.lookups.mir path )
   with
   | Some (constant_source, _, _), Some { form = code; _ } ->
       let symbol = Logic.Symbol.Constant path in
@@ -495,10 +492,12 @@ let evaluate_constant (context : State.context) frame path =
         }
       in
       Facts.run_once context (Value_of symbol) (fun () ->
-          let ty = Interface.Definition.read_constant_type context.lookups.interface path in
+          let ty =
+            Interface.Definition.read_constant_type context.definition.lookups.interface path
+          in
           Facts.declare context (Logic.Constant (symbol, Facts.declare_sort context ty));
           let _, defined_value =
-            Validity.run_without_costs context (fun () ->
+            Scope.with_no_costs context.scope (fun () ->
                 Amounts.run_code context empty code ~type_:ty)
           in
           Facts.add_fact context (Logic.equal (Logic.Symbol symbol) defined_value));
@@ -508,7 +507,7 @@ let evaluate_constant (context : State.context) frame path =
 let evaluate_field_default context frame ty variant field =
   match (ty, Validity.find_type_source context ty) with
   | Types.Named { path; _ }, Some source -> (
-      match Mir.read_defaults context.lookups.mir path with
+      match Mir.read_defaults context.definition.lookups.mir path with
       | Some { form = Field_defaults defaults; _ } -> (
           match
             List.find_opt
@@ -534,7 +533,7 @@ let check_built context frame (site : Invocation.site) ty term =
 let is_indirect (context : State.context) (ty : Types.ty) variant =
   match (ty, variant) with
   | Types.Named { path; _ }, Some variant -> (
-      match Interface.Definition.find_interface context.lookups.interface path with
+      match Interface.Definition.find_interface context.definition.lookups.interface path with
       | Some (Interface.Environment.Type_interface { shape = Sum variants; _ }) ->
           List.exists
             (fun (written : Types.variant) -> written.variant_name = variant && written.indirect)
@@ -633,7 +632,7 @@ let make_log_order left right =
 let declare_log context frame log_argument =
   Facts.declare context (Logic.Function (Logic.Symbol.Cost_log, [ Logic.Int ], Logic.Int));
   let rec add log_argument ~halving =
-    match List.assoc_opt log_argument context.logs with
+    match List.assoc_opt log_argument context.assertions.logs with
     | Some true -> ()
     | Some false when not halving -> ()
     | seen ->
@@ -641,8 +640,9 @@ let declare_log context frame log_argument =
           List.iter
             (fun (other, _) ->
               Facts.add_frame_fact context frame (make_log_order log_argument other))
-            context.logs;
-        context.logs <- (log_argument, halving) :: List.remove_assoc log_argument context.logs;
+            context.assertions.logs;
+        context.assertions.logs <-
+          (log_argument, halving) :: List.remove_assoc log_argument context.assertions.logs;
         let facts, half = make_log_facts log_argument ~halving in
         List.iter (Facts.add_frame_fact context frame) facts;
         Option.iter (fun half -> add half ~halving:false) half
@@ -677,8 +677,8 @@ let apply_specification_function context frame ~location (measure : Core.specifi
 
 let copy_value ?literal (context : State.context) frame ty term =
   if
-    context.counters = []
-    || Interface.Impls.is_plain context.lookups.interface
+    context.scope.counters = []
+    || Interface.Impls.is_plain context.definition.lookups.interface
          ~list_bounds:(Operations.compute_current_bounds context)
          ty
        && not (try Amounts.has_potential context ty with Facts.Unsupported _ -> true)

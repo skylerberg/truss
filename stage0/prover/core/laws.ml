@@ -23,12 +23,12 @@ let check_callback_requires context frame (site : Invocation.site) through
   | _ -> ()
 
 let list_laws (context : State.context) trait =
-  match context.lookups.interface.names.find_key trait with
+  match context.definition.lookups.interface.names.find_key trait with
   | Some key ->
-      let source = Contracts.read_source_at_key context.lookups key in
+      let source = Contracts.read_source_at_key context.definition.lookups key in
       List.map
         (fun (law : Mir.law) -> (source, law))
-        (context.lookups.mir.read_contract_part key).laws
+        (context.definition.lookups.mir.read_contract_part key).laws
   | None -> []
 
 let list_law_parameter_types ~substitution (law : Mir.law) =
@@ -63,10 +63,11 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
   let types = list_law_parameter_types ~substitution law in
   if List.exists (fun ty -> Types.is_error ty) types then None
   else begin
-    context.fresh <- context.fresh + 1;
+    context.vocabulary.fresh <- context.vocabulary.fresh + 1;
     let symbols =
       List.mapi
-        (fun index _ -> Logic.Symbol.Variable { label = "law"; numbers = [ context.fresh; index ] })
+        (fun index _ ->
+          Logic.Symbol.Variable { label = "law"; numbers = [ context.vocabulary.fresh; index ] })
         types
     in
     let inside =
@@ -97,25 +98,28 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
 let assume_laws (context : State.context) frame ~at (trait : Types.trait_reference) (ty : Types.ty)
     =
   let key = (trait, ty) in
-  if not (List.mem key context.laws_assumed) then begin
-    context.laws_assumed <- key :: context.laws_assumed;
+  if not (List.mem key context.assertions.laws_assumed) then begin
+    context.assertions.laws_assumed <- key :: context.assertions.laws_assumed;
     List.iter
       (fun (required : Types.trait_reference) ->
-        let substitution = Contracts.make_trait_substitution context.lookups required ty in
+        let substitution =
+          Contracts.make_trait_substitution context.definition.lookups required ty
+        in
         let impl = Option.map fst (Operations.find_concrete_impl context required ty) in
         List.iter
           (fun (source, (law : Mir.law)) ->
             match make_law_fact context frame source ~substitution law with
             | Some fact_ ->
                 (match impl with
-                | Some impl when Contracts.is_law_unshown context.lookups impl required ty law.name
+                | Some impl
+                  when Contracts.is_law_unshown context.definition.lookups impl required ty law.name
                   ->
-                    context.holes <- (context.home, at) :: context.holes
+                    context.report.holes <- (context.definition.home, at) :: context.report.holes
                 | _ -> ());
                 Facts.add_frame_fact context frame fact_
             | None -> ())
           (list_laws context required.trait))
-      (Interface.Properties.list_bound_closure context.lookups.interface ~self:ty trait)
+      (Interface.Properties.list_bound_closure context.definition.lookups.interface ~self:ty trait)
   end
 
 let template_trait : Path.t = Well_known.make_path From_template
@@ -126,7 +130,7 @@ let has_method_cost (context : State.context) (callee : Invocation.callee) (path
     when Path.equal owner trait.trait ->
       true
   | Trait_method _, _ -> (
-      match Interface.Impls.read_signature context.lookups.interface path with
+      match Interface.Impls.read_signature context.definition.lookups.interface path with
       | Some (signature : Types.signature) -> Types.terminates signature.uses
       | None -> true)
   | (Function _ | Capability_method _ | Intrinsic _ | Indirect ()), _ -> false

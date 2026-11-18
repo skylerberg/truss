@@ -12,19 +12,21 @@ let run_under_binder :
     (State.frame -> 'read) ->
     State.frame * 'read * (Logic.term -> Logic.term) =
  fun context frame bound_symbol sort premise read ->
-  let body_frame =
-    Facts.restrict { frame with binders = (bound_symbol, sort, premise) :: frame.binders } premise
-  in
   let facts = ref [] in
-  context.scopes <- (bound_symbol, facts) :: context.scopes;
-  context.quantifier_symbols <- bound_symbol :: context.quantifier_symbols;
-  let body =
-    Fun.protect
-      ~finally:(fun () -> context.scopes <- List.tl context.scopes)
-      (fun () -> read body_frame)
+  let body_frame =
+    Facts.restrict
+      {
+        frame with
+        binders = (bound_symbol, sort, premise) :: frame.binders;
+        binder_facts = (bound_symbol, facts) :: frame.binder_facts;
+      }
+      premise
   in
+  context.assertions.quantifier_symbols <- bound_symbol :: context.assertions.quantifier_symbols;
+  let body = read body_frame in
   let with_facts term =
-    if !facts <> [] then Tables.Term_table.replace context.quantifier_facts term (List.rev !facts);
+    if !facts <> [] then
+      Tables.Term_table.replace context.assertions.quantifier_facts term (List.rev !facts);
     term
   in
   (body_frame, body, with_facts)
@@ -45,8 +47,8 @@ let rec index_sequence (context : State.context) element term index =
   let sequence = make_sequence_type element in
   let index_trait = Well_known.make_path Index in
   match
-    Interface.Impls.list_impls_of_trait_for_type context.lookups.interface ~trait:index_trait
-      ~type_:sequence_path Path.standard_package
+    Interface.Impls.list_impls_of_trait_for_type context.definition.lookups.interface
+      ~trait:index_trait ~type_:sequence_path Path.standard_package
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "at"; receiver = Read } in
@@ -59,7 +61,7 @@ let rec index_sequence (context : State.context) element term index =
              [ Facts.declare_sort context sequence; Logic.Int ],
              Facts.declare_sort context element ));
       let at sequence index = Logic.Apply (symbol, [ sequence; index ]) in
-      if context.ranking && Facts.find_constructors context element <> None then
+      if context.definition.ranking && Facts.find_constructors context element <> None then
         Facts.run_once context (Ranked_elements sequence) (fun () ->
             let each = Logic.Symbol.Variable { label = "ranked.sequence"; numbers = [] }
             and index = Logic.Symbol.Variable { label = "ranked.index"; numbers = [] } in
@@ -83,7 +85,7 @@ and rank context ty term =
   Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
   (match ty with
   | Types.Named { path; arguments = [ Types.Type element ] }
-    when context.ranking && Path.equal path sequence_path ->
+    when context.definition.ranking && Path.equal path sequence_path ->
       ignore (index_sequence context element term (Logic.int 0))
   | _ -> ());
   Logic.Apply (symbol, [ term ])
@@ -118,7 +120,7 @@ let substitute_value_term context (value : Types.value) =
   | Value_variable _ -> Facts.raise_unsupported Whole_definition "an unsolved size"
 
 let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) symbol =
-  if context.ranking then
+  if context.definition.ranking then
     Facts.run_once context (Ranked_model symbol) (fun () ->
         let each = Logic.Symbol.Variable { label = "ranked.value"; numbers = [] } in
         let fact =
@@ -134,7 +136,8 @@ let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) sym
         Facts.add_fact context fact)
 
 let find_model_impl (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
-  let interface = context.lookups.interface and list_bounds = Interface.Impls.list_no_bounds in
+  let interface = context.definition.lookups.interface
+  and list_bounds = Interface.Impls.list_no_bounds in
   let model_trait : Types.trait_reference =
     { trait = Well_known.make_path Model; trait_arguments = []; associated = [] }
   in
@@ -176,11 +179,11 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
 
 let find_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   let key = (ty, model) in
-  match Tables.Model_table.find_opt context.models key with
+  match Tables.Model_table.find_opt context.vocabulary.models key with
   | Some model_fn -> model_fn
   | None ->
       let model_fn = compute_model_function context ty ~model in
-      Tables.Model_table.replace context.models key model_fn;
+      Tables.Model_table.replace context.vocabulary.models key model_fn;
       model_fn
 
 let find_model context (ty : Types.ty) term ~element =
@@ -191,7 +194,7 @@ let find_model context (ty : Types.ty) term ~element =
 let quantify_over (context : State.context) (frame : State.frame) (quantifier : Core.quantifier)
     (range : quantified_range) ~bind ~read =
   let make ?count bound_symbol sort premise body_frame bound_value =
-    let mark = context.fresh in
+    let mark = context.vocabulary.fresh in
     let body_frame, (after, body_value), with_facts =
       run_under_binder context body_frame bound_symbol sort premise (fun body_frame ->
           read body_frame bound_value)

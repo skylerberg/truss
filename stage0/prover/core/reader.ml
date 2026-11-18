@@ -12,6 +12,8 @@ type run = {
   provides : (Core.origin, Mir.provided list) Hashtbl.t;
   mutable loops : loop_exits list;
   mutable cancelled : (Mir.task * State.frame list ref) list;
+  mutable returns : (State.frame * Logic.term option) list;
+  mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
 }
 
 let make_unit_callee : _ Core.target -> Invocation.callee = function
@@ -51,7 +53,8 @@ let rec compute_place_type context frame run (place : Mir.place) =
   | [] -> (
       match place.Mir.root with
       | Local local -> Facts.substitute_type context frame run.infos.(local).type_
-      | Constant path -> Interface.Definition.read_constant_type context.lookups.interface path
+      | Constant path ->
+          Interface.Definition.read_constant_type context.definition.lookups.interface path
       | Literal { type_; _ } -> Facts.substitute_type context frame type_)
   | _ -> (
       let base =
@@ -115,7 +118,7 @@ let read_root context frame run (root : Mir.root) =
           | None -> Facts.raise_bug "`%s` reads `self` outside a method" frame.source.name)
       | key -> (
           (match key with
-          | Core_local core when frame.makes_obligations && not context.reading_callback ->
+          | Core_local core when frame.makes_obligations && not context.scope.is_reading_callback ->
               Validity.check_escaping_callback context frame core
           | Core_local _ | Mir_local _ -> ());
           match Locals.find_opt key frame.locals with
@@ -458,7 +461,7 @@ let evaluate_call_values context frame run (invocation : Invocation.t)
                           passed_place = find_argument_place context frame run mode value;
                           type_ = compute_operand_type context frame value;
                           term =
-                            Validity.run_reading_callback context (fun () ->
+                            Scope.with_reading_callback context.scope (fun () ->
                                 read_operand context frame run value);
                         };
                     ])
@@ -488,7 +491,7 @@ let read_call context frame run (call : Mir.call) ~result_type =
         | Indirect callee ->
             Some
               ( compute_operand_type context frame callee,
-                Validity.run_reading_callback context (fun () ->
+                Scope.with_reading_callback context.scope (fun () ->
                     read_operand context frame run callee),
                 classify_shape run callee )
         | _ -> None
@@ -530,7 +533,7 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
                 index final) )
     | Some Types.Mut, Intrinsic _, _ -> Facts.raise_unsupported location "this lend"
     | Some Types.Mut, _, _ ->
-        ( Validity.run_without_costs context (fun () -> lend frame),
+        ( Scope.with_no_costs context.scope (fun () -> lend frame),
           Some
             (fun frame final ->
               match lend ~leave_lent:(fun _ -> final) frame with
@@ -624,14 +627,14 @@ let bind_parts context (frame : State.frame) run =
     frame.aliases frame
 
 let note_decision (context : State.context) (frame : State.frame) origin test =
-  if frame.makes_obligations && frame.source.key = Some context.home then begin
+  if frame.makes_obligations && frame.source.key = Some context.definition.home then begin
     let text = Facts.quote_origin context frame origin in
-    context.decisions <-
+    context.assertions.decisions <-
       ( Printf.sprintf "`%s` is true" text,
         Some (Printf.sprintf "`%s` is false" text),
         frame.condition,
         test )
-      :: context.decisions
+      :: context.assertions.decisions
   end
 
 let refresh_place context frame ty (place : State.passed_place) =
@@ -641,19 +644,27 @@ let refresh_place context frame ty (place : State.passed_place) =
   frame
 
 let record_todo (context : State.context) (frame : State.frame) location =
-  if context.proving then begin
-    context.holes <- (context.home, location) :: context.holes;
-    context.unfinished <- frame.condition :: context.unfinished
-  end
+  let record_hole () =
+    context.report.holes <- (context.definition.home, location) :: context.report.holes
+  in
+  match context.scope.proving with
+  | Not_proving -> ()
+  | Proving_theorem -> record_hole ()
+  | Running_ghost_code ghost_run ->
+      record_hole ();
+      ghost_run.unfinished <- frame.condition :: ghost_run.unfinished
 
 let oblige_unreachable context frame location =
   Facts.oblige context frame Unreachable location
     [ Text "This `unreachable` may be reached." ]
     (Logic.Boolean false)
 
-let lend_part context (frame : State.frame) origin (mode : Types.mode) ~handed ~lends ~write_back =
+let lend_part context (frame : State.frame) run origin (mode : Types.mode) ~handed ~lends
+    ~write_back =
   let location = Facts.locate context frame.source origin in
-  match (context.yielded_part, context.yield_ensures, frame.yielded_so_far) with
+  match
+    (context.definition.yielded_part, context.definition.yield_ensures, frame.yielded_so_far)
+  with
   | Some part_type, Some (each, _), Some before ->
       List.iter
         (fun (clause : Mir.formula) ->
@@ -676,7 +687,7 @@ let lend_part context (frame : State.frame) origin (mode : Types.mode) ~handed ~
       let frame, part_after =
         if mode = Types.Mut && lends then (
           let part_after = Facts.arrive context frame "lent" part_type in
-          context.lent_back <- (part_type, handed, part_after) :: context.lent_back;
+          run.lent_back <- (part_type, handed, part_after) :: run.lent_back;
           (write_back frame part_after, part_after))
         else (frame, handed)
       in
@@ -779,7 +790,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Specification Yielded -> (
       match (frame.yielded, frame.yielded_so_far) with
       | Some yielded, _ -> (frame, yielded)
-      | None, Some yielded_so_far when frame.source.key = Some context.home ->
+      | None, Some yielded_so_far when frame.source.key = Some context.definition.home ->
           (frame, yielded_so_far)
       | _ -> Facts.raise_bug "`%s` reads `yielded` outside a lending method" frame.source.name)
   | Specification (Identical (first, second)) ->
@@ -790,7 +801,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       (frame, Logic.equal first_value second_value)
   | Specification (Applied { function_; arguments; unconverted }) ->
       let values =
-        Validity.run_reading_callback context (fun () -> List.map translate_operand arguments)
+        Scope.with_reading_callback context.scope (fun () -> List.map translate_operand arguments)
       in
       Values.apply_specification_function context frame ~location function_ values
         ~unconverted:(List.map (Facts.substitute_type context frame) unconverted)
@@ -958,7 +969,8 @@ and read_statement context frame run (statement : Mir.statement) =
       in
       let frame, term = read_value context frame run code in
       Assertions.check_assertion context frame ~origin:statement.origin
-        ~bit_vector:(Some (named, fun isolated -> snd (read_value context isolated run code)))
+        ~bit_vector:
+          (Some (named, fun context isolated -> snd (read_value context isolated run code)))
         term;
       Some frame
   | Choose { target; choice } ->
@@ -977,13 +989,13 @@ and read_statement context frame run (statement : Mir.statement) =
         | Part operand -> compute_operand_type context frame operand
         | Built { type_; _ } -> Facts.substitute_type context frame type_
       in
-      lend_part context frame origin mode ~handed ~lends:(lends_places part)
+      lend_part context frame run origin mode ~handed ~lends:(lends_places part)
         ~write_back:(fun frame after -> write_back_part context run part_type part frame after)
   | Jump jump ->
       (match jump with
       | Return returned ->
-          context.returns <-
-            (frame, Option.map (read_operand context frame run) returned) :: context.returns
+          run.returns <-
+            (frame, Option.map (read_operand context frame run) returned) :: run.returns
       | Break -> (
           match run.loops with
           | exits :: _ -> exits.breaks <- frame :: exits.breaks
@@ -1177,7 +1189,7 @@ and read_statement context frame run (statement : Mir.statement) =
                 | Lent Mut ->
                     Some
                       (fun at ->
-                        Validity.run_without_costs context (fun () ->
+                        Scope.with_no_costs context.scope (fun () ->
                             snd (read_value context at run lent.count)))
                 | _ -> None);
           collection =
@@ -1205,7 +1217,7 @@ and read_statement context frame run (statement : Mir.statement) =
                               | Basic (Lend { part; _ }) when part = lent.element -> frame
                               | _ -> lend frame rest)
                         in
-                        Validity.run_without_costs context (fun () ->
+                        Scope.with_no_costs context.scope (fun () ->
                             read_place context (lend at after_bindings) run
                               { root = Local lent.element; projections = [] })));
           bind_element;
@@ -1329,7 +1341,8 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
           (if by_bit_vector then
              Some
                ( list_named (),
-                 fun isolated -> snd (context.read_formula isolated condition ~arguments:[]) )
+                 fun context isolated ->
+                   snd (context.reader.read_formula context isolated condition ~arguments:[]) )
            else None)
         term;
       Some frame
@@ -1337,13 +1350,13 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       Some (Facts.restrict frame (Logic.not_ (Values.run_ghost_code context frame code)))
   | Matched { patterns } ->
       if frame.makes_obligations then
-        context.decisions <-
+        context.assertions.decisions <-
           ( Printf.sprintf "the arm `%s` is taken"
               (String.concat ", " (List.map (Facts.quote_origin context frame) patterns)),
             None,
             frame.condition,
             Logic.Boolean true )
-          :: context.decisions;
+          :: context.assertions.decisions;
       Some frame
   | Slice { destination; base; base_type; call } ->
       let values =
@@ -1427,10 +1440,11 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
   | Local local -> (
       match run.infos.(local).kind with
       | Source { local = (Declared { name; _ } | Trait_parameter { name; _ }) as core; _ }
-        when frame.source.key = Some context.home ->
-          Tables.Local_table.replace context.local_names (Core_local core) name
-      | Source { local = Synthetic _ as core; _ } when frame.source.key = Some context.home ->
-          Tables.Local_table.replace context.local_origins (Core_local core)
+        when frame.source.key = Some context.definition.home ->
+          Tables.Local_table.replace context.report.local_names (Core_local core) name
+      | Source { local = Synthetic _ as core; _ }
+        when frame.source.key = Some context.definition.home ->
+          Tables.Local_table.replace context.report.local_origins (Core_local core)
             run.infos.(local).origin
       | Source _ | Temporary | Lent _ -> ())
   | Constant _ | Literal _ -> ());
@@ -1455,7 +1469,15 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
     | _ -> written)
 
 let make_run ~locals ~lambdas =
-  { infos = locals; lambdas; provides = Hashtbl.create 2; loops = []; cancelled = [] }
+  {
+    infos = locals;
+    lambdas;
+    provides = Hashtbl.create 2;
+    loops = [];
+    cancelled = [];
+    returns = [];
+    lent_back = [];
+  }
 
 let read_formula context (frame : State.frame) (formula : Mir.formula) ~arguments =
   let run = make_run ~locals:formula.locals ~lambdas:formula.lambdas in
@@ -1481,6 +1503,7 @@ let read_formula context (frame : State.frame) (formula : Mir.formula) ~argument
   in
   Facts.run_in_source context frame.source (fun () ->
       let after, term = read_value context inside run formula.value in
+      if run.returns <> [] then Facts.raise_bug "a formula of `%s` returns" frame.source.name;
       ({ frame with spent = after.spent }, term))
 
 let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
@@ -1507,5 +1530,10 @@ let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
       start (list_returned_locals body.code)
   in
   match read_statements context start run body.code.statements with
-  | None -> ()
+  | None -> (List.rev run.returns, run.lent_back)
   | Some _ -> Facts.raise_bug "a body whose end control reaches"
+
+let read_lambda_body context start ~lambdas body =
+  match read_body context start ~lambdas body with
+  | returns, [] -> returns
+  | _, _ :: _ -> Facts.raise_bug "a lambda's body lends back a part of its function"

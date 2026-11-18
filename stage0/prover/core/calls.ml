@@ -22,7 +22,7 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
     (requirement : Mir.requirement) term (values : State.passed list) ~type_names =
   let clause = requirement.clause in
   let is_fixed name =
-    List.mem name context.entry
+    List.mem name context.entry.parameters
     || match name with Logic.Symbol.Constant _ | Logic.Symbol.Text_literal _ -> true | _ -> false
   in
   let is_simple text =
@@ -48,7 +48,7 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
   in
   match clauses.callee.key with
   | Some key
-    when frame.source.key = Some context.home
+    when frame.source.key = Some context.definition.home
          && List.for_all is_fixed (Logic.list_free_constants term) ->
       let written = list_written () in
       let replacements =
@@ -89,7 +89,7 @@ let name_term context ty term =
 let evaluate_default_value (context : State.context) frame (clauses : State.clauses) position =
   match
     Option.bind clauses.callee.key (fun (key : Resolve.Names.key) ->
-        Mir.read_defaults context.lookups.mir key.path)
+        Mir.read_defaults context.definition.lookups.mir key.path)
   with
   | Some { form = Parameter_defaults defaults; _ } -> (
       match (List.assoc_opt position defaults, List.nth_opt clauses.parameters position) with
@@ -106,7 +106,7 @@ let is_datatype ty = match ty with Types.Named _ -> Types.find_builtin ty = None
 let calls_update_step (context : State.context) (invocation : Invocation.t) =
   match invocation.callee with
   | Function { path; _ } -> (
-      match Interface.Impls.read_signature context.lookups.interface path with
+      match Interface.Impls.read_signature context.definition.lookups.interface path with
       | Some signature -> signature.is_update_step
       | None -> false)
   | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
@@ -207,11 +207,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     }
   in
   let callee_clauses = contract.callee_clauses in
-  let is_self_call = Option.equal Path.equal recursive_callee (Some context.node) in
+  let is_self_call = Option.equal Path.equal recursive_callee (Some context.definition.node) in
   if Option.is_some recursive_callee then
-    begin match (context.measures, callee_clauses.decreases) with
+    begin match (context.definition.measures, callee_clauses.decreases) with
     | [], []
-      when context.terminates && is_self_call
+      when context.scope.terminates && is_self_call
            && list_structural_parameters context frame callee_clauses <> [] ->
         let pairs = list_structural_parameters context frame callee_clauses in
         let before = List.map (fun (ty, entry, _) -> Models.rank context ty entry) pairs in
@@ -230,7 +230,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             conjunction
               (List.map (fun right_term -> Operation ("<=", [ int 0; right_term ])) before)
             &&& Amounts.compare_lexicographically before after)
-    | ([], _ | _, []) when context.terminates ->
+    | ([], _ | _, []) when context.scope.terminates ->
         Facts.oblige context frame Termination location
           [
             Text
@@ -344,7 +344,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             | Some passed -> Facts.declare_sort context passed.type_
             | None ->
                 Facts.declare_sort context
-                  ((Interface.Impls.normalize context.lookups.interface
+                  ((Interface.Impls.normalize context.definition.lookups.interface
                       ~list_bounds:Interface.Impls.list_no_bounds)
                      (Types.substitute (substitution_of callee_clauses) parameter.type_)))
           callee_bindings
@@ -354,13 +354,13 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       (match (path, callee_bindings) with
       | Method { name = "model"; receiver = Read; _ }, [ (self, _) ] when self.local = Self ->
           Models.rank_model context
-            ((Interface.Impls.normalize context.lookups.interface
+            ((Interface.Impls.normalize context.definition.lookups.interface
                 ~list_bounds:Interface.Impls.list_no_bounds)
                (Types.substitute (substitution_of callee_clauses) self.type_))
             ~model:result_type function_symbol
       | _ -> ());
       let symbol =
-        if List.mem function_symbol context.axiomatizing then begin
+        if List.mem function_symbol context.scope.axiomatizing then begin
           is_limited_call := true;
           let limited = Logic.Symbol.Limited { callee = path; type_arguments } in
           Facts.declare context (Logic.Function (limited, sorts, result_sort));
@@ -429,8 +429,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
               (match left_valid with Some (left, _) -> Logic.( ==> ) left valid | None -> valid)
         | None -> ())
     values;
-  if not (List.exists (Path.equal path) context.instantiating) then begin
-    context.instantiating <- path :: context.instantiating;
+  if not (List.exists (Path.equal path) context.scope.instantiating) then begin
+    Scope.with_instantiating context.scope path @@ fun () ->
     let axiom_symbol =
       match !applied_as with
       | Some (symbol, sorts)
@@ -440,8 +440,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       | _ -> None
     in
     let make_parameters label sorts =
-      context.fresh <- context.fresh + 1;
-      let axiom = context.fresh in
+      context.vocabulary.fresh <- context.vocabulary.fresh + 1;
+      let axiom = context.vocabulary.fresh in
       List.mapi
         (fun index sort -> (Logic.Symbol.Variable { label; numbers = [ axiom; index ] }, sort))
         sorts
@@ -461,30 +461,31 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                (Validity.make_validity context outside ~assuming:true ty input))
            callee_bindings inputs)
     in
-    let axiomatize symbol parameters make =
-      let mark = context.fresh in
+    let axiomatize symbol parameters (outside : State.frame) make =
+      let mark = context.vocabulary.fresh in
       let facts = ref [] in
       let axiom = { State.parameters = List.map fst parameters; hypotheses = []; at_calls = [] } in
-      let scopes = context.scopes and open_axioms = context.open_axioms in
-      context.axiomatizing <- symbol :: context.axiomatizing;
-      context.scopes <- List.map (fun (name, _) -> (name, facts)) parameters @ scopes;
-      context.open_axioms <- axiom :: open_axioms;
-      Fun.protect
-        ~finally:(fun () ->
-          context.axiomatizing <- List.tl context.axiomatizing;
-          context.scopes <- scopes;
-          context.open_axioms <- open_axioms)
-        (fun () ->
-          let stated = make () in
-          let drop_fresh_terms terms =
-            List.filter
-              (fun term -> not (Facts.mentions_fresh_after context mark term))
-              (List.rev terms)
-          in
-          axiom.hypotheses <- drop_fresh_terms axiom.hypotheses;
-          (stated, Logic.conjunction (drop_fresh_terms !facts), axiom))
+      let stated =
+        Scope.with_axiomatizing context.scope symbol (fun () ->
+            make
+              {
+                outside with
+                binder_facts =
+                  List.map (fun (name, _) -> (name, facts)) parameters @ outside.binder_facts;
+                open_axioms = axiom :: outside.open_axioms;
+              })
+      in
+      let drop_fresh_terms terms =
+        List.filter
+          (fun term -> not (Facts.mentions_fresh_after context mark term))
+          (List.rev terms)
+      in
+      axiom.hypotheses <- drop_fresh_terms axiom.hypotheses;
+      (stated, Logic.conjunction (drop_fresh_terms !facts), axiom)
     in
-    let record_axiom symbol axiom = Tables.Symbol_table.add context.axioms_of symbol axiom in
+    let record_axiom symbol axiom =
+      Tables.Symbol_table.add context.assertions.axioms_of symbol axiom
+    in
     let add_contract_axiom ~is_triggered symbol sorts =
       Facts.run_once context (Contract_of symbol) (fun () ->
           let parameters = make_parameters "ensured" sorts in
@@ -500,9 +501,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
               makes_obligations = false;
             }
           in
-          let mark = context.fresh in
+          let mark = context.vocabulary.fresh in
           let stated, facts, axiom =
-            axiomatize symbol parameters (fun () ->
+            axiomatize symbol parameters outside (fun outside ->
                 let valid = make_parameters_valid outside inputs in
                 let readable_clauses =
                   List.filter_map
@@ -544,7 +545,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
               let has_quantifier_through_definitions body =
                 Logic.has_quantifier body
                 || Logic.mentions
-                     (List.of_seq (Tables.Symbol_table.to_seq_keys context.definitions))
+                     (List.of_seq (Tables.Symbol_table.to_seq_keys context.vocabulary.definitions))
                      body
               in
               let definition =
@@ -571,7 +572,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                   (fun ((clauses : State.clauses), _, ensures) ->
                     List.iter
                       (fun ((clause : Mir.formula), _) ->
-                        Tables.Axiom_clause_table.replace context.axiom_clauses
+                        Tables.Axiom_clause_table.replace context.assertions.axiom_clauses
                           (symbol, clauses.callee.name, clause.origin)
                           ())
                       ensures)
@@ -618,7 +619,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     let is_in_axiom (clauses : State.clauses) (clause : Mir.formula) =
       match axiom_symbol with
       | Some (symbol, _) ->
-          Tables.Axiom_clause_table.mem context.axiom_clauses
+          Tables.Axiom_clause_table.mem context.assertions.axiom_clauses
             (symbol, clauses.callee.name, clause.origin)
       | None -> false
     in
@@ -687,8 +688,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     let is_about_part clause = contract.result_kind <> `Lends || Amounts.mentions_result clause in
     assume_ensures is_about_part;
     check_left ();
-    assume_ensures (fun clause -> not (is_about_part clause));
-    context.instantiating <- List.tl context.instantiating
+    assume_ensures (fun clause -> not (is_about_part clause))
   end
   else check_left ();
   (match !applied_as with
@@ -700,7 +700,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             (fun hypothesis -> Amounts.assume_typed context after (substitute hypothesis))
             axiom.hypotheses;
           List.iter (fun apply_hook -> apply_hook after substitute) axiom.at_calls)
-        (Tables.Symbol_table.find_all context.axioms_of symbol)
+        (Tables.Symbol_table.find_all context.assertions.axioms_of symbol)
   | _ -> ());
   let compute_change () =
     List.fold_left
@@ -774,14 +774,16 @@ let make_callback_cost (context : State.context) frame (metric : Metric.t) (ty :
       (match term with
       | Logic.Symbol (Function_value { callee; _ }) ->
           Option.iter state_value
-            (Option.bind (Interface.Impls.read_signature context.lookups.interface callee)
+            (Option.bind
+               (Interface.Impls.read_signature context.definition.lookups.interface callee)
                (fun (signature : Types.signature) ->
                  Costs.find_stated_operand signature.costs metric))
       | _ -> ());
-      (match List.assoc_opt (term, metric) context.lambda_costs with
+      (match List.assoc_opt (term, metric) context.vocabulary.lambda_costs with
       | Some (bound, showing) ->
-          context.lambda_costs <- List.remove_assoc (term, metric) context.lambda_costs;
-          context.obligations <- List.rev_append showing context.obligations;
+          context.vocabulary.lambda_costs <-
+            List.remove_assoc (term, metric) context.vocabulary.lambda_costs;
+          context.report.obligations <- List.rev_append showing context.report.obligations;
           state_value bound
       | None -> ());
       cost
@@ -845,7 +847,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     (fun (passed : State.passed) ->
       match passed.shape with
       | Named_function { origin; path; _ } -> (
-          match Contracts.find_function_contract context.lookups path with
+          match Contracts.find_function_contract context.definition.lookups path with
           | Some contract ->
               Laws.check_named_callback context frame invocation passed ~origin path contract values
           | None -> ())
@@ -889,7 +891,9 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       (fun (name, argument) -> (name, Types.substitute_capabilities frame.substitution argument))
       instantiation.capability_arguments
   in
-  let read_signature path = Interface.Impls.read_signature context.lookups.interface path in
+  let read_signature path =
+    Interface.Impls.read_signature context.definition.lookups.interface path
+  in
   let list_generics path =
     match read_signature path with
     | Some (signature : Types.signature) ->
@@ -944,7 +948,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         with_contract
           ~substitution_of:(fun _ -> substitution)
           ~type_arguments:arguments path
-          (Contracts.find_function_contract context.lookups path)
+          (Contracts.find_function_contract context.definition.lookups path)
     | Trait_method { trait; name; receiver; evidence; self_type; instantiation } -> (
         let arguments = list_arguments instantiation.type_arguments in
         let capability_arguments = list_capability_arguments instantiation in
@@ -994,7 +998,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             let trait_substitution =
               Types.combine_substitutions
                 (bind_parameters (list_generics trait_path) arguments
-                   ~fixed:(Contracts.make_trait_substitution context.lookups trait self_type))
+                   ~fixed:
+                     (Contracts.make_trait_substitution context.definition.lookups trait self_type))
                 (Types.make_capability_substitution
                    (list_capability_parameters trait_path)
                    capability_arguments)
@@ -1019,13 +1024,14 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             with_contract ~substitution_of:compute_substitution
               ~type_arguments:(Types.Type self_type :: arguments)
               path
-              (Contracts.find_method_contract context.lookups trait name receiver evidence))
+              (Contracts.find_method_contract context.definition.lookups trait name receiver
+                 evidence))
     | Indirect () ->
         Laws.check_callback_requires context frame site through values;
         let frame = havoc_mut frame in
         let frame =
           match through with
-          | _ when context.counters = [] -> frame
+          | _ when context.scope.counters = [] -> frame
           | Some (Types.Function function_type, callee_term, _) ->
               Operations.spend context frame
                 (compute_function_value_amount context frame ~location function_type callee_term)
@@ -1056,7 +1062,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | Capability_method { capability; name } ->
         with_contract
           (Path.make_capability_method capability name)
-          (Contracts.find_capability_contract context.lookups capability name)
+          (Contracts.find_capability_contract context.definition.lookups capability name)
     | Intrinsic { operation; type_arguments } ->
         let frame =
           match operation with

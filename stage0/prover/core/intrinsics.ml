@@ -306,7 +306,7 @@ let make_byte_order context left right =
     Facts.declare_sort context (Models.make_sequence_type (Types.make_builtin UInt8))
   in
   let symbol = Logic.Symbol.Compare_bytes_order in
-  let first = not (Tables.Symbol_table.mem context.declared symbol) in
+  let first = not (Tables.Symbol_table.mem context.vocabulary.declared symbol) in
   Facts.declare context (Logic.Function (symbol, [ sequence; sequence ], Logic.Int));
   let order first_term second_term = Logic.Apply (symbol, [ first_term; second_term ]) in
   if first then begin

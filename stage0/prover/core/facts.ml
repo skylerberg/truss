@@ -17,7 +17,7 @@ let run_in_source (context : State.context) (source : State.source) read =
   try read ()
   with
   | Unsupported ({ foreign_definition = None; _ } as unsupported)
-  when source.key <> Some context.home
+  when source.key <> Some context.definition.home
   ->
     raise (Unsupported { unsupported with foreign_definition = Some source.name })
 
@@ -39,37 +39,59 @@ let rec show_callee (path : Path.t) =
 
 let is_in_recursion_group (context : State.context) node =
   let is_inherited_from declaration member =
-    match context.lookups.mir.find_form_origin member with
+    match context.definition.lookups.mir.find_form_origin member with
     | Some (Inherited key, _) -> Path.equal key.path declaration
     | Some ((Written _ | Derived _), _) | None -> false
   in
-  List.exists (Path.equal node) (context.lookups.list_recursion_group context.node)
+  List.exists (Path.equal node)
+    (context.definition.lookups.list_recursion_group context.definition.node)
   ||
-  match context.node with
+  match context.definition.node with
   | Method { owner; _ }
-    when Option.is_some (Interface.Definition.find_trait_interface context.lookups.interface owner)
-    ->
-      List.exists (is_inherited_from context.node) (context.lookups.list_recursion_group node)
+    when Option.is_some
+           (Interface.Definition.find_trait_interface context.definition.lookups.interface owner) ->
+      List.exists
+        (is_inherited_from context.definition.node)
+        (context.definition.lookups.list_recursion_group node)
   | _ -> false
 
 let list_clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
 
 let declare (context : State.context) (declaration : Logic.declaration) =
+  let vocabulary = context.vocabulary in
   match declaration with
   | Constant (name, _) | Function (name, _, _) ->
-      if not (Tables.Symbol_table.mem context.declared name) then begin
-        Tables.Symbol_table.replace context.declared name ();
-        context.declarations <- declaration :: context.declarations
+      if not (Tables.Symbol_table.mem vocabulary.declared name) then begin
+        Tables.Symbol_table.replace vocabulary.declared name ();
+        vocabulary.declarations <- declaration :: vocabulary.declarations
       end
   | Definition { symbol; _ } ->
-      if not (Tables.Symbol_table.mem context.definitions symbol) then begin
-        Tables.Symbol_table.replace context.definitions symbol ();
-        context.declarations <- declaration :: context.declarations
+      if not (Tables.Symbol_table.mem vocabulary.definitions symbol) then begin
+        Tables.Symbol_table.replace vocabulary.definitions symbol ();
+        vocabulary.declarations <- declaration :: vocabulary.declarations
       end
   | Datatype _ -> invalid_arg "Translate.declare: a datatype is declared by its sort"
 
-let add_fact (context : State.context) fact = context.facts <- fact :: context.facts
+let make_assertions () : State.assertions =
+  {
+    facts = [];
+    stated = Tables.Stated_table.create 64;
+    decisions = [];
+    quantifier_facts = Tables.Term_table.create 16;
+    quantifier_symbols = [];
+    equalities = [];
+    logs = [];
+    powers = [];
+    indexes = [];
+    potentials = [];
+    axiom_clauses = Tables.Axiom_clause_table.create 16;
+    axioms_of = Tables.Symbol_table.create 16;
+    laws_assumed = [];
+  }
+
+let add_fact (context : State.context) fact =
+  context.assertions.facts <- fact :: context.assertions.facts
 
 let declare_value_symbol context (frame : State.frame) name sort =
   match List.rev frame.binders with
@@ -82,17 +104,17 @@ let declare_value_symbol context (frame : State.frame) name sort =
       Logic.Apply (name, List.map (fun (bound, _, _) -> Logic.Symbol bound) outermost_first)
 
 let make_fresh_name (context : State.context) label =
-  context.fresh <- context.fresh + 1;
-  make_variable label ~numbers:[ context.fresh ]
+  context.vocabulary.fresh <- context.vocabulary.fresh + 1;
+  make_variable label ~numbers:[ context.vocabulary.fresh ]
 
 let declare_fresh context frame label sort =
   let name = make_fresh_name context label in
-  Tables.Symbol_table.replace context.fresh_order name context.fresh;
+  Tables.Symbol_table.replace context.vocabulary.fresh_order name context.vocabulary.fresh;
   declare_value_symbol context frame name sort
 
 let mentions_fresh_after (context : State.context) mark term =
   let is_fresh_after name =
-    match Tables.Symbol_table.find_opt context.fresh_order name with
+    match Tables.Symbol_table.find_opt context.vocabulary.fresh_order name with
     | Some order -> order > mark
     | None -> false
   in
@@ -119,30 +141,31 @@ let close_over_binders (frame : State.frame) term =
              (Logic.conjunction (List.map (fun (_, _, premise) -> premise) outermost_first))
              term ))
 
-let add_scoped_fact (context : State.context) (frame : State.frame) term =
+let add_binder_fact (frame : State.frame) term =
   let named = List.filter (fun name -> Logic.mentions [ name ] term) frame.bound in
-  if List.for_all (fun name -> List.mem_assoc name context.scopes) named then
-    match List.find_opt (fun (name, _) -> List.mem name named) context.scopes with
+  if List.for_all (fun name -> List.mem_assoc name frame.binder_facts) named then
+    match List.find_opt (fun (name, _) -> List.mem name named) frame.binder_facts with
     | Some (_, facts) -> facts := term :: !facts
     | None -> ()
 
-let list_scope_facts (context : State.context) names =
+let list_binder_facts (frame : State.frame) names =
   List.concat_map
     (fun (name, facts) -> if List.mem name names then List.rev !facts else [])
-    context.scopes
+    frame.binder_facts
 
 let add_quantifier_facts ~binders (context : State.context) term =
   let is_stated bound fact =
     List.for_all
       (fun name -> List.mem name bound || not (Logic.mentions [ name ] fact))
-      context.quantifier_symbols
+      context.assertions.quantifier_symbols
   in
   let rec walk positive bound term =
     let collect_facts symbols =
       let bound = List.map fst symbols @ bound in
       ( bound,
         List.filter (is_stated bound)
-          (Option.value ~default:[] (Tables.Term_table.find_opt context.quantifier_facts term)) )
+          (Option.value ~default:[]
+             (Tables.Term_table.find_opt context.assertions.quantifier_facts term)) )
     in
     match term with
     | Logic.Forall (symbols, trigger, body) when positive ->
@@ -170,7 +193,7 @@ let add_quantifier_facts ~binders (context : State.context) term =
 
 let add_frame_fact context (frame : State.frame) term =
   if not (Logic.mentions frame.bound term) then add_fact context term
-  else add_scoped_fact context frame term
+  else add_binder_fact frame term
 
 let assume context (frame : State.frame) term =
   match term with
@@ -179,18 +202,19 @@ let assume context (frame : State.frame) term =
       let guarded = Logic.( ==> ) frame.condition term in
       if not (Logic.mentions frame.bound term || Logic.mentions frame.bound frame.condition) then
         add_fact context guarded
-      else add_scoped_fact context frame guarded
+      else add_binder_fact frame guarded
 
 let locate (context : State.context) (source : State.source) origin =
-  if source.key = Some context.home then Obligation.Node origin else Whole_definition
+  if source.key = Some context.definition.home then Obligation.Node origin else Whole_definition
 
 let make_requires_fix (context : State.context) required =
-  let names = context.lookups.interface.names in
-  let text = names.read_text context.home in
+  let names = context.definition.lookups.interface.names in
+  let text = names.read_text context.definition.home in
   let brace =
-    match names.read_definition context.home with
+    match names.read_definition context.definition.home with
     | { kind = Function { body; _ }; _ } ->
-        Some (Source.Definition_span.locate (names.read_spans context.home) body.id).start
+        Some
+          (Source.Definition_span.locate (names.read_spans context.definition.home) body.id).start
     | _ -> None
   in
   let edit at before =
@@ -209,7 +233,7 @@ let make_requires_fix (context : State.context) required =
     | _ -> None
   in
   match edit with
-  | Some edit when not context.inherits_precondition ->
+  | Some edit when not context.definition.inherits_precondition ->
       [
         {
           Obligation.title = (Obligation.Text "Add `requires " :: required) @ [ Text "`" ];
@@ -219,8 +243,10 @@ let make_requires_fix (context : State.context) required =
   | Some _ | None -> []
 
 let find_parameter_name (context : State.context) symbol =
-  if List.mem symbol context.entry then
-    match List.assoc_opt symbol context.values with Some name -> Some name | None -> Some "self"
+  if List.mem symbol context.entry.parameters then
+    match List.assoc_opt symbol context.entry.parameter_names with
+    | Some name -> Some name
+    | None -> Some "self"
   else None
 
 let collect_printed printed =
@@ -279,8 +305,11 @@ let show_truss_goal context term =
         Option.map (String.concat " || ") (collect_printed (List.map print parts))
     | term -> print term
   in
-  if List.exists (fun symbol -> List.mem symbol context.entry) (Logic.list_free_constants term) then
-    printed
+  if
+    List.exists
+      (fun symbol -> List.mem symbol context.entry.parameters)
+      (Logic.list_free_constants term)
+  then printed
   else None
 
 let add_requires context (frame : State.frame) (required : Obligation.message) =
@@ -301,7 +330,7 @@ let rec make_closed_obligation ?template_clause context (frame : State.frame) co
   else
     let names = List.map (fun (name, _, _) -> name) frame.binders in
     let goal =
-      match list_scope_facts context names with
+      match list_binder_facts frame names with
       | [] -> goal
       | facts -> Logic.( ==> ) (Logic.conjunction facts) goal
     in
@@ -318,8 +347,8 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
   let query =
     Logic.prune
       {
-        declarations = List.rev context.declarations;
-        facts = List.rev context.facts;
+        declarations = List.rev context.vocabulary.declarations;
+        facts = List.rev context.assertions.facts;
         goal = Logic.( ==> ) frame.condition goal;
       }
   in
@@ -330,16 +359,16 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
     cited = None;
     fixes = [];
     query;
-    values = context.values;
-    decisions = List.rev context.decisions;
+    values = context.entry.parameter_names;
+    decisions = List.rev context.assertions.decisions;
     locals =
       (let is_parameter = function
-         | Logic.Symbol symbol -> List.mem_assoc symbol context.values
+         | Logic.Symbol symbol -> List.mem_assoc symbol context.entry.parameter_names
          | _ -> false
        in
        Locals.fold
          (fun local term shown ->
-           match Tables.Local_table.find_opt context.local_names local with
+           match Tables.Local_table.find_opt context.report.local_names local with
            | Some name when not (is_parameter term || List.mem_assoc term shown) ->
                (term, name) :: shown
            | _ -> shown)
@@ -361,13 +390,13 @@ let oblige ?template_clause ?cited ?(fixes = []) context (frame : State.frame) c
   | Some obligation ->
       let fixes =
         match fixes with
-        | [] when frame.source.key = Some context.home && frame.makes_obligations -> (
+        | [] when frame.source.key = Some context.definition.home && frame.makes_obligations -> (
             match show_truss_goal context goal with
             | Some required -> add_requires context frame [ Text required ]
             | None -> [])
         | fixes -> fixes
       in
-      context.obligations <- { obligation with cited; fixes } :: context.obligations;
+      context.report.obligations <- { obligation with cited; fixes } :: context.report.obligations;
       assume context frame goal
   | None -> ()
 
@@ -417,15 +446,16 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
             (fun (node : Path.t) -> match node with Method { owner; _ } -> Some owner | _ -> None)
             recursive))
   in
-  if context.terminates && frame.makes_obligations then
+  if context.scope.terminates && frame.makes_obligations then
     List.iter
       (fun (edge : Mir.Call_edges.edge) ->
         match edge with Calls _ -> () | Supplies { supplier; code } -> reject_supply supplier code)
-      (Mir.Call_edges.list_statement_edges context.lookups.interface frame.substitution statement)
+      (Mir.Call_edges.list_statement_edges context.definition.lookups.interface frame.substitution
+         statement)
 
 let find_recursive_callee (context : State.context) (frame : State.frame) location callee =
   let resolution =
-    Mir.Call_edges.resolve_callee context.lookups.interface frame.substitution callee
+    Mir.Call_edges.resolve_callee context.definition.lookups.interface frame.substitution callee
   in
   let reject target origin =
     oblige context frame Termination location
@@ -442,9 +472,10 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
   let recursive_callee =
     match resolution.target with
     | Some target when frame.makes_obligations && is_in_recursion_group context target -> (
-        match context.lookups.mir.find_form_origin target with
-        | Some (Derived _, _) when context.terminates -> reject target "derives"
-        | Some (Inherited _, _) when context.terminates -> reject target "inherits from its trait"
+        match context.definition.lookups.mir.find_form_origin target with
+        | Some (Derived _, _) when context.scope.terminates -> reject target "derives"
+        | Some (Inherited _, _) when context.scope.terminates ->
+            reject target "inherits from its trait"
         | Some ((Written _ | Derived _ | Inherited _), _) | None -> Some target)
     | Some _ | None -> None
   in
@@ -452,7 +483,7 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
 
 let reject_uncompared_recursion (context : State.context) frame location recursive_callee ~describe
     =
-  if context.terminates then
+  if context.scope.terminates then
     Option.iter
       (fun callee ->
         oblige context frame Termination location
@@ -469,11 +500,12 @@ let quote_span text (span : Source.Definition_span.t) =
   if span.stop = span.start then "this expression" else Source.Definition_span.quote text span
 
 let quote_origin (context : State.context) (frame : State.frame) origin =
-  if frame.source.key <> Some context.home then
+  if frame.source.key <> Some context.definition.home then
     raise_bug "a quote of %s, outside the definition being proven" frame.source.name;
-  let names = context.lookups.interface.names in
-  quote_span (names.read_text context.home)
-    (Source.Definition_span.locate (names.read_spans context.home) origin)
+  let names = context.definition.lookups.interface.names in
+  quote_span
+    (names.read_text context.definition.home)
+    (Source.Definition_span.locate (names.read_spans context.definition.home) origin)
 
 let find_bounds (ty : Types.ty) =
   if Types.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF)
@@ -499,10 +531,10 @@ let equal_trait = Well_known.make_path Equal
 let find_visible_type (context : State.context) (ty : Types.ty) =
   match ty with
   | Named { path; arguments } when Types.find_builtin ty = None -> (
-      match Interface.Definition.find_interface context.lookups.interface path with
+      match Interface.Definition.find_interface context.definition.lookups.interface path with
       | Some (Interface.Environment.Type_interface interface)
         when (not interface.opaque)
-             || Path.locate_package path = Path.locate_package context.current ->
+             || Path.locate_package path = Path.locate_package context.definition.current ->
           let substitution = Types.make_substitution interface.type_generics arguments in
           Some (interface, substitution)
       | _ -> None)
@@ -538,18 +570,18 @@ let rec declare_sort (context : State.context) (ty : Types.ty) : Logic.sort =
     match (ty, find_float_format ty) with
     | _, Some (exponent, significand) -> Float (exponent, significand)
     | _ when Types.equal ty Types.unit ->
-        if not (Tables.Type_table.mem context.datatypes ty) then begin
-          Tables.Type_table.replace context.datatypes ty ();
-          context.declarations <-
-            Logic.Datatype (ty, [ (Logic.Symbol.Unit, []) ]) :: context.declarations
+        if not (Tables.Type_table.mem context.vocabulary.datatypes ty) then begin
+          Tables.Type_table.replace context.vocabulary.datatypes ty ();
+          context.vocabulary.declarations <-
+            Logic.Datatype (ty, [ (Logic.Symbol.Unit, []) ]) :: context.vocabulary.declarations
         end;
         Type_sort ty
     | Function function_type, _ -> Function_sort (List.length function_type.inputs)
     | _ -> begin
-        (if not (Tables.Type_table.mem context.datatypes ty) then
+        (if not (Tables.Type_table.mem context.vocabulary.datatypes ty) then
            match find_constructors context ty with
            | Some shape ->
-               Tables.Type_table.replace context.datatypes ty ();
+               Tables.Type_table.replace context.vocabulary.datatypes ty ();
                let declaration =
                  Logic.Datatype
                    ( ty,
@@ -563,7 +595,7 @@ let rec declare_sort (context : State.context) (ty : Types.ty) : Logic.sort =
                              fields ))
                        shape )
                in
-               context.declarations <- declaration :: context.declarations
+               context.vocabulary.declarations <- declaration :: context.vocabulary.declarations
            | None -> ());
         Type_sort ty
       end
@@ -598,8 +630,8 @@ let make_in_range ty term =
   | None -> Logic.Boolean true
 
 let run_once (context : State.context) stated make =
-  if not (Tables.Stated_table.mem context.stated stated) then begin
-    Tables.Stated_table.replace context.stated stated ();
+  if not (Tables.Stated_table.mem context.assertions.stated stated) then begin
+    Tables.Stated_table.replace context.assertions.stated stated ();
     make ()
   end
 
@@ -619,7 +651,8 @@ let bind (frame : State.frame) local ty term =
   }
 
 let substitute_type (context : State.context) (frame : State.frame) ty =
-  (Interface.Impls.normalize context.lookups.interface ~list_bounds:Interface.Impls.list_no_bounds)
+  (Interface.Impls.normalize context.definition.lookups.interface
+     ~list_bounds:Interface.Impls.list_no_bounds)
     (Types.substitute frame.substitution ty)
 
 let find_local_type context frame local =
@@ -868,7 +901,7 @@ let merge context ?value_type ~condition
       | None -> Some (choose values)
   in
   let yielded_so_far =
-    match (context.yielded_part, find_held (fun frame -> frame.yielded_so_far)) with
+    match (context.definition.yielded_part, find_held (fun frame -> frame.yielded_so_far)) with
     | Some part, Some values ->
         Some
           (define "parts"

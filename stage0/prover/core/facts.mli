@@ -14,6 +14,7 @@ val raise_bug : ('a, unit, string, 'b) format4 -> 'a
 val read_parameter_name : Mir.parameter -> string
 val list_clauses : Mir.requirement list -> Mir.formula list
 val declare : State.context -> Logic.declaration -> unit
+val make_assertions : unit -> State.assertions
 val add_fact : State.context -> Logic.term -> unit
 val declare_value_symbol : State.context -> State.frame -> Logic.symbol -> Logic.sort -> Logic.term
 val make_fresh_name : State.context -> string -> 'a Logic.Symbol.t

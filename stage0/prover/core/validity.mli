@@ -1,5 +1,4 @@
 val note_place : State.context -> State.frame -> int -> State.place_value -> unit
-val run_without_costs : State.context -> (unit -> 'a) -> 'a
 val read_specification : State.context -> State.frame -> Mir.formula -> State.frame * Logic.term
 val select_field : State.context -> Types.ty -> string option -> string -> Logic.term -> Logic.term
 
@@ -33,7 +32,6 @@ val declare_callback_arguments :
 val make_callback_contract_frame : State.frame -> Core.local list -> Logic.term list -> State.frame
 val find_own_callback : State.context -> Core.local -> (string * Mir.callback) option
 val check_escaping_callback : State.context -> State.frame -> Core.local -> unit
-val run_reading_callback : State.context -> (unit -> 'a) -> 'a
 
 val bind_arguments :
   State.frame ->

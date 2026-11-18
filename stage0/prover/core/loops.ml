@@ -58,7 +58,8 @@ type for_loop = {
   bind_parts : State.frame -> State.frame;
 }
 
-let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause list) ~held_gains =
+let list_loop_costs (context : State.context) (frame : State.frame) (clauses : Mir.loop_clause list)
+    ~held_gains =
   List.map
     (fun (counter : Costs.counter) ->
       let gains, measure_gained = Lazy.force held_gains in
@@ -95,7 +96,7 @@ let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause lis
                  gains)
       in
       { counter; entry; rule; measure_gained })
-    context.counters
+    context.scope.counters
 
 let loop_clause_holds context (at : State.frame) (counter : Costs.counter) (cost : Mir.cost) ~since
     =
@@ -388,8 +389,8 @@ let list_validity_obligations context (entry : State.frame) (changed : State.cha
   in
   let describe local : Obligation.message =
     match
-      ( Tables.Local_table.find_opt context.local_names local,
-        Tables.Local_table.find_opt context.local_origins local )
+      ( Tables.Local_table.find_opt context.report.local_names local,
+        Tables.Local_table.find_opt context.report.local_origins local )
     with
     | Some name, _ -> [ Text (Printf.sprintf "`%s`" name) ]
     | None, Some origin -> [ Text "`"; Facts.quote entry.source origin; Text "`" ]
@@ -468,7 +469,7 @@ let enter_loop ?holds context frame ~entry clauses ~changed =
     list_loop_costs context frame clauses ~held_gains:(measure_held_gains context frame holds)
   in
   check_loop_entry context entry costs;
-  let fresh_mark = context.fresh and facts_mark = List.length context.facts in
+  let fresh_mark = context.vocabulary.fresh and facts_mark = List.length context.assertions.facts in
   let preserved = list_validity_obligations context frame changed in
   let head = havoc context frame changed in
   assume_preserved_validity context head preserved;
@@ -511,8 +512,8 @@ let make_step_cost (counter : Costs.counter) =
   | Metric Time -> Logic.int 1
   | Metric (Allocations | Allocated_bytes) | Calls _ -> Costs.zero
 
-let declare_elements_so_far context (head : State.frame) ~element ~collection ~count yielded
-    find_element_at =
+let declare_elements_so_far (context : State.context) (head : State.frame) ~element ~collection
+    ~count yielded find_element_at =
   let symbol = Facts.make_fresh_name context "position" in
   let position = Logic.Symbol symbol in
   let premise =
@@ -557,7 +558,7 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
     enter_loop_head context { head with yielded = Some before } costs ~iterations:(Some iterations)
   in
   assume_invariants context head clauses;
-  let ended_mark = List.length context.facts in
+  let ended_mark = List.length context.assertions.facts in
   let received = receive head before in
   let through = received.through in
   let inside = received.advance (Facts.restrict head received.has_another) in
@@ -699,7 +700,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     | _ -> Facts.raise_bug "a cursor's evidence is not an impl"
   in
   let contract =
-    match Contracts.find_method_contract context.lookups trait "next" Mut evidence with
+    match Contracts.find_method_contract context.definition.lookups trait "next" Mut evidence with
     | Some contract -> contract
     | None ->
         Facts.raise_unsupported location "a loop over `%s`, whose `next` the prover cannot read"
@@ -709,7 +710,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   let option_type = Types.Named { path = option_path; arguments = [ Types.Type element_type ] } in
   let pulling : Invocation.site = { origin = for_loop.for_at; type_ = option_type } in
   let measures = find_measures clauses in
-  if context.terminates && measures = None then
+  if context.scope.terminates && measures = None then
     Facts.raise_bug "a loop over a cursor has no measure in a body that terminates";
   let find_measured (at : State.frame) =
     Option.map
@@ -965,8 +966,8 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
     let read measure = snd (Validity.read_specification context at measure) in
     match (find_measures clauses, loop.measure_operands) with
     | Some measures, _ -> Some (List.map read measures)
-    | None, Some (comparison, read_operands) when context.terminates -> (
-        let left, right = Validity.run_without_costs context (fun () -> read_operands at) in
+    | None, Some (comparison, read_operands) when context.scope.terminates -> (
+        let left, right = Scope.with_no_costs context.scope (fun () -> read_operands at) in
         let distance from into = Logic.Operation ("-", [ into; from ]) in
         let through distance = Logic.Operation ("+", [ distance; Logic.int 1 ]) in
         match (comparison : Core.comparison) with
@@ -978,7 +979,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
     | None, _ -> None
   in
   let start_measures = measure_terms inside in
-  if context.terminates && start_measures = None then
+  if context.scope.terminates && start_measures = None then
     Facts.raise_bug "a `while` loop has no measure in a body that terminates";
   let most =
     match (start_measures, measure_terms frame, iterations) with
