@@ -400,6 +400,7 @@ impl Iterable for Set[Element: Hash + Ordered] {
 
 public fn Set[Element: Hash + Ordered].cursor(own self) -> list::ListCursor[Element]
   ensures result.remaining() == self.length()
+  ensures identical(result.model().elements(), self.model())
   cost time O(self.length())
   cost amortized time O(self.length())
 {

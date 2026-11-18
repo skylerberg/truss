@@ -1567,6 +1567,16 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   `ensures`. Where the collection's `model()` is the `Sequence` of its
   elements, as a `List`'s is, `visited` is that model once the loop has
   visited every element.
+- Where a cursor's `model()` is a `Sequence` of the cursor's `Element`, as a
+  `ListCursor`'s is, the model is the values that the cursor has yet to
+  give, in order. In a loop that pulls such a cursor, `visited` followed by
+  the cursor's model is the cursor's model on entry to the loop, so
+  `visited` is that model once the cursor has no more values. A loop that
+  moves the elements out of a `List` or an `Array` therefore visits the
+  elements of the collection's model in order. A loop whose clauses name
+  `visited` proves, of such a cursor, that `next` returns the first value of
+  the model and leaves the rest as the model, and that it returns `None`
+  only when the model is empty.
 - A loop's `cost` bounds the loop's cost so far, at the start of every
   iteration and when it ends. It is never `amortized` or `finite`. Its bound
   can use the variables in scope at the loop, and `visited` or a range's
