@@ -2,19 +2,25 @@ type visit = {
   expression : Core.expression -> unit;
   statement : Core.statement -> unit;
   pattern : Core.pattern -> unit;
-  callee : Core.callee -> unit;
+  implicit_callee : Core.callee -> unit;
   place : Core.place -> unit;
 }
 
 let ignore_all =
-  { expression = ignore; statement = ignore; pattern = ignore; callee = ignore; place = ignore }
+  {
+    expression = ignore;
+    statement = ignore;
+    pattern = ignore;
+    implicit_callee = ignore;
+    place = ignore;
+  }
 
 let make_callee_visitor on_callee =
   {
     ignore_all with
     expression =
       (fun node -> match node.kind with Call { callee; _ } -> on_callee callee | _ -> ());
-    callee = on_callee;
+    implicit_callee = on_callee;
   }
 
 let compute_place_type : Core.place -> Types.ty = function
@@ -76,7 +82,7 @@ let walk_expression_children visit (node : Core.expression) =
       List.iter (fun (_, value) -> visit.expression value) updates
   | Slice { base; callee; bounds } ->
       walk_place visit base;
-      visit.callee callee;
+      visit.implicit_callee callee;
       List.iter
         (function Core.Passed { value; _ } -> walk_operand visit value | Default -> ())
         bounds
@@ -159,7 +165,7 @@ let walk_statement_children visit (node : Core.statement) =
           walk_place visit element
       | Cursor { cursor; next; uses = _ } ->
           walk_place visit cursor;
-          visit.callee next);
+          visit.implicit_callee next);
       visit.pattern pattern;
       List.iter (walk_loop_clause visit) clauses;
       walk_block visit body
@@ -177,7 +183,7 @@ let walk_pattern_children visit (node : Core.pattern) =
   | Wildcard | Bind _ | Literal _ | Range _ -> ()
   | Variant { fields; _ } | Record fields ->
       List.iter (fun (_, inner) -> visit.pattern inner) fields
-  | Equal_to { equal; _ } -> visit.callee equal
+  | Equal_to { equal; _ } -> visit.implicit_callee equal
   | Alternatives alternatives -> List.iter visit.pattern alternatives
 
 let rec make_deep_visitor visit =
@@ -194,7 +200,7 @@ let rec make_deep_visitor visit =
       (fun node ->
         visit.pattern node;
         walk_pattern_children (make_deep_visitor visit) node);
-    callee = visit.callee;
+    implicit_callee = visit.implicit_callee;
     place = visit.place;
   }
 

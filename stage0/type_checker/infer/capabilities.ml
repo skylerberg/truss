@@ -616,7 +616,7 @@ and check_children checking scope node =
       expression = check_expression checking scope;
       statement = check_statement checking scope;
       pattern = (fun inner -> check_children checking scope (`Pattern inner));
-      callee = require_callee_uses checking scope origin;
+      implicit_callee = require_callee_uses checking scope origin;
       place = ignore;
     }
   in

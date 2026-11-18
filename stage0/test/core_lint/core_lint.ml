@@ -805,7 +805,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  if List.exists (fun alternative -> list_bound alternative <> expected) rest then
                    report "the alternatives of a pattern do not bind the same locals"
              | _ -> ());
-         callee = check_callee;
+         implicit_callee = check_callee;
          place = ignore;
        })
     form.definition;

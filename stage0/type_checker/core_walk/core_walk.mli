@@ -2,7 +2,7 @@ type visit = {
   expression : Core.expression -> unit;
   statement : Core.statement -> unit;
   pattern : Core.pattern -> unit;
-  callee : Core.callee -> unit;
+  implicit_callee : Core.callee -> unit;
   place : Core.place -> unit;
 }
 

@@ -774,7 +774,7 @@ let list_used_paths (lookups : Lookups.t) key =
   Core_walk.walk_definition
     {
       Core_walk.ignore_all with
-      callee = use_callee;
+      implicit_callee = use_callee;
       expression =
         (fun (node : Core.expression) ->
           match node.kind with
