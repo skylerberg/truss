@@ -6,7 +6,8 @@ type while_loop = {
   test : State.frame -> (State.frame * Logic.term) option;
   run_body : State.frame -> State.frame list * State.frame list;
   on_failure : State.frame -> State.frame option;
-  measure_operands : (Core.comparison * (State.frame -> Logic.term * Logic.term)) option;
+  measure_operands :
+    (Core.comparison * (State.context -> State.frame -> Logic.term * Logic.term)) option;
 }
 
 type iterable =

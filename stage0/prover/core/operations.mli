@@ -15,7 +15,7 @@ val find_concrete_impl :
 val make_equality :
   State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
 
-val find_innermost_axiom : State.context -> State.frame -> Logic.term -> State.open_axiom option
+val find_innermost_axiom : State.frame -> Logic.term -> State.open_axiom option
 val declare_power : State.context -> State.frame -> Logic.term -> Logic.term -> Logic.term
 
 val translate_primitive_operation :

@@ -3,12 +3,12 @@ let run_code context frame (code : Mir.t) ~type_ =
   | Some returned -> returned
   | None -> (frame, Facts.arrive context frame "unfinished" type_)
 
-let make_empty_parts context frame element =
+let make_empty_parts (context : State.context) frame element =
   let parts =
-    Facts.declare_fresh context frame "parts"
+    Facts.declare_fresh context.vocabulary frame "parts"
       (Facts.declare_sort context (Models.make_sequence_type element))
   in
-  Facts.assume context frame
+  Facts.assume context.assertions frame
     (Logic.equal (Models.make_sequence_length context element parts) (Logic.int 0));
   parts
 
@@ -28,10 +28,10 @@ let mentions_result (clause : Mir.formula) =
 let mentions_history (clause : Mir.formula) =
   holds_specification clause (function Yielded -> true | _ -> false)
 
-let assume_typed context frame term =
-  match Operations.find_innermost_axiom context frame term with
+let assume_typed (context : State.context) frame term =
+  match Operations.find_innermost_axiom frame term with
   | Some axiom -> axiom.hypotheses <- Logic.( ==> ) frame.condition term :: axiom.hypotheses
-  | None -> Facts.assume context frame term
+  | None -> Facts.assume context.assertions frame term
 
 let rec compare_lexicographically before after =
   match (before, after) with
@@ -62,9 +62,9 @@ let is_same_resource (cost : Mir.cost) ~locals (counter : Costs.counter) =
       | _ -> false)
   | _ -> false
 
-let declare_bounded_amount context frame bound =
-  let amount = Facts.declare_fresh context frame "spent" Logic.Int in
-  Facts.assume context frame
+let declare_bounded_amount (context : State.context) frame bound =
+  let amount = Facts.declare_fresh context.vocabulary frame "spent" Logic.Int in
+  Facts.assume context.assertions frame
     Logic.(Operation ("<=", [ int 0; amount ]) &&& Operation ("<=", [ amount; bound ]));
   amount
 
@@ -100,7 +100,7 @@ let compute_growth compute_change =
 let make_may_be_target (context : State.context) frame term ty target =
   if term = target then Logic.Boolean true
   else
-    match List.assoc_opt target context.call_targets with
+    match List.assoc_opt target context.entry.call_targets with
     | Some local -> (
         match (ty, Facts.find_local_type context frame (Core_local local)) with
         | Types.Function _, Some target_type
@@ -111,7 +111,8 @@ let make_may_be_target (context : State.context) frame term ty target =
 
 let lambda_captures_target (context : State.context) lambda target =
   match
-    (List.assoc_opt lambda context.lambda_captures, List.assoc_opt target context.call_targets)
+    ( List.assoc_opt lambda context.costs.lambda_captures,
+      List.assoc_opt target context.entry.call_targets )
   with
   | Some captured, Some local -> List.mem local captured
   | _ -> false
@@ -148,7 +149,7 @@ let compute_callee_amount ?(method_cost : (Metric.t -> Logic.term) option) (cont
     ~(bind_frame : State.clauses -> State.frame) ~uses ~(values : State.passed list) ~change
     (counter : Costs.counter) =
   let is_recursive_call =
-    is_recursive && counter.counting = Units && List.mem counter context.bounded_counters
+    is_recursive && counter.counting = Units && List.mem counter context.entry.bounded_counters
   in
   let list_matching_costs (clauses : State.clauses) =
     let frame = bind_frame clauses in
@@ -293,7 +294,7 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
           Logic.int 1
       | Calls (Capability _ | Capability_method _ | Through _) -> Costs.zero
       | Metric _ -> (
-          match Contracts.find_capability_clauses context.lookups capability name with
+          match Contracts.find_capability_clauses context.definition.lookups capability name with
           | Some capability_clauses ->
               let inside =
                 Validity.bind_arguments frame capability_clauses
@@ -319,9 +320,10 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
             (Operations.declare_unknown_amount context frame counter)
       | Metric _ -> Operations.declare_unknown_amount context frame counter)
 
-let declare_held_symbol context ty term =
+let declare_held_symbol (context : State.context) ty term =
   let symbol = Logic.Symbol.Potential ty in
-  Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
+  Facts.declare context.vocabulary
+    (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
 let compute_buffer_elements context (ty : Types.ty) =
@@ -338,7 +340,7 @@ let compute_buffer_elements context (ty : Types.ty) =
     when Intrinsic.find_builtin path = Some View ->
       Some (element, fun term -> Intrinsics.make_buffer_model context View element term)
   | Types.Named { path; arguments } when Types.find_builtin ty = None -> (
-      match Interface.Definition.find_interface context.lookups.interface path with
+      match Interface.Definition.find_interface context.definition.lookups.interface path with
       | Some (Interface.Environment.Type_interface { shape = Record [ field ]; type_generics; _ })
         -> (
           let substitution = Types.make_substitution type_generics arguments in
@@ -355,28 +357,29 @@ let compute_buffer_elements context (ty : Types.ty) =
 
 let find_buffer_elements (context : State.context) (ty : Types.ty) =
   let key = ty in
-  match Tables.Type_table.find_opt context.buffers key with
+  match Tables.Type_table.find_opt context.costs.buffers key with
   | Some elements -> elements
   | None ->
       let elements = compute_buffer_elements context ty in
-      Tables.Type_table.replace context.buffers key elements;
+      Tables.Type_table.replace context.costs.buffers key elements;
       elements
 
-let declare_buffer_slack context (ty : Types.ty) term =
+let declare_buffer_slack (context : State.context) (ty : Types.ty) term =
   let symbol = Logic.Symbol.Slack ty in
-  Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
+  Facts.declare context.vocabulary
+    (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
-let declare_potential_measure context element =
+let declare_potential_measure (context : State.context) element =
   let symbol = Logic.Symbol.Potential_measure element in
   let measure = Intrinsics.measure_type element in
-  Facts.declare context
+  Facts.declare context.vocabulary
     (Logic.Constant (symbol, Facts.declare_sort context (Types.Function measure)));
   let term = Logic.Symbol symbol in
-  if not (List.mem term context.potentials) then begin
-    context.potentials <- term :: context.potentials;
+  if not (List.mem term context.costs.potentials) then begin
+    context.costs.potentials <- term :: context.costs.potentials;
     let each = Logic.Symbol.Variable { label = "potential.element"; numbers = [] } in
-    Facts.add_fact context
+    Facts.add_fact context.assertions
       (Logic.forall
          ( [ (each, Facts.declare_sort context element) ],
            Logic.equal
@@ -411,11 +414,11 @@ and has_potential (context : State.context) ?(seen = []) (ty : Types.ty) =
   if seen <> [] then holds_potential_type context ~seen ty
   else
     let key = ty in
-    match Tables.Type_table.find_opt context.holds_potential key with
+    match Tables.Type_table.find_opt context.costs.holds_potential key with
     | Some holds -> holds
     | None ->
         let holds = holds_potential_type context ~seen ty in
-        Tables.Type_table.replace context.holds_potential key holds;
+        Tables.Type_table.replace context.costs.holds_potential key holds;
         holds
 
 and holds_potential_type context ~seen (ty : Types.ty) =
@@ -427,7 +430,7 @@ and holds_potential_type context ~seen (ty : Types.ty) =
     | Types.Named { path; arguments } when Types.find_builtin ty = None -> (
         find_potential_clause context ty <> None
         ||
-        match Interface.Definition.find_interface context.lookups.interface path with
+        match Interface.Definition.find_interface context.definition.lookups.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
             let substitution = Types.make_substitution interface.type_generics arguments in
             let fields =
@@ -459,9 +462,9 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
   if not (has_potential context ty) then Costs.zero
   else begin
     let held = declare_held_symbol context ty term in
-    if (not (List.mem held context.potentials)) && not (Logic.mentions frame.bound term) then begin
-      context.potentials <- held :: context.potentials;
-      Facts.add_frame_fact context frame
+    if (not (List.mem held context.costs.potentials)) && not (Logic.mentions frame.bound term) then begin
+      context.costs.potentials <- held :: context.costs.potentials;
+      Facts.add_frame_fact context.assertions frame
         Logic.(
           Validity.make_validity context frame ~assuming:true ty term
           ==> Operation ("<=", [ int 0; held ]));
@@ -472,7 +475,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
               let sequence = model_of term in
               let slack = declare_buffer_slack context ty term in
               let length = Models.make_sequence_length context element sequence in
-              Facts.add_frame_fact context frame
+              Facts.add_frame_fact context.assertions frame
                 Logic.(
                   Operation ("<=", [ int 0; slack ])
                   &&& Operation ("<=", [ slack; Operation ("*", [ int 2; length ]) ]));
@@ -486,7 +489,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
                           Intrinsics.make_buffer_capacity context element term;
                         ] )
                   in
-                  Facts.add_frame_fact context frame
+                  Facts.add_frame_fact context.assertions frame
                     (Logic.equal slack
                        (Logic.ite
                           (Logic.Operation (">=", [ saved; Logic.int 0 ]))
@@ -494,14 +497,15 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
               | Types.Named { path; _ }
                 when Intrinsic.find_builtin path = Some View
                      || Intrinsic.find_builtin path = Some Array ->
-                  Facts.add_frame_fact context frame (Logic.equal slack (Logic.int 0))
+                  Facts.add_frame_fact context.assertions frame (Logic.equal slack (Logic.int 0))
               | _ -> ());
               let elements =
                 if has_potential context element then
                   sum_element_potentials context element sequence
                 else Costs.zero
               in
-              Facts.add_frame_fact context frame (Logic.equal held (Costs.plus slack elements))
+              Facts.add_frame_fact context.assertions frame
+                (Logic.equal held (Costs.plus slack elements))
           | None -> ())
       | clause, Some shape -> (
           try
@@ -517,7 +521,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
             let parts =
               choose_by_variant ty term shape (compute_parts_potential context frame ~seen ty term)
             in
-            Facts.add_frame_fact context frame
+            Facts.add_frame_fact context.assertions frame
               (Logic.equal held (Costs.plus declared_potential parts))
           with Facts.Unsupported _ -> ())
       | _ -> ()
@@ -586,7 +590,7 @@ let find_method_cost_bound context (metric : Metric.t) (method_ : Path.t) ~trait
   | Method { owner = trait; name; receiver } -> (
       if Well_known.is Copyable trait then
         if
-          Interface.Impls.is_plain context.lookups.interface
+          Interface.Impls.is_plain context.definition.lookups.interface
             ~list_bounds:(Operations.compute_current_bounds context)
             self_type
           && not (holds self_type)
@@ -598,7 +602,7 @@ let find_method_cost_bound context (metric : Metric.t) (method_ : Path.t) ~trait
         | Some (impl, substitution) -> (
             let path = Path.Method { owner = impl; name; receiver } in
             let makes_no_potential =
-              match Interface.Impls.read_signature context.lookups.interface path with
+              match Interface.Impls.read_signature context.definition.lookups.interface path with
               | Some (signature : Types.signature) -> (
                   List.for_all
                     (fun (parameter : Types.parameter_info) ->
@@ -609,7 +613,7 @@ let find_method_cost_bound context (metric : Metric.t) (method_ : Path.t) ~trait
               | None -> false
             in
             match
-              Contracts.find_method_contract context.lookups reference name receiver
+              Contracts.find_method_contract context.definition.lookups reference name receiver
                 (Impl { impl; substitution })
             with
             | Some contract when makes_no_potential || not includes_potential_made ->
@@ -622,15 +626,16 @@ let find_method_cost_bound context (metric : Metric.t) (method_ : Path.t) ~trait
         | None -> None)
   | _ -> None
 
-let declare_method_cost context frame (metric : Metric.t) (method_ : Path.t) ~trait_arguments
-    self_type =
+let declare_method_cost (context : State.context) frame (metric : Metric.t) (method_ : Path.t)
+    ~trait_arguments self_type =
   let symbol = Logic.Symbol.Method_cost { metric; method_; trait_arguments; self_type } in
-  Facts.declare context (Logic.Constant (symbol, Logic.Int));
+  Facts.declare context.vocabulary (Logic.Constant (symbol, Logic.Int));
   let least = Costs.least_amount (Metric metric) in
-  Facts.add_frame_fact context frame (Logic.Operation ("<=", [ least; Logic.Symbol symbol ]));
+  Facts.add_frame_fact context.assertions frame
+    (Logic.Operation ("<=", [ least; Logic.Symbol symbol ]));
   (match find_method_cost_bound context metric method_ ~trait_arguments self_type with
   | Some limit ->
-      Facts.add_frame_fact context frame
+      Facts.add_frame_fact context.assertions frame
         (Logic.Operation ("<=", [ Logic.Symbol symbol; Costs.larger limit least ]))
   | None -> ());
   Logic.Symbol symbol
