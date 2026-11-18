@@ -578,13 +578,11 @@ let make_flag_impl_source empty =
     "impl Monoid for Flag {\n\
     \  fn empty() -> Flag\n\
     \    ensures result == Flag(on: %s)\n\
-    \    cost time finite\n\
     \  {\n\
     \    Flag(on: %s)\n\
     \  }\n\n\
     \  fn combine(self, other: Flag) -> Flag\n\
     \    ensures result == Flag(on: self.on || other.on)\n\
-    \    cost time finite\n\
     \  {\n\
     \    Flag(on: self.on || other.on)\n\
     \  }\n\
@@ -1184,6 +1182,9 @@ let () =
 let () =
   Harness.test "a lambda's result is in range only for arguments in range" (fun () ->
       expect_not_proven Fixtures.Prover.same_lambda_in_range "prover.ensures");
+  Harness.test "a lambda's result is in range only for arguments whose fields are in range"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.lambda_reading_a_field_passed_to_a_function "prover.ensures");
   Harness.test "an uncalled lambda's calls show nothing of the path" (fun () ->
       expect_not_proven Fixtures.Prover.lambda_calling_a_hang_uncalled "prover.ensures");
   Harness.test "a lambda whose arguments cannot meet its requires shows nothing of the path"
@@ -2169,7 +2170,7 @@ let () =
       expect_proven Fixtures.Prover.finite_measure_compared_with_itself);
   Harness.test "a function value that uses a capability may give different results" (fun () ->
       expect_not_proven Fixtures.Prover.clock_reading_compared_with_itself "prover.ensures");
-  Harness.test "a function value without a time clause is a fresh result" (fun () ->
+  Harness.test "a function value that may run forever is a fresh result" (fun () ->
       expect_not_proven Fixtures.Prover.measure_compared_with_itself "prover.ensures");
   Harness.test "a lambda applied is its body" (fun () ->
       expect_proven (apply_function ^ Fixtures.Prover.apply_of_a_halving_lambda));
@@ -2296,7 +2297,7 @@ let () =
   Harness.test
     "a call that uses nothing is in the logic, whatever its callee's capability parameter"
     (fun () -> expect_proven (apply ^ Fixtures.Prover.apply_in_an_ensures));
-  Harness.test "a function without a time clause passes a lambda with a loop without a measure"
+  Harness.test "a function that uses RunForever passes a lambda with a loop without a measure"
     (fun () -> expect_proven (apply ^ Fixtures.Prover.apply_of_a_lambda_looping_without_a_measure));
   Harness.test "an operator on a bound type terminates" (fun () ->
       expect_proven Fixtures.Prover.sum_of_a_bound_type_under_a_time_clause)

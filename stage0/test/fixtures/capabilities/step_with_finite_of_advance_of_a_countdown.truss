@@ -1,5 +1,0 @@
-fn f(ticker: mut Countdown) -> UInt64
-  cost time finite
-{
-  step_with_finite(mut ticker, step: advance)
-}

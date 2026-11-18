@@ -22,7 +22,9 @@ impl Cursor for Words {
   }
 }
 
-fn total(from: Int64) -> Int64 {
+fn total(from: Int64) -> Int64
+  uses RunForever
+{
   var sum = 0
   var countdown = Countdown(left: from)
   for number in mut countdown {
@@ -34,7 +36,9 @@ fn total(from: Int64) -> Int64 {
   sum
 }
 
-fn longest(words: own List[String]) -> UInt64 {
+fn longest(words: own List[String]) -> UInt64
+  uses RunForever
+{
   var most: UInt64 = 0
   var cursor = Words(remaining: own words)
   for word in mut cursor {

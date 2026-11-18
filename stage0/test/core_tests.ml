@@ -127,10 +127,7 @@ let list_final_expressions (form : Core.t) =
 
 let list_capabilities (set : Types.capability_set) =
   List.map
-    (function
-      | Types.Capability path -> Path.show path
-      | Types.Divergence Always -> "may not terminate"
-      | _ -> "a capability that is not named")
+    (function Types.Capability path -> Path.show path | _ -> "a capability that is not named")
     (set :> Types.capability list)
 
 let shape = Fixtures.Core.shape
@@ -171,7 +168,9 @@ let () =
                  fn take(count: Int64) -> Int64 {\n\
                 \  count\n\
                  }\n\n\
-                 fn g(items: List[Int64], config: Config) -> Int64 {\n\
+                 fn g(items: List[Int64], config: Config) -> Int64\n\
+                \  uses RunForever\n\
+                 {\n\
                 \  var hole = todo\n\
                 \  " ^ statement ^ "\n  config.port\n}\n" );
             ]))
@@ -220,11 +219,11 @@ let () =
   expect "a capability parameter is inferred as the set of capabilities that a lambda uses"
     (apply ^ Fixtures.Core.lambda_using_console_passed_to_apply)
     list_granted
-    [ "standard::capabilities::Console"; "may not terminate" ];
+    [ "standard::capabilities::Console" ];
   expect "a capability parameter is inferred as the set of capabilities that a named function uses"
     (apply ^ Fixtures.Core.named_function_passed_for_a_capability_generic)
     list_granted
-    [ "standard::capabilities::Console"; "may not terminate" ];
+    [ "standard::capabilities::Console" ];
   Harness.test
     "a call's `uses` and a lambda's type contain the inferred set, not the callee's parameter"
     (fun () ->
@@ -252,9 +251,8 @@ let () =
                   form.definition
             | None -> Harness.fail "no core form")
         (Support.list_declarations packages (Support.parse_module "app::main"));
-      if
-        List.sort compare !actual <> [ "(fn() uses Console)"; "needs {Console, may not terminate}" ]
-      then Harness.fail "found [%s]" (String.concat "; " !actual));
+      if List.sort compare !actual <> [ "(fn() uses Console)"; "needs {Console}" ] then
+        Harness.fail "found [%s]" (String.concat "; " !actual));
   Harness.test "a capability parameter in a result type is inferred separately for each call"
     (fun () ->
       let text = Fixtures.Core.two_calls_of_later_with_different_capabilities in
@@ -345,7 +343,6 @@ let () =
           resource ^ " "
           ^
           match cost.bound with
-          | Finite -> "finite"
           | Order_of _ -> "of an order"
           | At_most _ -> "at most"
           | Exactly _ -> "exactly")
@@ -638,7 +635,7 @@ let () =
         form.definition;
       List.rev !held)
     [
-      "a loop holds standard::core::Cursor.next uses [app::main::Meter, may not terminate]";
+      "a loop holds standard::core::Cursor.next uses [app::main::Meter]";
       "a slice holds standard::list::List.slice_from uses []";
       "a pattern holds standard::core::Equal.equal uses []";
     ];
@@ -653,7 +650,7 @@ let () =
         form.definition;
       List.rev !invoked)
     [
-      "standard::core::Cursor.next uses [app::main::Meter, may not terminate]";
+      "standard::core::Cursor.next uses [app::main::Meter]";
       "standard::list::List.slice_from uses []";
       "standard::core::Equal.equal uses []";
       "standard::list::Slice.length uses []";

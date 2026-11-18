@@ -204,26 +204,24 @@ let () =
     | actual when actual = expected -> ()
     | actual -> Harness.fail "found [%s]" (String.concat "; " actual)
   in
-  Harness.test "a type cannot occur in the input of a function type that has a time clause"
-    (fun () ->
-      expect_one_diagnostic "type Knot(run: (fn(Knot) -> Bool cost time finite))\n"
-        "package.not_strictly_positive");
-  Harness.test "a type may occur in the input of a function type that has no time clause" (fun () ->
-      expect_fine "type Button(label: String, on_click: fn(Button))\n");
-  Harness.test "a type may occur in the output of a function type that has a time clause" (fun () ->
-      expect_fine "type Lazy(next: (fn() -> Lazy cost time finite))\n");
+  Harness.test "a type cannot occur in the input of a function type that terminates" (fun () ->
+      expect_one_diagnostic "type Knot(run: fn(Knot) -> Bool)\n" "package.not_strictly_positive");
+  Harness.test "a type may occur in the input of a function type that uses RunForever" (fun () ->
+      expect_fine "type Button(label: String, on_click: (fn(Button) uses RunForever))\n");
+  Harness.test "a type may occur in the output of a function type that terminates" (fun () ->
+      expect_fine "type Lazy(next: fn() -> Lazy)\n");
   Harness.test "a type cannot occur in such an input inside a collection" (fun () ->
-      expect_one_diagnostic "type Knot(runs: List[(fn(Knot) -> Bool cost time finite)])\n"
+      expect_one_diagnostic "type Knot(runs: List[fn(Knot) -> Bool])\n"
         "package.not_strictly_positive");
   Harness.test "a type cannot occur in such an input inside a type without fields" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.knot_in_a_pending_function_input
         "package.not_strictly_positive");
   Harness.test "a type cannot occur in such an input inside another function type's output"
     (fun () ->
-      expect_one_diagnostic "type Knot(make: fn() -> (fn(Knot) -> Bool cost time finite))\n"
+      expect_one_diagnostic "type Knot(make: fn() -> fn(Knot) -> Bool)\n"
         "package.not_strictly_positive");
   Harness.test "a type cannot occur in the input of a function type in such an input" (fun () ->
-      expect_one_diagnostic "type Knot(run: (fn(fn(Knot) -> Bool) -> Bool cost time finite))\n"
+      expect_one_diagnostic "type Knot(run: fn(fn(Knot) -> Bool) -> Bool)\n"
         "package.not_strictly_positive");
   Harness.test "a type cannot occur in such an input of an any type's associated type" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.knot_in_an_any_types_function_input

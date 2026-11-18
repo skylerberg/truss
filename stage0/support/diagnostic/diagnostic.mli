@@ -55,7 +55,6 @@ module Code : sig
     | Lends_own
     | Repeated_clause
     | Cost_word
-    | Finite_not_time
     | Loop_cost_bound
     | Function_type_names
     | Misplaced_requires
@@ -178,7 +177,7 @@ module Code : sig
     | Extra_member
     | Signature_mismatch
     | Missing_required_impl
-    | Implements_panic
+    | Implements_built_in_capability
     | Impl_uses
     | Unknown_associated_type
     | Unknown_associated_capability
@@ -208,7 +207,6 @@ module Code : sig
 
   type capabilities =
     | Not_available
-    | May_not_terminate
     | Lambda_uses
     | Not_granted
     | Provide_mode

@@ -1,0 +1,9 @@
+fn run(work: (fn() uses generic Mine))
+  uses generic Mine, RunForever
+{
+  let again: (fn() uses generic Mine, RunForever) = fn() {
+    work()
+    while true {}
+  }
+  again()
+}

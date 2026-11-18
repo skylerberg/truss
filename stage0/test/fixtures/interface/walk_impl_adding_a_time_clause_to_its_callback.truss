@@ -5,5 +5,5 @@ trait Walk {
 type Pair(first: Int64, second: Int64)
 
 impl Walk for Pair {
-  fn each(self, visit: (fn(Int64) cost time finite)) {}
+  fn each(self, visit: (fn(Int64) cost time O(1))) {}
 }

@@ -15,7 +15,7 @@ fn header(name: StringSlice, value: StringSlice) -> http::Header {
 }
 
 fn status(method: http::Method, headers: List[http::Header], policy: http::CsrfPolicy) -> UInt16
-  uses Tasks
+  uses Tasks, RunForever
 {
   let response = http::respond(fn(incoming, responder) {
     http::csrf(own incoming, mut responder, policy: policy, next: fn(_, inner) {

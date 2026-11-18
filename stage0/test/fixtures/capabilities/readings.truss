@@ -10,7 +10,11 @@ impl Meter for Fixed {
   }
 }
 
-type Readings(left: Int64)
+type Readings(left: UInt64)
+
+fn Readings.remaining(self) -> UInt64 {
+  self.left
+}
 
 impl Cursor for Readings {
   type Element = Int64
@@ -19,7 +23,7 @@ impl Cursor for Readings {
   fn next(mut self) -> Option[Int64]
     uses Meter
   {
-    if self.left <= 0 {
+    if self.left == 0 {
       return None
     }
     self.left -= 1
@@ -27,7 +31,7 @@ impl Cursor for Readings {
   }
 }
 
-fn readings(count: Int64) -> Readings {
+fn readings(count: UInt64) -> Readings {
   Readings(left: count)
 }
 

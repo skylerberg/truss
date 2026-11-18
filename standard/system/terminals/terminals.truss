@@ -1,7 +1,9 @@
 use standard::intrinsic
 use standard::system::calls
 
-internal fn set_raw_mode(descriptor: Int32, enabled: Bool) -> Result[Unit, Int32] {
+internal fn set_raw_mode(descriptor: Int32, enabled: Bool) -> Result[Unit, Int32]
+  uses RunForever
+{
   let size = intrinsic::libc_termios_size()
   let flag_size = intrinsic::libc_termios_flag_size()
   let input_at = intrinsic::libc_termios_iflag_offset()
@@ -43,6 +45,7 @@ internal fn set_raw_mode(descriptor: Int32, enabled: Bool) -> Result[Unit, Int32
 
 fn change(settings: mut List[UInt8], at: UInt64, size: UInt64, clear: UInt64, set: UInt64)
   ensures settings.length() == old(settings.length())
+  uses RunForever
 {
   let before = calls::number_at(settings.slice().elements, offset: at, size: size)
   var left = (before & ~clear) | set

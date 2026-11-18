@@ -17,7 +17,7 @@ public fn Array[Element: Copyable, count: UInt64].filled(value: Element) -> Arra
 }
 
 public fn Array[Element, count: UInt64].generate(
-  make: (fn(index: UInt64) -> Element requires index < count cost time finite),
+  make: (fn(index: UInt64) -> Element requires index < count),
 ) -> Array[Element, count]
   ensures forall i in 0..count => identical(result.model()[i], make(i))
   cost calls(make) == count
@@ -78,7 +78,6 @@ impl Model for Array[Element, count: UInt64] {
 
   fn model(self) -> Sequence[Element]
     ensures identical(result, intrinsic::array_model(self))
-    cost time finite
   {
     intrinsic::array_model(self)
   }

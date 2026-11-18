@@ -108,7 +108,7 @@ fn curve_of(algorithm: Algorithm) -> cryptography::Curve {
 }
 
 fn sign_with(key: jwk::Key, algorithm: Algorithm, input: Slice[UInt8]) -> Result[List[UInt8], Error]
-  uses Random, Panic
+  uses Random, Panic, RunForever
 {
   let function = hash_of(algorithm)
   match key.material {
@@ -189,7 +189,7 @@ public fn sign[Item: serialization::Serialize](
   key: jwk::Key,
   algorithm: Algorithm,
 ) -> Result[String, Error]
-  uses Random, Panic
+  uses Random, Panic, RunForever
 {
   var header: Map[String, json::Value] = [:]
   mut header.insert("alg", value: json::Value.String(value: algorithm.name().to_string()))
@@ -222,7 +222,9 @@ public type Header(algorithm: Algorithm, key_id: Option[String], kind: Option[St
 public type Token(header: Header, claims: json::Value)
   derives Equal
 
-public fn Token.claims[Item: serialization::Deserialize](self) -> Result[Item, Error] {
+public fn Token.claims[Item: serialization::Deserialize](self) -> Result[Item, Error]
+  uses RunForever
+{
   match json::from_value[Item](self.claims.copy()) {
     Ok(item) => Ok(own item)
     Err(error) => Err(Error.Claims(error: json::Error.Deserialize(error: own error)))

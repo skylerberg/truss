@@ -63,7 +63,9 @@ fn read_header(bytes: Slice[UInt8], at: UInt64) -> Result[Header, Error]
   Ok(Header(tag: tag, start: start, end: start + length))
 }
 
-fn read_value(bytes: Slice[UInt8], at: UInt64, depth: UInt64) -> Result[core::Pair[Value, UInt64], Error] {
+fn read_value(bytes: Slice[UInt8], at: UInt64, depth: UInt64) -> Result[core::Pair[Value, UInt64], Error]
+  decreases 65 - depth
+{
   if depth > 64 {
     return Err(Error(offset: at))
   }
@@ -202,6 +204,7 @@ public fn unsigned_integer(bytes: Slice[UInt8]) -> Value {
   var start: UInt64 = 0
   while start < bytes.length() && bytes.length() - start > 1 && bytes[start] == 0
     invariant start <= bytes.length()
+    decreases bytes.length() - start
   {
     start += 1
   }
@@ -222,6 +225,7 @@ public fn Value.unsigned_bytes(self, length: UInt64) -> Option[List[UInt8]] {
       var start: UInt64 = 0
       while start < bytes.length() && bytes[start] == 0
         invariant start <= bytes.length()
+        decreases bytes.length() - start
       {
         start += 1
       }

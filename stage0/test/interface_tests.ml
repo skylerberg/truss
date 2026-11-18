@@ -167,8 +167,16 @@ let () =
       expect_one_diagnostic Fixtures.Interface.ordered_impl_without_equal
         "types.missing_required_impl");
   Harness.test "nothing can implement Panic" (fun () ->
-      expect_one_diagnostic Fixtures.Interface.panic_impl "types.implements_panic");
-  Harness.test "every standard capability except Panic has exactly one real implementation"
+      expect_one_diagnostic Fixtures.Interface.panic_impl "types.implements_built_in_capability"
+        ~says:"Nothing can implement `Panic`: no Truss code runs after a panic");
+  Harness.test "nothing can implement RunForever" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.run_forever_impl
+        "types.implements_built_in_capability"
+        ~says:
+          "Nothing can implement `RunForever`, since a `provide` of it would let a function that \
+           does not declare `RunForever` run forever.");
+  Harness.test
+    "every standard capability except Panic and RunForever has exactly one real implementation"
     (fun () ->
       let packages = Support.setup [] in
       let interface = make_interface packages in
@@ -185,18 +193,23 @@ let () =
       in
       match
         List.partition
-          (fun (capability : Resolve.Names.declaration) -> Well_known.is Panic capability.path)
+          (fun (capability : Resolve.Names.declaration) ->
+            Well_known.is_built_in_capability capability.path)
           capabilities
       with
-      | [ panic ], others ->
-          if has_real_implementation panic then Harness.fail "Panic has a real implementation";
+      | [ first; second ], others ->
+          List.iter
+            (fun (built_in : Resolve.Names.declaration) ->
+              if has_real_implementation built_in then
+                Harness.fail "%s has a real implementation" (Path.show built_in.path))
+            [ first; second ];
           List.iter
             (fun (capability : Resolve.Names.declaration) ->
               if not (has_real_implementation capability) then
                 Harness.fail "%s has no real implementation" (Path.show capability.path))
             others
-      | _ -> Harness.fail "the standard library does not declare Panic exactly once");
-  Harness.test "a test declares Panic, which leaves it deterministic" (fun () ->
+      | _ -> Harness.fail "the standard library does not declare Panic and RunForever exactly once");
+  Harness.test "a test declares Panic or RunForever, which leaves it deterministic" (fun () ->
       List.iter
         (fun (written, is_external) ->
           let text = Printf.sprintf "test \"t\" uses %s {}\n" written in
@@ -205,7 +218,7 @@ let () =
           let packages = Support.setup [ ("app::main", text) ] in
           if Interface.Definition.is_external_test (make_interface packages) test <> is_external
           then Harness.fail "a test that uses %s is external: %b" written (not is_external))
-        [ ("Panic", false); ("Clock, Panic", true) ]);
+        [ ("Panic", false); ("RunForever", false); ("Clock, Panic", true) ]);
   Harness.test "a test cannot declare a capability that has no real implementation" (fun () ->
       expect_one_diagnostic "capability Greeter {\n  fn greet()\n}\n\ntest \"t\" uses Greeter {}\n"
         "types.no_real_implementation"
@@ -214,12 +227,12 @@ let () =
       expect_one_diagnostic ~file:"app" Fixtures.Interface.main_using_a_greeter
         "types.no_real_implementation"
         ~says:"`Greeter` has no real implementation, so the runtime cannot provide it to `main`.");
-  Harness.test "main can declare Panic and the standard capabilities" (fun () ->
+  Harness.test "main can declare Panic, RunForever, and the standard capabilities" (fun () ->
       expect_no_diagnostics
         [
           ( "app",
             "fn main(arguments: List[String]) -> ExitCode\n\
-            \  uses Panic, Console, Clock\n\
+            \  uses Panic, RunForever, Console, Clock\n\
              {\n\
             \  todo\n\
              }\n" );
@@ -304,11 +317,7 @@ let () =
   Harness.test "an impl's callback type cannot drop its trait's time clause" (fun () ->
       expect_signature_mismatch
         Fixtures.Interface.walk_impl_dropping_the_time_clause_of_its_callback
-        ~declared:"`each(self, visit: (fn(Int64) cost time finite))`");
-  Harness.test "an impl's callback type cannot bound the time that its trait's leaves finite"
-    (fun () ->
-      expect_signature_mismatch Fixtures.Interface.walk_impl_bounding_the_time_of_its_callback
-        ~declared:"`each(self, visit: (fn(Int64) cost time finite))`");
+        ~declared:"`each(self, visit: (fn(Int64) cost time O(...)))`");
   Harness.test "an impl's callback type cannot drop `amortized` from its trait's cost" (fun () ->
       expect_signature_mismatch
         Fixtures.Interface.walk_impl_dropping_amortized_from_the_cost_of_its_callback
@@ -317,7 +326,7 @@ let () =
     (fun () ->
       expect_signature_mismatch
         Fixtures.Interface.walk_impl_bounding_the_allocations_of_its_callback
-        ~declared:"`each(self, visit: (fn(Int64) cost time finite))`");
+        ~declared:"`each(self, visit: (fn(Int64) cost time O(...)))`");
   Harness.test "an impl's callback type cannot use fewer capabilities than its trait's" (fun () ->
       expect_signature_mismatch Fixtures.Interface.walk_impl_dropping_a_capability_of_its_callback
         ~declared:"`each(self, visit: (fn(Int64) uses Log))`");
@@ -373,7 +382,7 @@ let () =
     (fun () ->
       expect_signature_mismatch
         Fixtures.Interface.chooses_impl_dropping_the_time_clause_of_its_result
-        ~declared:"`choose(self) -> (fn(Int64) -> Int64 cost time finite)`")
+        ~declared:"`choose(self) -> (fn(Int64) -> Int64 cost time O(...))`")
 
 let () =
   let feed = "`feed[Item: Convert[Int64]](self, item: Item) -> UInt64`" in
@@ -818,7 +827,7 @@ let () =
       let signature =
         read_method_signature packages (Types.make_named (app "FixedClock") []) clock "now"
       in
-      match (Types.remove_divergence signature.uses :> Types.capability list) with
+      match (signature.uses :> Types.capability list) with
       | [ Capability _ ] -> ()
       | uses -> Harness.fail "%d uses" (List.length uses))
 
@@ -983,97 +992,3 @@ let () =
           if Well_known.of_path (Well_known.make_path known) <> Some known then
             Harness.fail "`%s` is not found by its path" (Path.show (Well_known.make_path known)))
         Well_known.For_testing.all)
-
-let show_divergence (uses : Types.capability_set) =
-  String.concat "; "
-    (List.map
-       (function
-         | Types.Divergence Always -> "always"
-         | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
-             Printf.sprintf "%s: %s.%s(%s)" (Types.show self_type) (Types.show_trait trait) name
-               (Path.show_receiver receiver)
-         | capability -> Types.show_capability capability)
-       (Types.list_divergence uses :> Types.capability list))
-
-let expect_divergence subject uses expected =
-  if show_divergence uses <> expected then
-    Harness.fail "%s has the divergence [%s], not [%s]" subject (show_divergence uses) expected
-
-let read_declared_uses packages name =
-  match Interface.Definition.find_declared_signature (make_interface packages) (app name) with
-  | Some signature -> signature.uses
-  | None -> failwith (name ^ " has no signature")
-
-let () =
-  let packages =
-    Support.setup [ ("app::main", Fixtures.Interface.allocation_bounds_naming_a_callee) ]
-  in
-  let expect_declared_divergence name expected =
-    expect_divergence name (read_declared_uses packages name) expected
-  in
-  Harness.test "a signature whose bounds name the allocations of a callee has no error" (fun () ->
-      expect_no_diagnostics [ ("app::main", Fixtures.Interface.allocation_bounds_naming_a_callee) ]);
-  Harness.test "a bound that names the allocations of a callee leaves the divergence unchanged"
-    (fun () ->
-      expect_declared_divergence "timed_and_counted" "Inner: Ticker.tick(`mut self`)";
-      expect_declared_divergence "timed_and_visited" "generic Granted";
-      expect_declared_divergence "visited_in_finite_time" "");
-  Harness.test
-    "a function without a time clause may not terminate, whatever its allocation bound names"
-    (fun () ->
-      expect_declared_divergence "counted" "always";
-      expect_declared_divergence "visited" "always")
-
-let () =
-  let packages =
-    Support.setup [ ("app::main", Fixtures.Interface.tickers_followed_by_time_clauses) ]
-  in
-  let ticker : Types.trait_reference =
-    { trait = app "Ticker"; trait_arguments = []; associated = [] }
-  in
-  let countdown = Types.make_named (app "Countdown") [] in
-  let forever = Types.make_named (app "Forever") [] in
-  let relay inner = Types.make_named (app "Relay") [ inner ] in
-  let read_declared_uses = read_declared_uses packages in
-  let read_impl_method_uses type_name name =
-    match
-      Interface.Impls.list_impls_of_trait_for_type (make_interface packages) ~trait:(app "Ticker")
-        ~type_:(app type_name) (Support.parse_module "app::main").package
-    with
-    | [ impl ] -> (
-        match
-          Interface.Impls.read_signature (make_interface packages)
-            (Method { owner = impl; name; receiver = Mut })
-        with
-        | Some signature -> signature.uses
-        | None -> failwith (name ^ " has no signature"))
-    | _ -> failwith (type_name ^ " has no one impl")
-  in
-  let list_no_bounds _ = [] in
-  Harness.test
-    "a time clause that names the time of a bound's method holds that method's divergence"
-    (fun () ->
-      expect_divergence "advance" (read_declared_uses "advance") "Inner: Ticker.tick(`mut self`)");
-  Harness.test "a time clause that names the time of a method with a time clause terminates"
-    (fun () -> expect_divergence "same" (read_declared_uses "same") "");
-  Harness.test "a provided method that follows a method of `Self` follows each impl's method"
-    (fun () ->
-      expect_divergence "Countdown's tick_twice" (read_impl_method_uses "Countdown" "tick_twice") "";
-      expect_divergence "Forever's tick_twice"
-        (read_impl_method_uses "Forever" "tick_twice")
-        "always";
-      expect_divergence "Relay's tick_twice"
-        (read_impl_method_uses "Relay" "tick_twice")
-        "Inner: Ticker.tick(`mut self`)");
-  Harness.test "the divergence of a concrete type's method is that of its impl's method" (fun () ->
-      let normalize self_type =
-        Interface.Impls.normalize_capabilities (make_interface packages) ~list_bounds:list_no_bounds
-          (Types.make_capability_set
-             [
-               Types.Divergence
-                 (Of_impl_method { self_type; trait = ticker; name = "tick"; receiver = Mut });
-             ])
-      in
-      expect_divergence "Relay[Relay[Countdown]]" (normalize (relay (relay countdown))) "";
-      expect_divergence "Relay[Relay[Forever]]" (normalize (relay (relay forever))) "always";
-      expect_divergence "any Ticker" (normalize (Types.Any ticker)) "always")

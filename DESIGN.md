@@ -607,7 +607,7 @@ parameter can therefore carry a `requires`:
 ```truss
 fn List[Element].generate(
   count: UInt64,
-  make: (fn(index: UInt64) -> Element requires index < count cost time finite),
+  make: (fn(index: UInt64) -> Element requires index < count),
 ) -> List[Element]
 
 let reversed = List.generate(values.length(), make: fn(index) { values[values.length() - 1 - index] })
@@ -725,59 +725,54 @@ argument, so exact highlighting comes from the language server.
 Rules: [Termination](SPECIFICATION.md#termination), [Loops](SPECIFICATION.md#loops),
 [Recursive types](SPECIFICATION.md#recursive-types).
 
+**Running forever is a capability.** A function may run forever only where
+its `uses` names `RunForever`: a loop without a measure uses it, and so does
+a call of a function that uses it. Every other rule is the capability check.
+A function type without `RunForever` takes only functions that terminate, a
+capability parameter holds `RunForever` where a function passed for it may
+run forever, and a specification, which uses no capability, calls only
+functions that terminate. Koka tracks divergence as the effect `div` in the
+same way, and Truss writes it as it writes every capability. The
+alternative is that a function without a `time` clause may run forever.
+That default gives an omitted clause two meanings: a function type that
+names a capability parameter has to leave termination to the parameter, and
+the type of a function that uses the parameter's capabilities and runs
+forever has no written form.
+
 **The recursion check follows every edge of the call graph.** A function
 reaches itself by a direct call, by naming a function as a value, and by
 passing an `impl` where a bound needs one, because the code that receives
 the function or the `impl` can call back. If the check ignored the last two,
 a package could implement a trait with a method that calls a generic
-function that calls the method back, and each `time` clause would be proven
-by assuming the other. Every such cycle is visible within one package,
-because Truss has no mutable state outside variables and because of the next
-rule.
+function that calls the method back, and each termination proof would
+assume the other. Every such cycle is visible within one package, because
+Truss has no mutable state outside variables and because of the next rule.
 
 **A type cannot hold a terminating function that takes the type.** With
-`type Knot(run: (fn(Knot) -> Bool cost time finite))`, a function that calls
-`knot.run(knot)` calls itself, and no name in its code says so. Coq and Lean
-forbid this for every function type, as strict positivity. Truss forbids it
-only for a function type with a `time` clause, because a function with a
-`time` clause cannot call one without. `type Button(on_click: fn(Button))`
-is therefore legal.
+`type Knot(run: fn(Knot) -> Bool)`, a function that calls `knot.run(knot)`
+calls itself, and no name in its code says so. Coq and Lean forbid this for
+every function type, as strict positivity. Truss forbids it only for a
+function type without `RunForever`, so
+`type Button(on_click: (fn(Button) uses RunForever))` is legal.
 
-**Whether a call terminates is part of its capability set.** A function
-without a `time` clause may not terminate, and that fact travels as a
-capability does: a call needs it where its callee has it, and a capability
-parameter passes it on. `map` therefore states a `time` bound and still
-takes a function that may not terminate. Such a call may not terminate, so
-only a caller without a `time` clause can make it. Koka and F* track
-divergence as an effect in the same way. The alternative is a `time` clause
-on every callback's type, which rejects each function that has none, and a
-function has none unless its author wrote one.
-
-**A bound passes on whether its `impl`'s method terminates.** A call
-through a bound of a method without a `time` clause holds a condition in
-its capability set: it terminates if the type argument's `impl` of the
-method does. A type argument settles the condition from that `impl`, so
-`skip` over a list's cursor terminates, and `skip` over a cursor that waits
-on a socket may not.
-
-The check is the capability check, so it covers a function bound to a local
-as it covers one passed to a call, and a specification, which has no
-capabilities, calls only functions that terminate.
+**An associated capability set passes on whether an `impl`'s method runs
+forever.** `Cursor.next` uses `Self.Uses`. A cursor over lines read from a
+socket puts `RunForever` in its `Uses`, and a list's cursor does not, so
+`skip` over a list's cursor terminates and `skip` over the socket's may
+not.
 
 | Rule | Reason |
 |---|---|
 | Structural recursion needs no annotation, and other recursion states `decreases`. | Lean accepts structural recursion in the same way. Dafny infers a measure. A structural check with an explicit clause is more predictable than an inference that may fail. |
 | A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` has the distance between them as its default measure, and a `for` loop over a cursor has the cursor's `remaining()`. | Most loops count toward a bound that their condition names, so `decreases high - low` would only repeat the condition. The default is one measure read from the loop's own code, never chosen by a search among candidates, so a reader knows the measure that the proof uses. Dafny takes the same default for a loop. A cursor's `remaining()` states its measure once, in its type, for every loop over it. |
 | A loop that runs until a capability says to stop has no termination proof. | An implementation could supply data forever. |
-| A function type with a `time` clause takes only functions that terminate, even where its `uses` names a capability parameter. | A written clause holds. If the parameter could carry a function that may not terminate into such a type, `cost time finite` there would promise nothing. |
-| A `time` clause follows a function parameter only where its bound names `time(parameter)`. `finite` names none, so it promises termination whatever is passed. | The bound is true as written: it is unbounded exactly where the parameter's time is. A `finite` that followed its callbacks would be a condition that the signature does not show. |
-| No parameter passes on termination alone. A callback that may not terminate is taken through a capability parameter, which also takes its capabilities. | A callee needs a callback without capabilities only to apply it in a contract, and there the callback must terminate too. One mechanism then covers both. |
-| No function type states that a function uses a capability parameter's capabilities and may not terminate. | Non-termination is never written: a function may not terminate unless it states a `time` clause, and a function type that names a capability parameter leaves termination to the parameter. A clause for this type would be the only written form of non-termination, and only a lambda that is bound or returned in the function that declares the parameter would need it. A lambda passed in a call needs no written type. |
-| A trait's method without a `time` clause leaves termination to each `impl`, and a `time` clause follows such a method of a bound where each of its bounds names `time(Type.method)`. | `Cursor.next` terminates for a list's cursor and need not for a cursor over lines read from a socket. One alternative is a `time` clause on the trait's method, which forbids the second cursor. The other is a call through a bound that may not terminate: no adapter such as `skip` then states a `time` clause, and no function with a `time` clause uses an adapter over a list. The bound is true as written for every type argument: the `time` of a method that may not terminate is unbounded. |
-| A call through `any Trait` of a method without a `time` clause may not terminate. | `any` hides the type, so no `impl` is known where the call is checked. A `time` clause that followed the call would be a condition on a type that no signature names. |
-| An `impl`'s `time` clause follows a method of its bounds only where its trait's method lets the `impl` decide. | A call through a bound is checked against the trait's method. If the trait's method promised termination and an `impl` followed `Inner.next`, a function with a `time` clause would call a method that never returns. |
-| A loop without a measure may not terminate, so it stands only where that is allowed, as a call that may not terminate does. | The capability check then covers the loop in every body, as it covers a call. The alternative is an obligation of the prover for each loop in a function with a `time` clause, which states the same fact a second time and leaves a lambda's loop to a rule of its own. |
-| A lambda may not terminate when its body makes a call that may not, or holds a loop without a measure. | Its capabilities are inferred from its body, and so is this. A lambda with neither stays in the logic, so a proof can reason about a call that passes it. |
+| A loop without a measure uses `RunForever`. | The capability check then covers the loop in every body, as it covers a call. A lambda's loop needs no rule of its own: the lambda's capabilities are inferred from its body. |
+| Nothing implements `RunForever`. | A `provide` of it would let a function that does not declare `RunForever` run forever. |
+| A function that uses `RunForever` has no `time` clause. | A written clause holds, and the time of a function that may run forever has no bound. |
+| A `time` clause has no `finite` bound. | A function without `RunForever` terminates, so the bound would repeat what the omitted capability already says. |
+| A manifest grants `RunForever` to a dependency as it grants any other capability. | A dependency that is granted nothing then terminates, as well as reaching nothing outside its arguments. |
+| A capability method that waits for the world terminates unless it declares `RunForever`. | A capability method returns to its caller once the world answers. If waiting counted as running forever, nearly every function that reads input would declare `RunForever`, and the capability would no longer separate a loop that has no measure from one that has. |
+| A trait's method declares `RunForever`, or names an associated capability set, for an `impl` to run forever. | A call through a bound is checked against the trait's method, as it is for every other capability. `Deserialize.deserialize` declares `RunForever`, since an implementation of `Deserializer` can report a next element forever. |
 
 ### Cost clauses
 
@@ -808,7 +803,7 @@ worst case instead.
 
 | Rule | Reason |
 |---|---|
-| A countable resource takes an exact bound, and time takes only `O(...)` or `finite`. | An exact bound can state that each item is processed exactly once. A concrete time cannot be proven across machines. |
+| A countable resource takes an exact bound, and time takes only `O(...)`. | An exact bound can state that each item is processed exactly once. A concrete time cannot be proven across machines. |
 | `O(f)` bounds the cost for every input, not only for large inputs. | The textbook definition is a limit, which a prover handles poorly, and it gives wrong answers for bounds in several variables. |
 | A bound can mention `result`. | An output-sensitive bound, such as the bound of a function that returns its matches, cannot be stated otherwise. |
 | `log(n)` is log₂(n + 1) rounded up. | It is defined at 0 and is an integer. Inside `O`, the base makes no difference. |
@@ -816,16 +811,16 @@ worst case instead.
 | A function that calls a callback bounds its allocations with `allocations(visit)`, and its allocated bytes with `allocated_bytes(visit)`. | `Option.map` allocates what its callback allocates. Without the term it states no allocation bound, and a function with `cost allocations <= 0` then calls no combinator, even with a lambda that allocates nothing. The alternative is an allocation clause on the type of every callback, which rejects each function that states none. |
 | A cost of a callee, such as `allocations(visit)`, is a bound on any one call, and an `==` bound cannot name it. | A callback's allocations vary with its arguments, so the one number that a signature states for them is an upper bound. An exact count that names an upper bound is false for a call that allocates less. A function that needs an exact count takes a callback whose type states `==`. |
 | A callback whose allocations have no bound makes `allocations(visit)` unbounded, and a bound that names the term holds. | A written clause is true for every argument, as a `time` bound is where `time(visit)` is unbounded. No rule ignores the clause for some argument. A caller that passes such a callback proves no allocation bound through the call. |
-| A cost of a callee is named only in a clause on its own resource, and only `time(...)` follows a callee. | A bound on one resource of a call does not bound another. `allocations(visit)` in a `time` clause would read as if the clause followed `visit`, and allocations do not say whether a call returns. |
+| A cost of a callee is named only in a clause on its own resource. | A bound on one resource of a call does not bound another. |
 | A loop's `cost` holds before the condition is evaluated, and the evaluation that ends the loop is added to it. | A clause that had to hold after the last evaluation could not be exact: `calls(Random.next) == heads` holds before each evaluation of `Random.next() % 2 == 0 && heads < limit`, and one more call has been made after the evaluation that fails. An `O(...)` clause would need a `+ 1` for that evaluation in every loop. |
-| A loop's cost is never `amortized` and never `finite`. | Potential belongs to the values that the loop mutates, and a loop proves termination with `decreases`. |
+| A loop's cost is never `amortized`. | Potential belongs to the values that the loop mutates. |
 
 ### Function types
 
 Rules: [Function types](SPECIFICATION.md#function-types).
 
 A function type puts its clauses after its result, inside parentheses, as in
-`(fn(Request) -> Response uses Database, Log cost time finite)`. Truss has
+`(fn(Request) -> Response uses Database, Log cost time O(1))`. Truss has
 whole clauses, not one or two effect keywords, so the clauses come in the
 order they have in a definition, and the parentheses mark where they end.
 
@@ -1241,7 +1236,7 @@ left.saturating_add(right)
 | Rule | Reason |
 |---|---|
 | A place that one branch mutates is used by no other branch. | This is the rule for calls, where a place passed `mut` is used by nothing else during the call: `swap(mut first, second: mut first)` is rejected. Applied across branches, it prevents every data race. |
-| A branch uses no capability except `Panic`, and uses `Panic` only where the enclosing function has it. | Two branches that called one stateful implementation would race, and the order of their calls would vary from run to run. No code can `provide` `Panic`, so no branch calls a stateful implementation of it. A branch that panicked in a function without `Panic` would end a program that relies on the function's signature, such as a server whose handler type has no `Panic` ([Failure](#failure)). A function that contains `parallel` is therefore still pure, and a test that runs it is cached. Code whose branches use capabilities is [concurrent](#concurrency). |
+| A branch uses no capability except `Panic` and `RunForever`, and uses each only where the enclosing function has it. | Two branches that called one stateful implementation would race, and the order of their calls would vary from run to run. No code can `provide` `Panic` or `RunForever`, so no branch calls a stateful implementation of either. A branch that panicked in a function without `Panic` would end a program that relies on the function's signature, such as a server whose handler type has no `Panic` ([Failure](#failure)). A function that contains `parallel` is therefore still pure, and a test that runs it is cached. Code whose branches use capabilities is [concurrent](#concurrency). |
 | The input decides where a computation is split, never the number of cores. | The result does not depend on the machine: a parallel float sum gives the same bits everywhere (*determinism*). |
 | A test runs the branches in order. | The test runner already runs one test on each core, and a failed check is the same on every run. |
 | A branch cannot exit the block early. | A branch uses no capability except `Panic`, so it cannot be asked to stop. An early exit would have to abandon the other branches, or wait for work whose result is discarded. |
@@ -1532,6 +1527,7 @@ in a test build takes constant time.
 | A test with `uses` is external: it gets the real implementations, and its result is never cached. | Its result depends on the world. It gets no hidden isolation: a test that wants a scratch directory narrows file access where a reader can see it. |
 | A test's standard input is empty. | Workers run tests at once, so input from the terminal would go to whichever test read first, and a test waiting for a person would run into its time limit. A test that needs input gets it from a `Console` it provides, or gives it to a program it runs through `Processes`. |
 | A test declares `Panic` as a function does, and a test that declares only `Panic` is deterministic. | A test's signature states its effects like any other. A panic does not depend on the world, so the suite caches the result of such a test. |
+| A test has `RunForever` whether or not it declares it. | A test has a time limit, so a test that runs forever fails at the limit instead of stopping the suite. No code calls a test, so its termination proves nothing that a caller relies on. |
 | A failed test is never retried. | A retry hides exactly the failures that an external test exists to catch. |
 | A test cannot expect a panic. | That would treat a panic as intended behavior, which is the job of `Result`. The misuse that other languages test this way, such as a violated precondition, does not compile. To check that a program crashes on bad input, an external test runs the program through `Processes`. |
 | A test has a time limit. | A loop that never ends fails its test. |
@@ -1614,7 +1610,7 @@ Rules: [Writing specifications](SPECIFICATION.md#writing-specifications).
 
 | Rule | Reason |
 |---|---|
-| A function called in a specification is pure, without even `Panic`, and has a `time` clause. | A function that might not return, or might end the program, has no value to reason about, and a definition that is not well founded would make the logic unsound. |
+| A function called in a specification is pure: it uses no capability, not even `Panic` or `RunForever`. | A function that might not return, or might end the program, has no value to reason about, and a definition that is not well founded would make the logic unsound. |
 | A specification is read left to right. | `index < items.length() && items[index] > 0` is well defined. |
 | `==>` exists, and only in specifications. | "If this holds, then that holds" is the commonest form of a specification, and `!a \|\| b` hides it. `==>` binds more loosely than `&&` and `\|\|`, as in Dafny. Code already has `if`. |
 | Integer arithmetic in a specification is exact. | A specification cannot have an overflow bug, and `decreases high - low` can be negative, which is the case that the prover must rule out. |
@@ -2011,6 +2007,7 @@ contract, so a typo in a body blocks no caller.
 
 | Rule | Reason |
 |---|---|
+| A body that fails, or that reads a failing part, has no call edges. | A recursion group follows the call edges of its members' bodies, and the proof of a function that terminates reads its group. If a failing body blocked the groups that reach it, a typo in a body would block every caller's proof. The body cannot run, so it calls nothing, and fixing it computes its edges and the groups that change. |
 | The database keeps no earlier version of a failing part. | An earlier version would make the database depend on the order of the edits. A caller checked against an earlier signature would also report errors that the files do not hold. |
 | A build, a test run, or a template check requires that no definition it reaches has errors. | No run executes code that the files do not hold, and a test whose code is correct runs while unrelated code is broken. |
 

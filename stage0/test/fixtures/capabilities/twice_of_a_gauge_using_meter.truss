@@ -3,10 +3,10 @@ fn metered() -> Int64
 {
   var twice = Twice(source: Gauge(last: 0))
   mut twice.skip()
-  drain(mut twice)
+  pull_once(mut twice)
 }
 
 fn pure() -> Int64 {
   var twice = Twice(source: Twice(source: Counter(next: 0)))
-  drain(mut twice)
+  pull_once(mut twice)
 }

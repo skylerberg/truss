@@ -580,7 +580,7 @@ internal fn FileReader.opened(simulated_handle: UInt64) -> FileReader {
 }
 
 public fn FileReader.read_line(mut self) -> Result[Option[String], SystemError]
-  uses Handles
+  uses Handles, RunForever
 {
   mut self.reader.read_line()
 }
@@ -789,7 +789,7 @@ public fn append_text(file: Path, contents: StringSlice) -> Result[Unit, SystemE
 }
 
 public fn copy(from: Path, to: Path) -> Result[UInt64, SystemError]
-  uses FileRead, FileWrite, Handles
+  uses FileRead, FileWrite, Handles, RunForever
 {
   let permissions = FileRead.metadata(from, follow_links: true)?.permissions
   var source = FileRead.open(from)?
@@ -832,7 +832,7 @@ public fn create_directories(directory: Path) -> Result[Unit, SystemError]
 }
 
 public fn remove_all(path: Path) -> Result[Unit, SystemError]
-  uses FileRead, FileWrite
+  uses FileRead, FileWrite, RunForever
 {
   if FileRead.metadata(path, follow_links: false)?.is_directory() {
     for entry in FileRead.list(path)? {
@@ -872,7 +872,7 @@ public fn temporary_root() -> Path
 }
 
 public fn with_temporary_directory[Output](work: (fn(Path) -> Output uses generic Granted)) -> Result[Output, SystemError]
-  uses FileRead, FileWrite, Random, Environment, generic Granted
+  uses FileRead, FileWrite, Random, Environment, generic Granted, RunForever
 {
   let directory = create_temporary_directory(temporary_root(), prefix: "truss-")?
   let output = work(directory)
@@ -881,7 +881,7 @@ public fn with_temporary_directory[Output](work: (fn(Path) -> Output uses generi
 }
 
 public fn with_temporary_file[Output](work: (fn(Path) -> Output uses generic Granted)) -> Result[Output, SystemError]
-  uses FileRead, FileWrite, Random, Environment, generic Granted
+  uses FileRead, FileWrite, Random, Environment, generic Granted, RunForever
 {
   let directory = create_temporary_directory(temporary_root(), prefix: "truss-")?
   let file = directory.join("file")
@@ -903,7 +903,7 @@ public type WalkEntry(path: Path, kind: FileKind, depth: UInt64)
 let walk_depth_limit: UInt64 = 256
 
 public fn walk(root: Path, follow_links: Bool = false) -> Result[List[WalkEntry], SystemError]
-  uses FileRead
+  uses FileRead, RunForever
 {
   let kind = FileRead.metadata(root, follow_links: follow_links)?.kind
   var unvisited: List[WalkEntry] = [WalkEntry(path: root.copy(), kind: kind, depth: 0)]
@@ -953,14 +953,12 @@ public opaque type Glob(components: List[GlobComponent], absolute: Bool)
 fn wildcard_matches(
   pattern_length: UInt64,
   text_length: UInt64,
-  is_wildcard: (fn(pattern_index: UInt64) -> Bool requires pattern_index < pattern_length cost time finite),
+  is_wildcard: (fn(pattern_index: UInt64) -> Bool requires pattern_index < pattern_length),
   matches_one: (
     fn(pattern_index: UInt64, text_index: UInt64) -> Bool
       requires pattern_index < pattern_length && text_index < text_length
-      cost time finite
   ),
 ) -> Bool
-  cost time finite
 {
   var text: UInt64 = 0
   var pattern: UInt64 = 0
@@ -1003,7 +1001,6 @@ fn wildcard_matches(
 }
 
 fn GlobToken.matches(self, character: Character) -> Bool
-  cost time finite
 {
   match self {
     AnyCharacters => false
@@ -1022,7 +1019,6 @@ fn GlobToken.matches(self, character: Character) -> Bool
 }
 
 fn name_matches(tokens: Slice[GlobToken], name: StringSlice) -> Bool
-  cost time finite
 {
   var characters: List[Character] = []
   for character in name.characters() {
@@ -1039,7 +1035,6 @@ fn name_matches(tokens: Slice[GlobToken], name: StringSlice) -> Bool
 fn parse_class(pattern: StringSlice, from: UInt64) -> Result[ParsedClass, GlobError]
   requires from < pattern.length()
   ensures !(result is Ok(parsed) && (parsed.end <= from || parsed.end > pattern.length()))
-  cost time finite
 {
   var ranges: List[CharacterRange] = []
   var index = from + 1
@@ -1097,13 +1092,11 @@ impl FromTemplate for Glob {
 
 public fn is_valid_glob(literals: Slice[text::Literal]) -> Bool
   ensures result == (literals.length() == 1 && Glob.parse(literals[0].text()) is Ok(_))
-  cost time finite
 {
   literals.length() == 1 && Glob.parse(literals[0].text()) is Ok(_)
 }
 
 public fn Glob.parse(pattern: StringSlice) -> Result[Glob, GlobError]
-  cost time finite
 {
   var components: List[GlobComponent] = []
   var tokens: List[GlobToken] = []
@@ -1158,7 +1151,6 @@ public fn Glob.parse(pattern: StringSlice) -> Result[Glob, GlobError]
 }
 
 public fn Glob.matches(self, path: Path) -> Bool
-  cost time finite
 {
   if self.absolute != path.is_absolute() {
     return false
@@ -1181,7 +1173,7 @@ public fn Glob.matches(self, path: Path) -> Bool
 }
 
 public fn Glob.find(self, root: Path) -> Result[List[Path], SystemError]
-  uses FileRead
+  uses FileRead, RunForever
 {
   var paths: List[Path] = []
   for entry in walk(root)? {
@@ -1373,11 +1365,15 @@ public fn MemoryFiles.new() -> MemoryFiles {
   files
 }
 
-public fn MemoryFiles.with_text(own self, file: Path, contents: StringSlice) -> MemoryFiles {
+public fn MemoryFiles.with_text(own self, file: Path, contents: StringSlice) -> MemoryFiles
+  uses RunForever
+{
   own self.with_bytes(file, contents: contents.bytes())
 }
 
-public fn MemoryFiles.with_bytes(own self, file: Path, contents: Slice[UInt8]) -> MemoryFiles {
+public fn MemoryFiles.with_bytes(own self, file: Path, contents: Slice[UInt8]) -> MemoryFiles
+  uses RunForever
+{
   var changed = own self
   var directory = Path.new("/")
   var components = reversed_components(file)
@@ -1401,14 +1397,18 @@ public fn MemoryFiles.with_bytes(own self, file: Path, contents: Slice[UInt8]) -
   changed
 }
 
-public fn MemoryFiles.contents(self, file: Path) -> Option[List[UInt8]] {
+public fn MemoryFiles.contents(self, file: Path) -> Option[List[UInt8]]
+  uses RunForever
+{
   match self.read_bytes(file) {
     Ok(bytes) => Some(own bytes)
     Err(_) => None
   }
 }
 
-public fn MemoryFiles.text(self, file: Path) -> Option[String] {
+public fn MemoryFiles.text(self, file: Path) -> Option[String]
+  uses RunForever
+{
   match self.read_bytes(file) {
     Ok(bytes) => match String.from_utf8(own bytes) {
       Ok(text) => Some(own text)
@@ -1487,7 +1487,9 @@ internal fn MemoryFiles.kind_of(self, inode: UInt64) -> Option[FileKind] {
   }
 }
 
-internal fn MemoryFiles.locate(self, path: Path, follow_last: Bool) -> Result[Located, SystemError] {
+internal fn MemoryFiles.locate(self, path: Path, follow_last: Bool) -> Result[Located, SystemError]
+  uses RunForever
+{
   var unresolved = reversed_components(path)
   var current = Path.new("/")
   var followed: UInt64 = 0
@@ -1544,7 +1546,9 @@ internal fn MemoryFiles.locate(self, path: Path, follow_last: Bool) -> Result[Lo
   Ok(Located(path: own current, inode: inode))
 }
 
-internal fn MemoryFiles.existing(self, path: Path, follow_last: Bool) -> Result[UInt64, SystemError] {
+internal fn MemoryFiles.existing(self, path: Path, follow_last: Bool) -> Result[UInt64, SystemError]
+  uses RunForever
+{
   match self.locate(path, follow_last: follow_last)?.inode {
     Some(inode) => Ok(inode)
     None => Err(SystemError.NotFound)
@@ -1610,7 +1614,9 @@ internal fn MemoryFiles.remove_tree(mut self, path: Path, keep_directory: Bool) 
   }
 }
 
-internal fn MemoryFiles.read_bytes(self, file: Path) -> Result[List[UInt8], SystemError] {
+internal fn MemoryFiles.read_bytes(self, file: Path) -> Result[List[UInt8], SystemError]
+  uses RunForever
+{
   let inode = self.existing(file, follow_last: true)?
   match self.inodes.get(inode) {
     Some(entry) => match entry.kind {
@@ -1647,7 +1653,9 @@ internal fn MemoryFiles.replace_contents(mut self, inode: UInt64, contents: own 
   }
 }
 
-internal fn MemoryFiles.write_bytes(mut self, file: Path, contents: own List[UInt8]) -> Result[Unit, SystemError] {
+internal fn MemoryFiles.write_bytes(mut self, file: Path, contents: own List[UInt8]) -> Result[Unit, SystemError]
+  uses RunForever
+{
   let located = self.locate(file, follow_last: true)?
   match located.inode {
     Some(inode) => mut self.replace_contents(inode, contents: own contents)
@@ -1664,7 +1672,9 @@ internal fn MemoryFiles.change_inode(
   path: Path,
   permissions: Option[Permissions],
   modified: Option[Instant],
-) -> Result[Unit, SystemError] {
+) -> Result[Unit, SystemError]
+  uses RunForever
+{
   let inode = self.existing(path, follow_last: true)?
   match mut self.inodes.take(inode) {
     Some(entry) => {
@@ -1810,7 +1820,9 @@ internal fn MemoryFiles.resize(mut self, inode: UInt64, length: UInt64) -> Resul
   }
 }
 
-internal fn MemoryFiles.open_to_read(mut self, file: Path) -> Result[UInt64, SystemError] {
+internal fn MemoryFiles.open_to_read(mut self, file: Path) -> Result[UInt64, SystemError]
+  uses RunForever
+{
   let inode = self.existing(file, follow_last: true)?
   if self.kind_of(inode) == Some(FileKind.Directory) {
     return Err(SystemError.IsADirectory)
@@ -1821,7 +1833,9 @@ internal fn MemoryFiles.open_to_read(mut self, file: Path) -> Result[UInt64, Sys
   Ok(mut self.add_open_file(inode, readable: true, writable: false, appending: false))
 }
 
-internal fn MemoryFiles.open_to_write(mut self, file: Path, mode: WriteMode) -> Result[UInt64, SystemError] {
+internal fn MemoryFiles.open_to_write(mut self, file: Path, mode: WriteMode) -> Result[UInt64, SystemError]
+  uses RunForever
+{
   let located = self.locate(file, follow_last: true)?
   let inode = match located.inode {
     Some(existing) => {
@@ -1854,7 +1868,9 @@ internal fn MemoryFiles.open_to_write(mut self, file: Path, mode: WriteMode) -> 
   Ok(handle)
 }
 
-impl FileRead for MemoryFiles {
+impl FileRead for MemoryFiles
+  uses RunForever
+{
   fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
     self.read_bytes(file)
   }
@@ -1914,7 +1930,9 @@ impl FileRead for MemoryFiles {
   }
 }
 
-impl FileWrite for MemoryFiles {
+impl FileWrite for MemoryFiles
+  uses RunForever
+{
   fn write(mut self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
     mut self.write_bytes(file, contents: contents.to_list())
   }

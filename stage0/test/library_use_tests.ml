@@ -35,9 +35,10 @@ let () =
 let () =
   Harness.test "a display that ends is proven, and a function with a time clause calls it"
     (fun () -> expect_proven Fixtures.Library_use.point_display_called_by_a_timed_function);
-  Harness.test "a display that may not end is rejected" (fun () ->
+  Harness.test "a display that may run forever is rejected" (fun () ->
       Support.expect_one_diagnostic ~check Fixtures.Library_use.display_with_an_endless_loop
-        "capabilities.may_not_terminate")
+        "capabilities.not_available"
+        ~says:"`display` can use only the capabilities `Display` declares for it.")
 
 let () =
   Harness.test "two strings with the same text are equal" (fun () ->

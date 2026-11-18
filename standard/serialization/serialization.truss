@@ -6,6 +6,7 @@ public trait Serialize {
 
 public trait Deserialize {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[Self, Error]
+    uses RunForever
 }
 
 public trait Serializer {
@@ -67,7 +68,9 @@ impl Display for Error {
   }
 }
 
-public fn required[Field: Deserialize, Source: Deserializer](source: mut Source, name: StringSlice) -> Result[Field, Error] {
+public fn required[Field: Deserialize, Source: Deserializer](source: mut Source, name: StringSlice) -> Result[Field, Error]
+  uses RunForever
+{
   let _ = mut source.field(name)
   Field.deserialize(mut source)
 }
@@ -75,7 +78,9 @@ public fn required[Field: Deserialize, Source: Deserializer](source: mut Source,
 public fn optional[Field: Deserialize, Source: Deserializer](
   source: mut Source,
   name: StringSlice,
-) -> Result[Option[Field], Error] {
+) -> Result[Option[Field], Error]
+  uses RunForever
+{
   if !mut source.field(name) {
     return Ok(None)
   }
@@ -273,7 +278,9 @@ impl Serialize for List[Element: Serialize] {
 }
 
 impl Deserialize for List[Element: Deserialize] {
-  fn deserialize[Source: Deserializer](source: mut Source) -> Result[List[Element], Error] {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[List[Element], Error]
+    uses RunForever
+  {
     mut source.begin_list()?
     var items: List[Element] = []
     while mut source.next_element() {
@@ -294,7 +301,9 @@ impl Serialize for Option[Inner: Serialize] {
 }
 
 impl Deserialize for Option[Inner: Deserialize] {
-  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Option[Inner], Error] {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Option[Inner], Error]
+    uses RunForever
+  {
     let kind = source.kind()
     if kind == Kind.Absent || kind == Kind.Null {
       mut source.skip()
@@ -320,7 +329,9 @@ impl Serialize for Map[Key: Hash + Ordered + Display, Member: Serialize] {
 }
 
 impl Deserialize for Map[Key: Hash + Ordered + text::Parse, Member: Deserialize] {
-  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Map[Key, Member], Error] {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Map[Key, Member], Error]
+    uses RunForever
+  {
     mut source.begin_map()?
     var members: Map[Key, Member] = [:]
     while true {

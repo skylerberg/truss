@@ -23,7 +23,6 @@ fn odd(n: Int64) -> Bool
 }
 
 fn corner() -> Point
-  cost time finite
 {
   Point(x: origin_x, y: doubled)
 }

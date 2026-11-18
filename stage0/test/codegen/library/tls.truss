@@ -55,7 +55,7 @@ fn world() -> simulation::World
 }
 
 fn serve_once(listener: mut network::Listener) -> String
-  uses Handles, Tasks, Random, Clock, Panic
+  uses Handles, Tasks, Random, Clock, Panic, RunForever
 {
   var connection = mut listener.accept().expect("a client connects")
   let _ = mut connection.set_read_timeout(Some(Duration.seconds(5)))
@@ -77,7 +77,7 @@ fn serve_once(listener: mut network::Listener) -> String
 }
 
 fn visit(host: StringSlice, roots: own List[x509::Certificate], protocols: own List[String]) -> String
-  uses NetworkClient, Handles, Tasks, Random, Clock, Panic
+  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, RunForever
 {
   var connection = network::connect(host, port: 8443).expect("the server accepts")
   let _ = mut connection.set_read_timeout(Some(Duration.seconds(5)))
@@ -96,7 +96,7 @@ fn visit(host: StringSlice, roots: own List[x509::Certificate], protocols: own L
 }
 
 fn handshake(host: StringSlice, roots: own List[x509::Certificate], protocols: own List[String]) -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Random, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Random, Panic, RunForever
 {
   var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8443)).expect("the port is free")
   var server = ""
@@ -129,13 +129,13 @@ test "a client rejects a chain for another host or from an unknown root" uses Pa
 }
 
 fn greet(request: own http::Request, responder: mut http::Responder)
-  uses Tasks
+  uses Tasks, RunForever
 {
   let _ = mut responder.send(http::Response.text("secure ${request.path()}".slice()))
 }
 
 fn secure_exchange() -> String
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
   var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8443)).expect("the port is free")
   concurrent {
@@ -157,13 +157,13 @@ test "an HTTPS client and server exchange a request and a response" uses Panic {
 }
 
 fn routes(request: own http::Request, responder: mut http::Responder)
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let _ = mut responder.send(route(own request))
 }
 
 fn route(request: own http::Request) -> http::Response
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if request.matches(http::Route"POST /upload") is Some(_) {
     let tag = request.header("x-tag").unwrap_or("none".slice()).to_string()
@@ -191,7 +191,7 @@ fn summary(outcome: own Result[http::Response, http::Error]) -> String {
 }
 
 fn client_exchanges(is_secure: Bool) -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
   let port: UInt16 = if is_secure { 8443 } else { 8080 }
   var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: port)).expect("the port is free")
@@ -259,7 +259,7 @@ fn identity(certificate_text: StringSlice, key_text: StringSlice) -> tls::Identi
 }
 
 fn mutual(port: UInt16, required: tls::ClientCertificates, protocols: List[String], presented: Option[tls::Identity]) -> String
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
   var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: port)).expect("the port is free")
   var config = server_config()
@@ -297,7 +297,7 @@ test "a server that requires a client certificate accepts one its roots signed, 
 }
 
 fn read_proxy_head(connection: network::Connection) -> String
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var received: List[UInt8] = []
   while !String.from_utf8_lossy(received.slice()).slice().contains("\r\n\r\n") {
@@ -310,7 +310,7 @@ fn read_proxy_head(connection: network::Connection) -> String
 }
 
 fn pump(from: network::Connection, to: network::Connection)
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while true {
     var piece: List[UInt8] = []
@@ -330,7 +330,7 @@ fn pump(from: network::Connection, to: network::Connection)
 }
 
 fn proxied() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
   var origin = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8455)).expect("the port is free")
   var proxy = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 3128)).expect("the port is free")
@@ -402,7 +402,7 @@ test "a client sends plain requests to its proxy in absolute form and tunnels TL
 }
 
 fn smtp_line[Stream: streams::Duplex](connection: Stream, inbox: mut List[UInt8]) -> Option[String]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while true {
     for index in 1..inbox.length() {
@@ -421,7 +421,7 @@ fn smtp_line[Stream: streams::Duplex](connection: Stream, inbox: mut List[UInt8]
 }
 
 fn smtp_session[Stream: streams::Duplex](connection: Stream, transcript: tasks::Cell[List[String]], offers_tls: Bool) -> Bool
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var inbox: List[UInt8] = []
   while true {
@@ -455,7 +455,7 @@ fn smtp_session[Stream: streams::Duplex](connection: Stream, transcript: tasks::
 }
 
 fn mailed(port: UInt16, offers_tls: Bool) -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
   var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: port)).expect("the port is free")
   let transcript = tasks::Cell[List[String]].new([])

@@ -52,7 +52,6 @@ fn first_changed_code(form: Form) -> UInt32
 }
 
 fn is_below(text: StringSlice, limit: UInt32) -> Bool
-  cost time finite
 {
   for character in text.characters() {
     if character.code() >= limit {
@@ -63,7 +62,6 @@ fn is_below(text: StringSlice, limit: UInt32) -> Bool
 }
 
 fn append_decomposition(codes: mut List[UInt32], code: UInt32, compatible: Bool)
-  cost time finite
 {
   if code < 160 {
     mut codes.push(code)
@@ -89,7 +87,6 @@ fn append_decomposition(codes: mut List[UInt32], code: UInt32, compatible: Bool)
 }
 
 fn with_combining_classes(codes: Slice[UInt32]) -> List[UInt32]
-  cost time finite
 {
   var entries: List[UInt32] = []
   for index in 0..codes.length() {
@@ -101,7 +98,6 @@ fn with_combining_classes(codes: Slice[UInt32]) -> List[UInt32]
 
 fn reorder(entries: mut List[UInt32])
   ensures entries.length() == old(entries.length())
-  cost time finite
 {
   var position: UInt64 = 1
   while position < entries.length()
@@ -135,7 +131,6 @@ fn composite_of(first: UInt32, second: UInt32) -> Option[UInt32]
 }
 
 fn compose(entries: Slice[UInt32]) -> List[UInt32]
-  cost time finite
 {
   var output: List[UInt32] = []
   var starter: UInt64 = 0
@@ -169,7 +164,6 @@ fn compose(entries: Slice[UInt32]) -> List[UInt32]
 }
 
 fn encoded(codes: Slice[UInt32]) -> String
-  cost time finite
 {
   var output = ""
   for index in 0..codes.length() {
@@ -179,7 +173,6 @@ fn encoded(codes: Slice[UInt32]) -> String
 }
 
 public fn normalize(text: StringSlice, form: Form = Form.Composed) -> String
-  cost time finite
 {
   if is_below(text, limit: first_changed_code(form)) {
     return text.to_string()
@@ -199,7 +192,6 @@ public fn normalize(text: StringSlice, form: Form = Form.Composed) -> String
 }
 
 public fn is_normalized(text: StringSlice, form: Form = Form.Composed) -> Bool
-  cost time finite
 {
   is_below(text, limit: first_changed_code(form)) || normalize(text, form: form) == text
 }
@@ -219,7 +211,6 @@ public fn fold_case(text: StringSlice) -> String
 }
 
 public fn equal_ignoring_case(first: StringSlice, second: StringSlice) -> Bool
-  cost time finite
 {
   fold_case(first) == fold_case(second)
 }

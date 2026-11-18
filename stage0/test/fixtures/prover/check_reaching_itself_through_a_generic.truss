@@ -1,10 +1,8 @@
 trait Check {
   fn check(self) -> Bool
-    cost time finite
 }
 
 fn run[Item: Check](item: Item) -> Bool
-  cost time finite
 {
   item.check()
 }
@@ -13,7 +11,6 @@ type Loop()
 
 impl Check for Loop {
   fn check(self) -> Bool
-    cost time finite
   {
     !run(self)
   }

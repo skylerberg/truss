@@ -1,4 +1,6 @@
-fn forever() {
+fn forever()
+  uses RunForever
+{
   while true {}
 }
 

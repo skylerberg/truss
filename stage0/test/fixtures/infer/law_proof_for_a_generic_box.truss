@@ -1,7 +1,6 @@
 type Box[Item](item: Item)
 
 fn smaller[Item: Ordered](first: Box[Item], second: Box[Item]) -> Bool
-  cost time finite
 {
   first.item < second.item
 }

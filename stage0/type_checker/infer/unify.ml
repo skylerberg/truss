@@ -33,11 +33,7 @@ let make_fresh_value unifier =
 
 let make_fresh_capability_variable unifier =
   unifier.capability_variable_count <- unifier.capability_variable_count + 1;
-  Types.make_capability_set
-    [
-      Types.Capability_variable unifier.capability_variable_count;
-      Types.Divergence (Of_variable unifier.capability_variable_count);
-    ]
+  Types.make_capability_set [ Types.Capability_variable unifier.capability_variable_count ]
 
 let unify_capabilities unifier (left : Types.capability_set) right =
   left = right
@@ -86,17 +82,6 @@ and zonk_capabilities unifier capabilities =
           [
             Types.Capability_projection
               { base = zonk unifier base; trait = zonk_trait unifier trait; name };
-          ]
-      | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
-          [
-            Types.Divergence
-              (Of_impl_method
-                 {
-                   self_type = zonk unifier self_type;
-                   trait = zonk_trait unifier trait;
-                   name;
-                   receiver;
-                 });
           ]
       | capability -> [ capability ])
     capabilities

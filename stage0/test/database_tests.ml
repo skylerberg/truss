@@ -158,13 +158,7 @@ let tool_user =
 
 let make_mutual_source body =
   Printf.sprintf
-    "fn f(n: Int64) -> Int64\n\
-    \  cost time finite\n\
-     { g(n) }\n\
-     fn g(n: Int64) -> Int64\n\
-    \  cost time finite\n\
-     { %s }\n\
-     fn h() -> Int64 { f(1) }\n"
+    "fn f(n: Int64) -> Int64\n{ g(n) }\nfn g(n: Int64) -> Int64\n{ %s }\nfn h() -> Int64 { f(1) }\n"
     body
 
 let acyclic = make_mutual_source "n"
@@ -173,10 +167,8 @@ let cyclic = make_mutual_source "f(n)"
 let stepper =
   "trait Step {\n\
   \  fn step(own self) -> Int64\n\
-  \    cost time finite\n\
    }\n\
    fn run(value: own any Step) -> Int64\n\
-  \  cost time finite\n\
    {\n\
   \  own value.step()\n\
    }\n\
@@ -186,7 +178,6 @@ let stepper_that_runs =
   stepper
   ^ "impl Step for Foo {\n\
     \  fn step(own self) -> Int64\n\
-    \    cost time finite\n\
     \  {\n\
     \    let value: any Step = any self\n\
     \    run(own value)\n\
@@ -197,10 +188,8 @@ let make_configured_source construction =
   Printf.sprintf
     "type Config(size: Int64 = start())\n\
      fn start() -> Int64\n\
-    \  cost time finite\n\
      { make().size }\n\
      fn make() -> Config\n\
-    \  cost time finite\n\
      { %s }\n"
     construction
 
@@ -214,12 +203,10 @@ let make_default_source version =
   \  }\n\
    }\n" ^ version
   ^ "fn make[Item: Default]() -> Item\n\
-    \  cost time finite\n\
      {\n\
     \  Item.default()\n\
      }\n\
      fn check() -> Version\n\
-    \  cost time finite\n\
      {\n\
     \  make[Version]()\n\
      }\n"
@@ -524,19 +511,15 @@ let () =
         ~excludes:[];
       expect_reads database "call edges app app::main::run" ~includes:[] ~excludes:dependencies);
   Harness.test
-    "a construction that runs a field default joins the recursion group of the default's callee"
+    "a construction that runs a field default that fails adds no call edge to the default's callee"
     (fun () ->
-      expect_included
-        (list_propagated
-           ~before:[ ("app::main", make_configured_source "Config(size: 1)") ]
-           ~after:[ ("app::main", make_configured_source "Config()") ])
-        ~parts:
-          [
-            "MIR call edges app::main::make";
-            "recursion group app::main::make";
-            "recursion group app::main::start";
-            "proof app::main::start";
-          ]);
+      let recomputed =
+        list_propagated
+          ~before:[ ("app::main", make_configured_source "Config(size: 1)") ]
+          ~after:[ ("app::main", make_configured_source "Config()") ]
+      in
+      expect_included recomputed ~parts:[ "MIR call edges app::main::make" ];
+      expect_untouched recomputed ~names:[ "recursion group" ]);
   Harness.test "a derived method's MIR call edges read its generated MIR" (fun () ->
       expect_reads
         (build [ ("app::main", version_deriving_over_a_key) ])

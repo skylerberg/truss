@@ -5,7 +5,9 @@ type Trickle(received: List[UInt8], step: UInt64)
 impl streams::Writer for Trickle {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
     var accepted: UInt64 = 0
-    while accepted < self.step && accepted < bytes.length() {
+    while accepted < self.step && accepted < bytes.length()
+      decreases self.step - accepted
+    {
       mut self.received.push(bytes[accepted])
       accepted += 1
     }
@@ -41,7 +43,9 @@ type Drip(bytes: List[UInt8], position: UInt64, step: UInt64)
 impl streams::Reader for Drip {
   fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
     var read_count: UInt64 = 0
-    while read_count < self.step && read_count < limit && self.position < self.bytes.length() {
+    while read_count < self.step && read_count < limit && self.position < self.bytes.length()
+      decreases self.step - read_count
+    {
       mut buffer.push(self.bytes[self.position])
       self.position += 1
       read_count += 1

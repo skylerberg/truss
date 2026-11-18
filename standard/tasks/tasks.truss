@@ -82,7 +82,7 @@ public fn Channel[Message: Storable].new(capacity: UInt64 = 0) -> Channel[Messag
 }
 
 public fn Channel[Message: Storable].send(self, message: own Message) -> Result[Unit, SendError]
-  uses Tasks
+  uses Tasks, RunForever
 {
   let key = intrinsic::shared_key(self.queue)
   var unsent = own message
@@ -112,7 +112,7 @@ public fn Channel[Message: Storable].send(self, message: own Message) -> Result[
 }
 
 fn Channel[Message: Storable].await_receiver(self, position: UInt64) -> Result[Unit, SendError]
-  uses Tasks
+  uses Tasks, RunForever
 {
   let key = intrinsic::shared_key(self.queue)
   while true {
@@ -132,7 +132,7 @@ fn Channel[Message: Storable].await_receiver(self, position: UInt64) -> Result[U
 }
 
 public fn Channel[Message: Storable].receive(self) -> Option[Message]
-  uses Tasks
+  uses Tasks, RunForever
 {
   let key = intrinsic::shared_key(self.queue)
   while true {
@@ -187,7 +187,7 @@ public type Messages[Message: Storable](channel: Channel[Message])
 
 impl Cursor for Messages[Message: Storable] {
   type Element = Message
-  capability Uses = Tasks
+  capability Uses = Tasks, RunForever
 
   fn next(mut self) -> Option[Message]
     uses Self.Uses
@@ -269,7 +269,7 @@ public fn Limiter.new(permits: UInt64) -> Limiter
 }
 
 public fn Limiter.hold[Output](self, work: (fn() -> Output uses generic Granted)) -> Option[Output]
-  uses Tasks, generic Granted
+  uses Tasks, generic Granted, RunForever
 {
   if self.permits.send(Permit()) is Err(_) {
     return None
@@ -402,7 +402,9 @@ internal fn Scheduler.join(mut self, task_group: UInt64) -> Bool {
   true
 }
 
-internal fn Scheduler.cancel(mut self, task_group: UInt64) -> Bool {
+internal fn Scheduler.cancel(mut self, task_group: UInt64) -> Bool
+  uses RunForever
+{
   let index = match self.group_index(task_group) {
     Some(index) => index
     None => return false
@@ -599,7 +601,7 @@ internal fn Scheduler.return_to_root(mut self, suspended: Bool) {
 }
 
 fn switch_task(scheduler: intrinsic::Shared[Scheduler])
-  uses Tasks, Panic
+  uses Tasks, Panic, RunForever
 {
   while true {
     let decision = intrinsic::shared_update(scheduler, input: 0, change: fn(state, _) {
@@ -645,7 +647,7 @@ internal fn SeededTasks.advance(self, by: Duration)
 }
 
 internal fn SeededTasks.sleep(self, duration: Duration)
-  uses Tasks, Panic
+  uses Tasks, Panic, RunForever
 {
   let blocked = intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
     mut scheduler.sleep(duration)
@@ -656,7 +658,7 @@ internal fn SeededTasks.sleep(self, duration: Duration)
 }
 
 impl Tasks for SeededTasks
-  uses Panic
+  uses Panic, RunForever
 {
   fn open(self) -> UInt64 {
     intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
@@ -797,7 +799,7 @@ public fn Pool[Resource: Storable].using[Output, Failure](
   open: (fn() -> Result[Resource, Failure] uses generic Granted),
   work: (fn(mut Resource) -> Result[Output, Failure] uses generic Granted),
 ) -> Option[Result[Output, Failure]]
-  uses Tasks, Clock, generic Granted
+  uses Tasks, Clock, generic Granted, RunForever
 {
   let idle = self.idle.copy()
   let options = self.options
@@ -805,7 +807,9 @@ public fn Pool[Resource: Storable].using[Output, Failure](
     let now = Clock.now()
     let reused = idle.update(fn(listed) {
       var found: Option[Resource] = None
-      while found is None && !listed.is_empty() {
+      while found is None && !listed.is_empty()
+        decreases listed.length()
+      {
         let last = mut listed.pop()
         match own last {
           Some(entry) => {

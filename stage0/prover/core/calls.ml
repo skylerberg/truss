@@ -829,7 +829,6 @@ let compute_function_value_amount context frame ~location (function_type : Types
             | Types.Capability_parameter _ | Types.Capability_projection _
             | Types.Capability_variable _ ->
                 true
-            | Types.Divergence _ -> false
             | Types.Capability_error _ ->
                 Facts.raise_bug "the prover reads a capability with an error")
           (function_type.uses :> Types.capability list)

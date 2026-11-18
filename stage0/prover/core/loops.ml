@@ -102,7 +102,6 @@ let loop_clause_holds context (at : State.frame) (counter : Costs.counter) (cost
     match cost.bound with
     | Order_of amount | At_most amount | Exactly amount ->
         snd (Validity.read_specification context { at with makes_obligations = false } amount)
-    | Finite -> Costs.zero
   in
   match counter.counting with
   | Units -> Costs.at_most since (Costs.bound amount)
@@ -154,8 +153,7 @@ let check_loop_entry context frame costs =
       | Clause_bound { written; _ } ->
           (match written.bound with
           | Order_of amount | At_most amount | Exactly amount ->
-              ignore (Validity.read_specification context frame amount)
-          | Finite -> ());
+              ignore (Validity.read_specification context frame amount));
           Facts.oblige context frame Cost
             (Facts.locate context frame.source written.origin)
             [
@@ -281,7 +279,6 @@ let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) costs ~it
                     (Validity.read_specification context
                        { clause_at with makes_obligations = false }
                        amount)
-              | Finite -> Costs.zero
             in
             let counted =
               match cost.counter.counting with
@@ -614,8 +611,7 @@ let names_visited (clauses : Mir.loop_clause list) =
       | Mir.Invariant invariant -> Amounts.mentions_history invariant
       | Decreases measures -> List.exists Amounts.mentions_history measures
       | Cost { bound = Order_of bound | At_most bound | Exactly bound; _ } ->
-          Amounts.mentions_history bound
-      | Cost { bound = Finite; _ } -> false)
+          Amounts.mentions_history bound)
     clauses
 
 let assume_visited_is_a_prefix context (head : State.frame) ~element ~visited ~entry_model ~model =

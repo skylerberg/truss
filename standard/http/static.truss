@@ -147,7 +147,7 @@ fn is_unchanged(request: Request, tag: StringSlice, modified: Instant) -> Bool {
 }
 
 public fn serve_file(request: Request, responder: mut Responder, file: Path, options: StaticOptions = StaticOptions()) -> Result[Unit, Error]
-  uses FileRead, Handles, Tasks
+  uses FileRead, Handles, Tasks, RunForever
 {
   let metadata = match FileRead.metadata(file) {
     Ok(metadata) => metadata
@@ -237,7 +237,7 @@ public fn serve_directory(
   prefix: StringSlice = "/",
   options: StaticOptions = StaticOptions(),
 ) -> Result[Unit, Error]
-  uses FileRead, Handles, Tasks
+  uses FileRead, Handles, Tasks, RunForever
 {
   if request.method != Method.Get && request.method != Method.Head {
     let refused = Response.text("only GET and HEAD are allowed", status: Status(code: 405)).with_header("Allow", value: "GET, HEAD")

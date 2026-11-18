@@ -143,8 +143,8 @@ let judge : Diagnostic.Code.t -> verdict = function
   | Parser (Cost_word | Misplaced_potential | Interpolation_not_allowed) -> Unknown
   | Parser
       ( Use_after_definition | Let_else_brace | Nesting_too_deep | Misplaced_opaque
-      | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Finite_not_time
-      | Loop_cost_bound | Function_type_names | Misplaced_requires | Misplaced_function_type
+      | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Loop_cost_bound
+      | Function_type_names | Misplaced_requires | Misplaced_function_type
       | Misplaced_associated_type | Misplaced_constraint | Specification_only | Misplaced_assert
       | Misplaced_proof | Misplaced_loop_exit | Exits_parallel | Echo_in_specification
       | Reserved_specification_name )

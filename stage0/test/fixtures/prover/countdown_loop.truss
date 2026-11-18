@@ -6,7 +6,6 @@ impl Cursor for Countdown {
   fn next(mut self) -> Option[UInt8]
     ensures result != None ==> self.left < old(self.left)
     ensures result != None ==> result == Some(self.left)
-    cost time finite
   {
     if self.left == 0 { None } else {
       self.left -= 1
@@ -16,7 +15,6 @@ impl Cursor for Countdown {
 }
 
 fn f(start: Countdown) -> UInt8
-  cost time finite
 {
   var left = start
   var last: UInt8 = 0

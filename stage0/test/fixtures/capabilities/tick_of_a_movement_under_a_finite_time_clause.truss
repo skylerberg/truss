@@ -1,5 +1,0 @@
-fn f[Watch: Clockwork](movement: mut Watch.Movement) -> UInt64
-  cost time finite
-{
-  mut movement.tick()
-}

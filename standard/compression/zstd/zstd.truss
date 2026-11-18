@@ -283,6 +283,7 @@ type Counts(values: List[Int16], log: UInt32, consumed: UInt64)
 
 fn read_counts(bytes: Slice[UInt8], maximum_symbol: UInt64, maximum_log: UInt32) -> Result[Counts, Error]
   requires maximum_log <= 9 && maximum_symbol <= 255
+  uses RunForever
 {
   var reader = Forward(bytes: bytes.to_list(), bit: 0)
   let log = (mut reader.read(4) & 15) + 5
@@ -362,7 +363,9 @@ fn next_state(table: FseTable, entry: FseEntry, stream: mut Backward) -> UInt64 
   intrinsic::convert[UInt32, UInt64](entry.baseline) + intrinsic::convert[UInt32, UInt64](mut stream.read(entry.bits))
 }
 
-fn decode_weights(bytes: Slice[UInt8], at: UInt64) -> Result[Weights, Error] {
+fn decode_weights(bytes: Slice[UInt8], at: UInt64) -> Result[Weights, Error]
+  uses RunForever
+{
   if at >= bytes.length() {
     return malformed("a missing Huffman header")
   }
@@ -421,7 +424,9 @@ fn decode_weights(bytes: Slice[UInt8], at: UInt64) -> Result[Weights, Error] {
 
 type HuffmanRead(table: Huffman, consumed: UInt64)
 
-fn read_huffman(bytes: Slice[UInt8], at: UInt64) -> Result[HuffmanRead, Error] {
+fn read_huffman(bytes: Slice[UInt8], at: UInt64) -> Result[HuffmanRead, Error]
+  uses RunForever
+{
   let read = decode_weights(bytes, at: at)?
   var weights = own read.values
   var total: UInt32 = 0
@@ -512,7 +517,9 @@ type FrameState(
   repeats: Array[UInt64, 3],
 )
 
-fn decode_literals(block: Slice[UInt8], state: mut FrameState) -> Result[Literals, Error] {
+fn decode_literals(block: Slice[UInt8], state: mut FrameState) -> Result[Literals, Error]
+  uses RunForever
+{
   if block.is_empty() {
     return malformed("a block without literals")
   }
@@ -599,6 +606,7 @@ type TableRead(table: FseTable, consumed: UInt64)
 
 fn read_table(block: Slice[UInt8], at: UInt64, mode: UInt64, defaults: Slice[Int16], default_log: UInt32, maximum_symbol: UInt64, maximum_log: UInt32, previous: Option[FseTable]) -> Result[TableRead, Error]
   requires maximum_log <= 9 && maximum_symbol <= 255
+  uses RunForever
 {
   if mode == 0 {
     return Ok(TableRead(table: build_fse(defaults, log: default_log)?, consumed: 0))
@@ -624,7 +632,9 @@ fn entry_of(table: FseTable, state: UInt64) -> Result[FseEntry, Error] {
   if state < table.entries.length() { Ok(table.entries[state]) } else { malformed("an FSE state out of range") }
 }
 
-fn decode_sequences(block: Slice[UInt8], literals: Slice[UInt8], state: mut FrameState, output: mut List[UInt8], limit: UInt64) -> Result[Unit, Error] {
+fn decode_sequences(block: Slice[UInt8], literals: Slice[UInt8], state: mut FrameState, output: mut List[UInt8], limit: UInt64) -> Result[Unit, Error]
+  uses RunForever
+{
   if block.is_empty() {
     return malformed("a block without a sequences section")
   }
@@ -743,7 +753,9 @@ fn decode_sequences(block: Slice[UInt8], literals: Slice[UInt8], state: mut Fram
   Ok(Unit)
 }
 
-fn decode_frame(input: Slice[UInt8], at: UInt64, output: mut List[UInt8], limit: UInt64) -> Result[UInt64, Error] {
+fn decode_frame(input: Slice[UInt8], at: UInt64, output: mut List[UInt8], limit: UInt64) -> Result[UInt64, Error]
+  uses RunForever
+{
   if at >= input.length() || input.length() - at < 6 {
     return malformed("a frame without its header")
   }
@@ -845,7 +857,9 @@ fn decode_frame(input: Slice[UInt8], at: UInt64, output: mut List[UInt8], limit:
   malformed("a frame without a last block")
 }
 
-public fn decompress(input: Slice[UInt8], limit: UInt64 = 268435456) -> Result[List[UInt8], Error] {
+public fn decompress(input: Slice[UInt8], limit: UInt64 = 268435456) -> Result[List[UInt8], Error]
+  uses RunForever
+{
   var output: List[UInt8] = []
   var index: UInt64 = 0
   if input.is_empty() {

@@ -1,5 +1,4 @@
 fn is_small(value: Integer) -> Bool
-  cost time finite
 {
   value < 99
 }

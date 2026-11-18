@@ -319,7 +319,9 @@ test "a removed file stays readable through a handle that was open" uses Panic {
   }
 }
 
-fn project() -> files::MemoryFiles {
+fn project() -> files::MemoryFiles
+  uses RunForever
+{
   files::MemoryFiles.new()
     .with_text(path_of("/project/README"), contents: "read me")
     .with_text(path_of("/project/source/main.truss"), contents: "main")
