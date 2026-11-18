@@ -6,6 +6,6 @@ val encode_call :
   Lowered.place ->
   unit
 
-val encode : Memory_layout.env -> Ground.ty -> Emit_c.Builder.instance
+val encode : Memory_layout.env -> Ground.ty -> Emit_c.Builder.item_code
 val decode : Memory_layout.env -> Ground.ty -> string -> Lowered.static_value
 val decode_booleans : string -> bool list

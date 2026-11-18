@@ -6,7 +6,7 @@
   compiler_bug
   path
   ground
-  instance
+  blake3
   memory_layout
   libc
   lowered

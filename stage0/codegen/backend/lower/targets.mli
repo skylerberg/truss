@@ -15,7 +15,7 @@ val make_trait_method_key :
   self_type:Types.ty ->
   instantiation:Types.instantiation ->
   evidence:Core.evidence ->
-  Instance.key
+  Lowered.Item.t
 
 val pass : Lowering.state -> Types.mode -> Ground.ty -> Lowered.place -> Lowered.operand option
 val raise_lending_capability_method : Path.t -> string -> 'a
@@ -105,9 +105,9 @@ val lower_provided_evidence :
   ('a * Path.t * Types.substitution) list ->
   ('a * Lowered.operand) list
 
-val lower_instance_call :
+val lower_item_call :
   Lowering.state ->
-  Instance.key ->
+  Lowered.Item.t ->
   signature:Types.signature ->
   substitution:Types.substitution ->
   arguments:(Types.mode * Ground.ty * Lowered.place) list ->

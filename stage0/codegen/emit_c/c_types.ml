@@ -12,9 +12,9 @@ module Keys = Map.Make (struct
 end)
 
 let render_key_name = function
-  | Type ty -> Instance.make_type_symbol ty
-  | Block (ty, variant) -> Instance.make_type_symbol ty ^ "_Block_" ^ variant
-  | Code function_type -> Instance.make_type_symbol (Function function_type) ^ "_Code"
+  | Type ty -> Mangling.make_type_name ty
+  | Block (ty, variant) -> Mangling.make_type_name ty ^ "_Block_" ^ variant
+  | Code function_type -> Mangling.make_type_name (Function function_type) ^ "_Code"
   | Environment (symbol, nested_index) -> Printf.sprintf "%s_Environment_%d" symbol nested_index
   | Evidence nested_index -> Printf.sprintf "t_Evidence_%d" nested_index
 
@@ -37,8 +37,8 @@ type context = {
   mutable references : key list option;
   mutable helpers_used : string list;
   mutable statics : string list;
-  mutable instances : Instance.key list;
-  mutable called : Instance.key list;
+  mutable referenced_items : Lowered.Item.t list;
+  mutable called : Lowered.Item.t list;
   mutable calls : (Path.t * int) list;
   mutable failures : (C_runtime.failure * Lowered.site) list;
 }
@@ -56,15 +56,15 @@ let make_context env prefix =
     references = None;
     helpers_used = [];
     statics = [];
-    instances = [];
+    referenced_items = [];
     called = [];
     calls = [];
     failures = [];
   }
 
 let refer context key =
-  if not (List.exists (Instance.equal key) context.instances) then
-    context.instances <- key :: context.instances
+  if not (List.exists (Lowered.Item.equal key) context.referenced_items) then
+    context.referenced_items <- key :: context.referenced_items
 
 let use_helper context name =
   if not (List.mem name context.helpers_used) then
@@ -95,7 +95,7 @@ let rec render_value_type context (ty : Ground.ty) =
   | Scalar scalar -> render_scalar_type context scalar
   | _ ->
       register context (Type ty);
-      Instance.make_type_symbol ty
+      Mangling.make_type_name ty
 
 and render_scalar_type context : Memory_layout.scalar -> string = function
   | Integer integer -> C_runtime.render_integer_type integer

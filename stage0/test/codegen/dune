@@ -44,7 +44,6 @@
   well_known
   ground
   memory_layout
-  instance
   lowered
   convention
   emit_c

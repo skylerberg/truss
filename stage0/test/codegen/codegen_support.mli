@@ -32,7 +32,7 @@ val uint64 : Ground.ty
 type local_info
 type block
 type function_
-type instance = Memory_layout.env -> Emit_c.Builder.instance
+type item = Memory_layout.env -> Emit_c.Builder.item_code
 
 val local : ?name:string -> Lowered.ty -> local_info
 val value : Ground.ty -> Lowered.ty
@@ -50,10 +50,10 @@ val function_ :
   block list ->
   function_
 
-val key : string -> Instance.key
-val instance : ?nested:function_ list -> string -> function_ -> instance
-val entry : ?nested:function_ list -> local_info list -> block list -> instance
-val make_constant_instance : Emit_c.Builder.instance -> instance
+val key : string -> Lowered.Item.t
+val item : ?nested:function_ list -> string -> function_ -> item
+val entry : ?nested:function_ list -> local_info list -> block list -> item
+val make_constant_item : Emit_c.Builder.item_code -> item
 
 val call :
   string ->
@@ -73,10 +73,10 @@ val run_program :
   ?extra:(string * Memory_layout.shape) list ->
   ?env:Memory_layout.env ->
   ?input:string ->
-  instance list ->
+  item list ->
   int * string * string
 
-val expect_status : ?extra:(string * Memory_layout.shape) list -> int -> instance list -> unit
+val expect_status : ?extra:(string * Memory_layout.shape) list -> int -> item list -> unit
 val example : Path.module_
 val example_file : Path.file
 val make_database : ?checks:bool -> Project.package list -> Database.t
@@ -87,14 +87,14 @@ val make_backend :
 
 val load_files :
   ?results:Backend.results ->
-  ?roots:Instance.key list ->
+  ?roots:Lowered.Item.t list ->
   ?checks:bool ->
   (Path.file * string) list ->
   Database.t * Backend.t
 
 val load :
   ?results:Backend.results ->
-  ?roots:Instance.key list ->
+  ?roots:Lowered.Item.t list ->
   ?checks:bool ->
   string ->
   Database.t * Backend.t

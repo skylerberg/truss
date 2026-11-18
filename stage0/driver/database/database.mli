@@ -79,5 +79,5 @@ module For_testing : sig
   type observed = { recomputed : string list; collected : string list }
 
   val observe : (unit -> unit) -> observed
-  val add_root : t -> Instance.key -> unit
+  val add_root : t -> Lowered.Item.t -> unit
 end

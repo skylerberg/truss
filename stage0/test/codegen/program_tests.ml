@@ -652,7 +652,7 @@ let () =
         Backend.For_testing.compile_fragment backend
           (Generated (Program_main (Top { module_ = Codegen_support.example; name = "main" })))
       in
-      let is_console_drop : Instance.key -> bool = function
+      let is_console_drop : Lowered.Item.t -> bool = function
         | Drop (Named { path = Top { name = "SystemConsole"; _ }; _ }) -> true
         | _ -> false
       in
@@ -707,7 +707,7 @@ let () =
                               _;
                             } ) ->
                           Some
-                            (Instance.Code
+                            (Lowered.Item.Code
                                { path = declaration.path; instantiation = Ground.no_instantiation })
                       | _ -> None)
                     ((Database.make_name_lookups checked [ Codegen_support.example.package ])

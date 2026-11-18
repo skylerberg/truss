@@ -432,8 +432,8 @@ let translate_named_function (context : State.context) (frame : State.frame)
           (Facts.list_clauses callee_clauses.requires)
       end
   | _ -> ());
-  let instance = List.map (Types.substitute_argument frame.substitution) type_arguments in
-  let symbol = Logic.Symbol.Function_value { callee = path; instance } in
+  let type_arguments = List.map (Types.substitute_argument frame.substitution) type_arguments in
+  let symbol = Logic.Symbol.Function_value { callee = path; type_arguments } in
   Facts.declare context (Logic.Constant (symbol, Facts.declare_sort context ty));
   let term = Logic.Symbol symbol in
   (match ty with
@@ -441,14 +441,14 @@ let translate_named_function (context : State.context) (frame : State.frame)
     when Lambdas.is_in_the_logic function_type && contract.is_logic_function ->
       let parameters = Lambdas.make_parameter_symbols context frame function_type in
       let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-      let function_symbol = Logic.Symbol.Function { callee = path; instance } in
+      let function_symbol = Logic.Symbol.Function { callee = path; type_arguments } in
       Facts.declare context
         (Logic.Function
            ( function_symbol,
              List.map snd parameters,
              Facts.declare_sort context function_type.output ));
       let value = Logic.Apply (function_symbol, inputs) in
-      if instance = [] then
+      if type_arguments = [] then
         assume_contract_for_every_argument context frame contract parameters value;
       Facts.add_frame_fact context frame
         (Logic.forall

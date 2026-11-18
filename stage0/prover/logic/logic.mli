@@ -3,9 +3,9 @@ type sort = Int | Bool | Float of int * int | Type_sort of Types.ty | Function_s
 module Symbol : sig
   type 'term t =
     | Variable of { label : string; numbers : int list }
-    | Function of { callee : Path.t; instance : Types.argument list }
-    | Limited of { callee : Path.t; instance : Types.argument list }
-    | Function_value of { callee : Path.t; instance : Types.argument list }
+    | Function of { callee : Path.t; type_arguments : Types.argument list }
+    | Limited of { callee : Path.t; type_arguments : Types.argument list }
+    | Function_value of { callee : Path.t; type_arguments : Types.argument list }
     | Constant of Path.t
     | Generic_value of { owner : Path.t; name : string }
     | Text_literal of { type_ : Types.ty; text : string }

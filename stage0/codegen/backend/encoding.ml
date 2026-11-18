@@ -7,7 +7,7 @@ let encode_call env builder ~output ty (place : Lowered.place) =
     Emit_c.Builder.emit builder
       (Call
          {
-           target = Direct { function_ = Instance (Encode ty); signature = make_signature env ty };
+           target = Direct { function_ = Item (Encode ty); signature = make_signature env ty };
            arguments = [ Lowered.Address { place; writable = false }; output ];
            result = Discarded;
          })

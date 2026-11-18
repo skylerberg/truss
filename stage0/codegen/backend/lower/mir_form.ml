@@ -637,7 +637,7 @@ let resolve_call_signature st (callee : Mir.callee) =
   match resolve_callee st callee with
   | Some (path, instantiation) ->
       let signature, substitution = read_callee_signature st path instantiation in
-      (path, Instance.Code { path; instantiation }, signature, substitution)
+      (path, Lowered.Item.Code { path; instantiation }, signature, substitution)
   | None -> Definitions.raise_bug "a callee that is not a function or a method"
 
 let compute_result_type st (callee : Mir.callee) =
@@ -655,7 +655,7 @@ let lower_call_with_places st (callee : Mir.callee) (places : Lowered.place list
       (Definitions.list_interface_parameters signature)
       places
   in
-  Targets.lower_instance_call st key ~signature ~substitution ~arguments ~destination ()
+  Targets.lower_item_call st key ~signature ~substitution ~arguments ~destination ()
 
 let evaluate_arguments (st : Lowering.state) (signature : Types.signature) substitution
     (arguments : Mir.argument list) =
@@ -1437,7 +1437,7 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
   | Function_value { path; instantiation; _ } -> (
       match ty with
       | Function function_type ->
-          let adapter : Instance.generated =
+          let adapter : Lowered.Item.generated =
             Adapter
               {
                 function_ = path;
@@ -1445,7 +1445,7 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
                 ty = function_type;
               }
           in
-          assign (Function_value { code = Instance (Generated adapter); environment = None })
+          assign (Function_value { code = Item (Generated adapter); environment = None })
       | _ -> Definitions.raise_bug "a function value of type %s" (Ground.to_string ty))
   | Value_parameter parameter -> (
       match ground_argument st (Value (Value_parameter parameter)) with
@@ -1522,7 +1522,7 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
         failure;
       match signature.output with
       | Returns _ ->
-          Targets.lower_instance_call st
+          Targets.lower_item_call st
             (Code { path; instantiation })
             ~signature ~substitution ~arguments ~mask ~destination ()
       | Lends _ -> Definitions.raise_bug "a lending call that lends no part")
@@ -1775,7 +1775,7 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
               check_requires st ~path ~instantiation arguments ~origin
                 ~failure:"index out of bounds";
             compute_lent_place signature.output substitution (fun ~lending destination ->
-                Targets.lower_instance_call st
+                Targets.lower_item_call st
                   (Code { path; instantiation })
                   ~signature ~substitution ~arguments ~mask ~lending ~destination ())
         | None, Trait_method { trait; name; receiver; self_type; _ } -> (

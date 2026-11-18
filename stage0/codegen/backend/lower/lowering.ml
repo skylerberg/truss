@@ -267,7 +267,7 @@ let finish_function st ?(returns = true) ~first ~rest () : Emit_c.Builder.protot
   in
   { parameters = first @ Option.to_list pointer @ rest; result; returns }
 
-let finish_instance st ?returns ~rest () =
+let finish_item st ?returns ~rest () =
   Emit_c.Builder.build st.builder (finish_function st ?returns ~first:[] ~rest ())
 
 let emit_unreachable_block st =

@@ -191,7 +191,7 @@ let find_written_equal context ty left right =
             Logic.Symbol.Function
               {
                 callee = Path.Method { owner = impl; name = "equal"; receiver = Read };
-                instance = [ Types.Type ty ];
+                type_arguments = [ Types.Type ty ];
               }
           in
           let sort = Facts.declare_sort context ty in

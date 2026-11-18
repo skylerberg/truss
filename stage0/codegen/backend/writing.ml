@@ -26,7 +26,7 @@ let emit_write_call env builder ~output (writer : Well_known.t) ty (place : Lowe
            Direct
              {
                function_ =
-                 Instance
+                 Item
                    (Code
                       {
                         path = Well_known.make_path writer;
