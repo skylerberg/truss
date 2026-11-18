@@ -53,9 +53,10 @@ let union_capabilities (left : capability_set) (right : capability_set) =
   make_capability_set (left @ right)
 
 let run_forever : capability = Capability (Well_known.make_path Run_forever)
+let has_capability capability (set : capability_set) = List.mem capability set
 let built_in_capabilities = make_capability_set [ panic; run_forever ]
-let is_built_in_capability capability = List.mem capability built_in_capabilities
-let terminates (set : capability_set) = not (List.mem run_forever set)
+let is_built_in_capability capability = has_capability capability built_in_capabilities
+let terminates set = not (has_capability run_forever set)
 
 let has_capability_error (capabilities : capability_set) =
   List.exists (function Capability_error _ -> true | _ -> false) capabilities
