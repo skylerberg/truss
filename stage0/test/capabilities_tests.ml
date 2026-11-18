@@ -220,7 +220,11 @@ let () =
         List.filter_map
           (fun (node : Core.expression) ->
             match (node.kind, node.type_) with
-            | Lambda _, Function { uses; _ } -> Some (Types.may_panic uses)
+            | Lambda _, Function { uses; _ } ->
+                Some
+                  (List.mem
+                     (Types.Capability (Well_known.make_path Panic))
+                     (uses :> Types.capability list))
             | _ -> None)
           (list_core_expressions text ~of_function:"f")
       with

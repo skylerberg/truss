@@ -190,7 +190,7 @@ let () =
       match
         List.partition
           (fun (capability : Resolve.Names.declaration) ->
-            Well_known.is_built_in_capability capability.path)
+            Types.is_built_in_capability (Capability capability.path))
           capabilities
       with
       | [ first; second ], others ->

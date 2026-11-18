@@ -115,7 +115,7 @@ let check_real_implementations (state : Checking.state) (resolved : Resolve.reso
       | Capability_path written -> (
           match resolved.names.(written.path.last.id) with
           | Some (Definition (Capability, path))
-            when (not (Well_known.is_built_in_capability path))
+            when (not (Types.is_built_in_capability (Capability path)))
                  && Option.is_none (Definition.find_real_implementation state.lookups path) ->
               Checking.report state No_real_implementation state.spans.(capability.id)
                 (Printf.sprintf
