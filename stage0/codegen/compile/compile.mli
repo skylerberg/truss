@@ -62,15 +62,15 @@ val run_tests :
 
 type unshippable = {
   failure : [ `Todo | `Echo ];
-  file : string;
+  file : Path.file;
   line : int;
   column : int;
   way : Path.t list;
 }
 
-val list_unshippable : t -> main:Path.t -> unshippable list
-val list_reached_definitions : t -> Path.t -> Path.t list
-val list_reached_todo_types : t -> Path.t -> Path.t list
+val list_unshippable : requests -> main:Path.t -> unshippable list
+val list_reached_definitions : requests -> Path.t -> Path.t list
+val list_reached_todo_types : requests -> Path.t -> Path.t list
 val make_program_path : t -> string
 val build_program : t -> main:Path.t -> output:string -> (unit, string) result
 
