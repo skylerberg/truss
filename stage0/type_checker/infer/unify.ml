@@ -179,9 +179,10 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
   | Variable index, other | other, Variable index -> bind unifier index other
   | Literal (left_kind, left_index), Literal (right_kind, right_index) ->
       let join () =
-        if Hashtbl.mem unifier.code_literals left_index then
-          Hashtbl.replace unifier.code_literals right_index ();
-        bind unifier left_index right
+        let root = min left_index right_index and joined = max left_index right_index in
+        if Hashtbl.mem unifier.code_literals joined then
+          Hashtbl.replace unifier.code_literals root ();
+        bind unifier joined (Types.Literal (left_kind, root))
       in
       left_kind = right_kind && (left_index = right_index || join ())
   | Literal (kind, index), other | other, Literal (kind, index) ->

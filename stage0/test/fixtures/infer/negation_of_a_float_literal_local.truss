@@ -1,0 +1,5 @@
+fn f() {
+  let ratio = 1.5
+  let negated = -ratio
+  let _ = negated
+}
