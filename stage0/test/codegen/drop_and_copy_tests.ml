@@ -93,8 +93,8 @@ let () =
       let ty = make_storage_type Codegen_support.int32 in
       Codegen_support.expect_status 20
         [
-          Codegen_support.make_constant_item (Backend.For_testing.copy drop_and_copy ty);
-          Codegen_support.make_constant_item (Backend.For_testing.drop drop_and_copy ty);
+          Codegen_support.make_program_fragment (Backend.For_testing.copy drop_and_copy ty);
+          Codegen_support.make_program_fragment (Backend.For_testing.drop drop_and_copy ty);
           Codegen_support.entry
             [
               Codegen_support.local (Codegen_support.value ty);
@@ -128,7 +128,7 @@ let () =
       let ty = make_storage_type Codegen_support.uint8 in
       Codegen_support.expect_status 0
         [
-          Codegen_support.make_constant_item (Backend.For_testing.drop drop_and_copy ty);
+          Codegen_support.make_program_fragment (Backend.For_testing.drop drop_and_copy ty);
           Codegen_support.entry
             [ Codegen_support.local (Codegen_support.value ty) ]
             [
@@ -159,10 +159,10 @@ let () =
       let uint64_constant number = Lowered.Constant (Integer (UInt64, Z.of_int number)) in
       Codegen_support.expect_status 4
         [
-          Codegen_support.make_constant_item (Backend.For_testing.copy drop_and_copy outer);
-          Codegen_support.make_constant_item (Backend.For_testing.copy drop_and_copy inner);
-          Codegen_support.make_constant_item (Backend.For_testing.drop drop_and_copy outer);
-          Codegen_support.make_constant_item (Backend.For_testing.drop drop_and_copy inner);
+          Codegen_support.make_program_fragment (Backend.For_testing.copy drop_and_copy outer);
+          Codegen_support.make_program_fragment (Backend.For_testing.copy drop_and_copy inner);
+          Codegen_support.make_program_fragment (Backend.For_testing.drop drop_and_copy outer);
+          Codegen_support.make_program_fragment (Backend.For_testing.drop drop_and_copy inner);
           Codegen_support.entry
             [
               Codegen_support.local (Codegen_support.value inner);

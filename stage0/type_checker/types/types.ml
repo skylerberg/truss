@@ -59,6 +59,7 @@ and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t opt
 
 let is_divergence = function Divergence _ -> true | _ -> false
 let unconditional_divergence : capability = Divergence Always
+let panic : capability = Capability (Well_known.make_path Panic)
 
 let make_capability_set capabilities : capability_set =
   List.sort_uniq compare

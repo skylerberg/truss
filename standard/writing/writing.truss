@@ -24,26 +24,6 @@ internal fn append(output: mut intrinsic::Storage[UInt8], bytes: intrinsic::View
   }
 }
 
-internal fn code_point(output: mut intrinsic::Storage[UInt8], code: UInt32)
-  cost time finite
-{
-  if code < 128 {
-    byte(mut output, value: intrinsic::convert(code))
-  } else if code < 2048 {
-    byte(mut output, value: intrinsic::convert(192 | (code >> 6)))
-    byte(mut output, value: intrinsic::convert(128 | (code & 63)))
-  } else if code < 65536 {
-    byte(mut output, value: intrinsic::convert(224 | (code >> 12)))
-    byte(mut output, value: intrinsic::convert(128 | ((code >> 6) & 63)))
-    byte(mut output, value: intrinsic::convert(128 | (code & 63)))
-  } else {
-    byte(mut output, value: intrinsic::convert(240 | (code >> 18)))
-    byte(mut output, value: intrinsic::convert(128 | ((code >> 12) & 63)))
-    byte(mut output, value: intrinsic::convert(128 | ((code >> 6) & 63)))
-    byte(mut output, value: intrinsic::convert(128 | (code & 63)))
-  }
-}
-
 internal fn unsigned(output: mut intrinsic::Storage[UInt8], value: UInt64)
   decreases value
   cost time finite
@@ -170,9 +150,18 @@ fn upper_hexadecimal(output: mut intrinsic::Storage[UInt8], value: UInt32)
   byte(mut output, value: digit.digit_byte(uppercase: true))
 }
 
-fn escaped(output: mut intrinsic::Storage[UInt8], code: UInt32, quote: UInt8)
+fn escaped_code(output: mut intrinsic::Storage[UInt8], code: UInt32)
   cost time finite
 {
+  append(mut output, bytes: "\\u{".slice().bytes)
+  upper_hexadecimal(mut output, value: code)
+  byte(mut output, value: 125)
+}
+
+fn escaped(output: mut intrinsic::Storage[UInt8], character: Character, quote: UInt8)
+  cost time finite
+{
+  let code = character.code()
   let quote_code: UInt32 = intrinsic::convert(quote)
   if code == 92 {
     append(mut output, bytes: "\\\\".slice().bytes)
@@ -188,11 +177,10 @@ fn escaped(output: mut intrinsic::Storage[UInt8], code: UInt32, quote: UInt8)
   } else if code == 0 {
     append(mut output, bytes: "\\0".slice().bytes)
   } else if code < 32 || code == 127 {
-    append(mut output, bytes: "\\u{".slice().bytes)
-    upper_hexadecimal(mut output, value: code)
-    byte(mut output, value: 125)
+    escaped_code(mut output, code: code)
   } else {
-    code_point(mut output, code: code)
+    growth::reserve(mut output, additional: character.utf8_length())
+    character.encode_onto(mut output)
   }
 }
 
@@ -200,7 +188,7 @@ internal fn quoted_character(output: mut intrinsic::Storage[UInt8], value: Chara
   cost time finite
 {
   append(mut output, bytes: "Character\"".slice().bytes)
-  escaped(mut output, code: intrinsic::convert(value), quote: 34)
+  escaped(mut output, character: value, quote: 34)
   byte(mut output, value: 34)
 }
 
@@ -231,7 +219,10 @@ internal fn quoted_text(output: mut intrinsic::Storage[UInt8], text: intrinsic::
     if code == 36 && at + 1 < count && intrinsic::view_at(text, index: at + 1) == 123 {
       append(mut output, bytes: "\\$".slice().bytes)
     } else {
-      escaped(mut output, code: code, quote: 34)
+      match Character.try_from(code) {
+        Ok(character) => escaped(mut output, character: character, quote: 34)
+        Err(_) => escaped_code(mut output, code: code)
+      }
     }
     at += length
   }

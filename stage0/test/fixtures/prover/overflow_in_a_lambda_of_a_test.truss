@@ -1,0 +1,4 @@
+test "a" {
+  let items: List[UInt8] = [1, 2, 3]
+  let _ = items.filter(fn(item) { item + 1 > 3 })
+}

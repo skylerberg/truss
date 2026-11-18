@@ -809,6 +809,9 @@ let () =
         "ownership.views_temporary");
   Harness.test "a cursor cannot view a block's value that the statement drops" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.cursor_over_a_block_value "ownership.views_temporary");
+  Harness.test "a cursor cannot view a record update that the statement drops" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.cursor_over_a_record_update
+        "ownership.views_temporary");
   Harness.test "a cursor may view a named value" (fun () ->
       expect_fine Fixtures.Ownership.cursor_over_a_named_string);
   Harness.test "a cursor may view a string literal, which has static storage" (fun () ->

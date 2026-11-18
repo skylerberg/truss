@@ -579,10 +579,11 @@ public fn collections::SortedMap[Key: Ordered, Value].in_range(self, range: Rang
 
 public fn collections::SortedMap[Key: Ordered, Value].retain(
   mut self,
-  keep: (fn(map::Entry[Key, Value]) -> Bool uses generic Granted),
+  keep: (fn(map::Entry[Key, Value]) -> Bool cost time finite),
 )
-  uses generic Granted
   ensures self.length() <= old(self.length())
+  ensures forall key: Key =>
+    self.model().contains_key(key) ==> keep(map::Entry(key: key, value: self.model().get(key)))
   cost time O(old(self.length()) * time(keep))
 {
   var entries = map::exchange(mut self.entries, value: [])
@@ -597,6 +598,7 @@ public fn collections::SortedMap[Key: Ordered, Value].retain(
       entries.model()[i].key < entries.model()[j].key
     invariant forall i in index..count => forall j in index..count =>
       i < j ==> entries.model()[i].key < entries.model()[j].key
+    invariant forall i in 0..retained => keep(entries.model()[i])
   {
     if keep(entries[index]) {
       mut entries.swap(retained, second: index)
@@ -619,6 +621,17 @@ public fn collections::SortedMap[Key: Ordered, Value].extend[Source: Cursor[Elem
   } else if !added.entries.is_empty() {
     let current = map::exchange(mut self.entries, value: [])
     self.entries = merged(own current, second: own added.entries)
+  }
+}
+
+impl Model for collections::SortedMap[Key: Ordered, Value] {
+  type Value = FiniteMap[Key, Value]
+
+  fn model(self) -> FiniteMap[Key, Value]
+    ensures identical(result, map::entries_model(self.entries.model()))
+    cost time finite
+  {
+    map::entries_model(self.entries.model())
   }
 }
 

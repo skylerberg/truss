@@ -50,8 +50,6 @@ let begin_body (st : Lowering.state) ~(body : Mir.Graph.body) ~defaults =
       (Definitions.list_evidence st.context code.substitution code.uses)
   in
   Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
-  st.evidence <-
-    st.evidence @ Generated.list_real_implementations st ~user:(Path.show code.definition) code.real;
   let places =
     match mask with
     | Some mask -> Mir_form.fill_defaults st (Lowered.make_local_place mask) body ~defaults places

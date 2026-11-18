@@ -331,3 +331,46 @@ let () =
         "package.method_name_clash" ~says:"a `measure` of its own");
   Harness.test "impls whose heads unify only through an infinite type do not overlap" (fun () ->
       expect_fine Fixtures.Package_checks.impls_unifying_only_through_an_infinite_type)
+
+let expect_used ?(others = []) text =
+  Support.expect_no_diagnostics ~check (("app::main", text) :: others)
+
+let () =
+  Harness.test "an internal function that nothing in its package uses is rejected" (fun () ->
+      expect_one_diagnostic Fixtures.Package_checks.unused_internal_function "usage.unused_function"
+        ~says:"Nothing in `app` uses the internal function `app::main::double`");
+  Harness.test "an internal constant that nothing in its package uses is rejected" (fun () ->
+      expect_one_diagnostic Fixtures.Package_checks.unused_internal_constant "usage.unused_constant");
+  Harness.test "an internal function that only calls itself is rejected" (fun () ->
+      expect_one_diagnostic Fixtures.Package_checks.internal_function_used_only_by_itself
+        "usage.unused_function" ~says:"Nothing in `app` uses");
+  Harness.test "internal functions that only unused definitions call are rejected together"
+    (fun () ->
+      let packages =
+        Support.setup
+          [ ("app::main", Fixtures.Package_checks.internal_functions_used_only_by_each_other) ]
+      in
+      match check packages (Support.parse_file "app::main") with
+      | [ first; second ] ->
+          let messages = List.sort compare [ first.message; second.message ] in
+          if
+            messages
+            <> [
+                 "Nothing in `app` uses the internal function `app::main::quadruple`. Delete it.";
+                 "Only unused definitions use the internal function `app::main::twice`. Delete it \
+                  with them.";
+               ]
+          then Harness.fail "found %s" (String.concat "; " messages)
+      | found -> Harness.fail "found [%s]" (String.concat "; " (Support.list_codes found)));
+  Harness.test "an internal function that another module of the package calls is used" (fun () ->
+      expect_used Fixtures.Package_checks.public_function_calling_an_internal_helper
+        ~others:[ ("app::helpers", Fixtures.Package_checks.internal_helpers) ]);
+  Harness.test "an internal method called with a dot is used" (fun () ->
+      expect_used Fixtures.Package_checks.internal_method_called_with_a_dot);
+  Harness.test "an internal function returned as a value is used" (fun () ->
+      expect_used Fixtures.Package_checks.internal_function_returned_as_a_value);
+  Harness.test "an internal function named only in an `ensures` is used" (fun () ->
+      expect_used Fixtures.Package_checks.internal_function_named_only_in_an_ensures);
+  Harness.test "an internal constant named only in a pattern is used" (fun () ->
+      expect_used Fixtures.Package_checks.internal_constant_named_only_in_a_pattern
+        ~others:[ ("app::limits", Fixtures.Package_checks.internal_limit) ])

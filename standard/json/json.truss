@@ -3,7 +3,6 @@ use standard::numbers::float_math
 use standard::serialization
 use standard::streams
 use standard::text
-use standard::writing
 
 public type Value =
   | Null
@@ -236,7 +235,7 @@ fn parse_unicode_escape(text: StringSlice, from: UInt64, output: mut String) -> 
         return Err(Failure(kind: ParseErrorKind.InvalidUnicode, offset: from))
       }
       if code < 55296 || code > 56319 {
-        writing::code_point(mut output.storage, code: code)
+        mut output.push_character(intrinsic::convert(code))
         return Ok(from + 6)
       }
       let pair = text.length() - from >= 8 && text.byte(from + 6) == 92 && text.byte(from + 7) == 117
@@ -249,7 +248,7 @@ fn parse_unicode_escape(text: StringSlice, from: UInt64, output: mut String) -> 
           if low < 56320 || low > 57343 {
             return Err(Failure(kind: ParseErrorKind.InvalidUnicode, offset: from))
           }
-          writing::code_point(mut output.storage, code: 65536 + (code - 55296) * 1024 + (low - 56320))
+          mut output.push_character(intrinsic::convert(65536 + (code - 55296) * 1024 + (low - 56320)))
           Ok(from + 12)
         }
       }

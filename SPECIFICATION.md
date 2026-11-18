@@ -1114,8 +1114,8 @@ fn Slice[Element].zip[Other](self, other: Slice[Other]) -> Zipped[Element, Other
 ### Overloads by receiver mode
 
 ```truss
-fn Slice[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
-fn List[Element].filter(own self, keep: fn(Element) -> Bool) -> List[Element]
+fn Slice[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
+fn List[Element].filter(own self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
 ```
 
 A method can have up to three overloads that differ only in the mode of
@@ -1816,8 +1816,8 @@ public trait Add[Right] {
 
 ## Failure
 
-Code panics only in a test and where its signature declares `uses Panic`.
-Running out of memory and overflowing the stack are the exceptions.
+Code panics only where it has `Panic`. Running out of memory and overflowing
+the stack are the exceptions.
 
 Every operation that can fail is a proof obligation: integer overflow,
 division by zero, indexing or slicing out of bounds, a shift that is too
@@ -1831,10 +1831,10 @@ is an error, and one of these makes it compile:
 
 `unreachable` admits only the first.
 
-In a test, and in the body of a function that declares `uses Panic`, an
-operation that is not proven safe is checked when it runs, in every build,
-and panics when it fails. The check prevents the out-of-bounds read or the
-wrapped result that the unchecked operation would give.
+In code that has `Panic`, an operation that is not proven safe is checked
+when it runs, in every build, and panics when it fails. The check prevents
+the out-of-bounds read or the wrapped result that the unchecked operation
+would give.
 
 - An overflow, a division by zero, and a shift that is too large are checked
   where they happen.
@@ -1842,7 +1842,7 @@ wrapped result that the unchecked operation would give.
   `requires` of the method it calls. One through a trait bound or `any` is
   proven, and so is a `requires` that cannot be evaluated at run time (see
   [Deriving](#deriving)).
-- A lambda in that body, a `proof` block, and every clause are proven. A
+- A lambda in that code, a `proof` block, and every clause are proven. A
   lambda's capabilities are inferred from its body, not declared, and a
   `proof` block and a clause do not run.
 
@@ -2589,6 +2589,12 @@ and the prelude changes only with a language version.
   use call no private or `internal` function and name no such constant. An
   `ensures` may name any function the definition can, so that callers in its
   package can know its result in terms of private helpers.
+- An `internal` function, method, or constant that no definition of its
+  package uses is an error. A use counts when the user is not `internal` or
+  is itself used, so `internal` definitions that use only each other are an
+  error together. A definition the compiler calls is exempt, such as the
+  static `new` of a `system` module's type, which builds the implementation
+  of a capability.
 
 ## No foreign code
 
