@@ -40,13 +40,14 @@ let run_quietly arguments = fst (run_truss arguments)
 let run_json arguments = Cli.Json.parse (snd (run_truss (arguments @ [ "--json" ])))
 let list_objects = function Cli.Json.List items -> items | _ -> []
 
-let encode_text_field name value =
+let read_string_field name value =
   match Cli.Json.lookup_field name value with Cli.Json.String text -> text | _ -> ""
 
-let run_show root path =
-  List.map (encode_text_field "text")
-    (list_objects (Cli.Json.lookup_field "definitions" (run_json [ "show"; "-C"; root; path ])))
+let list_shown root path =
+  list_objects (Cli.Json.lookup_field "definitions" (run_json [ "show"; "-C"; root; path ]))
 
+let run_show root path = List.map (read_string_field "text") (list_shown root path)
+let read_header text = List.hd (String.split_on_char '\n' text)
 let () = Unix.putenv "TRUSS_CACHE" (Harness.make_scratch_directory "store")
 
 let () =
@@ -766,7 +767,15 @@ let () =
       let root = make_package [ ("main.truss", Fixtures.point_with_a_sum_method) ] in
       expect_strings
         ~expected:[ "public type Point(x: Int64, y: Int64)"; "public fn Point.sum(self) -> Int64" ]
-        (run_show root "demo::Point"))
+        (run_show root "demo::Point"));
+  test "a standard library type is shown with its file" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.point_with_a_sum_method) ] in
+      match list_shown root "standard::option::Option" with
+      | option :: _ ->
+          expect_string ~expected:"standard/option/option.truss" (read_string_field "file" option);
+          expect_string ~expected:"public type Option[Value] ="
+            (read_header (read_string_field "text" option))
+      | [] -> fail "found nothing")
 
 let make_two_points () =
   make_package
@@ -776,7 +785,7 @@ let make_two_points () =
       ("drawing/drawing.truss", Fixtures.drawing_point);
     ]
 
-let list_headers texts = List.map (fun text -> List.hd (String.split_on_char '\n' text)) texts
+let list_headers texts = List.map read_header texts
 
 let () =
   test "a type is shown with an impl that names it by its module's path" (fun () ->
@@ -1006,8 +1015,8 @@ let expect_read lines ~reader ~parts ~reads ~of_ =
     not
       (List.exists
          (fun line ->
-           encode_text_field "reader" line = reader
-           && encode_text_field "of" line = of_
+           read_string_field "reader" line = reader
+           && read_string_field "of" line = of_
            && List.mem reads (list_strings (Cli.Json.lookup_field "reads" line))
            && List.for_all
                 (fun part -> List.mem part (list_strings (Cli.Json.lookup_field "parts" line)))
@@ -1034,7 +1043,7 @@ let () =
       in
       expect_read lines ~reader:"demo::four" ~parts:[ "checked body" ] ~reads:"interface"
         ~of_:"demo::double";
-      if List.exists (fun line -> encode_text_field "of" line = "demo::four") lines then
+      if List.exists (fun line -> read_string_field "of" line = "demo::four") lines then
         fail "four is listed as its own dependency");
   test "a mut self method's dependents are found by its name without the receiver" (fun () ->
       expect_read
@@ -1089,12 +1098,12 @@ let () =
   test "a hole has the type it must have and the names in scope with theirs" (fun () ->
       match list_holes (make_package [ ("main.truss", Fixtures.unfinished) ]) with
       | [ hole ] ->
-          if encode_text_field "type" hole <> "String" then fail "the type is not String";
+          if read_string_field "type" hole <> "String" then fail "the type is not String";
           expect_strings
             ~expected:[ "count: Int64"; "header: String"; "title: String" ]
             (List.map
                (fun binding ->
-                 encode_text_field "name" binding ^ ": " ^ encode_text_field "type" binding)
+                 read_string_field "name" binding ^ ": " ^ read_string_field "type" binding)
                (list_objects (Cli.Json.lookup_field "in_scope" hole)))
       | found -> fail "found %d holes" (List.length found));
   test "a hole blocks the tests that can reach it, and only those" (fun () ->
@@ -1132,14 +1141,14 @@ let () =
   test "a hole whose type nothing fixes, such as one interpolated, is not decided yet" (fun () ->
       match list_holes (make_package [ ("main.truss", Fixtures.show_of_an_interpolated_todo) ]) with
       | [ hole ] ->
-          if encode_text_field "type" hole <> "not decided yet" then
-            fail "type %s" (encode_text_field "type" hole)
+          if read_string_field "type" hole <> "not decided yet" then
+            fail "type %s" (read_string_field "type" hole)
       | found -> fail "found %d holes" (List.length found));
   test "a type defined as todo is a hole" (fun () ->
       match list_holes (make_package [ ("main.truss", "type Session = todo\n") ]) with
       | [ hole ] ->
-          if encode_text_field "kind" hole <> "type" then
-            fail "kind %s" (encode_text_field "kind" hole)
+          if read_string_field "kind" hole <> "type" then
+            fail "kind %s" (read_string_field "kind" hole)
       | found -> fail "found %d holes" (List.length found));
   test "a type defined as todo blocks main and the tests that reach it, and only those" (fun () ->
       match list_holes (make_package [ ("main.truss", Fixtures.unfinished_type) ]) with
@@ -1152,8 +1161,8 @@ let () =
       let outcomes =
         List.map
           (fun test ->
-            ( encode_text_field "name" test,
-              encode_text_field "outcome" test,
+            ( read_string_field "name" test,
+              read_string_field "outcome" test,
               match Cli.Json.lookup_field "message" test with
               | Cli.Json.String message -> message
               | _ -> "" ))
@@ -1188,7 +1197,7 @@ let () =
       then fail "%s" output;
       let outputs =
         List.map
-          (fun test -> (encode_text_field "name" test, encode_text_field "output" test))
+          (fun test -> (read_string_field "name" test, read_string_field "output" test))
           (list_objects (Cli.Json.lookup_field "tests" (run_json [ "test"; "-C"; root ])))
       in
       match outputs with

@@ -137,7 +137,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
       (fun (file, (span : Source.span), (target : Inspect.References.target)) ->
         match target with
         | Module edit_module when edit_module = old_module ->
-            let text = Source.text (Workspace.read_source snapshot file) in
+            let text = Source.text (Database.read_source database file) in
             let written = String.sub text span.start (span.stop - span.start) in
             Some (file, Diagnostic.replace span (if String.contains written ':' then full else last))
         | _ -> None)
@@ -157,15 +157,14 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
   in
   { edits = group_by_file edits; moved = Some (old_module, new_module) }
 
-let read_text snapshot file = Source.text (Workspace.read_source snapshot file)
-
-let apply_plan snapshot packages plan =
+let apply_plan database snapshot packages plan =
   List.map
     (fun file ->
+      let text = Source.text (Database.read_source database file) in
       let text =
         match List.assoc_opt file plan.edits with
-        | Some edits -> Diagnostic.apply_edits (read_text snapshot file) edits
-        | None -> read_text snapshot file
+        | Some edits -> Diagnostic.apply_edits text edits
+        | None -> text
       in
       (file, compute_moved_file plan file, text))
     (Command_packages.list_files snapshot packages)
@@ -195,12 +194,12 @@ let make_trial_snapshot snapshot after =
 let encode_edits snapshot packages plan =
   List.concat_map
     (fun (file, edits) ->
-      let source = Command_packages.read_source snapshot packages file in
+      let path = Command_packages.show_file snapshot packages file in
       List.map
         (fun (edit : Source.span Diagnostic.edit) ->
           Json.Object
             [
-              ("file", Json.String (Source.path source));
+              ("file", Json.String path);
               ("start", Json.Int edit.span.start);
               ("stop", Json.Int edit.span.stop);
               ("replacement", Json.String edit.replacement);
@@ -220,7 +219,7 @@ let run ~from_ ~to_ =
         plan_definition database snapshot packages path (compute_new_name ~from_ to_)
     | Module module_ -> plan_module database snapshot packages module_ to_
   in
-  let after = apply_plan snapshot packages plan in
+  let after = apply_plan database snapshot packages plan in
   let database = Workspace.open_database (make_trial_snapshot snapshot after) in
   Database.check database packages;
   let caused =

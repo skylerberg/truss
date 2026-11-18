@@ -255,14 +255,6 @@ let list_dependency_names snapshot name =
       List.map (fun (dependency : Manifest.dependency) -> dependency.package) package.dependencies
   | None -> []
 
-let read_source snapshot (file : Path.file) =
-  match
-    Option.bind (find_package snapshot file.module_.package) (fun package ->
-        List.assoc_opt file package.files)
-  with
-  | Some text -> Source.create ~path:(Path.show_file file) text
-  | None -> Compiler_bug.raise_bug ~stage:"Workspace" "%s is not a file" (Path.show_file file)
-
 let locate_root snapshot = match snapshot.kind with Worktree root | Trial { root; _ } -> root
 
 let list_registry_packages snapshot =

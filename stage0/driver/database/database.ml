@@ -2151,7 +2151,12 @@ let list_holes proofs path =
         (fun ((home : Resolve.Names.key), location) ->
           let ({ file; base } : Resolve.Names.place) = names.read_place home in
           let span = Prover.resolve_location names home location in
-          (file, (Source.Definition_span.to_file ~base span).start))
+          let line, column =
+            Source.compute_position
+              (read_source proofs.database file)
+              (Source.Definition_span.to_file ~base span).start
+          in
+          (file, line, column))
         holes
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
 

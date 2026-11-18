@@ -101,12 +101,11 @@ let select_files snapshot packages paths =
             wanted)
         (list_files snapshot packages)
 
-let read_source snapshot packages (file : Path.file) =
-  let source = Workspace.read_source snapshot file in
-  if List.mem file.module_.package packages then
-    Source.create ~path:(Shown_path.show_path (locate_file snapshot file)) (Source.text source)
-  else source
-
 let show_file snapshot packages (file : Path.file) =
   if List.mem file.module_.package packages then Shown_path.show_path (locate_file snapshot file)
   else Path.show_file file
+
+let read_source snapshot database packages file =
+  Source.create
+    ~path:(show_file snapshot packages file)
+    (Source.text (Database.read_source database file))
