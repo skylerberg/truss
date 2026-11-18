@@ -1,0 +1,16 @@
+fn first_or_crash(values: Slice[Int64]) -> Int64
+  uses Panic
+  cost time O(1)
+{
+  match values.first() {
+    Some(value) => value
+    None => Panic.crash("the values are not empty")
+  }
+}
+
+fn sum(left: Int64, right: Int64) -> Int64
+  uses Panic
+  cost time O(1)
+{
+  left.checked_add(right).expect("the sum fits Int64")
+}
