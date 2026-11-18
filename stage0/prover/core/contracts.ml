@@ -186,15 +186,15 @@ let find_resource (cost : Mir.cost) ~locals : Costs.resource option =
 let is_updating_helper (lookups : Lookups.t) (path : Path.t) =
   match path with
   | Method { receiver = Mut; _ } -> (
+      let names = lookups.interface.names in
       match
-        Option.map lookups.interface.names.read_definition (lookups.interface.names.find_key path)
+        Option.map
+          (fun key -> (names.read_declaration key, names.read_definition key))
+          (names.find_key path)
       with
       | Some
-          {
-            visibility = Private;
-            kind = Function { signature = { name = Member_name _; _ }; _ };
-            _;
-          } ->
+          ( { visibility = Private; _ },
+            { kind = Function { signature = { name = Member_name _; _ }; _ }; _ } ) ->
           true
       | _ -> false)
   | _ -> false

@@ -44,12 +44,20 @@ let show_kind : kind -> string = function
   | Test -> "a test"
   | Law_proof -> "a law's proof"
 
+type visibility = Private | Internal | Public | Public_opaque
+
+let convert_visibility : Syntax.visibility option -> visibility = function
+  | None -> Private
+  | Some Internal -> Internal
+  | Some Public -> Public
+  | Some Public_opaque -> Public_opaque
+
 type declaration = {
   module_ : Path.module_;
   path : Path.t;
   ordinal : int;
   kind : kind;
-  visibility : Syntax.visibility;
+  visibility : visibility;
   generic : bool;
 }
 
@@ -77,7 +85,7 @@ let classify_receiver (parameters : Syntax.parameter list) : Path.receiver =
 let extract_last_name (module_ : Path.module_) =
   match List.rev (Path.list_module_parts module_) with last :: _ -> last | [] -> ""
 
-type entry = { name : string; kind : named; visibility : Syntax.visibility; generic : bool }
+type entry = { name : string; kind : named; visibility : visibility; generic : bool }
 
 module String_map = Map.Make (String)
 
@@ -86,7 +94,7 @@ let is_type_kind : named -> bool = function
   | Function | Constant | Theorem -> false
 
 let is_value_kind kind = not (is_type_kind kind)
-let is_public = function Syntax.Public | Public_opaque -> true | Private | Internal -> false
+let is_public = function Public | Public_opaque -> true | Private | Internal -> false
 
 let is_visible ~(from : Path.module_) (module_ : Path.module_) visibility =
   module_ = from || is_public visibility || (visibility = Internal && module_.package = from.package)
@@ -262,7 +270,7 @@ let list_file_entries (top_levels : Syntax.top_level list) =
     (fun (top_level : Syntax.top_level) ->
       let definition = top_level.definition.value in
       let make_plain_entries name kind generic =
-        [ { name; kind; visibility = definition.visibility; generic } ]
+        [ { name; kind; visibility = convert_visibility definition.visibility; generic } ]
       in
       match definition.kind with
       | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
@@ -299,7 +307,7 @@ let builtin_entries =
         })
       Intrinsic.operations
 
-type 'visible lookup = Visible of 'visible | Hidden of (Path.t * Syntax.visibility) | Absent
+type 'visible lookup = Visible of 'visible | Hidden of (Path.t * visibility) | Absent
 
 let lookup_in lookups ~(from : Path.module_) module_ name ~is_kind =
   match lookups.find module_ name with
@@ -338,7 +346,7 @@ let collect_visible keyed_lookups =
       | Some hidden -> Hidden hidden
       | None -> Absent)
 
-let describe_hidden hidden (visibility : Syntax.visibility) =
+let describe_hidden hidden (visibility : visibility) =
   Printf.sprintf "`%s` is %s, so it cannot be used here." (Path.show hidden)
     (match visibility with
     | Private -> "private to its module"
@@ -470,7 +478,7 @@ let resolve_header lookups ~file ~imports ~spell (trait_ : Syntax.path_type)
       ~self:for_type trait_,
     for_type )
 
-let restrict_visibility (left : Syntax.visibility) (right : Syntax.visibility) : Syntax.visibility =
+let restrict_visibility (left : visibility) (right : visibility) : visibility =
   match (left, right) with
   | Private, _ | _, Private -> Private
   | Internal, _ | _, Internal -> Internal
@@ -484,7 +492,7 @@ and list_argument_paths : Path.argument -> Path.t list = function
   | Constant path -> [ path ]
   | Parameter _ | Count _ -> []
 
-let derive_impl_visibility lookups (trait : Path.reference) for_type =
+let derive_header_visibility lookups (trait : Path.reference) for_type =
   List.fold_left
     (fun visibility (path : Path.t) ->
       match path with
@@ -546,7 +554,7 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
     | _ -> None
   in
   let declare_top_level index (item : Syntax.definition Syntax.item) =
-    let declare = make_written index ~visibility:item.value.visibility item in
+    let declare = make_written index ~visibility:(convert_visibility item.value.visibility) item in
     match item.value.kind with
     | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
         declare (make_top_path module_ name.text) Function (generics <> [])
@@ -574,7 +582,7 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
     | Impl { trait_; type_; _ } ->
         let trait, for_type = resolve_local_header item trait_ type_ in
         make_written index
-          ~visibility:(derive_impl_visibility lookups trait for_type)
+          ~visibility:(derive_header_visibility lookups trait for_type)
           item
           (Impl { module_; trait; for_type })
           Impl (type_.generics <> [])
@@ -586,7 +594,11 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
         declare (Test { module_; name = text }) Test false
     | Law_proof { trait_; law; type_; _ } ->
         let trait, for_type = resolve_local_header item trait_ type_ in
-        declare (Law_proof { module_; trait; law = law.text; for_type }) Law_proof false
+        make_written index
+          ~visibility:(derive_header_visibility lookups trait for_type)
+          item
+          (Law_proof { module_; trait; law = law.text; for_type })
+          Law_proof false
     | Definition_error { name = Some (Plain_name name); intended = Some intended } ->
         declare (make_top_path module_ name.text) (convert_named (convert_intended intended)) false
     | Definition_error { name = Some (Member_name (head, name)); intended } ->

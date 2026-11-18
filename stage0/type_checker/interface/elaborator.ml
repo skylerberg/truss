@@ -1200,7 +1200,12 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
               in
               make_elaborated_interface context
                 (Type_interface
-                   { type_generics; shape; opaque = definition.visibility = Public_opaque; derives })
+                   {
+                     type_generics;
+                     shape;
+                     opaque = (lookups.names.read_declaration key).visibility = Public_opaque;
+                     derives;
+                   })
           | Constant { name; type_; _ } ->
               let context =
                 match name with

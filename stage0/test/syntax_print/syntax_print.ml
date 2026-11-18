@@ -326,11 +326,11 @@ and show_pattern_field (field : Syntax.pattern_field) =
   | Field inner -> show_pattern inner
   | Rest -> ".."
 
-let show_visibility = function
-  | Syntax.Private -> ""
-  | Internal -> "internal"
-  | Public -> "public"
-  | Public_opaque -> "public opaque"
+let show_visibility : Syntax.visibility option -> string = function
+  | None -> ""
+  | Some Internal -> "internal"
+  | Some Public -> "public"
+  | Some Public_opaque -> "public opaque"
 
 let show_type_head (head : Syntax.type_head) = show_path head.path ^ show_generics head.generics
 
