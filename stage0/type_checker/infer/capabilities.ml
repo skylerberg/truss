@@ -206,12 +206,6 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
       scope.inferred_lambda
   end
 
-let require_intrinsic_uses checking scope (origin : Core.origin) operation =
-  if Option.is_none (find_implemented_capability scope) then
-    require_available checking scope origin
-      (Types.make_capability_set
-         (List.map (fun capability -> Types.Capability capability) (Intrinsic.list_uses operation)))
-
 let compute_operand_type : Core.operand -> Types.ty = function
   | Place core_place -> Core_walk.compute_place_type core_place
   | Value value -> value.type_
@@ -515,6 +509,11 @@ let explain_callee_divergence checking scope (callee : Core.operand Core.target)
             (Printf.sprintf "%s may not terminate, since it has no `time` clause" subject))
   | None -> make_explanation "This call may not terminate"
 
+let compute_required_uses scope (callee : Core.callee) =
+  match (callee.target, find_implemented_capability scope) with
+  | Intrinsic _, Some _ -> Types.no_capabilities
+  | (Function _ | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _), _ -> callee.uses
+
 let require_callee_uses checking scope (origin : Core.origin) ?explain_divergence
     (callee : Core.callee) =
   check_callee_grants checking origin callee.target;
@@ -523,10 +522,7 @@ let require_callee_uses checking scope (origin : Core.origin) ?explain_divergenc
     ~explain_divergence:
       (Option.value explain_divergence
          ~default:(explain_callee_divergence checking scope callee.target))
-    callee.uses;
-  match callee.target with
-  | Intrinsic { operation; _ } -> require_intrinsic_uses checking scope origin operation
-  | Function _ | Trait_method _ | Capability_method _ | Indirect _ -> ()
+    (compute_required_uses scope callee)
 
 let require_divergence_of_unmeasured_loop checking scope (origin : Core.origin)
     ~explain_missing_measure =

@@ -78,7 +78,7 @@ let instantiate (interface : Interface.Lookups.t) (target : Core.operand Core.ta
       Types.union_capabilities
         (Types.make_capability_set [ Types.Capability capability ])
         (read_method_divergence ~owner:capability ~name ~receiver:Static)
-  | Intrinsic _ -> Types.no_capabilities
+  | Intrinsic { operation; _ } -> (Intrinsic_signatures.make_signature operation).uses
   | Indirect function_value -> (
       let type_ =
         match function_value with
