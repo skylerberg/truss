@@ -55,7 +55,7 @@ let attach_blocks snapshot packages database holes =
         (fun (test : Test_command.test) -> ("test " ^ Test_command.label_test test, test.path))
         (Test_command.select snapshot database packages ~paths:[] ~match_:None)
   in
-  let lookups = lazy (Workspace_backend.make_lowered_lookups database packages) in
+  let lookups = lazy (Workspace_backend.require_lowered_lookups database packages) in
   let read_memoized table list_reached root =
     match Path_table.find_opt table root with
     | Some reached -> reached

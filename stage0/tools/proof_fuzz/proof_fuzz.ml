@@ -31,7 +31,9 @@ let load text =
       ( database,
         lazy
           (Backend.create ~evaluation_time_limit_ms:2000
-             (Database.make_lowered_lookups database [ example.package ])
+             (match Database.find_lowered_lookups database [ example.package ] with
+             | Ok lookups -> lookups
+             | Error message -> failwith message)
              (Lazy.force c_compiler) Development) )
 
 let find_integer (ty : Types.ty) =

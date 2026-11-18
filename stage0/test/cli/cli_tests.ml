@@ -794,7 +794,7 @@ let () =
         fail "the geometry's Point showed %s" (String.concat "; " geometry))
 
 let make_lowered_lookups (snapshot, packages) =
-  Cli.Workspace_backend.make_lowered_lookups (Workspace.open_database snapshot) packages
+  Cli.Workspace_backend.require_lowered_lookups (Workspace.open_database snapshot) packages
 
 let make_speaker_calling called =
   make_package

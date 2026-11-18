@@ -81,7 +81,7 @@ let build_program ?output snapshot packages (profile : Backend.profile) =
   let main = require_main snapshot database packages in
   Option.iter
     (refuse_unshippable snapshot packages
-       (Workspace_backend.make_lowered_lookups database packages)
+       (Workspace_backend.require_lowered_lookups database packages)
        main)
     (Report.force_proofs report);
   let backend = Workspace_backend.create database snapshot packages profile in
