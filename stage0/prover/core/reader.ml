@@ -732,7 +732,20 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       ( frame,
         Values.translate_global_value context frame site path instantiation.type_arguments
           ~is_argument )
-  | To_any _ -> Operations.convert_to_any context frame site
+  | To_any { value; trait; _ } ->
+      Facts.reject_recursion_through_supplied_code context frame
+        (Facts.locate context frame.source site.origin)
+        (lazy
+          (Mir.Call_edges.list_code_supplied_by_conversion context.lookups.interface
+             frame.substitution
+             (compute_operand_type context frame value)
+             trait))
+        ~describe:(fun supplier ->
+          Printf.sprintf
+            "This conversion to `any` gives `%s`, whose methods call back here, so the prover \
+             cannot show that the recursion ends."
+            supplier);
+      Operations.convert_to_any context frame site
   | Operation { operation; operands; type_arguments } ->
       let types =
         List.filter_map
@@ -1385,6 +1398,18 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
   | Template { destination; literals; call } -> (
       match (call.callee.target, call.arguments) with
       | Trait_method { trait; name; receiver; evidence; _ }, [ Passed { value = template; _ } ] ->
+          Option.iter
+            (fun recursive_callee ->
+              Facts.oblige context frame Termination location
+                [
+                  State.Text
+                    (Printf.sprintf
+                       "This template calls `%s`, which calls back here, and a template passes no \
+                        arguments the prover can compare, so the recursion cannot be shown to end."
+                       (Path.show recursive_callee));
+                ]
+                (Logic.Boolean false))
+            (snd (Facts.find_recursive_callee context frame location call.callee.target));
           let frame, tagged =
             Values.apply_template context frame
               { origin = call.origin; type_ = compute_target_type context frame run destination }
@@ -1394,23 +1419,19 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
           Some (write_place context frame run destination tagged)
       | _ -> Facts.raise_unsupported location "a tagged template whose tag the prover cannot read")
   | Provide { provided; _ } ->
-      if context.terminates && frame.makes_obligations then
-        List.iter
-          (fun (implementation : Mir.provided) ->
-            List.iter
-              (fun (provided : Core.provided) ->
-                if Facts.has_method_in_recursion_group context provided.impl then
-                  Facts.oblige context frame Termination location
-                    [
-                      State.Text
-                        (Printf.sprintf
-                           "This `provide` gives `%s`, whose methods call back here, so the prover \
-                            cannot show that the recursion ends."
-                           (Path.show provided.impl));
-                    ]
-                    (Logic.Boolean false))
-              implementation.provides)
-          provided;
+      List.iter
+        (fun (implementation : Mir.provided) ->
+          List.iter
+            (fun (provided : Core.provided) ->
+              Facts.reject_recursion_through_supplied_code context frame location
+                (lazy (Mir.Call_edges.list_impl_methods context.lookups.interface provided.impl))
+                ~describe:(fun supplier ->
+                  Printf.sprintf
+                    "This `provide` gives `%s`, whose methods call back here, so the prover cannot \
+                     show that the recursion ends."
+                    supplier))
+            implementation.provides)
+        provided;
       Hashtbl.replace run.provides statement.origin provided;
       Some frame
   | Provide_end -> (

@@ -1,0 +1,11 @@
+trait Step {
+  fn step(self) -> Int64
+    cost time finite
+  {
+    Hop().step()
+  }
+}
+
+type Hop()
+
+impl Step for Hop {}

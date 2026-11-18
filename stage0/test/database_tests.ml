@@ -252,6 +252,32 @@ let expect_recursion_group text ~of_:name ~expected =
     Harness.fail "the recursion group of %s is [%s], not [%s]" name (String.concat "; " group)
       (String.concat "; " expected)
 
+let make_level_source ~height =
+  Printf.sprintf
+    "trait Level {\n\
+    \  fn height(self) -> Int64\n\
+    \    cost time finite\n\n\
+    \  fn raised(self) -> Int64\n\
+    \    cost time finite\n\
+    \  {\n\
+    \    self.height()\n\
+    \  }\n\
+     }\n\n\
+     type Shelf(height: Int64)\n\n\
+     impl Level for Shelf {\n\
+    \  fn height(self) -> Int64 {\n\
+    \    %s\n\
+    \  }\n\
+     }\n\n\
+     fn floor(shelf: Shelf) -> Int64\n\
+    \  cost time finite\n\
+     {\n\
+    \  shelf.raised()\n\
+     }\n"
+    height
+
+let raised_of_shelf = "app::main::impl app::main::Level for app::main::Shelf.raised"
+
 let callee_and_caller =
   "fn callee(x: Int64) -> Int64 { x + 1 }\nfn caller() -> Int64 { callee(1) }\n"
 
@@ -602,6 +628,31 @@ let () =
             "call edges app " ^ derived_version_default;
             "proof app::main::check";
           ]);
+  Harness.test "an inherited method's MIR call edges read the MIR of its trait's provided body"
+    (fun () ->
+      expect_reads
+        (build [ ("app::main", make_level_source ~height:"self.height") ])
+        ("MIR call edges " ^ raised_of_shelf)
+        ~includes:[ "body mir app::main::Level.raised" ]
+        ~excludes:[]);
+  Harness.test
+    "an impl's method that calls the caller of a method the impl inherits joins their recursion \
+     group" (fun () ->
+      expect_recursion_group (make_level_source ~height:"self.height") ~of_:"floor" ~expected:[];
+      expect_recursion_group
+        (make_level_source ~height:"floor(self)")
+        ~of_:"floor"
+        ~expected:
+          [
+            "app::main::floor";
+            "app::main::impl app::main::Level for app::main::Shelf.height";
+            raised_of_shelf;
+          ];
+      expect_included
+        (list_propagated
+           ~before:[ ("app::main", make_level_source ~height:"self.height") ]
+           ~after:[ ("app::main", make_level_source ~height:"floor(self)") ])
+        ~parts:[ "recursion group " ^ raised_of_shelf; "proof app::main::floor" ]);
   Harness.test
     "adding a file and then removing it recomputes no part of the other file's definitions"
     (fun () ->

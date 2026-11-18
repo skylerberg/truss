@@ -3,7 +3,9 @@ let require_home (source : State.source) =
   | Some key -> key
   | None -> Facts.raise_bug "%s has no definition key" source.name
 
-let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures ~inherits_precondition =
+let make_context ?node (lookups : Lookups.t) ~home ~current ~terminates ~measures
+    ~inherits_precondition =
+  let node = Option.value node ~default:current in
   let rec context =
     {
       State.run_body = (fun frame ~lambdas body -> Reader.read_body context frame ~lambdas body);
@@ -13,6 +15,7 @@ let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures ~inh
       laws_assumed = [];
       lookups;
       current;
+      node;
       terminates;
       measures;
       declarations = [];
@@ -61,7 +64,7 @@ let make_context (lookups : Lookups.t) ~home ~current ~terminates ~measures ~inh
       call_targets = [];
       reading_callback = false;
       validating = [];
-      ranking = terminates && measures = [] && lookups.list_recursion_group current <> [];
+      ranking = terminates && measures = [] && lookups.list_recursion_group node <> [];
       disjoint = lookups.list_must_be_disjoint home;
       indexes = [];
     }
@@ -218,8 +221,12 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
   in
   let home = require_home source in
   let context =
-    make_context lookups ~home ~current:path ~terminates ~measures:contract.decreases
-      ~inherits_precondition
+    make_context lookups ~home ~current:path
+      ~node:
+        (Mir.Call_edges.resolve_node
+           { interface = lookups.interface; mir = lookups.mir }
+           path substitution)
+      ~terminates ~measures:contract.decreases ~inherits_precondition
   in
   context.proving <- proof;
   context.callbacks <-

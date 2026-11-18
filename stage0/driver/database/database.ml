@@ -633,20 +633,26 @@ let find_type_interface lookups path =
   | Value interface -> interface
   | Failed _ | Blocked -> None
 
-let list_derived_methods (names : Resolve.Names.lookups) package =
+let list_unwritten_methods (names : Resolve.Names.lookups) package =
   List.concat_map
     (fun (((trait : Path.t), _), (impl : Path.t)) ->
-      match (impl, names.find_key trait) with
-      | Derived _, Some trait_key ->
+      match names.find_key trait with
+      | Some trait_key when (names.read_declaration trait_key).kind = Trait ->
           List.filter_map
             (fun (member : Resolve.Names.key) ->
               match member.path with
-              | Method { name; receiver; _ } when Infer.derives trait name ->
-                  Some (Path.Method { owner = impl; name; receiver })
+              | Method { name; receiver; _ } ->
+                  let method_ = Path.Method { owner = impl; name; receiver } in
+                  if Option.is_some (names.find_key method_) then None else Some method_
               | _ -> None)
             (names.list_contained trait_key)
-      | _ -> [])
+      | Some _ | None -> [])
     (names.list_impls package)
+
+let is_derived_method (path : Path.t) =
+  match path with
+  | Method { owner = Derived { trait; _ }; name; _ } -> Infer.derives trait name
+  | _ -> false
 
 let list_package_parts database (names : Resolve.Names.lookups) package : Part.any list =
   let package_database = obtain_owner database package in
@@ -654,7 +660,7 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.a
   let paths =
     List.map (fun (declaration : Resolve.Names.declaration) -> declaration.path) declarations
   in
-  let derived_methods = list_derived_methods names package in
+  let unwritten_methods = list_unwritten_methods names package in
   let of_declaration (declaration : Resolve.Names.declaration) : Part.any list =
     let key = Resolve.Names.make_key declaration in
     List.map (fun section -> Part.Any (Resolved (key, section))) Resolve.sections
@@ -687,10 +693,12 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.a
         | _, Path.Derived { type_; trait } -> Some (Part.Any (Derived_interface { type_; trait }))
         | _ -> None)
       (names.list_impls package)
-  @ List.map (fun path -> Part.Any (Generated_mir path)) derived_methods
+  @ List.map
+      (fun path -> Part.Any (Generated_mir path))
+      (List.filter is_derived_method unwritten_methods)
   @ List.concat_map
       (fun path -> [ Part.Any (Mir_call_edges path); Any (Call_edges (path, package)) ])
-      (List.sort_uniq Path.compare (paths @ derived_methods))
+      (List.sort_uniq Path.compare (paths @ unwritten_methods))
   @ List.map
       (fun dependency -> Part.Any (Grant (package, dependency)))
       (List.sort_uniq Path.compare_package (names.list_dependency_names package))

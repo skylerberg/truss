@@ -13,7 +13,6 @@ val run_in_source : State.context -> State.source -> (unit -> 'a) -> 'a
 val raise_bug : ('a, unit, string, 'b) format4 -> 'a
 val read_parameter_name : Mir.parameter -> string
 val is_in_recursion_group : State.context -> Path.t -> bool
-val has_method_in_recursion_group : State.context -> Path.t -> bool
 val list_clauses : Mir.requirement list -> Mir.formula list
 val declare : State.context -> Logic.declaration -> unit
 val add_fact : State.context -> Logic.term -> unit
@@ -38,6 +37,21 @@ val oblige :
   State.message ->
   Logic.term ->
   unit
+
+val reject_recursion_through_supplied_code :
+  State.context ->
+  State.frame ->
+  State.location ->
+  describe:(string -> string) ->
+  Path.t list Lazy.t ->
+  unit
+
+val find_recursive_callee :
+  State.context ->
+  State.frame ->
+  State.location ->
+  'operand Core.target ->
+  Mir.Call_edges.resolution * Path.t option
 
 val oblige_safe_operation :
   ?cited:Resolve.Names.key * Core.origin ->

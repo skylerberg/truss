@@ -1,0 +1,20 @@
+trait Grow {
+  fn grow(self) -> Int64
+    cost time finite
+}
+
+type Seed(height: Int64)
+
+type Sprout(height: Int64)
+
+impl Grow for Seed {
+  fn grow(self) -> Int64 {
+    Sprout(height: self.height).grow()
+  }
+}
+
+impl Grow for Sprout {
+  fn grow(self) -> Int64 {
+    Seed(height: self.height).grow()
+  }
+}

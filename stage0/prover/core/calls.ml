@@ -106,8 +106,8 @@ let list_structural_parameters context (frame : State.frame) (clauses : State.cl
        clauses.parameters)
 
 let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
-    path (contract : State.contract) (values : State.passed list) ~lent_final ~havoc_mut
-    ~substitution_of ~type_arguments =
+    path (contract : State.contract) (values : State.passed list) ~recursive_callee ~lent_final
+    ~havoc_mut ~substitution_of ~type_arguments =
   let is_logic_call = contract.is_logic_function && invocation.uses = Types.no_capabilities in
   let values =
     if is_logic_call then
@@ -183,16 +183,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     }
   in
   let callee_clauses = contract.callee_clauses in
-  if
-    context.terminates && frame.makes_obligations
-    && (match invocation.callee with
-      | Trait_method _ -> Mir.Call_edges.is_dispatched invocation.callee
-      | _ -> true)
-    && Facts.is_in_recursion_group context path
-  then
+  if Option.is_some recursive_callee then
     begin match (context.measures, callee_clauses.decreases) with
     | [], []
-      when Path.equal path context.current
+      when Option.equal Path.equal recursive_callee (Some context.node)
            && list_structural_parameters context frame callee_clauses <> [] ->
         let pairs = list_structural_parameters context frame callee_clauses in
         let before = List.map (fun (ty, entry, _) -> Models.rank context ty entry) pairs in
@@ -721,7 +715,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                   (fun metric -> Amounts.compute_method_cost context frame metric invocation.callee)
               else None
             in
-            Amounts.compute_callee_amount ?method_cost context after ~path
+            Amounts.compute_callee_amount ?method_cost context after
+              ~is_recursive:(Option.is_some recursive_callee)
               ~clauses:(Contracts.list_declared_clauses contract)
               ~bind_frame:(fun clauses ->
                 {
@@ -892,30 +887,31 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
          parameters)
       arguments
   in
-  if context.terminates && frame.makes_obligations then
-    List.iter
-      (fun impl ->
-        if Facts.has_method_in_recursion_group context impl then
-          Facts.oblige context frame Termination location
-            [
-              Text
-                (Printf.sprintf
-                   "This call uses `%s` where a bound needs it, and that `impl`'s methods reach \
-                    back here. Such a use passes no arguments the prover can compare, so the \
-                    recursion cannot be shown to end: write it as a direct call on a part."
-                   (Path.show impl));
-            ]
-            (Logic.Boolean false))
-      (Mir.Call_edges.list_impls_used context.lookups.interface
-         (Path.locate_package context.current)
-         invocation.callee);
+  let resolution, recursive_callee =
+    Facts.find_recursive_callee context frame location invocation.callee
+  in
+  let reject_recursion_without_a_contract () =
+    Option.iter
+      (fun recursive_callee ->
+        Facts.oblige context frame Termination location
+          [
+            Text
+              (Printf.sprintf
+                 "This call to `%s` may not end: it calls back here, and the prover reads this \
+                  call without the callee's `decreases` clause."
+                 (Path.show recursive_callee));
+          ]
+          (Logic.Boolean false))
+      recursive_callee
+  in
   let with_contract ?(substitution_of = fun _ -> Types.no_substitution) ?(type_arguments = []) path
       = function
     | Some contract ->
         Some
-          (call_contract ~lent_final:leave_lent context frame site invocation path contract values
-             ~havoc_mut ~substitution_of ~type_arguments)
+          (call_contract ~recursive_callee ~lent_final:leave_lent context frame site invocation path
+             contract values ~havoc_mut ~substitution_of ~type_arguments)
     | None ->
+        reject_recursion_without_a_contract ();
         let frame = havoc_mut frame in
         let frame =
           Operations.spend context frame
@@ -942,11 +938,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       let self_type = Facts.substitute_type context frame self_type in
       let trait = { trait with trait_arguments = list_arguments trait.trait_arguments } in
       let evidence : Core.evidence =
-        match evidence with
-        | Bound -> (
-            match Operations.find_concrete_impl context trait self_type with
-            | Some (impl, substitution) -> Impl { impl; substitution }
-            | None -> evidence)
+        match (evidence, resolution.evidence) with
+        | Bound, Some (Impl _ as resolved) -> resolved
         | _ -> evidence
       in
       Laws.assume_laws context frame ~at:location trait self_type;
@@ -955,6 +948,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       | ("minimum_value" | "maximum_value" | "bit_width"), _, []
         when Well_known.is Fixed_width_integer trait.trait
              && Types.find_integer_bits self_type <> None -> (
+          reject_recursion_without_a_contract ();
           match (name, Types.find_integer_range self_type, Types.find_integer_bits self_type) with
           | "minimum_value", Some (low, _), _ -> Some (frame, Logic.Integer low)
           | "maximum_value", Some (_, high), _ -> Some (frame, Logic.Integer high)
@@ -962,9 +956,11 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           | _ -> None)
       | "equal", _, [ left; right ]
         when Path.equal trait.trait Facts.equal_trait && Facts.is_structural context self_type ->
+          reject_recursion_without_a_contract ();
           Some (frame, Logic.equal left right)
       | "equal", Impl { impl = Derived _; _ }, [ left; right ]
         when Path.equal trait.trait Facts.equal_trait ->
+          reject_recursion_without_a_contract ();
           Some (frame, Operations.make_equality context frame self_type left right)
       | _ ->
           (match evidence with

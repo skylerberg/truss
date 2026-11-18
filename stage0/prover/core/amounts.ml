@@ -145,13 +145,11 @@ let make_conditional_amount condition amount =
   | condition -> Logic.ite condition amount Costs.zero
 
 let compute_callee_amount ?(method_cost : (Metric.t -> Logic.term) option) (context : State.context)
-    after ~path ~clauses:(declared_clauses : State.clauses list)
+    after ~is_recursive ~clauses:(declared_clauses : State.clauses list)
     ~(bind_frame : State.clauses -> State.frame) ~uses ~(values : State.passed list) ~change
     (counter : Costs.counter) =
   let is_recursive_call =
-    counter.counting = Units
-    && List.mem counter context.bounded_counters
-    && Facts.is_in_recursion_group context path
+    is_recursive && counter.counting = Units && List.mem counter context.bounded_counters
   in
   let list_matching_costs (clauses : State.clauses) =
     let frame = bind_frame clauses in
@@ -309,8 +307,7 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
                        values)
                   ~substitution:Types.no_substitution
               in
-              compute_callee_amount context frame
-                ~path:(Path.make_capability_method capability name)
+              compute_callee_amount context frame ~is_recursive:false
                 ~clauses:[ capability_clauses ]
                 ~bind_frame:(fun _ -> inside)
                 ~uses:(invocation.uses :> Types.capability list)

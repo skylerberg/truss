@@ -1,0 +1,17 @@
+trait Step {
+  fn step(self) -> Int64
+    cost time finite
+  {
+    run(self)
+  }
+}
+
+fn run[Item: Step](item: Item) -> Int64
+  cost time finite
+{
+  item.step()
+}
+
+type Hop()
+
+impl Step for Hop {}

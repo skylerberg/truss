@@ -126,6 +126,7 @@ type stated = Tables.stated =
 type context = {
   lookups : Lookups.t;
   current : Path.t;
+  node : Path.t;
   mutable terminates : bool;
   mutable callbacks : (Core.local * string * Mir.callback) list;
   measures : Mir.formula list;

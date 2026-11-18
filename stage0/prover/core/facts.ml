@@ -28,12 +28,20 @@ let read_parameter_name (parameter : Mir.parameter) =
   | Some name -> name
   | None -> raise_bug "a parameter that no definition names"
 
-let is_in_recursion_group (context : State.context) path =
-  List.exists (Path.equal path) (context.lookups.list_recursion_group context.current)
-
-let has_method_in_recursion_group (context : State.context) impl =
-  List.exists (is_in_recursion_group context)
-    (Mir.Call_edges.list_written_methods context.lookups.interface.names impl)
+let is_in_recursion_group (context : State.context) node =
+  let is_inherited_from declaration member =
+    match context.lookups.mir.find_form_origin member with
+    | Some (Inherited key, _) -> Path.equal key.path declaration
+    | Some ((Written _ | Derived _), _) | None -> false
+  in
+  List.exists (Path.equal node) (context.lookups.list_recursion_group context.node)
+  ||
+  match context.node with
+  | Method { owner; _ }
+    when Option.is_some (Interface.Definition.find_trait_interface context.lookups.interface owner)
+    ->
+      List.exists (is_inherited_from context.node) (context.lookups.list_recursion_group node)
+  | _ -> false
 
 let list_clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
@@ -352,6 +360,59 @@ let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (fram
 let oblige ?template_clause ?cited ?(fixes = []) context frame code location message goal =
   record_obligation ?template_clause ?cited ~fixes ~panic_clause:None context frame code location
     message goal
+
+let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
+    ~describe supplied =
+  if context.terminates && frame.makes_obligations then
+    List.iter
+      (fun supplier ->
+        oblige context frame Termination location
+          [ Text (describe (Path.show supplier)) ]
+          (Logic.Boolean false))
+      (List.sort_uniq Path.compare
+         (List.filter_map
+            (fun (node : Path.t) ->
+              match node with
+              | Method { owner; _ } when is_in_recursion_group context node -> Some owner
+              | _ -> None)
+            (Lazy.force supplied)))
+
+let find_recursive_callee (context : State.context) (frame : State.frame) location callee =
+  let resolution =
+    Mir.Call_edges.resolve_callee context.lookups.interface frame.substitution callee
+  in
+  let reject target origin =
+    oblige context frame Termination location
+      [
+        Text
+          (Printf.sprintf
+             "This call to `%s` reaches back here through code that its `impl` %s. No measure can \
+              be stated for that code, so the recursion cannot be shown to end."
+             (Path.show target) origin);
+      ]
+      (Logic.Boolean false);
+    None
+  in
+  let recursive_callee =
+    if context.terminates && frame.makes_obligations then begin
+      reject_recursion_through_supplied_code context frame location resolution.supplied
+        ~describe:(fun supplier ->
+          Printf.sprintf
+            "This call uses `%s` where a bound needs it, and its methods reach back here. Such a \
+             use passes no arguments the prover can compare, so the recursion cannot be shown to \
+             end: write it as a direct call on a part."
+            supplier);
+      match resolution.target with
+      | Some target when is_in_recursion_group context target -> (
+          match context.lookups.mir.find_form_origin target with
+          | Some (Derived _, _) -> reject target "derives"
+          | Some (Inherited _, _) -> reject target "inherits from its trait"
+          | Some (Written _, _) | None -> Some target)
+      | Some _ | None -> None
+    end
+    else None
+  in
+  (resolution, recursive_callee)
 
 let oblige_safe_operation ?cited ?(fixes = []) (context : State.context) (frame : State.frame) code
     location message goal =

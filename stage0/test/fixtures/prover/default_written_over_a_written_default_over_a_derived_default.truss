@@ -1,0 +1,18 @@
+type Inner(size: Int64)
+  derives Default
+
+type Middle(inner: Inner)
+
+type Outer(middle: Middle)
+
+impl Default for Middle {
+  fn default() -> Middle {
+    Middle(inner: Inner.default())
+  }
+}
+
+impl Default for Outer {
+  fn default() -> Outer {
+    Outer(middle: Middle.default())
+  }
+}

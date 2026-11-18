@@ -1,0 +1,34 @@
+trait Level {
+  fn height(self) -> Int64
+    cost time finite
+
+  fn raised(self, floor: Int64) -> Int64
+    cost time finite
+  {
+    self.height().max(floor)
+  }
+
+  fn lowered(self, ceiling: Int64) -> Int64
+    cost time finite
+  {
+    self.height().min(ceiling)
+  }
+
+  fn clamped(self, floor: Int64, ceiling: Int64) -> Int64
+    cost time finite
+  {
+    self.height().max(floor).min(ceiling)
+  }
+}
+
+type Shelf(height: Int64)
+
+impl Level for Shelf {
+  fn height(self) -> Int64 {
+    self.height
+  }
+
+  fn clamped(self, floor: Int64, ceiling: Int64) -> Int64 {
+    self.raised(floor).min(self.lowered(ceiling))
+  }
+}

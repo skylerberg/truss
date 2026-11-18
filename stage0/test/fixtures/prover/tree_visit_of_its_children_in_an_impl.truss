@@ -1,0 +1,14 @@
+trait Visit {
+  fn visit(self)
+    cost time finite
+}
+
+type Tree(value: Int64, children: List[Tree])
+
+impl Visit for Tree {
+  fn visit(self) {
+    for child in self.children {
+      child.visit()
+    }
+  }
+}

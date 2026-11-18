@@ -1,0 +1,13 @@
+trait Depth {
+  fn depth(self) -> UInt64
+    cost time finite
+}
+
+impl Depth for Tree {
+  fn depth(self) -> UInt64 {
+    match self {
+      Leaf => 0
+      Node(left, right, ..) => left.depth().max(right.depth())
+    }
+  }
+}

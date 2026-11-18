@@ -1,0 +1,12 @@
+type Holder(outer: Outer)
+  derives Default
+
+type Outer(size: Int64)
+
+impl Default for Outer {
+  fn default() -> Outer
+    cost time finite
+  {
+    Holder.default().outer
+  }
+}

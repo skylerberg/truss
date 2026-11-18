@@ -843,10 +843,45 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
   integer measure over the parameters that stays at or above zero and that
   every recursive call makes smaller. A list of measures is compared in
   order. Functions in a cycle of calls each state one.
-- A function also reaches itself by naming a function as a value, and by
-  using an `impl` where a bound needs one. Inside an `impl`'s methods, using
-  that same `impl` is a recursive call to every method of the `impl`, and
-  cannot be shown to decrease.
+- **A recursion is followed through each call to the code that the call
+  runs.** The callee decides which code that is:
+
+  | The callee | The code that the call runs |
+  |---|---|
+  | A function, or a method of a type | That function or method |
+  | A trait's method, on a type whose `impl` is known | That `impl`'s method: the method written in the `impl`, the method that the `impl` derives, or the provided method that the `impl` inherits |
+  | A trait's method, through `any Trait` | The method of every `impl` of the trait |
+  | A trait's method, through a bound on a type parameter | Code that a caller of the enclosing function supplies, as the next rule says |
+  | A function value | Code that a caller of the enclosing function supplies, as the next rule says |
+
+  A provided method that an `impl` inherits runs the trait's body for that
+  `impl`, so a call on `Self` in the body runs the same `impl`'s method. The
+  body is also checked once, for every `impl`. In that check a call on `Self`
+  is followed to the method of every `impl` of the trait.
+- **Code that supplies other code to a callee is followed to all of the
+  supplied code.** The callee is checked for every type argument and every
+  function value, so it cannot name the code that it is given:
+
+  | The supplier | The supplied code |
+  |---|---|
+  | A call that gives a type argument to a type parameter with a bound. The parameter is one of a generic function, of a generic `impl`, of a generic type with a derived `impl`, or of a trait's generic method | Every method of the type argument's `impl` of the bound |
+  | A function named as a value | The function, and the code that its type arguments supply |
+  | A conversion to `any Trait` | Every method of the value's `impl` of the trait |
+  | A `provide` | Every method of the provided `impl` |
+
+- **A recursion that leads back to a function with a `time` clause is proven
+  to terminate, or is rejected.** The way back decides:
+
+  | The way back to the function | The requirement |
+  |---|---|
+  | A call of a function, of a method written in an `impl`, or of a trait's method through `any Trait` or on `Self` | The call is on a part of a parameter, or each function in the cycle states `decreases` |
+  | A call of a method that its `impl` derives or inherits | Rejected. The `impl` states no measure for that code, so nothing proves that the recursion through it terminates |
+  | Supplied code | Rejected. A use of supplied code passes no arguments to compare with a measure |
+
+  With `type Tree(children: List[Tree])`, an `equal` of `Tree` written as
+  `self.children == other.children` supplies the `impl` of `Equal` for `Tree`
+  to the list's `equal`, which calls it back, and is rejected. A loop over
+  the children that calls `equal` on each child recurses on a part.
 
 ### Cost clauses
 
