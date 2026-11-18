@@ -1,0 +1,11 @@
+fn slow() {
+}
+
+fn run[capability Mine](work: (fn() uses Mine))
+  uses Mine
+{
+  let again: (fn() uses Mine) = fn() {
+    slow()
+  }
+  again()
+}

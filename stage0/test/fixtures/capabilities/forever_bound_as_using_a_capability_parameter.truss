@@ -1,0 +1,10 @@
+fn forever() {
+  while true {}
+}
+
+fn run[capability Mine](work: (fn() uses Mine))
+  uses Mine
+{
+  let again: (fn() uses Mine) = forever
+  again()
+}
