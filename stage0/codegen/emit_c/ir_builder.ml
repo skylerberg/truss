@@ -95,7 +95,8 @@ let is_unsigned_zero : Lowered.operand -> bool = function
 let fold_constants (rvalue : Lowered.rvalue) : Lowered.rvalue =
   let decide truth : Lowered.rvalue = Use (Constant (Bool truth)) in
   match rvalue with
-  | Binary (op, Constant (Integer (_, left)), Constant (Integer (_, right))) -> (
+  | Binary (op, Constant (Integer (left_integer, left)), Constant (Integer (right_integer, right)))
+    when left_integer = right_integer -> (
       match op with
       | Greater -> decide (Z.gt left right)
       | Greater_equal -> decide (Z.geq left right)
@@ -165,8 +166,8 @@ let rec branch builder condition ~yes ~no =
 
 let rec evaluate builder condition : Lowered.rvalue =
   match condition with
-  | Holds rvalue -> fold_constants rvalue
-  | Negation negated -> fold_constants (Unary (Not, evaluate_operand builder negated))
+  | Holds rvalue -> rvalue
+  | Negation negated -> Unary (Not, evaluate_operand builder negated)
   | Conjunction (first, second) ->
       let first = evaluate_operand builder first in
       Binary (Bit_and, first, evaluate_operand builder second)
