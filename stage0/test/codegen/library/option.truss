@@ -45,7 +45,7 @@ test "an option without a value takes the value that a function makes" {
   assert kept == Ok(3)
 }
 
-test "expect lends the element of an option that a list lends" {
+test "expect lends the element of an option that a list lends" uses Panic {
   let names: List[String] = ["ada", "grace"]
   assert names.get(1).expect("the list holds two names").length() == 5
 }

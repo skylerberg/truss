@@ -1942,9 +1942,9 @@ These capabilities are in the prelude:
 | `Log` | Writing to the program's log |
 | `Panic` | Ending the program |
 
-The runtime holds a *real implementation* of every standard capability
-except `Panic`, which is built in. A capability that a package declares has
-no real implementation.
+The runtime holds a *real implementation* of every standard capability.
+`Panic`'s is built in, and no `impl` implements it. A capability that a
+package declares has no real implementation.
 
 ### Handles
 
@@ -1972,10 +1972,9 @@ fn main(arguments: List[String]) -> ExitCode
 }
 ```
 
-`main` has this signature. Its `uses` clause names only `Panic` and
-capabilities with a real implementation, and the runtime provides those real
-implementations and nothing else. The program ends when `main` returns or
-panics.
+`main` has this signature. Its `uses` clause names only capabilities with
+a real implementation, and the runtime provides those real implementations
+and nothing else. The program ends when `main` returns or panics.
 
 ## Parallelism
 
@@ -2355,12 +2354,12 @@ test "config loads with defaults" {
 ```
 
 - `plain_string` is a `STRING` with no interpolation.
-- A test has `Panic`. It provides every other capability its code uses,
-  unless it declares them with `uses`. A test with `uses` is *external*: it
-  gets the real implementations of exactly those capabilities. Any other
-  test is deterministic.
+- A test provides every capability its code uses, unless it declares them
+  with `uses`, as a function does. A test whose `uses` names a capability
+  other than `Panic` is *external*: it gets the real implementations of
+  exactly those capabilities. Any other test is deterministic.
 - A test's `uses` names only capabilities with a [real
-  implementation](#standard-capabilities), so it cannot name `Panic`.
+  implementation](#standard-capabilities).
 - A test's standard input is empty.
 - A failed `assert` ends the test as failed, and the rest of the test can
   rely on the asserted fact.

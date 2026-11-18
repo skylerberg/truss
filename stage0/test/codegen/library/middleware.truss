@@ -83,7 +83,7 @@ fn visit() -> List[String]
   }
 }
 
-test "middleware adds CORS, security headers, request IDs, logs, and body limits" {
+test "middleware adds CORS, security headers, request IDs, logs, and body limits" uses Panic {
   let world = simulation::World.new()
   provide world {
     let seen = visit()

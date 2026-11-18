@@ -35,7 +35,7 @@ fn stalled_head() -> Stalled
   }
 }
 
-test "a client that stalls inside its headers is closed after the head deadline" {
+test "a client that stalls inside its headers is closed after the head deadline" uses Panic {
   provide simulation::World.new() {
     let stalled = stalled_head()
     assert stalled.reply == ""
@@ -64,7 +64,7 @@ fn second_waits_for_first() -> List[String]
   }
 }
 
-test "a server at its connection limit accepts the next connection only once one closes" {
+test "a server at its connection limit accepts the next connection only once one closes" uses Panic {
   provide simulation::World.new() {
     assert second_waits_for_first() == ["true true"]
   }
@@ -107,7 +107,7 @@ fn deadlines() -> List[String]
   }
 }
 
-test "a handler past its deadline gets a 503 if it sent nothing, and a cut connection if it had begun" {
+test "a handler past its deadline gets a 503 if it sent nothing, and a cut connection if it had begun" uses Panic {
   provide simulation::World.new() {
     let seen = deadlines()
     assert seen.length() == 3
@@ -137,7 +137,7 @@ fn abandoned() -> Int64
   }
 }
 
-test "a handler whose HTTP/1.1 client disconnects is cancelled" {
+test "a handler whose HTTP/1.1 client disconnects is cancelled" uses Panic {
   provide simulation::World.new() {
     let finished = abandoned()
     let _ = echo "${finished}"
@@ -176,7 +176,7 @@ fn reset_over_http_two() -> Int64
   }
 }
 
-test "a handler whose HTTP/2 stream the client resets is cancelled" {
+test "a handler whose HTTP/2 stream the client resets is cancelled" uses Panic {
   provide simulation::World.new() {
     let finished = reset_over_http_two()
     let _ = echo "${finished}"
@@ -215,7 +215,7 @@ fn clients_seen() -> List[String]
   }
 }
 
-test "a client address comes from forwarding headers only when a trusted proxy sent them" {
+test "a client address comes from forwarding headers only when a trusted proxy sent them" uses Panic {
   provide simulation::World.new() {
     assert clients_seen() == ["203.0.113.7", "2001:db8::1", "10.1.2.3", "127.0.0.1", "127.0.0.1"]
   }

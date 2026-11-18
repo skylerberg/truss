@@ -1256,7 +1256,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                      uses =
                        Types.union_capabilities
                          (elaborate_capabilities context uses)
-                         (Types.make_capability_set [ Types.panic; Types.unconditional_divergence ]);
+                         (Types.make_capability_set [ Types.unconditional_divergence ]);
                      costs = [];
                      specification_only = false;
                      capture_free_parameters = [];

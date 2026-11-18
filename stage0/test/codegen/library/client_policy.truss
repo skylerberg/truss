@@ -118,7 +118,7 @@ fn exercised() -> List[String]
   }
 }
 
-test "the client follows redirects, keeps cookies when asked, strips credentials across origins, and retries" {
+test "the client follows redirects, keeps cookies when asked, strips credentials across origins, and retries" uses Panic {
   provide simulation::World.new() {
     let seen = exercised()
     assert seen == [

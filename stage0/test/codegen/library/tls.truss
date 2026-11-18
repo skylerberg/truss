@@ -108,7 +108,7 @@ fn handshake(host: StringSlice, roots: own List[x509::Certificate], protocols: o
   [own client, own server]
 }
 
-test "a client and a server agree on keys, verify the chain, pick a protocol, and exchange data" {
+test "a client and a server agree on keys, verify the chain, pick a protocol, and exchange data" uses Panic {
   provide world() {
     let seen = handshake("example.test", roots: [certificate(root_pem.slice())], protocols: ["http/1.1", "h2"])
     assert seen[0] == "echo hello h2 2"
@@ -116,7 +116,7 @@ test "a client and a server agree on keys, verify the chain, pick a protocol, an
   }
 }
 
-test "a client rejects a chain for another host or from an unknown root" {
+test "a client rejects a chain for another host or from an unknown root" uses Panic {
   provide world() {
     let other = handshake("localhost", roots: [certificate(root_pem.slice())], protocols: [])
     assert other[0] == "failed: the certificate is not for this host"
@@ -150,7 +150,7 @@ fn secure_exchange() -> String
   }
 }
 
-test "an HTTPS client and server exchange a request and a response" {
+test "an HTTPS client and server exchange a request and a response" uses Panic {
   provide world() {
     assert secure_exchange() == "200 secure /page"
   }
@@ -224,7 +224,7 @@ fn client_exchanges(is_secure: Bool) -> List[String]
   }
 }
 
-test "a client sends several requests over one HTTP/2 connection, with an upload larger than a window" {
+test "a client sends several requests over one HTTP/2 connection, with an upload larger than a window" uses Panic {
   provide world() {
     let seen = client_exchanges(true)
     assert seen.length() == 6
@@ -237,7 +237,7 @@ test "a client sends several requests over one HTTP/2 connection, with an upload
   }
 }
 
-test "a client keeps an HTTP/1.1 connection open between requests" {
+test "a client keeps an HTTP/1.1 connection open between requests" uses Panic {
   provide world() {
     let seen = client_exchanges(false)
     assert seen.length() == 6
@@ -284,7 +284,7 @@ fn mutual(port: UInt16, required: tls::ClientCertificates, protocols: List[Strin
   }
 }
 
-test "a server that requires a client certificate accepts one its roots signed, and refuses others" {
+test "a server that requires a client certificate accepts one its roots signed, and refuses others" uses Panic {
   provide world() {
     let client = identity(client_pem.slice(), key_text: client_key_pem.slice())
     let server_only = identity(server_only_pem.slice(), key_text: server_only_key_pem.slice())
@@ -390,7 +390,7 @@ fn proxied() -> List[String]
   }
 }
 
-test "a client sends plain requests to its proxy in absolute form and tunnels TLS through CONNECT" {
+test "a client sends plain requests to its proxy in absolute form and tunnels TLS through CONNECT" uses Panic {
   provide world() {
     let seen = proxied()
     assert seen.length() == 4
@@ -493,7 +493,7 @@ fn mailed(port: UInt16, offers_tls: Bool) -> List[String]
   seen
 }
 
-test "mail upgrades an SMTP connection with STARTTLS, verifies the server, and sends over TLS" {
+test "mail upgrades an SMTP connection with STARTTLS, verifies the server, and sends over TLS" uses Panic {
   provide world() {
     assert mailed(2526, offers_tls: true) == [
       "sent",
@@ -508,7 +508,7 @@ test "mail upgrades an SMTP connection with STARTTLS, verifies the server, and s
   }
 }
 
-test "mail refuses to send in the clear to a server that does not offer STARTTLS" {
+test "mail refuses to send in the clear to a server that does not offer STARTTLS" uses Panic {
   provide world() {
     let seen = mailed(2527, offers_tls: false)
     assert seen[0] == "unsupported: a mail server that does not offer STARTTLS"
