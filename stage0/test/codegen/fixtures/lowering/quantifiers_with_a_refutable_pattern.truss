@@ -1,0 +1,15 @@
+fn has_a_three(options: List[Option[Int64]]) -> Bool {
+  exists Some(value) in options => value == 3
+}
+
+fn has_only_positives(options: List[Option[Int64]]) -> Bool {
+  forall Some(value) in options => value > 0
+}
+
+test "a quantifier's pattern leaves out the elements it does not match" {
+  assert has_a_three([None, Some(3)])
+  assert !has_a_three([None, Some(4), None])
+  assert has_only_positives([None, Some(1), None])
+  assert !has_only_positives([None, Some(-1)])
+  assert has_only_positives([None])
+}
