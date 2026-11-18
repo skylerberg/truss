@@ -13,10 +13,10 @@ val prove : Lookups.t -> Resolve.Names.key -> proof
 val resolve_location :
   Resolve.Names.lookups -> Resolve.Names.key -> State.location -> Source.Definition_span.t
 
+type 'span site = { code : Diagnostic.Code.prover; span : 'span; shows : string }
+
 type 'span state = {
-  code : Diagnostic.Code.prover;
-  span : 'span;
-  shows : string;
+  site : 'span site;
   failure : 'span Diagnostic.diagnostic option;
   trusts_compiled_code : bool;
 }
@@ -33,6 +33,9 @@ val decide :
 val list_states : verdicts -> Path.file -> Source.span state list
 val list_diagnostics : verdicts -> Path.file -> Diagnostic.t list
 
-type query = { code : Diagnostic.Code.prover; span : Source.span; shows : string; input : string }
-
-val list_queries : Lookups.t -> (Resolve.Names.key * proof) list -> Path.file -> query list
+val list_queries :
+  runs:(State.template_check * (bool list, string) result) list ->
+  Lookups.t ->
+  (Resolve.Names.key * proof) list ->
+  Path.file ->
+  (Source.span site * string) list
