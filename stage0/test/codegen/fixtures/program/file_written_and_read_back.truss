@@ -1,7 +1,7 @@
 use standard::files
 
 fn main(arguments: List[String]) -> ExitCode
-  uses Console, FileRead, FileWrite, Handles
+  uses Console, FileRead, FileWrite, Handles, RunForever
 {
   let path = Path.new(arguments[1].slice())
   if FileWrite.write_text(path, contents: "first\nsecond line\nlast".slice()) is Err(_) {

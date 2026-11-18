@@ -70,7 +70,7 @@ let compiler_implements (impl : Types.impl_interface) =
 let find_conformance lookups ~list_bounds ~(trait_span : Source.Definition_span.t)
     (impl : Types.impl_interface) (trait_path : Syntax.path_type) =
   let shown_trait = Elaborator.show_path trait_path.path in
-  if Well_known.is Panic impl.implements.trait || compiler_implements impl then None
+  if Well_known.is_built_in_capability impl.implements.trait || compiler_implements impl then None
   else
     Option.map
       (fun (implementation : Impls.implementation) ->
@@ -95,9 +95,13 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
     (impl : Types.impl_interface) (trait_path : Syntax.path_type) =
   let lookups = state.lookups in
   if Well_known.is Panic impl.implements.trait then
-    Checking.report state Implements_panic state.spans.(trait_path.id)
+    Checking.report state Implements_built_in_capability state.spans.(trait_path.id)
       "Nothing can implement `Panic`: no Truss code runs after a panic, and two `parallel` \
        branches that called one implementation with state would race."
+  else if Well_known.is Run_forever impl.implements.trait then
+    Checking.report state Implements_built_in_capability state.spans.(trait_path.id)
+      "Nothing can implement `RunForever`, since a `provide` of it would let a function that does \
+       not declare `RunForever` run forever."
   else if compiler_implements impl then
     Checking.report state Implements_built_in state.spans.(trait_path.id)
       (Printf.sprintf
@@ -224,7 +228,7 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
       | None ->
           Checking.report state Extra_member state.spans.(name.id)
             (Printf.sprintf "`%s` declares no method `%s` with this receiver." shown_trait name.text)
-      | Some implemented -> (
+      | Some implemented ->
           if trait.is_capability && not (receiver = Read || receiver = Mut) then
             Checking.report state Wrong_receiver state.spans.(name.id)
               "A capability's implementation takes `self`, or `mut self` if it mutates its own \
@@ -247,12 +251,7 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
               let allowed =
                 if trait.is_capability then normalize_capabilities impl.impl_uses else expected.uses
               in
-              if
-                not
-                  (Types.is_capability_subset
-                     (normalize_capabilities (Types.remove_divergence written.uses))
-                     allowed)
-              then
+              if not (Types.is_capability_subset (normalize_capabilities written.uses) allowed) then
                 Checking.report state Impl_uses state.spans.(name.id)
                   (if trait.is_capability then
                      Printf.sprintf
@@ -261,31 +260,4 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                        name.text
                    else
                      Printf.sprintf "`%s` can use only the capabilities `%s` declares for it."
-                       name.text shown_trait)
-              else if Types.terminates written.uses then
-                let followed =
-                  Types.compute_missing_capabilities
-                    ~required:(normalize_capabilities (Types.list_divergence written.uses))
-                    ~available:expected.uses
-                in
-                match
-                  List.find_map
-                    (function
-                      | Types.Divergence (Of_impl_method { self_type; trait; name; _ }) ->
-                          Some (Types.show_impl_method self_type trait name)
-                      | _ -> None)
-                    (followed :> Types.capability list)
-                with
-                | Some followed_method ->
-                    Checking.report state Impl_uses state.spans.(name.id)
-                      (Printf.sprintf
-                         "The `time` clause of `%s` follows %s, which may not terminate, and the \
-                          `time` clause that `%s` declares for `%s` does not follow it."
-                         name.text followed_method shown_trait name.text)
-                | None when followed <> Types.no_capabilities ->
-                    Checking.report state Impl_uses state.spans.(name.id)
-                      (Printf.sprintf
-                         "The `time` clause of `%s` names a function that may not terminate, and \
-                          `%s` declares that `%s` terminates whatever it is passed."
-                         name.text shown_trait name.text)
-                | None -> ()))
+                       name.text shown_trait))

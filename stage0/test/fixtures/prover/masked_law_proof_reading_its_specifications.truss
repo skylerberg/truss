@@ -1,6 +1,5 @@
 trait Masked {
   fn low(self) -> UInt8
-    cost time finite
 
   law below_sixteen(value: Self) {
     value.low() < 16
@@ -12,7 +11,6 @@ type Nibble(bits: UInt8)
 impl Masked for Nibble {
   fn low(self) -> UInt8
     ensures result == (self.bits & 15)
-    cost time finite
   {
     self.bits & 15
   }

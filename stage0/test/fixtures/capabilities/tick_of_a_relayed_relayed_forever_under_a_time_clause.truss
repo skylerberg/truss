@@ -1,5 +1,0 @@
-fn f(ticker: mut Relay[Relay[Forever]]) -> UInt64
-  cost time finite
-{
-  mut ticker.tick()
-}

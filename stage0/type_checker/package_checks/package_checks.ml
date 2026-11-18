@@ -325,8 +325,8 @@ let grows lookups (start : Path.t) =
 
 let not_strictly_positive_message =
   "A function stored in such a value could be called on the value and call itself through it, so a \
-   function with a `time` clause might not terminate. Remove the `time` clause from the function \
-   type, or pass the function the fields that it needs instead of the whole value."
+   function without `RunForever` might run forever. Add `RunForever` to the function type's \
+   `uses`, or pass the function the fields that it needs instead of the whole value."
 
 let read_written_variant (variants : Syntax.variant list) (variant : Types.variant) =
   match

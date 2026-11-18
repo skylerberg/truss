@@ -385,30 +385,19 @@ and parse_cost cursor =
     | Metric metric -> Syntax.Metric metric
     | _ -> Calls (parse_call_target cursor)
   in
-  let bound_token = Cursor.peek cursor in
   let bound =
-    match bound_token.kind with
+    match Cursor.peek_kind cursor with
     | Punctuation Less_equal ->
         Cursor.advance cursor;
         Syntax.At_most (parse_expression cursor)
     | Punctuation Equal_equal ->
         Cursor.advance cursor;
         Exactly (parse_expression cursor)
-    | _ -> (
-        let suggested =
-          if resource = Metric Time then [ Contextual_keyword.O; Finite ] else [ O ]
-        in
-        match
-          Contextual_keyword.expect cursor ~accepted:[ O; Finite ] ~suggested ~category:"a bound"
-            ~expected:"a bound: `O(...)`, `finite`, `<=`, or `==`"
-        with
-        | O -> Big_o (parse_parenthesized_expression cursor)
-        | _ ->
-            if resource <> Metric Time then
-              Cursor.report cursor Finite_not_time bound_token.span
-                "`finite` is a bound only for `time`; a countable resource takes `O(...)`, `<=`, \
-                 or `==`.";
-            Finite)
+    | _ ->
+        ignore
+          (Contextual_keyword.expect cursor ~accepted:[ O ] ~suggested:[ O ] ~category:"a bound"
+             ~expected:"a bound: `O(...)`, `<=`, or `==`");
+        Big_o (parse_parenthesized_expression cursor)
   in
   { amortized; resource; bound }
 
@@ -1290,17 +1279,10 @@ and parse_loop_clauses cursor =
     | Keyword Cost ->
         let keyword = Cursor.take cursor in
         let cost = parse_cost cursor in
-        if cost.amortized || cost.bound = Finite then
+        if cost.amortized then
           Cursor.report cursor Loop_cost_bound keyword.span
-            (Printf.sprintf
-               "A loop's `cost` bounds the loop's cost so far, so it takes `O(...)`, `<=`, or \
-                `==`%s. %s"
-               (if cost.bound = Finite then "" else ", and is never `amortized`")
-               (if cost.bound = Finite then
-                  "A loop shows that it ends with `decreases`, not with `time finite`."
-                else
-                  "Potential belongs to the values the loop mutates, which the function's own \
-                   `cost` accounts for."));
+            "A loop's `cost` bounds the loop's cost so far, so it is never `amortized`. Potential \
+             belongs to the values the loop mutates, which the function's own `cost` accounts for.";
         gather
           (({ kind = Loop_cost cost; id = Cursor.allocate_id_from cursor start }
              : Syntax.loop_clause)

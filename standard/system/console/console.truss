@@ -9,7 +9,9 @@ internal fn SystemConsole.new() -> SystemConsole {
   SystemConsole(input: lines::LineInput.new())
 }
 
-impl Console for SystemConsole {
+impl Console for SystemConsole
+  uses RunForever
+{
   fn print(self, text: StringSlice) {
     let _ = calls::write_fully(1, bytes: text.bytes)
   }

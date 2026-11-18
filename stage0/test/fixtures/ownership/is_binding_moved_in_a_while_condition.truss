@@ -1,4 +1,6 @@
-fn f() {
+fn f()
+  uses RunForever
+{
   while make() is Some(text) {
     keep(own text)
   }

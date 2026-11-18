@@ -1,8 +1,0 @@
-fn f(count: UInt32)
-  cost time O(count)
-{
-  var index: UInt32 = 0
-  while index != count {
-    index = index + 1
-  }
-}

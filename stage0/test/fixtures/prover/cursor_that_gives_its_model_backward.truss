@@ -5,7 +5,6 @@ impl Model for FromTheBack {
 
   fn model(self) -> Sequence[Int64]
     ensures identical(result, self.items.model())
-    cost time finite
   {
     self.items.model()
   }

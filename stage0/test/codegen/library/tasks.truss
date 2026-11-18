@@ -9,7 +9,7 @@ fn counted(count: Int64) -> List[Int64] {
 }
 
 fn produce(numbers: tasks::Channel[Int64], count: Int64)
-  uses Tasks
+  uses Tasks, RunForever
 {
   for number in 0..count {
     let _ = numbers.send(number)
@@ -18,7 +18,7 @@ fn produce(numbers: tasks::Channel[Int64], count: Int64)
 }
 
 fn collect[Message: Storable](messages: tasks::Channel[Message]) -> List[Message]
-  uses Tasks
+  uses Tasks, RunForever
 {
   var received: List[Message] = []
   for message in messages.messages() {
@@ -65,7 +65,7 @@ test "a closed channel refuses messages and delivers the messages it holds" uses
 }
 
 fn produce_from(numbers: tasks::Channel[Int64], first: Int64, count: Int64)
-  uses Tasks
+  uses Tasks, RunForever
 {
   for index in 0..count {
     let _ = numbers.send(first + 2 * index)
@@ -217,7 +217,7 @@ test "one seed gives one order" uses Panic {
 }
 
 fn receive_or_leave(numbers: tasks::Channel[Int64]) -> Int64
-  uses Tasks
+  uses Tasks, RunForever
 {
   concurrent {
     {
@@ -238,7 +238,7 @@ test "leaving a concurrent block cancels a task that waits to receive" uses Pani
 }
 
 fn send_or_leave(numbers: tasks::Channel[Int64], outcomes: tasks::Channel[Bool])
-  uses Tasks
+  uses Tasks, RunForever
 {
   concurrent {
     {
@@ -275,7 +275,7 @@ test "a cancelled send fails with Cancelled and leaves no message in the channel
 }
 
 fn count_until_cancelled() -> Int64
-  uses Tasks
+  uses Tasks, RunForever
 {
   var polls = 0
   concurrent {
@@ -301,7 +301,7 @@ test "a task that polls Tasks.cancelled lets the other tasks run" uses Panic {
 type StoppedClock(never: tasks::Channel[Int64])
 
 impl Clock for StoppedClock
-  uses Tasks
+  uses Tasks, RunForever
 {
   fn now(self) -> Instant {
     Instant.from_unix_nanoseconds(0)
@@ -352,7 +352,7 @@ test "with_timeout cancels work that is still waiting at the limit" uses Panic {
 }
 
 fn hold_each(limiter: tasks::Limiter, events: tasks::Channel[Int64])
-  uses Tasks
+  uses Tasks, RunForever
 {
   concurrent for _ in 0..6 {
     let _ = limiter.hold(fn() {

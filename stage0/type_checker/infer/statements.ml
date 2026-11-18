@@ -316,8 +316,7 @@ and check_loop_clause state env (clause : Syntax.loop_clause) =
       State.check_cost state cost;
       match cost.bound with
       | Big_o value | At_most value | Exactly value ->
-          ignore (Hooks.check_expression state env value)
-      | Finite -> ())
+          ignore (Hooks.check_expression state env value))
 
 and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression)
     =

@@ -1,10 +1,8 @@
 trait Bag[Item] {
   fn count(self) -> UInt64
-    cost time finite
 
   fn element(self, position: UInt64) lends Item
     requires position < self.count()
-    cost time finite
 }
 
 type Pair(first: Int64, second: Int64)

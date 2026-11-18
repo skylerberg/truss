@@ -1,5 +1,0 @@
-fn f(single: Single)
-  cost time finite
-{
-  visit_once(single)
-}

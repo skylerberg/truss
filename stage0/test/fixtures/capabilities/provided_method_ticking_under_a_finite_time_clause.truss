@@ -1,9 +1,0 @@
-trait Metronome {
-  fn beat(mut self) -> UInt64
-
-  fn beat_once(mut self) -> UInt64
-    cost time finite
-  {
-    mut self.beat()
-  }
-}

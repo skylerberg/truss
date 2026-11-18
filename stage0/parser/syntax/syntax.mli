@@ -72,7 +72,7 @@ and call_target =
   | Call_capability of path_type
   | Call_method of path_type * name
 
-and bound = Big_o of expression | Finite | At_most of expression | Exactly of expression
+and bound = Big_o of expression | At_most of expression | Exactly of expression
 and expression = expression_kind node
 
 and expression_kind =

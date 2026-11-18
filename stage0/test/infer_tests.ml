@@ -1338,10 +1338,8 @@ let () =
     "the target of `calls` in a clause is a function parameter, a capability, or a capability's \
      method" (fun () ->
       let make_clause_source counted =
-        "type Point(x: Int64)\n\n\
-         fn f(count: Int64, visit: (fn() cost time finite))\n\
-        \  uses Clock\n\
-        \  cost calls(" ^ counted ^ ") <= 1\n{\n  todo\n}\n"
+        "type Point(x: Int64)\n\nfn f(count: Int64, visit: fn())\n  uses Clock\n  cost calls("
+        ^ counted ^ ") <= 1\n{\n  todo\n}\n"
       in
       expect_fine (make_clause_source "visit");
       expect_fine (make_clause_source "Clock");

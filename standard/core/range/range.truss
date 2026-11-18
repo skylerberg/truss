@@ -2,14 +2,12 @@ use standard::core
 
 public fn Range[Value: Ordered].is_empty(self) -> Bool
   ensures result == (if self.inclusive { self.start > self.stop } else { self.start >= self.stop })
-  cost time finite
 {
   if self.inclusive { self.start > self.stop } else { self.start >= self.stop }
 }
 
 public fn Range[Value: Ordered].contains(self, value: Value) -> Bool
   ensures result == (self.start <= value && (if self.inclusive { value <= self.stop } else { value < self.stop }))
-  cost time finite
 {
   self.start <= value && (if self.inclusive { value <= self.stop } else { value < self.stop })
 }
@@ -22,7 +20,6 @@ impl Iterable for Range[Value: core::Countable] {
       Some(steps) => if self.inclusive { steps.saturating_add(1) } else { steps }
       None => 0
     })
-    cost time finite
   {
     match self.start.steps_to(self.stop) {
       Some(steps) => if self.inclusive { steps.saturating_add(1) } else { steps }
@@ -33,7 +30,6 @@ impl Iterable for Range[Value: core::Countable] {
   fn element(self, position: UInt64) lends Value
     requires position < self.count()
     ensures self.contains(result)
-    cost time finite
   {
     match self.start.steps_to(self.stop) {
       Some(steps) => {
@@ -80,7 +76,6 @@ impl Iterable for Reversed[Value: core::Countable] {
 
   fn count(self) -> UInt64
     ensures result == self.range.count()
-    cost time finite
   {
     self.range.count()
   }
@@ -88,7 +83,6 @@ impl Iterable for Reversed[Value: core::Countable] {
   fn element(self, position: UInt64) lends Value
     requires position < self.count()
     ensures self.range.contains(result)
-    cost time finite
   {
     self.range.element(self.range.count() - 1 - position)
   }
@@ -110,7 +104,6 @@ impl Iterable for Stepped[Value: core::Countable] {
   fn count(self) -> UInt64
     ensures self.range.count() == 0 ==> result == 0
     ensures self.range.count() > 0 ==> result == (self.range.count() - 1) / self.step + 1
-    cost time finite
   {
     let whole = self.range.count()
     if whole == 0 { 0 } else { (whole - 1) / self.step + 1 }
@@ -119,7 +112,6 @@ impl Iterable for Stepped[Value: core::Countable] {
   fn element(self, position: UInt64) lends Value
     requires position < self.count()
     ensures self.range.contains(result)
-    cost time finite
   {
     self.range.element(position * self.step)
   }

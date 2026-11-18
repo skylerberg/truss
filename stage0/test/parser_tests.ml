@@ -475,8 +475,8 @@ let () =
   Harness.test "a function type" (fun () ->
       expect_type "fn(mut Element, Element) -> Ordering" "(fn (mut Element Element) -> Ordering)");
   Harness.test "a function type in parentheses with clauses" (fun () ->
-      expect_type "(fn(Item) uses Clock, Random cost time finite)"
-        "(fn (Item) (uses Clock Random) (cost time finite))");
+      expect_type "(fn(Item) uses Clock, Random cost time O(1))"
+        "(fn (Item) (uses Clock Random) (cost time (O 1)))");
   Harness.test "parentheses around a function type need clauses" (fun () ->
       Parse_support.expect_error "fn f(value: (fn(Item))) {}" ~code:Unexpected_token ~at:"(fn");
   Harness.test "a function type's requires names its inputs" (fun () ->

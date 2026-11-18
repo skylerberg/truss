@@ -2,7 +2,6 @@ type Key(parts: List[Int64])
   derives Default
 
 fn make_key() -> Key
-  cost time finite
 {
   Key.default()
 }

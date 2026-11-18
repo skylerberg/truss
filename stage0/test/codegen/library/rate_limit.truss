@@ -47,7 +47,7 @@ test "a rate limiter forgets the least recently seen key when it holds too many"
 }
 
 fn limited_statuses() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
   var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8098)).expect("the port is free")
   let limiter = http::RateLimiter.new(http::RateLimit(requests: 2, per_seconds: 10))

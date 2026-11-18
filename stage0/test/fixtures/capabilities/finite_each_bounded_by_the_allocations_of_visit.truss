@@ -1,9 +1,0 @@
-fn each(items: List[Int64], visit: (fn(Int64) uses generic Granted))
-  uses generic Granted
-  cost time finite
-  cost allocations <= items.length() * allocations(visit)
-{
-  for item in items {
-    visit(item)
-  }
-}

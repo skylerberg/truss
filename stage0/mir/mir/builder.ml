@@ -1553,7 +1553,6 @@ and lower_attached_formula builder (written : Core.expression) =
 
 and lower_loop_clauses builder (clauses : Core.loop_clause list) : Tree.loop_clause list =
   let lower_bound : Core.bound -> Tree.bound = function
-    | Finite -> Finite
     | Order_of amount -> Order_of (lower_attached_formula builder amount)
     | At_most amount -> At_most (lower_attached_formula builder amount)
     | Exactly amount -> Exactly (lower_attached_formula builder amount)

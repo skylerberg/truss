@@ -788,7 +788,7 @@ let list_import_diagnostics database note (file : Path.file) =
 
 let find_call_edges database note ~calling_package path =
   match read_mir_call_edges database note path with
-  | Failed _ | Blocked -> None
+  | Failed _ | Blocked -> Some []
   | Value mir_call_edges -> (
       match
         Mir.Call_edges.list_implementations

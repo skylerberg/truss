@@ -1405,7 +1405,7 @@ let () =
       expect_shown (List.rev !carried)
         ~expected:
           [
-            "a loop carries standard::core::Cursor.next uses {Meter, may not terminate}";
+            "a loop carries standard::core::Cursor.next uses {Meter}";
             "a slice carries standard::list::List.slice_from uses {}";
             "a pattern carries standard::core::Equal.equal uses {}";
           ]);
@@ -1422,7 +1422,7 @@ let () =
       expect_shown (List.rev !invoked)
         ~expected:
           [
-            "standard::core::Cursor.next uses {Meter, may not terminate}";
+            "standard::core::Cursor.next uses {Meter}";
             "standard::list::List.slice_from uses {}";
             "standard::core::Equal.equal uses {}";
             "standard::list::Slice.length uses {}";

@@ -159,7 +159,6 @@ and visit_loop visit (loop : Tree.loop) =
     (function
       | Tree.Invariant clause -> visit_formula visit clause
       | Decreases measures -> List.iter (visit_formula visit) measures
-      | Cost { bound = Finite; _ } -> ()
       | Cost { bound = Order_of amount | At_most amount | Exactly amount; _ } ->
           visit_formula visit amount)
     loop.clauses

@@ -30,11 +30,7 @@ let find_clauses (lookups : Lookups.t) path callee =
         requires = contract.requires;
         ensures = contract.ensures;
         decreases = contract.decreases;
-        costs =
-          List.filter
-            (fun (cost : Mir.cost) ->
-              match cost with { resource = Metric Time; bound = Finite; _ } -> false | _ -> true)
-            contract.costs;
+        costs = contract.costs;
         callbacks = contract.callbacks;
         inherited = false;
       })
@@ -107,11 +103,9 @@ let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
     | Some (signature : Types.signature) -> (
         List.for_all
           (function
-            | Types.Capability_parameter _ | Types.Divergence (Of_parameter _ | Of_impl_method _) ->
-                true
+            | Types.Capability_parameter _ -> true
             | Types.Capability _ | Types.Capability_projection _ | Types.Capability_variable _
-            | Types.Capability_error _
-            | Types.Divergence (Always | Of_variable _) ->
+            | Types.Capability_error _ ->
                 false)
           (signature.uses :> Types.capability list)
         && List.for_all

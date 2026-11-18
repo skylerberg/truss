@@ -12,7 +12,9 @@ impl Cursor for Countdown {
   }
 }
 
-fn sum(items: mut any Cursor[Element = Int64]) -> Int64 {
+fn sum(items: mut any Cursor[Element = Int64]) -> Int64
+  uses RunForever
+{
   var total: Int64 = 0
   while mut items.next() is Some(item) {
     total = total.wrapping_add(item)

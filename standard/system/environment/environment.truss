@@ -5,7 +5,9 @@ use standard::system::handles
 
 internal type SystemEnvironment()
 
-impl Environment for SystemEnvironment {
+impl Environment for SystemEnvironment
+  uses RunForever
+{
   fn variable(self, name: StringSlice) -> Option[String] {
     variable(name)
   }
@@ -104,7 +106,9 @@ fn variable(name: StringSlice) -> Option[String] {
   }
 }
 
-fn variable_from(entry: intrinsic::View[UInt8]) -> environment::Variable {
+fn variable_from(entry: intrinsic::View[UInt8]) -> environment::Variable
+  uses RunForever
+{
   let length = intrinsic::view_length(entry)
   var split: UInt64 = 0
   while split < length && intrinsic::view_at(entry, index: split) != 61
@@ -178,7 +182,9 @@ fn for_this_user(name: StringSlice, on_linux: StringSlice, on_macos: StringSlice
   }
 }
 
-fn after_last(bytes: intrinsic::View[UInt8], marker: intrinsic::View[UInt8]) -> Option[String] {
+fn after_last(bytes: intrinsic::View[UInt8], marker: intrinsic::View[UInt8]) -> Option[String]
+  uses RunForever
+{
   let length = intrinsic::view_length(bytes)
   let size = intrinsic::view_length(marker)
   if size > length {
@@ -217,7 +223,9 @@ fn names_a_zone(name: intrinsic::View[UInt8]) -> Bool {
   true
 }
 
-fn zone_file(name: StringSlice) -> Result[List[UInt8], SystemError] {
+fn zone_file(name: StringSlice) -> Result[List[UInt8], SystemError]
+  uses RunForever
+{
   var handle = handles::open_to_read(Path(text: "/usr/share/zoneinfo/${name}"))?
   let rules = handles::read_all(mut handle)?
   Ok(List.from_storage(own rules))

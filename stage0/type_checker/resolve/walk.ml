@@ -360,8 +360,7 @@ and resolve_clause state scope (clause : Syntax.clause) =
         }
       in
       match cost.bound with
-      | Big_o value | At_most value | Exactly value -> resolve_expression state bound value
-      | Finite -> ())
+      | Big_o value | At_most value | Exactly value -> resolve_expression state bound value)
   | Clause_error -> ()
 
 and resolve_local_value state scope (name : Syntax.name) =

@@ -415,10 +415,7 @@ let resolve_capabilities state (capabilities : Types.capability_set) =
       in
       Types.flat_map_capabilities
         (function
-          | Types.Capability_variable variable ->
-              (Types.remove_divergence (read_solved variable) :> Types.capability list)
-          | Types.Divergence (Of_variable variable) ->
-              (Types.list_divergence (read_solved variable) :> Types.capability list)
+          | Types.Capability_variable variable -> (read_solved variable :> Types.capability list)
           | capability -> [ capability ])
         capabilities
   | _ -> capabilities
@@ -439,22 +436,6 @@ and finalize_capabilities state capabilities =
           (function
             | Types.Capability_projection { base; trait; name } ->
                 [ Types.Capability_projection { base = finalize_type state base; trait; name } ]
-            | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
-                [
-                  Types.Divergence
-                    (Of_impl_method
-                       {
-                         self_type = finalize_type state self_type;
-                         trait =
-                           {
-                             trait with
-                             trait_arguments =
-                               List.map (finalize_argument state) trait.trait_arguments;
-                           };
-                         name;
-                         receiver;
-                       });
-                ]
             | capability -> [ capability ])
           capabilities))
 
@@ -564,9 +545,6 @@ let resolve_associated_type state type_ (trait : Types.trait_reference) name
       make_error_type state Unknown_associated_type at
         (Printf.sprintf "`%s` gives no `%s` as a `%s`." (Types.show type_) name
            (Types.show_trait trait))
-
-let compute_callee_uses state (target : Core.operand Core.target) =
-  Callee_uses.compute state.lookups.interface ~list_bounds:(lookup_bounds state) target
 
 let make_callee state (target : Core.operand Core.target) =
   Callee_uses.make_callee state.lookups.interface ~list_bounds:(lookup_bounds state) target
@@ -985,30 +963,6 @@ let add_mismatch state (span : Source.Definition_span.t) ~expected ~actual =
         ~fixes:[ fix "Write it as a float." [ insert span.stop ".0" ] ]
         (Printf.sprintf "An integer literal is never a float, and `%s` is expected here."
            (Types.show expected))
-  | Types.Function found, Types.Function wanted
-    when Types.subtract_capabilities (Types.list_divergence found.uses) wanted.uses
-         <> Types.no_capabilities ->
-      let missing =
-        (Types.subtract_capabilities (Types.list_divergence found.uses) wanted.uses
-          :> Types.capability list)
-      in
-      let followed_methods =
-        List.filter_map
-          (function
-            | Types.Divergence (Of_impl_method { self_type; trait; name; _ }) ->
-                Some (Types.show_impl_method self_type trait name)
-            | _ -> None)
-          missing
-      in
-      add_mismatch_diagnostic state Mismatch span ~sides
-        (Printf.sprintf "Expected %s, found %s, which %s." (Types.describe expected)
-           (Types.describe actual)
-           (match followed_methods with
-           | [ followed ] when List.compare_length_with missing 1 = 0 ->
-               Printf.sprintf "terminates only if %s does" followed
-           | _ :: _ :: _ when List.compare_lengths followed_methods missing = 0 ->
-               Printf.sprintf "terminates only if %s do" (String.concat " and " followed_methods)
-           | _ -> "may not terminate"))
   | _ ->
       add_mismatch_diagnostic state Mismatch span ~sides
         (Printf.sprintf "Expected %s, found %s." (Types.describe expected) (Types.describe actual))
@@ -1150,7 +1104,7 @@ let check_operand_clause state (cost : Syntax.cost) (operand : Interface.Elabora
            "`%s` is an upper bound on one call, and a call may spend less, so an exact amount that \
             names it would be false for that call. State this bound with `<=` or `O(...)`."
            shown)
-  | Big_o _ | At_most _ | Finite -> ()
+  | Big_o _ | At_most _ -> ()
 
 let check_cost state (cost : Syntax.cost) =
   check_resource state cost.resource;
@@ -1158,7 +1112,6 @@ let check_cost state (cost : Syntax.cost) =
   | Big_o value | At_most value | Exactly value ->
       List.iter (check_operand_clause state cost)
         (Interface.Elaborator.list_cost_operands state.context value)
-  | Finite -> ()
 
 let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let make = make_synthetic_expression state ~origin in
