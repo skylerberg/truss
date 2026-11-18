@@ -27,13 +27,12 @@ val check_prefix :
   Types.ty
 
 val check_operator_call :
-  operands:Tables.argument list ->
   State.state ->
-  Syntax.expression ->
+  Syntax.id ->
   trait:Path.t ->
   method_:string ->
-  left:Types.ty ->
-  right:Types.ty option ->
+  left:Syntax.expression * Types.ty ->
+  right:(Syntax.expression * Types.ty) option ->
   Types.ty
 
 val check_literal_operands : State.state -> left:Types.ty -> right:Types.ty -> unit

@@ -46,6 +46,12 @@ let infer_shift_result state ~left:(left_span, left_type) ~right:(right_span, ri
   infer_integer_result state left_span left_type
     ~describe:(Printf.sprintf "Shifts work on built-in integers, not `%s`.")
 
+let list_operand_arguments (operands : Syntax.expression list) =
+  List.mapi
+    (fun index (operand : Syntax.expression) ->
+      { Tables.expression = operand.id; core_argument_index = index; mode = Types.Read })
+    operands
+
 let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
   State.reject_in_formula state env (State.read_span state value.id) "`?`";
   let inner_type = State.normalize state (Hooks.check_expression state env inner) in
@@ -222,18 +228,20 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
           end
           else begin
             Form.register_call state value;
-            check_operator_call
-              ~operands:
-                [ { Tables.expression = inner.id; core_argument_index = 0; mode = Types.Read } ]
-              state value ~trait:(Well_known.make_path Negate) ~method_:"negate" ~left:type_
-              ~right:None
+            check_operator_call state value.id ~trait:(Well_known.make_path Negate)
+              ~method_:"negate" ~left:(inner, type_) ~right:None
           end)
 
-and check_operator_call ~operands state (value : Syntax.expression) ~trait ~method_ ~left ~right =
-  let arguments = match right with Some right -> [ Types.Type right ] | None -> [] in
-  let reference = State.make_trait_reference ~arguments trait in
+and check_operator_call state (id : Syntax.id) ~trait ~method_ ~left:(left, left_type) ~right =
+  let operands, trait_arguments =
+    match right with
+    | Some (right, right_type) -> ([ left; right ], [ Types.Type right_type ])
+    | None -> ([ left ], [])
+  in
+  let reference = State.make_trait_reference ~arguments:trait_arguments trait in
+  let arguments = list_operand_arguments operands in
   let result = State.make_fresh_type state in
-  state.tables.calls.(value.id) <-
+  state.tables.calls.(id) <-
     Some
       {
         callee =
@@ -242,37 +250,37 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
               trait = reference;
               name = method_;
               receiver = Read;
-              self_type = left;
+              self_type = left_type;
               instantiation = Types.no_instantiation;
               evidence = Built_in;
             };
-        arguments = operands;
+        arguments;
         omitted_defaults = [];
         callee_result = result;
       };
   State.defer state (fun () ->
-      let left = State.normalize state left in
+      let left_type = State.normalize state left_type in
       let reference = Unify.zonk_trait state.unifier reference in
       if
-        Types.contains_unsolved left
+        Types.contains_unsolved left_type
         || List.exists
              (function Types.Type type_ -> Types.contains_unsolved type_ | _ -> false)
              reference.trait_arguments
       then false
       else begin
-        (match State.find_evidence state left reference with
+        (match State.find_evidence state left_type reference with
         | Some evidence ->
             let output =
-              State.resolve_associated_type state left reference "Output"
-                ~at:(State.read_span state value.id)
+              State.resolve_associated_type state left_type reference "Output"
+                ~at:(State.read_span state id)
             in
             let decided = State.zonk state result in
             if not (State.unify state result output) then
-              State.report state Mismatch (State.read_span state value.id)
+              State.report state Mismatch (State.read_span state id)
                 (Printf.sprintf "This operator gives `%s`, and `%s` is expected."
                    (Types.show (State.zonk state output))
                    (Types.show decided));
-            state.tables.calls.(value.id) <-
+            state.tables.calls.(id) <-
               Some
                 {
                   callee =
@@ -281,21 +289,21 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
                         trait = reference;
                         name = method_;
                         receiver = Read;
-                        self_type = left;
+                        self_type = left_type;
                         instantiation = Types.no_instantiation;
                         evidence = State.convert_evidence evidence;
                       };
-                  arguments = operands;
+                  arguments;
                   omitted_defaults = [];
                   callee_result = output;
                 }
         | None ->
             let unknown =
-              if Types.is_error left then left
+              if Types.is_error left_type then left_type
               else
-                State.make_error_type state No_impl (State.read_span state value.id)
+                State.make_error_type state No_impl (State.read_span state id)
                   (Printf.sprintf "`%s` does not implement `%s`, so the operator does not apply."
-                     (Types.show left) (Types.show_trait reference))
+                     (Types.show left_type) (Types.show_trait reference))
             in
             ignore (State.unify state result unknown));
         true
@@ -318,11 +326,7 @@ and check_built_in_operator state (value : Syntax.expression) (operands : Syntax
     Some
       {
         callee = Built_in_operator;
-        arguments =
-          List.mapi
-            (fun index (operand : Syntax.expression) ->
-              { Tables.expression = operand.id; core_argument_index = index; mode = Read })
-            operands;
+        arguments = list_operand_arguments operands;
         omitted_defaults = [];
         callee_result = result;
       }
@@ -424,11 +428,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                     instantiation = Types.no_instantiation;
                     evidence = Built_in;
                   };
-              arguments =
-                [
-                  { expression = left.id; core_argument_index = 0; mode = Read };
-                  { expression = right.id; core_argument_index = 1; mode = Read };
-                ];
+              arguments = list_operand_arguments [ left; right ];
               omitted_defaults = [];
               callee_result = result;
             };
@@ -507,13 +507,8 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           else begin
             Form.register_call state value;
             let result =
-              check_operator_call
-                ~operands:
-                  [
-                    { Tables.expression = left.id; core_argument_index = 0; mode = Types.Read };
-                    { Tables.expression = right.id; core_argument_index = 1; mode = Types.Read };
-                  ]
-                state value ~trait ~method_ ~left:left_type ~right:(Some right_type)
+              check_operator_call state value.id ~trait ~method_ ~left:(left, left_type)
+                ~right:(Some (right, right_type))
             in
             if same_builtin then begin
               ignore (State.unify state result left_type);

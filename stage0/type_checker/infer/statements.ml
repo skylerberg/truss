@@ -116,19 +116,10 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
           match operation with
           | Arithmetic arithmetic ->
               let trait, method_ = Operators.select_arithmetic_trait arithmetic in
-              let call_site : Syntax.expression = { kind = Expression_error; id = written.id } in
               let result =
-                Operators.check_operator_call
-                  ~operands:
-                    [
-                      {
-                        Tables.expression = written_target.id;
-                        core_argument_index = 0;
-                        mode = Types.Read;
-                      };
-                      { Tables.expression = value.id; core_argument_index = 1; mode = Types.Read };
-                    ]
-                  state call_site ~trait ~method_ ~left:target_type ~right:(Some right_type)
+                Operators.check_operator_call state written.id ~trait ~method_
+                  ~left:(written_target, target_type)
+                  ~right:(Some (value, right_type))
               in
               if not (State.unify state result target_type) then
                 State.report_mismatch state (State.read_span state value.id) ~expected:target_type

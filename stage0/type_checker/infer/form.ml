@@ -743,26 +743,15 @@ let build_compound_assign state (written : Syntax.statement) (target : Syntax.ex
         match find_built_in_operation trait name self_type with
         | Some operation -> make_built_in operation
         | None ->
-            let read_argument_mode index =
-              match
-                List.find_opt
-                  (fun (argument : Tables.argument) -> argument.core_argument_index = index)
-                  recorded.arguments
-              with
-              | Some argument -> argument.mode
-              | None -> Types.Read
-            in
             ( Call
                 (State.make_call state ~callee:(convert_callee recorded.callee)
                    ~arguments:
                      [
-                       Operands.build_argument (read_argument_mode 0) current;
-                       Operands.build_argument (read_argument_mode 1) bound_value;
+                       Operands.build_argument Read current;
+                       Operands.build_argument Read bound_value;
                      ]
                    ~lends:None),
-              Operands.build
-                (State.decide_binding_mode state (read_argument_mode 1) right.type_)
-                right ))
+              Operands.build (State.decide_binding_mode state Read right.type_) right ))
     | Some _ -> State.raise_bug "a compound assignment's call is not a trait method call"
     | None -> make_built_in (convert_to_operation operation)
   in
