@@ -703,6 +703,9 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.spinner_calling_a_function_without_time
         "capabilities.may_not_terminate");
+  Harness.test "an impl of `From` makes no call that may not terminate" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.from_impl_calling_a_function_without_time
+        "capabilities.may_not_terminate");
   Harness.test "an impl's time clause follows no callback that its trait's does not" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.visit_impl_naming_the_time_of_its_callback
         "types.impl_uses")
