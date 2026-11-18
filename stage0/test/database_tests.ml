@@ -2,7 +2,8 @@ let check_text text =
   let database = Support.make_database (Support.setup [ ("app::main", text) ]) in
   (match
      Support.list_codes
-       (Support.list_fragment_diagnostics database (Support.parse_file "app::main"))
+       (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database
+          (Support.parse_file "app::main"))
    with
   | [] -> ()
   | codes -> Harness.fail "the program has diagnostics: %s" (String.concat ", " codes));
@@ -343,7 +344,7 @@ let count_termination_obligations database ~of_:shown =
   | Some (Value (Obligations outcome)) ->
       List.length
         (List.filter
-           (fun (obligation : Prover.State.obligation) -> obligation.code = Termination)
+           (fun (obligation : Prover.Obligation.t) -> obligation.code = Termination)
            outcome.obligations)
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None ->
       failwith ("the proof of " ^ shown ^ " makes no obligations")

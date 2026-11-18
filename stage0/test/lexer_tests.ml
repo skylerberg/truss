@@ -27,7 +27,7 @@ let show (token : Token.t) =
           (String.concat "${}"
              (List.map
                 (fun (text : Token.text) -> text.value)
-                (Array.to_list (Token.list_texts literal))))
+                (Array.to_list (Token.For_testing.list_texts literal))))
   | Punctuation punctuation ->
       (if token.span.start = token.span.stop then "+" else "") ^ Token.spell_punctuation punctuation
   | Foreign foreign -> Token.spell_foreign foreign
@@ -71,7 +71,11 @@ let expect_error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
       let expected = Support.locate_occurrence ~sub:at ~occurrence text in
       if diagnostic.span.start <> expected then
         Harness.fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
-      let results = List.map (Diagnostic.apply_fix text) diagnostic.fixes in
+      let results =
+        List.map
+          (fun (fix : Source.span Diagnostic.fix) -> Diagnostic.apply_edits text fix.edits)
+          diagnostic.fixes
+      in
       match (fixed, results) with
       | None, [] -> ()
       | None, result :: _ -> Harness.fail "expected no fix, got one giving %S" result
@@ -99,7 +103,10 @@ let expect_error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
 let list_fixed_texts text ~code =
   List.concat_map
     (fun (diagnostic : Diagnostic.t) ->
-      if diagnostic.code = Lexer code then List.map (Diagnostic.apply_fix text) diagnostic.fixes
+      if diagnostic.code = Lexer code then
+        List.map
+          (fun (fix : Source.span Diagnostic.fix) -> Diagnostic.apply_edits text fix.edits)
+          diagnostic.fixes
       else [])
     (snd (lex text))
 
@@ -162,7 +169,9 @@ let () =
       expect_error "a \xFF\xFE b" ~code:Invalid_utf8 ~at:"\xFF");
   Harness.test "JSON output is valid UTF-8 when a message is about a bad byte" (fun () ->
       let source = Source.create ~path:"test.truss" "\"\\\xFF\"" in
-      let json = Diagnostic.to_json source (snd (Lexer.lex source)) in
+      let json =
+        String.concat "," (List.map (Diagnostic.to_json_object source) (snd (Lexer.lex source)))
+      in
       if not (String.is_valid_utf_8 json) then Harness.fail "the JSON is not valid UTF-8: %S" json)
 
 let () =
@@ -746,7 +755,7 @@ let () =
         Diagnostic.fix "x"
           [ Diagnostic.delete (Source.make_span 0 2); Diagnostic.delete (Source.make_span 1 3) ]
       in
-      match Diagnostic.apply_fix "abc" fix with
+      match Diagnostic.apply_edits "abc" fix.edits with
       | _ -> Harness.fail "expected Invalid_argument"
       | exception Invalid_argument _ -> ())
 
@@ -759,7 +768,7 @@ let () =
       List.iter
         (fun (diagnostic : Diagnostic.t) ->
           List.iter
-            (fun fix ->
+            (fun (fix : Source.span Diagnostic.fix) ->
               let expected =
                 let rec remove_one = function
                   | [] -> []
@@ -770,7 +779,7 @@ let () =
                 remove_one before
               in
               expect_equal_lists Fun.id "codes after the fix" expected
-                (List.sort compare (list_codes (Diagnostic.apply_fix text fix))))
+                (List.sort compare (list_codes (Diagnostic.apply_edits text fix.edits))))
             diagnostic.fixes)
         (snd (lex text)))
 
@@ -794,11 +803,12 @@ let () =
   let specification = read_document "SPECIFICATION.md" in
   let list_spellings list = List.sort_uniq compare (List.map fst list) in
   Harness.test "SPECIFICATION.md lists the keywords" (fun () ->
-      expect_equal_lists Fun.id "keywords" (list_spellings Token.keywords)
+      expect_equal_lists Fun.id "keywords"
+        (list_spellings Token.For_testing.keywords)
         (list_words (list_block_after specification "Reserved everywhere:")));
   Harness.test "SPECIFICATION.md lists the reserved words" (fun () ->
       expect_equal_lists Fun.id "reserved"
-        (list_spellings Token.reserved_words)
+        (list_spellings Token.For_testing.reserved_words)
         (list_words (list_block_after specification "Reserved for later use")));
   Harness.test "SPECIFICATION.md lists the punctuation" (fun () ->
       expect_equal_lists Fun.id "punctuation"
@@ -830,7 +840,7 @@ let () =
           if Token.can_end kind <> List.mem kind can_end then Harness.fail "can_end %s" (spell kind);
           if Token.can_begin kind <> List.mem kind can_begin then
             Harness.fail "can_begin %s" (spell kind))
-        (List.map (fun (_, keyword) -> Token.Keyword keyword) Token.keywords
+        (List.map (fun (_, keyword) -> Token.Keyword keyword) Token.For_testing.keywords
         @ List.map (fun (_, punctuation) -> Token.Punctuation punctuation) Token.punctuation
         @ [ Underscore ]));
   List.iter

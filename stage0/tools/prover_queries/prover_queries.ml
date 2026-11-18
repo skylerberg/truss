@@ -61,25 +61,25 @@ let () =
   let source = Database.read_source database file in
   let queries =
     List.filter_map
-      (fun (query : Prover.query) ->
-        let query_line, query_column = Source.compute_position source query.span.start in
+      (fun ((site : Source.span Prover.site), input) ->
+        let site_line, site_column = Source.compute_position source site.span.start in
         if
-          Option.fold ~none:true ~some:(( = ) query_line) line
-          && Option.fold ~none:true ~some:(( = ) query_column) column
-        then Some (query_line, query_column, query)
+          Option.fold ~none:true ~some:(( = ) site_line) line
+          && Option.fold ~none:true ~some:(( = ) site_column) column
+        then Some (site_line, site_column, site, input)
         else None)
-      (Prover.list_queries
+      (Prover.For_testing.list_queries ~runs:[]
          (Database.make_proof_lookups database)
          (Database.list_proofs (Database.prove database [ file ]))
          file)
   in
   if queries = [] then exit_with_error "No obligation of %s starts there." path;
   List.iter
-    (fun (query_line, query_column, (query : Prover.query)) ->
+    (fun (site_line, site_column, (site : Source.span Prover.site), input) ->
       Printf.printf "(echo %s)\n%s(reset)\n"
         (quote_string
-           (Printf.sprintf "%s:%d:%d %s: %s" path query_line query_column
-              (Diagnostic.Code.name (Prover query.code))
-              query.shows))
-        query.input)
+           (Printf.sprintf "%s:%d:%d %s: %s" path site_line site_column
+              (Diagnostic.Code.name (Prover site.code))
+              site.shows))
+        input)
     queries

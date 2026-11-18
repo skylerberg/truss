@@ -53,4 +53,3 @@ val equal : t -> t -> bool
 val hash : t -> int
 
 module Map : Map.S with type key = t
-module Set : Set.S with type elt = t

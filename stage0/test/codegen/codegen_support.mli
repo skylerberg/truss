@@ -1,5 +1,4 @@
 val test : string -> (unit -> unit) -> unit
-val list_fragment_diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val fail : ('a, unit, string, unit) format4 -> 'a
 val expect_string : expected:String.t -> String.t -> unit
 val expect_int : expected:int -> int -> unit
@@ -65,8 +64,8 @@ val call :
 
 val make_shape_env : ?extra:(string * Memory_layout.shape) list -> unit -> Memory_layout.env
 val scratch : string lazy_t
+val make_scratch_path : string -> string
 val c_compiler : C_compiler.t lazy_t
-val counter : int ref
 val list_worker_counts : unit -> int list
 
 val run_program :
@@ -81,6 +80,7 @@ val expect_status :
 
 val example : Path.module_
 val example_file : Path.file
+val example_main : Path.t
 val make_database : Project.package list -> Database.t
 val make_example_package : (Path.file * string) list -> Project.package list
 
@@ -112,9 +112,11 @@ val load :
 
 val list_tests_in : Database.t -> Path.module_ -> Path.t list
 val list_tests : Database.t -> Path.t list
+val run_example_tests : Database.t -> Backend.t -> string
 val run_source : string -> string
 val expect_output : string -> String.t -> unit
-val expect_pass : string -> string -> unit
+val build_program : Backend.t -> main:Path.t -> (string, string) result
+val build_main : ?profile:Backend.profile -> string -> string
 val run_main : ?arguments:string list -> ?input:string -> string -> int * string * string
 val drop_shapes : (string * Memory_layout.shape) list
 val standard_context : Monomorphic.context

@@ -1,4 +1,4 @@
-type t = { enabled : bool; mutable drawn : bool }
+type t
 
 val create : enabled:bool -> t
 val show : t -> string -> unit

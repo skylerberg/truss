@@ -36,7 +36,9 @@ let check_block name index block =
       let packages = Support.setup [ ("example", text) ] in
       let file = Support.parse_file "example" in
       let database = Support.make_database packages in
-      let diagnostics = Support.list_fragment_diagnostics database file in
+      let diagnostics =
+        Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database file
+      in
       let is_tolerated (diagnostic : Diagnostic.t) =
         List.mem (Diagnostic.Code.name diagnostic.code) tolerated
       in

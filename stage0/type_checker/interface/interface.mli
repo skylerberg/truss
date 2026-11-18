@@ -73,11 +73,6 @@ module Properties : sig
     defining : Path.t list;
   }
 
-  type contents = Properties.contents = {
-    contained : (Types.ty * occurrence) list;
-    recursions : recursion list;
-  }
-
   val list_field_type_paths : package:Path.package -> Types.type_interface -> Path.t list
 
   val compute_component_facts :

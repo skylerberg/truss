@@ -1016,14 +1016,15 @@ let read_host_system () =
 let list_proof_template_checks : Prover.proof part -> _ = function
   | Value (Obligations { obligations; _ }) ->
       List.filter_map
-        (fun (obligation : Prover.State.obligation) ->
+        (fun (obligation : Prover.Obligation.t) ->
           Option.map
-            (fun (template_clause : Prover.State.template_clause) -> template_clause.check)
+            (fun (template_clause : Prover.Obligation.template_clause) -> template_clause.check)
             obligation.template_clause)
         obligations
   | Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked -> []
 
-let make_template_check_root ({ from_template; literals; clauses } : Prover.State.template_check) =
+let make_template_check_root
+    ({ from_template; literals; clauses } : Prover.Obligation.template_check) =
   Lowered.Item.Template_check { from_template; literals; clauses }
 
 let claim_template_check_roots database (key : Resolve.Names.key) =
@@ -1991,7 +1992,16 @@ let restore ?on_bug ~saved ~find_text ~loaded packages entries =
   propagate_checks ?on_bug database;
   database
 
-type checker = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
+type checker =
+  | Parse
+  | Resolve
+  | Interface
+  | Infer
+  | Patterns
+  | Usage
+  | Ownership
+  | Package_checks
+  | Unexported
 
 let remove_duplicates diagnostics =
   List.sort_uniq
@@ -2006,7 +2016,7 @@ let list_checked_parts (key : Resolve.Names.key) : checker -> Part.any list = fu
   | Patterns -> [ Any (Patterns key) ]
   | Usage -> [ Any (Usage key) ]
   | Ownership -> [ Any (Ownership key) ]
-  | Package_checks -> []
+  | Parse | Package_checks | Unexported -> []
 
 let list_definition_diagnostics database key checker =
   List.concat_map
@@ -2030,7 +2040,7 @@ let list_package_outcomes database package =
           match
             read_part database (note_untracked_read database) (Package_check (package, check))
           with
-          | Value outcome -> Some outcome
+          | Value outcome -> Some (check, outcome)
           | Failed _ | Blocked -> None)
         (Package_checks.list_checks
            ((make_untracked_name_lookups database).list_package_declarations package))
@@ -2049,40 +2059,46 @@ let list_checker_diagnostics database (file : Path.file) checker =
       (fun key -> place_diagnostics key (list_definition_diagnostics database key checker))
       (list_file_keys names file)
   in
+  let of_package_checks (is_selected : Package_checks.check -> bool) =
+    List.concat_map
+      (fun (check, outcome) ->
+        match outcome with
+        | Package_checks.Placed diagnostics when is_selected check ->
+            List.concat_map
+              (fun (diagnostic : Package_checks.placed) ->
+                place_diagnostics diagnostic.key [ diagnostic.diagnostic ])
+              diagnostics
+        | Placed _ | Unused_dependencies _ -> [])
+      (list_package_outcomes database file.module_.package)
+  in
   sort_by_span_and_code
     (match checker with
+    | Parse -> (read_value database (note_untracked_read database) (Parsed file)).diagnostics
     | Resolve ->
         Option.value ~default:[]
           (find_value database (note_untracked_read database) (Import_check file))
         @ of_definitions ()
-    | Package_checks ->
-        List.concat_map
-          (function
-            | Package_checks.Placed diagnostics ->
-                List.concat_map
-                  (fun (diagnostic : Package_checks.placed) ->
-                    place_diagnostics diagnostic.key [ diagnostic.diagnostic ])
-                  diagnostics
-            | Unused_dependencies _ -> [])
-          (list_package_outcomes database file.module_.package)
+    | Package_checks -> of_package_checks (fun check -> check <> Unexported)
+    | Unexported -> of_package_checks (fun check -> check = Unexported)
     | Interface | Infer | Patterns | Usage | Ownership -> of_definitions ())
 
-let checkers = [ Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks ]
+let checkers =
+  [ Parse; Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks; Unexported ]
+
+let list_diagnostics checkers database (file : Path.file) =
+  remove_duplicates (List.concat_map (list_checker_diagnostics database file) checkers)
 
 let read_checked_body database (key : Resolve.Names.key) =
   match read_part database (note_untracked_read database) (Checked_body key) with
   | Value checked -> Some checked
   | Failed _ | Blocked -> None
 
-let list_file_diagnostics database (file : Path.file) =
-  remove_duplicates
-    ((read_value database (note_untracked_read database) (Parsed file)).diagnostics
-    @ List.concat_map (list_checker_diagnostics database file) checkers)
+let list_file_diagnostics database file = list_diagnostics checkers database file
 
 let list_blocking_diagnostics database (file : Path.file) =
   let names = make_untracked_name_lookups database in
   remove_duplicates
-    ((read_value database (note_untracked_read database) (Parsed file)).diagnostics
+    (list_checker_diagnostics database file Parse
     @ List.concat_map
         (fun (key : Resolve.Names.key) ->
           match key.path with
@@ -2122,9 +2138,9 @@ let list_manifest_problems database package =
     ((make_untracked_name_lookups database).list_dependency_names package)
   @ List.concat_map
       (function
-        | Package_checks.Unused_dependencies dependencies ->
+        | _, Package_checks.Unused_dependencies dependencies ->
             List.map (fun dependency -> Unused_dependency dependency) dependencies
-        | Placed _ -> [])
+        | _, Placed _ -> [])
       (list_package_outcomes database package)
 
 let find_code_packages database package =
@@ -2379,6 +2395,7 @@ let with_observer observe run =
 
 module For_testing = struct
   type nonrec checker = checker =
+    | Parse
     | Resolve
     | Interface
     | Infer
@@ -2386,9 +2403,10 @@ module For_testing = struct
     | Usage
     | Ownership
     | Package_checks
+    | Unexported
 
-  let list_diagnostics checkers database (file : Path.file) =
-    List.concat_map (list_checker_diagnostics database file) checkers
+  let list_diagnostics = list_diagnostics
+  let fragment_checkers = List.filter (fun checker -> checker <> Unexported) checkers
 
   let make_unchecked_interface_lookups database =
     make_recording_interface_lookups database (note_untracked_read database) ~is_checked:false

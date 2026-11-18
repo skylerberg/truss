@@ -59,7 +59,7 @@ type proofs
 
 val prove : t -> Path.file list -> proofs
 val list_holes : proofs -> Path.t -> (Path.file * int * int) list
-val list_template_checks : proofs -> Prover.State.template_check list
+val list_template_checks : proofs -> Prover.Obligation.template_check list
 val list_proofs : proofs -> (Resolve.Names.key * Prover.proof) list
 val make_proof_lookups : t -> Prover.Lookups.t
 
@@ -75,9 +75,19 @@ type counts = {
 val count : (unit -> 'a) -> 'a * counts list
 
 module For_testing : sig
-  type checker = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
+  type checker =
+    | Parse
+    | Resolve
+    | Interface
+    | Infer
+    | Patterns
+    | Usage
+    | Ownership
+    | Package_checks
+    | Unexported
 
   val list_diagnostics : checker list -> t -> Path.file -> Diagnostic.t list
+  val fragment_checkers : checker list
   val make_unchecked_interface_lookups : t -> Interface.Lookups.t
   val read_derived_form : t -> Path.t -> Core.t option
   val read_core : t -> Path.t -> (Core.t * Types.substitution) option

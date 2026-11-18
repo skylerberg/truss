@@ -298,7 +298,6 @@ type reported
 val make_reported : _ diagnostic -> reported
 val reported_elsewhere : reported
 val map_spans : ('a -> 'b) -> 'a diagnostic -> 'b diagnostic
-val apply_fix : string -> Source.span fix -> string
 val apply_edits : string -> Source.span edit list -> string
 val list_machine_applicable : t list -> t list
 
@@ -313,12 +312,10 @@ end
 
 val select_shown : t list -> t list
 val render : Source.t -> t -> string
-val to_json : Source.t -> t list -> string
 val to_json_object : Source.t -> t -> string
 val encode_json_string : string -> string
 val quote : string -> string
 
 module For_testing : sig
   val limit : int
-  val is_unused_definition : Code.t -> bool
 end

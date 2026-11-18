@@ -70,7 +70,7 @@ let list_words ~starts ~continues text =
   in
   scan 0 []
 
-let keywords = List.map fst Token.keywords
+let keywords = List.map fst Token.For_testing.keywords
 
 let list_identifiers text =
   List.filter

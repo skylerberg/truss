@@ -63,6 +63,5 @@ val find_type_equality : 'a stored -> 'b stored -> ('a, 'b) Type.eq option
 val locate_package : any -> Path.package
 val locate_name_package : name -> Path.package
 val show : t -> string
-val show_stored : 'a stored -> string
 val find_definition : t -> Path.t option
 val show_kind : t -> string

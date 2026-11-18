@@ -528,7 +528,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
             match find_argument 1 with
             | Some amount ->
                 ( Facts.locate context frame.source amount,
-                  [ State.Text "The shift amount `"; Facts.quote source amount; Text "`" ],
+                  [ Obligation.Text "The shift amount `"; Facts.quote source amount; Text "`" ],
                   match find_parameter_spelling context frame right with
                   | Some text ->
                       Facts.add_requires context frame [ Text (Printf.sprintf "%s < %d" text bits) ]

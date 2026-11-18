@@ -211,22 +211,27 @@ let build_real_implementation (st : Lowering.state) ~user capability =
         Definitions.raise_bug "%s uses %s, which has no real implementation" user
           (Path.show capability)
   in
-  let ty =
-    Monomorphic.ground st.context.monomorphic Types.no_substitution
-      (Definitions.read_impl_interface st.context impl).for_type
-  in
+  let for_type = (Definitions.read_impl_interface st.context impl).for_type in
+  let ty = Monomorphic.ground st.context.monomorphic Types.no_substitution for_type in
   let implementation =
     if Lowering.is_zero_size st ty then Lowered.Constant Null
     else begin
       let value = Lowering.allocate_binding st ty in
-      let constructor : Path.t =
-        match ty with
-        | Named { path; _ } -> Method { owner = path; name = "new"; receiver = Static }
-        | _ -> Definitions.raise_bug "%s implements %s" (Ground.to_string ty) (Path.show capability)
+      let default =
+        match
+          Interface.Impls.find_evidence st.context.lookups.interface
+            ~list_bounds:Interface.Impls.list_no_bounds for_type
+            { trait = Well_known.make_path Default; trait_arguments = []; associated = [] }
+        with
+        | Some (From_impl { impl = default_impl; _ }) ->
+            Path.Method { owner = default_impl; name = "default"; receiver = Static }
+        | _ ->
+            Definitions.raise_bug "%s implements %s and has no impl of Default"
+              (Types.show for_type) (Path.show capability)
       in
       Targets.lower_item_call st
-        (Code { path = constructor; instantiation = Ground.no_instantiation })
-        ~signature:(Definitions.read_signature st.context constructor)
+        (Code { path = default; instantiation = Ground.no_instantiation })
+        ~signature:(Definitions.read_signature st.context default)
         ~substitution:Types.no_substitution ~arguments:[] ~destination:value ~site:None ();
       Address { place = value; writable = true }
     end
