@@ -712,13 +712,14 @@ let merge context ?value_type ~condition
       Locals.fold
         (fun id joined renamed ->
           match Locals.find_opt id frame.locals with
-          | Some own when own != joined && own <> joined -> (own, joined) :: renamed
+          | Some incoming when incoming != joined && incoming <> joined ->
+              (incoming, joined) :: renamed
           | _ -> renamed)
         locals []
     in
     let renamed =
       match (frame.self, self) with
-      | Some own, Some joined when own <> joined -> (own, joined) :: renamed
+      | Some incoming, Some joined when incoming <> joined -> (incoming, joined) :: renamed
       | _ -> renamed
     in
     List.fold_left (fun amount (from, into) -> Logic.replace ~from ~into amount) amount renamed

@@ -97,10 +97,7 @@ val compute_missing_capabilities :
 
 val flat_map_capabilities : (capability -> capability list) -> capability_set -> capability_set
 
-type substitution = {
-  arguments : (parameter * argument) list;
-  capability_arguments : (parameter * capability_set) list;
-}
+type substitution
 
 val no_substitution : substitution
 val combine_substitutions : substitution -> substitution -> substitution
@@ -111,6 +108,14 @@ val substitute_argument : substitution -> argument -> argument
 val substitute_trait : substitution -> trait_reference -> trait_reference
 val substitute_function : substitution -> function_type -> function_type
 val substitute_capabilities : substitution -> capability_set -> capability_set
+val substitute_substitution : substitution -> substitution -> substitution
+
+val map_substitution :
+  argument:(argument -> argument) ->
+  capabilities:(capability_set -> capability_set) ->
+  substitution ->
+  substitution
+
 val extract_result_type : result -> ty
 val show_mode : mode -> string
 val map : ?map_capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
@@ -223,3 +228,7 @@ val find_implementing_receiver :
   trait_interface -> impl_interface -> trait_method -> Path.receiver option
 
 type constant_interface = { constant_type : ty }
+
+module For_testing : sig
+  val list_arguments : substitution -> (parameter * argument) list
+end

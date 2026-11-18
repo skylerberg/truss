@@ -225,12 +225,12 @@ let compute_callee_amount ?ends_in (context : State.context) after ~path
 let find_generic_argument context frame (operation : Intrinsic.operation) type_arguments name =
   let generics = (Intrinsic_signatures.make_signature operation).generics in
   List.find_map
-    (fun ((parameter : Types.parameter), argument) ->
+    (fun ((generic : Types.generic), argument) ->
       match argument with
-      | Types.Value value when parameter.name = name ->
+      | Types.Value value when generic.generic.name = name ->
           Some (Models.make_value_term context frame value)
       | _ -> None)
-    (Types.make_substitution generics type_arguments).arguments
+    (List.combine generics type_arguments)
 
 let compute_step_amount context frame (invocation : Invocation.t) (values : State.passed list)
     (counter : Costs.counter) =
@@ -577,7 +577,7 @@ let find_method_time_bound context (method_ : Path.t) ~trait_arguments self_type
       else
         let reference : Types.trait_reference = { trait; trait_arguments; associated = [] } in
         match Operations.find_concrete_impl context reference self_type with
-        | Some (impl, arguments) -> (
+        | Some (impl, substitution) -> (
             let path = Path.Method { owner = impl; name; receiver } in
             let makes_no_potential =
               match Interface.Impls.read_signature context.lookups.interface path with
@@ -592,7 +592,7 @@ let find_method_time_bound context (method_ : Path.t) ~trait_arguments self_type
             in
             match
               Contracts.find_method_contract context.lookups reference name receiver
-                (Impl { impl; arguments })
+                (Impl { impl; substitution })
             with
             | Some contract when makes_no_potential ->
                 List.find_map

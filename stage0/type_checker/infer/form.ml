@@ -9,7 +9,7 @@ let read_call (state : State.state) (id : Syntax.id) : Tables.call =
   | None -> State.raise_bug "the checker recorded no call for a call node"
 
 let convert_evidence : Tables.evidence -> Core.evidence = function
-  | Impl { impl; arguments } -> Impl { impl; arguments }
+  | Impl { impl; substitution } -> Impl { impl; substitution }
   | Bound -> Bound
   | Dynamic -> Dynamic
   | Built_in -> State.raise_bug "a built-in method has no core evidence"

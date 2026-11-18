@@ -177,8 +177,8 @@ let find_written_equal context ty left right =
       { trait = Facts.equal_trait; trait_arguments = []; associated = [] }
       ty
   with
-  | Some (((Impl _ : Path.t) as impl), arguments) -> (
-      let evidence : Core.evidence = Impl { impl; arguments } in
+  | Some (((Impl _ : Path.t) as impl), substitution) -> (
+      let evidence : Core.evidence = Impl { impl; substitution } in
       match
         Contracts.find_method_contract context.lookups
           { trait = Facts.equal_trait; trait_arguments = []; associated = [] }

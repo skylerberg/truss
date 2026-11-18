@@ -41,7 +41,7 @@ let instantiate (interface : Interface.Lookups.t) (callee : Core.callee) : Types
             Types.union_capabilities (Types.remove_divergence declared) divergence
           in
           match evidence with
-          | Impl { impl; arguments } -> (
+          | Impl { impl; substitution } -> (
               match
                 Interface.Impls.read_signature interface (Method { owner = impl; name; receiver })
               with
@@ -49,13 +49,13 @@ let instantiate (interface : Interface.Lookups.t) (callee : Core.callee) : Types
                   let own_generics =
                     List.filter
                       (fun (generic : Types.generic) ->
-                        Option.is_none (Types.find_argument generic.generic arguments))
+                        Option.is_none (Types.find_argument generic.generic substitution))
                       implemented.generics
                   in
                   replace_divergence
                     (Types.list_divergence
                        (Types.substitute_capabilities
-                          (Types.combine_substitutions arguments
+                          (Types.combine_substitutions substitution
                              (Types.combine_substitutions
                                 (Types.make_substitution own_generics instantiation.type_arguments)
                                 (Types.make_capability_substitution
