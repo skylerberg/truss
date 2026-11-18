@@ -826,6 +826,20 @@ let () =
             "impl Serialize for Int64 {";
           ]
         (run_show root "Int64"));
+  test "a dependency's type is shown with its impls of public traits only" (fun () ->
+      let root =
+        make_directory
+          [
+            ("truss.toml", "[project]\n");
+            ("geometry/truss.toml", make_manifest "acme::geometry");
+            ("geometry/vector/vector.truss", Fixtures.vector_with_a_public_and_a_private_impl);
+            ("app/truss.toml", make_manifest "app" ^ "[dependencies]\n\"acme::geometry\" = []\n");
+            ("app/main.truss", "fn main() {}\n");
+          ]
+      in
+      expect_strings
+        ~expected:[ "public type Vector(x: Int64, y: Int64)"; "impl Display for Vector {" ]
+        (list_headers (run_show (Filename.concat root "app") "acme::geometry::vector::Vector")));
   test "a built-in type is shown with an impl that the project writes for it" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.doubled_for_int64) ] in
       expect_headers ~expected:[ "impl Doubled for Int64 {" ] (run_show root "Int64"));
