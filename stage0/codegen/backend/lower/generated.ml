@@ -9,6 +9,30 @@ let choose_result_place st result_ty =
   | Some place -> place
   | None -> Lowering.allocate_temporary st result_ty
 
+let allocate_parameters (st : Lowering.state) substitution (parameters : Types.parameter_info list)
+    =
+  List.map
+    (fun (info : Types.parameter_info) ->
+      let ty = Monomorphic.ground st.context.monomorphic substitution info.type_ in
+      ( Lowering.allocate_parameter st ~owned:(info.mode = Own)
+          (Monomorphic.ground_mode info.mode)
+          ty,
+        info.mode,
+        ty ))
+    parameters
+
+let load_outer_evidence builder ~evidence index : Lowered.operand =
+  let outer = Emit_c.Ir_builder.allocate_local builder Convention.evidence in
+  Emit_c.Ir_builder.emit builder
+    (Call
+       {
+         target = Intrinsic Evidence_outer;
+         arguments =
+           [ Copy (Lowered.make_local_place evidence); Constant (Integer (Int32, Z.of_int index)) ];
+         result = Returned (Lowered.make_local_place outer);
+       });
+  Copy (Lowered.make_local_place outer)
+
 let read_impl_capability context impl =
   let interface = Definitions.read_impl_interface context impl in
   ( interface,
@@ -28,17 +52,7 @@ let build_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl
   let builder = st.builder in
   let evidence = Emit_c.Ir_builder.allocate_local builder Convention.evidence in
   Lowering.set_result_slot st result;
-  let parameter_places =
-    List.map
-      (fun (info : Types.parameter_info) ->
-        let ty = Monomorphic.ground context.monomorphic substitution info.type_ in
-        ( Lowering.allocate_parameter st ~owned:(info.mode = Own)
-            (Monomorphic.ground_mode info.mode)
-            ty,
-          info.mode,
-          ty ))
-      capability_signature.parameters
-  in
+  let parameter_places = allocate_parameters st substitution capability_signature.parameters in
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
   let implementation =
@@ -54,20 +68,7 @@ let build_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl
          });
   st.evidence <-
     List.mapi
-      (fun position capability ->
-        let outer = Emit_c.Ir_builder.allocate_local builder Convention.evidence in
-        Emit_c.Ir_builder.emit builder
-          (Call
-             {
-               target = Intrinsic Evidence_outer;
-               arguments =
-                 [
-                   Copy (Lowered.make_local_place evidence);
-                   Constant (Integer (Int32, Z.of_int position));
-                 ];
-               result = Returned (Lowered.make_local_place outer);
-             });
-        (capability, Lowered.Copy (Lowered.make_local_place outer)))
+      (fun position capability -> (capability, load_outer_evidence builder ~evidence position))
       captured;
   let self_mode : Types.mode =
     match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read
@@ -101,32 +102,11 @@ let build_locked_entry context (item : Lowered.Item.t) ~capability ~name : Emit_
   let evidence = Emit_c.Ir_builder.allocate_local builder Convention.evidence in
   Lowering.set_result_slot st result;
   let parameter_places =
-    List.map
-      (fun (info : Types.parameter_info) ->
-        let ty = Monomorphic.ground context.monomorphic Types.no_substitution info.type_ in
-        ( Lowering.allocate_parameter st ~owned:(info.mode = Own)
-            (Monomorphic.ground_mode info.mode)
-            ty,
-          info.mode,
-          ty ))
-      capability_signature.parameters
+    allocate_parameters st Types.no_substitution capability_signature.parameters
   in
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
-  let load_outer index : Lowered.operand =
-    let outer = Emit_c.Ir_builder.allocate_local builder Convention.evidence in
-    Emit_c.Ir_builder.emit builder
-      (Call
-         {
-           target = Intrinsic Evidence_outer;
-           arguments =
-             [
-               Copy (Lowered.make_local_place evidence); Constant (Integer (Int32, Z.of_int index));
-             ];
-           result = Returned (Lowered.make_local_place outer);
-         });
-    Copy (Lowered.make_local_place outer)
-  in
-  let implementation = load_outer 0 and tasks = load_outer 1 in
+  let implementation = load_outer_evidence builder ~evidence 0
+  and tasks = load_outer_evidence builder ~evidence 1 in
   let address = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
   Emit_c.Ir_builder.emit builder
     (Call
@@ -419,17 +399,7 @@ let build_any_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.
   let builder = st.builder in
   let value = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
   Lowering.set_result_slot st result;
-  let parameter_places =
-    List.map
-      (fun (info : Types.parameter_info) ->
-        let ty = Monomorphic.ground context.monomorphic substitution info.type_ in
-        ( Lowering.allocate_parameter st ~owned:(info.mode = Own)
-            (Monomorphic.ground_mode info.mode)
-            ty,
-          info.mode,
-          ty ))
-      method_signature.parameters
-  in
+  let parameter_places = allocate_parameters st substitution method_signature.parameters in
   let evidence = Lowering.list_evidence_parameters st capabilities in
   let lending =
     List.map

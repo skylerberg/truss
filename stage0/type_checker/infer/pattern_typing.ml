@@ -129,19 +129,12 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
                   @@ State.make_error_type state Unknown_variant
                        (State.read_span state variant_name.id)
                        ~fixes:
-                         (match
-                            Diagnostic.find_closest variant_name.text
-                              (List.map
-                                 (fun (variant : Types.variant) -> variant.variant_name)
-                                 variants)
-                          with
-                         | Some candidate ->
-                             [
-                               State.fix
-                                 (Printf.sprintf "Write `%s`." candidate)
-                                 [ State.replace (State.read_span state variant_name.id) candidate ];
-                             ]
-                         | None -> [])
+                         (Diagnostic.list_spelling_fixes
+                            (State.read_span state variant_name.id)
+                            ~written:variant_name.text
+                            (List.map
+                               (fun (variant : Types.variant) -> variant.variant_name)
+                               variants))
                        (Printf.sprintf "`%s` has no variant `%s`." (Types.show type_)
                           variant_name.text))
           | None ->
@@ -244,17 +237,9 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
               check_pattern_with state env inner ~is_var ~mode
               @@ State.make_error_type state Unknown_member (State.read_span state name.id)
                    ~fixes:
-                     (match
-                        Diagnostic.find_closest name.text
-                          (List.map (fun (declared : Types.field) -> declared.field_name) fields)
-                      with
-                     | Some candidate ->
-                         [
-                           State.fix
-                             (Printf.sprintf "Write `%s`." candidate)
-                             [ State.replace (State.read_span state name.id) candidate ];
-                         ]
-                     | None -> [])
+                     (Diagnostic.list_spelling_fixes (State.read_span state name.id)
+                        ~written:name.text
+                        (List.map (fun (declared : Types.field) -> declared.field_name) fields))
                    (Printf.sprintf "There is no field `%s` here." name.text);
               None)
       | Field inner -> (

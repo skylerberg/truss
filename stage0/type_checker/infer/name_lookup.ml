@@ -178,14 +178,8 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
   let report_unknown candidates =
     State.make_error_type state Unknown_member (State.read_span state member.id)
       ~fixes:
-        (match Diagnostic.find_closest member.text candidates with
-        | Some candidate ->
-            [
-              State.fix
-                (Printf.sprintf "Write `%s`." candidate)
-                [ State.replace (State.read_span state member.id) candidate ];
-            ]
-        | None -> [])
+        (Diagnostic.list_spelling_fixes (State.read_span state member.id) ~written:member.text
+           candidates)
       (Printf.sprintf "%s has no field `%s`."
          (String.capitalize_ascii (State.describe state base_type))
          member.text)

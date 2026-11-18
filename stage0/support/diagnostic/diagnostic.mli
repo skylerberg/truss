@@ -290,7 +290,7 @@ val fix : string -> 'span edit list -> 'span fix
 val replace : 'span -> string -> 'span edit
 val insert : 'span -> string -> 'span edit
 val delete : 'span -> 'span edit
-val find_closest : string -> string list -> string option
+val list_spelling_fixes : 'span -> written:string -> string list -> 'span fix list
 val show_count : int -> string -> string -> string
 
 type reported

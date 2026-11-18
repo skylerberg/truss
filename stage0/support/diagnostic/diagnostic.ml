@@ -574,6 +574,11 @@ let find_closest text candidates =
   | closest :: _ -> Some closest
   | [] -> None
 
+let list_spelling_fixes span ~written candidates =
+  match find_closest written candidates with
+  | Some candidate -> [ fix (Printf.sprintf "Write `%s`." candidate) [ replace span candidate ] ]
+  | None -> []
+
 let show_count count singular plural =
   Printf.sprintf "%d %s" count (if count = 1 then singular else plural)
 

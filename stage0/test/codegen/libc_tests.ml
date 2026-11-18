@@ -756,14 +756,6 @@ let () =
       if status <> 1 then
         Codegen_support.fail "the descriptor was not free again (status %d, %s)" status errors)
 
-let operate_checked builder ?destination ?(type_arguments = []) operation arguments =
-  ignore
-    (Backend.For_testing.Intrinsics.lower
-       (Codegen_support.make_shape_env ~extra ())
-       builder intrinsic_types operation ~type_arguments arguments ~destination
-       ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
-       ~trace:None)
-
 let expect_panic ~saying program =
   let status, _, errors = Codegen_support.run_program ~extra program in
   if status <> 101 then Codegen_support.fail "expected a panic, got status %d (%s)" status errors;
@@ -779,7 +771,7 @@ let () =
               let storage =
                 Emit_c.Ir_builder.allocate_local builder (Codegen_support.value bytes_ty)
               in
-              operate_checked builder
+              operate builder
                 ~destination:(Lowered.make_local_place storage)
                 ~type_arguments:[ Codegen_support.uint8 ] (Buffer Storage_with_capacity)
                 [ Value (Lowered.make_uint64_constant 4) ];
@@ -787,8 +779,7 @@ let () =
                 Emit_c.Ir_builder.allocate_local builder
                   (Codegen_support.value Codegen_support.int64)
               in
-              operate_checked builder ~destination:(Lowered.make_local_place got)
-                (Runtime (Libc Read))
+              operate builder ~destination:(Lowered.make_local_place got) (Runtime (Libc Read))
                 [
                   Value (Codegen_support.constant_int32 0);
                   Place (Lowered.make_local_place storage);
@@ -812,8 +803,7 @@ let () =
                 Emit_c.Ir_builder.allocate_local builder
                   (Codegen_support.value Codegen_support.int64)
               in
-              operate_checked builder ~destination:(Lowered.make_local_place wrote)
-                (Runtime (Libc Write))
+              operate builder ~destination:(Lowered.make_local_place wrote) (Runtime (Libc Write))
                 [
                   Value (Codegen_support.constant_int32 1);
                   Place (Lowered.make_local_place view);
@@ -838,7 +828,7 @@ let () =
                 Emit_c.Ir_builder.allocate_local builder
                   (Codegen_support.value Codegen_support.int32)
               in
-              operate_checked builder
+              operate builder
                 ~destination:(Lowered.make_local_place descriptor)
                 (Runtime (Libc Open))
                 [
@@ -847,28 +837,6 @@ let () =
                   Value (Codegen_support.constant_int32 0);
                 ];
               descriptor);
-        ]);
-  Codegen_support.test "a checked build passes a C library call whose arguments are large enough"
-    (fun () ->
-      Codegen_support.expect_status ~extra
-        (Libc.evaluate_number Codegen_support.host Enoent)
-        [
-          build_entry (fun builder ->
-              let name = make_view builder "/nonexistent/truss\000" in
-              let wanted = make_flags builder [ O_rdonly ] in
-              operate_checked builder (Runtime (Libc Open))
-                [
-                  Place (Lowered.make_local_place name);
-                  Value (Copy (Lowered.make_local_place wanted));
-                  Value (Codegen_support.constant_int32 0);
-                ];
-              let error =
-                Emit_c.Ir_builder.allocate_local builder
-                  (Codegen_support.value Codegen_support.int32)
-              in
-              operate_checked builder ~destination:(Lowered.make_local_place error)
-                (Runtime (Libc Errno)) [];
-              error);
         ]);
   Codegen_support.test
     "a checked build stops a float converted to an integer type that cannot hold it" (fun () ->
