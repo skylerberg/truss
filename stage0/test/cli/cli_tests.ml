@@ -802,6 +802,57 @@ let () =
       if List.mem "impl Display for Point {" geometry then
         fail "the geometry's Point showed %s" (String.concat "; " geometry))
 
+let expect_headers ~expected texts =
+  let headers = list_headers texts in
+  List.iter
+    (fun header ->
+      if not (List.mem header headers) then
+        fail "%s is missing from %s" header (String.concat "; " headers))
+    expected
+
+let () =
+  test "a built-in type is shown by its name with its methods and its impls" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.point_with_a_sum_method) ] in
+      expect_headers
+        ~expected:
+          [
+            "public fn Int64.to_big_endian_bytes(self) -> Array[UInt8, 8]";
+            "impl FixedWidthInteger for Int64 {";
+            "impl Serialize for Int64 {";
+          ]
+        (run_show root "Int64"));
+  test "a built-in type is shown with an impl that the project writes for it" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.doubled_for_int64) ] in
+      expect_headers ~expected:[ "impl Doubled for Int64 {" ] (run_show root "Int64"));
+  test "a prelude type and a prelude trait are shown by their names" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.point_with_a_sum_method) ] in
+      expect_headers ~expected:[ "public type Option[Value] =" ] (run_show root "Option");
+      expect_headers
+        ~expected:[ "public trait FixedWidthInteger:" ]
+        (run_show root "FixedWidthInteger"));
+  test "a method written in an impl is shown through the implementing type" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.square_area) ] in
+      expect_strings ~expected:[ "fn area(self) -> Int64" ] (run_show root "demo::Square.area"));
+  test "a module is shown without repeating the methods written in its traits and impls" (fun () ->
+      let root =
+        make_package
+          [
+            ("main.truss", Fixtures.point_with_a_sum_method);
+            ("shapes/shapes.truss", Fixtures.square_area);
+          ]
+      in
+      expect_strings
+        ~expected:[ "trait Shape {"; "type Square(side: Int64)"; "impl Shape for Square {" ]
+        (list_headers (run_show root "demo::shapes")));
+  test "a built-in type that no definition names is shown as having nothing to show" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.point_with_a_sum_method) ] in
+      let status, output = run_truss [ "show"; "-C"; root; "Never" ] in
+      if
+        status <> 0
+        || not
+             (String.includes ~affix:"`Never` is visible here but has no definition to show." output)
+      then fail "status %d: %s" status output)
+
 let make_lowered_lookups (snapshot, packages) =
   Cli.Workspace_backend.require_lowered_lookups (Workspace.open_database snapshot) packages
 
@@ -950,7 +1001,31 @@ let () =
         not
           (String.includes ~affix:"fn Point.value(self)" text
           && String.includes ~affix:"Point(x: 1).value()" text)
-      then fail "wrote %s" text)
+      then fail "wrote %s" text);
+  test "renaming a member constant rewrites its uses" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.point_origin_and_its_use) ] in
+      if rename root "demo::Point.origin" "center" <> 0 then fail "refused";
+      let text = read root "main.truss" in
+      if
+        not
+          (String.includes ~affix:"let Point.center: Point" text
+          && String.includes ~affix:"Point.center.x" text)
+      then fail "wrote %s" text);
+  test "a method is renamed by a suffix of its path" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.point_get_and_its_calls) ] in
+      if rename root "Point.get" "value" <> 0 then fail "refused";
+      let text = read root "main.truss" in
+      if not (String.includes ~affix:"Point(x: 1).value()" text) then fail "wrote %s" text);
+  test "a new name with a full path is checked against the renamed definition's module" (fun () ->
+      let root = make_package two_files in
+      if rename root "total" "demo::weather::sum" <> 0 then fail "refused";
+      if not (String.includes ~affix:"public fn sum(" (read root "weather/weather.truss")) then
+        fail "wrote %s" (read root "weather/weather.truss"));
+  test "a suffix that names two definitions renames neither" (fun () ->
+      let root = make_two_points () in
+      let status, output = run_truss [ "rename"; "-C"; root; "Point"; "Spot" ] in
+      if status <> 2 || not (String.includes ~affix:"`Point` names 2 definitions" output) then
+        fail "status %d: %s" status output)
 
 let rewrite root path text =
   Out_channel.with_open_bin (Filename.concat root path) (fun out -> output_string out text);
@@ -1062,6 +1137,11 @@ let () =
       let root = make_package [ ("main.truss", Fixtures.doubling) ] in
       let status, output = run_truss [ "dependents"; "-C"; root; "ouble" ] in
       if status <> 2 || not (String.includes ~affix:"No definition named ouble" output) then
+        fail "status %d: %s" status output);
+  test "a built-in type has no definition whose dependents could be listed" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.doubling) ] in
+      let status, output = run_truss [ "dependents"; "-C"; root; "Int64" ] in
+      if status <> 2 || not (String.includes ~affix:"No definition named Int64" output) then
         fail "status %d: %s" status output);
   test "a name that is not a path is refused" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.doubling) ] in
