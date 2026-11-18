@@ -275,30 +275,33 @@ let make_result_key compiler root =
             Cbor.Array (List.map (fun flag -> Cbor.Text flag) compiler.settings.extra);
           ]))
 
-let locate_offset compiler (definition : Path.t) offset : Emit_c.position =
-  let names = compiler.requests.interface.names in
+type location = { file : Path.file; line : int; column : int }
+
+let locate_offset (requests : requests) (definition : Path.t) offset =
+  let names = requests.interface.names in
   match Option.map names.read_place (names.find_key definition) with
   | Some { file; base } ->
-      let line, column =
-        Source.compute_position (compiler.requests.read_source file) (base + offset)
-      in
-      { file = compiler.show_file file; line; column }
+      let line, column = Source.compute_position (requests.read_source file) (base + offset) in
+      { file; line; column }
   | None -> raise_bug "%s has no place in a file" (Path.show definition)
 
-let locate_site compiler (site : Lowered.site) = locate_offset compiler site.definition site.offset
+let locate_site requests (site : Lowered.site) = locate_offset requests site.definition site.offset
 
-let show_position (position : Emit_c.position) =
-  Printf.sprintf "%s:%d:%d" position.file position.line position.column
-
-let locate_todo_type compiler (path : Path.t) =
-  let names = compiler.requests.interface.names in
+let locate_todo_type (requests : requests) (path : Path.t) =
+  let names = requests.interface.names in
   match
     Option.map (fun key -> (names.read_definition key, names.read_spans key)) (names.find_key path)
   with
   | Some ({ kind = Type_definition { name; _ }; _ }, spans) ->
-      locate_offset compiler path spans.(name.id).start
+      locate_offset requests path spans.(name.id).start
   | Some _ | None ->
       raise_bug "%s is reached as a type defined as todo, and has no definition" (Path.show path)
+
+let make_position compiler ({ file; line; column } : location) : Emit_c.position =
+  { file = compiler.show_file file; line; column }
+
+let show_location compiler ({ file; line; column } : location) =
+  Printf.sprintf "%s:%d:%d" (compiler.show_file file) line column
 
 let list_small_callees ~find ~is_worked_on fragment =
   match Emit_c.key fragment with
@@ -335,7 +338,11 @@ let rec build ?report_progress ?tests ?(supplied = []) compiler ~roots ~startup 
   let sources =
     [
       ("startup", startup);
-      ("sites", Emit_c.render_sites_file ~resolve_position:(locate_site compiler) units);
+      ( "sites",
+        Emit_c.render_sites_file
+          ~resolve_position:(fun site ->
+            make_position compiler (locate_site compiler.requests site))
+          units );
     ]
   in
   let find key = Instance_table.find_opt units_by_key key in
@@ -430,7 +437,7 @@ let show_unsupported compiler (unsupported : Lower.unsupported) =
   let where =
     match unsupported.at with
     | None -> ""
-    | Some at -> show_position (locate_site compiler at) ^ ": "
+    | Some at -> show_location compiler (locate_site compiler.requests at) ^ ": "
   in
   where ^ "Stage0 cannot build this yet: " ^ unsupported.construct ^ "."
 
@@ -602,7 +609,7 @@ let make_incomplete_record compiler todo_types =
            (List.map
               (fun path ->
                 Printf.sprintf "the type %s is defined as todo\n  at %s" (Path.show path)
-                  (show_position (locate_todo_type compiler path)))
+                  (show_location compiler (locate_todo_type compiler.requests path)))
               todo_types));
     echo = None;
     output = None;
@@ -700,7 +707,7 @@ let build_supplied_tests compiler ~time_limit_ms supplied ~output =
 
 type unshippable = {
   failure : [ `Todo | `Echo ];
-  file : string;
+  file : Path.file;
   line : int;
   column : int;
   way : Path.t list;
@@ -709,16 +716,16 @@ type unshippable = {
 let make_root_key (root : Path.t) : Instance.key =
   match root with Test _ -> make_test_root root | _ -> Generated (Program_main root)
 
-let rec read_executed_fragment compiler key =
-  match compiler.requests.find_lowered key with
+let rec read_executed_fragment (requests : requests) key =
+  match requests.find_lowered key with
   | Some (Ok (Compiled fragment | Folded (_, fragment))) -> Some fragment
-  | Some (Ok (Evaluate (path, _))) -> read_executed_fragment compiler (Instance.Evaluator path)
+  | Some (Ok (Evaluate (path, _))) -> read_executed_fragment requests (Instance.Evaluator path)
   | Some (Error _) | None -> None
 
-let trace_root compiler root =
-  Emit_c.trace_reachable ~lookup:(read_executed_fragment compiler) [ make_root_key root ]
+let trace_root requests root =
+  Emit_c.trace_reachable ~lookup:(read_executed_fragment requests) [ make_root_key root ]
 
-let list_reached_definitions compiler root =
+let list_reached_definitions requests root =
   List.sort_uniq Path.compare
     (List.filter_map
        (fun (_, way) ->
@@ -726,10 +733,10 @@ let list_reached_definitions compiler root =
          | (Instance.Code { path; _ } | Constant path | Generated (Program_main path)) :: _ ->
              Some path
          | _ -> None)
-       (trace_root compiler root))
+       (trace_root requests root))
 
-let list_unshippable compiler ~main =
-  let reached = trace_root compiler main in
+let list_unshippable (requests : requests) ~main =
+  let reached = trace_root requests main in
   begin
     let list_definitions keys =
       List.fold_left
@@ -744,14 +751,14 @@ let list_unshippable compiler ~main =
     let reports =
       List.map
         (fun path ->
-          let ({ file; line; column } : Emit_c.position) = locate_todo_type compiler path in
+          let ({ file; line; column } : location) = locate_todo_type requests path in
           { failure = `Todo; file; line; column; way = [ main; path ] })
-        (compiler.requests.list_reached_todo_types (make_root_key main))
+        (requests.list_reached_todo_types (make_root_key main))
       @ List.concat_map
           (fun (compiled, keys) ->
             List.map
               (fun (failure, site) ->
-                let ({ file; line; column } : Emit_c.position) = locate_site compiler site in
+                let ({ file; line; column } : location) = locate_site requests site in
                 {
                   failure = (match failure with Emit_c.Echo -> `Echo | Todo -> `Todo);
                   file;
@@ -791,7 +798,7 @@ let make_program_root compiler ~main =
                 Printf.sprintf
                   "%s: the type %s is defined as todo, and `main` can reach it, so the program \
                    cannot be built."
-                  (show_position (locate_todo_type compiler path))
+                  (show_location compiler (locate_todo_type compiler.requests path))
                   (Path.show path))
               todo_types))
 
@@ -809,8 +816,8 @@ let build_program compiler ~main ~output =
     ~startup:(Startup.render_program_start (Instance.make_symbol root))
     ~output
 
-let list_reached_todo_types compiler root =
-  compiler.requests.list_reached_todo_types (make_root_key root)
+let list_reached_todo_types (requests : requests) root =
+  requests.list_reached_todo_types (make_root_key root)
 
 let run_template_check compiler ~from_template ~literals ~clauses =
   let ran =

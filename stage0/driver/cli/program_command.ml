@@ -16,16 +16,16 @@ let require_main snapshot database packages =
          no program."
         (Path.show_package package)
 
-let refuse_unshippable snapshot packages compile main proofs =
+let refuse_unshippable snapshot packages requests main proofs =
   let in_code =
     List.map
       (fun ({ failure; file; line; column; way } : Compile.unshippable) ->
-        ( Command_packages.show_workspace_path snapshot packages file,
+        ( Command_packages.show_file snapshot packages file,
           line,
           column,
           (failure :> [ `Todo | `Echo | `Proof_hole ]),
           way ))
-      (Compile.list_unshippable compile ~main)
+      (Compile.list_unshippable requests ~main)
   in
   let in_proofs =
     List.concat_map
@@ -33,7 +33,7 @@ let refuse_unshippable snapshot packages compile main proofs =
         List.map
           (fun (file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
           (Proofs.list_holes snapshot packages proofs definition))
-      (Compile.list_reached_definitions compile main)
+      (Compile.list_reached_definitions requests main)
   in
   match List.sort_uniq compare (in_code @ in_proofs) with
   | [] -> ()
@@ -79,8 +79,10 @@ let build_program ?output snapshot packages (build : Compiler.build) =
   let report = Report.gather ~proofs:is_release database snapshot packages in
   if not (Report.clean report) then raise (Report.Errors report);
   let main = require_main snapshot database packages in
+  Option.iter
+    (refuse_unshippable snapshot packages (Compiler.make_lowering_requests database packages) main)
+    (Report.force_proofs report);
   let compile = Compiler.create database snapshot packages build in
-  Option.iter (refuse_unshippable snapshot packages compile main) (Report.force_proofs report);
   let output = Option.value output ~default:(Compile.make_program_path compile) in
   match Compile.build_program compile ~main ~output with
   | Error message -> Outcome.raise_cannot_run "%s" message

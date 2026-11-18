@@ -793,8 +793,8 @@ let () =
       if List.mem "impl Display for Point {" geometry then
         fail "the geometry's Point showed %s" (String.concat "; " geometry))
 
-let make_lowering (snapshot, packages) =
-  Cli.Compiler.make_lowering_compiler (Workspace.open_database snapshot) packages
+let make_lowering_requests (snapshot, packages) =
+  Cli.Compiler.make_lowering_requests (Workspace.open_database snapshot) packages
 
 let make_speaker_calling called =
   make_package
@@ -838,7 +838,8 @@ let () =
           (make_package [ ("main.truss", Fixtures.main_reaching_a_todo_through_a_helper) ])
       in
       match
-        Compile.list_unshippable (make_lowering project) ~main:(List.hd (list_mains project))
+        Compile.list_unshippable (make_lowering_requests project)
+          ~main:(List.hd (list_mains project))
       with
       | [ { failure = `Todo; line = 6; way; _ } ] ->
           expect_strings ~expected:[ "demo::main"; "demo::helper" ] (List.map Path.show way)
@@ -846,7 +847,8 @@ let () =
   test "a todo in a capability's method counts only where the method is called" (fun () ->
       let list_reached_from called =
         let project = Cli.Command_packages.load (make_speaker_calling called) in
-        Compile.list_unshippable (make_lowering project) ~main:(List.hd (list_mains project))
+        Compile.list_unshippable (make_lowering_requests project)
+          ~main:(List.hd (list_mains project))
       in
       (match list_reached_from "say" with
       | [] -> ()
@@ -876,7 +878,8 @@ let () =
         Cli.Command_packages.load (make_package [ ("main.truss", Fixtures.main_with_an_echo) ])
       in
       match
-        Compile.list_unshippable (make_lowering project) ~main:(List.hd (list_mains project))
+        Compile.list_unshippable (make_lowering_requests project)
+          ~main:(List.hd (list_mains project))
       with
       | [ { failure = `Echo; line = 2; _ } ] -> ()
       | reached -> fail "found %d" (List.length reached))

@@ -55,12 +55,12 @@ let attach_blocks snapshot packages database holes =
         (fun (test : Test_command.test) -> ("test " ^ Test_command.label_test test, test.path))
         (Test_command.select snapshot database packages ~paths:[] ~match_:None)
   in
-  let compile = lazy (Compiler.make_lowering_compiler database packages) in
+  let requests = lazy (Compiler.make_lowering_requests database packages) in
   let read_memoized table list_reached root =
     match Path_table.find_opt table root with
     | Some reached -> reached
     | None ->
-        let reached = list_reached (Lazy.force compile) root in
+        let reached = list_reached (Lazy.force requests) root in
         Path_table.replace table root reached;
         reached
   in
