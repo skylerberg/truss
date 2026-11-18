@@ -381,6 +381,23 @@ let declare_potential_measure context element =
   end;
   term
 
+let sum_element_potentials context element sequence =
+  Intrinsics.make_sequence_sum context element sequence (declare_potential_measure context element)
+
+let choose_by_variant ty term shape compute_variant =
+  match shape with
+  | [ (None, fields) ] -> compute_variant (None, fields)
+  | variants -> (
+      match List.rev variants with
+      | last :: earlier ->
+          List.fold_left
+            (fun otherwise ((variant, _) as one) ->
+              Logic.ite
+                (Logic.Is (Facts.make_constructor_symbol ty variant, term))
+                (compute_variant one) otherwise)
+            (compute_variant last) earlier
+      | [] -> Costs.zero)
+
 let rec find_potential_clause context (ty : Types.ty) =
   match Validity.find_type_clauses context ty with
   | Some (source, { potential = Some potential; _ }) -> Some (source, potential)
@@ -477,8 +494,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
               | _ -> ());
               let elements =
                 if has_potential context element then
-                  Intrinsics.make_sequence_sum context element sequence
-                    (declare_potential_measure context element)
+                  sum_element_potentials context element sequence
                 else Costs.zero
               in
               Facts.add_frame_fact context frame (Logic.equal held (Costs.plus slack elements))
@@ -494,20 +510,8 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
                        written)
               | None -> Costs.zero
             in
-            let compute_parts = compute_parts_potential context frame ~seen ty term in
             let parts =
-              match shape with
-              | [ (None, fields) ] -> compute_parts (None, fields)
-              | variants -> (
-                  match List.rev variants with
-                  | last :: earlier ->
-                      List.fold_left
-                        (fun otherwise ((variant, _) as one) ->
-                          Logic.ite
-                            (Logic.Is (Facts.make_constructor_symbol ty variant, term))
-                            (compute_parts one) otherwise)
-                        (compute_parts last) earlier
-                  | [] -> Costs.zero)
+              choose_by_variant ty term shape (compute_parts_potential context frame ~seen ty term)
             in
             Facts.add_frame_fact context frame
               (Logic.equal held (Costs.plus declared_potential parts))
@@ -532,6 +536,31 @@ and compute_parts_potential context frame ~seen ty term (variant, fields) =
            else compute_potential context frame ~seen:(ty :: seen) field_type part)
       else total)
     Costs.zero fields
+
+let compute_elements_potential context (ty : Types.ty) term =
+  let rec sum_elements ~enclosing (ty : Types.ty) term =
+    if not (has_potential context ty) then Costs.zero
+    else
+      match Facts.find_constructors context ty with
+      | Some shape -> (
+          let sum_fields (variant, fields) =
+            List.fold_left
+              (fun total (field, field_type) ->
+                if List.exists (Types.equal field_type) (ty :: enclosing) then total
+                else
+                  Costs.plus total
+                    (sum_elements ~enclosing:(ty :: enclosing) field_type
+                       (Validity.select_field context ty variant field term)))
+              Costs.zero fields
+          in
+          try choose_by_variant ty term shape sum_fields with Facts.Unsupported _ -> Costs.zero)
+      | None -> (
+          match (find_potential_clause context ty, find_buffer_elements context ty) with
+          | None, Some (element, model_of) when has_potential context element ->
+              sum_element_potentials context element (model_of term)
+          | _ -> Costs.zero)
+  in
+  sum_elements ~enclosing:[] ty term
 
 let find_method_time_bound context (method_ : Path.t) ~trait_arguments self_type =
   let holds ty = try has_potential context ty with Facts.Unsupported _ -> true in
