@@ -1,10 +1,7 @@
 use standard::base64
 
 fn decodes_to(text: StringSlice, expected: StringSlice) -> Bool {
-  match base64::decode(text) {
-    Ok(bytes) => bytes == expected.to_bytes()
-    Err(_) => false
-  }
+  base64::decode(text) == Ok(expected.to_bytes())
 }
 
 test "bytes encode with padding, as RFC 4648 gives them" {

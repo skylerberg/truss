@@ -17,8 +17,10 @@ public trait FromElements {
 }
 
 public type SplitFirst[Element](first: Element, rest: Slice[Element])
+  derives Equal
 
 public type SplitLast[Element](last: Element, rest: Slice[Element])
+  derives Equal
 
 public type Enumerated[Element](elements: Slice[Element])
 

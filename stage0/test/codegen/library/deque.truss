@@ -23,8 +23,8 @@ test "a deque pops from both ends in order" {
   mut queue.push_back(3)
   mut queue.push_front(1)
   assert queue.length() == 3 && !queue.is_empty()
-  assert queue.front() is Some(item) && item == 1
-  assert queue.back() is Some(item) && item == 3
+  assert queue.front() == Some(1)
+  assert queue.back() == Some(3)
   assert mut queue.pop_front() == Some(1)
   assert mut queue.pop_back() == Some(3)
   assert mut queue.pop_back() == Some(2)
@@ -71,8 +71,8 @@ test "a deque is indexed from its front" {
   assert queue[0] == 1 && queue[1] == 2 && queue[2] == 3 && queue[3] == 4
   queue[1] = 20
   queue[3] = 40
-  assert queue.get(1) is Some(item) && item == 20
-  assert queue.get(3) is Some(item) && item == 40
+  assert queue.get(1) == Some(20)
+  assert queue.get(3) == Some(40)
   assert queue.get(4) is None
   assert listed(queue) == [1, 20, 3, 40]
 }

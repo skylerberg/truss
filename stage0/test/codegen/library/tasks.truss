@@ -27,15 +27,6 @@ fn collect[Message: Storable](messages: tasks::Channel[Message]) -> List[Message
   received
 }
 
-fn includes(orders: List[List[Int64]], order: List[Int64]) -> Bool {
-  for other in orders {
-    if other == order {
-      return true
-    }
-  }
-  false
-}
-
 test "a channel delivers messages in the order they were sent" {
   provide tasks::SeededTasks.new(1) {
     let numbers = tasks::Channel[Int64].new(capacity: 3)
@@ -198,7 +189,7 @@ test "the order in which tasks run depends on the seed" {
       }
       numbers.close()
       let order = collect(numbers)
-      if !includes(orders, order: order) {
+      if !orders.contains(order) {
         mut orders.push(own order)
       }
     }

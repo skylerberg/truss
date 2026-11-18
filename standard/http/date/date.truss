@@ -1,10 +1,6 @@
 use standard::intrinsic
 use standard::time
 
-fn same_name(first: StringSlice, second: StringSlice) -> Bool {
-  first.to_ascii_lowercase() == second.to_ascii_lowercase()
-}
-
 let weekday_names: Array[String, 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 let month_names: Array[String, 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -43,7 +39,7 @@ internal fn format(instant: Instant) -> String {
 fn month_number(name: StringSlice) -> Option[UInt8] {
   let count: UInt64 = 12
   for index in 0..count {
-    if same_name(month_names[index].slice(), second: name) {
+    if month_names[index].equal_ignoring_ascii_case(name) {
       return Some(intrinsic::convert(index + 1))
     }
   }

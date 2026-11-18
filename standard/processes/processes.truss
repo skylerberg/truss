@@ -12,13 +12,16 @@ public opaque type Command(
   output: Redirect,
   error_output: Redirect,
 )
+  derives Equal
 
 public type Variable(name: String, value: String)
+  derives Equal
 
 public type Redirect = Inherit | Capture | Discard | Pipe
   derives Equal
 
 public opaque type Argument(text: String)
+  derives Equal
 
 impl From[String] for Argument {
   fn from(value: own String) -> Argument {
@@ -247,7 +250,7 @@ public type Signal =
   | User1
   | User2
   | Other(number: Int32)
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 public fn Signal.from_number(number: Int32) -> Signal
   cost time O(1)
@@ -268,6 +271,7 @@ public fn Signal.from_number(number: Int32) -> Signal
 }
 
 public type Output(status: ExitStatus, output: List[UInt8], error_output: List[UInt8])
+  derives Equal
 
 public fn Output.text(self) -> Result[String, text::Utf8Error]
   cost time O(self.output.length())

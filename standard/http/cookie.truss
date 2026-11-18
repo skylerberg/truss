@@ -90,7 +90,7 @@ public fn Cookie.removal(name: StringSlice, path: StringSlice = "/") -> Cookie {
 public fn Request.cookies(self) -> List[CookiePair] {
   var pairs: List[CookiePair] = []
   for entry in self.headers.entries() {
-    if same_name(entry.name.slice(), second: "Cookie") {
+    if entry.name.equal_ignoring_ascii_case("Cookie") {
       for piece in entry.value.slice().split(";") {
         let part = piece.trim()
         match part.find("=") {
