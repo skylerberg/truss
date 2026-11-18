@@ -107,9 +107,6 @@ let read_source snapshot packages (file : Path.file) =
     Source.create ~path:(Shown_path.show_path (locate_file snapshot file)) (Source.text source)
   else source
 
-let show_workspace_path snapshot packages workspace_path =
-  match
-    List.find_opt (fun file -> Path.show_file file = workspace_path) (list_files snapshot packages)
-  with
-  | Some file -> Shown_path.show_path (locate_file snapshot file)
-  | None -> workspace_path
+let show_file snapshot packages (file : Path.file) =
+  if List.mem file.module_.package packages then Shown_path.show_path (locate_file snapshot file)
+  else Path.show_file file

@@ -156,7 +156,7 @@ and check_variant_value state (value : Syntax.expression) type_path variant ~arg
               inputs = [ (Types.Own, field.field_type) ];
               output = type_;
               uses = Types.no_capabilities;
-              costs = [ { amortized = false; resource = Time; bound = Order_of } ];
+              costs = [ { amortized = false; resource = Metric Time; bound = Order_of } ];
             }
       | Some { fields = Some fields; _ } ->
           State.make_error_type state Not_a_value (State.read_span state value.id)
@@ -549,9 +549,9 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
           let instance =
             Instantiation.instantiate state span
               ~extra:
-                (Types.bind_argument
-                   (Types.make_self_parameter trait.trait)
-                   (Types.Type type_) Types.no_substitution)
+                (Types.make_trait_substitution
+                   (Members.list_trait_generics state.lookups trait.trait)
+                   ~self:type_ trait)
               (Members.read_method_signature state.lookups trait.trait method_)
           in
           Visible
@@ -561,7 +561,7 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
                   name;
                   receiver;
                   self_type = type_;
-                  instantiation = Types.no_instantiation;
+                  instantiation = instance.instantiation;
                   evidence =
                     (match type_ with
                     | Types.Any _ -> Dynamic

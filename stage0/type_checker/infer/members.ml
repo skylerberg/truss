@@ -37,5 +37,10 @@ let are_fields_visible (lookups : Lookups.t) ~package (path : Path.t) =
   | Some { opaque = true; _ } -> Path.locate_package path = package
   | _ -> true
 
+let list_trait_generics (lookups : Lookups.t) trait =
+  match Interface.Definition.find_trait_interface lookups.interface trait with
+  | Some interface -> interface.trait_generics
+  | None -> []
+
 let read_method_signature (lookups : Lookups.t) trait method_ =
   Interface.Definition.read_method_signature lookups.interface ~owner:trait method_

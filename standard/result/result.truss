@@ -41,6 +41,8 @@ public fn Result[Value, Error].map[Output](
 ) -> Result[Output, Error]
   uses generic Granted
   cost time O(time(transform))
+  cost allocations <= allocations(transform)
+  cost allocated_bytes <= allocated_bytes(transform)
 {
   match own self {
     Ok(value) => Ok(transform(own value))
@@ -54,6 +56,8 @@ public fn Result[Value, Error].map_error[Other](
 ) -> Result[Value, Other]
   uses generic Granted
   cost time O(time(transform))
+  cost allocations <= allocations(transform)
+  cost allocated_bytes <= allocated_bytes(transform)
 {
   match own self {
     Ok(value) => Ok(own value)
@@ -67,6 +71,8 @@ public fn Result[Value, Error].and_then[Output](
 ) -> Result[Output, Error]
   uses generic Granted
   cost time O(time(next))
+  cost allocations <= allocations(next)
+  cost allocated_bytes <= allocated_bytes(next)
 {
   match own self {
     Ok(value) => next(own value)
@@ -80,6 +86,8 @@ public fn Result[Value, Error].or_else[Other](
 ) -> Result[Value, Other]
   uses generic Granted
   cost time O(time(recover))
+  cost allocations <= allocations(recover)
+  cost allocated_bytes <= allocated_bytes(recover)
 {
   match own self {
     Ok(value) => Ok(own value)
@@ -104,6 +112,8 @@ public fn Result[Value, Error].unwrap_or_else(
 ) -> Value
   uses generic Granted
   cost time O(time(recover))
+  cost allocations <= allocations(recover)
+  cost allocated_bytes <= allocated_bytes(recover)
 {
   match own self {
     Ok(value) => value

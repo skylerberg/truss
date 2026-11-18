@@ -307,14 +307,33 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                    else
                      Printf.sprintf "`%s` can use only the capabilities `%s` declares for it."
                        name.text shown_trait)
-              else if
-                Types.terminates written.uses
-                && not
-                     (Types.is_capability_subset (Types.list_divergence written.uses) expected.uses)
-              then
-                Checking.report state Impl_uses state.spans.(name.id)
-                  (Printf.sprintf
-                     "The `time` clause of `%s` names a function that may not terminate, and `%s` \
-                      declares that `%s` terminates whatever it is passed."
-                     name.text shown_trait name.text)
+              else if Types.terminates written.uses then
+                let followed =
+                  Types.compute_missing_capabilities
+                    ~required:
+                      (Impls.normalize_capabilities_in_impl state.lookups ~list_bounds impl
+                         (Types.list_divergence written.uses))
+                    ~available:expected.uses
+                in
+                match
+                  List.find_map
+                    (function
+                      | Types.Divergence (Of_impl_method { self_type; trait; name; _ }) ->
+                          Some (Types.show_impl_method self_type trait name)
+                      | _ -> None)
+                    (followed :> Types.capability list)
+                with
+                | Some followed_method ->
+                    Checking.report state Impl_uses state.spans.(name.id)
+                      (Printf.sprintf
+                         "The `time` clause of `%s` follows %s, which may not terminate, and the \
+                          `time` clause that `%s` declares for `%s` does not follow it."
+                         name.text followed_method shown_trait name.text)
+                | None when followed <> Types.no_capabilities ->
+                    Checking.report state Impl_uses state.spans.(name.id)
+                      (Printf.sprintf
+                         "The `time` clause of `%s` names a function that may not terminate, and \
+                          `%s` declares that `%s` terminates whatever it is passed."
+                         name.text shown_trait name.text)
+                | None -> ()
           end)

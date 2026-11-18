@@ -1,0 +1,10 @@
+trait Clockwork {
+  type Movement: Ticker
+}
+
+fn f[Watch: Clockwork](movement: mut Watch.Movement) -> UInt64
+  cost time O(time(Watch.Movement.tick))
+{
+  let _ = mut movement.tick()
+  mut movement.tick()
+}

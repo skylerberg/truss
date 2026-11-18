@@ -189,7 +189,7 @@ let () =
 
 let expect_fold name ~folded ~run source =
   Codegen_support.test name (fun () ->
-      let _, compile =
+      let _, backend =
         Codegen_support.load
           ~roots:
             (List.map
@@ -198,7 +198,7 @@ let expect_fold name ~folded ~run source =
           source
       in
       let is_folded name =
-        Compile.For_testing.is_folded compile (Top { module_ = Codegen_support.example; name })
+        Backend.For_testing.is_folded backend (Top { module_ = Codegen_support.example; name })
       in
       List.iter
         (fun name ->

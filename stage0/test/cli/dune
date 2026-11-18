@@ -15,7 +15,7 @@
   manifest
   registry
   project
-  compile
+  backend
   watcher))
 
 (rule

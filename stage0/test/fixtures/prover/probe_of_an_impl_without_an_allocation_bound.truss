@@ -1,0 +1,5 @@
+fn f(source: Unstated) -> Bool
+  cost allocations <= 0
+{
+  probe_once(source)
+}

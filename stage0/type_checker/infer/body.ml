@@ -92,7 +92,7 @@ let check_clauses state env (clauses : Syntax.clause list) =
   let env = { env with State.specification = true } in
   List.iter
     (fun (clause : Syntax.clause) ->
-      match clause.kind with Cost { resource; _ } -> State.check_resource state resource | _ -> ())
+      match clause.kind with Cost cost -> State.check_cost state cost | _ -> ())
     clauses;
   List.iter
     (fun ((value : Syntax.expression), kind) ->
@@ -525,7 +525,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
         (match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
         | Some interface ->
             let substitution =
-              Interface.Properties.make_trait_substitution interface ~self:for_type trait
+              Types.make_trait_substitution interface.trait_generics ~self:for_type trait
             in
             state.law_parameters <-
               List.map
@@ -583,18 +583,14 @@ let finalize (state : State.state) =
     }
   in
   let finalize_evidence : Tables.evidence -> Tables.evidence = function
-    | Impl { impl; arguments } ->
+    | Impl { impl; substitution } ->
         Impl
           {
             impl;
-            arguments =
-              {
-                arguments with
-                arguments =
-                  List.map
-                    (fun (parameter, value) -> (parameter, finalize_argument value))
-                    arguments.arguments;
-              };
+            substitution =
+              Types.map_substitution ~argument:finalize_argument
+                ~capabilities:(State.finalize_capabilities state)
+                substitution;
           }
     | other -> other
   in

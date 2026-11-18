@@ -1,4 +1,4 @@
-type build = Development | Release
+type profile = Development | Release
 type linkage = External | Internal
 type failure = C_runtime.failure = Echo | Todo
 
@@ -24,7 +24,7 @@ val trace_reachable :
 val is_small : fragment -> bool
 val failures : fragment -> (failure * Lowered.site) list
 val render_fragment : fragment -> string
-val render_file : Memory_layout.env -> build -> (fragment * linkage) list -> string
+val render_file : Memory_layout.env -> profile -> (fragment * linkage) list -> string
 val site_struct : string
 
 type position = { file : string; line : int; column : int }

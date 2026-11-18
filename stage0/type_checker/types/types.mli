@@ -41,16 +41,20 @@ and capability =
   | Capability_error of Diagnostic.reported
   | Divergence of divergence
 
-and divergence = Always | Of_parameter of parameter | Of_variable of int
+and divergence =
+  | Always
+  | Of_parameter of parameter
+  | Of_impl_method of {
+      self_type : ty;
+      trait : trait_reference;
+      name : string;
+      receiver : Path.receiver;
+    }
+  | Of_variable of int
+
 and capability_set = private capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
-
-and resource =
-  | Time
-  | Allocations
-  | Allocated_bytes
-  | Calls of { capability : Path.t; method_ : string option }
-
+and resource = Metric of Metric.t | Calls of { capability : Path.t; method_ : string option }
 and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
 val unit : ty
@@ -87,12 +91,10 @@ val compute_missing_capabilities :
 
 val flat_map_capabilities : (capability -> capability list) -> capability_set -> capability_set
 
-type substitution = {
-  arguments : (parameter * argument) list;
-  capability_arguments : (parameter * capability_set) list;
-}
+type substitution
 
 val no_substitution : substitution
+val is_empty_substitution : substitution -> bool
 val combine_substitutions : substitution -> substitution -> substitution
 val bind_argument : parameter -> argument -> substitution -> substitution
 val find_argument : parameter -> substitution -> argument option
@@ -101,6 +103,14 @@ val substitute_argument : substitution -> argument -> argument
 val substitute_trait : substitution -> trait_reference -> trait_reference
 val substitute_function : substitution -> function_type -> function_type
 val substitute_capabilities : substitution -> capability_set -> capability_set
+val substitute_substitution : substitution -> substitution -> substitution
+
+val map_substitution :
+  argument:(argument -> argument) ->
+  capabilities:(capability_set -> capability_set) ->
+  substitution ->
+  substitution
+
 val extract_result_type : result -> ty
 val show_mode : mode -> string
 val map : ?map_capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
@@ -119,6 +129,7 @@ val costs_imply : provided:cost list -> required:cost list -> bool
 val show : ty -> string
 val describe : ty -> string
 val show_capability : capability -> string
+val show_impl_method : ty -> trait_reference -> string -> string
 val show_trait : trait_reference -> string
 val show_argument : argument -> string
 val show_capabilities : capability_set -> string
@@ -155,6 +166,7 @@ type instantiation = {
 val no_instantiation : instantiation
 val substitute_instantiation : substitution -> instantiation -> instantiation
 val make_signature_substitution : signature -> instantiation -> substitution
+val make_trait_substitution : generic list -> self:ty -> trait_reference -> substitution
 val map_signature : (ty -> ty) -> signature -> signature
 val substitute_signature : substitution -> signature -> signature
 
@@ -212,3 +224,7 @@ val find_implementing_receiver :
   trait_interface -> impl_interface -> trait_method -> Path.receiver option
 
 type constant_interface = { constant_type : ty }
+
+module For_testing : sig
+  val list_arguments : substitution -> (parameter * argument) list
+end

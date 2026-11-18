@@ -1,0 +1,15 @@
+fn step_with[Source](
+  ticker: mut Source,
+  step: (fn(mut Source) -> UInt64 uses generic Granted),
+) -> UInt64
+  uses generic Granted
+  cost time O(time(step))
+{
+  step(mut ticker)
+}
+
+fn step_with_finite[Source](ticker: mut Source, step: (fn(mut Source) -> UInt64 cost time finite)) -> UInt64
+  cost time finite
+{
+  step(mut ticker)
+}

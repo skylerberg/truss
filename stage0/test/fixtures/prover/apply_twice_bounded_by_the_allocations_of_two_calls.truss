@@ -1,0 +1,7 @@
+fn f(value: Int64, change: (fn(Int64) -> Int64 uses generic Granted)) -> Int64
+  uses generic Granted
+  cost allocations <= 2 * allocations(change)
+  cost allocated_bytes <= 2 * allocated_bytes(change)
+{
+  change(change(value))
+}

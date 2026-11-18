@@ -12,12 +12,12 @@ val label_test : test -> string
 
 val run_tests :
   ?rerun:bool ->
-  ?report_progress:(Compile.progress -> unit) ->
+  ?report_progress:(Backend.progress -> unit) ->
   Database.t ->
   Workspace.snapshot ->
   Path.package list ->
   test list ->
-  Compile.record list
+  Backend.record list
 
 val run : paths:string list -> match_:string option -> timings:bool -> rerun:bool -> int
 

@@ -1,0 +1,5 @@
+fn f(movement: mut Forever) -> UInt64
+  cost time finite
+{
+  run[Broken](mut movement)
+}

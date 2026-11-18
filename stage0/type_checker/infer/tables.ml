@@ -1,7 +1,7 @@
 type local = Syntax.id
 
 type evidence =
-  | Impl of { impl : Path.t; arguments : Types.substitution }
+  | Impl of { impl : Path.t; substitution : Types.substitution }
   | Bound
   | Dynamic
   | Built_in

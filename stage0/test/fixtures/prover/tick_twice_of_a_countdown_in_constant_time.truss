@@ -1,0 +1,25 @@
+type Countdown(left: UInt64)
+
+impl Ticker for Countdown {
+  fn tick(mut self) -> UInt64
+    cost time O(1)
+  {
+    if self.left > 0 {
+      self.left -= 1
+    }
+    self.left
+  }
+}
+
+fn tick_through_a_bound[Inner: Ticker](ticker: mut Inner) -> UInt64
+  cost time O(time(Inner.tick))
+{
+  mut ticker.tick()
+}
+
+fn f(ticker: mut Countdown) -> UInt64
+  cost time O(1)
+{
+  let _ = tick_through_a_bound(mut ticker)
+  mut ticker.tick_twice()
+}
