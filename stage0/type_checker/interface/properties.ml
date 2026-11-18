@@ -1,10 +1,3 @@
-let make_trait_substitution (interface : Types.trait_interface) ~self
-    (reference : Types.trait_reference) : Types.substitution =
-  Types.bind_argument
-    (Types.make_self_parameter reference.trait)
-    (Types.Type self)
-    (Types.make_substitution interface.trait_generics reference.trait_arguments)
-
 let list_bound_closure_over ~find_requirements ~self (bound : Types.trait_reference) =
   let closure = ref [] in
   let rec visit ancestors (bound : Types.trait_reference) =
@@ -66,7 +59,8 @@ let list_associated_bounds lookups ~base trait name =
         (fun (associated : Types.associated_type) ->
           if associated.associated_name = name then
             List.map
-              (Types.substitute_trait (make_trait_substitution interface ~self:base declaring))
+              (Types.substitute_trait
+                 (Types.make_trait_substitution interface.trait_generics ~self:base declaring))
               associated.associated_bounds
           else [])
         interface.associated_types

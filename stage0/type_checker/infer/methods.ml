@@ -403,11 +403,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
 and check_trait_method_through_type state env ?expected:_ ?trait_arguments
     (value : Syntax.expression) self_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) arguments =
-  let trait_generics =
-    match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
-    | Some interface -> interface.trait_generics
-    | None -> []
-  in
+  let trait_generics = Members.list_trait_generics state.lookups trait.trait in
   match trait_arguments with
   | Some written when List.length written <> List.length trait_generics ->
       Calls.check_arguments_alone state env arguments
@@ -426,10 +422,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) arguments ~trait_generics
     ~trait_arguments =
   let extra =
-    Types.bind_argument
-      (Types.make_self_parameter trait.trait)
-      (Types.Type self_type)
-      (Types.make_substitution trait_generics trait_arguments)
+    Types.make_trait_substitution trait_generics ~self:self_type { trait with trait_arguments }
   in
   let signature = Members.read_method_signature state.lookups trait.trait method_ in
   let instance =
@@ -742,16 +735,10 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
 and check_trait_method_with_receiver state env (value : Syntax.expression)
     ~(receiver : Syntax.expression) ~receiver_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) ~type_arguments arguments =
-  let trait_generics =
-    match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
-    | Some interface -> interface.trait_generics
-    | None -> []
-  in
   let extra =
-    Types.bind_argument
-      (Types.make_self_parameter trait.trait)
-      (Types.Type receiver_type)
-      (Types.make_substitution trait_generics trait.trait_arguments)
+    Types.make_trait_substitution
+      (Members.list_trait_generics state.lookups trait.trait)
+      ~self:receiver_type trait
   in
   let not_callable =
     match receiver_type with

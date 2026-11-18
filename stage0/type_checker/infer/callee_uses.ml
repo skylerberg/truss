@@ -33,7 +33,7 @@ let instantiate (interface : Interface.Lookups.t) (callee : Core.callee) : Types
           let declared =
             Types.substitute_capabilities
               (Types.combine_substitutions
-                 (Interface.Properties.make_trait_substitution trait_interface ~self:self_type trait)
+                 (Types.make_trait_substitution trait_interface.trait_generics ~self:self_type trait)
                  (Types.make_signature_substitution signature instantiation))
               signature.uses
           in
