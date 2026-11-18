@@ -1093,10 +1093,10 @@ fn List[Element].with_capacity(capacity: UInt64) -> List[Element]
 
 fn List[Element].push(mut self, item: own Element)
 
-fn List[Element: Ordered].sort(mut self)
+fn Slice[Element: Ordered].sort(mut self)
   cost time O(self.length() * log(self.length()) * time(Element.compare))
 
-fn List[Element].zip[Other](self, other: Slice[Other]) -> Zipped[Element, Other]
+fn Slice[Element].zip[Other](self, other: Slice[Other]) -> Zipped[Element, Other]
 ```
 
 - A method is a function declared as `fn Type.name`. One whose first

@@ -2394,7 +2394,9 @@ let () =
     (fun () -> expect_proven Fixtures.Prover.standard_combinators_under_an_allocation_bound);
   Harness.test "a standard combinator spends the allocations of the lambda it is passed" (fun () ->
       expect_proven Fixtures.Prover.standard_map_of_a_lambda_that_allocates_once;
-      expect_not_proven Fixtures.Prover.standard_map_of_a_lambda_that_allocates "prover.cost")
+      expect_not_proven Fixtures.Prover.standard_map_of_a_lambda_that_allocates "prover.cost");
+  Harness.test "a collection's map has one output for each element" (fun () ->
+      expect_proven Fixtures.Prover.standard_map_keeping_the_length)
 
 let () =
   let ticker = Fixtures.Prover.ticker_without_a_time_clause in
