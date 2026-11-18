@@ -39,10 +39,7 @@ let uint8 = named "UInt8"
 let option value = named "Option" ~arguments:[ Type value ]
 let list element = named "List" ~arguments:[ Type element ]
 let array element count = named "Array" ~arguments:[ Type element; Value (Z.of_int count) ]
-
-let host =
-  match Libc.host with Some os -> os | None -> failwith "these tests run only on Linux and macOS"
-
+let host = match Libc.host with Ok system -> system | Error message -> failwith message
 let field name ty = (name, Memory_layout.Typed ty)
 
 let variant ?(indirect = false) name fields : Memory_layout.variant_shape =
@@ -214,7 +211,9 @@ let make_example_package files : Project.package list =
 
 let make_backend ?results ?evaluation_time_limit_ms database =
   Backend.create ?results ?evaluation_time_limit_ms
-    (Database.make_lowered_lookups database [ example.package ])
+    (match Database.find_lowered_lookups database [ example.package ] with
+    | Ok lookups -> lookups
+    | Error message -> failwith message)
     (Lazy.force c_compiler) Development
 
 let load_files ?results ?(roots = []) ?checks files =

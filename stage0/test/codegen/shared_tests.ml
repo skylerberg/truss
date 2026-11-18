@@ -25,7 +25,9 @@ let loaded =
            (String.concat "" (List.map (Diagnostic.render text) diagnostics)));
      ( database,
        Backend.create
-         (Database.make_lowered_lookups database [ Path.standard_package ])
+         (match Database.find_lowered_lookups database [ Path.standard_package ] with
+         | Ok lookups -> lookups
+         | Error message -> failwith message)
          (Lazy.force Codegen_support.c_compiler)
          Development ))
 
