@@ -2241,12 +2241,19 @@ fn count[Source: Cursor](source: own Source) -> UInt64
 
 ### Equality
 
-A type's equality is *structural* when two equal values cannot be distinguished
-by any function, so `a == b` implies `f(a) == f(b)`. The
-built-in integers, `Bool`, `Character`, `Unit`, `String`, and the types of
-specifications have it, and so does a type that derives `Equal` when all its
+A type's equality is *structural* when `==` compares contents: two values are
+equal exactly when they are the same variant and their fields are equal. The
+built-in integers, `Bool`, `Character`, `Unit`, and `String`, whose `==`
+compares text, have it, and so does a type that derives `Equal` when all its
 fields do. A hand-written `Equal`, float equality, and an opaque type's
 equality outside its package are not structural.
+
+A type's equality is *identity* when equal values are `identical`, so
+`a == b` implies `f(a) == f(b)` for every function `f`. The built-in
+integers, `Bool`, `Character`, `Unit`, and the types of specifications have
+it, and so does a type that derives `Equal` when the equality of all its
+fields is identity. `String`'s equality is structural but not identity: two
+equal strings can differ in `capacity()`.
 
 ### Deriving
 
@@ -2464,9 +2471,9 @@ an invariant, a law, or a proof.
 - Float arithmetic in a specification follows IEEE 754.
 
 The prelude types `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset` exist
-only in specifications and have structural equality. A type gives its value
-in their terms with the prelude trait `Model`, whose `model()` can be called
-only in specifications:
+only in specifications, and their equality is identity. A type gives its
+value in their terms with the prelude trait `Model`, whose `model()` can be
+called only in specifications:
 
 ```truss
 fn List[Element].push(mut self, item: own Element)

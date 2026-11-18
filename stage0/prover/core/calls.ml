@@ -963,7 +963,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
               | _, _, Some (bits, _) -> Some (frame, Logic.int bits)
               | _ -> None)
         | "equal", _, [ left; right ]
-          when Path.equal trait.trait Facts.equal_trait && Facts.is_structural context self_type ->
+          when Path.equal trait.trait Facts.equal_trait
+               && Facts.is_equality_identity context self_type ->
             Without_contract (Some (frame, Logic.equal left right))
         | "equal", Impl { impl = Derived _; _ }, [ left; right ]
           when Path.equal trait.trait Facts.equal_trait ->

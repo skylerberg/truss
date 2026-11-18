@@ -218,7 +218,7 @@ let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right 
                let selector = Facts.make_selector_symbol ty variant field in
                let left = Logic.Apply (selector, [ left ])
                and right = Logic.Apply (selector, [ right ]) in
-               if Facts.is_structural context field_type then Logic.equal left right
+               if Facts.is_equality_identity context field_type then Logic.equal left right
                else if Facts.find_float_format field_type <> None then make_float_equal left right
                else
                  match find_written_equal context field_type left right with
@@ -254,7 +254,7 @@ let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right 
   equal
 
 let make_equality context frame (ty : Types.ty) left right =
-  if Facts.is_structural context ty then Logic.equal left right
+  if Facts.is_equality_identity context ty then Logic.equal left right
   else if Facts.find_float_format ty <> None then make_float_equal left right
   else
     match find_written_equal context ty left right with

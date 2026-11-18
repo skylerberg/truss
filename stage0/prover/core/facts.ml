@@ -560,7 +560,7 @@ let rec declare_sort (context : State.context) (ty : Types.ty) : Logic.sort =
         Type_sort ty
       end
 
-let rec is_structural context ?(seen = []) (ty : Types.ty) =
+let rec is_equality_identity context ?(seen = []) (ty : Types.ty) =
   is_numeric ty || is_bool ty || Types.is_builtin Character ty || Types.equal ty Types.unit
   || List.exists (Types.equal ty) seen
   ||
@@ -570,7 +570,7 @@ let rec is_structural context ?(seen = []) (ty : Types.ty) =
       && List.for_all
            (fun (_, fields) ->
              List.for_all
-               (fun (_, field_type) -> is_structural context ~seen:(ty :: seen) field_type)
+               (fun (_, field_type) -> is_equality_identity context ~seen:(ty :: seen) field_type)
                fields)
            shape
   | _ -> false

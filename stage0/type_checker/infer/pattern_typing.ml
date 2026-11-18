@@ -304,10 +304,11 @@ and check_constant_pattern (state : State.state) id span path type_ =
       else if not (is_structural state (State.resolve state constant_type)) then
         State.report state Not_structural span
           (Printf.sprintf
-             "A constant in a pattern needs a type with structural equality, so that matching it \
-              and `==` agree, and `%s` does not have it: its equality is hand-written, or it holds \
-              a float, whose `==` treats `-0.0` and `0.0` as equal. Match with a guard instead, as \
-              in `value if value == %s`."
+             "A constant in a pattern needs a type with structural equality, whose `==` compares \
+              contents, because the checks that a `match` covers every case and that every arm is \
+              reachable compare constants by their contents. `%s` does not have it: its equality \
+              is hand-written, or it holds a float, whose `==` treats `-0.0` and `0.0` as equal. \
+              Match with a guard instead, as in `value if value == %s`."
              (State.show state constant_type)
              (match path with
              | Top { name; _ } | Member_constant { name; _ } | Method { name; _ } -> name
