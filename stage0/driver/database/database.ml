@@ -744,9 +744,6 @@ let make_recording_call_edge_lookups database note : Mir.Call_edges.lookups =
     mir = make_recording_mir_lookups database note;
   }
 
-let read_mir_call_edges database note path =
-  Option.value (find_part database note (Mir_call_edges path)) ~default:Blocked
-
 let make_recording_patterns_lookups database note : Patterns.Lookups.t =
   {
     read_core = read_checked_form database note;
@@ -798,17 +795,27 @@ let list_import_diagnostics database note (file : Path.file) =
     ~text:(Source.text (read_source database file))
     ~used:(find_used_imports database note file)
 
-let find_call_edges database note ~calling_package path =
-  match read_mir_call_edges database note path with
-  | Failed _ | Blocked -> Some []
-  | Value mir_call_edges -> (
-      match
-        Mir.Call_edges.list_implementations
-          (make_recording_call_edge_lookups database note)
-          ~calling_package path
-      with
-      | implementations -> Some (List.sort_uniq Path.compare (mir_call_edges @ implementations))
-      | exception Reads_failed_part -> None)
+type node_edges = Of_definition of Path.t list part | Of_removed_definition
+
+let read_node_edges database note ~calling_package path ~had_edges =
+  match find_part database note (Mir_call_edges path) with
+  | Some (Value mir_call_edges) ->
+      Of_definition
+        (make_part
+           (fun path ->
+             List.sort_uniq Path.compare
+               (mir_call_edges
+               @ Mir.Call_edges.list_implementations
+                   (make_recording_call_edge_lookups database note)
+                   ~calling_package path))
+           path)
+  | Some (Failed _ | Blocked) -> Of_definition (Value [])
+  | None when had_edges -> Of_removed_definition
+  | None ->
+      Compiler_bug.raise_bug ~stage:"Database"
+        "%s is a node of the call graph of %s, and no definition registers its call edges"
+        (Path.show path)
+        (Path.show_package calling_package)
 
 let read_recursion_group database note path =
   Option.value (find_value database note (Recursion_group path)) ~default:[]
@@ -1348,12 +1355,14 @@ let compute_part database (Part.Any typed as part) =
             (Package_checks.run (make_recording_package_checks_lookups database note) package)
             check)
   | Call_edges (path, calling_package) ->
-      compute_value
-        (Call_edges (path, calling_package))
-        (fun note ->
-          match find_call_edges database note ~calling_package path with
-          | Some edges -> Value edges
-          | None -> Blocked)
+      let slot = make_value_slot database (Call_edges (path, calling_package)) in
+      compute_into slot (fun note ->
+          match
+            read_node_edges database note ~calling_package path
+              ~had_edges:(Option.is_some slot.stored)
+          with
+          | Of_definition edges -> Some edges
+          | Of_removed_definition -> None)
   | Recursion_group _ ->
       Compiler_bug.raise_bug ~stage:"Database" "%s is computed by its call graph, not by a stage"
         (Part.show (Stored part))
@@ -1452,6 +1461,14 @@ let update_groups database package =
   | Some graph when Call_graph.has_changes graph ->
       let find_successors = find_call_successors database package in
       let { Call_graph.touched; removed } = Call_graph.update graph ~find_successors in
+      List.iter
+        (fun node ->
+          if Option.is_none (find_stored database (Call_edges (node, package))) then
+            Compiler_bug.raise_bug ~stage:"Database"
+              "%s is a node of the call graph of %s after the graph's update, and its definition \
+               is removed"
+              (Path.show node) (Path.show_package package))
+        touched;
       forget database (List.map (fun node -> Part.Any (Call_edges (node, package))) removed);
       let make_group_slot node = make_value_slot database (Recursion_group node) in
       let is_package_node node = Path.locate_package node = package in

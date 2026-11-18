@@ -276,6 +276,87 @@ let make_level_source ~height =
 
 let raised_of_shelf = "app::main::impl app::main::Level for app::main::Shelf.raised"
 
+let propagate_with_lib ~before ~after =
+  let settle files =
+    let database = Support.make_database (Support.setup ~dependencies:[ ("app", "lib") ] files) in
+    Database.For_testing.propagate database;
+    database
+  in
+  let hot = settle before in
+  let (), observed =
+    Database.For_testing.observe (fun () ->
+        Database.update hot (list_changes ~before ~after);
+        Database.For_testing.propagate hot)
+  in
+  (match Database.For_testing.list_differences hot (settle after) with
+  | [] -> ()
+  | parts ->
+      Harness.fail "the propagated database differs from a cold build in %s"
+        (String.concat ", " parts));
+  observed.recomputed
+
+let make_level_library ~provided =
+  Printf.sprintf
+    "public trait Level {\n\
+    \  fn height(self) -> Int64\n\
+     %s}\n\n\
+     public type Shelf(height: Int64)\n\n\
+     impl Level for Shelf {\n\
+    \  fn height(self) -> Int64 {\n\
+    \    self.height\n\
+    \  }\n\
+     }\n\n\
+     public fn measure[Item: Level](item: Item) -> Int64 {\n\
+    \  item.height()\n\
+     }\n"
+    provided
+
+let level_user =
+  "use lib::tools\nfn caller(shelf: tools::Shelf) -> Int64 { tools::measure(shelf) }\n"
+
+let raised_of_library_shelf = "lib::tools::impl lib::tools::Level for lib::tools::Shelf.raised"
+
+let make_step_library ~follow =
+  Printf.sprintf
+    "public trait Step {\n\
+    \  fn step(self, node: Node) -> Int64\n\
+     }\n\n\
+     public type Node(next: any Step)\n\n\
+     public fn follow(node: Node) -> Int64 {\n\
+    \  %s\n\
+     }\n"
+    follow
+
+let hop_stepping_through_a_library =
+  "use lib::tools\n\n\
+   type Hop()\n\n\
+   impl tools::Step for Hop {\n\
+  \  fn step(self, node: tools::Node) -> Int64 {\n\
+  \    tools::follow(node)\n\
+  \  }\n\
+   }\n"
+
+let step_of_hop = "app::main::impl lib::tools::Step for app::main::Hop.step"
+
+let count_termination_obligations database ~of_:shown =
+  let file = Support.parse_file "app::main" in
+  let declaration =
+    List.find
+      (fun (declaration : Resolve.Names.declaration) -> Path.show declaration.path = shown)
+      ((Database.make_name_lookups database).list_declarations_in file)
+  in
+  match
+    Database.For_testing.find_proof (Support.prove database file)
+      (Resolve.Names.make_key declaration)
+  with
+  | Some (Value (Obligations outcome)) ->
+      List.length
+        (List.filter
+           (fun (obligation : Prover.State.obligation) -> obligation.code = Termination)
+           outcome.obligations)
+  | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None ->
+      failwith ("the proof of " ^ shown ^ " makes no obligations")
+
 let callee_and_caller =
   "fn callee(x: Int64) -> Int64 { x + 1 }\npublic fn caller() -> Int64 { callee(1) }\n"
 
@@ -652,6 +733,60 @@ let () =
            ~before:[ ("app::main", make_level_source ~height:"self.height") ]
            ~after:[ ("app::main", make_level_source ~height:"floor(self)") ])
         ~parts:[ "recursion group " ^ raised_of_shelf; "proof app::main::floor" ]);
+  Harness.test "removing a function that a function of its package calls matches a cold build"
+    (fun () ->
+      ignore
+        (list_propagated
+           ~before:[ ("app::main", callee_and_caller) ]
+           ~after:[ ("app::main", "fn caller() -> Int64 { callee(1) }\n") ]));
+  Harness.test "removing a function that another package calls matches a cold build" (fun () ->
+      ignore
+        (propagate_with_lib ~before:tool_user
+           ~after:[ List.hd tool_user; ("lib::tools", "public fn other() -> Int64 { 2 }\n") ]));
+  Harness.test "removing an impl that a call through `any` reaches matches a cold build" (fun () ->
+      ignore
+        (list_propagated
+           ~before:[ ("app::main", stepper_that_runs) ]
+           ~after:[ ("app::main", stepper) ]));
+  Harness.test
+    "removing a provided method that another package's call graph reaches through an impl matches \
+     a cold build" (fun () ->
+      let provided = "\n  fn raised(self) -> Int64 {\n    self.height()\n  }\n" in
+      let with_raised = [ ("app::main", level_user); ("lib::tools", make_level_library ~provided) ]
+      and without_raised =
+        [ ("app::main", level_user); ("lib::tools", make_level_library ~provided:"") ]
+      in
+      expect_included
+        (propagate_with_lib ~before:without_raised ~after:with_raised)
+        ~parts:[ "call edges app " ^ raised_of_library_shelf ];
+      expect_included
+        (propagate_with_lib ~before:with_raised ~after:without_raised)
+        ~parts:[ "call edges app " ^ raised_of_library_shelf ]);
+  Harness.test
+    "a dependency's body that fails reports its error and hides a recursion through it only until \
+     the body is fixed" (fun () ->
+      let with_follow follow =
+        [ ("app::main", hop_stepping_through_a_library); ("lib::tools", make_step_library ~follow) ]
+      in
+      let failing = with_follow "node.next.step(node) + missing"
+      and fixed = with_follow "node.next.step(node)" in
+      let settle files =
+        Support.make_database (Support.setup ~dependencies:[ ("app", "lib") ] files)
+      in
+      let with_failing_body = settle failing in
+      (match
+         Support.list_codes
+           (Database.list_file_diagnostics with_failing_body (Support.parse_file "lib::tools"))
+       with
+      | [ "resolve.unknown_name" ] -> ()
+      | codes -> Harness.fail "the dependency reports [%s]" (String.concat ", " codes));
+      if count_termination_obligations with_failing_body ~of_:step_of_hop <> 0 then
+        Harness.fail "the proof makes a termination obligation while the body fails";
+      expect_included
+        (propagate_with_lib ~before:failing ~after:fixed)
+        ~parts:[ "call edges app lib::tools::follow"; "proof " ^ step_of_hop ];
+      if count_termination_obligations (settle fixed) ~of_:step_of_hop <> 1 then
+        Harness.fail "the proof makes no termination obligation for the recursion");
   Harness.test
     "adding a file and then removing it recomputes no part of the other file's definitions"
     (fun () ->
