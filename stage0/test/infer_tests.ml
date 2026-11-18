@@ -793,6 +793,9 @@ let () =
   Harness.test "deriving Deserialize needs every invariant clause to run" (fun () ->
       expect_one_diagnostic Fixtures.Infer.deserialize_of_digits_with_an_invariant_over_a_type
         "types.cannot_derive");
+  Harness.test "deriving Deserialize needs an invariant that names no `identical`" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.deserialize_of_rivals_with_an_invariant_naming_identical
+        "types.cannot_derive");
   Harness.test "deriving Deserialize accepts an invariant that runs" (fun () ->
       expect_fine Fixtures.Infer.deserialize_of_bounds_with_an_invariant);
   Harness.test "deriving Deserialize accepts an invariant that quantifies over a range" (fun () ->

@@ -1,0 +1,5 @@
+use standard::serialization
+
+type Rivals(home: String, away: String)
+  invariant !identical(home, away)
+  derives serialization::Deserialize
