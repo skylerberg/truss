@@ -138,7 +138,7 @@ let encode_timings timings =
     ]
 
 type progress = {
-  line : Status_line.t;
+  status_line : Status_line.t;
   tests : test array;
   mutable ended : int;
   mutable not_passed : int;
@@ -174,13 +174,13 @@ let draw progress =
         ]
     | None -> []
   in
-  Status_line.show progress.line (String.concat " · " parts)
+  Status_line.show progress.status_line (String.concat " · " parts)
 
 let handle_progress progress ~build_ended (event : Backend.progress) =
   match event with
-  | Lowering -> Status_line.show progress.line "building · lowering"
+  | Lowering -> Status_line.show progress.status_line "building · lowering"
   | Compiling { compiled; total } ->
-      Status_line.show progress.line
+      Status_line.show progress.status_line
         (Printf.sprintf "building · compiling %d/%d C files" compiled total)
   | Running _ ->
       let now = read_microseconds () in
@@ -221,7 +221,7 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   if not (Report.clean report) then raise (Report.Errors report);
   let progress =
     {
-      line = Status_line.create ~enabled:(not json);
+      status_line = Status_line.create ~enabled:(not json);
       tests = Array.of_list tests;
       ended = 0;
       not_passed = 0;
@@ -232,7 +232,7 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   let build_ended = ref None in
   let records =
     Fun.protect
-      ~finally:(fun () -> Status_line.clear progress.line)
+      ~finally:(fun () -> Status_line.clear progress.status_line)
       (fun () ->
         run_tests ~rerun
           ~report_progress:(handle_progress progress ~build_ended)
