@@ -16,7 +16,7 @@ public type Category =
   | Surrogate
   | PrivateUse
   | Unassigned
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 fn is_compatibility(form: Form) -> Bool
   cost time O(1)

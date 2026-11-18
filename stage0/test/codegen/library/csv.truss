@@ -28,10 +28,7 @@ fn parsed(text: StringSlice) -> String {
 }
 
 fn fails(text: StringSlice, expected: csv::ParseError) -> Bool {
-  match csv::parse(text) {
-    Ok(_) => false
-    Err(error) => error == expected
-  }
+  csv::parse(text) == Err(expected)
 }
 
 test "rows and fields are split at newlines and commas" {

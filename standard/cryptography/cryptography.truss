@@ -1641,6 +1641,7 @@ public fn pbkdf2_hmac_sha256(
 }
 
 public type PasswordCost(memory_kibibytes: UInt32 = 19456, iterations: UInt32 = 2, parallelism: UInt32 = 1)
+  derives Equal
 
 let blake2b_initial: Array[UInt64, 8] = [
   0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1, 0x510e527fade682d1,
@@ -4102,7 +4103,7 @@ public opaque type SigningKey(seed: Array[UInt8, 32], verifying_key: Array[UInt8
   derives Copyable
 
 public opaque type VerifyingKey(bytes: Array[UInt8, 32])
-  derives Plain, Equal, Hash
+  derives Plain, Equal, Hash, Ordered
 
 public type Signature(bytes: Array[UInt8, 64])
   derives Equal
@@ -4197,7 +4198,7 @@ public fn VerifyingKey.verify(self, message: Slice[UInt8], signature: Signature)
 public opaque type AgreementKey(bytes: Array[UInt8, 32])
 
 public type AgreementPublicKey(bytes: Array[UInt8, 32])
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 public fn AgreementKey.generate() -> AgreementKey
   uses Random
@@ -4617,10 +4618,6 @@ fn public_operation(key: RsaPublicKey, signature: Slice[UInt8]) -> Option[List[U
   Some(modular::limbs_to_bytes(field.from_montgomery(raised.slice()).slice(), length: size))
 }
 
-fn constant_equal(first: Slice[UInt8], second: Slice[UInt8]) -> Bool {
-  first.length() == second.length() && constant_time_equal(first, second: second)
-}
-
 fn pkcs1_encoding(function: HashFunction, digest: Slice[UInt8], size: UInt64) -> Option[List[UInt8]] {
   var info = digest_info(function)
   mut info.append_slice(digest)
@@ -4639,7 +4636,7 @@ fn pkcs1_encoding(function: HashFunction, digest: Slice[UInt8], size: UInt64) ->
 public fn RsaPublicKey.verify_pkcs1(self, function: HashFunction, message: Slice[UInt8], signature: Slice[UInt8]) -> Bool {
   match public_operation(self, signature: signature) {
     Some(encoded) => match pkcs1_encoding(function, digest: function.digest(message).slice(), size: self.modulus.length()) {
-      Some(expected) => constant_equal(encoded.slice(), second: expected.slice())
+      Some(expected) => constant_time_equal(encoded.slice(), second: expected.slice())
       None => false
     }
     None => false
@@ -4708,7 +4705,7 @@ public fn RsaPublicKey.verify_pss(self, function: HashFunction, message: Slice[U
   }
   let salt = block[zeros + 1..]
   let expected = pss_hash(function, digest: function.digest(message).slice(), salt: salt)
-  constant_equal(expected.slice(), second: hashed)
+  constant_time_equal(expected.slice(), second: hashed)
 }
 
 public opaque type RsaPrivateKey(

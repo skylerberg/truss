@@ -6,7 +6,7 @@ use standard::text
 public type Host =
   | Domain(name: String)
   | Address(address: network::IpAddress)
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 impl Display for Host {
   fn display(self, output: mut TextBuilder)
@@ -34,7 +34,7 @@ public opaque type Url(
   query: Option[String],
   fragment: Option[String],
 )
-  derives Copyable, Equal, Hash
+  derives Copyable, Equal, Hash, Ordered
 
 public type ParseError =
   | MissingScheme
@@ -577,12 +577,6 @@ internal fn remove_dot_segments(path: StringSlice) -> String
   String(storage: own output)
 }
 
-internal fn text_equals(scheme: StringSlice, name: StringSlice) -> Bool
-  cost time O(name.length())
-{
-  scheme.length() == name.length() && scheme.matches_at(name, offset: 0)
-}
-
 internal fn Url.merge_path(self, relative: StringSlice) -> String
   cost time finite
 {
@@ -712,13 +706,13 @@ public fn Url.port_or_default(self) -> Option[UInt16]
     Some(port) => Some(port)
     None => {
       let scheme = self.scheme.slice()
-      if text_equals(scheme, name: "http") || text_equals(scheme, name: "ws") {
+      if scheme == "http" || scheme == "ws" {
         Some(80)
-      } else if text_equals(scheme, name: "https") || text_equals(scheme, name: "wss") {
+      } else if scheme == "https" || scheme == "wss" {
         Some(443)
-      } else if text_equals(scheme, name: "ftp") {
+      } else if scheme == "ftp" {
         Some(21)
-      } else if text_equals(scheme, name: "ssh") {
+      } else if scheme == "ssh" {
         Some(22)
       } else {
         None
@@ -965,6 +959,7 @@ impl text::Parse for Url {
 }
 
 public opaque type Component(text: String)
+  derives Equal
 
 impl From[StringSlice] for Component {
   fn from(value: own StringSlice) -> Component {
