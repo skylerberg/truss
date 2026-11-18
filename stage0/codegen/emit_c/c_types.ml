@@ -132,6 +132,7 @@ let rec render_type context symbol : Lowered.ty -> string = function
       let key = Evidence (max nested_index 1) in
       register context key;
       render_key_name key
+  | Trace -> "struct t_trace"
   | Lend -> "struct " ^ use_helper context "t_lend"
   | Lend_mark -> "struct " ^ use_helper context "t_lend" ^ "_mark"
 

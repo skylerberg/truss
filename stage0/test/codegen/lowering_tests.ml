@@ -97,7 +97,12 @@ let () =
     "a call of a lending method that never lends compiles, and the code after it is unreachable"
     (fun () ->
       Codegen_support.expect_output Fixtures.Lowering.call_of_a_lending_method_that_never_lends
-        "test 0 panicked\nmessage 35\nno cell\n  at example/main.truss:6:3\n")
+        "test 0 panicked\n\
+         message 108\n\
+         no cell\n\
+        \  at example/main.truss:6:3\n\
+        \  called at example/main.truss:12:3\n\
+        \  called at example/main.truss:17:10\n")
 
 let () =
   Codegen_support.expect_pass "a named function as a value, at its own type and at a wider one"

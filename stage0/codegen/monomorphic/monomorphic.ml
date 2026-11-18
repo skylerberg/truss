@@ -28,11 +28,6 @@ let list_capabilities context substitution (set : Types.capability_set) : Path.t
           (context.normalize_capabilities (Types.substitute_capabilities substitution set))
          :> Types.capability list))
 
-let list_evidence context substitution uses =
-  List.filter
-    (fun path -> not (Path.equal path panic_capability))
-    (list_capabilities context substitution uses)
-
 let rec ground context substitution (ty : Types.ty) : Ground.ty =
   match context.normalize (Types.substitute substitution ty) with
   | Named { path; arguments } ->
@@ -73,7 +68,10 @@ and ground_function context substitution (function_type : Types.function_type) :
         (fun (yield_mode, ty) -> (ground_mode yield_mode, ground context Types.no_substitution ty))
         function_type.inputs;
     result = ground context Types.no_substitution function_type.output;
-    uses = list_evidence context Types.no_substitution function_type.uses;
+    uses =
+      List.filter
+        (fun path -> not (Path.equal path panic_capability))
+        (list_capabilities context Types.no_substitution function_type.uses);
   }
 
 let uint64 = Ground.make_builtin UInt64

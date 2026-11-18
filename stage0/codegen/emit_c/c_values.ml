@@ -6,7 +6,7 @@ let render_local_name local = function
 
 let is_erased context : Lowered.ty -> bool = function
   | Value ty -> (C_types.compute_layout context ty).size = 0
-  | Pointer _ | Raw _ | Environment _ | Evidence _ | Lend | Lend_mark -> false
+  | Pointer _ | Raw _ | Environment _ | Evidence _ | Trace | Lend | Lend_mark -> false
 
 let find_field (fields : Memory_layout.field list) name =
   List.find_opt (fun (field : Memory_layout.field) -> field.name = name) fields
@@ -182,6 +182,7 @@ let classify_scalar context : Lowered.ty -> Memory_layout.scalar = function
   | Raw scalar -> scalar
   | Pointer _ | Environment _ | Evidence _ -> Pointer Opaque
   | Lend | Lend_mark -> C_runtime.raise_bug "an operator on a lend's record"
+  | Trace -> C_runtime.raise_bug "an operator on a link of the call chain"
 
 let is_float : Memory_layout.scalar -> bool = function Float32 | Float64 -> true | _ -> false
 let compute_bit_width (scalar : Memory_layout.scalar) = 8 * Memory_layout.compute_scalar_size scalar

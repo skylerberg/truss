@@ -15,4 +15,5 @@ val lower :
   argument list ->
   destination:Lowered.place option ->
   site:Lowered.site ->
+  trace:Lowered.operand option ->
   Lowered.place option

@@ -462,6 +462,7 @@ let () =
                        length = Constant (Integer (UInt64, Z.of_int 4));
                        site = { definition = Codegen_support.definition "entry"; offset = 4 };
                        reported = None;
+                       trace = None;
                      });
               ];
           ]
@@ -638,6 +639,7 @@ let operate builder ?destination ?(type_arguments = [ Codegen_support.int32 ]) ?
     (Codegen_support.make_shape_env ())
     builder intrinsic_types operation ~type_arguments arguments ~destination
     ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+    ~trace:None
 
 let () =
   Codegen_support.test
@@ -894,6 +896,7 @@ let () =
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
           ~destination
           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+          ~trace:None
       in
       Codegen_support.expect_status ~extra 53
         [
@@ -979,6 +982,7 @@ let () =
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
           ~destination
           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+          ~trace:None
       in
       let make_program_with pushed =
         [
@@ -1111,6 +1115,7 @@ let () =
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
           ~destination
           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+          ~trace:None
       in
       let make_shortened ~to_ =
         [
@@ -1192,7 +1197,8 @@ let () =
              (Codegen_support.make_shape_env ~extra ())
              builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
              ~destination
-             ~site:{ definition = Codegen_support.definition "entry"; offset = 0 })
+             ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+             ~trace:None)
       in
       let byte : Lowered.operand = Constant (Integer (UInt8, Z.of_int 1)) in
       let expect_stop saying run_operation =

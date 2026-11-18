@@ -43,6 +43,7 @@ val lower_implementation_evidence :
   impl:Path.t ->
   type_arguments:Ground.argument list ->
   implementation:Lowered.operand ->
+  site:Lowered.site option ->
   Lowered.operand
 
 val lookup_evidence : Lowering.state -> Path.t -> Lowered.operand
@@ -64,6 +65,7 @@ val lower_indirect_call :
   Lowering.state ->
   function_type:Ground.function_type ->
   value:Lowered.place ->
+  site:Lowered.site option ->
   Lowered.place list ->
   Lowered.place ->
   unit
@@ -77,6 +79,7 @@ val lower_call_through_any :
   any:Lowered.place ->
   arguments:(Types.mode * Ground.ty * Lowered.place) list ->
   ?lending:Lowered.operand list ->
+  site:Lowered.site option ->
   Lowered.place ->
   unit
 
@@ -102,6 +105,7 @@ val lower_any_into :
 val lower_provided_evidence :
   Lowering.state ->
   implementation:Lowered.operand ->
+  site:Lowered.site option ->
   ('a * Path.t * Types.substitution) list ->
   ('a * Lowered.operand) list
 
@@ -114,6 +118,7 @@ val lower_item_call :
   ?mask:int ->
   ?lending:Lowered.operand list ->
   destination:Lowered.place ->
+  site:Lowered.site option ->
   unit ->
   unit
 

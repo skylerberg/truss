@@ -83,7 +83,7 @@ let build_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl
       ((self_mode, self_ty, { Lowered.root = Local implementation; projections = [ Deref ] })
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(choose_result_place st result_ty)
-    ();
+    ~site:None ();
   Emit_c.Builder.build st.builder
     (Lowering.finish_function st
        ~returns:(capability_signature.output <> Returns Never)
@@ -223,41 +223,42 @@ let build_impl_table context (item : Lowered.Item.t) ~impl ~type_arguments : Low
   in
   { table_item = item; capability = Some capability; entries }
 
+let build_real_implementation (st : Lowering.state) ~user capability =
+  let impl =
+    match Interface.Definition.find_real_implementation st.context.lookups.interface capability with
+    | Some impl -> impl
+    | None ->
+        Definitions.raise_bug "%s uses %s, which has no real implementation" user
+          (Path.show capability)
+  in
+  let ty =
+    Monomorphic.ground st.context.monomorphic Types.no_substitution
+      (Definitions.read_impl_interface st.context impl).for_type
+  in
+  let implementation =
+    if Lowering.is_zero_size st ty then Lowered.Constant Null
+    else begin
+      let value = Lowering.allocate_binding st ty in
+      let constructor : Path.t =
+        match ty with
+        | Named { path; _ } -> Method { owner = path; name = "new"; receiver = Static }
+        | _ -> Definitions.raise_bug "%s implements %s" (Ground.to_string ty) (Path.show capability)
+      in
+      Targets.lower_item_call st
+        (Code { path = constructor; instantiation = Ground.no_instantiation })
+        ~signature:(Definitions.read_signature st.context constructor)
+        ~substitution:Types.no_substitution ~arguments:[] ~destination:value ~site:None ();
+      Address { place = value; writable = true }
+    end
+  in
+  Targets.lower_implementation_evidence st ~impl ~type_arguments:[] ~implementation ~site:None
+
 let list_real_implementations (st : Lowering.state) ~user capabilities =
   List.map
     (fun capability ->
-      let impl =
-        match
-          Interface.Definition.find_real_implementation st.context.lookups.interface capability
-        with
-        | Some impl -> impl
-        | None ->
-            Definitions.raise_bug "%s uses %s, which has no real implementation" user
-              (Path.show capability)
-      in
-      let ty =
-        Monomorphic.ground st.context.monomorphic Types.no_substitution
-          (Definitions.read_impl_interface st.context impl).for_type
-      in
-      let implementation =
-        if Lowering.is_zero_size st ty then Lowered.Constant Null
-        else begin
-          let value = Lowering.allocate_binding st ty in
-          let constructor : Path.t =
-            match ty with
-            | Named { path; _ } -> Method { owner = path; name = "new"; receiver = Static }
-            | _ ->
-                Definitions.raise_bug "%s implements %s" (Ground.to_string ty)
-                  (Path.show capability)
-          in
-          Targets.lower_item_call st
-            (Code { path = constructor; instantiation = Ground.no_instantiation })
-            ~signature:(Definitions.read_signature st.context constructor)
-            ~substitution:Types.no_substitution ~arguments:[] ~destination:value ();
-          Address { place = value; writable = true }
-        end
-      in
-      (capability, Targets.lower_implementation_evidence st ~impl ~type_arguments:[] ~implementation))
+      ( capability,
+        if Path.equal capability Definitions.panic_path then Lowered.Constant Null
+        else build_real_implementation st ~user capability ))
     capabilities
 
 let text_copied_from = Well_known.make_path Text_copied_from
@@ -284,7 +285,8 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
     ignore
       (Intrinsics.lower ~may_panic:false context.env builder context.types operation ~type_arguments
          arguments ~destination
-         ~site:{ definition = main_path; offset = 0 })
+         ~site:{ definition = main_path; offset = 0 }
+         ~trace:None)
   in
   let wanted = Emit_c.Builder.allocate_local builder (Value context.types.uint64) in
   Emit_c.Builder.emit builder
@@ -326,7 +328,7 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
         ~signature:(Definitions.read_signature context text_copied_from)
         ~substitution:Types.no_substitution
         ~arguments:[ (Read, view_ty, view) ]
-        ~destination:text ();
+        ~destination:text ~site:None ();
       lower (Buffer Storage_push) [ string_ty ]
         [ Place (Lowered.project list (Field storage_field)); Value (Lowering.move_place st text) ]
         None);
@@ -343,7 +345,7 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
     (Code { path = main_path; instantiation = Ground.no_instantiation })
     ~signature ~substitution:Types.no_substitution
     ~arguments:[ (list_mode, list_ty, list) ]
-    ~destination:exit ();
+    ~destination:exit ~site:None ();
   (match (Monomorphic.compute_shape context.monomorphic exit_ty, Lowering.find_result_place st) with
   | Record [ (field, _) ], Some status ->
       Emit_c.Builder.emit builder
@@ -367,7 +369,7 @@ let build_test_main context (item : Lowered.Item.t) test_path : Emit_c.fragment 
     ~destination:
       (choose_result_place st
          (Monomorphic.ground context.monomorphic Types.no_substitution Types.unit))
-    ();
+    ~site:None ();
   Lowering.finish_item st ~rest:[] ()
 
 let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instantiation
@@ -386,13 +388,14 @@ let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instant
       ty.parameters
   in
   let evidence = Lowering.list_evidence_parameters st ty.uses in
+  Lowering.start_trace st;
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
   Targets.lower_item_call st
     (Code { path = function_; instantiation })
     ~signature ~substitution
     ~arguments:(List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(choose_result_place st ty.result)
-    ();
+    ~site:None ();
   Emit_c.Builder.build st.builder
     (Lowering.finish_function st ~returns:(ty.result <> Never) ~first:[ environment ]
        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
@@ -458,7 +461,7 @@ let build_any_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.
       ((self_mode, self_ty, { Lowered.root = Local typed; projections = [ Deref ] })
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~lending:(List.map (fun local -> Lowered.Copy (Lowered.make_local_place local)) lending)
-    ~destination ();
+    ~destination ~site:None ();
   Emit_c.Builder.build st.builder
     (Lowering.finish_function st
        ~returns:(method_signature.output <> Returns Never)

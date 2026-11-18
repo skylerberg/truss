@@ -23,7 +23,7 @@ let list_consumed_places : Intrinsic.operation -> int list = function
   | _ -> []
 
 let lower ~may_panic ?(value_arguments = []) ?reported env builder types operation ~type_arguments
-    arguments ~destination ~site =
+    arguments ~destination ~site ~trace =
   let set rvalue =
     Option.iter
       (fun destination_place -> Emit_c.Builder.emit builder (Assign (destination_place, rvalue)))
@@ -53,6 +53,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
            length = Lowered.make_uint64_constant (String.length message);
            site;
            reported;
+           trace;
          })
   in
   let fail_when failure condition message =
@@ -773,6 +774,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
                length = Copy (Storage.project_view_length bytes);
                site;
                reported;
+               trace;
              });
         Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder)
     | Handle_from ->

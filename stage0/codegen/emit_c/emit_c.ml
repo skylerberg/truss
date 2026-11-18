@@ -7,7 +7,7 @@ module Path_table = Hashtbl.Make (Path)
 type profile = Development | Release
 type linkage = C_runtime.linkage = External | Internal
 
-let site_struct = C_runtime.site_struct
+let site_structs = C_runtime.site_structs
 let version = 28
 
 type failure = C_runtime.failure = Echo | Todo
@@ -209,11 +209,12 @@ let render_file env profile (fragments : (fragment * linkage) list) =
     (match profile with
     | Development ->
         "#define T_UNREACHABLE() t_runtime_compiler_bug()\n\
-         #define T_OBLIGATION_FAILED(message, length, site) t_runtime_panic(message, length, site)\n"
+         #define T_OBLIGATION_FAILED(message, length, site, trace) t_runtime_panic(message, \
+         length, site, trace)\n"
     | Release ->
         "#define T_UNREACHABLE() __builtin_unreachable()\n\
-         #define T_OBLIGATION_FAILED(message, length, site) ((void)(message), (void)(length), \
-         (void)(site), __builtin_unreachable())\n");
+         #define T_OBLIGATION_FAILED(message, length, site, trace) ((void)(message), \
+         (void)(length), (void)(site), (void)(trace), __builtin_unreachable())\n");
   let helpers_used =
     List.sort_uniq String.compare
       (context.helpers_used

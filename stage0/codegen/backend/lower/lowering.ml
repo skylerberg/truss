@@ -192,6 +192,14 @@ let list_evidence_parameters st capabilities =
       arriving;
   List.map snd arriving
 
+let start_trace st = st.evidence <- (Definitions.panic_path, Lowered.Constant Null) :: st.evidence
+
+let find_panic_trace st =
+  Option.map snd
+    (List.find_opt
+       (fun (capability, _) -> Path.equal capability Definitions.panic_path)
+       st.evidence)
+
 let set_result_slot st (convention : Convention.result) =
   st.result <-
     (match convention with
