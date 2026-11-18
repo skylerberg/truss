@@ -1,4 +1,4 @@
-let raise_bug format = Compiler_bug.raise_bug ~stage:"Builder" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Ir_builder" format
 
 module Locals = Set.Make (Int)
 module Blocks = Set.Make (Int)

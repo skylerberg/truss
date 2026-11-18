@@ -121,7 +121,7 @@ let render_fragment (fragment : fragment) =
     ~on_other:(Buffer.add_char buffer);
   Buffer.contents buffer
 
-module Builder = Builder
+module Ir_builder = Ir_builder
 
 let make_symbol = Mangling.make_symbol
 

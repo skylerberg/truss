@@ -2,7 +2,7 @@ type profile = Development | Release
 type linkage = External | Internal
 type failure = C_runtime.failure = Echo | Todo
 
-module Builder = Builder
+module Ir_builder = Ir_builder
 
 val make_symbol : Lowered.Item.t -> string
 val version : int

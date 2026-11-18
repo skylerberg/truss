@@ -153,7 +153,7 @@ let make_constant_state (context : Definitions.context) path =
   in
   let st =
     Lowering.enter context
-      ~builder:(Emit_c.Builder.create context.env ~item:(Evaluator path))
+      ~builder:(Emit_c.Ir_builder.create context.env ~item:(Evaluator path))
       (Lowering.make_frame code)
   in
   (st, mir, ty)
@@ -332,8 +332,8 @@ let write_output (st : Lowering.state) output =
   let view_ty = Storage.make_view_type (Ground.make_builtin UInt8) in
   let descriptor = Lowering.allocate_temporary st int32
   and view = Lowering.allocate_temporary st view_ty in
-  Emit_c.Builder.emit builder (Assign (descriptor, Use (Constant (Integer (Int32, Z.one)))));
-  Emit_c.Builder.emit builder
+  Emit_c.Ir_builder.emit builder (Assign (descriptor, Use (Constant (Integer (Int32, Z.one)))));
+  Emit_c.Ir_builder.emit builder
     (Assign
        ( view,
          Storage.build_view view_ty
@@ -354,7 +354,7 @@ let write_output (st : Lowering.state) output =
 
 let build_evaluator context path : Emit_c.fragment =
   let st, mir, ty = make_constant_state context path in
-  Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
+  Emit_c.Ir_builder.start st.builder (Emit_c.Ir_builder.allocate_block st.builder);
   Lowering.run_in_scope st (fun () ->
       let place = Lowering.allocate_temporary st ty in
       Mir_form.lower_mir_into st mir place;
