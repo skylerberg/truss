@@ -21,7 +21,7 @@ let make_trait_substitution (lookups : Lookups.t) (trait : Types.trait_reference
     (Interface.Definition.read_trait_interface lookups.interface trait.trait)
     ~self:ty trait
 
-let find_part ?(inherited = false) (lookups : Lookups.t) path callee =
+let find_clauses (lookups : Lookups.t) path callee =
   Option.map
     (fun (contract : Mir.contract) ->
       {
@@ -36,7 +36,7 @@ let find_part ?(inherited = false) (lookups : Lookups.t) path callee =
               match cost with { resource = Time; bound = Finite; _ } -> false | _ -> true)
             contract.costs;
         callbacks = contract.callbacks;
-        inherited;
+        inherited = false;
       })
     (Option.map
        (fun ({ form; _ } : Mir.contract Mir.sourced) -> form)
@@ -100,7 +100,7 @@ let is_law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_re
            (list_law_proofs lookups (Path.locate_package impl) trait for_type)
   | None -> false
 
-let make_contract (lookups : Lookups.t) path ~own ~others =
+let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
   let signature = Interface.Impls.read_signature lookups.interface path in
   let is_logic_function =
     match signature with
@@ -120,51 +120,53 @@ let make_contract (lookups : Lookups.t) path ~own ~others =
     | None -> false
   in
   let result_kind = match signature with Some { output = Lends _; _ } -> `Lends | _ -> `Returns in
-  { State.parts = own :: others; is_logic_function; result_kind }
+  { State.callee_clauses; trait_clauses; is_logic_function; result_kind }
+
+let list_declared_clauses (contract : State.contract) =
+  contract.callee_clauses :: Option.to_list contract.trait_clauses
+
+let select_precondition_clauses (contract : State.contract) =
+  match contract.trait_clauses with
+  | Some trait_clauses when contract.callee_clauses.requires = [] -> trait_clauses
+  | Some _ | None -> contract.callee_clauses
 
 let find_function_contract lookups (path : Path.t) =
   Option.bind (find_source lookups path) (fun (callee, _, _) ->
-      Option.map
-        (fun own -> make_contract lookups path ~own ~others:[])
-        (find_part lookups path callee))
+      Option.map (make_contract lookups path) (find_clauses lookups path callee))
 
-let find_declared_part ?inherited lookups path =
-  Option.bind (find_source lookups path) (fun (callee, _, _) ->
-      find_part ?inherited lookups path callee)
+let find_declared_clauses lookups path =
+  Option.bind (find_source lookups path) (fun (callee, _, _) -> find_clauses lookups path callee)
 
-let find_trait_part lookups (trait : Path.t) name receiver =
-  find_declared_part ~inherited:true lookups (Path.Method { owner = trait; name; receiver })
+let find_trait_clauses lookups (trait : Path.t) name receiver =
+  Option.map
+    (fun (clauses : State.clauses) -> { clauses with inherited = true })
+    (find_declared_clauses lookups (Path.Method { owner = trait; name; receiver }))
 
 let find_capability_contract lookups (capability : Path.t) name =
   let path = Path.make_capability_method capability name in
   Option.bind (find_source lookups path) (fun (callee, _, _) ->
       Option.map
-        (fun own -> { (make_contract lookups path ~own ~others:[]) with is_logic_function = false })
-        (find_part lookups path callee))
+        (fun callee_clauses ->
+          { (make_contract lookups path callee_clauses) with is_logic_function = false })
+        (find_clauses lookups path callee))
 
-let find_capability_part lookups (capability : Path.t) name =
-  find_declared_part lookups (Path.make_capability_method capability name)
+let find_capability_clauses lookups (capability : Path.t) name =
+  find_declared_clauses lookups (Path.make_capability_method capability name)
 
 let find_method_contract lookups (trait : Types.trait_reference) name receiver
     (evidence : Core.evidence) =
-  let trait_side = find_trait_part lookups trait.trait name receiver in
+  let trait_clauses = find_trait_clauses lookups trait.trait name receiver in
   match evidence with
   | Impl { impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
       match find_source lookups path with
       | Some (callee, _, (Written _ | Derived _)) ->
-          Option.map
-            (fun own -> make_contract lookups path ~own ~others:(Option.to_list trait_side))
-            (find_part lookups path callee)
-      | Some (_, _, Inherited _) | None ->
-          Option.map (fun own -> make_contract lookups path ~own ~others:[]) trait_side)
+          Option.map (make_contract ?trait_clauses lookups path) (find_clauses lookups path callee)
+      | Some (_, _, Inherited _) | None -> Option.map (make_contract lookups path) trait_clauses)
   | Bound | Dynamic ->
       Option.map
-        (fun own ->
-          make_contract lookups
-            (Path.Method { owner = trait.trait; name; receiver })
-            ~own ~others:[])
-        trait_side
+        (make_contract lookups (Path.Method { owner = trait.trait; name; receiver }))
+        trait_clauses
 
 let find_integer_literal (formula : Mir.formula) =
   match formula.value with

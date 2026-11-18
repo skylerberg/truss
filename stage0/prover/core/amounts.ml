@@ -139,21 +139,21 @@ let make_conditional_amount condition amount =
   | Logic.Boolean false -> Costs.zero
   | condition -> Logic.ite condition amount Costs.zero
 
-let compute_callee_amount ?ends_in (context : State.context) after ~path ~(parts : State.part list)
-    ~(bind_frame : State.part -> State.frame) ~uses ~(values : State.passed list) ~change
-    (counter : Costs.counter) =
+let compute_callee_amount ?ends_in (context : State.context) after ~path
+    ~clauses:(declared_clauses : State.clauses list) ~(bind_frame : State.clauses -> State.frame)
+    ~uses ~(values : State.passed list) ~change (counter : Costs.counter) =
   let is_recursive_call =
     counter.counting = Units
     && List.mem counter context.bounded_counters
     && Facts.is_in_recursion_group context path
   in
-  let list_clauses (part : State.part) =
-    let frame = bind_frame part in
+  let list_matching_costs (clauses : State.clauses) =
+    let frame = bind_frame clauses in
     List.filter_map
       (fun (cost : Mir.cost) ->
-        if is_same_resource cost ~locals:frame.locals counter then Some (part, frame, cost)
+        if is_same_resource cost ~locals:frame.locals counter then Some (clauses, frame, cost)
         else None)
-      part.costs
+      clauses.costs
   in
   let compute_amount (_, (frame : State.frame), (cost : Mir.cost)) =
     let exact_target =
@@ -175,15 +175,15 @@ let compute_callee_amount ?ends_in (context : State.context) after ~path ~(parts
   let find_first_clauses () =
     let amortized_first = Option.is_some change && counter.amortized in
     List.find_map
-      (fun part ->
-        match list_clauses part with
+      (fun clauses ->
+        match list_matching_costs clauses with
         | [] -> None
-        | clauses ->
+        | costs ->
             let amortized, plain =
-              List.partition (fun (_, _, (cost : Mir.cost)) -> cost.amortized) clauses
+              List.partition (fun (_, _, (cost : Mir.cost)) -> cost.amortized) costs
             in
             Some (if amortized_first then amortized @ plain else plain @ amortized))
-      parts
+      declared_clauses
   in
   match counter.resource with
   | Calls target when make_reach_formula context after uses values target = Logic.Boolean false ->
@@ -287,10 +287,10 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
           Logic.int 1
       | Calls (Capability _ | Capability_method _ | Through _) -> Costs.zero
       | Time | Allocations | Allocated_bytes -> (
-          match Contracts.find_capability_part context.lookups capability name with
-          | Some part ->
+          match Contracts.find_capability_clauses context.lookups capability name with
+          | Some capability_clauses ->
               let inside =
-                Validity.bind_part_arguments frame part
+                Validity.bind_arguments frame capability_clauses
                   ~arguments:
                     (List.map
                        (fun (passed : State.passed) -> (passed.position, passed.term))
@@ -299,7 +299,7 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
               in
               compute_callee_amount context frame
                 ~path:(Path.make_capability_method capability name)
-                ~parts:[ part ]
+                ~clauses:[ capability_clauses ]
                 ~bind_frame:(fun _ -> inside)
                 ~uses:(invocation.uses :> Types.capability list)
                 ~values ~change:None counter
@@ -596,15 +596,15 @@ let find_method_time_bound context (method_ : Path.t) ~trait_arguments self_type
             with
             | Some contract when makes_no_potential ->
                 List.find_map
-                  (fun (part : State.part) ->
+                  (fun (clauses : State.clauses) ->
                     List.find_map
                       (fun (cost : Mir.cost) ->
                         match cost with
                         | { resource = Time; amortized = false; bound = Order_of amount; _ } ->
                             Contracts.find_integer_literal amount
                         | _ -> None)
-                      part.costs)
-                  contract.parts
+                      clauses.costs)
+                  (Contracts.list_declared_clauses contract)
             | _ -> None)
         | None -> None)
   | _ -> None
