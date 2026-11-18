@@ -64,6 +64,7 @@ fn collections::SortedSet[Element: Ordered].search(self, element: Element) -> Re
       && (forall i in index..self.elements.length() => element < self.elements.model()[i])
   }
   cost time O(log(self.elements.length()) * time(Element.compare))
+  cost allocations <= log(self.elements.length()) * allocations(Element.compare)
 {
   var low: UInt64 = 0
   var high = self.elements.length()
@@ -74,6 +75,7 @@ fn collections::SortedSet[Element: Ordered].search(self, element: Element) -> Re
     invariant forall i in high..self.elements.length() => element < self.elements.model()[i]
     decreases high - low
     cost time O((log(self.elements.length()) - log(high - low)) * time(Element.compare))
+    cost allocations <= (log(self.elements.length()) - log(high - low)) * allocations(Element.compare)
   {
     let middle = low + (high - low) / 2
     match self.elements[middle].compare(element) {
@@ -360,6 +362,7 @@ public fn collections::SortedSet[Element: Ordered].collect[Source: Cursor[Elemen
 public fn collections::SortedSet[Element: Ordered].length(self) -> UInt64
   ensures result == (self.elements.length())
   cost time O(1)
+  cost allocations == 0
 {
   self.elements.length()
 }
@@ -367,6 +370,7 @@ public fn collections::SortedSet[Element: Ordered].length(self) -> UInt64
 public fn collections::SortedSet[Element: Ordered].is_empty(self) -> Bool
   ensures result == (self.length() == 0)
   cost time O(1)
+  cost allocations == 0
 {
   self.length() == 0
 }
@@ -374,6 +378,7 @@ public fn collections::SortedSet[Element: Ordered].is_empty(self) -> Bool
 public fn collections::SortedSet[Element: Ordered].contains(self, element: Element) -> Bool
   ensures result == (self.search(element) is Ok(_))
   cost time O(log(self.length()) * time(Element.compare))
+  cost allocations <= log(self.length()) * allocations(Element.compare)
 {
   self.search(element) is Ok(_)
 }
@@ -709,13 +714,16 @@ public fn collections::SortedSet[Element: Ordered].reversed(self) -> list::Rever
 impl Equal for collections::SortedSet[Element: Ordered] {
   fn equal(self, other: collections::SortedSet[Element]) -> Bool
     ensures result == (self.elements == other.elements)
+    cost allocations <= self.length() * allocations(Element.equal)
   {
     self.elements == other.elements
   }
 }
 
 impl Hash for collections::SortedSet[Element: Ordered + Hash] {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations <= self.length() * allocations(Element.hash)
+  {
     self.elements.hash(mut hasher)
   }
 }

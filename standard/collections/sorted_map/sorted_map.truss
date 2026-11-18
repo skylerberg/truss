@@ -64,6 +64,7 @@ fn collections::SortedMap[Key: Ordered, Value].search(self, key: Key) -> Result[
       && (forall i in index..self.entries.length() => key < self.entries.model()[i].key)
   }
   cost time O(log(self.entries.length()) * time(Key.compare))
+  cost allocations <= log(self.entries.length()) * allocations(Key.compare)
 {
   var low: UInt64 = 0
   var high = self.entries.length()
@@ -74,6 +75,7 @@ fn collections::SortedMap[Key: Ordered, Value].search(self, key: Key) -> Result[
     invariant forall i in high..self.entries.length() => key < self.entries.model()[i].key
     decreases high - low
     cost time O((log(self.entries.length()) - log(high - low)) * time(Key.compare))
+    cost allocations <= (log(self.entries.length()) - log(high - low)) * allocations(Key.compare)
   {
     let middle = low + (high - low) / 2
     match self.entries[middle].key.compare(key) {
@@ -252,6 +254,7 @@ public fn collections::SortedMap[Key: Ordered, Value].collect[Source: Cursor[Ele
 public fn collections::SortedMap[Key: Ordered, Value].length(self) -> UInt64
   ensures result == (self.entries.length())
   cost time O(1)
+  cost allocations == 0
 {
   self.entries.length()
 }
@@ -259,6 +262,7 @@ public fn collections::SortedMap[Key: Ordered, Value].length(self) -> UInt64
 public fn collections::SortedMap[Key: Ordered, Value].is_empty(self) -> Bool
   ensures result == (self.length() == 0)
   cost time O(1)
+  cost allocations == 0
 {
   self.length() == 0
 }
@@ -266,6 +270,7 @@ public fn collections::SortedMap[Key: Ordered, Value].is_empty(self) -> Bool
 public fn collections::SortedMap[Key: Ordered, Value].contains(self, key: Key) -> Bool
   ensures result == (self.search(key) is Ok(_))
   cost time O(log(self.length()) * time(Key.compare))
+  cost allocations <= log(self.length()) * allocations(Key.compare)
 {
   self.search(key) is Ok(_)
 }
@@ -273,6 +278,7 @@ public fn collections::SortedMap[Key: Ordered, Value].contains(self, key: Key) -
 public fn collections::SortedMap[Key: Ordered, Value].get(self, key: Key) lends Option[Value]
   ensures (result is Some(_)) == self.contains(key)
   cost time O(log(self.length()) * time(Key.compare))
+  cost allocations <= log(self.length()) * allocations(Key.compare)
 {
   match self.search(key) {
     Ok(index) => {
@@ -623,6 +629,7 @@ impl Index for collections::SortedMap[Key: Ordered, Value] {
   fn contains_key(self, key: Key) -> Bool
     ensures result == self.contains(key)
     cost time O(log(self.length()) * time(Key.compare))
+    cost allocations <= log(self.length()) * allocations(Key.compare)
   {
     self.contains(key)
   }
@@ -630,6 +637,7 @@ impl Index for collections::SortedMap[Key: Ordered, Value] {
   fn at(self, key: Key) lends Value
     requires self.contains(key)
     cost time O(log(self.length()) * time(Key.compare))
+    cost allocations <= log(self.length()) * allocations(Key.compare)
   {
     self.entries[self.position_of(key)].value
   }
@@ -639,6 +647,7 @@ impl IndexMut for collections::SortedMap[Key: Ordered, Value] {
   fn at(mut self, key: Key) lends mut Value
     requires self.contains(key)
     cost time O(log(self.length()) * time(Key.compare))
+    cost allocations <= log(self.length()) * allocations(Key.compare)
   {
     let position = self.position_of(key)
     mut self.entries[position].value
@@ -653,6 +662,7 @@ fn collections::SortedMap[Key: Ordered, Value].position_of(self, key: Key) -> UI
       Err(index) => index
     })
   cost time O(log(self.entries.length()) * time(Key.compare))
+  cost allocations <= log(self.entries.length()) * allocations(Key.compare)
 {
   match self.search(key) {
     Ok(index) => index
@@ -754,6 +764,7 @@ impl Equal for collections::SortedMap[Key: Ordered, Value: Equal] {
       && forall i in 0..self.entries.length() =>
         self.entries.model()[i].key == other.entries.model()[i].key
           && self.entries.model()[i].value == other.entries.model()[i].value)
+    cost allocations <= self.length() * (allocations(Key.equal) + allocations(Value.equal))
   {
     if self.entries.length() != other.entries.length() {
       return false
@@ -765,6 +776,7 @@ impl Equal for collections::SortedMap[Key: Ordered, Value: Equal] {
         self.entries.model()[i].key == other.entries.model()[i].key
           && self.entries.model()[i].value == other.entries.model()[i].value
       decreases self.entries.length() - index
+      cost allocations <= index * (allocations(Key.equal) + allocations(Value.equal))
     {
       if self.entries[index].key != other.entries[index].key || self.entries[index].value != other.entries[index].value {
         return false
