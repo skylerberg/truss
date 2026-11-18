@@ -2256,7 +2256,7 @@ fn tunnel(connection: mut network::Connection, host: StringSlice, port: UInt16, 
 {
   var request = "CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\n"
   match authorization {
-    Some(value) => mut request.push("Proxy-Authorization: ${value}\r\n".slice())
+    Some(value) => mut request.push("Proxy-Authorization: ${value}\r\n")
     None => {}
   }
   mut request.push("\r\n")
@@ -2361,7 +2361,7 @@ fn authority_of(url: url::Url) -> String {
     None => {}
   }
   match url.port() {
-    Some(port) => mut authority.push(":${port}".slice())
+    Some(port) => mut authority.push(":${port}")
     None => {}
   }
   authority
