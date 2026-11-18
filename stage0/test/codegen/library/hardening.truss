@@ -146,7 +146,7 @@ test "a handler whose HTTP/1.1 client disconnects is cancelled" {
 }
 
 fn frame(kind: UInt8, flags: UInt8, stream: UInt8, payload: Slice[UInt8]) -> List[UInt8] {
-  var bytes: List[UInt8] = [0, 0, UInt8.try_from(payload.length()).unwrap_or(0), kind, flags, 0, 0, 0, stream]
+  var bytes: List[UInt8] = [0, 0, UInt8.try_from_integer(payload.length()).unwrap_or(0), kind, flags, 0, 0, 0, stream]
   mut bytes.append(payload.to_list())
   bytes
 }

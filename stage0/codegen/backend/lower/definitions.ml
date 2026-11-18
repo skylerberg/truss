@@ -7,7 +7,6 @@ type context = {
   monomorphic : Monomorphic.context;
   types : Intrinsics.types;
   bool : Ground.ty;
-  checks : bool;
 }
 
 let make_monomorphic_context (interface : Interface.Lookups.t) : Monomorphic.context =
@@ -21,7 +20,7 @@ let make_monomorphic_context (interface : Interface.Lookups.t) : Monomorphic.con
 let uint64 = Ground.make_builtin UInt64
 let string_slice : Ground.ty = Named { path = Well_known.make_path String_slice; arguments = [] }
 
-let make_context (settings : Lookups.settings) ~env (lookups : Lookups.t) =
+let make_context ~env (lookups : Lookups.t) =
   let monomorphic = make_monomorphic_context lookups.interface in
   {
     lookups;
@@ -30,7 +29,6 @@ let make_context (settings : Lookups.settings) ~env (lookups : Lookups.t) =
     monomorphic;
     types = { uint64; string_slice };
     bool = Ground.make_builtin Bool;
-    checks = settings.checks;
   }
 
 type written = { spans : Source.Definition_span.t array; text : string }
@@ -42,7 +40,6 @@ type code = {
   result : Types.result;
   substitution : Types.substitution;
   uses : Types.capability_set;
-  real : Path.t list;
   has_defaults : bool;
 }
 
@@ -54,7 +51,6 @@ let make_unwritten_code ~definition ~substitution ~result =
     result;
     substitution;
     uses = Types.no_capabilities;
-    real = [];
     has_defaults = false;
   }
 
@@ -86,7 +82,6 @@ let make_function_code context ~enclosing_impl (key : Resolve.Names.key)
     result = interface.output;
     substitution;
     uses = interface.uses;
-    real = [];
     has_defaults =
       List.exists
         (fun (parameter : Types.parameter_info) -> parameter.has_default)
@@ -133,21 +128,7 @@ let make_declaration_code context (path : Path.t) instantiation =
 
 let make_code context (path : Path.t) (instantiation : Ground.instantiation) : code =
   match path with
-  | Test _ -> (
-      match Resolve.Names.find_definition context.lookups.interface.names path with
-      | Some (key, { kind = Test _; _ }) ->
-          {
-            (make_unwritten_code ~definition:path ~substitution:Types.no_substitution
-               ~result:(Returns Types.unit))
-            with
-            written = Some (read_written context key);
-            uses = Types.make_capability_set [ Capability Monomorphic.panic_capability ];
-            real =
-              Monomorphic.list_evidence context.monomorphic Types.no_substitution
-                (Interface.Definition.read_test_uses context.lookups.interface path);
-          }
-      | _ -> raise_bug "%s is not a test" (Path.show path))
-  | Top _ | Method _ -> (
+  | Top _ | Method _ | Test _ -> (
       let interface = read_signature context path in
       let substitution = Monomorphic.make_signature_substitution interface instantiation in
       let enclosing_impl =
@@ -174,7 +155,7 @@ let make_code context (path : Path.t) (instantiation : Ground.instantiation) : c
       raise_bug "%s is not code" (Path.show path)
 
 let panic_path = Monomorphic.panic_capability
-let list_evidence context = Monomorphic.list_evidence context.monomorphic
+let list_evidence context = Monomorphic.list_capabilities context.monomorphic
 
 let classify_result context substitution (result : Types.result) =
   match result with

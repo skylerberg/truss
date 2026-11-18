@@ -235,6 +235,7 @@ val convert :
   state ->
   env ->
   ?argument:Types.mode ->
+  ?takes_view_as_owner:bool ->
   ?expression:Core.origin ->
   Source.Definition_span.t ->
   actual:Types.ty ->

@@ -21,6 +21,7 @@ module Symbol : sig
     | Valid of Types.ty
     | Rank of Types.ty
     | Capacity of Types.ty
+    | Owner_of_view of Types.ty
     | Model of Types.ty
     | Slack of Types.ty
     | Potential of Types.ty

@@ -18,7 +18,7 @@ fn pattern(count: UInt64) -> List[UInt8] {
   var state: UInt32 = 1
   for index in 0..count {
     state = state.wrapping_multiply(1103515245).wrapping_add(12345)
-    mut bytes.push(if index % 50 < 30 { letters[UInt64.from(state >> 16) % 7] } else { 120 })
+    mut bytes.push(if index % 50 < 30 { letters[UInt64.from_integer(state >> 16) % 7] } else { 120 })
   }
   bytes
 }

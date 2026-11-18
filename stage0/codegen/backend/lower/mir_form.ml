@@ -646,7 +646,8 @@ let compute_result_type st (callee : Mir.callee) =
   | Returns ty -> Monomorphic.ground st.context.monomorphic substitution ty
   | Lends _ -> Definitions.raise_bug "%s does not return a value" (Path.show path)
 
-let lower_call_with_places st (callee : Mir.callee) (places : Lowered.place list) ~destination =
+let lower_call_with_places st (callee : Mir.callee) (places : Lowered.place list) ~destination ~site
+    =
   let _, item, signature, substitution = resolve_call_signature st callee in
   let arguments =
     List.map2
@@ -655,7 +656,7 @@ let lower_call_with_places st (callee : Mir.callee) (places : Lowered.place list
       (Definitions.list_interface_parameters signature)
       places
   in
-  Targets.lower_item_call st item ~signature ~substitution ~arguments ~destination ()
+  Targets.lower_item_call st item ~signature ~substitution ~arguments ~destination ~site ()
 
 let evaluate_arguments (st : Lowering.state) (signature : Types.signature) substitution
     (arguments : Mir.argument list) =
@@ -697,7 +698,7 @@ let lower_argument_place st (argument : Mir.argument) =
   | Passed { mode; value; _ } -> (mode, compute_operand_type st value, lower_operand_place st value)
   | Default -> Definitions.raise_bug "an omitted argument in a call that has no defaults"
 
-let lower_shared_update st ~shared ~input ~change ~destination =
+let lower_shared_update st ~shared ~input ~change ~destination ~site =
   let _, _, shared = lower_argument_place st shared in
   let _, _, input = lower_argument_place st input in
   let _, change_ty, change = lower_argument_place st change in
@@ -725,7 +726,7 @@ let lower_shared_update st ~shared ~input ~change ~destination =
     | Some destination -> destination
     | None -> Lowering.allocate_temporary st result_ty
   in
-  Targets.lower_indirect_call st ~function_type ~value:change
+  Targets.lower_indirect_call st ~function_type ~value:change ~site:(Some site)
     [ { root = Local typed; projections = [ Deref ] }; input ]
     result;
   Emit_c.Builder.emit st.builder
@@ -735,7 +736,7 @@ let lower_intrinsic st ?reported (operation : Intrinsic.operation) ~type_argumen
     (arguments : Mir.argument list) ~destination ~site =
   match (operation, arguments) with
   | Runtime Shared_update, [ shared; input; change ] ->
-      lower_shared_update st ~shared ~input ~change ~destination;
+      lower_shared_update st ~shared ~input ~change ~destination ~site;
       None
   | _ ->
       let type_arguments, value_arguments = split_arguments st type_arguments in
@@ -759,9 +760,9 @@ let lower_intrinsic st ?reported (operation : Intrinsic.operation) ~type_argumen
           | Intrinsics.Place place -> ignore (Lowering.move_place st place)
           | Value _ -> ())
         (Intrinsics.list_consumed_places operation);
-      Intrinsics.lower ~checks:(Lowering.checks_operations st) ~value_arguments ?reported
-        st.context.env st.builder st.context.types operation ~type_arguments arguments ~destination
-        ~site
+      Intrinsics.lower ~may_panic:(Lowering.may_panic st) ~value_arguments ?reported st.context.env
+        st.builder st.context.types operation ~type_arguments arguments ~destination ~site
+        ~trace:(Lowering.find_panic_trace st)
 
 let read_field_default (st : Lowering.state) (ty : Ground.ty) ~variant ~field :
     Mir.Graph.t Mir.field_default Mir.sourced =
@@ -1070,8 +1071,7 @@ let find_forwarded_call st (call : Mir.call) : Forwarded.t option =
   | _ -> None
 
 let find_checked_requires (st : Lowering.state) path =
-  if Types.may_panic st.frame.code.uses then Mir.find_checked_requires st.context.lookups.mir path
-  else None
+  if Lowering.may_panic st then Mir.find_checked_requires st.context.lookups.mir path else None
 
 let is_forwarded_whole (frame : Lowering.mir_frame) part =
   match frame.body.blocks.(frame.block).terminator with
@@ -1229,12 +1229,14 @@ and lower_statement st (statement : Mir.Graph.statement) =
              length = Lowered.make_uint64_constant (String.length message);
              site = locate_site st origin;
              reported = None;
+             trace = None;
            });
       Emit_c.Builder.start st.builder after
   | Echo echoed ->
       Targets.echo st (lower_operand_place st echoed) (compute_operand_type st echoed)
         ~site:(locate_site st origin)
-  | Provide { provided; can_use_tasks } -> provide st provided ~can_use_tasks
+  | Provide { provided; can_use_tasks } ->
+      provide st provided ~can_use_tasks ~site:(Some (locate_site st origin))
   | Provide_end -> (
       let frame = require_mir_frame st in
       match frame.provides with
@@ -1251,7 +1253,7 @@ and end_local st local =
       (obtain_lent_call st local)
   else drop_local st local
 
-and provide st (provided : Mir.provided list) ~can_use_tasks =
+and provide st (provided : Mir.provided list) ~can_use_tasks ~site =
   let enclosing = st.evidence in
   let implementations =
     List.map
@@ -1267,7 +1269,7 @@ and provide st (provided : Mir.provided list) ~can_use_tasks =
           else Address { place; writable = true }
         in
         ( implementation.mode,
-          Targets.lower_provided_evidence st ~implementation:pointer
+          Targets.lower_provided_evidence st ~implementation:pointer ~site
             (List.map
                (fun (provided : Core.provided) ->
                  (provided.capability, provided.impl, provided.arguments))
@@ -1311,6 +1313,10 @@ and assign st (target : Mir.place) (value : Mir.rvalue) ~origin =
   match (target, value) with
   | { root = Local local; projections = [] }, Operand (Borrow { place = source; mode; _ }) ->
       alias st local (lower_place st source) ~writable:(mode = Mut)
+  | { root = Local local; projections = [] }, Convert { conversion = View_to_owned; value; _ } ->
+      Targets.lower_owner_of_view st
+        ~owner:(Lowering.ground st (lookup_local_info st local).type_)
+        ~view:(compute_operand_type st value) (lower_operand_place st value) (lower_place st target)
   | _ -> (
       let ty = compute_target_type st target value in
       let types_ty =
@@ -1385,9 +1391,9 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
   | Operation { operation; type_arguments; operands } ->
       let type_arguments, value_arguments = split_arguments st type_arguments in
       ignore
-        (Intrinsics.lower ~checks:(Lowering.checks_operations st) ~value_arguments
-           ?reported:(find_reported_site st) st.context.env st.builder st.context.types
-           (Scalar operation) ~type_arguments
+        (Intrinsics.lower ~may_panic:(Lowering.may_panic st) ~value_arguments
+           ?reported:(find_reported_site st) ~trace:(Lowering.find_panic_trace st) st.context.env
+           st.builder st.context.types (Scalar operation) ~type_arguments
            (List.map
               (fun operand ->
                 let operand_ty = compute_operand_type st operand in
@@ -1424,6 +1430,8 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
   | Convert { conversion = Widen; value = inner; _ } -> write_operand st inner destination
   | Convert { conversion = To_integer | From_integer; _ } ->
       Definitions.raise_bug "a conversion that exists only in specifications"
+  | Convert { conversion = View_to_owned; _ } ->
+      Definitions.raise_bug "the owner of a view written outside its lent local"
   | To_any { value = inner; trait; evidence } ->
       let impl, type_arguments =
         Targets.resolve_impl st.context st.frame.code.substitution ~trait
@@ -1524,7 +1532,9 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
       | Returns _ ->
           Targets.lower_item_call st
             (Code { path; instantiation })
-            ~signature ~substitution ~arguments ~mask ~destination ()
+            ~signature ~substitution ~arguments ~mask ~destination
+            ~site:(Some (locate_site st origin))
+            ()
       | Lends _ -> Definitions.raise_bug "a lending call that lends no part")
   | None, Intrinsic { operation = Runtime Holds_invariant; _ } -> (
       match call.arguments with
@@ -1546,12 +1556,13 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
       in
       lower_capability_defaults st ~capability ~name call.arguments arguments;
       if Path.equal capability Definitions.panic_path then
-        match arguments with
-        | [ (_, _, message) ] ->
+        match (arguments, Lowering.find_panic_trace st) with
+        | [ (_, _, message) ], Some trace ->
             ignore
-              (Intrinsics.lower ~checks:(Lowering.checks_operations st) st.context.env st.builder
+              (Intrinsics.lower ~may_panic:(Lowering.may_panic st) st.context.env st.builder
                  st.context.types (Runtime Crash) ~type_arguments:[] [ Intrinsics.Place message ]
-                 ~destination:None ~site:(locate_site st origin))
+                 ~destination:None ~site:(locate_site st origin) ~trace:(Some trace))
+        | [ _ ], None -> Definitions.raise_bug "Panic.crash where Panic has no evidence"
         | _ -> Definitions.raise_bug "Panic.crash takes one message"
       else begin
         let c_signature, result = Targets.make_entry_signature st.context signature in
@@ -1583,7 +1594,9 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
       match List.map (lower_argument_place st) call.arguments with
       | (_, _, any) :: arguments ->
           Targets.lower_call_through_any st ~any_type ~trait:trait.trait ~name ~receiver ~any
-            ~arguments destination
+            ~arguments
+            ~site:(Some (locate_site st origin))
+            destination
       | [] -> Definitions.raise_bug "a call through any with no receiver")
   | None, Indirect function_value ->
       let function_type =
@@ -1593,6 +1606,7 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
       in
       let value = lower_operand_place st function_value in
       Targets.lower_indirect_call st ~function_type ~value
+        ~site:(Some (locate_site st origin))
         (List.map
            (fun argument ->
              let _, _, place = lower_argument_place st argument in
@@ -1695,6 +1709,7 @@ and check_requires st ~path ~instantiation arguments ~origin ~failure =
                  length = Lowered.make_uint64_constant (String.length failure);
                  site;
                  reported;
+                 trace = Lowering.find_panic_trace st;
                });
           Emit_c.Builder.start st.builder after)
         requires;
@@ -1779,7 +1794,9 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
             compute_lent_place signature.output substitution (fun ~lending destination ->
                 Targets.lower_item_call st
                   (Code { path; instantiation })
-                  ~signature ~substitution ~arguments ~mask ~lending ~destination ())
+                  ~signature ~substitution ~arguments ~mask ~lending ~destination
+                  ~site:(Some (locate_site st origin))
+                  ())
         | None, Trait_method { trait; name; receiver; self_type; _ } -> (
             let any_type =
               match Types.substitute st.frame.code.substitution self_type with
@@ -1793,7 +1810,9 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
                   (Targets.make_any_substitution st.context ~any:any_type trait.trait)
                   (fun ~lending destination ->
                     Targets.lower_call_through_any st ~any_type ~trait:trait.trait ~name ~receiver
-                      ~any ~arguments ~lending destination)
+                      ~any ~arguments ~lending
+                      ~site:(Some (locate_site st origin))
+                      destination)
             | [] -> Definitions.raise_bug "a call through any with no receiver")
         | None, Capability_method { capability; name } ->
             Targets.raise_lending_capability_method capability name
@@ -1972,6 +1991,7 @@ and lower_terminator st region (ending : Mir.Graph.terminator) ~origin =
              length = Lowered.make_uint64_constant (String.length message);
              site = locate_site st origin;
              reported = None;
+             trace = None;
            });
       Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder)
   | Return returned ->
@@ -2083,12 +2103,12 @@ and lower_for_loop st region ~(iteration : Mir.iteration) ~part ~body ~(loop : M
               element = Lowering.ground st (lookup_local_info st part).type_;
             }
           in
-          lower_for_each st ~schedule:(Spawned spawning) ~iteration ~each)
-  | Parallel_loop -> lower_for_each st ~schedule:Chunked ~iteration ~each
-  | Core.Sequential -> lower_for_each st ~schedule:Sequential ~iteration ~each
+          lower_for_each st ~schedule:(Spawned spawning) ~iteration ~each ~origin)
+  | Parallel_loop -> lower_for_each st ~schedule:Chunked ~iteration ~each ~origin
+  | Core.Sequential -> lower_for_each st ~schedule:Sequential ~iteration ~each ~origin
 
 and lower_for_each st ~(schedule : Lowering.schedule) ~(iteration : Mir.iteration)
-    ~(each : Lowered.place -> unit) =
+    ~(each : Lowered.place -> unit) ~origin =
   let schedule =
     match schedule with
     | Chunked when not (Lowering.may_fork st) -> Lowering.Sequential
@@ -2105,7 +2125,9 @@ and lower_for_each st ~(schedule : Lowering.schedule) ~(iteration : Mir.iteratio
   | Pull { cursor; next } ->
       let cursor = lower_place st cursor in
       Targets.pull_loop st ~option:(compute_result_type st next)
-        ~call_next:(fun destination -> lower_call_with_places st next [ cursor ] ~destination)
+        ~call_next:(fun destination ->
+          lower_call_with_places st next [ cursor ] ~destination
+            ~site:(Some (locate_site st origin)))
         ~body:owned_each
 
 and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~inclusive ~each =

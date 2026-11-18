@@ -71,7 +71,7 @@ val run_template_check :
   (bool list, string) result
 
 val list_roots : tests:Path.t list -> mains:Path.t list -> Lowered.Item.t list
-val lower : Lookups.settings -> Lookups.t -> Lowered.Item.t -> (lowered, unsupported) result
+val lower : Libc.system -> Lookups.t -> Lowered.Item.t -> (lowered, unsupported) result
 val list_references : lowered -> Lowered.Item.t list
 
 val check_calls :

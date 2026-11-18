@@ -117,8 +117,12 @@ static void t_describe(const uint8_t *message, uint64_t length, const struct t_s
   t_text_position(site);
 }
 
-_Noreturn void t_runtime_panic(const uint8_t *message, uint64_t length, const struct t_site *site) {
+_Noreturn void t_runtime_panic(const uint8_t *message, uint64_t length, const struct t_site *site, const struct t_trace *trace) {
   t_describe(message, length, site);
+  for (const struct t_trace *link = trace; link != 0; link = link->caller) {
+    t_text_string("\n  called at ");
+    t_text_position(link->site);
+  }
   t_end(t_panicked, "panic: ", 101);
 }
 
@@ -2036,7 +2040,7 @@ let render_runtime ~tests =
     [
       (if tests then "#define T_TESTS 1\n" else "");
       headers;
-      Emit_c.site_struct;
+      Emit_c.site_structs;
       failing;
       allocation;
       threads;

@@ -2,8 +2,8 @@
 fn echoed(through: mut processes::Child, count: UInt64) -> UInt64
   uses Tasks, Handles, Panic
 {
-  var input = mut through.take_input().unwrap()
-  var output = mut through.take_output().unwrap()
+  var input = mut through.take_input().expect("the child was spawned with a piped input")
+  var output = mut through.take_output().expect("the child was spawned with a piped output")
   var got: UInt64 = 0
   concurrent {
     {
@@ -13,7 +13,7 @@ fn echoed(through: mut processes::Child, count: UInt64) -> UInt64
       }
       var written: UInt64 = 0
       while written < count {
-        written += mut input.write(block.slice()).unwrap()
+        written += mut input.write(block.slice()).expect("the pipe to the child accepts writes")
       }
       let _ = own input.close()
     }
@@ -22,7 +22,7 @@ fn echoed(through: mut processes::Child, count: UInt64) -> UInt64
       var open = true
       while open {
         mut heard.clear()
-        let read = mut output.read(mut heard, limit: 65536).unwrap()
+        let read = mut output.read(mut heard, limit: 65536).expect("the pipe from the child can be read")
         got += read
         open = read > 0
       }

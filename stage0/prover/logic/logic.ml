@@ -21,6 +21,7 @@ module Symbol = struct
     | Valid of Types.ty
     | Rank of Types.ty
     | Capacity of Types.ty
+    | Owner_of_view of Types.ty
     | Model of Types.ty
     | Slack of Types.ty
     | Potential of Types.ty
@@ -127,6 +128,7 @@ let rec show_symbol : symbol -> string = function
   | Valid ty -> "valid." ^ Types.show ty
   | Rank ty -> "rank." ^ Types.show ty
   | Capacity ty -> "capacity." ^ Types.show ty
+  | Owner_of_view owner -> "owner_of_view." ^ Types.show owner
   | Model ty -> "model." ^ Types.show ty
   | Slack ty -> "slack." ^ Types.show ty
   | Potential ty -> "potential." ^ Types.show ty

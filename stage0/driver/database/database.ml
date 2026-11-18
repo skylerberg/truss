@@ -68,7 +68,6 @@ type t = {
   stale : unit Stored_table.t Package_stage_table.t;
   implied : Part.any list Package_table.t;
   graphs : Call_graph.t Package_table.t;
-  lowering : (Backend.Lookups.settings, string) result;
   item_values : binding Stored_table.t;
   references : References.t;
   claimants : Part.t list Item_table.t;
@@ -173,7 +172,7 @@ let list_stale_parts database package stage =
   | Some parts -> Stored_table.fold (fun part () parts -> part :: parts) parts []
   | None -> []
 
-let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
+let create ?(loaded = []) (packages : Project.package list) =
   let package_databases = Package_table.create 8 in
   List.iter
     (fun package_database ->
@@ -189,7 +188,6 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       stale = Package_stage_table.create 64;
       implied = Package_table.create 8;
       graphs = Package_table.create 8;
-      lowering = Result.map (fun system -> { Backend.Lookups.checks; system }) Libc.host;
       item_values = Stored_table.create 2048;
       references = References.create ~tracks_blocked:false;
       claimants = Item_table.create 64;
@@ -243,7 +241,6 @@ let copy database =
     stale;
     implied = Package_table.copy database.implied;
     graphs;
-    lowering = database.lowering;
     item_values = Stored_table.copy database.item_values;
     references = References.copy database.references;
     claimants = Item_table.copy database.claimants;
@@ -998,10 +995,12 @@ let is_drained ~ready (Part.Any part) =
   | Lowered item | Test_key item -> Item_table.mem (Lazy.force ready) item
   | _ -> true
 
-let read_lowering_settings database =
-  match database.lowering with
-  | Ok settings -> settings
-  | Error _ -> Compiler_bug.raise_bug ~stage:"Database" "this host has no lowering settings"
+let read_host_system () =
+  match Libc.host with
+  | Ok system -> system
+  | Error _ ->
+      Compiler_bug.raise_bug ~stage:"Database"
+        "code is lowered on a host that Stage0 does not build for"
 
 let list_proof_template_checks : Prover.proof part -> _ = function
   | Value (Obligations { obligations; _ }) ->
@@ -1017,7 +1016,7 @@ let make_template_check_root ({ from_template; literals; clauses } : Prover.Stat
   Lowered.Item.Template_check { from_template; literals; clauses }
 
 let claim_template_check_roots database (key : Resolve.Names.key) =
-  if Result.is_ok database.lowering then
+  if Result.is_ok Libc.host then
     claim_roots database (Stored (Any (Proof key)))
       (List.map make_template_check_root
          (list_proof_template_checks (read_stored database (Proof key))))
@@ -1032,7 +1031,7 @@ let find_entry_point (names : Resolve.Names.lookups) package =
     (names.list_declarations { package; modules = [] })
 
 let claim_lowering_roots database (names : Resolve.Names.lookups) package =
-  if Result.is_ok database.lowering then
+  if Result.is_ok Libc.host then
     claim_roots database (Stored (Any (Namespace package)))
       (Backend.list_roots
          ~tests:
@@ -1360,9 +1359,7 @@ let compute_part database (Part.Any typed as part) =
   | Lowered key ->
       compute_value (Lowered key) (fun note ->
           match
-            Backend.lower (read_lowering_settings database)
-              (make_recording_lowering_lookups database note)
-              key
+            Backend.lower (read_host_system ()) (make_recording_lowering_lookups database note) key
           with
           | lowered -> Value lowered
           | exception Reads_failed_part -> Blocked
@@ -2159,7 +2156,12 @@ let list_holes proofs path =
         (fun ((home : Resolve.Names.key), location) ->
           let ({ file; base } : Resolve.Names.place) = names.read_place home in
           let span = Prover.resolve_location names home location in
-          (file, (Source.Definition_span.to_file ~base span).start))
+          let line, column =
+            Source.compute_position
+              (read_source proofs.database file)
+              (Source.Definition_span.to_file ~base span).start
+          in
+          (file, line, column))
         holes
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
 
@@ -2291,9 +2293,9 @@ let list_reached_todo_types database key =
   List.sort_uniq Path.compare (visit [] (Stored (Any (Test_key key))))
 
 let find_lowered_lookups database packages : (Backend.lowered_lookups, string) result =
-  match database.lowering with
+  match Libc.host with
   | Error message -> Error message
-  | Ok { system; _ } ->
+  | Ok system ->
       drain database ~through:Test_keys packages;
       let interface = make_interface_lookups database packages in
       Ok

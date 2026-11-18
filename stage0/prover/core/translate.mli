@@ -19,6 +19,5 @@ val translate_laws :
   State.outcome
 
 val translate_type : Lookups.t -> State.source -> path:Path.t -> State.outcome
-val test : Lookups.t -> State.source -> path:Path.t -> State.outcome
 val translate_constant : Lookups.t -> State.source -> path:Path.t -> State.outcome
 val translate_theorem : Lookups.t -> State.source -> path:Path.t -> State.outcome

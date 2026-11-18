@@ -303,6 +303,17 @@ let () =
     Fixtures.Ownership.capturing_lambda_passed_and_stored_in_a_local
 
 let () =
+  Harness.test
+    "a view that a call returns outlives the statement when the call took a view as its owning type"
+    (fun () -> expect_fine Fixtures.Ownership.view_of_a_call_given_a_string_slice_as_its_owner);
+  Harness.test
+    "a string cannot be mutated while the result of a call that took its slice as a string is live"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Ownership.string_cleared_while_a_call_given_its_slice_as_an_owner_is_viewed
+        "ownership.mutated_while_viewed")
+
+let () =
   let types = Fixtures.Ownership.types in
   let expect_rejected name body code =
     Harness.test name (fun () -> expect_one_diagnostic (types ^ body) code)
@@ -809,6 +820,9 @@ let () =
         "ownership.views_temporary");
   Harness.test "a cursor cannot view a block's value that the statement drops" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.cursor_over_a_block_value "ownership.views_temporary");
+  Harness.test "a cursor cannot view a record update that the statement drops" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.cursor_over_a_record_update
+        "ownership.views_temporary");
   Harness.test "a cursor may view a named value" (fun () ->
       expect_fine Fixtures.Ownership.cursor_over_a_named_string);
   Harness.test "a cursor may view a string literal, which has static storage" (fun () ->

@@ -12,12 +12,13 @@ let intrinsic_types : Backend.For_testing.Intrinsics.types =
 
 let operate builder ?destination ?(type_arguments = []) operation arguments =
   ignore
-    (Backend.For_testing.Intrinsics.lower
+    (Backend.For_testing.Intrinsics.lower ~may_panic:false
        (Codegen_support.make_shape_env ~extra ())
        builder intrinsic_types operation ~type_arguments arguments ~destination
-       ~site:{ definition = Codegen_support.definition "entry"; offset = 0 })
+       ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+       ~trace:None)
 
-let build_entry build_body : Codegen_support.item =
+let build_entry build_body : Codegen_support.program_fragment =
  fun env ->
   let builder = Emit_c.Builder.create env ~item:(Codegen_support.code_item "entry") in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
@@ -108,7 +109,7 @@ let () =
       in
       let path = Emit_c.Builder.allocate_local builder (Codegen_support.value bytes_ty) in
       ignore
-        (Backend.For_testing.Intrinsics.lower env builder intrinsic_types
+        (Backend.For_testing.Intrinsics.lower ~may_panic:false env builder intrinsic_types
            (Runtime (Libc Proc_pidpath)) ~type_arguments:[]
            [
              Value (Codegen_support.constant_int32 1);
@@ -116,7 +117,8 @@ let () =
              Value (Lowered.make_uint64_constant 64);
            ]
            ~destination:(Some (Lowered.make_local_place length))
-           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 });
+           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+           ~trace:None);
       Emit_c.Builder.finish builder (Return (Some (Copy (Lowered.make_local_place length))));
       let fragment =
         Emit_c.Builder.build builder
@@ -442,11 +444,12 @@ let () =
       let extra = extra @ [ (Ground.to_string uint32, Memory_layout.Scalar (Integer UInt32)) ] in
       let operate builder ~destination operation arguments =
         ignore
-          (Backend.For_testing.Intrinsics.lower
+          (Backend.For_testing.Intrinsics.lower ~may_panic:false
              (Codegen_support.make_shape_env ~extra ())
              builder intrinsic_types operation ~type_arguments:[] arguments
              ~destination:(Some destination)
-             ~site:{ definition = Codegen_support.definition "entry"; offset = 0 })
+             ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+             ~trace:None)
       in
       Codegen_support.expect_status ~extra 16
         [
@@ -465,11 +468,12 @@ let () =
               let name = Emit_c.Builder.allocate_local builder (Codegen_support.value bytes_ty) in
               let operate_on_bytes ?destination operation arguments =
                 ignore
-                  (Backend.For_testing.Intrinsics.lower
+                  (Backend.For_testing.Intrinsics.lower ~may_panic:false
                      (Codegen_support.make_shape_env ~extra ())
                      builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ]
                      arguments ~destination
-                     ~site:{ definition = Codegen_support.definition "entry"; offset = 0 })
+                     ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+                     ~trace:None)
               in
               operate_on_bytes ~destination:(Lowered.make_local_place name)
                 (Buffer Storage_with_capacity)
@@ -676,8 +680,8 @@ let () =
         let open_test_file () =
           let descriptor = Emit_c.Builder.allocate_local builder (Codegen_support.value int32) in
           ignore
-            (Backend.For_testing.Intrinsics.lower env builder types (Runtime (Libc Open))
-               ~type_arguments:[]
+            (Backend.For_testing.Intrinsics.lower ~may_panic:false env builder types
+               (Runtime (Libc Open)) ~type_arguments:[]
                [
                  Place (Lowered.make_local_place name);
                  Value
@@ -686,7 +690,8 @@ let () =
                  Value (Codegen_support.constant_int32 0);
                ]
                ~destination:(Some (Lowered.make_local_place descriptor))
-               ~site:{ definition = Codegen_support.definition "entry"; offset = 0 });
+               ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+               ~trace:None);
           descriptor
         in
         let first = open_test_file () in
@@ -722,8 +727,8 @@ let () =
       let status, _, errors =
         Codegen_support.run_program ~env
           [
-            Codegen_support.make_constant_item entry;
-            Codegen_support.make_constant_item (Backend.For_testing.drop drop_and_copy handle_ty);
+            Codegen_support.make_program_fragment entry;
+            Codegen_support.make_program_fragment (Backend.For_testing.drop drop_and_copy handle_ty);
           ]
       in
       if status <> 1 then
@@ -731,13 +736,14 @@ let () =
 
 let operate_checked builder ?destination ?(type_arguments = []) operation arguments =
   ignore
-    (Backend.For_testing.Intrinsics.lower ~checks:true
+    (Backend.For_testing.Intrinsics.lower ~may_panic:false
        (Codegen_support.make_shape_env ~extra ())
        builder intrinsic_types operation ~type_arguments arguments ~destination
-       ~site:{ definition = Codegen_support.definition "entry"; offset = 0 })
+       ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+       ~trace:None)
 
-let expect_panic ~saying items =
-  let status, _, errors = Codegen_support.run_program ~extra items in
+let expect_panic ~saying program =
+  let status, _, errors = Codegen_support.run_program ~extra program in
   if status <> 101 then Codegen_support.fail "expected a panic, got status %d (%s)" status errors;
   if not (String.includes ~affix:saying errors) then
     Codegen_support.fail "expected %S in %S" saying errors
@@ -845,13 +851,14 @@ let () =
           Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
         in
         ignore
-          (Backend.For_testing.Intrinsics.lower ~checks:true
+          (Backend.For_testing.Intrinsics.lower ~may_panic:false
              (Codegen_support.make_shape_env ~extra ())
              builder intrinsic_types (Scalar Convert)
              ~type_arguments:[ float64; Codegen_support.int32 ]
              [ Value (Constant (Float64 (Int64.bits_of_float number))) ]
              ~destination:(Some (Lowered.make_local_place result))
-             ~site:{ definition = Codegen_support.definition "entry"; offset = 0 });
+             ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+             ~trace:None);
         result
       in
       Codegen_support.expect_status ~extra 7 [ build_entry (fun builder -> convert builder 7.9) ];

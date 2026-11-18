@@ -1,0 +1,20 @@
+fn widened() -> Float64
+  ensures result == 1.5
+{
+  let single: Float32 = 1.5
+  single.to_float64()
+}
+
+fn converted() -> Float64
+  ensures result == 3.0
+{
+  let three: Int32 = 3
+  three.to_float64()
+}
+
+fn truncated() -> Int16 {
+  match Int16.try_from_float32(3.0) {
+    Ok(whole) => whole + 32764
+    Err(_) => unreachable
+  }
+}

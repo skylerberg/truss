@@ -1,7 +1,7 @@
 use standard::core
 
 fn scalar(code: UInt32) -> Result[Character, core::ConversionError] {
-  Character.try_from(code)
+  Character.try_from_code(code)
 }
 
 test "a character's encoded lengths follow its code point" {
@@ -92,10 +92,10 @@ test "a character is a digit in a radix, and a digit is a character" {
 }
 
 test "characters convert to and from numbers, except surrogates and values past the last" {
-  assert UInt32.from(Character"A") == 65
-  assert UInt32.from(Character.maximum) == 1114111
+  assert Character"A".code() == 65
+  assert Character.maximum.code() == 1114111
   let byte: UInt8 = 233
-  assert Character.from(byte) == Character"\u{E9}"
+  assert Character.from_code(UInt32.from_integer(byte)) == Character"\u{E9}"
   assert scalar(65) == Ok(Character"A")
   assert scalar(1114111) == Ok(Character.maximum)
   assert scalar(1114112) is Err(_)
@@ -103,8 +103,8 @@ test "characters convert to and from numbers, except surrogates and values past 
   assert scalar(57343) is Err(_)
   assert scalar(55295) is Ok(_)
   assert scalar(57344) is Ok(_)
-  assert UInt8.try_from(Character"\u{FF}") == Ok(255)
-  assert UInt8.try_from(Character"\u{100}") is Err(_)
+  assert UInt8.try_from_integer(Character"\u{FF}".code()) == Ok(255)
+  assert UInt8.try_from_integer(Character"\u{100}".code()) is Err(_)
 }
 
 test "stepping through characters skips the surrogates" {

@@ -329,6 +329,27 @@ let make_text_value context frame (ty : Types.ty) text =
       | _ -> ());
   literal
 
+let make_owner_of_view context frame ~(view : Types.ty) ~(owner : Types.ty) viewed =
+  let symbol = Logic.Symbol.Owner_of_view owner in
+  Facts.declare context
+    (Logic.Function (symbol, [ Facts.declare_sort context view ], Facts.declare_sort context owner));
+  let converted = Logic.Apply (symbol, [ viewed ]) in
+  Validity.assume_valid context frame owner converted;
+  let element =
+    match owner with
+    | Types.Named { arguments = [ Types.Type element ]; _ } -> element
+    | _ -> Types.make_builtin UInt8
+  in
+  (match
+     ( Models.find_model context owner converted ~element,
+       Models.find_model context view viewed ~element )
+   with
+  | Some owned, Some elements -> Facts.assume context frame (Logic.equal owned elements)
+  | _ ->
+      Facts.raise_bug "`%s` and its view `%s` have no model of one type" (Types.show owner)
+        (Types.show view));
+  converted
+
 let project_field context frame ty variant field field_type term =
   let part = Validity.select_field context ty variant field term in
   Amounts.assume_typed context frame (Facts.make_in_range field_type part);

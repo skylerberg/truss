@@ -374,7 +374,8 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                 in
                 let key_type = resolve_associated "Key" and output = resolve_associated "Output" in
                 let actual = check_expression state env ~expected:key_type key in
-                Name_lookup.coerce state env ~argument:Read key ~actual ~expected:key_type;
+                Name_lookup.coerce state env ~argument:Read ~takes_view_as_owner:true key ~actual
+                  ~expected:key_type;
                 state.tables.calls.(value.id) <-
                   Some
                     {

@@ -113,13 +113,13 @@ impl Deserialize for Bool {
 
 impl Serialize for Int8 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.integer(Int64.from(self))
+    mut sink.integer(Int64.from_integer(self))
   }
 }
 
 impl Deserialize for Int8 {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[Int8, Error] {
-    match Int8.try_from(mut source.integer()?) {
+    match Int8.try_from_integer(mut source.integer()?) {
       Ok(number) => Ok(number)
       Err(_) => Err(out_of_range(source, type_name: "Int8"))
     }
@@ -128,13 +128,13 @@ impl Deserialize for Int8 {
 
 impl Serialize for Int16 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.integer(Int64.from(self))
+    mut sink.integer(Int64.from_integer(self))
   }
 }
 
 impl Deserialize for Int16 {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[Int16, Error] {
-    match Int16.try_from(mut source.integer()?) {
+    match Int16.try_from_integer(mut source.integer()?) {
       Ok(number) => Ok(number)
       Err(_) => Err(out_of_range(source, type_name: "Int16"))
     }
@@ -143,13 +143,13 @@ impl Deserialize for Int16 {
 
 impl Serialize for Int32 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.integer(Int64.from(self))
+    mut sink.integer(Int64.from_integer(self))
   }
 }
 
 impl Deserialize for Int32 {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[Int32, Error] {
-    match Int32.try_from(mut source.integer()?) {
+    match Int32.try_from_integer(mut source.integer()?) {
       Ok(number) => Ok(number)
       Err(_) => Err(out_of_range(source, type_name: "Int32"))
     }
@@ -170,13 +170,13 @@ impl Deserialize for Int64 {
 
 impl Serialize for UInt8 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.unsigned(UInt64.from(self))
+    mut sink.unsigned(UInt64.from_integer(self))
   }
 }
 
 impl Deserialize for UInt8 {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[UInt8, Error] {
-    match UInt8.try_from(mut source.unsigned()?) {
+    match UInt8.try_from_integer(mut source.unsigned()?) {
       Ok(number) => Ok(number)
       Err(_) => Err(out_of_range(source, type_name: "UInt8"))
     }
@@ -185,13 +185,13 @@ impl Deserialize for UInt8 {
 
 impl Serialize for UInt16 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.unsigned(UInt64.from(self))
+    mut sink.unsigned(UInt64.from_integer(self))
   }
 }
 
 impl Deserialize for UInt16 {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[UInt16, Error] {
-    match UInt16.try_from(mut source.unsigned()?) {
+    match UInt16.try_from_integer(mut source.unsigned()?) {
       Ok(number) => Ok(number)
       Err(_) => Err(out_of_range(source, type_name: "UInt16"))
     }
@@ -200,13 +200,13 @@ impl Deserialize for UInt16 {
 
 impl Serialize for UInt32 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.unsigned(UInt64.from(self))
+    mut sink.unsigned(UInt64.from_integer(self))
   }
 }
 
 impl Deserialize for UInt32 {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[UInt32, Error] {
-    match UInt32.try_from(mut source.unsigned()?) {
+    match UInt32.try_from_integer(mut source.unsigned()?) {
       Ok(number) => Ok(number)
       Err(_) => Err(out_of_range(source, type_name: "UInt32"))
     }
@@ -227,7 +227,7 @@ impl Deserialize for UInt64 {
 
 impl Serialize for Float32 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.float(Float64.from(self))
+    mut sink.float(self.to_float64())
   }
 }
 
@@ -679,7 +679,7 @@ impl Deserializer for TreeReader[Node: Tree] {
       None => None
     }
     match found {
-      Some(integer) => match UInt64.try_from(integer) {
+      Some(integer) => match UInt64.try_from_integer(integer) {
         Ok(unsigned) => {
           self.current = None
           Ok(unsigned)

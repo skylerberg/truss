@@ -1,13 +1,13 @@
 let make_named_program ~entry_name ~helper_name returned =
   let helper =
-    Codegen_support.item helper_name
+    Codegen_support.define_function helper_name
       (Codegen_support.function_
          ~result:(Codegen_support.value Codegen_support.int32)
          []
          [ Codegen_support.block [] (Return (Some (Codegen_support.constant_int32 returned))) ])
   in
   let main =
-    Codegen_support.item entry_name
+    Codegen_support.define_function entry_name
       (Codegen_support.function_
          ~result:(Codegen_support.value Codegen_support.int32)
          [ Codegen_support.local (Lowered.Value Codegen_support.int32) ]
@@ -19,11 +19,11 @@ let make_named_program ~entry_name ~helper_name returned =
   in
   [ main; helper ]
 
-let lookup items wanted =
+let lookup program wanted =
   let env = Codegen_support.make_shape_env () in
   List.find
     (fun fragment -> Lowered.Item.equal (Emit_c.item fragment) wanted)
-    (List.map (fun item -> item env) items)
+    (List.map (fun program_fragment -> program_fragment env) program)
 
 let list_references program item = Emit_c.references (lookup program item)
 
@@ -56,7 +56,7 @@ let show_components program root =
 
 let make_ping_pong ?(ping = "ping") ?(pong = "pong") returned =
   let make_caller name callees =
-    Codegen_support.item name
+    Codegen_support.define_function name
       (Codegen_support.function_
          ~result:(Codegen_support.value Codegen_support.int32)
          [ Codegen_support.local (Lowered.Value Codegen_support.int32) ]
@@ -69,7 +69,7 @@ let make_ping_pong ?(ping = "ping") ?(pong = "pong") returned =
          ])
   in
   let helper =
-    Codegen_support.item "helper"
+    Codegen_support.define_function "helper"
       (Codegen_support.function_
          ~result:(Codegen_support.value Codegen_support.int32)
          []
@@ -92,8 +92,8 @@ let () =
         (String.concat " "
            (List.map (fun fragment -> Lowered.Item.to_string (Emit_c.item fragment)) linked)));
   Codegen_support.test "a drop reaches the type's drop function" (fun () ->
-      let dropping_item =
-        Codegen_support.item "f"
+      let dropping_function =
+        Codegen_support.define_function "f"
           (Codegen_support.function_ ~parameters:[ 0 ]
              [ Codegen_support.local (Codegen_support.value Codegen_support.text) ]
              [ Codegen_support.block [ Drop (Codegen_support.at 0) ] (Return None) ])
@@ -101,7 +101,7 @@ let () =
       let references =
         Emit_c.references
           (let env = Codegen_support.make_shape_env ~extra:Codegen_support.drop_shapes () in
-           dropping_item env)
+           dropping_function env)
       in
       Codegen_support.expect_string ~expected:"drop Text"
         (String.concat " " (List.map Lowered.Item.to_string references)));
@@ -139,7 +139,7 @@ let () =
         (show_components (make_ping_pong 1) "start"));
   Codegen_support.test "an item that calls only itself is a component of its own" (fun () ->
       let again =
-        Codegen_support.item "again"
+        Codegen_support.define_function "again"
           (Codegen_support.function_
              ~result:(Codegen_support.value Codegen_support.int32)
              [ Codegen_support.local (Lowered.Value Codegen_support.int32) ]
@@ -188,10 +188,11 @@ let () =
             length = make_length message;
             site;
             reported = None;
+            trace = None;
           }
       in
       let make_suite name blocks =
-        Codegen_support.item name (Codegen_support.function_ [] blocks)
+        Codegen_support.define_function name (Codegen_support.function_ [] blocks)
       in
       let tests =
         [

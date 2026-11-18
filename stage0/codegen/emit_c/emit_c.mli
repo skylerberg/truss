@@ -5,14 +5,12 @@ type failure = C_runtime.failure = Echo | Todo
 module Builder = Builder
 
 val make_symbol : Lowered.Item.t -> string
-
-type compiled = Data of Lowered.data | Table of Lowered.table
-
 val version : int
 
 type fragment = Fragment.t
 
-val make_fragment : Memory_layout.env -> compiled -> fragment
+val make_data_fragment : Memory_layout.env -> Lowered.data -> fragment
+val make_table_fragment : Memory_layout.env -> Lowered.table -> fragment
 val item : fragment -> Lowered.Item.t
 val references : fragment -> Lowered.Item.t list
 val called : fragment -> Lowered.Item.t list
@@ -27,7 +25,7 @@ val is_small : fragment -> bool
 val failures : fragment -> (failure * Lowered.site) list
 val render_fragment : fragment -> string
 val render_file : Memory_layout.env -> profile -> (fragment * linkage) list -> string
-val site_struct : string
+val site_structs : string
 
 type position = { file : string; line : int; column : int }
 

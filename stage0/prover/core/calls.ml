@@ -7,8 +7,28 @@ let lookup_argument_at_index (values : State.passed list) index =
   | Some term -> term
   | None -> Logic.Boolean false
 
+let rec show_callee (path : Path.t) =
+  match path with
+  | Top { name; _ } -> name
+  | Method { owner = Impl { for_type; _ } | Derived { type_ = for_type; _ }; name; _ }
+  | Method { owner = for_type; name; _ }
+  | Member_constant { owner = for_type; name } ->
+      show_callee for_type ^ "." ^ name
+  | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> Path.show path
+
+let list_type_names substitution =
+  let shown =
+    List.map
+      (fun ((parameter : Types.parameter), ty) -> (parameter.name, Types.show ty))
+      (Types.list_type_arguments substitution)
+    |> List.sort_uniq compare
+  in
+  List.filter
+    (fun (name, _) -> List.length (List.filter (fun (other, _) -> other = name) shown) = 1)
+    shown
+
 let list_required_fixes (context : State.context) (frame : State.frame) (clauses : State.clauses)
-    (requirement : Mir.requirement) term (values : State.passed list) =
+    (requirement : Mir.requirement) term (values : State.passed list) ~type_names =
   let clause = requirement.clause in
   let is_fixed name =
     List.mem name context.entry
@@ -50,7 +70,12 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
         Facts.add_requires context frame
           [
             Substituted
-              { key; clause = clause.origin; replacements = List.filter_map Fun.id replacements };
+              {
+                key;
+                clause = clause.origin;
+                replacements = List.filter_map Fun.id replacements;
+                type_names;
+              };
           ]
       else []
   | Some _ | None -> []
@@ -212,7 +237,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
               (Printf.sprintf
                  "This call to `%s` may not end: it calls back here, and both need a `decreases` \
                   clause for the prover to show that the recursion ends."
-                 (Path.show path));
+                 (show_callee path));
           ]
           (Logic.Boolean false)
     | measures, callee_measures ->
@@ -263,12 +288,13 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         let cited = Option.map (fun key -> (key, clause.origin)) precondition_clauses.callee.key in
         let fixes =
           list_required_fixes context frame precondition_clauses requirement term values
+            ~type_names:(list_type_names (substitution_of precondition_clauses))
         in
         let message : State.message =
           [
             Text "`";
             Facts.quote precondition_clauses.callee clause.origin;
-            Text (Printf.sprintf "` may not hold for this call to `%s`." (Path.show path));
+            Text (Printf.sprintf "` may not hold for this call to `%s`." (show_callee path));
           ]
         in
         if is_checked then
