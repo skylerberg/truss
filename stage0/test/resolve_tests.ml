@@ -10,14 +10,8 @@ let standard =
   ]
 
 let setup ?dependencies files = Support.setup ?dependencies (standard @ files)
-
-let list_diagnostics packages name =
-  let file = parse_file name in
-  (match Support.parse_errors packages file with
-  | [] -> ()
-  | errors -> Harness.fail "the test input does not parse: %s" (String.concat " " errors));
-  Database.For_testing.list_diagnostics [ Resolve ] (Database.create packages) file
-
+let check packages = Database.For_testing.list_diagnostics [ Resolve ] (Database.create packages)
+let list_diagnostics packages name = Support.run_check ~check packages name
 let list_codes = Support.list_codes
 
 let expect_no_diagnostics files =
@@ -32,7 +26,6 @@ let expect_no_diagnostics files =
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) reported)))
     files
 
-let check packages = Database.For_testing.list_diagnostics [ Resolve ] (Database.create packages)
 let expect_one_diagnostic = Support.expect_one_diagnostic ~setup:(fun files -> setup files) ~check
 
 let locate_name packages name text occurrence =
@@ -381,8 +374,10 @@ let () =
           @ [ ("app::main", "use app::shapes\n\nfn f() -> Int64 {\n  let = shapes::area()\n}\n") ])
       in
       let file = parse_file "app::main" in
-      if Support.parse_errors packages file = [] then Harness.fail "parsed";
-      match Database.For_testing.list_diagnostics [ Resolve ] (Database.create packages) file with
+      let database = Database.create packages in
+      if Database.For_testing.list_diagnostics [ Parse ] database file = [] then
+        Harness.fail "parsed";
+      match Database.For_testing.list_diagnostics [ Resolve ] database file with
       | [] -> ()
       | reported -> Harness.fail "reported %s" (String.concat "; " (list_codes reported)));
   Harness.test "an import of a module that does not exist is an error" (fun () ->
@@ -424,8 +419,10 @@ let () =
   Harness.test "a body the parser could not read is not resolved" (fun () ->
       let packages = setup [ ("app::main", Fixtures.Resolve.body_with_a_broken_let) ] in
       let file = parse_file "app::main" in
-      if Support.parse_errors packages file = [] then Harness.fail "parsed";
-      match Database.For_testing.list_diagnostics [ Resolve ] (Database.create packages) file with
+      let database = Database.create packages in
+      if Database.For_testing.list_diagnostics [ Parse ] database file = [] then
+        Harness.fail "parsed";
+      match Database.For_testing.list_diagnostics [ Resolve ] database file with
       | [] -> ()
       | reported ->
           Harness.fail "resolved the broken body: %s" (String.concat "; " (list_codes reported)))
@@ -555,8 +552,10 @@ let () =
           [ ("app::main", Fixtures.Resolve.impls_rejected_for_different_function_type_arguments) ]
       in
       let file = parse_file "app::main" in
-      if Support.parse_errors packages file = [] then Harness.fail "parsed";
-      match list_codes (check packages file) with
+      let database = Database.create packages in
+      if Database.For_testing.list_diagnostics [ Parse ] database file = [] then
+        Harness.fail "parsed";
+      match list_codes (Database.For_testing.list_diagnostics [ Resolve ] database file) with
       | [] -> ()
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported));
   Harness.test "impls rejected for different function type arguments have distinct keys" (fun () ->

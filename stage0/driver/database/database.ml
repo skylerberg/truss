@@ -1181,14 +1181,8 @@ let compute_part database (Part.Any typed as part) =
       compute_value (Parsed file) (fun note ->
           note (Input (Source file));
           let source = read_source database file in
-          let tokens, lexer_diagnostics = Lexer.lex source in
-          let tree, parser_diagnostics = Parser.parse tokens ~lexer_diagnostics in
-          Value
-            {
-              tree;
-              diagnostics = lexer_diagnostics @ parser_diagnostics;
-              text = Source.text source;
-            })
+          let tree, diagnostics = Parser.parse_source source in
+          Value { tree; diagnostics; text = Source.text source })
   | Namespace _ -> compute_namespace database package_database
   | Resolved (key, section) ->
       compute_value

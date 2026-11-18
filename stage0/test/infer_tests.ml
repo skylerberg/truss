@@ -123,9 +123,13 @@ let () =
           ]
       in
       let file = Support.parse_file "app::main" in
-      if List.length (Support.parse_errors packages file) <> 2 then
+      let database = Support.make_database packages in
+      if List.length (Database.For_testing.list_diagnostics [ Parse ] database file) <> 2 then
         Harness.fail "expected two syntax errors";
-      match Support.list_codes (check packages file) with
+      match
+        Support.list_codes
+          (Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ] database file)
+      with
       | [ "types.mismatch" ] -> ()
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported));
   Harness.test "a literal takes the type of the other operand" (fun () ->
