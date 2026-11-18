@@ -753,7 +753,10 @@ let () =
     "a loop over a generic trait's elements leaves the trait's arguments to inference, not its \
      parameter" (fun () ->
       expect_one_diagnostic Fixtures.Infer.loop_over_the_elements_of_a_generic_trait
-        "types.cannot_infer");
+        "types.cannot_infer"
+        ~says:
+          "This loop does not determine the arguments of `Bag`, whose methods give its elements."
+        ~at:("pair {", 1));
   Harness.test "a list literal is a type that implements FromElements" (fun () ->
       expect_fine Fixtures.Infer.list_literal_as_a_type_with_from_elements;
       expect_type Fixtures.Infer.list_literal_as_a_type_with_from_elements "[1, 2, 3]"

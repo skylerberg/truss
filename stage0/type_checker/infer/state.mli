@@ -21,6 +21,7 @@ type subset_constraint = {
 type frame = {
   first_variable : int;
   mutable recorded_expressions : int list;
+  mutable recorded_loops : (Syntax.id * Syntax.id) list;
   mutable bindings : int list;
   mutable declared : int list;
   mutable deferred_checks : (unit -> bool) list;
@@ -135,6 +136,7 @@ val replace : Source.Definition_span.t -> string -> Source.Definition_span.t Dia
 val insert : int -> string -> Source.Definition_span.t Diagnostic.edit
 val find_current_frame : state -> frame option
 val record : state -> Syntax.expression -> Types.ty -> unit
+val record_loop : state -> loop:Syntax.id -> iterable:Syntax.expression -> Tables.loop -> unit
 val note_compiled_expression : state -> env -> Syntax.expression -> unit
 val report_specification_only : state -> Source.Definition_span.t -> string -> Diagnostic.reported
 val defer : state -> (unit -> bool) -> unit
