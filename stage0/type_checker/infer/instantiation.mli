@@ -24,6 +24,7 @@ val check_written_arguments :
   State.state -> Syntax.bracket_item list -> (Types.argument list, Types.ty) result
 
 type instance = {
+  declared : Types.signature;
   signature : Types.signature;
   substitution : Types.substitution;
   instantiation : Types.instantiation;

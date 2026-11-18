@@ -210,6 +210,21 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.comparison_of_a_list_and_a_slice_of_another_element
         "types.mismatch");
+  Harness.test
+    "a read-only parameter whose type is a type parameter or an associated type takes a view of \
+     the list or the string it stands for" (fun () ->
+      expect_fine Fixtures.Infer.views_passed_as_owners_to_generic_parameters);
+  Harness.test "a parameter declared as a string takes no string slice" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.string_slice_passed_to_a_string_parameter
+        "types.mismatch");
+  Harness.test "an `own` parameter takes no view of its owning type" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.string_slice_passed_as_an_own_key "types.mismatch");
+  Harness.test "a slice is not passed as an array" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.slice_passed_as_an_array_key "types.mismatch");
+  Harness.test "a slice of bytes is not passed as a string" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.byte_slice_passed_as_a_string_key "types.mismatch");
+  Harness.test "a string slice is not the receiver of a string's method" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.string_slice_passed_as_a_string_receiver "types.mismatch");
   Harness.test "+ on strings is an error with a fix to interpolation" (fun () ->
       expect_one_diagnostic Fixtures.Infer.string_plus_a_string "types.string_addition"
         ~fixed:Fixtures.Infer.string_plus_a_string_fixed);
