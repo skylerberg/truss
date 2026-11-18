@@ -25,16 +25,14 @@ let c_compiler =
 let load text =
   let database = build_example_database text in
   Database.check database [ example_file.module_.package ];
-  if Database.list_file_diagnostics database example_file <> [] then None
-  else
-    Some
-      ( database,
-        lazy
-          (Backend.create ~evaluation_time_limit_ms:2000
-             (match Database.find_lowered_lookups database [ example.package ] with
-             | Ok lookups -> lookups
-             | Error message -> failwith message)
-             (Lazy.force c_compiler) Development) )
+  if Database.list_file_diagnostics database example_file <> [] then None else Some database
+
+let make_backend database =
+  Backend.create ~evaluation_time_limit_ms:2000
+    (match Database.find_lowered_lookups database [ example.package ] with
+    | Ok lookups -> lookups
+    | Error message -> failwith message)
+    (Lazy.force c_compiler) Development
 
 let find_integer (ty : Types.ty) =
   if Types.is_builtin Bool ty then Some (1, false) else Types.find_integer_bits ty
@@ -127,7 +125,7 @@ let runs = ref 0
 let run_mutant ~samples text =
   match load text with
   | None -> ()
-  | Some (database, _) -> (
+  | Some database -> (
       incr checked;
       let states =
         Prover.list_states
@@ -153,13 +151,13 @@ let run_mutant ~samples text =
       in
       match load with_admitting with
       | None -> ()
-      | Some (running, backend) ->
+      | Some running ->
           List.iteri
             (fun index candidate ->
               incr functions;
               let call function_ arguments =
                 Database.For_testing.add_root running (Call_evaluation { function_; arguments });
-                Backend.For_testing.evaluate_call (Lazy.force backend) ~function_ ~arguments
+                Backend.For_testing.evaluate_call (make_backend running) ~function_ ~arguments
               in
               let is_admitted arguments =
                 candidate.admits = []
@@ -251,7 +249,7 @@ let () =
                   diagnostics
             in
             match load text with
-            | Some (database, _) ->
+            | Some database ->
                 let unproven =
                   Prover.list_diagnostics
                     (Prover.decide ~runs:[]
