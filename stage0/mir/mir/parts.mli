@@ -30,4 +30,4 @@ val read_defaults : lookups -> Path.t -> Tree.t Tree.defaults sourced option
 val read_default_graphs : lookups -> Path.t -> Graph.t Tree.defaults sourced option
 val read_type_clauses : lookups -> Path.t -> Tree.type_clauses sourced option
 val is_index_call : _ Core.target -> bool
-val list_checked_requires : lookups -> Path.t -> Tree.requirement list
+val find_checked_requires : lookups -> Path.t -> Tree.requirement list sourced option

@@ -381,11 +381,11 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
     | Quantified { quantifier; binder; body } when Emitter.is_specification builder ->
         lower_quantified builder node quantifier binder body
     | Quantified { quantifier; binder = Over_range { pattern; start; stop; inclusive }; body } ->
-        lower_quantifier_loop builder node quantifier body (fun ~loop ~each ->
-            lower_range_loop builder ~origin ~pattern ~start ~stop ~inclusive ~loop ~each)
+        lower_quantifier_loop builder node quantifier body (fun ~matched ~loop ~each ->
+            lower_range_loop ~matched builder ~origin ~pattern ~start ~stop ~inclusive ~loop ~each)
     | Quantified { quantifier; binder = Over_elements { pattern; elements }; body } ->
-        lower_quantifier_loop builder node quantifier body (fun ~loop ~each ->
-            lower_elements_loop builder ~origin ~pattern ~elements ~loop ~each)
+        lower_quantifier_loop builder node quantifier body (fun ~matched ~loop ~each ->
+            lower_elements_loop ~matched builder ~origin ~pattern ~elements ~loop ~each)
     | Collection_literal { elements; construction = Specification_only } ->
         let* elements = lower_operands builder elements in
         hold (Array elements)
@@ -711,12 +711,12 @@ and lower_pattern_tests ~bind_matched builder (patterns : Core.pattern list) pla
     (Some (Constant { value = Boolean true; type_ = Types.bool }))
     !tested
 
-and match_patterns ?(covers = false) builder (patterns : Core.pattern list) scrutinees origin :
-    Tree.operand option =
+and match_patterns ?(covers = false) ?owned builder (patterns : Core.pattern list) scrutinees origin
+    : Tree.operand option =
   let places = List.map fst scrutinees in
   let bind_matched patterns () =
     List.iter2
-      (fun pattern (place, scrutinee_origin) -> bind builder pattern place ~scrutinee_origin)
+      (fun pattern (place, scrutinee_origin) -> bind ?owned builder pattern place ~scrutinee_origin)
       patterns scrutinees
   in
   let rec lower_alternatives = function
@@ -1250,8 +1250,14 @@ and lower_statement builder (node : Core.statement) =
           | Some part -> Emitter.emit builder (Yield { mode; part }) origin
           | None -> ()))
 
-and lower_for_loop ?cursor_type ?(lent = ref None) builder ~origin ~(pattern : Core.pattern)
-    ~iteration ~loop ~each =
+and bind_or_match ?matched ?owned builder (pattern : Core.pattern) place ~origin =
+  match matched with
+  | Some matched ->
+      matched := match_patterns ?owned builder [ pattern ] [ (place, pattern.origin) ] origin
+  | None -> bind ?owned builder pattern place ~scrutinee_origin:pattern.origin
+
+and lower_for_loop ?cursor_type ?(lent = ref None) ?matched builder ~origin
+    ~(pattern : Core.pattern) ~iteration ~loop ~each =
   let part = Emitter.allocate_local builder Temporary pattern.type_ origin in
   let binding_count = ref 0 in
   let body =
@@ -1273,11 +1279,10 @@ and lower_for_loop ?cursor_type ?(lent = ref None) builder ~origin ~(pattern : C
                 | Range _ -> ());
                 (match iteration with
                 | Range _ ->
-                    bind ~owned:true builder pattern (Emitter.make_local_place part)
-                      ~scrutinee_origin:pattern.origin
+                    bind_or_match ?matched ~owned:true builder pattern
+                      (Emitter.make_local_place part) ~origin
                 | Pull _ ->
-                    bind builder pattern (Emitter.make_local_place part)
-                      ~scrutinee_origin:pattern.origin);
+                    bind_or_match ?matched builder pattern (Emitter.make_local_place part) ~origin);
                 binding_count := List.length (Emitter.emitted builder)));
         if Emitter.reaches builder then Some Emitter.unit_value else None)
   in
@@ -1287,18 +1292,19 @@ and lower_for_loop ?cursor_type ?(lent = ref None) builder ~origin ~(pattern : C
     origin;
   Emitter.resume_group builder origin origin
 
-and lower_range_loop builder ~origin ~pattern ~start:low ~stop:high ~inclusive ~loop ~each =
+and lower_range_loop ?matched builder ~origin ~pattern ~start:low ~stop:high ~inclusive ~loop ~each
+    =
   match (lower_expression builder low, lower_expression builder high) with
   | Some start, Some stop ->
       let start = Emitter.hold_operand builder start low.type_ origin
       and stop = Emitter.hold_operand builder stop high.type_ origin in
-      lower_for_loop builder ~origin ~pattern
+      lower_for_loop ?matched builder ~origin ~pattern
         ~iteration:(Range { start; stop; inclusive })
         ~loop ~each
   | _ -> ()
 
-and lower_elements_loop builder ~origin ~(pattern : Core.pattern) ~(elements : Core.elements) ~loop
-    ~each =
+and lower_elements_loop ?matched builder ~origin ~(pattern : Core.pattern)
+    ~(elements : Core.elements) ~loop ~each =
   let { Core.count; position; element } = elements in
   let counted =
     Emitter.build_block builder (fun () ->
@@ -1325,7 +1331,7 @@ and lower_elements_loop builder ~origin ~(pattern : Core.pattern) ~(elements : C
                           lent_part := Some { element; collection; count = counted }
                       | None -> raise_bug "a loop over elements whose collection no call borrows")
                   | Constant _ | Literal _ -> raise_bug "a loop over elements that a constant lends");
-                  bind builder pattern part ~scrutinee_origin:pattern.origin)
+                  bind_or_match ?matched builder pattern part ~origin)
                 (lower_lent builder lending ~duration:Loop_body)))
   | Some _, _ -> raise_bug "a loop over elements that no call lends"
   | None, _ -> ()
@@ -1374,14 +1380,26 @@ and lower_quantifier_loop builder (node : Core.expression) (quantifier : Core.qu
   let make_loop () =
     { Tree.clauses = []; schedule = Sequential; origin; quantified = !quantified }
   in
-  run ~loop:make_loop ~each:(fun bind_part ->
+  let matched = ref None in
+  let lower_element_decision () =
+    match !matched with
+    | Some (Tree.Constant { value = Boolean true; _ }) -> lower_expression builder body
+    | Some left ->
+        let right = Emitter.build_block builder (fun () -> lower_expression builder body) in
+        let connective : Tree.connective =
+          match quantifier with Exists -> And | Forall -> Implies
+        in
+        Emitter.hold_choice builder Types.bool origin (Connective { connective; left; right })
+    | None -> None
+  in
+  run ~matched ~loop:make_loop ~each:(fun bind_part ->
       Emitter.run_in_scope builder origin (fun () ->
           bind_part ();
           Option.iter
             (fun holds ->
               quantified := Some { Tree.quantifier; decides };
               Emitter.assign builder (Emitter.make_local_place decides) (Operand holds) origin)
-            (lower_expression builder body)));
+            (lower_element_decision ())));
   Some (Use { place = Emitter.make_local_place decides; type_ = Types.bool; origin })
 
 and lower_quantified builder (node : Core.expression) (quantifier : Core.quantifier)

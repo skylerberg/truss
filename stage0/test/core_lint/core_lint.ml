@@ -312,7 +312,9 @@ let is_executable context (condition : Core.expression) =
          Types.equal node.type_ Integer
          ||
          match node.kind with
-         | Quantified _ | Old _ | Result | Specification_function _ | Method_cost _ -> true
+         | Quantified { binder = Over_type _; _ }
+         | Old _ | Result | Specification_function _ | Method_cost _ ->
+             true
          | Call { callee = Function { path; _ }; _ } -> (
              match Interface.Impls.read_signature context.interface path with
              | Some signature -> signature.specification_only
