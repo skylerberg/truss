@@ -2049,8 +2049,8 @@ signatures it calls, including through a capability parameter, the
 implementation's calls are mutually exclusive: each holds the
 implementation's mutex from start to end. Such an implementation has no
 method with a parameter that can hold a function, or an `any` value, that
-uses a capability, so its mutexes cannot deadlock. An implementation
-provided without `mut` has no mutex.
+uses a capability other than `Panic` and `RunForever`, so its mutexes
+cannot deadlock. An implementation provided without `mut` has no mutex.
 
 ## Strings
 

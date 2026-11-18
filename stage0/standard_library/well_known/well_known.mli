@@ -66,7 +66,6 @@ type t =
 val make_path : t -> Path.t
 val of_path : Path.t -> t option
 val is : t -> Path.t -> bool
-val is_built_in_capability : Path.t -> bool
 val specification : Path.module_
 val is_system_module : Path.module_ -> bool
 val is_runtime_constructor : Path.t -> bool

@@ -1202,7 +1202,9 @@ unchanged between calls.
 only capabilities that are provided outside it, so every task acquires locks
 in one order, from the innermost implementation outward. A callback that
 uses a capability could acquire a lock out of that order, so a method of
-such an implementation takes no callback that uses a capability.
+such an implementation takes no callback that uses a capability. `Panic`
+and `RunForever` are exempt: no `provide` implements either, so a callback
+that uses only them acquires no lock.
 
 **A mutex is not a value.** Locking a mutex mutates a read-only place, which
 mutable value semantics rules out, and two tasks that lock two mutexes in

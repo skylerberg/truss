@@ -1063,18 +1063,16 @@ let find_forwarded_call st (call : Mir.call) : Forwarded.t option =
         -frame.forwarded_locals
       in
       let code = Definitions.make_code st.context path instantiation in
-      if Types.may_panic code.uses then None
-      else
-        Option.bind
-          (Forwarded.forward_call ~substitution:code.substitution
-             ~make_fresh_local:take_fresh_number (read_mir_graph st.context path) call)
-          (fun (forwarded : Forwarded.t) ->
-            if
-              List.for_all
-                (fun (_, type_, _) -> Lowering.is_trivial st (Lowering.ground st type_))
-                forwarded.setup
-            then Some forwarded
-            else None)
+      Option.bind
+        (Forwarded.forward_call ~substitution:code.substitution ~make_fresh_local:take_fresh_number
+           (read_mir_graph st.context path) call)
+        (fun (forwarded : Forwarded.t) ->
+          if
+            List.for_all
+              (fun (_, type_, _) -> Lowering.is_trivial st (Lowering.ground st type_))
+              forwarded.setup
+          then Some forwarded
+          else None)
   | _ -> None
 
 let is_forwarded_whole (frame : Lowering.mir_frame) part =

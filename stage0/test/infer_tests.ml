@@ -702,6 +702,10 @@ let () =
        expect_one_diagnostic
          (sessions ^ Fixtures.Infer.monitor_table_with_a_callback)
          "capabilities.callback_may_deadlock");
+   Harness.test
+     "a capability implemented by a monitor may take a callback that uses only `Panic` and \
+      `RunForever`, since no `provide` implements either" (fun () ->
+       expect_fine Fixtures.Infer.monitor_table_with_callbacks_that_use_only_built_in_capabilities);
    Harness.test "an implementation is not a monitor if the body of its `provide` cannot use `Tasks`"
      (fun () -> expect_fine (sessions ^ Fixtures.Infer.table_provided_without_tasks));
    let tally = Fixtures.Infer.tally in
