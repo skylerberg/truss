@@ -59,7 +59,7 @@ public fn Cookie.header(self) -> Result[String, Error] {
     None => {}
   }
   match self.max_age_seconds {
-    Some(seconds) => mut text.push("; Max-Age=${seconds}".slice())
+    Some(seconds) => mut text.push("; Max-Age=${seconds}")
     None => {}
   }
   match self.expires {
