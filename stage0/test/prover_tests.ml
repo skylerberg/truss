@@ -156,8 +156,21 @@ let () =
       expect_proven Fixtures.Prover.loop_with_an_invariant);
   Harness.test "a loop invariant that an iteration breaks" (fun () ->
       expect_not_proven Fixtures.Prover.while_loop_breaking_its_invariant "prover.invariant");
-  Harness.test "a loop in a function with a time clause must end" (fun () ->
-      expect_not_proven Fixtures.Prover.while_loop_under_a_finite_time_clause "prover.termination");
+  Harness.test "a while loop's default measure holds in a function that terminates" (fun () ->
+      expect_not_proven Fixtures.Prover.while_loop_toward_a_bound_it_does_not_approach
+        "prover.termination");
+  Harness.test "a while loop's default measure is not checked where the function may run forever"
+    (fun () ->
+      expect_proven
+        Fixtures.Prover.while_loop_toward_a_bound_it_does_not_approach_where_it_may_run_forever);
+  Harness.test "a loop's written measure holds where the function may run forever" (fun () ->
+      expect_not_proven
+        Fixtures.Prover.while_loop_whose_measure_does_not_decrease_where_it_may_run_forever
+        "prover.termination");
+  Harness.test "a cursor's remaining holds where the function may run forever" (fun () ->
+      expect_not_proven
+        Fixtures.Prover.cursor_whose_remaining_does_not_decrease_where_it_may_run_forever
+        "prover.termination");
   Harness.test "a loop that counts up to its bound ends" (fun () ->
       expect_proven Fixtures.Prover.while_loop_counting_up);
   Harness.test "a for loop over a range knows its index is in range" (fun () ->
@@ -166,6 +179,11 @@ let () =
       expect_proven Fixtures.Prover.recursion_that_decreases);
   Harness.test "recursion that does not decrease" (fun () ->
       expect_not_proven Fixtures.Prover.recursion_that_does_not_decrease "prover.termination");
+  Harness.test "a function's written measure holds where it may run forever" (fun () ->
+      expect_not_proven Fixtures.Prover.recursion_that_does_not_decrease_where_it_may_run_forever
+        "prover.termination");
+  Harness.test "recursion without a measure is not checked where the function may run forever"
+    (fun () -> expect_proven Fixtures.Prover.recursion_without_a_measure_where_it_may_run_forever);
   Harness.test "a contract that calls its own function applies the function's limited copy"
     (fun () ->
       let packages =
