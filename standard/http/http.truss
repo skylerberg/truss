@@ -33,7 +33,7 @@ public type Method =
   | Connect
   | Trace
   | Other(name: String)
-  derives Equal
+  derives Equal, Hash, Ordered
 
 public fn Method.from_name(name: StringSlice) -> Method
   cost time finite
@@ -162,24 +162,6 @@ public type Header(name: String, value: String)
 public opaque type Headers(entries: List[Header])
   derives Equal, Copyable
 
-fn same_name(first: StringSlice, second: StringSlice) -> Bool
-  cost time finite
-{
-  if first.length() != second.length() {
-    return false
-  }
-  for index in 0..first.length() {
-    let a = first.byte(index)
-    let b = second.byte(index)
-    let lower_a = if 65 <= a && a <= 90 { a + 32 } else { a }
-    let lower_b = if 65 <= b && b <= 90 { b + 32 } else { b }
-    if lower_a != lower_b {
-      return false
-    }
-  }
-  true
-}
-
 public fn Headers.new() -> Headers {
   Headers(entries: [])
 }
@@ -194,7 +176,7 @@ public fn Headers.entries(self) -> Slice[Header] {
 
 public fn Headers.get(self, name: StringSlice) -> Option[StringSlice] {
   for entry in self.entries {
-    if same_name(entry.name.slice(), second: name) {
+    if entry.name.equal_ignoring_ascii_case(name) {
       return Some(entry.value.slice())
     }
   }
@@ -210,7 +192,7 @@ public fn Headers.add(mut self, name: StringSlice, value: StringSlice) {
 }
 
 public fn Headers.remove(mut self, name: StringSlice) {
-  mut self.entries.retain(fn(entry) { !same_name(entry.name.slice(), second: name) })
+  mut self.entries.retain(fn(entry) { !entry.name.equal_ignoring_ascii_case(name) })
 }
 
 public fn Headers.set(mut self, name: StringSlice, value: StringSlice) {
@@ -222,7 +204,7 @@ fn has_token(header: Option[StringSlice], token: StringSlice) -> Bool {
   match header {
     Some(value) => {
       for part in value.split(",") {
-        if same_name(part.trim(), second: token) {
+        if part.trim().equal_ignoring_ascii_case(token) {
           return true
         }
       }
@@ -496,7 +478,7 @@ fn new_responder(outbound: tasks::Channel[flow::Outbound], stream: UInt32, is_he
 fn fields_of(headers: Headers, has_length: Bool) -> List[hpack::Field] {
   var fields: List[hpack::Field] = []
   for entry in headers.entries() {
-    if !is_connection_specific(entry.name.slice()) && !(has_length && same_name(entry.name.slice(), second: "content-length")) {
+    if !is_connection_specific(entry.name.slice()) && !(has_length && entry.name.equal_ignoring_ascii_case("content-length")) {
       mut fields.push(hpack::Field(name: entry.name.copy(), value: entry.value.copy()))
     }
   }
@@ -656,6 +638,7 @@ public fn Responder.stream[Input: streams::Reader](
 }
 
 public type Response(status: Status, headers: Headers = Headers(entries: []), body: List[UInt8] = [])
+  derives Equal
 
 public fn Response.new(status: Status = Status.ok) -> Response {
   Response(status: status)
@@ -937,7 +920,7 @@ fn read_head[Stream: streams::Duplex](
 fn content_length(headers: Headers) -> Result[Option[UInt64], Error] {
   var declared: Option[UInt64] = None
   for entry in headers.entries() {
-    if same_name(entry.name.slice(), second: "Content-Length") {
+    if entry.name.equal_ignoring_ascii_case("Content-Length") {
       let digits = entry.value.slice()
       var digits_only = !digits.is_empty()
       for byte in digits.bytes() {
@@ -978,7 +961,7 @@ fn framing_of(headers: Headers, is_response: Bool) -> Result[Framing, Error] {
       let codings: List[StringSlice] = coding.split(",")
       match codings.last() {
         Some(last) => {
-          if !same_name(last.trim(), second: "chunked") {
+          if !last.trim().equal_ignoring_ascii_case("chunked") {
             return Err(Error.Unsupported(message: "a transfer coding other than chunked"))
           }
         }
@@ -1141,10 +1124,10 @@ fn head_bytes(status: UInt16, fields: Slice[hpack::Field], is_end: Bool, version
   var has_date = false
   var has_length = false
   for field in fields {
-    if same_name(field.name.slice(), second: "Date") {
+    if field.name.equal_ignoring_ascii_case("Date") {
       has_date = true
     }
-    if same_name(field.name.slice(), second: "Content-Length") {
+    if field.name.equal_ignoring_ascii_case("Content-Length") {
       has_length = true
     }
     push_text(mut head, text: field.name.slice())
@@ -1235,7 +1218,7 @@ fn write_one[Stream: streams::Duplex](
       Head(status, fields, is_end, ack, ..) => {
         var has_length = false
         for field in fields {
-          if same_name(field.name.slice(), second: "Content-Length") {
+          if field.name.equal_ignoring_ascii_case("Content-Length") {
             has_length = true
           }
         }
@@ -1336,7 +1319,7 @@ fn forwarded_hops(headers: Headers) -> List[StringSlice] {
         var hop: Option[StringSlice] = None
         for pair in element.split(";") {
           let trimmed = pair.trim()
-          if trimmed.length() > 4 && same_name(trimmed.part(0, to: 4), second: "for=") {
+          if trimmed.length() > 4 && trimmed.part(0, to: 4).equal_ignoring_ascii_case("for=") {
             hop = Some(trimmed.part(4, to: trimmed.length()))
           }
         }
@@ -1628,8 +1611,8 @@ fn serve_one[Stream: streams::Duplex](
 }
 
 fn is_connection_specific(name: StringSlice) -> Bool {
-  same_name(name, second: "connection") || same_name(name, second: "keep-alive") || same_name(name, second: "proxy-connection")
-    || same_name(name, second: "transfer-encoding") || same_name(name, second: "upgrade")
+  name.equal_ignoring_ascii_case("connection") || name.equal_ignoring_ascii_case("keep-alive") || name.equal_ignoring_ascii_case("proxy-connection")
+    || name.equal_ignoring_ascii_case("transfer-encoding") || name.equal_ignoring_ascii_case("upgrade")
 }
 
 fn has_uppercase(name: StringSlice) -> Bool {
@@ -2416,7 +2399,7 @@ fn request_head(method: Method, url: url::Url, headers: Headers, body_length: UI
     push_text(mut head, text: "\r\n")
   }
   for entry in headers.entries() {
-    if !same_name(entry.name.slice(), second: "Content-Length") && !same_name(entry.name.slice(), second: "Connection") {
+    if !entry.name.equal_ignoring_ascii_case("Content-Length") && !entry.name.equal_ignoring_ascii_case("Connection") {
       push_text(mut head, text: entry.name.slice())
       push_text(mut head, text: ": ")
       push_text(mut head, text: entry.value.slice())
@@ -2819,12 +2802,12 @@ fn retry_after_milliseconds(headers: Headers, now: Instant) -> Option[Int64] {
 }
 
 fn is_body_header(name: StringSlice) -> Bool {
-  same_name(name, second: "Content-Type") || same_name(name, second: "Content-Encoding")
-    || same_name(name, second: "Content-Language") || same_name(name, second: "Content-Location")
+  name.equal_ignoring_ascii_case("Content-Type") || name.equal_ignoring_ascii_case("Content-Encoding")
+    || name.equal_ignoring_ascii_case("Content-Language") || name.equal_ignoring_ascii_case("Content-Location")
 }
 
 fn is_credential_header(name: StringSlice) -> Bool {
-  same_name(name, second: "Authorization") || same_name(name, second: "Cookie") || same_name(name, second: "Proxy-Authorization")
+  name.equal_ignoring_ascii_case("Authorization") || name.equal_ignoring_ascii_case("Cookie") || name.equal_ignoring_ascii_case("Proxy-Authorization")
 }
 
 fn without_headers(headers: Headers, drops: fn(StringSlice) -> Bool) -> Headers {
@@ -2882,7 +2865,7 @@ public fn Client.stream[Output](
     if self.options.stores_cookies {
       let now = Clock.now().unix_seconds()
       for entry in opened.headers.entries() {
-        if same_name(entry.name.slice(), second: "Set-Cookie") {
+        if entry.name.equal_ignoring_ascii_case("Set-Cookie") {
           mut self.jar.store(address, set_cookie: entry.value.slice(), now: now)
         }
       }

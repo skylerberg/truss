@@ -11,10 +11,6 @@ test "a string's bytes are its UTF-8 encoding" {
   assert "".bytes().length() == 0
 }
 
-fn same(actual: StringSlice, expected: StringSlice) -> Bool {
-  actual == expected
-}
-
 test "a string and a literal are receivers of the methods of a string slice" {
   let name: String = "caf\u{e9}"
   let copied = name.to_string()
@@ -67,17 +63,17 @@ test "the first and last characters are whole characters" {
 
 test "a substring is taken at character boundaries" {
   let text = "caf\u{e9} au lait"
-  assert same(text.substring(0, to: 3), expected: "caf")
-  assert same(text.substring(3, to: 5), expected: "\u{e9}")
-  assert same(text.substring(5, to: 5), expected: "")
+  assert text.substring(0, to: 3) == "caf"
+  assert text.substring(3, to: 5) == "\u{e9}"
+  assert text.substring(5, to: 5) == ""
   assert text.get_substring(0, to: 5) == Some("caf\u{e9}".slice())
   assert text.get_substring(0, to: 4) is None
   assert text.get_substring(4, to: 5) is None
   assert text.get_substring(6, to: 2) is None
   assert text.get_substring(0, to: 99) is None
   let halves = text.split_at(5)
-  assert same(halves.first, expected: "caf\u{e9}")
-  assert same(halves.second, expected: " au lait")
+  assert halves.first == "caf\u{e9}"
+  assert halves.second == " au lait"
 }
 
 test "prefixes and suffixes are tested and stripped" {
@@ -97,14 +93,14 @@ test "prefixes and suffixes are tested and stripped" {
 }
 
 test "trimming removes Unicode white space from the ends only" {
-  assert same("  hello world \n".trim(), expected: "hello world")
-  assert same("  hello ".trim_start(), expected: "hello ")
-  assert same("  hello ".trim_end(), expected: "  hello")
-  assert same("\u{a0}\u{2003}wide\u{3000}".trim(), expected: "wide")
-  assert same("".trim(), expected: "")
-  assert same("   ".trim(), expected: "")
-  assert same("none".trim(), expected: "none")
-  assert same("\u{e9}t\u{e9}".trim(), expected: "\u{e9}t\u{e9}")
+  assert "  hello world \n".trim() == "hello world"
+  assert "  hello ".trim_start() == "hello "
+  assert "  hello ".trim_end() == "  hello"
+  assert "\u{a0}\u{2003}wide\u{3000}".trim() == "wide"
+  assert "".trim() == ""
+  assert "   ".trim() == ""
+  assert "none".trim() == "none"
+  assert "\u{e9}t\u{e9}".trim() == "\u{e9}t\u{e9}"
 }
 
 test "to_bytes copies a string's bytes" {
@@ -207,7 +203,7 @@ test "split gives the parts between separators, empty ones included" {
   var whole = 0
   for part in "no separator".split("--") {
     whole += 1
-    assert same(part, expected: "no separator")
+    assert part == "no separator"
   }
   assert whole == 1
   var long: List[String] = []
@@ -253,18 +249,6 @@ test "split_once splits at the first separator and split_once_last at the last" 
   assert "=".split_once("=") == Some(core::Pair(first: "", second: ""))
 }
 
-fn collected(parts: List[String], expected: Slice[String]) -> Bool {
-  if parts.length() != expected.length() {
-    return false
-  }
-  for index in 0..parts.length() {
-    if parts[index] != expected[index] {
-      return false
-    }
-  }
-  true
-}
-
 test "find_character gives the byte offset of the first character that matches" {
   let text = "caf\u{e9} 42"
   assert text.find_character(fn(character) { character.is_ascii_digit() }) == Some(6)
@@ -275,12 +259,12 @@ test "find_character gives the byte offset of the first character that matches" 
 }
 
 test "trim_matching removes matching characters from both ends" {
-  assert same("xxhixx".trim_matching(fn(character) { character == Character"x" }), expected: "hi")
-  assert same("123abc456".trim_matching(fn(character) { character.is_ascii_digit() }), expected: "abc")
-  assert same("xxxx".trim_matching(fn(character) { character == Character"x" }), expected: "")
-  assert same("hi".trim_matching(fn(character) { character == Character"x" }), expected: "hi")
-  assert same("\u{e9}a\u{e9}".trim_matching(fn(character) { character == Character"\u{e9}" }), expected: "a")
-  assert same("".trim_matching(fn(character) { character == Character"x" }), expected: "")
+  assert "xxhixx".trim_matching(fn(character) { character == Character"x" }) == "hi"
+  assert "123abc456".trim_matching(fn(character) { character.is_ascii_digit() }) == "abc"
+  assert "xxxx".trim_matching(fn(character) { character == Character"x" }) == ""
+  assert "hi".trim_matching(fn(character) { character == Character"x" }) == "hi"
+  assert "\u{e9}a\u{e9}".trim_matching(fn(character) { character == Character"\u{e9}" }) == "a"
+  assert "".trim_matching(fn(character) { character == Character"x" }) == ""
 }
 
 test "split_matching splits at each character that matches" {
@@ -288,12 +272,12 @@ test "split_matching splits at each character that matches" {
   for part in "a1b22c".split_matching(fn(character) { character.is_ascii_digit() }) {
     mut parts.push(part.to_string())
   }
-  assert collected(parts, expected: ["a", "b", "", "c"])
+  assert parts == ["a", "b", "", "c"]
   var one: List[String] = []
   for part in "plain".split_matching(fn(character) { character.is_ascii_digit() }) {
     mut one.push(part.to_string())
   }
-  assert collected(one, expected: ["plain"])
+  assert one == ["plain"]
 }
 
 test "split_whitespace gives the words, however much white space is between them" {
@@ -301,7 +285,7 @@ test "split_whitespace gives the words, however much white space is between them
   for word in "  the quick\t\tbrown\u{a0}fox \n".split_whitespace() {
     mut words.push(word.to_string())
   }
-  assert collected(words, expected: ["the", "quick", "brown", "fox"])
+  assert words == ["the", "quick", "brown", "fox"]
   var none = 0
   for _ in "   \n ".split_whitespace() {
     none += 1
@@ -316,7 +300,7 @@ test "split_whitespace gives the words, however much white space is between them
   for word in "word".split_whitespace() {
     mut single.push(word.to_string())
   }
-  assert collected(single, expected: ["word"])
+  assert single == ["word"]
 }
 
 test "lines gives each line without its line break" {
@@ -324,12 +308,12 @@ test "lines gives each line without its line break" {
   for line in "first\nsecond\r\nthird".lines() {
     mut lines.push(line.to_string())
   }
-  assert collected(lines, expected: ["first", "second", "third"])
+  assert lines == ["first", "second", "third"]
   var ended: List[String] = []
   for line in "one\n\ntwo\n".lines() {
     mut ended.push(line.to_string())
   }
-  assert collected(ended, expected: ["one", "", "two"])
+  assert ended == ["one", "", "two"]
   var none = 0
   for _ in "".lines() {
     none += 1
@@ -365,7 +349,7 @@ test "clear empties a string, which can then be added to" {
 
 test "from_utf8 takes valid bytes and says where invalid ones start" {
   let valid: List[UInt8] = [104, 195, 169]
-  assert String.from_utf8(own valid) is Ok(text) && text == "h\u{e9}"
+  assert String.from_utf8(own valid) == Ok("h\u{e9}")
   let none: List[UInt8] = []
   assert String.from_utf8(own none) is Ok(text) && text.is_empty()
   let replacement: List[UInt8] = [239, 191, 189]
@@ -473,9 +457,9 @@ test "bytes that are not text become the replacement character, once for each br
 
 test "UTF-16 units become a string, and a lone surrogate says where it is" {
   let plain: List[UInt16] = [104, 233, 8364]
-  assert String.from_utf16(plain) is Ok(text) && text == "h\u{e9}\u{20ac}"
+  assert String.from_utf16(plain) == Ok("h\u{e9}\u{20ac}")
   let pair: List[UInt16] = [55357, 56832, 33]
-  assert String.from_utf16(pair) is Ok(text) && text == "\u{1f600}!"
+  assert String.from_utf16(pair) == Ok("\u{1f600}!")
   let none: List[UInt16] = []
   assert String.from_utf16(none) is Ok(text) && text.is_empty()
   let lone_high: List[UInt16] = [97, 55357]

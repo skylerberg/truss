@@ -1356,7 +1356,8 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       let collection = read_place context frame run base in
       let is_checked =
         match call.callee with
-        | Function { path; _ } -> Mir.list_checked_requires context.lookups.mir path <> []
+        | Function { path; _ } ->
+            Option.is_some (Mir.find_checked_requires context.lookups.mir path)
         | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
       in
       let frame, viewed, low, high =

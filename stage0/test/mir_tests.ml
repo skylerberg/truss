@@ -1070,6 +1070,25 @@ let () =
           Harness.fail "%d `requires` and %d `ensures`" (List.length contract.requires)
             (List.length contract.ensures)
       | None -> Harness.fail "`g` has no contract");
+  Harness.test "a clause that quantifies over a range and can run holds the quantifier as a loop"
+    (fun () ->
+      let packages =
+        Support.setup [ ("app::main", Fixtures.Mir.contract_with_a_quantified_clause_that_runs) ]
+      in
+      let f : Path.t = Top { module_ = Support.parse_module "app::main"; name = "f" } in
+      match Mir.read_contract (make_app_parts packages) f with
+      | Some { form = { requires = [ quantified ]; _ }; _ } ->
+          if not quantified.is_executable then Harness.fail "the quantified clause cannot run";
+          let loops = ref 0 in
+          Mir.iter_formula
+            (fun (statement : Mir.statement) ->
+              match statement.kind with
+              | For { loop = { quantified = Some _; _ }; _ } -> incr loops
+              | _ -> ())
+            quantified.clause;
+          if !loops <> 1 then Harness.fail "the clause holds %d quantifier loops" !loops
+      | Some { form = contract; _ } -> Harness.fail "%d `requires`" (List.length contract.requires)
+      | None -> Harness.fail "`f` has no contract");
   Harness.test "a loop holds its clauses as formulas, and a `proof` block's statement its body"
     (fun () ->
       let packages =

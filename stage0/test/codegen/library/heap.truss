@@ -15,7 +15,7 @@ test "a heap pops its smallest item first" {
     mut heap.push(value)
   }
   assert heap.length() == 7
-  assert heap.peek() is Some(item) && item == 1
+  assert heap.peek() == Some(1)
   assert mut heap.pop() == Some(1)
   assert mut heap.pop() == Some(2)
   assert mut heap.pop() == Some(3)
@@ -28,7 +28,7 @@ test "a heap of the other order pops its largest item first" {
   for value in [5, 3, 8, 1, 9, 2, 7] {
     mut heap.push(value)
   }
-  assert heap.peek() is Some(item) && item == 9
+  assert heap.peek() == Some(9)
   assert drained(own heap) == [9, 8, 7, 5, 3, 2, 1]
 }
 

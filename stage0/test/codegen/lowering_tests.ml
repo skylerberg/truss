@@ -160,6 +160,10 @@ let () =
     Fixtures.Lowering.quantifiers_over_a_list_a_slice_and_a_shelf
 
 let () =
+  Codegen_support.expect_pass "quantifiers whose pattern leaves out the elements it does not match"
+    Fixtures.Lowering.quantifiers_with_a_refutable_pattern
+
+let () =
   Codegen_support.expect_pass
     "constants that are infinite or not a number, which C has no literal for"
     Fixtures.Lowering.infinite_and_not_a_number_constants
