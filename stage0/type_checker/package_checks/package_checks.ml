@@ -66,7 +66,7 @@ let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
       read_definition lookups declaration )
   with
   | Some ((trait, type_), _), (definition, spans) -> (
-      match (Types.find_integer_implementors trait, Intrinsic.builtin_of_path type_) with
+      match (Types.find_integer_implementors trait, Intrinsic.find_builtin type_) with
       | Some builtins, Some builtin when List.mem builtin builtins -> []
       | Some _, _ ->
           [
@@ -136,9 +136,29 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
       Interface.Definition.find_trait_interface lookups.interface impl.implements.trait )
   with
   | Types.Named { path; _ }, Some trait when not trait.is_capability ->
+      let view = Types.find_view impl.for_type in
+      let list_counted_members owner =
+        Resolve.Names.list_members_visible_to_package lookups.interface.names
+          ~package:declaration.module_.package owner
+      in
       List.filter_map
         (fun (method_ : Types.trait_method) ->
-          let own = lookups.interface.names.list_members path method_.method_name in
+          let own = list_counted_members path method_.method_name
+          and of_view =
+            match view with
+            | Some (Types.Named view) ->
+                List.filter
+                  (fun (key : Resolve.Names.key) ->
+                    match key.path with Method { receiver; _ } -> receiver <> Static | _ -> false)
+                  (list_counted_members view.path method_.method_name)
+            | _ -> []
+          in
+          let describe_method ~is_own =
+            match view with
+            | Some view when not is_own ->
+                Printf.sprintf "the `%s` of its view `%s`" method_.method_name (Types.show view)
+            | _ -> Printf.sprintf "a `%s` of its own" method_.method_name
+          in
           let is_same_version (key : Resolve.Names.key) =
             match key.path with
             | Method { receiver; _ } -> receiver = method_.method_receiver
@@ -156,26 +176,29 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
                  (Resolve.Names.make_key declaration)
                  Method_name_clash (locate_header spans definition) message)
           in
-          if own = [] then None
-          else if List.exists is_same_version own then
+          let is_own_version = List.exists is_same_version own in
+          if is_own_version || List.exists is_same_version of_view then
             make_clash
-              (Printf.sprintf
-                 "`%s` has a `%s` of its own that takes %s, so it cannot also get one from `%s`."
-                 (Types.show impl.for_type) method_.method_name
+              (Printf.sprintf "`%s` has %s, which takes %s, so it cannot also get one from `%s`."
+                 (Types.show impl.for_type)
+                 (describe_method ~is_own:is_own_version)
                  (Path.show_receiver method_.method_receiver)
                  (Types.show_trait impl.implements))
+          else if own = [] && of_view = [] then None
           else if declaration.module_.package <> Path.locate_package path then
             make_clash
               (Printf.sprintf
-                 "`%s` has a `%s` of its own, so only an `impl` in its own package can give it \
-                  another."
-                 (Types.show impl.for_type) method_.method_name)
+                 "`%s` has %s, so only an `impl` in its own package can give it another."
+                 (Types.show impl.for_type)
+                 (describe_method ~is_own:(own <> [])))
           else if not written then
             make_clash
               (Printf.sprintf
-                 "`%s` has a `%s` of its own, so this `impl` can give it another only by writing \
-                  it, and `%s` is left to the body `%s` provides."
-                 (Types.show impl.for_type) method_.method_name method_.method_name
+                 "`%s` has %s, so this `impl` can give it another only by writing it, and `%s` is \
+                  left to the body `%s` provides."
+                 (Types.show impl.for_type)
+                 (describe_method ~is_own:(own <> []))
+                 method_.method_name
                  (Types.show_trait impl.implements))
           else None)
         trait.methods
@@ -302,8 +325,8 @@ let grows lookups (start : Path.t) =
 
 let not_strictly_positive_message =
   "A function stored in such a value could be called on the value and call itself through it, so a \
-   function with a `time` clause might not terminate. Remove the `time` clause from the function \
-   type, or pass the function the fields that it needs instead of the whole value."
+   function without `RunForever` might run forever. Add `RunForever` to the function type's \
+   `uses`, or pass the function the fields that it needs instead of the whole value."
 
 let read_written_variant (variants : Syntax.variant list) (variant : Types.variant) =
   match
@@ -477,11 +500,16 @@ let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
   in
   let edges = ref [] in
   Core_walk.walk_definition
-    (Core_walk.make_callee_visitor (function
-      | Function { path; type_arguments }
-        when Path.locate_package path = key.module_.package && type_arguments <> [] ->
-          edges := (path, List.exists grows type_arguments) :: !edges
-      | _ -> ()))
+    {
+      Core_walk.ignore_all with
+      callee =
+        (fun callee ->
+          match callee.target with
+          | Function { path; instantiation = { type_arguments; _ } }
+            when Path.locate_package path = key.module_.package && type_arguments <> [] ->
+              edges := (path, List.exists grows type_arguments) :: !edges
+          | _ -> ());
+    }
     form.definition;
   List.rev !edges
 
@@ -724,6 +752,129 @@ let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
           else None)
         (list_named_constants lookups value)
 
+let must_be_used (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
+  (match declaration.visibility with Private | Internal -> true | Public | Public_opaque -> false)
+  && declaration.ordinal = 0
+  && Option.is_none (lookups.interface.names.find_container (Resolve.Names.make_key declaration))
+  && Option.is_none (Well_known.of_path declaration.path)
+  && (not (Path.is_entry_point declaration.path))
+  &&
+  match declaration.kind with
+  | Function | Method | Constant | Member_constant -> true
+  | Type | Trait | Capability | Theorem | Impl | Test | Law_proof -> false
+
+let list_used_paths (lookups : Lookups.t) key =
+  let used = ref [] in
+  let use path = used := path :: !used in
+  let use_constant : Core.pattern_constant -> unit = function
+    | Named_constant path -> use path
+    | Boolean_constant _ | Integer_constant _ | String_constant _ -> ()
+  in
+  let use_bound : Core.range_bound -> unit = function
+    | Constant_bound path -> use path
+    | Integer_bound _ -> ()
+  in
+  let use_callee (callee : Core.callee) =
+    match callee.target with
+    | Function { path; _ } -> use path
+    | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> ()
+  in
+  Core_walk.walk_definition
+    {
+      Core_walk.ignore_all with
+      callee = use_callee;
+      expression =
+        (fun (node : Core.expression) ->
+          match node.kind with Function_value { path; _ } -> use path | _ -> ());
+      place =
+        (function
+        | Constant { path; _ } -> use path
+        | Local _ | Field _ | Lent _ | Temporary _ -> ());
+      pattern =
+        (fun (node : Core.pattern) ->
+          match node.kind with
+          | Literal value | Equal_to { value; _ } -> use_constant value
+          | Range { start; stop; _ } ->
+              use_bound start;
+              use_bound stop
+          | Wildcard | Bind _ | Variant _ | Record _ | Alternatives _ -> ());
+    }
+    (lookups.read_core key).definition;
+  !used
+
+let locate_name (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
+  match definition.kind with
+  | Function { signature; _ } | Method_declaration signature ->
+      spans.((Resolve.Names.extract_signature_name signature).id)
+  | Constant { name = Plain_name name | Member_name (_, name); _ } -> spans.(name.id)
+  | _ -> raise_bug "an unused definition that is neither a function nor a constant"
+
+let report_unused (lookups : Lookups.t) (declaration : Resolve.Names.declaration) ~is_named =
+  let (code : Diagnostic.Code.usage), noun =
+    match declaration.kind with
+    | Constant | Member_constant -> (Unused_constant, "constant")
+    | _ -> (Unused_function, "function")
+  in
+  let visibility =
+    match declaration.visibility with
+    | Internal -> "internal"
+    | Private -> "private"
+    | Public | Public_opaque -> raise_bug "an unused definition that is public"
+  in
+  let message =
+    if is_named then
+      Printf.sprintf "Only unused definitions use the %s %s `%s`. Delete it with them." visibility
+        noun (Path.show declaration.path)
+    else
+      Printf.sprintf "Nothing in `%s` uses the %s %s `%s`. Delete it."
+        (Path.show_package declaration.module_.package)
+        visibility noun (Path.show declaration.path)
+  in
+  let definition, spans = read_definition lookups declaration in
+  {
+    key = Resolve.Names.make_key declaration;
+    diagnostic = Diagnostic.make ~code:(Usage code) (locate_name spans definition) message;
+  }
+
+let check_unexported (lookups : Lookups.t) package =
+  let uses =
+    List.map
+      (fun declaration ->
+        ( declaration,
+          must_be_used lookups declaration,
+          list_used_paths lookups (Resolve.Names.make_key declaration) ))
+      (lookups.interface.names.list_package_declarations package)
+  in
+  let uses_of_unexported = Path_table.create 64 in
+  let named_by_another = Path_table.create 64 in
+  List.iter
+    (fun ((declaration : Resolve.Names.declaration), is_checked, paths) ->
+      if is_checked then Path_table.replace uses_of_unexported declaration.path paths;
+      List.iter
+        (fun path ->
+          if not (Path.equal path declaration.path) then Path_table.replace named_by_another path ())
+        paths)
+    uses;
+  let reached = Path_table.create 64 in
+  let rec reach paths =
+    List.iter
+      (fun path ->
+        if not (Path_table.mem reached path) then begin
+          Path_table.replace reached path ();
+          Option.iter reach (Path_table.find_opt uses_of_unexported path)
+        end)
+      paths
+  in
+  List.iter (fun (_, is_checked, paths) -> if not is_checked then reach paths) uses;
+  List.filter_map
+    (fun ((declaration : Resolve.Names.declaration), is_checked, _) ->
+      if is_checked && not (Path_table.mem reached declaration.path) then
+        Some
+          (report_unused lookups declaration
+             ~is_named:(Path_table.mem named_by_another declaration.path))
+      else None)
+    uses
+
 type check =
   | Sealed of Resolve.Names.key
   | Impl of Resolve.Names.key
@@ -731,6 +882,7 @@ type check =
   | Constant of Resolve.Names.key
   | Instantiations
   | Tests
+  | Unexported
   | Dependencies
 
 let list_checks (declarations : Resolve.Names.declaration list) =
@@ -747,7 +899,7 @@ let list_checks (declarations : Resolve.Names.declaration list) =
         | Constant | Member_constant -> [ Constant (Resolve.Names.make_key declaration) ]
         | _ -> [])
     declarations
-  @ [ Instantiations; Tests; Dependencies ]
+  @ [ Instantiations; Tests; Unexported; Dependencies ]
 
 let describe_unused_dependency ~package dependency =
   Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." (Path.show_package package)
@@ -766,15 +918,30 @@ let list_unused_dependencies (lookups : Lookups.t) package =
 
 type outcome = Placed of placed list | Unused_dependencies of Path.package list
 
+let check_definition (lookups : Lookups.t) key check_declaration =
+  let names = lookups.interface.names in
+  match check_declaration (names.read_declaration key) with
+  | placed -> Placed placed
+  | exception Interface.Properties.Recursion_limit message ->
+      Placed
+        [
+          {
+            key;
+            diagnostic =
+              Diagnostic.make ~code:(Types Recursion_limit)
+                (names.read_spans key).((names.read_definition key).id)
+                message;
+          };
+        ]
+
 let run (lookups : Lookups.t) package check =
   let list_contained = memoize (list_contained_types lookups) in
   match check with
-  | Sealed key -> Placed (check_sealed lookups (lookups.interface.names.read_declaration key))
-  | Impl key ->
-      Placed (check_impl lookups ~list_contained (lookups.interface.names.read_declaration key))
-  | Type key ->
-      Placed (check_type lookups ~list_contained (lookups.interface.names.read_declaration key))
-  | Constant key -> Placed (check_constant lookups (lookups.interface.names.read_declaration key))
+  | Sealed key -> check_definition lookups key (check_sealed lookups)
+  | Impl key -> check_definition lookups key (check_impl lookups ~list_contained)
+  | Type key -> check_definition lookups key (check_type lookups ~list_contained)
+  | Constant key -> check_definition lookups key (check_constant lookups)
   | Instantiations -> Placed (check_instantiation lookups package)
   | Tests -> Placed (check_tests lookups package)
+  | Unexported -> Placed (check_unexported lookups package)
   | Dependencies -> Unused_dependencies (list_unused_dependencies lookups package)

@@ -34,7 +34,7 @@ let create ~scan_foreign_escape source diagnostics =
     text = Source.text source;
     length = String.length (Source.text source);
     diagnostics;
-    position = Source.line_start source 0;
+    position = Source.compute_line_start source 0;
     first_line_break = None;
     blank_line = false;
     line_is_blank = true;
@@ -109,11 +109,11 @@ let measure_line_break cursor index =
   if is_at cursor index '\r' && is_at cursor (index + 1) '\n' then 2 else 1
 
 let extract_indentation cursor offset =
-  let start = Source.line_start cursor.source offset in
+  let start = Source.compute_line_start cursor.source offset in
   String.sub cursor.text start (skip_spaces cursor start - start)
 
 let count_spaces_before cursor offset =
-  let line_start = Source.line_start cursor.source offset in
+  let line_start = Source.compute_line_start cursor.source offset in
   let rec loop position =
     if position > line_start && is_space cursor.text.[position - 1] then loop (position - 1)
     else position
@@ -121,7 +121,7 @@ let count_spaces_before cursor offset =
   loop offset
 
 let has_only_spaces_before cursor offset =
-  count_spaces_before cursor offset = Source.line_start cursor.source offset
+  count_spaces_before cursor offset = Source.compute_line_start cursor.source offset
 
 let describe_code_point scalar_value =
   let code_point = Uchar.to_int scalar_value in

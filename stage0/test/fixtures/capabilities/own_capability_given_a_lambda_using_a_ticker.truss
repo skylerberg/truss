@@ -1,0 +1,11 @@
+capability Ticker {
+  fn tick() -> UInt64
+    cost time O(1)
+}
+
+fn sneaky(action: (fn() -> UInt64 uses generic Mine)) -> UInt64
+  uses generic Mine
+{
+  let again: (fn() -> UInt64 uses generic Mine) = fn() { Ticker.tick() }
+  again()
+}

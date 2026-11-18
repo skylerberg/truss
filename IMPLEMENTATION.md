@@ -27,6 +27,13 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `brew install z3` on macOS, or from the release's archive, and put it on
   the path or name it in `TRUSS_Z3`. CI downloads that release and checks
   its hash.
+- **`stage0/tools/prover_queries`** prints the solver's input for each
+  obligation that starts at a position, written as a diagnostic writes it:
+  `dune exec ./stage0/tools/prover_queries/prover_queries.exe --
+  standard/numbers/floats/floats.truss:6:13`. A file of a package is named
+  by its path. The output is one script for `z3 -in`, which prints each
+  obligation's answer, Z3's reason for an unknown answer, and the steps Z3
+  used.
 - **The Unicode tables are generated** from the Unicode character database
   files that `stage0/tools/unicode/sources.txt` lists with their hashes:
   the compiler's into `stage0/support/unicode/unicode_tables.ml`, and the standard
@@ -72,8 +79,9 @@ develop as well as make it easier to bootstrap the compiler in parts.
 ### The parser
 
 - **The parser reads tokens, never the source text.** A fix that would move
-  code edits around it instead, so the fix never respells the code: `x as T`
-  becomes `T.from(x)` by inserting `T.from(` and replacing ` as T` with `)`.
+  code edits around it instead, so the fix never respells the code:
+  `x as Int64` becomes `Int64.from_integer(x)` by inserting
+  `Int64.from_integer(` and replacing ` as Int64` with `)`.
 - **The tree holds no positions.** A node holds an id, and its item's span
   table holds the node's span at that index. A definition that only moved
   parses to an equal tree, so a change to positions alone re-runs only the
@@ -129,7 +137,7 @@ unchecked.
 ### Module names
 
 Code names each module by its path, such as `Resolve.Names` or
-`Emit_c.Builder`, so a reader finds a definition without searching for the
+`Emit_c.Ir_builder`, so a reader finds a definition without searching for the
 module a short name stands for. Code has no `open`: a name from another
 module is qualified, as in `Facts.find_visible_type`, and no `open` can
 shadow a name in scope. Code has no module alias either. Many modules share a name,
@@ -168,16 +176,23 @@ Every stage of stage0 is tested the same way:
   package database, which a test executable loads once from the user's cache.
   A test must not give a new database the library's sources: that parses
   and checks the whole library again, so every such test gets slower each
-  time the library grows.
-- **The standard library's own tests are written in Truss.** Each file of
-  `stage0/test/codegen/library/` is a module of tests for one module of the
-  library, named after it. `library_tests` builds every file's tests into
-  one program and runs it, so a new test adds its own code to that build
-  and no build of its own. A test of a library function's result goes
-  there. A test of a panic goes in the module `panics`: each of its tests
-  must panic with a message that contains the test's name. A test written
-  in OCaml that compiles a program of its own is for the compiler: a
-  diagnostic, generated code, or a whole program's output.
+  time the library grows. A test whose probe module must be in the standard
+  package, such as one that calls an intrinsic, extends the stored package
+  with `Database.For_testing.extend_package`, which checks only the probe.
+- **A test whose only claim is that it passes is written in Truss.** Each
+  file under `stage0/test/codegen/modules/` is a module of tests. A file of
+  `modules/library/` tests one module of the standard library and is named
+  after it. The other directories, such as `modules/feature/` and
+  `modules/owning/`, test the code generated for a construct. `module_tests`
+  divides the modules into the shares that `TRUSS_TEST_SHARE` names, builds
+  the tests of every module in its share into one program, and runs it. The
+  `runtest` alias runs two shares in parallel. A new test therefore adds
+  its code to one build and starts no build of its own. A test of a panic
+  goes in the module `library::panics`: each of its tests must panic with a
+  message that contains the test's name. A test written in OCaml that
+  compiles a program of its own is for what a passing test cannot show: a
+  diagnostic, the generated code, a reported source location, or a whole
+  program's output.
 - **A test's Truss source is a fixture file, not an OCaml string.** The
   text a test checks lives in `fixtures/<suite>/<name>.truss` beside the
   suite, where it can be read, edited, and renamed as Truss.

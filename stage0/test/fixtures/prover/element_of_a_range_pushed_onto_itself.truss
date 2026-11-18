@@ -1,0 +1,5 @@
+fn f(names: mut List[String])
+  requires names.length() >= 1
+{
+  mut names[..][0].push(names[0])
+}

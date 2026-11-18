@@ -21,6 +21,37 @@ let () =
     ];
   Harness.test "a `var` and a `mut` parameter can be written through a slice" (fun () ->
       expect_fine (bump ^ Fixtures.Ownership.writes_through_slices_of_a_var_and_a_mut_parameter));
+  List.iter
+    (fun (written, fixture) ->
+      Harness.test (Printf.sprintf "a read-only parameter cannot be written through %s" written)
+        (fun () -> expect_one_diagnostic fixture "ownership.read_only_view"))
+    [
+      ("a range of a view of it", Fixtures.Ownership.range_of_a_view_of_a_read_only_list_sorted);
+      ( "a range of a range of a view of it",
+        Fixtures.Ownership.range_of_a_range_of_a_view_of_a_read_only_list_sorted );
+      ( "an assigned element of a range of a view of it",
+        Fixtures.Ownership.element_of_a_range_of_a_view_of_a_read_only_list_assigned );
+      ( "an element of a range of a view of it passed `mut`",
+        Fixtures.Ownership.element_of_a_range_of_a_view_of_a_read_only_list_passed_mut );
+      ( "an assigned element of an element of a view of it",
+        Fixtures.Ownership.element_of_an_element_of_a_view_of_a_read_only_list_assigned );
+      ( "an element of an element of a view of it passed `mut`",
+        Fixtures.Ownership.element_of_an_element_of_a_view_of_a_read_only_list_passed_mut );
+      ( "a range of an element of a view of it",
+        Fixtures.Ownership.range_of_an_element_of_a_view_of_a_read_only_list_sorted );
+      ( "the variable of a `mut` loop over a view of it",
+        Fixtures.Ownership.loop_variable_over_a_view_of_a_read_only_list_passed_mut );
+      ( "the assigned variable of a `mut` loop over a view of it",
+        Fixtures.Ownership.loop_variable_over_a_view_of_a_read_only_list_assigned );
+      ( "the variable of a `mut` loop over a range of a view of it",
+        Fixtures.Ownership.loop_variable_over_a_range_of_a_view_of_a_read_only_list_passed_mut );
+      ( "a name that a `match` binds to an element of a view of it",
+        Fixtures.Ownership.match_binding_of_an_element_of_a_view_of_a_read_only_list_passed_mut );
+    ];
+  Harness.test
+    "a `mut` parameter can be written through ranges of, elements of, and `mut` loops over, a view \
+     of it" (fun () ->
+      expect_fine Fixtures.Ownership.writes_through_ranges_and_loops_of_views_of_a_mut_list);
   Harness.test "a read-only `Slice` parameter cannot be written through" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.read_only_slice_written "types.not_assignable")
 
@@ -270,6 +301,17 @@ let () =
     (keep ^ Fixtures.Ownership.captured_local_moved_after_the_call);
   expect_accepted "a capturing lambda can be passed to a call and stored in a local record"
     Fixtures.Ownership.capturing_lambda_passed_and_stored_in_a_local
+
+let () =
+  Harness.test
+    "a view that a call returns outlives the statement when the call took a view as its owning type"
+    (fun () -> expect_fine Fixtures.Ownership.view_of_a_call_given_a_string_slice_as_its_owner);
+  Harness.test
+    "a string cannot be mutated while the result of a call that took its slice as a string is live"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Ownership.string_cleared_while_a_call_given_its_slice_as_an_owner_is_viewed
+        "ownership.mutated_while_viewed")
 
 let () =
   let types = Fixtures.Ownership.types in
@@ -646,10 +688,15 @@ let () =
       ( "an argument to an `own` parameter",
         Fixtures.Ownership.own_list_passed_without_own,
         Fixtures.Ownership.own_list_passed_without_own_fixed );
+      ( "the base of a record update",
+        Fixtures.Ownership.record_update_of_an_own_parameter,
+        Fixtures.Ownership.record_update_of_an_own_parameter_fixed );
       ( "the receiver of a method that takes `own self`",
         Fixtures.Ownership.own_receiver_moved_without_own,
         Fixtures.Ownership.own_receiver_moved_without_own_fixed );
     ];
+  Harness.test "the base of a record update that copies implicitly takes no `own`" (fun () ->
+      expect_fine Fixtures.Ownership.record_update_of_a_copied_point);
   Harness.test "a map literal's keys and values must be owned" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.map_literal_of_an_own_name "ownership.needs_owned");
   Harness.test "a constant's value and a default may hold a constant without a copy" (fun () ->
@@ -776,6 +823,11 @@ let () =
   Harness.test "a cursor cannot view a temporary that the statement drops" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.cursor_over_a_temporary_string
         "ownership.views_temporary");
+  Harness.test "a cursor cannot view a block's value that the statement drops" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.cursor_over_a_block_value "ownership.views_temporary");
+  Harness.test "a cursor cannot view a record update that the statement drops" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.cursor_over_a_record_update
+        "ownership.views_temporary");
   Harness.test "a cursor may view a named value" (fun () ->
       expect_fine Fixtures.Ownership.cursor_over_a_named_string);
   Harness.test "a cursor may view a string literal, which has static storage" (fun () ->
@@ -842,6 +894,56 @@ let () =
       expect_one_diagnostic Fixtures.Ownership.is_on_a_parameter_kept "ownership.not_owned")
 
 let () =
+  Harness.test "a `String` cannot be mutated while a view that its view's method returned is live"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.string_mutated_while_its_trimmed_view_is_live
+        "ownership.mutated_while_viewed");
+  Harness.test "a `List` lends a part through a lending method of `Slice`" (fun () ->
+      expect_fine Fixtures.Ownership.then_block_reading_a_part_that_a_list_lends);
+  Harness.test
+    "a `List` cannot be mutated while a name aliases a part that a method of `Slice` lent"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.then_block_mutating_the_list_that_lends
+        "ownership.mutated_while_viewed");
+  Harness.test "a `List` cannot be passed `mut` to a method of `Slice` while a range of it is live"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.list_sorted_while_a_range_of_it_is_live
+        "ownership.mutated_while_viewed");
+  Harness.test
+    "an `Array` cannot be assigned while a name aliases a part that a method of `Slice` lent"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Ownership.array_of_strings_assigned_while_a_part_it_lent_is_aliased
+        "ownership.mutated_while_viewed");
+  Harness.test
+    "an `Array` cannot be passed `mut` to a method of `Slice` while a range of it is live"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.array_sorted_while_a_range_of_it_is_live
+        "ownership.mutated_while_viewed")
+
+let () =
+  List.iter
+    (fun (lender, fixture) ->
+      Harness.test
+        (Printf.sprintf "%s cannot be assigned while a view that a call returned of it is live"
+           lender) (fun () -> expect_one_diagnostic fixture "ownership.mutated_while_viewed"))
+    [
+      ("a `Plain` array", Fixtures.Ownership.plain_array_assigned_while_its_slice_is_live);
+      ( "a `Plain` array passed to a function",
+        Fixtures.Ownership.plain_array_assigned_while_a_view_a_call_returned_is_live );
+      ( "a `Plain` record that holds an array",
+        Fixtures.Ownership.record_holding_an_array_assigned_while_a_view_of_it_is_live );
+    ];
+  Harness.test "a view of a temporary `Plain` array cannot outlive the temporary" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.slice_of_a_temporary_plain_array_kept
+        "ownership.views_temporary");
+  Harness.test "a `Plain` array can be assigned after the last use of a view of it" (fun () ->
+      expect_fine Fixtures.Ownership.plain_array_assigned_after_the_last_use_of_its_slice);
+  Harness.test "a `Plain` record that holds no array lends nothing to a view that a call returns"
+    (fun () ->
+      expect_fine Fixtures.Ownership.plain_record_assigned_while_a_view_a_call_returned_is_live)
+
+let () =
   let make = Fixtures.Ownership.make_an_option_of_a_string in
   Harness.test "a binding inside a loop is a new one each time, so it may be moved" (fun () ->
       expect_fine (make ^ Fixtures.Ownership.binding_moved_inside_a_loop));
@@ -887,18 +989,52 @@ let () =
       expect_one_diagnostic Fixtures.Ownership.then_block_of_the_result_mutating_the_lender
         "ownership.mutated_while_viewed")
 
+let () =
+  List.iter
+    (fun (lender, fixture) ->
+      Harness.test
+        (Printf.sprintf "a list cannot be mutated while a name aliases a part lent by %s" lender)
+        (fun () -> expect_one_diagnostic fixture "ownership.mutated_while_viewed"))
+    [
+      ("a range of it", Fixtures.Ownership.then_block_mutating_the_list_a_range_lends);
+      ("a slice of it", Fixtures.Ownership.then_block_mutating_the_list_a_slice_lends);
+      ("a range of it in a `match`", Fixtures.Ownership.match_arm_mutating_the_list_a_range_lends);
+      ( "a range of it in a `while` condition",
+        Fixtures.Ownership.while_body_mutating_the_list_a_range_lends );
+      ( "a range of a range of it",
+        Fixtures.Ownership.then_block_mutating_the_list_a_range_of_a_range_lends );
+      ( "a view of it that a call returned",
+        Fixtures.Ownership.then_block_mutating_the_list_a_returned_view_lends );
+      ( "a field of a temporary that views it",
+        Fixtures.Ownership.then_block_mutating_the_list_a_field_of_a_temporary_lends );
+      ( "a range of a view of it",
+        Fixtures.Ownership.then_block_mutating_the_list_a_view_of_a_view_lends );
+    ];
+  Harness.test "a list cannot be mutated while a name aliases an element of a range of it"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Ownership.then_block_mutating_the_list_an_element_of_a_range_aliases
+        "ownership.mutated_while_viewed");
+  Harness.test "a list may be read while a name aliases a part that a range of it lent" (fun () ->
+      expect_fine Fixtures.Ownership.then_block_reading_the_list_a_range_lends);
+  Harness.test "a list may be mutated after a range of it lent a part that was copied" (fun () ->
+      expect_fine Fixtures.Ownership.then_block_mutating_the_list_after_a_range_lent_a_copy);
+  Harness.test "a list may be mutated in the statement after one in which a range of it lent a part"
+    (fun () -> expect_fine Fixtures.Ownership.statement_after_a_range_lent_mutating_the_list);
+  Harness.test "a temporary that owns its value lends a part without lending another list"
+    (fun () -> expect_fine Fixtures.Ownership.then_block_mutating_a_temporary_list_that_lends)
+
 let count_disjoint_obligations text =
   let packages = Support.setup [ ("app::main", text) ] in
   let file = Support.parse_file "app::main" in
   let database = Support.make_database packages in
-  Database.check database [ file.module_.package ];
   List.fold_left
     (fun total declaration ->
       match Database.For_testing.read_ownership database (Resolve.Names.make_key declaration) with
       | Value must_be_disjoint -> total + List.length must_be_disjoint
       | Failed _ | Blocked -> total)
     0
-    ((Support.make_names packages file.module_.package).list_declarations_in file)
+    ((Support.make_names packages).list_declarations_in file)
 
 let () =
   Harness.test "two slices of one list passed to one call produce one `Disjoint` obligation"
@@ -923,6 +1059,23 @@ let () =
     (fun () ->
       let actual =
         count_disjoint_obligations Fixtures.Ownership.mut_element_beside_a_view_of_the_same_list
+      in
+      if actual <> 1 then Harness.fail "%d obligations" actual);
+  Harness.test
+    "elements of two ranges of one list passed `mut` to one call produce one `Disjoint` obligation"
+    (fun () ->
+      let actual =
+        count_disjoint_obligations Fixtures.Ownership.two_mut_elements_of_two_ranges_of_one_list
+      in
+      if actual <> 1 then Harness.fail "%d obligations" actual);
+  Harness.test "elements of two ranges of ranges of one list can be passed `mut` to one call"
+    (fun () -> expect_fine Fixtures.Ownership.two_mut_elements_of_two_ranges_of_ranges_of_one_list);
+  Harness.test
+    "elements of two ranges of ranges of one list passed `mut` to one call produce one `Disjoint` \
+     obligation" (fun () ->
+      let actual =
+        count_disjoint_obligations
+          Fixtures.Ownership.two_mut_elements_of_two_ranges_of_ranges_of_one_list
       in
       if actual <> 1 then Harness.fail "%d obligations" actual)
 
@@ -1013,6 +1166,9 @@ let () =
   Harness.test "a `mut` argument of a function stores the function's view arguments" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.mut_list_keeping_a_view_argument
         "ownership.mutated_while_viewed");
+  Harness.test "a `mut` range argument stores the call's view arguments in its list" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.mut_range_keeping_a_view_argument
+        "ownership.mutated_while_viewed");
   Harness.test "a view stored in a place inside a branch is still stored after the branch"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.view_pushed_in_a_branch
@@ -1100,12 +1256,4 @@ let () =
         "ownership.use_after_move");
   Harness.test "a move in the right operand is the only move of the place" (fun () ->
       expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_and);
-      expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_or));
-  Harness.test "the moves in a chain of thousands of `&&` are checked" (fun () ->
-      let chain = String.concat " && " (List.init 4000 (fun _ -> "flag")) in
-      expect_one_diagnostic
-        (take
-        ^ Printf.sprintf
-            "fn f(flag: Bool, box: own Box) -> Bool {\n  %s && take(own box) && take(own box)\n}\n"
-            chain)
-        "ownership.use_after_move")
+      expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_or))

@@ -1,0 +1,13 @@
+trait Step {
+  fn step(mut self)
+}
+
+type Spinner(count: UInt64)
+
+impl Step for Spinner {
+  fn step(mut self)
+    uses RunForever
+  {
+    while true {}
+  }
+}

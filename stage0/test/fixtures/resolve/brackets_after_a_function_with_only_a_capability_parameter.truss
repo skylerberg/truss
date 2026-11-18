@@ -1,0 +1,11 @@
+fn apply(visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
+{
+  visit(1)
+}
+
+fn ignore(value: Int64) {}
+
+fn f() {
+  apply[Int64](ignore)
+}

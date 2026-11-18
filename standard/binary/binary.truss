@@ -9,17 +9,17 @@ public type DecodeError =
   derives Equal
 
 impl Display for DecodeError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       UnexpectedEnd(needed, available) => {
-        mut output.write("the bytes end: ")
+        mut output.push("the bytes end: ")
         needed.display(mut output)
-        mut output.write(" needed, ")
+        mut output.push(" needed, ")
         available.display(mut output)
-        mut output.write(" left")
+        mut output.push(" left")
       }
-      Overlong => mut output.write("the variable-length integer does not fit in 64 bits")
+      Overlong => mut output.push("the variable-length integer does not fit in 64 bits")
     }
   }
 }

@@ -24,7 +24,7 @@ type operand =
   | Take of { place : place; type_ : Types.ty; origin : Core.origin }
   | Constant of { value : constant; type_ : Types.ty }
 
-type callee = operand Core.target
+type callee = { target : operand Core.target; uses : Types.capability_set }
 
 type function_argument =
   | Function_reference of { path : Path.t; origin : Core.origin }
@@ -34,14 +34,7 @@ type argument =
   | Passed of { mode : Types.mode; value : operand; function_ : function_argument option }
   | Default
 
-type call = {
-  callee : callee;
-  arguments : argument list;
-  uses : Types.capability_set;
-  node : Core.id;
-  origin : Core.origin;
-}
-
+type call = { callee : callee; arguments : argument list; node : Core.id; origin : Core.origin }
 type capture = { local : Core.local; type_ : Types.ty; place : place }
 
 type yielded =
@@ -88,7 +81,7 @@ type rvalue =
     }
   | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
   | Copy of operand
-  | Function_value of { path : Path.t; type_arguments : Types.argument list; is_argument : bool }
+  | Function_value of { path : Path.t; instantiation : Types.instantiation; is_argument : bool }
   | Lambda of { body : int; captures : capture list; is_argument : bool }
   | Value_parameter of Types.parameter
   | Specification of specification
@@ -113,7 +106,7 @@ and specification =
       arguments : operand list;
       unconverted : Types.ty list;
     }
-  | Method_time of callee
+  | Method_cost of { metric : Metric.t; method_ : operand Core.target }
   | Map of (operand * operand) list
   | Quantified of {
       quantifier : Core.quantifier;
@@ -140,7 +133,7 @@ and formula = {
   lambdas : body array;
 }
 
-and bound = Finite | Order_of of formula | At_most of formula | Exactly of formula
+and bound = Order_of of formula | At_most of formula | Exactly of formula
 and cost = { origin : Core.origin; amortized : bool; resource : Core.resource; bound : bound }
 and loop_clause = Invariant of formula | Decreases of formula list | Cost of cost
 and quantified = { quantifier : Core.quantifier; decides : local }

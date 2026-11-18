@@ -1,6 +1,0 @@
-impl Display for demo::geometry::Point {
-  fn display(self, output: mut TextBuilder)
-  {
-    mut output.write("a point of the plane")
-  }
-}

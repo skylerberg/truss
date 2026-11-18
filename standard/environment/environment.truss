@@ -1,8 +1,8 @@
 public type OperatingSystem = Linux | MacOs | Windows | FreeBsd | Other
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 public type Architecture = X86With64Bits | Arm64 | X86 | Arm | RiscV64 | WebAssembly32 | Other
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 public type Platform(
   operating_system: OperatingSystem,
@@ -11,8 +11,10 @@ public type Platform(
   host_name: String,
   process_identifier: UInt32,
 )
+  derives Equal
 
 public type Variable(name: String, value: String)
+  derives Equal
 
 public type Location = Home | Temporary | Executable | Configuration | Cache | Data
   derives Equal, Hash, Ordered
@@ -61,7 +63,7 @@ public fn FixedEnvironment.with_zone(own self, name: StringSlice, rules: own Lis
 impl Environment for FixedEnvironment {
   fn variable(self, name: StringSlice) -> Option[String]
   {
-    self.variables.get(name.to_string()).map(fn(value) { value.copy() })
+    self.variables.get(name).map(fn(value) { value.copy() })
   }
 
   fn variables(self) -> List[Variable]
@@ -92,6 +94,6 @@ impl Environment for FixedEnvironment {
 
   fn zone_rules(self, name: StringSlice) -> Option[List[UInt8]]
   {
-    self.zones.get(name.to_string()).map(fn(value) { value.copy() })
+    self.zones.get(name).map(fn(value) { value.copy() })
   }
 }

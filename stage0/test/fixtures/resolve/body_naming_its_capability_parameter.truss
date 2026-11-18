@@ -1,0 +1,6 @@
+fn f(visit: (fn() uses generic Granted))
+  uses generic Granted
+{
+  let held: (fn() uses generic Granted) = visit
+  held()
+}

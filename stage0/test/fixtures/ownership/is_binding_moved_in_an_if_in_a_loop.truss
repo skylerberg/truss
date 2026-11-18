@@ -1,4 +1,6 @@
-fn f(ready: Bool) {
+fn f(ready: Bool)
+  uses RunForever
+{
   while ready {
     if make() is Some(text) {
       keep(own text)

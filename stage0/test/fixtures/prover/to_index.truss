@@ -1,17 +1,17 @@
 fn to_index(value: UInt8) -> UInt64
   ensures result == value
 {
-  UInt64.from(value)
+  UInt64.from_integer(value)
 }
 
 fn to_signed(value: UInt16) -> Int32
   ensures result == value
 {
-  Int32.from(value)
+  Int32.from_integer(value)
 }
 
 fn to_wider(value: Int8) -> Int64
   ensures result == value
 {
-  Int64.from(value)
+  Int64.from_integer(value)
 }

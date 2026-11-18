@@ -1,0 +1,12 @@
+fn f(items: List[Int64], limit: UInt64)
+  cost time O(limit + items.length())
+{
+  var index: UInt64 = 0
+  while index < limit || costly(items)
+    invariant index <= limit
+    decreases limit - index
+    cost time O(index)
+  {
+    index = index + 1
+  }
+}

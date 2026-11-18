@@ -3,7 +3,7 @@ type snapshot
 val take_snapshot : string -> (snapshot * (string * Path.package) list, string) result
 val retake : snapshot -> (snapshot, string) result
 val locate_root : snapshot -> string
-val open_database : ?checks:bool -> snapshot -> Database.t
+val open_database : snapshot -> Database.t
 val problems : snapshot -> Project.problem list
 val list_dependency_problems : snapshot -> Database.t -> Project.problem list
 val list_packages : snapshot -> (string * Path.package) list
@@ -12,11 +12,9 @@ val list_registry_packages : snapshot -> (Path.package * Registry.Version.t * st
 val lock_fix : snapshot -> string option
 val list_package_files : snapshot -> Path.package -> Path.file list
 val list_dependency_names : snapshot -> Path.package -> Path.package list
-val read_source : snapshot -> Path.file -> Source.t
 val locate_file : snapshot -> Path.file -> string
 val list_package_databases : unit -> string list
 val make_trial : snapshot -> (string * string option) list -> snapshot
-val fetch_published : Path.package -> Registry.Version.t -> (snapshot, string) result
 val flush : unit -> unit
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
@@ -47,6 +45,7 @@ val reset : unit -> unit
 
 module For_testing : sig
   val load_standard_package_database : unit -> Database.package_database
+  val copy_standard_package_database : into:string -> unit
   val build_cold_database : snapshot -> Database.t
   val collect_cache : unit -> unit
   val listen : key:string -> (Unix.file_descr, string) result

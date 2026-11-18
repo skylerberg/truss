@@ -25,7 +25,6 @@ let () =
     Database.create
       [ { name = Path.standard_package; dependencies = []; files = Standard_library.files } ]
   in
-  Database.check database [ Path.standard_package ];
   let show channel (name, queries, seconds, failed) =
     Printf.fprintf channel "%8.2f s %6d queries  %s%s\n%!" seconds queries name
       (if failed = 0 then "" else Printf.sprintf " (%d not proven)" failed)
@@ -36,7 +35,7 @@ let () =
         match Database.list_file_diagnostics database file with
         | _ :: _ -> None
         | [] ->
-            let runs_before = Solver.count_queries_run solver in
+            let runs_before = Solver.For_testing.count_queries_run solver in
             let start = Unix.gettimeofday () in
             let failed =
               List.length
@@ -49,7 +48,7 @@ let () =
             in
             let row =
               ( Path.show_file file,
-                Solver.count_queries_run solver - runs_before,
+                Solver.For_testing.count_queries_run solver - runs_before,
                 Unix.gettimeofday () -. start,
                 failed )
             in

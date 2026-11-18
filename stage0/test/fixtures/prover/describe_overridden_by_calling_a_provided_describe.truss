@@ -1,0 +1,27 @@
+trait Describe {
+  fn size(self) -> Int64
+
+  fn describe(self) -> Int64 {
+    self.size()
+  }
+}
+
+type Inner(size: Int64)
+
+type Outer(inner: Inner)
+
+impl Describe for Inner {
+  fn size(self) -> Int64 {
+    self.size
+  }
+}
+
+impl Describe for Outer {
+  fn size(self) -> Int64 {
+    self.inner.size
+  }
+
+  fn describe(self) -> Int64 {
+    self.inner.describe()
+  }
+}

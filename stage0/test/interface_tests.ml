@@ -4,27 +4,9 @@ let check packages =
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_no_diagnostics = Support.expect_no_diagnostics ~check
 let app name : Path.t = Top { module_ = Support.parse_module "app::main"; name }
-
-let make_interface packages =
-  Database.make_interface_lookups (Support.make_database packages)
-    [ (Support.parse_module "app::main").package ]
-
+let make_interface packages = Database.make_interface_lookups (Support.make_database packages)
 let make_standard_path = Path.make_standard_path
 let int64 = Types.make_builtin Int64
-
-let () =
-  let packages = Support.setup [] in
-  List.iter
-    (fun ((file : Path.file), text) ->
-      Harness.test
-        (Printf.sprintf "%s has no interface errors" (Path.show_file file))
-        (fun () ->
-          let source = Source.create ~path:(Path.show_file file) text in
-          List.iter
-            (fun diagnostic -> Harness.fail "%s" (Diagnostic.render source diagnostic))
-            (Database.For_testing.list_diagnostics [ Interface ] (Support.make_database packages)
-               file)))
-    Standard_library.files
 
 let () =
   Harness.test "a function's signature is elaborated" (fun () ->
@@ -159,12 +141,24 @@ let () =
       expect_one_diagnostic Fixtures.Interface.equal_impl_with_an_extra_method "types.extra_member");
   Harness.test "an impl must give every associated type" (fun () ->
       expect_one_diagnostic Fixtures.Interface.add_impl_without_output "types.missing_member");
+  Harness.test "a missing associated type is reported once where a method writes a type for it"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Interface.add_impl_without_output_returning_meters
+        "types.missing_member");
   Harness.test "the traits a trait requires must be implemented" (fun () ->
       expect_one_diagnostic Fixtures.Interface.ordered_impl_without_equal
         "types.missing_required_impl");
   Harness.test "nothing can implement Panic" (fun () ->
-      expect_one_diagnostic Fixtures.Interface.panic_impl "types.implements_panic");
-  Harness.test "every standard capability except Panic has exactly one real implementation"
+      expect_one_diagnostic Fixtures.Interface.panic_impl "types.implements_built_in_capability"
+        ~says:"Nothing can implement `Panic`: no Truss code runs after a panic");
+  Harness.test "nothing can implement RunForever" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.run_forever_impl
+        "types.implements_built_in_capability"
+        ~says:
+          "Nothing can implement `RunForever`, since a `provide` of it would let a function that \
+           does not declare `RunForever` run forever.");
+  Harness.test
+    "every standard capability except Panic and RunForever has exactly one real implementation"
     (fun () ->
       let packages = Support.setup [] in
       let interface = make_interface packages in
@@ -181,32 +175,32 @@ let () =
       in
       match
         List.partition
-          (fun (capability : Resolve.Names.declaration) -> Well_known.is Panic capability.path)
+          (fun (capability : Resolve.Names.declaration) ->
+            Types.is_built_in_capability (Capability capability.path))
           capabilities
       with
-      | [ panic ], others ->
-          if has_real_implementation panic then Harness.fail "Panic has a real implementation";
+      | [ first; second ], others ->
+          List.iter
+            (fun (built_in : Resolve.Names.declaration) ->
+              if has_real_implementation built_in then
+                Harness.fail "%s has a real implementation" (Path.show built_in.path))
+            [ first; second ];
           List.iter
             (fun (capability : Resolve.Names.declaration) ->
               if not (has_real_implementation capability) then
                 Harness.fail "%s has no real implementation" (Path.show capability.path))
             others
-      | _ -> Harness.fail "the standard library does not declare Panic exactly once");
-  Harness.test "a test cannot declare Panic, with a fix that removes its uses" (fun () ->
-      expect_one_diagnostic "test \"t\" uses Panic {\n  assert 1 + 1 == 2\n}\n"
-        "types.no_real_implementation" ~fixed:"test \"t\" {\n  assert 1 + 1 == 2\n}\n");
-  Harness.test "the fix removes Panic and one comma beside it from a test's uses" (fun () ->
+      | _ -> Harness.fail "the standard library does not declare Panic and RunForever exactly once");
+  Harness.test "a test declares Panic or RunForever, which leaves it deterministic" (fun () ->
       List.iter
-        (fun (written, fixed) ->
-          expect_one_diagnostic
-            (Printf.sprintf "test \"t\" uses %s {}\n" written)
-            "types.no_real_implementation"
-            ~fixed:(Printf.sprintf "test \"t\" uses %s {}\n" fixed))
-        [
-          ("Clock, Panic", "Clock");
-          ("Panic, Clock", "Clock");
-          ("Clock, Panic, Random", "Clock, Random");
-        ]);
+        (fun (written, is_external) ->
+          let text = Printf.sprintf "test \"t\" uses %s {}\n" written in
+          expect_no_diagnostics [ ("app::main", text) ];
+          let test : Path.t = Test { module_ = Support.parse_module "app::main"; name = "t" } in
+          let packages = Support.setup [ ("app::main", text) ] in
+          if Interface.Definition.is_external_test (make_interface packages) test <> is_external
+          then Harness.fail "a test that uses %s is external: %b" written (not is_external))
+        [ ("Panic", false); ("RunForever", false); ("Clock, Panic", true) ]);
   Harness.test "a test cannot declare a capability that has no real implementation" (fun () ->
       expect_one_diagnostic "capability Greeter {\n  fn greet()\n}\n\ntest \"t\" uses Greeter {}\n"
         "types.no_real_implementation"
@@ -215,12 +209,12 @@ let () =
       expect_one_diagnostic ~file:"app" Fixtures.Interface.main_using_a_greeter
         "types.no_real_implementation"
         ~says:"`Greeter` has no real implementation, so the runtime cannot provide it to `main`.");
-  Harness.test "main can declare Panic and the standard capabilities" (fun () ->
+  Harness.test "main can declare Panic, RunForever, and the standard capabilities" (fun () ->
       expect_no_diagnostics
         [
           ( "app",
             "fn main(arguments: List[String]) -> ExitCode\n\
-            \  uses Panic, Console, Clock\n\
+            \  uses Panic, RunForever, Console, Clock\n\
              {\n\
             \  todo\n\
              }\n" );
@@ -243,6 +237,10 @@ let () =
       expect_one_diagnostic Fixtures.Interface.clock_impl_method_declaring_uses "types.impl_uses");
   Harness.test "an impl's method can rename its generic parameters" (fun () ->
       expect_no_diagnostics [ ("app::main", Fixtures.Interface.impl_renaming_method_generics) ]);
+  Harness.test "an impl's method names its capability parameters as the trait's method does"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Interface.impl_renaming_a_capability_parameter
+        "types.signature_mismatch");
   Harness.test "traits cannot require each other in a cycle" (fun () ->
       let packages =
         Support.setup [ ("app::main", Fixtures.Interface.traits_requiring_each_other) ]
@@ -290,6 +288,234 @@ let () =
   Harness.test "a trait may add an overload of a method of a trait it requires" (fun () ->
       expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_overloading_element) ])
 
+let expect_signature_mismatch text ~declared =
+  expect_one_diagnostic text "types.signature_mismatch" ~says:declared
+
+let () =
+  Harness.test "an impl's callback type cannot add a time clause to its trait's" (fun () ->
+      expect_signature_mismatch Fixtures.Interface.walk_impl_adding_a_time_clause_to_its_callback
+        ~declared:
+          "`each` must have the signature `each(self, visit: fn(Int64))` that `Walk` declares.");
+  Harness.test "an impl's callback type cannot drop its trait's time clause" (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.walk_impl_dropping_the_time_clause_of_its_callback
+        ~declared:"`each(self, visit: (fn(Int64) cost time O(...)))`");
+  Harness.test "an impl's callback type cannot drop `amortized` from its trait's cost" (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.walk_impl_dropping_amortized_from_the_cost_of_its_callback
+        ~declared:"`each(self, visit: (fn(Int64) cost amortized time O(...)))`");
+  Harness.test "an impl's callback type cannot bound the allocations that its trait's does not"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.walk_impl_bounding_the_allocations_of_its_callback
+        ~declared:"`each(self, visit: (fn(Int64) cost time O(...)))`");
+  Harness.test "an impl's callback type cannot use fewer capabilities than its trait's" (fun () ->
+      expect_signature_mismatch Fixtures.Interface.walk_impl_dropping_a_capability_of_its_callback
+        ~declared:"`each(self, visit: (fn(Int64) uses Log))`");
+  Harness.test "an impl's callback type cannot use more capabilities than its trait's" (fun () ->
+      expect_signature_mismatch Fixtures.Interface.walk_impl_adding_a_capability_to_its_callback
+        ~declared:"`each(self, visit: (fn(Int64) uses Log))`");
+  Harness.test "an impl's callback type cannot add a time clause beside a capability parameter"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.walk_impl_adding_a_time_clause_to_its_polymorphic_callback
+        ~declared:"`each(self, visit: (fn(Int64) uses generic Granted))`");
+  Harness.test "an impl's callback types name the capability parameters that its trait's name"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.walk_impl_swapping_the_capability_parameters_of_its_callbacks
+        ~declared:
+          "`each(self, visit: (fn(Int64) uses generic Visiting), finish: (fn() uses generic \
+           Finishing))`");
+  Harness.test
+    "an impl may repeat its trait's polymorphic callback type and rename a type parameter in it"
+    (fun () ->
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.walk_impls_repeating_a_polymorphic_callback) ]);
+  Harness.test "an impl's callback type may name its trait's capability set or list the set"
+    (fun () ->
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.walk_impls_naming_their_capability_set_in_a_callback) ]);
+  Harness.test "an impl may name the capability set of a parameter that a subtrait bounds"
+    (fun () ->
+      expect_no_diagnostics
+        [
+          ("app::main", Fixtures.Interface.walk_impl_naming_the_capability_set_of_a_subtrait_bound);
+        ]);
+  Harness.test "an impl's callback type cannot list a capability outside its trait's set" (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.walk_impl_listing_a_capability_outside_its_set_in_a_callback
+        ~declared:"`each(self, visit: (fn(Int64) uses Log))`");
+  Harness.test "an unknown capability in an impl's callback type is reported once" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Interface.walk_impl_naming_an_unknown_capability_in_its_callback
+        "resolve.unknown_name");
+  Harness.test "a capability's implementation cannot add a time clause to a callback type"
+    (fun () ->
+      expect_signature_mismatch Fixtures.Interface.runner_impl_adding_a_time_clause_to_its_callback
+        ~declared:
+          "`run` must have the signature `run(self, work: fn(Int64))` that `Runner` declares.");
+  Harness.test "an impl that overrides a provided method cannot add a time clause to its callback"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.walk_impl_overriding_each_with_a_time_clause_on_its_callback
+        ~declared:"`each(self, visit: fn(Int64))`");
+  Harness.test "an impl's result type cannot drop the time clause of its trait's function type"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.chooses_impl_dropping_the_time_clause_of_its_result
+        ~declared:"`choose(self) -> (fn(Int64) -> Int64 cost time O(...))`")
+
+let () =
+  let feed = "`feed[Item: Convert[Int64]](self, item: Item) -> UInt64`" in
+  Harness.test "an impl's method cannot write its trait's bound with another type argument"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.feeds_impl_bounding_its_item_by_another_trait_argument
+        ~declared:
+          "`feed` must have the signature `feed[Item: Convert[Int64]](self, item: Item) -> UInt64` \
+           that `Feeds` declares.");
+  Harness.test "an impl's method cannot write its trait's bound with another constraint" (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.feeds_impl_bounding_its_item_under_another_constraint
+        ~declared:"`feed[Item: Cursor[Element = Int64]](self, item: Item) -> UInt64`");
+  Harness.test "an impl's method cannot add a bound to its trait's type parameter" (fun () ->
+      expect_signature_mismatch Fixtures.Interface.feeds_impl_adding_a_bound_to_its_item
+        ~declared:feed;
+      expect_signature_mismatch
+        Fixtures.Interface.feeds_impl_adding_a_bound_of_the_same_trait_to_its_item ~declared:feed);
+  Harness.test "an impl's method cannot drop a bound of its trait's type parameter" (fun () ->
+      expect_signature_mismatch Fixtures.Interface.feeds_impl_dropping_the_bound_of_its_item
+        ~declared:"`feed[Item: Display](self, item: Item) -> UInt64`");
+  Harness.test "an impl's method may write its trait's bounds in another order" (fun () ->
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.feeds_impl_reordering_the_bounds_of_its_item) ]);
+  Harness.test
+    "an impl's method may write a bound that names `Self.Element` with the type its impl chooses"
+    (fun () ->
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.feeds_impls_bounding_an_item_by_their_element) ]);
+  Harness.test
+    "a signature mismatch shows a bound that names `Self.Element` with the type the impl chooses"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.feeds_impl_bounding_its_item_by_a_type_other_than_its_element
+        ~declared:"`feed[Item: Convert[Int64]](self, item: Item) -> Int64`");
+  Harness.test "an impl's method may rename a type parameter and keep its trait's bounds" (fun () ->
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.feeds_impl_renaming_its_bounded_items) ]);
+  Harness.test
+    "a signature mismatch shows the trait's bounds under the impl's name for a type parameter"
+    (fun () ->
+      expect_signature_mismatch Fixtures.Interface.feeds_impl_renaming_its_item_under_another_bound
+        ~declared:"`feed[Morsel: Convert[Int64]](self, item: Morsel) -> UInt64`");
+  Harness.test
+    "a signature mismatch shows a type parameter's bounds beside a capability parameter at its use"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.feeds_impl_with_another_bound_beside_a_capability_parameter
+        ~declared:
+          "`feed_each[Morsel: Convert[Int64]](self, item: Morsel, visit: (fn(Morsel) uses generic \
+           Granted))`");
+  Harness.test
+    "a capability's implementation cannot write its capability's bound with another type argument"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.feeds_capability_impl_bounding_its_item_by_another_trait_argument
+        ~declared:feed);
+  Harness.test
+    "an impl's method cannot take a type parameter for its trait's `UInt64` generic parameter"
+    (fun () ->
+      expect_signature_mismatch
+        Fixtures.Interface.filler_impl_taking_a_type_parameter_for_a_value_parameter
+        ~declared:"`fill[count: UInt64](self) -> Array[Int64, count]`");
+  Harness.test "a method that an impl must give is shown with its generic parameters" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.feeds_impl_without_feed "types.missing_member"
+        ~says:
+          "This `impl` must give `feed[Item: Convert[Int64] + Display](self, item: Item, visit: \
+           (fn(Item) uses generic Granted)) -> UInt64`, which `Feeds` declares.")
+
+let () =
+  Harness.test "an impl's method gives a default where its trait's parameter has one" (fun () ->
+      expect_signature_mismatch Fixtures.Interface.steps_impl_without_its_traits_default
+        ~declared:
+          "`step` must have the signature `step(self, by: Int64 = ...) -> Int64` that `Steps` \
+           declares.");
+  Harness.test "an impl's method gives no default where its trait's parameter has none" (fun () ->
+      expect_signature_mismatch Fixtures.Interface.steps_impl_adding_a_default
+        ~declared:"`step(self, by: Int64) -> Int64`");
+  Harness.test "a capability's implementation takes every argument, so it gives no default"
+    (fun () ->
+      expect_signature_mismatch Fixtures.Interface.steps_capability_impl_giving_a_default
+        ~declared:"`step(self, by: Int64) -> Int64`";
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.steps_capability_impl_taking_every_argument) ]);
+  Harness.test "an impl's callback type may write its trait's cost clauses in another order"
+    (fun () ->
+      expect_no_diagnostics
+        [
+          ( "app::main",
+            Fixtures.Interface.walk_impl_writing_the_cost_clauses_of_its_callback_in_another_order
+          );
+        ]);
+  Harness.test "an impl's method may name an associated type of a required trait through `Self`"
+    (fun () ->
+      expect_no_diagnostics
+        [ ("app::main", Fixtures.Interface.impl_of_a_subtrait_naming_a_base_key_through_self) ])
+
+let () =
+  let text = Fixtures.Interface.feeds_impl_with_another_bound_and_another_parameter_type in
+  let read_feed () =
+    let packages = Support.setup [ ("app::main", text) ] in
+    let interface =
+      Database.For_testing.make_unchecked_interface_lookups (Support.make_database packages)
+    in
+    let feeds : Types.trait_reference =
+      { trait = app "Feeds"; trait_arguments = []; associated = [] }
+    in
+    match
+      Interface.Impls.find_evidence interface
+        ~list_bounds:(fun _ -> [])
+        (Types.make_named (app "Reader") [])
+        feeds
+    with
+    | Some (From_impl { impl; _ }) ->
+        (interface, Path.Method { owner = impl; name = "feed"; receiver = Read })
+    | _ -> failwith "no impl"
+  in
+  let show_bounds bounds = String.concat " + " (List.map Types.show_trait bounds) in
+  Harness.test "an impl's method has its trait's bounds and parameter types under its own names"
+    (fun () ->
+      let interface, feed = read_feed () in
+      match Interface.Impls.read_signature interface feed with
+      | Some
+          {
+            generics = [ { generic = { name = "Morsel"; _ }; kind = Type_generic bounds } ];
+            parameters = [ item; count ];
+            _;
+          } ->
+          if show_bounds bounds <> "Convert[Int64]" then
+            Harness.fail "bounds: %s" (show_bounds bounds);
+          if Types.show item.type_ <> "Morsel" then Harness.fail "item: %s" (Types.show item.type_);
+          if Types.show count.type_ <> "UInt64" then
+            Harness.fail "count: %s" (Types.show count.type_)
+      | Some _ -> Harness.fail "another shape of signature"
+      | None -> Harness.fail "no signature");
+  Harness.test "the body of an impl's method is checked under its trait's bounds" (fun () ->
+      let interface, feed = read_feed () in
+      match interface.names.find_key feed with
+      | None -> Harness.fail "no key"
+      | Some key -> (
+          match
+            List.filter
+              (fun ((parameter : Types.parameter), _) -> parameter.name = "Morsel")
+              (Interface.Impls.read_scope interface key).bounds
+          with
+          | [ (_, bounds) ] ->
+              if show_bounds bounds <> "Convert[Int64]" then
+                Harness.fail "bounds: %s" (show_bounds bounds)
+          | _ -> Harness.fail "no bounds for `Morsel`"))
+
 let expect_property name expected text make_type check =
   Harness.test name (fun () ->
       let packages = Support.setup [ ("app::main", text) ] in
@@ -310,16 +536,16 @@ let () =
     Interface.Impls.is_plain;
   expect_property "a List is Copyable" true "" (fun _ -> list int64) Interface.Impls.is_copyable;
   expect_property "a handle is not Copyable" false ""
-    (fun _ -> Types.make_named (Intrinsic.make_builtin_path Handle) [])
+    (fun _ -> Types.make_builtin Handle)
     Interface.Impls.is_copyable;
   expect_property "a handle is not Plain" false ""
-    (fun _ -> Types.make_named (Intrinsic.make_builtin_path Handle) [])
+    (fun _ -> Types.make_builtin Handle)
     Interface.Impls.is_plain;
   expect_property "an Option of a handle is not Copyable" false ""
-    (fun _ -> option (Types.make_named (Intrinsic.make_builtin_path Handle) []))
+    (fun _ -> option (Types.make_builtin Handle))
     Interface.Impls.is_copyable;
   expect_property "an Option of a handle is not Plain" false ""
-    (fun _ -> option (Types.make_named (Intrinsic.make_builtin_path Handle) []))
+    (fun _ -> option (Types.make_builtin Handle))
     Interface.Impls.is_plain;
   expect_property "a List is not Plain" false "" (fun _ -> list int64) Interface.Impls.is_plain;
   expect_property "an Option of a Slice is a view" true ""
@@ -510,14 +736,17 @@ let () =
              (option opaque) (trait "Equal" []))
       then Harness.fail "found an impl");
   Harness.test "an impl of a conversion is found by the argument's type" (fun () ->
-      let packages = Support.setup [] in
-      if
-        Option.is_none
-          (Interface.Impls.find_evidence (make_interface packages)
-             ~list_bounds:(fun _ -> [])
-             int64
-             (trait "From" [ Types.make_builtin Int32 ]))
-      then Harness.fail "no impl")
+      let packages = Support.setup [ ("app::main", Fixtures.Interface.meters_from_numbers) ] in
+      let interface = make_interface packages in
+      let meters = Types.make_named (app "Meters") [] in
+      let find_from source =
+        Interface.Impls.find_evidence interface
+          ~list_bounds:(fun _ -> [])
+          meters (trait "From" [ source ])
+      in
+      if Option.is_none (find_from int64) then Harness.fail "no impl of From[Int64]";
+      if Option.is_some (find_from (Types.make_builtin Int32)) then
+        Harness.fail "an impl of From[Int32]")
 
 let () =
   let text = Fixtures.Interface.described in
@@ -579,7 +808,7 @@ let () =
       let signature =
         read_method_signature packages (Types.make_named (app "FixedClock") []) clock "now"
       in
-      match (signature.uses :> Types.capability list) with
+      match Types.list_capabilities signature.uses with
       | [ Capability _ ] -> ()
       | uses -> Harness.fail "%d uses" (List.length uses))
 
@@ -717,7 +946,8 @@ let () =
   Harness.test "a trait is not the head of a method" (fun () ->
       expect_one_diagnostic Fixtures.Interface.method_headed_by_a_trait "types.not_a_type");
   Harness.test "a capability parameter is not a type" (fun () ->
-      expect_one_diagnostic "fn f[capability Granted](value: Granted) {}\n" "types.not_a_type");
+      expect_one_diagnostic "fn f(value: Granted, visit: (fn() uses generic Granted)) {}\n"
+        "resolve.unknown_name");
   Harness.test "a method of an unknown type keeps its head's generic parameters" (fun () ->
       expect_one_diagnostic Fixtures.Interface.method_of_an_unknown_generic_type
         "resolve.unknown_name")
@@ -728,8 +958,7 @@ let () =
       let declared =
         List.map
           (fun (declaration : Resolve.Names.declaration) -> declaration.path)
-          ((Support.make_names packages Path.standard_package).list_package_declarations
-             Path.standard_package)
+          ((Support.make_names packages).list_package_declarations Path.standard_package)
       in
       List.iter
         (fun known ->

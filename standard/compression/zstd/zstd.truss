@@ -8,18 +8,18 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       Malformed(message) => {
-        mut output.write("malformed zstd data: ")
-        mut output.write(message.slice())
+        mut output.push("malformed zstd data: ")
+        mut output.push(message)
       }
-      ChecksumMismatch => mut output.write("the zstd frame's checksum does not match its content")
+      ChecksumMismatch => mut output.push("the zstd frame's checksum does not match its content")
       TooLarge(limit) => {
-        mut output.write("the decompressed data is longer than ")
+        mut output.push("the decompressed data is longer than ")
         limit.display(mut output)
-        mut output.write(" bytes")
+        mut output.push(" bytes")
       }
     }
   }
@@ -282,8 +282,7 @@ internal fn build_fse(counts: Slice[Int16], log: UInt32) -> Result[FseTable, Err
 type Counts(values: List[Int16], log: UInt32, consumed: UInt64)
 
 fn read_counts(bytes: Slice[UInt8], maximum_symbol: UInt64, maximum_log: UInt32) -> Result[Counts, Error]
-  requires maximum_log <= 9 && maximum_symbol <= 255
-{
+  requires maximum_log <= 9 && maximum_symbol <= 255 {
   var reader = Forward(bytes: bytes.to_list(), bit: 0)
   let log = (mut reader.read(4) & 15) + 5
   if log > maximum_log {
@@ -313,7 +312,10 @@ fn read_counts(bytes: Slice[UInt8], maximum_symbol: UInt64, maximum_log: UInt32)
           break
         }
       }
-      for _ in 0..zeros {
+      let length_before_zeros = values.length()
+      for _ in 0..zeros
+        invariant values.length() >= length_before_zeros && values.length() <= maximum_symbol + 1
+      {
         if values.length() <= maximum_symbol {
           mut values.push(0)
         }
@@ -598,8 +600,7 @@ fn decode_literals(block: Slice[UInt8], state: mut FrameState) -> Result[Literal
 type TableRead(table: FseTable, consumed: UInt64)
 
 fn read_table(block: Slice[UInt8], at: UInt64, mode: UInt64, defaults: Slice[Int16], default_log: UInt32, maximum_symbol: UInt64, maximum_log: UInt32, previous: Option[FseTable]) -> Result[TableRead, Error]
-  requires maximum_log <= 9 && maximum_symbol <= 255
-{
+  requires maximum_log <= 9 && maximum_symbol <= 255 {
   if mode == 0 {
     return Ok(TableRead(table: build_fse(defaults, log: default_log)?, consumed: 0))
   }

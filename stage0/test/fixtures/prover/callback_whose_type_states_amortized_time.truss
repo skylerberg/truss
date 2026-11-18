@@ -1,0 +1,5 @@
+fn f(visit: (fn(Int64) cost amortized time O(1)))
+  cost time O(1)
+{
+  visit(1)
+}

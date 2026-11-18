@@ -1,3 +1,4 @@
+module Item = Item
 include Lowered_types
 
 let make_local_place local = { root = Local local; projections = [] }
@@ -7,7 +8,8 @@ let raise_bug format = Compiler_bug.raise_bug ~stage:"Lowered" format
 
 let is_erased env = function
   | Value ty -> Memory_layout.has_zero_size env ty
-  | Pointer _ | Raw _ | Environment _ | Evidence _ | Lend | Lend_mark -> false
+  | Pointer _ | Raw _ | Environment _ | Evidence _ | Capabilities _ | Trace | Lend | Lend_mark ->
+      false
 
 let convert_member : Memory_layout.member -> ty = function
   | Typed ty -> Value ty

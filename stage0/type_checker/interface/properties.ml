@@ -1,25 +1,31 @@
-let make_trait_substitution (interface : Types.trait_interface) ~self
-    (reference : Types.trait_reference) : Types.substitution =
-  (Types.make_self_parameter reference.trait, Types.Type self)
-  :: Types.make_substitution interface.trait_generics reference.trait_arguments
-
-let list_bound_closure lookups ~self (bound : Types.trait_reference) =
+let list_bound_closure_over ~find_requirements ~self (bound : Types.trait_reference) =
   let closure = ref [] in
   let rec visit ancestors (bound : Types.trait_reference) =
     if not (List.exists (Path.equal bound.trait) ancestors || List.mem bound !closure) then begin
       closure := bound :: !closure;
-      match Definition.find_trait_interface lookups bound.trait with
-      | Some trait ->
+      match find_requirements bound.trait with
+      | Some (trait_generics, requires) ->
+          let substitution =
+            Types.bind_argument
+              (Types.make_self_parameter bound.trait)
+              (Types.Type self)
+              (Types.make_substitution trait_generics bound.trait_arguments)
+          in
           List.iter
             (fun required ->
-              visit (bound.trait :: ancestors)
-                (Types.substitute_trait (make_trait_substitution trait ~self bound) required))
-            trait.requires
+              visit (bound.trait :: ancestors) (Types.substitute_trait substitution required))
+            requires
       | None -> ()
     end
   in
   visit [] bound;
   List.rev !closure
+
+let list_bound_closure lookups =
+  list_bound_closure_over ~find_requirements:(fun trait ->
+      Option.map
+        (fun (interface : Types.trait_interface) -> (interface.trait_generics, interface.requires))
+        (Definition.find_trait_interface lookups trait))
 
 let find_declaring_trait lookups ~base (trait : Types.trait_reference) ~is_declared =
   List.find_opt
@@ -53,7 +59,8 @@ let list_associated_bounds lookups ~base trait name =
         (fun (associated : Types.associated_type) ->
           if associated.associated_name = name then
             List.map
-              (Types.substitute_trait (make_trait_substitution interface ~self:base declaring))
+              (Types.substitute_trait
+                 (Types.make_trait_substitution interface.trait_generics ~self:base declaring))
               associated.associated_bounds
           else [])
         interface.associated_types
@@ -174,7 +181,7 @@ let rec compute_conditions lookups ~facts_of ~resolve ~compute_leaf ?(in_progres
       | View -> if requires [ Well_known.make_path Storable ] then Some [] else None
       | Holds_function -> None)
   | Types.Named { path; arguments } -> (
-      match (Intrinsic.builtin_of_path path, property) with
+      match (Intrinsic.find_builtin path, property) with
       | Some Storage, Plain | Some View, View | Some Handle, (Copyable | Plain) -> None
       | Some Shared, Copyable -> Some []
       | Some Shared, Plain -> None
@@ -219,14 +226,14 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
     | Types.Function ({ inputs; output; _ } as function_) ->
         List.iter
           (fun (_, input) ->
-            step_inside (if Types.terminates function_ then Function_input else Indirect) input)
+            step_inside (if Types.terminates function_.uses then Function_input else Indirect) input)
           inputs;
         step_inside Indirect output
     | Types.Any { trait_arguments; associated; _ } ->
         List.iter (step_inside Indirect)
           (list_type_arguments trait_arguments @ List.map snd associated)
     | Types.Named { path; arguments } -> (
-        match Intrinsic.builtin_of_path path with
+        match Intrinsic.find_builtin path with
         | Some Array -> List.iter (step_inside In_place) (list_type_arguments arguments)
         | Some _ -> List.iter (step_inside Indirect) (list_type_arguments arguments)
         | None -> (

@@ -1,0 +1,5 @@
+fn f(visit: (fn(Int64) cost amortized allocations <= 0))
+  cost allocations <= 0
+{
+  visit(1)
+}

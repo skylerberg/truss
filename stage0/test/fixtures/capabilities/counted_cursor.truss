@@ -27,6 +27,8 @@ fn first() -> Option[Int64] {
   pull(mut cursor)
 }
 
-fn length() -> UInt64 {
+fn length() -> UInt64
+  uses RunForever
+{
   counted(3).count()
 }

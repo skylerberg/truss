@@ -50,15 +50,14 @@ public fn IpAddress.is_multicast(self) -> Bool
   }
 }
 
-internal fn write_dotted(output: mut TextBuilder, first: UInt8, second: UInt8, third: UInt8, fourth: UInt8)
-  cost time finite
+internal fn write_dotted(output: mut String, first: UInt8, second: UInt8, third: UInt8, fourth: UInt8)
 {
   first.display(mut output)
-  mut output.write(".")
+  mut output.push(".")
   second.display(mut output)
-  mut output.write(".")
+  mut output.push(".")
   third.display(mut output)
-  mut output.write(".")
+  mut output.push(".")
   fourth.display(mut output)
 }
 
@@ -105,11 +104,10 @@ internal fn is_ipv4_mapped(octets: Array[UInt8, 16]) -> Bool
   (forall index in 0..10 => octets[index] == 0) && octets[10] == 255 && octets[11] == 255
 }
 
-internal fn write_groups(output: mut TextBuilder, octets: Array[UInt8, 16])
-  cost time finite
+internal fn write_groups(output: mut String, octets: Array[UInt8, 16])
 {
   if is_ipv4_mapped(octets) {
-    mut output.write("::ffff:")
+    mut output.push("::ffff:")
     write_dotted(mut output, first: octets[12], second: octets[13], third: octets[14], fourth: octets[15])
     return
   }
@@ -120,20 +118,20 @@ internal fn write_groups(output: mut TextBuilder, octets: Array[UInt8, 16])
     decreases 8 - index
   {
     if run.length >= 2 && index == run.start {
-      mut output.write("::")
+      mut output.push("::")
       index += run.length
     } else {
       if index > 0 && !(run.length >= 2 && index == run.start + run.length) {
-        mut output.write(":")
+        mut output.push(":")
       }
-      mut output.write(group(octets, index: index).format(radix: 16))
+      mut output.push(group(octets, index: index).format(radix: 16))
       index += 1
     }
   }
 }
 
 impl Display for IpAddress {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       Version4(octets) =>
@@ -450,17 +448,17 @@ public type SocketAddress(address: IpAddress, port: UInt16)
   derives Equal, Hash, Ordered
 
 impl Display for SocketAddress {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self.address {
       Version4(_) => self.address.display(mut output)
       Version6(_) => {
-        mut output.write("[")
+        mut output.push("[")
         self.address.display(mut output)
-        mut output.write("]")
+        mut output.push("]")
       }
     }
-    mut output.write(":")
+    mut output.push(":")
     self.port.display(mut output)
   }
 }
@@ -490,15 +488,15 @@ public type AddressError(offset: UInt64)
   derives Equal
 
 impl Display for AddressError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write("the text is not an address at offset ")
+    mut output.push("the text is not an address at offset ")
     self.offset.display(mut output)
   }
 }
 
 public opaque type IpNetwork(address: IpAddress, prefix_length: UInt8)
-  derives Plain, Equal, Hash
+  derives Plain, Equal, Hash, Ordered
 
 internal fn mask_octet(octet: UInt8, index: UInt64, prefix_length: UInt8) -> UInt8
   requires index < 16
@@ -554,10 +552,10 @@ public fn IpNetwork.contains(self, address: IpAddress) -> Bool
 }
 
 impl Display for IpNetwork {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     self.address.display(mut output)
-    mut output.write("/")
+    mut output.push("/")
     self.prefix_length.display(mut output)
   }
 }
@@ -786,6 +784,7 @@ public fn LocalListener.accept(mut self) -> Result[LocalConnection, SystemError]
 }
 
 public type Datagram(length: UInt64, from: SocketAddress)
+  derives Equal
 
 public opaque type DatagramSocket(handle: streams::Handle, local: SocketAddress)
 
@@ -837,7 +836,7 @@ public type HostsAllowed(hosts: Set[String])
 
 fn HostsAllowed.allows(self, host: StringSlice) -> Bool {
   for allowed in self.hosts {
-    if allowed.slice() == host {
+    if allowed == host {
       return true
     }
   }
@@ -853,7 +852,7 @@ impl NetworkClient for HostsAllowed
 
   fn connect(self, address: SocketAddress, timeout: Option[Duration]) -> Result[Connection, SystemError] {
     for allowed in self.hosts {
-      match NetworkClient.resolve(allowed.slice()) {
+      match NetworkClient.resolve(allowed) {
         Ok(addresses) => {
           if addresses.contains(address.address) {
             return NetworkClient.connect(address, timeout: timeout)

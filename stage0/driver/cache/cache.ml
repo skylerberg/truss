@@ -202,14 +202,14 @@ let load_segment path =
 
 let refresh cache =
   let directory = make_segments_directory cache in
-  let own = Option.map (fun writer -> writer.segment.path) cache.writer in
+  let written_segment = Option.map (fun writer -> writer.segment.path) cache.writer in
   let present =
     match Sys.readdir directory with
     | entries ->
         Array.to_list entries
         |> List.filter (fun entry -> Filename.check_suffix entry ".segment")
         |> List.map (Filename.concat directory)
-        |> List.filter (fun path -> Some path <> own)
+        |> List.filter (fun path -> Some path <> written_segment)
     | exception Sys_error _ -> []
   in
   let there = Hashtbl.create (List.length present) in
@@ -352,18 +352,18 @@ let read_from segment key location =
   | Some _ | None -> None
   | exception Sys_error _ -> None
 
-let read_own writer key location =
+let read_from_writer writer key location =
   let written = writer.size - Buffer.length writer.pending in
   if location.offset >= written then
     Some (Buffer.sub writer.pending (location.offset - written + record_head_width) location.length)
   else read_from writer.segment key location
 
 let lookup_once cache key =
-  let own =
+  let written_value =
     Option.bind cache.writer (fun writer ->
-        Option.bind (Hashtbl.find_opt writer.segment.table key) (read_own writer key))
+        Option.bind (Hashtbl.find_opt writer.segment.table key) (read_from_writer writer key))
   in
-  match own with
+  match written_value with
   | Some value -> Some value
   | None ->
       List.find_map
@@ -386,17 +386,17 @@ let is_present cache key =
   (match cache.writer with Some writer -> Hashtbl.mem writer.segment.table key | None -> false)
   || List.exists (fun segment -> find_in segment key <> None) cache.segments
 
-let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-12 store result"
+let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-17 cache result key"
 
 type result_kind = Package_database | Test_result | Solver_answer
 
-let show_result_tag = function
-  | Package_database -> "package"
-  | Test_result -> "tests"
-  | Solver_answer -> "solver"
+let show_result_kind = function
+  | Package_database -> "package database"
+  | Test_result -> "test result"
+  | Solver_answer -> "solver answer"
 
 let make_result_key ~kind ~key =
-  derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text (show_result_tag kind); Cbor.Bytes key ]))
+  derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text (show_result_kind kind); Cbor.Bytes key ]))
 
 let find_result cache ~kind ~key =
   let name = make_result_key ~kind ~key in

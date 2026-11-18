@@ -1,0 +1,9 @@
+trait Chooses {
+  fn choose(self) -> (fn(Int64) -> Int64 cost time O(1))
+}
+
+type Fixed()
+
+impl Chooses for Fixed {
+  fn choose(self) -> fn(Int64) -> Int64 { todo }
+}

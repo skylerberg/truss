@@ -9,12 +9,10 @@ type Shape =
 
 trait Measured {
   fn size(self) -> Int64
-    cost time finite
 }
 
 impl Measured for Point {
   fn size(self) -> Int64
-    cost time finite
   {
     1
   }
@@ -22,14 +20,12 @@ impl Measured for Point {
 
 impl Measured for Segment {
   fn size(self) -> Int64
-    cost time finite
   {
     self.start.size() + self.end.size()
   }
 }
 
 fn measure(shape: Shape) -> Int64
-  cost time finite
 {
   match shape {
     Dot(at) => at.size()
@@ -38,7 +34,6 @@ fn measure(shape: Shape) -> Int64
 }
 
 fn largest[T: Measured](left: T, right: T) -> Int64
-  cost time finite
 {
   let first = left.size()
   let second = right.size()

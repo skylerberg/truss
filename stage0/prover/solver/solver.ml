@@ -1,7 +1,7 @@
 let version = "5.3.3"
 let steps = 1_000_000
 let cardinality_bounds = [ 2; 3; 4 ]
-let entry_format_version = 1
+let entry_format_version = 2
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Solver" format
 
 type cache = { find : string -> string option; add : string -> string -> unit }
@@ -45,17 +45,43 @@ let header =
      (set-option :rlimit %d)\n"
     steps
 
-let key_of_text text =
+let compute_key text =
   Logic.hash
     (Printf.sprintf "z3 %s\nentry format %d\ncardinality bounds %s\n%s%s" version
        entry_format_version
        (String.concat ", " (List.map string_of_int cardinality_bounds))
        header text)
 
-let hash_query query = key_of_text (Logic.show_query query)
+let hash_query query = compute_key (Logic.show_query query)
 
 type sexp = Atom of string | List of sexp list
-type answer = Proven | Counterexample of (Logic.symbol * sexp) list | Unknown
+type unknown = Out_of_steps | Incomplete of string
+type answer = Proven | Counterexample of (Logic.symbol * sexp) list | Unknown of unknown
+
+let find_string_literal_end text position =
+  let length = String.length text in
+  let rec scan index =
+    if index >= length then length
+    else if text.[index] <> '"' then scan (index + 1)
+    else if index + 1 < length && text.[index + 1] = '"' then scan (index + 2)
+    else index + 1
+  in
+  scan (position + 1)
+
+let read_string_literal literal =
+  let length = String.length literal in
+  if length < 2 || literal.[0] <> '"' || literal.[length - 1] <> '"' then
+    raise_bug "Z3 wrote `%s` where a string literal belongs" literal
+  else
+    let buffer = Buffer.create length in
+    let rec copy index =
+      if index < length - 1 then begin
+        Buffer.add_char buffer literal.[index];
+        copy (if literal.[index] = '"' then index + 2 else index + 1)
+      end
+    in
+    copy 1;
+    Buffer.contents buffer
 
 let parse_sexps text =
   let length = String.length text in
@@ -83,6 +109,9 @@ let parse_sexps text =
           | None -> (List (List.rev acc), position)
       in
       Some (parse_items (position + 1) [])
+    else if text.[position] = '"' then
+      let stop = find_string_literal_end text position in
+      Some (Atom (String.sub text position (stop - position)), stop)
     else
       let stop = ref position in
       while !stop < length && not (List.mem text.[!stop] [ ' '; '\n'; '\t'; '\r'; '('; ')' ]) do
@@ -108,11 +137,14 @@ type request = {
   value_arguments : string list;
 }
 
-type status = Unsatisfiable | Satisfiable of { cardinality_bound : int option } | Undecided
+type status =
+  | Unsatisfiable
+  | Satisfiable of { cardinality_bound : int option }
+  | Undecided of unknown
 
 let run_locked solver work = Mutex.protect solver.lock work
 
-let request ?(symbols = []) ?(terms = []) query =
+let make_request ?(symbols = []) ?(terms = []) query =
   let rendering = Logic.render query in
   let named = Logic.list_symbols rendering in
   let requested_symbols =
@@ -131,7 +163,7 @@ let request ?(symbols = []) ?(terms = []) query =
   in
   let requested = List.map fst (requested_symbols @ requested_terms)
   and value_arguments = List.map snd (requested_symbols @ requested_terms) in
-  let text_key = key_of_text (Logic.rendered_text rendering) in
+  let text_key = compute_key (Logic.rendered_text rendering) in
   {
     text_key;
     values_key = text_key ^ "/" ^ String.concat "," value_arguments;
@@ -141,20 +173,23 @@ let request ?(symbols = []) ?(terms = []) query =
 
 let print_status = function
   | Unsatisfiable -> "proven\n"
-  | Undecided -> "unknown\n"
+  | Undecided Out_of_steps -> "out of steps\n"
+  | Undecided (Incomplete reason) -> Printf.sprintf "incomplete %S\n" reason
   | Satisfiable { cardinality_bound = None } -> "model\n"
   | Satisfiable { cardinality_bound = Some bound } -> Printf.sprintf "model %d\n" bound
 
 let parse_status text =
-  match String.split_on_char ' ' (String.trim text) with
-  | [ "proven" ] -> Some Unsatisfiable
-  | [ "unknown" ] -> Some Undecided
-  | [ "model" ] -> Some (Satisfiable { cardinality_bound = None })
-  | [ "model"; bound ] ->
-      Option.map
-        (fun bound -> Satisfiable { cardinality_bound = Some bound })
-        (int_of_string_opt bound)
-  | _ -> None
+  match String.trim text with
+  | "proven" -> Some Unsatisfiable
+  | "out of steps" -> Some (Undecided Out_of_steps)
+  | "model" -> Some (Satisfiable { cardinality_bound = None })
+  | line -> (
+      match Scanf.sscanf_opt line "model %d%!" Fun.id with
+      | Some bound -> Some (Satisfiable { cardinality_bound = Some bound })
+      | None ->
+          Option.map
+            (fun reason -> Undecided (Incomplete reason))
+            (Scanf.sscanf_opt line "incomplete %S%!" Fun.id))
 
 let print_values values =
   String.concat ""
@@ -187,13 +222,30 @@ let add_entry solver key entry =
       Hashtbl.replace solver.entries key entry;
       Option.iter (fun cache -> cache.add key entry) solver.cache)
 
-let run_check solver request ?cardinality_bound text =
-  let input =
-    header ^ text
-    ^
-    if request.requested = [] then ""
-    else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.value_arguments)
+let make_input request text =
+  header ^ text
+  ^ (if request.requested = [] then ""
+     else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.value_arguments))
+  ^ "(get-info :reason-unknown)\n(get-info :rlimit)\n"
+
+let show_input (request, query) = make_input request (Logic.show_query query)
+
+let read_unknown answers =
+  let find_info keyword =
+    List.find_map
+      (function List [ Atom name; Atom value ] when name = keyword -> Some value | _ -> None)
+      answers
   in
+  match (find_info ":rlimit", find_info ":reason-unknown") with
+  | Some steps_used, Some reason -> (
+      match int_of_string_opt steps_used with
+      | Some steps_used when steps_used >= steps -> Out_of_steps
+      | Some _ -> Incomplete (read_string_literal reason)
+      | None -> raise_bug "Z3 counted `%s` steps" steps_used)
+  | _ -> raise_bug "Z3 answered unknown without its reason and its count of steps"
+
+let run_check solver request ?cardinality_bound text =
+  let input = make_input request text in
   run_locked solver (fun () -> solver.queries_run <- solver.queries_run + 1);
   let status, output, errors = Process.run ~input solver.program [ "-in"; "-smt2" ] in
   match parse_sexps output with
@@ -211,7 +263,7 @@ let run_check solver request ?cardinality_bound text =
                  pairs)
             |> List.filter_map Fun.id
         | _ -> [] )
-  | Atom "unknown" :: _ -> (Undecided, [])
+  | Atom "unknown" :: answers -> (Undecided (read_unknown answers), [])
   | _ ->
       raise_bug
         "Z3 exited with status %d without answering a query, writing `%s` to stdout and `%s` to \
@@ -222,21 +274,23 @@ let run_bounded_check solver request query cardinality_bound =
   run_check solver request ~cardinality_bound (Logic.show_query ~cardinality_bound query)
 
 let search_model solver request query text =
-  let rec search_from = function
-    | [] -> (Undecided, [])
-    | cardinality_bound :: larger_bounds -> (
-        match run_bounded_check solver request query cardinality_bound with
-        | Unsatisfiable, _ -> search_from larger_bounds
-        | ((Satisfiable _ | Undecided), _) as outcome -> outcome)
-  in
   match run_check solver request text with
-  | Undecided, _ when Logic.has_uninterpreted_sort query -> search_from cardinality_bounds
+  | (Undecided _, _) as undecided when Logic.has_uninterpreted_sort query ->
+      let rec search_from = function
+        | [] -> undecided
+        | cardinality_bound :: larger_bounds -> (
+            match run_bounded_check solver request query cardinality_bound with
+            | Unsatisfiable, _ -> search_from larger_bounds
+            | (Satisfiable _, _) as model -> model
+            | Undecided _, _ -> undecided)
+      in
+      search_from cardinality_bounds
   | outcome -> outcome
 
 let solve solver (request, query) =
   let render_checked () =
     let text = Logic.show_query query in
-    if key_of_text text <> request.text_key then
+    if compute_key text <> request.text_key then
       raise_bug "the query is not the one its request was made from";
     text
   in
@@ -255,7 +309,7 @@ let solve solver (request, query) =
             | Satisfiable _, values ->
                 add_entry solver request.values_key (print_values values);
                 (status, values)
-            | (Unsatisfiable | Undecided), _ ->
+            | (Unsatisfiable | Undecided _), _ ->
                 raise_bug "a query that had a model has none when it is solved again"))
     | Some status -> (status, [])
     | None ->
@@ -264,12 +318,12 @@ let solve solver (request, query) =
         (match status with
         | Satisfiable _ when request.requested <> [] ->
             add_entry solver request.values_key (print_values values)
-        | Satisfiable _ | Unsatisfiable | Undecided -> ());
+        | Satisfiable _ | Unsatisfiable | Undecided _ -> ());
         outcome
   in
   match status with
   | Unsatisfiable -> Proven
-  | Undecided -> Unknown
+  | Undecided unknown -> Unknown unknown
   | Satisfiable _ ->
       Counterexample
         (List.filter_map
@@ -306,8 +360,7 @@ let solve_all solver requests =
   solve_distinct (fun request -> request.values_key);
   List.map (solve solver) requests
 
-let count_queries_run solver = run_locked solver (fun () -> solver.queries_run)
-
 module For_testing = struct
   let hash_query = hash_query
+  let count_queries_run solver = run_locked solver (fun () -> solver.queries_run)
 end

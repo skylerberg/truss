@@ -48,7 +48,7 @@ let list_missing (lookups : Lookups.t) ~package ~of_ (uses : Types.capability_se
       (function
         | Types.Capability path when not (List.exists (Path.equal path) granted) -> Some path
         | _ -> None)
-      (uses :> Types.capability list)
+      (Types.list_capabilities uses)
 
 let describe_missing ~subject ~of_ capability =
   let of_ = Path.show_package of_ in

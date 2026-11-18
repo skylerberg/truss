@@ -1,0 +1,7 @@
+fn f(names: List[String]) -> UInt64 {
+  if names.get(0) is Some(name) {
+    name.length()
+  } else {
+    0
+  }
+}

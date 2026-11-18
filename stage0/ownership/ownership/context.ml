@@ -17,7 +17,7 @@ type context = {
   implements_capability : bool;
   mutable mutable_locals : Core.local list;
   mutable diagnostics : Diagnostic.in_definition list;
-  mutable must_be_disjoint : (Core.origin * Core.origin) list;
+  mutable must_be_disjoint : (Core.origin list * Core.origin list) list;
 }
 
 let is_plain context type_ =
@@ -32,11 +32,33 @@ let is_view context type_ =
 let holds_function context type_ =
   Interface.Impls.holds_function context.lookups.interface ~list_bounds:context.list_bounds type_
 
+let rec holds_array context (type_ : Types.ty) =
+  match type_ with
+  | Named { path; arguments } -> (
+      Types.is_builtin Array type_
+      ||
+      match Interface.Definition.find_type_interface context.lookups.interface path with
+      | Some interface ->
+          let holds_array_in fields =
+            List.exists (fun (field : Types.field) -> holds_array context field.field_type) fields
+          in
+          Option.fold ~none:false ~some:holds_array_in
+            (Types.instantiate_fields interface arguments)
+          || List.exists
+               (fun (variant : Types.variant) ->
+                 Option.fold ~none:false ~some:holds_array_in variant.fields)
+               (Option.value ~default:[] (Types.instantiate_variants interface arguments))
+      | None -> false)
+  | Parameter _ | Projection _ -> true
+  | Function _ | Any _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> false
+
+let lends_nothing context type_ = is_plain context type_ && not (holds_array context type_)
+
 let list_callee_signatures context (callee : Mir.callee) : Types.signature list =
   let list_signatures path =
     Option.to_list (Interface.Impls.read_signature context.lookups.interface path)
   in
-  match callee with
+  match callee.target with
   | Function { path; _ } -> list_signatures path
   | Trait_method { trait; name; receiver; _ } ->
       list_signatures (Method { owner = trait.trait; name; receiver })
@@ -56,7 +78,7 @@ let stores_function context (callee : Mir.callee) position =
     | Some parameter -> List.mem parameter.name signature.capture_free_parameters
     | None -> false
   in
-  match callee with
+  match callee.target with
   | Indirect _ -> true
   | _ -> List.exists is_declared (list_callee_signatures context callee)
 
@@ -99,7 +121,9 @@ let show_root context (root : Place.root) =
 let show context (place : Place.t) =
   show_root context place.root
   ^ String.concat ""
-      (List.map (function Place.Field name -> "." ^ name | Element _ -> "[...]") place.steps)
+      (List.map
+         (function Place.Field name -> "." ^ name | Element _ | Range _ -> "[...]")
+         place.steps)
 
 let collect context (mir : Mir.Graph.t) ~mode_keywords =
   List.iter

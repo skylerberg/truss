@@ -1,0 +1,10 @@
+type Pot[Item](item: Item)
+  derives Default
+
+type Seed(size: Int64)
+
+impl Default for Seed {
+  fn default() -> Seed {
+    Seed(size: Pot[Seed].default().item.size)
+  }
+}

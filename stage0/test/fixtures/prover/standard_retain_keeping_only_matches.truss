@@ -1,0 +1,37 @@
+use standard::collections
+
+fn filtered(items: own List[Int64]) -> List[Int64]
+  ensures forall i in 0..result.length() => result.model()[i] > 0
+{
+  own items.filter(fn(item) { item > 0 })
+}
+
+fn retained_list(items: mut List[Int64])
+  ensures forall i in 0..items.length() => items.model()[i] > 0
+{
+  mut items.retain(fn(item) { item > 0 })
+}
+
+fn retained_set(elements: mut Set[Int64])
+  ensures forall element: Int64 => elements.model().contains(element) ==> element > 0
+{
+  mut elements.retain(fn(element) { element > 0 })
+}
+
+fn retained_map(scores: mut Map[Int64, Int64])
+  ensures forall key: Int64 => scores.model().contains_key(key) ==> scores.model().get(key) > 0
+{
+  mut scores.retain(fn(entry) { entry.value > 0 })
+}
+
+fn retained_sorted_set(elements: mut collections::SortedSet[Int64])
+  ensures forall element: Int64 => elements.model().contains(element) ==> element > 0
+{
+  mut elements.retain(fn(element) { element > 0 })
+}
+
+fn retained_sorted_map(scores: mut collections::SortedMap[Int64, Int64])
+  ensures forall key: Int64 => scores.model().contains_key(key) ==> scores.model().get(key) > 0
+{
+  mut scores.retain(fn(entry) { entry.value > 0 })
+}

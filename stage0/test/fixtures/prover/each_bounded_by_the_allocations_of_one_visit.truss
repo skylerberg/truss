@@ -1,0 +1,8 @@
+fn f(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
+  cost allocations <= allocations(visit)
+{
+  for item in items {
+    visit(item)
+  }
+}

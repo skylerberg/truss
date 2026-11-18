@@ -1,0 +1,15 @@
+fn f(start: Countdown) -> UInt8
+  cost time O(start.left * start.weight + start.left)
+{
+  var left = start
+  var last: UInt8 = 0
+  for value in left
+    invariant visited.length() + left.left == start.left
+    invariant left.weight == start.weight
+    decreases left.left
+    cost time O(visited.length() * start.weight + visited.length())
+  {
+    last = value
+  }
+  last
+}

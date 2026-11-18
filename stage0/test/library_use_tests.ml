@@ -1,6 +1,6 @@
 let check packages file =
   let database = Support.make_database packages in
-  match Support.list_diagnostics database file with
+  match Support.list_fragment_diagnostics database file with
   | [] -> Support.list_proof_diagnostics database file
   | errors -> errors
 
@@ -24,14 +24,21 @@ let () =
   Harness.test "a set holds inserted elements and not removed ones" (fun () ->
       expect_proven Fixtures.Library_use.set_insert_and_remove);
   Harness.test "a set literal contains its listed elements and nothing else" (fun () ->
-      expect_proven Fixtures.Library_use.set_literal_with_two_elements)
+      expect_proven Fixtures.Library_use.set_literal_with_two_elements);
+  Harness.test "comparisons, hashes, and lookups state how much they allocate" (fun () ->
+      expect_proven Fixtures.Library_use.comparisons_and_lookups_without_allocations);
+  Harness.test "a comparison of a list or a string with its view allocates nothing and proves"
+    (fun () -> expect_proven Fixtures.Library_use.comparisons_of_owners_and_views);
+  Harness.test "a lookup with a view of its key allocates nothing and finds the key's elements"
+    (fun () -> expect_proven Fixtures.Library_use.lookups_by_views_of_keys)
 
 let () =
-  Harness.test "a display that ends is proven, and a function with a time clause calls it"
-    (fun () -> expect_proven Fixtures.Library_use.point_display_called_by_a_timed_function);
-  Harness.test "a display that may not end is rejected" (fun () ->
+  Harness.test "a display that ends is proven, and a function that terminates calls it" (fun () ->
+      expect_proven Fixtures.Library_use.point_display_called_by_a_function_that_terminates);
+  Harness.test "a display that may run forever is rejected" (fun () ->
       Support.expect_one_diagnostic ~check Fixtures.Library_use.display_with_an_endless_loop
-        "prover.termination")
+        "capabilities.not_available"
+        ~says:"`display` can use only the capabilities `Display` declares for it.")
 
 let () =
   Harness.test "two strings with the same text are equal" (fun () ->

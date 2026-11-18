@@ -92,7 +92,15 @@ val build_try :
 
 val build_collection_literal : State.state -> Syntax.expression -> Core.expression list -> Core.kind
 
-val build_map_literal :
-  State.state -> Syntax.expression -> (Core.expression * Core.expression) list -> Core.kind
+val build_converted_literal :
+  State.state -> Syntax.expression -> element:Types.ty -> Core.expression list -> Core.kind
+
+val build_converted_map_literal :
+  State.state ->
+  Syntax.expression ->
+  key:Types.ty ->
+  value_type:Types.ty ->
+  (Core.expression * Core.expression) list ->
+  Core.kind
 
 val build_declared_local : State.state -> Syntax.id -> Core.local

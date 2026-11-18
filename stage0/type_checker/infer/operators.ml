@@ -46,6 +46,11 @@ let infer_shift_result state ~left:(left_span, left_type) ~right:(right_span, ri
   infer_integer_result state left_span left_type
     ~describe:(Printf.sprintf "Shifts work on built-in integers, not `%s`.")
 
+let is_integer_operand state type_ =
+  let type_ = State.normalize state type_ in
+  State.is_integer_type state type_ || type_ = Types.Integer
+  || match State.resolve state type_ with Types.Literal (Integer_literal, _) -> true | _ -> false
+
 let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
   State.reject_in_formula state env (State.read_span state value.id) "`?`";
   let inner_type = State.normalize state (Hooks.check_expression state env inner) in
@@ -79,6 +84,13 @@ let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
 
 and check_record_update state env (value : Syntax.expression) (base : Syntax.expression) updates =
   let base_type = State.normalize state (Hooks.check_expression state env base) in
+  (match List.assoc_opt value.id state.keyword_modes with
+  | None -> Modes.note_owned_value state env base
+  | Some Own -> ()
+  | Some Mut ->
+      State.report state Wrong_mode (State.read_span state base.id)
+        "`with` takes ownership of its base, so the base is passed `own`, not `mut`."
+  | Some Read -> State.raise_bug "a mode keyword recorded as `Read`");
   (match base_type with
   | Types.Named { path; _ }
     when not (Members.are_fields_visible state.lookups ~package:state.package path) ->
@@ -243,12 +255,11 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
               name = method_;
               receiver = Read;
               self_type = left;
-              type_arguments = [];
+              instantiation = Types.no_instantiation;
               evidence = Built_in;
             };
         arguments = operands;
         omitted_defaults = [];
-        uses = Types.no_capabilities;
         callee_result = result;
       };
   State.defer state (fun () ->
@@ -283,12 +294,11 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
                         name = method_;
                         receiver = Read;
                         self_type = left;
-                        type_arguments = [];
+                        instantiation = Types.no_instantiation;
                         evidence = State.convert_evidence evidence;
                       };
                   arguments = operands;
                   omitted_defaults = [];
-                  uses = Types.no_capabilities;
                   callee_result = output;
                 }
         | None ->
@@ -326,7 +336,6 @@ and check_built_in_operator state (value : Syntax.expression) (operands : Syntax
               { Tables.expression = operand.id; core_argument_index = index; mode = Read })
             operands;
         omitted_defaults = [];
-        uses = Types.no_capabilities;
         callee_result = result;
       }
 
@@ -388,15 +397,11 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
       let left_type = Option.get state.tables.types.(left.id) in
       let right_type = Option.get state.tables.types.(right.id) in
       check_literal_operands state ~left:left_type ~right:right_type;
-      let are_integers type_ =
-        let type_ = State.normalize state type_ in
-        State.is_integer_type state type_ || type_ = Types.Integer
-        ||
-        match State.resolve state type_ with
-        | Types.Literal (Integer_literal, _) -> true
-        | _ -> false
-      in
-      if env.specification && are_integers left_type && are_integers right_type then begin
+      if
+        env.specification
+        && is_integer_operand state left_type
+        && is_integer_operand state right_type
+      then begin
         State.register_expression state value (fun () ->
             Form.build_built_in_comparison state comparison left right);
         Types.bool
@@ -404,8 +409,24 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
       else begin
         State.register_expression state value (fun () ->
             Form.build_comparison state value comparison left right);
-        if not (State.unify state left_type right_type) then
-          ignore (add_operand_mismatch state value left right ~left_type ~right_type);
+        let compared_type =
+          match
+            ( State.find_view_as state ~owned:right_type ~view:left_type,
+              State.find_view_as state ~owned:left_type ~view:right_type )
+          with
+          | Some _, _ ->
+              Name_lookup.coerce state env ~argument:Types.Read right ~actual:right_type
+                ~expected:left_type;
+              left_type
+          | None, Some _ ->
+              Name_lookup.coerce state env ~argument:Types.Read left ~actual:left_type
+                ~expected:right_type;
+              right_type
+          | None, None ->
+              if not (State.unify state left_type right_type) then
+                ignore (add_operand_mismatch state value left right ~left_type ~right_type);
+              left_type
+        in
         let trait, method_, result =
           match comparison with
           | Equal | Not_equal -> (Well_known.make_path Equal, "equal", Types.bool)
@@ -423,8 +444,8 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                     trait = State.make_trait_reference ~arguments:[] trait;
                     name = method_;
                     receiver = Read;
-                    self_type = left_type;
-                    type_arguments = [];
+                    self_type = compared_type;
+                    instantiation = Types.no_instantiation;
                     evidence = Built_in;
                   };
               arguments =
@@ -433,10 +454,9 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                   { expression = right.id; core_argument_index = 1; mode = Read };
                 ];
               omitted_defaults = [];
-              uses = Types.no_capabilities;
               callee_result = result;
             };
-        Name_lookup.resolve_evidence state value left_type
+        Name_lookup.resolve_evidence state value compared_type
           (State.make_trait_reference ~arguments:[] trait);
         Types.bool
       end
@@ -471,16 +491,12 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
         State.make_error_type state String_addition (State.read_span state value.id) ~fixes
           "Strings have no `+`. Join them with interpolation, or with methods such as `push`."
       end
-      else begin
-        let are_integers type_ =
-          let type_ = State.normalize state type_ in
-          State.is_integer_type state type_ || type_ = Types.Integer
-          ||
-          match State.resolve state type_ with
-          | Types.Literal (Integer_literal, _) -> true
-          | _ -> false
-        in
-        if env.specification && are_integers left_type && are_integers right_type then begin
+      else
+        begin if
+          env.specification
+          && is_integer_operand state left_type
+          && is_integer_operand state right_type
+        then begin
           ignore
             (match State.resolve state left_type with
             | Types.Literal _ -> State.unify state left_type Types.Integer
@@ -525,7 +541,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
             end
             else result
           end
-      end
+        end
 
 and add_operand_mismatch state (value : Syntax.expression) (left : Syntax.expression)
     (right : Syntax.expression) ~left_type ~right_type =
@@ -533,35 +549,25 @@ and add_operand_mismatch state (value : Syntax.expression) (left : Syntax.expres
   let left_type = State.normalize state left_type
   and right_type = State.normalize state right_type in
   if State.is_integer_type state left_type && State.is_integer_type state right_type then begin
-    let from =
-      State.make_trait_reference ~arguments:[ Types.Type right_type ] (Well_known.make_path From)
+    let is_within narrower wider =
+      match (Types.find_integer_range narrower, Types.find_integer_range wider) with
+      | Some (low, high), Some (wider_low, wider_high) ->
+          Z.geq low wider_low && Z.leq high wider_high
+      | _ -> false
+    in
+    let make_widening_fix side (operand : Syntax.expression) target =
+      State.fix
+        (Printf.sprintf "Convert the %s side to `%s`." side (Types.show target))
+        [
+          State.replace
+            (State.read_span state operand.id)
+            (Printf.sprintf "%s.from_integer(%s)" (Types.show target)
+               (State.quote_span state (State.read_span state operand.id)));
+        ]
     in
     let fixes =
-      if Option.is_some (State.find_evidence state left_type from) then
-        [
-          State.fix
-            (Printf.sprintf "Convert the right side to `%s`." (Types.show left_type))
-            [
-              State.replace (State.read_span state right.id)
-                (Printf.sprintf "%s.from(%s)" (Types.show left_type)
-                   (State.quote_span state (State.read_span state right.id)));
-            ];
-        ]
-      else if
-        Option.is_some
-          (State.find_evidence state right_type
-             (State.make_trait_reference ~arguments:[ Types.Type left_type ]
-                (Well_known.make_path From)))
-      then
-        [
-          State.fix
-            (Printf.sprintf "Convert the left side to `%s`." (Types.show right_type))
-            [
-              State.replace (State.read_span state left.id)
-                (Printf.sprintf "%s.from(%s)" (Types.show right_type)
-                   (State.quote_span state (State.read_span state left.id)));
-            ];
-        ]
+      if is_within right_type left_type then [ make_widening_fix "right" right left_type ]
+      else if is_within left_type right_type then [ make_widening_fix "left" left right_type ]
       else []
     in
     State.add_mismatch_diagnostic state Mismatched_integers (State.read_span state value.id) ~sides
@@ -613,10 +619,10 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
                       List.iter
                         (fun name ->
                           match
-                            (Interface.Impls.project_capability_set state.lookups.interface
-                               ~list_bounds:(State.lookup_bounds state) inner_type
-                               { bound with associated = [] } name
-                              :> Types.capability list)
+                            Types.list_capabilities
+                              (Interface.Impls.project_capability_set state.lookups.interface
+                                 ~list_bounds:(State.lookup_bounds state) inner_type
+                                 { bound with associated = [] } name)
                           with
                           | [] -> ()
                           | set ->

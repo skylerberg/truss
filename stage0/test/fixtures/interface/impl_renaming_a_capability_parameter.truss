@@ -1,0 +1,14 @@
+trait Runner {
+  fn run(self, action: (fn() uses generic Used))
+    uses generic Used
+}
+
+type Thing()
+
+impl Runner for Thing {
+  fn run(self, action: (fn() uses generic Given))
+    uses generic Given
+  {
+    todo
+  }
+}

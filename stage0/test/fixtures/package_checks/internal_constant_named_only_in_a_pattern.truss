@@ -1,0 +1,8 @@
+use app::limits
+
+public fn is_limit(value: Int64) -> Bool {
+  match value {
+    limits::limit => true
+    _ => false
+  }
+}

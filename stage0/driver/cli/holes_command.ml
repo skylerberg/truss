@@ -16,7 +16,7 @@ let list_holes snapshot packages database (names : Resolve.Names.lookups)
   match Database.read_resolved database key with
   | Some resolved ->
       let ({ file; base } : Resolve.Names.place) = names.read_place key in
-      let source = Command_packages.read_source snapshot packages file in
+      let source = Command_packages.read_source snapshot database packages file in
       List.map
         (fun (hole : Inspect.hole) ->
           let line, column = Source.compute_position source (base + hole.offset) in
@@ -36,7 +36,7 @@ let list_holes snapshot packages database (names : Resolve.Names.lookups)
   | None -> []
 
 let gather snapshot packages database paths =
-  let names = Database.make_name_lookups database packages in
+  let names = Database.make_name_lookups database in
   List.concat_map
     (fun file ->
       List.concat_map
@@ -55,12 +55,12 @@ let attach_blocks snapshot packages database holes =
         (fun (test : Test_command.test) -> ("test " ^ Test_command.label_test test, test.path))
         (Test_command.select snapshot database packages ~paths:[] ~match_:None)
   in
-  let compile = lazy (Compiler.make_lowering_compiler database packages) in
+  let lookups = lazy (Workspace_backend.require_lowered_lookups database packages) in
   let read_memoized table list_reached root =
     match Path_table.find_opt table root with
     | Some reached -> reached
     | None ->
-        let reached = list_reached (Lazy.force compile) root in
+        let reached = list_reached (Lazy.force lookups) root in
         Path_table.replace table root reached;
         reached
   in
@@ -68,8 +68,8 @@ let attach_blocks snapshot packages database holes =
   List.map
     (fun hole ->
       let list_reached =
-        if hole.type_ = None then read_memoized reached_todo_types Compile.list_reached_todo_types
-        else read_memoized reached_definitions Compile.list_reached_definitions
+        if hole.type_ = None then read_memoized reached_todo_types Backend.list_reached_todo_types
+        else read_memoized reached_definitions Backend.list_reached_definitions
       in
       {
         hole with

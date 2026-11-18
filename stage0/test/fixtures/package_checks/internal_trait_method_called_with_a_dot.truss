@@ -1,0 +1,13 @@
+internal trait Doubled {
+  fn doubled(self) -> Int64
+}
+
+impl Doubled for Int64 {
+  fn doubled(self) -> Int64 {
+    self
+  }
+}
+
+public fn twice(value: Int64) -> Int64 {
+  value.doubled()
+}

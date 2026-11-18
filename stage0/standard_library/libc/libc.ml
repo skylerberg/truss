@@ -17,8 +17,12 @@ let host =
     match Built_for.architecture with "amd64" -> Some X86_64 | "arm64" -> Some Arm64 | _ -> None
   in
   match (os, architecture) with
-  | Some os, Some architecture -> Some { os; architecture }
-  | _ -> None
+  | Some os, Some architecture -> Ok { os; architecture }
+  | _ ->
+      Error
+        (Printf.sprintf "Stage0 builds programs only for %s, on %s."
+           (String.concat " and " (List.map show_os oses))
+           (String.concat " and " (List.map show_architecture architectures)))
 
 type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | Float32 | Float64
 

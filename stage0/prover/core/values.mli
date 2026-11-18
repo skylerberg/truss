@@ -22,11 +22,14 @@ val apply_map_literal :
   State.context ->
   State.frame ->
   ty:Types.ty ->
-  location:State.location ->
+  location:Obligation.location ->
   (int option * Logic.term * Logic.term) list ->
   State.frame * Logic.term
 
 val make_text_value : State.context -> State.frame -> Types.ty -> string -> Logic.term
+
+val make_owner_of_view :
+  State.context -> State.frame -> view:Types.ty -> owner:Types.ty -> Logic.term -> Logic.term
 
 val project_field :
   State.context ->
@@ -58,12 +61,12 @@ val apply_construct :
   State.frame * Logic.term
 
 val make_text_match :
-  State.context -> State.location -> Types.ty -> Logic.term -> string -> Logic.term
+  State.context -> Obligation.location -> Types.ty -> Logic.term -> string -> Logic.term
 
 val apply_specification_function :
   State.context ->
   State.frame ->
-  location:State.location ->
+  location:Obligation.location ->
   Core.specification_function ->
   Logic.term list ->
   unconverted:Types.ty list ->

@@ -153,10 +153,7 @@ and text = { value : string; span : Source.span }
 and interpolation = { tokens : t array; span : Source.span; is_closed : bool }
 
 val equal_punctuation : punctuation -> punctuation -> bool
-val list_texts : string_literal -> text array
 val list_interpolations : string_literal -> interpolation array
-val keywords : (string * keyword) list
-val reserved_words : (string * reserved) list
 val punctuation : (string * punctuation) list
 val find_word : string -> kind option
 val spell_keyword : keyword -> string
@@ -169,3 +166,9 @@ val joins : char -> char -> bool
 val can_end : kind -> bool
 val can_begin : kind -> bool
 val joins_neighbor : before:char option -> after:char option -> string -> bool
+
+module For_testing : sig
+  val list_texts : string_literal -> text array
+  val keywords : (string * keyword) list
+  val reserved_words : (string * reserved) list
+end

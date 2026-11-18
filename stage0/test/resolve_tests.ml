@@ -44,9 +44,9 @@ let locate_name packages name text occurrence =
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.make_key declaration in
         match
-          ( (Support.make_names packages key.module_.package).read_definition key,
-            (Support.make_names packages key.module_.package).read_spans key,
-            (Support.make_names packages key.module_.package).read_place key,
+          ( (Support.make_names packages).read_definition key,
+            (Support.make_names packages).read_spans key,
+            (Support.make_names packages).read_place key,
             Database.read_resolved (Support.make_database packages) key )
         with
         | definition, spans, { base; _ }, Some resolved ->
@@ -56,7 +56,7 @@ let locate_name packages name text occurrence =
                  (fun (name : Syntax.name) -> base + spans.(name.id).start = offset)
                  (Syntax_walk.collect_names spans definition))
         | _ -> None)
-      ((Support.make_names packages file.module_.package).list_declarations_in file)
+      ((Support.make_names packages).list_declarations_in file)
   in
   match located with
   | Some located -> located
@@ -257,9 +257,9 @@ let find_bracket text written occurrence =
     (fun (declaration : Resolve.Names.declaration) ->
       let key = Resolve.Names.make_key declaration in
       match
-        ( (Support.make_names packages key.module_.package).read_definition key,
-          (Support.make_names packages key.module_.package).read_spans key,
-          (Support.make_names packages key.module_.package).read_place key,
+        ( (Support.make_names packages).read_definition key,
+          (Support.make_names packages).read_spans key,
+          (Support.make_names packages).read_place key,
           Database.read_resolved (Support.make_database packages) key )
       with
       | definition, spans, { base; _ }, Some resolved ->
@@ -295,7 +295,35 @@ let () =
       | Some Resolve.Method_bracket -> ()
       | _ -> Harness.fail "decided");
   Harness.test "brackets after a function without generic parameters are an error" (fun () ->
-      expect_one_diagnostic Fixtures.Resolve.brackets_after_a_plain_function "resolve.not_generic")
+      expect_one_diagnostic Fixtures.Resolve.brackets_after_a_plain_function "resolve.not_generic");
+  Harness.test "brackets after a function with only a capability parameter are an error" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Resolve.brackets_after_a_function_with_only_a_capability_parameter
+        "resolve.not_generic")
+
+let () =
+  Harness.test "a capability parameter named only in its function's own uses is an error" (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.capability_parameter_named_only_in_uses
+        "resolve.unconstrained_capability_parameter"
+        ~says:
+          "`generic Granted` appears only in the function's own `uses`, so no argument gives it \
+           capabilities, and it stands for none. Name it in the type of a parameter, as in `visit: \
+           (fn() uses generic Granted)`.");
+  Harness.test "a body names only the capability parameters of its signature" (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.body_naming_a_capability_parameter_of_no_signature
+        "resolve.unknown_name");
+  Harness.test "a body can name a capability parameter of its signature" (fun () ->
+      expect_no_diagnostics [ ("app::main", Fixtures.Resolve.body_naming_its_capability_parameter) ]);
+  Harness.test "a capability parameter without `generic` is an error with a fix that writes it"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.capability_parameter_without_its_marker
+        "resolve.unknown_name" ~fixed:Fixtures.Resolve.capability_parameter_without_its_marker_fixed);
+  Harness.test "a capability parameter cannot share its name with a type parameter" (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.capability_parameter_named_like_a_type_parameter
+        "resolve.shadowed_name");
+  Harness.test "a capability parameter cannot shadow a capability" (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.capability_parameter_named_like_a_capability
+        "resolve.shadowed_name")
 
 let () =
   Harness.test "mut before a call to a function is an error with a fix that removes it" (fun () ->
@@ -346,7 +374,7 @@ let () =
       expect_one_diagnostic ~others
         "use app::shapes\n\nfn f() -> Int64 {\n  shapes::missing::area()\n}\n"
         "resolve.unknown_module");
-  Harness.test "a file where the parser recovered reports no unused import" (fun () ->
+  Harness.test "a file with a syntax error reports no unused import" (fun () ->
       let packages =
         setup
           (others
@@ -378,8 +406,7 @@ let () =
   Harness.test "a method's type head names its type" (fun () ->
       let packages = setup [ ("app::main", Fixtures.Resolve.counter_method) ] in
       let owner = Path.Top { module_ = parse_module "app::main"; name = "Counter" } in
-      let owner_package = (parse_module "app::main").package in
-      match (Support.make_names packages owner_package).list_members owner "get" with
+      match (Support.make_names packages).list_members owner "get" with
       | [ { path = Method { receiver = Read; _ }; _ } ] -> ()
       | reported -> Harness.fail "found %d members" (List.length reported));
   Harness.test "a method can be written in another file of its type's package" (fun () ->
@@ -391,8 +418,7 @@ let () =
           ]
       in
       let owner = Path.Top { module_ = parse_module "app::main"; name = "Counter" } in
-      let owner_package = (parse_module "app::main").package in
-      match (Support.make_names packages owner_package).list_members owner "get" with
+      match (Support.make_names packages).list_members owner "get" with
       | [ _ ] -> ()
       | reported -> Harness.fail "found %d members" (List.length reported));
   Harness.test "a body the parser could not read is not resolved" (fun () ->
@@ -476,7 +502,7 @@ let () =
       | [] -> ()
       | reported -> Harness.fail "found [%s]" (String.concat "; " (list_codes reported)));
       match
-        (Support.make_names packages (parse_file "app::main").module_.package).list_imports
+        (Support.make_names packages).list_imports
           {
             module_ = (parse_file "app::main").module_;
             path = Top { module_ = (parse_file "app::main").module_; name = "f" };
@@ -504,4 +530,57 @@ let () =
   Harness.test "a name used through an import of standard::intrinsic is not an error of its own"
     (fun () ->
       expect_one_diagnostic Fixtures.Resolve.call_through_standard_intrinsic
-        "resolve.intrinsic_import")
+        "resolve.intrinsic_import");
+  Harness.test "a type head through standard::intrinsic outside the standard package names no type"
+    (fun () ->
+      let packages =
+        setup [ ("app::main", Fixtures.Resolve.method_of_standard_intrinsic_outside_standard) ]
+      in
+      (match Support.list_declarations packages (parse_module "app::main") with
+      | [ { path = Method { owner; _ }; _ } ] when not (Path.is_resolved owner) -> ()
+      | declarations ->
+          Harness.fail "declared [%s]"
+            (String.concat "; "
+               (List.map
+                  (fun (declaration : Resolve.Names.declaration) -> Path.show declaration.path)
+                  declarations)));
+      match list_codes (check packages (parse_file "app::main")) with
+      | [ "resolve.intrinsic_import" ] -> ()
+      | reported -> Harness.fail "reported [%s]" (String.concat "; " reported))
+
+let () =
+  Harness.test "impls rejected for different function type arguments are not duplicates" (fun () ->
+      let packages =
+        setup
+          [ ("app::main", Fixtures.Resolve.impls_rejected_for_different_function_type_arguments) ]
+      in
+      let file = parse_file "app::main" in
+      if Support.parse_errors packages file = [] then Harness.fail "parsed";
+      match list_codes (check packages file) with
+      | [] -> ()
+      | reported -> Harness.fail "reported [%s]" (String.concat "; " reported));
+  Harness.test "impls rejected for different function type arguments have distinct keys" (fun () ->
+      let packages =
+        setup
+          [ ("app::main", Fixtures.Resolve.impls_rejected_for_different_function_type_arguments) ]
+      in
+      match
+        List.sort compare
+          (List.filter_map
+             (fun (declaration : Resolve.Names.declaration) ->
+               match declaration.path with
+               | Impl _ -> Some (Path.show declaration.path, declaration.ordinal)
+               | _ -> None)
+             (Support.list_declarations packages (parse_module "app::main")))
+      with
+      | [
+       ("app::main::impl app::main::Wraps[fn(Bool) -> Int64] for app::main::Box", 0);
+       ("app::main::impl app::main::Wraps[fn(Int64) -> Int64] for app::main::Box", 0);
+      ] ->
+          ()
+      | impls ->
+          Harness.fail "declared [%s]"
+            (String.concat "; "
+               (List.map
+                  (fun (shown, ordinal) -> Printf.sprintf "%s, ordinal %d" shown ordinal)
+                  impls)))

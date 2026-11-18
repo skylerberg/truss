@@ -1,0 +1,5 @@
+fn spin()
+  uses RunForever
+  cost time O(1)
+{
+}

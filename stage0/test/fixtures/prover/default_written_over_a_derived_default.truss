@@ -1,0 +1,10 @@
+type Inner(size: Int64)
+  derives Default
+
+type Outer(inner: Inner)
+
+impl Default for Outer {
+  fn default() -> Outer {
+    Outer(inner: Inner.default())
+  }
+}

@@ -22,7 +22,7 @@ impl Tally for Counter
 }
 
 fn main(arguments: List[String]) -> ExitCode
-  uses Tasks, Console, Panic
+  uses Tasks, Console, Panic, RunForever
 {
   var counter = Counter(count: 0)
   provide mut counter {

@@ -4,5 +4,5 @@ type Digit(value: UInt8)
 fn digit_index(digit: Digit) -> UInt64
   ensures result < 9
 {
-  UInt64.from(digit.value - 1)
+  UInt64.from_integer(digit.value - 1)
 }

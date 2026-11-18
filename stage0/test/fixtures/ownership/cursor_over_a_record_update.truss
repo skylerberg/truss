@@ -1,0 +1,6 @@
+type Named(name: String, count: Int64)
+
+fn f(named: own Named) -> Option[Character] {
+  var each = (own named with (count: 1)).name.characters()
+  mut each.next()
+}

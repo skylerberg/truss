@@ -1,3 +1,0 @@
-public fn stamp() -> Int64 {
-  1
-}

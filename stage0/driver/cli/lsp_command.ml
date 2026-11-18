@@ -65,9 +65,9 @@ let encode_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
 let encode_state encoding source (state : Source.span Prover.state) =
   Json.Object
     [
-      ("range", encode_range encoding source state.span);
-      ("code", Json.String (Diagnostic.Code.name (Prover state.code)));
-      ("shows", Json.String state.shows);
+      ("range", encode_range encoding source state.site.span);
+      ("code", Json.String (Diagnostic.Code.name (Prover state.site.code)));
+      ("shows", Json.String state.site.shows);
       ("proven", Json.Bool (state.failure = None));
       ("trustsCompiledCode", Json.Bool state.trusts_compiled_code);
     ]
@@ -99,7 +99,6 @@ let check ~root encoding (buffers : (string * string) list) =
       buffers
   in
   let database = Workspace.open_database trial in
-  Database.check database packages;
   let proofs =
     Proofs.check database trial packages (List.filter_map (fun (_, _, file) -> file) opened)
   in
@@ -351,18 +350,6 @@ let serve ~input ~output ~check =
               | Stop status -> status))
   in
   loop false
-
-let check_buffers = function
-  | root :: encoding :: rest ->
-      let rec pair_up = function uri :: text :: rest -> (uri, text) :: pair_up rest | _ -> [] in
-      let encoding = if encoding = "utf-8" then Utf_8 else Utf_16 in
-      Json.print (check ~root encoding (pair_up rest));
-      0
-  | _ -> 2
-
-let check_arguments ~root encoding buffers =
-  "__check-buffers" :: root :: show_encoding encoding
-  :: List.concat_map (fun (uri, text) -> [ uri; text ]) buffers
 
 module For_testing = struct
   let locate_position = locate_position

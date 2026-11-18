@@ -1,4 +1,4 @@
-let check packages = Support.list_diagnostics (Support.make_database packages)
+let check packages = Support.list_fragment_diagnostics (Support.make_database packages)
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
 
@@ -35,6 +35,27 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.impl_inheriting_a_label_overload
         "package.method_name_clash");
+  Harness.test "an impl cannot give a `String` a method that its view has in the same mode"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Package_checks.impl_giving_a_string_a_method_of_its_view
+        "package.method_name_clash" ~says:"the `to_string` of its view `StringSlice`");
+  Harness.test
+    "an impl in another package cannot give a `String` another overload of its view's method"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Package_checks.impl_giving_a_string_an_overload_of_a_method_of_its_view
+        "package.method_name_clash" ~says:"only an `impl` in its own package");
+  Harness.test "an impl cannot give an `Array` a method that its view has in the same mode"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Package_checks.impl_giving_an_array_a_method_of_its_view
+        "package.method_name_clash" ~says:"the `contains` of its view `Slice[Element]`");
+  Harness.test "an impl may give a `String` a method that neither it nor its view has" (fun () ->
+      expect_fine Fixtures.Package_checks.impl_giving_a_string_a_method_that_its_view_lacks);
+  Harness.test
+    "an impl in another package may give a `String` a method that its view has as `internal`"
+    (fun () ->
+      expect_fine
+        Fixtures.Package_checks.impl_giving_a_string_a_method_that_its_view_has_as_internal);
   Harness.test "a type's constant cannot share a name with a trait's method" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.constant_named_like_a_trait_method
         "package.method_name_clash");
@@ -68,6 +89,11 @@ let () =
   Harness.test "a type that contains itself with growing arguments is an error" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.nested_type_with_growing_arguments
         "package.growing_type");
+  Harness.test
+    "an impl whose associated type grows the type that holds it reaches the recursion limit"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Package_checks.impl_growing_a_type_through_its_associated_type
+        "types.recursion_limit" ~says:"needs more than 64 nested types");
   Harness.test "generic code that instantiates itself with growing arguments is an error" (fun () ->
       let packages =
         Support.setup
@@ -183,26 +209,24 @@ let () =
     | actual when actual = expected -> ()
     | actual -> Harness.fail "found [%s]" (String.concat "; " actual)
   in
-  Harness.test "a type cannot occur in the input of a function type that has a time clause"
-    (fun () ->
-      expect_one_diagnostic "type Knot(run: (fn(Knot) -> Bool cost time finite))\n"
-        "package.not_strictly_positive");
-  Harness.test "a type may occur in the input of a function type that has no time clause" (fun () ->
-      expect_fine "type Button(label: String, on_click: fn(Button))\n");
-  Harness.test "a type may occur in the output of a function type that has a time clause" (fun () ->
-      expect_fine "type Lazy(next: (fn() -> Lazy cost time finite))\n");
+  Harness.test "a type cannot occur in the input of a function type that terminates" (fun () ->
+      expect_one_diagnostic "type Knot(run: fn(Knot) -> Bool)\n" "package.not_strictly_positive");
+  Harness.test "a type may occur in the input of a function type that uses RunForever" (fun () ->
+      expect_fine "type Button(label: String, on_click: (fn(Button) uses RunForever))\n");
+  Harness.test "a type may occur in the output of a function type that terminates" (fun () ->
+      expect_fine "type Lazy(next: fn() -> Lazy)\n");
   Harness.test "a type cannot occur in such an input inside a collection" (fun () ->
-      expect_one_diagnostic "type Knot(runs: List[(fn(Knot) -> Bool cost time finite)])\n"
+      expect_one_diagnostic "type Knot(runs: List[fn(Knot) -> Bool])\n"
         "package.not_strictly_positive");
   Harness.test "a type cannot occur in such an input inside a type without fields" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.knot_in_a_pending_function_input
         "package.not_strictly_positive");
   Harness.test "a type cannot occur in such an input inside another function type's output"
     (fun () ->
-      expect_one_diagnostic "type Knot(make: fn() -> (fn(Knot) -> Bool cost time finite))\n"
+      expect_one_diagnostic "type Knot(make: fn() -> fn(Knot) -> Bool)\n"
         "package.not_strictly_positive");
   Harness.test "a type cannot occur in the input of a function type in such an input" (fun () ->
-      expect_one_diagnostic "type Knot(run: (fn(fn(Knot) -> Bool) -> Bool cost time finite))\n"
+      expect_one_diagnostic "type Knot(run: fn(fn(Knot) -> Bool) -> Bool)\n"
         "package.not_strictly_positive");
   Harness.test "a type cannot occur in such an input of an any type's associated type" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.knot_in_an_any_types_function_input
@@ -287,5 +311,81 @@ let () =
       match Support.list_codes (check packages (Support.parse_file "app::main")) with
       | [ "package.method_name_clash" ] -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
+  Harness.test "an impl in another package may name a method after the type's `internal` method"
+    (fun () ->
+      let packages =
+        Support.setup
+          ~dependencies:[ ("app", "tools") ]
+          [
+            ("tools::kits", Fixtures.Package_checks.kit_with_an_internal_part);
+            ( "app::main",
+              Fixtures.Package_checks.impl_naming_a_method_after_an_internal_one_of_another_package
+            );
+          ]
+      in
+      match Support.list_codes (check packages (Support.parse_file "app::main")) with
+      | [] -> ()
+      | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
+  Harness.test "an impl in the type's package counts the type's private method of another module"
+    (fun () ->
+      expect_one_diagnostic
+        ~others:[ ("app::shapes", Fixtures.Package_checks.shape_with_a_private_measure) ]
+        Fixtures.Package_checks.impl_naming_a_method_after_a_private_one_of_another_module
+        "package.method_name_clash" ~says:"a `measure` of its own");
   Harness.test "impls whose heads unify only through an infinite type do not overlap" (fun () ->
       expect_fine Fixtures.Package_checks.impls_unifying_only_through_an_infinite_type)
+
+let check_package packages = Database.list_file_diagnostics (Support.make_database packages)
+let expect_unused = Support.expect_one_diagnostic ~check:check_package
+
+let expect_used ?(others = []) ?(file = "app::main") text =
+  Support.expect_no_diagnostics ~check:check_package ((file, text) :: others)
+
+let () =
+  Harness.test "an internal function that nothing in its package uses is rejected" (fun () ->
+      expect_unused Fixtures.Package_checks.unused_internal_function "usage.unused_function"
+        ~says:"Nothing in `app` uses the internal function `app::main::double`");
+  Harness.test "an internal constant that nothing in its package uses is rejected" (fun () ->
+      expect_unused Fixtures.Package_checks.unused_internal_constant "usage.unused_constant");
+  Harness.test "an internal function that only calls itself is rejected" (fun () ->
+      expect_unused Fixtures.Package_checks.internal_function_used_only_by_itself
+        "usage.unused_function" ~says:"Nothing in `app` uses");
+  Harness.test "internal functions that only unused definitions call are rejected together"
+    (fun () ->
+      let packages =
+        Support.setup
+          [ ("app::main", Fixtures.Package_checks.internal_functions_used_only_by_each_other) ]
+      in
+      match check_package packages (Support.parse_file "app::main") with
+      | [ first; second ] ->
+          let messages = List.sort compare [ first.message; second.message ] in
+          if
+            messages
+            <> [
+                 "Nothing in `app` uses the internal function `app::main::quadruple`. Delete it.";
+                 "Only unused definitions use the internal function `app::main::twice`. Delete it \
+                  with them.";
+               ]
+          then Harness.fail "found %s" (String.concat "; " messages)
+      | found -> Harness.fail "found [%s]" (String.concat "; " (Support.list_codes found)));
+  Harness.test "an internal function that another module of the package calls is used" (fun () ->
+      expect_used Fixtures.Package_checks.public_function_calling_an_internal_helper
+        ~others:[ ("app::helpers", Fixtures.Package_checks.internal_helpers) ]);
+  Harness.test "an internal method called with a dot is used" (fun () ->
+      expect_used Fixtures.Package_checks.internal_method_called_with_a_dot);
+  Harness.test "a method of an internal trait called through the trait is used" (fun () ->
+      expect_used Fixtures.Package_checks.internal_trait_method_called_with_a_dot);
+  Harness.test "an internal function returned as a value is used" (fun () ->
+      expect_used Fixtures.Package_checks.internal_function_returned_as_a_value);
+  Harness.test "an internal function named only in an `ensures` is used" (fun () ->
+      expect_used Fixtures.Package_checks.internal_function_named_only_in_an_ensures);
+  Harness.test "an internal constant named only in a pattern is used" (fun () ->
+      expect_used Fixtures.Package_checks.internal_constant_named_only_in_a_pattern
+        ~others:[ ("app::limits", Fixtures.Package_checks.internal_limit) ]);
+  Harness.test "a private function that nothing in its package uses is rejected" (fun () ->
+      expect_unused Fixtures.Package_checks.unused_private_function "usage.unused_function"
+        ~says:"Nothing in `app` uses the private function `app::main::double`");
+  Harness.test "a private function that a test calls is used" (fun () ->
+      expect_used Fixtures.Package_checks.private_function_called_by_a_test);
+  Harness.test "the `main` of a package's root module is used" (fun () ->
+      expect_used ~file:"app" Fixtures.Package_checks.entry_point_alone)

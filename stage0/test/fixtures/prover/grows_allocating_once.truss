@@ -1,0 +1,12 @@
+type Tree =
+  | Leaf
+  | indirect Node(left: Tree, right: Tree)
+
+fn grows(index: UInt32) -> Bool
+  ensures result == (index < 2)
+  cost allocations == 1
+{
+  let _ = Tree.Node(left: Tree.Leaf, right: Tree.Leaf)
+  index < 2
+}
+

@@ -35,37 +35,37 @@ fn is_cookie_value(value: StringSlice) -> Bool {
 }
 
 public fn Cookie.header(self) -> Result[String, Error] {
-  if !is_token(self.name.slice()) {
+  if !is_token(self.name) {
     return Err(malformed("a cookie name that is not a token"))
   }
-  if !is_cookie_value(self.value.slice()) {
+  if !is_cookie_value(self.value) {
     return Err(malformed("a cookie value with a byte that cookies cannot carry"))
   }
   var text = self.name.copy()
   mut text.push("=")
-  mut text.push(self.value.slice())
+  mut text.push(self.value)
   match self.path {
     Some(path) => {
       mut text.push("; Path=")
-      mut text.push(path.slice())
+      mut text.push(path)
     }
     None => {}
   }
   match self.domain {
     Some(domain) => {
       mut text.push("; Domain=")
-      mut text.push(domain.slice())
+      mut text.push(domain)
     }
     None => {}
   }
   match self.max_age_seconds {
-    Some(seconds) => mut text.push("; Max-Age=${seconds}".slice())
+    Some(seconds) => mut text.push("; Max-Age=${seconds}")
     None => {}
   }
   match self.expires {
     Some(instant) => {
       mut text.push("; Expires=")
-      mut text.push(format_date(instant).slice())
+      mut text.push(format_date(instant))
     }
     None => {}
   }
@@ -90,7 +90,7 @@ public fn Cookie.removal(name: StringSlice, path: StringSlice = "/") -> Cookie {
 public fn Request.cookies(self) -> List[CookiePair] {
   var pairs: List[CookiePair] = []
   for entry in self.headers.entries() {
-    if same_name(entry.name.slice(), second: "Cookie") {
+    if entry.name.equal_ignoring_ascii_case("Cookie") {
       for piece in entry.value.slice().split(";") {
         let part = piece.trim()
         match part.find("=") {
@@ -111,7 +111,7 @@ public fn Request.cookies(self) -> List[CookiePair] {
 
 public fn Request.cookie(self, name: StringSlice) -> Option[String] {
   for pair in self.cookies() {
-    if pair.name.slice() == name {
+    if pair.name == name {
       return Some(pair.value.copy())
     }
   }
@@ -121,7 +121,7 @@ public fn Request.cookie(self, name: StringSlice) -> Option[String] {
 public fn Response.with_cookie(own self, cookie: Cookie) -> Result[Response, Error] {
   var response = own self
   let header = cookie.header()?
-  mut response.headers.add("Set-Cookie", value: header.slice())
+  mut response.headers.add("Set-Cookie", value: header)
   Ok(own response)
 }
 
@@ -173,10 +173,10 @@ fn signature_of(key: CookieKey, name: StringSlice, value: StringSlice) -> String
 public fn CookieKey.sign(self, cookie: own Cookie) -> Cookie {
   var signed = own cookie
   let encoded = base64::encode(signed.value.slice().bytes(), alphabet: base64::Alphabet.UrlSafe, padding: false)
-  let signature = signature_of(self, name: signed.name.slice(), value: encoded.slice())
+  let signature = signature_of(self, name: signed.name, value: encoded)
   var value = own encoded
   mut value.push(".")
-  mut value.push(signature.slice())
+  mut value.push(signature)
   signed.value = own value
   signed
 }
@@ -241,12 +241,12 @@ public fn open_cookie(keys: Slice[CookieKey], name: StringSlice, value: StringSl
 
 public fn Request.signed_cookie(self, keys: Slice[CookieKey], name: StringSlice) -> Option[String] {
   let value = self.cookie(name)?
-  verify_cookie(keys, name: name, value: value.slice())
+  verify_cookie(keys, name: name, value: value)
 }
 
 public fn Request.sealed_cookie(self, keys: Slice[CookieKey], name: StringSlice) -> Option[String] {
   let value = self.cookie(name)?
-  open_cookie(keys, name: name, value: value.slice())
+  open_cookie(keys, name: name, value: value)
 }
 
 public opaque type Session(values: Form, is_changed: Bool, issued: Instant)
@@ -293,8 +293,8 @@ public fn Session.get(self, name: StringSlice) -> Option[StringSlice] {
 public fn Session.set(mut self, name: StringSlice, value: StringSlice) {
   var kept = Form.new()
   for field in self.values.entries() {
-    if field.name.slice() != name {
-      mut kept.add(field.name.slice(), value: field.value.slice())
+    if field.name != name {
+      mut kept.add(field.name, value: field.value)
     }
   }
   mut kept.add(name, value: value)
@@ -305,8 +305,8 @@ public fn Session.set(mut self, name: StringSlice, value: StringSlice) {
 public fn Session.remove(mut self, name: StringSlice) {
   var kept = Form.new()
   for field in self.values.entries() {
-    if field.name.slice() != name {
-      mut kept.add(field.name.slice(), value: field.value.slice())
+    if field.name != name {
+      mut kept.add(field.name, value: field.value)
     }
   }
   self.values = own kept
@@ -326,6 +326,6 @@ public fn Session.cookie(self, key: CookieKey, name: StringSlice = "session", ma
   uses Random
 {
   var payload = "${self.issued.unix_seconds()}\n"
-  mut payload.push(self.values.encode().slice())
+  mut payload.push(self.values.encode())
   key.seal(Cookie(name: name.to_string(), value: own payload, max_age_seconds: Some(max_age_seconds)))
 }

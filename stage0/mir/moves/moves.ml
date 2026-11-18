@@ -4,7 +4,7 @@ module Place_table = Hashtbl.Make (Structural_key.Make (struct
   type t = path
 end))
 
-let path_of_place (place : Mir.place) =
+let find_place_path (place : Mir.place) =
   match place.root with
   | Constant _ | Literal _ -> None
   | Local local -> Some { local; projections = place.projections }
@@ -54,7 +54,7 @@ let list_rvalue_uses ~is_moving ~origin (rvalue : Mir.rvalue) =
   | Function_value _ | Value_parameter _ | Specification _ -> []
 
 let list_call_uses ~is_moving (call : Mir.call) =
-  (match call.callee with
+  (match call.callee.target with
     | Indirect operand -> list_operand_uses ~is_moving ~by_value:false operand
     | _ -> [])
   @ List.concat_map
@@ -155,7 +155,7 @@ type status = Holds | Empty | Maybe
 let find_index analysis path = Place_table.find_opt analysis.positions path
 
 let list_affected analysis place =
-  match path_of_place place with
+  match find_place_path place with
   | None -> []
   | Some outer ->
       List.filter
@@ -206,7 +206,7 @@ let move_out analysis state place ~origin = set_empty ~origin state (list_affect
 let list_moved_at analysis state path =
   match find_index analysis path with Some position -> state.moved_at.(position) | None -> []
 
-let list_given_by statement = List.filter_map path_of_place (list_inits statement)
+let list_given_by statement = List.filter_map find_place_path (list_inits statement)
 
 let find_possibly_empty analysis state (path : path) =
   List.find_opt
@@ -348,7 +348,7 @@ let analyse ?find_passed ?(is_moving = fun _ -> true) ~tracks:needs_drop (body :
   let candidates = Place_table.create 64 in
   let add path = Place_table.replace candidates path () in
   let consider (place : Mir.place) =
-    match path_of_place place with
+    match find_place_path place with
     | Some path when tracks path.local ->
         let rec consider_ancestors projections =
           add { path with projections };
@@ -519,7 +519,7 @@ let analyse ?find_passed ?(is_moving = fun _ -> true) ~tracks:needs_drop (body :
                 Option.iter
                   (fun path ->
                     Option.iter (mark_needed_flags analysis state) (find_index analysis path))
-                  (path_of_place place))
+                  (find_place_path place))
               (list_inits statement);
             List.iter drop_local (list_ended statement);
             apply_effects analysis state ~moves:[] ~inits:(list_inits statement)

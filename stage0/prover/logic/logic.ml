@@ -3,9 +3,9 @@ type sort = Int | Bool | Float of int * int | Type_sort of Types.ty | Function_s
 module Symbol = struct
   type 'term t =
     | Variable of { label : string; numbers : int list }
-    | Function of { callee : Path.t; instance : Types.argument list }
-    | Limited of { callee : Path.t; instance : Types.argument list }
-    | Function_value of { callee : Path.t; instance : Types.argument list }
+    | Function of { callee : Path.t; type_arguments : Types.argument list }
+    | Limited of { callee : Path.t; type_arguments : Types.argument list }
+    | Function_value of { callee : Path.t; type_arguments : Types.argument list }
     | Constant of Path.t
     | Generic_value of { owner : Path.t; name : string }
     | Text_literal of { type_ : Types.ty; text : string }
@@ -21,13 +21,15 @@ module Symbol = struct
     | Valid of Types.ty
     | Rank of Types.ty
     | Capacity of Types.ty
+    | Owner_of_view of Types.ty
     | Model of Types.ty
     | Slack of Types.ty
     | Potential of Types.ty
     | Potential_measure of Types.ty
     | Block_bytes of { type_ : Types.ty; variant : string option }
-    | Time of sort
-    | Method_time of {
+    | Callback_cost of { metric : Metric.t; sort : sort }
+    | Method_cost of {
+        metric : Metric.t;
         method_ : Path.t;
         trait_arguments : Types.argument list;
         self_type : Types.ty;
@@ -96,7 +98,7 @@ let show_sort = function
   | Type_sort ty -> Types.show ty
   | Function_sort arity -> Printf.sprintf "function/%d" arity
 
-let show_instance = function
+let show_type_arguments = function
   | [] -> ""
   | arguments -> "[" ^ String.concat ", " (List.map Types.show_argument arguments) ^ "]"
 
@@ -104,9 +106,12 @@ let show_variant = Option.value ~default:"record"
 
 let rec show_symbol : symbol -> string = function
   | Variable { label; numbers } -> String.concat "." (label :: List.map string_of_int numbers)
-  | Function { callee; instance } -> "function." ^ Path.show callee ^ show_instance instance
-  | Limited { callee; instance } -> "limited." ^ Path.show callee ^ show_instance instance
-  | Function_value { callee; instance } -> "named." ^ Path.show callee ^ show_instance instance
+  | Function { callee; type_arguments } ->
+      "function." ^ Path.show callee ^ show_type_arguments type_arguments
+  | Limited { callee; type_arguments } ->
+      "limited." ^ Path.show callee ^ show_type_arguments type_arguments
+  | Function_value { callee; type_arguments } ->
+      "named." ^ Path.show callee ^ show_type_arguments type_arguments
   | Constant path -> "constant." ^ Path.show path
   | Generic_value { owner; name } -> Printf.sprintf "generic.%s.%s" (Path.show owner) name
   | Text_literal { type_; text } -> Printf.sprintf "text_literal.%s.%S" (Types.show type_) text
@@ -123,14 +128,16 @@ let rec show_symbol : symbol -> string = function
   | Valid ty -> "valid." ^ Types.show ty
   | Rank ty -> "rank." ^ Types.show ty
   | Capacity ty -> "capacity." ^ Types.show ty
+  | Owner_of_view owner -> "owner_of_view." ^ Types.show owner
   | Model ty -> "model." ^ Types.show ty
   | Slack ty -> "slack." ^ Types.show ty
   | Potential ty -> "potential." ^ Types.show ty
   | Potential_measure ty -> "potential.measure." ^ Types.show ty
   | Block_bytes { type_; variant } -> "bytes." ^ Types.show type_ ^ "." ^ show_variant variant
-  | Time sort -> "time." ^ show_sort sort
-  | Method_time { method_; trait_arguments; self_type } ->
-      Printf.sprintf "time.method.%s%s[%s]" (Path.show method_) (show_instance trait_arguments)
+  | Callback_cost { metric; sort } -> Metric.show metric ^ "." ^ show_sort sort
+  | Method_cost { metric; method_; trait_arguments; self_type } ->
+      Printf.sprintf "%s.method.%s%s[%s]" (Metric.show metric) (Path.show method_)
+        (show_type_arguments trait_arguments)
         (Types.show self_type)
   | Opaque_operation { operation; type_; _ } ->
       Printf.sprintf "operation.%s.%s"
@@ -239,6 +246,15 @@ let truncated_divide left right =
 
 let truncated_remainder left right =
   Operation ("-", [ left; Operation ("*", [ right; truncated_divide left right ]) ])
+
+let integer_of_bits ~is_signed ~width bits =
+  let unsigned = Operation ("bv2nat", [ bits ]) in
+  if is_signed then
+    ite
+      (Operation (">=", [ unsigned; Integer (Z.shift_left Z.one (width - 1)) ]))
+      (Operation ("-", [ unsigned; Integer (Z.shift_left Z.one width) ]))
+      unsigned
+  else unsigned
 
 let rec mentions symbols = function
   | Symbol name -> List.mem name symbols

@@ -36,7 +36,7 @@ let make_sequence_type element =
 
 let make_sequence_length context element term =
   let path = Path.Method { owner = sequence_path; name = "length"; receiver = Read } in
-  let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type element ] } in
+  let symbol = Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type element ] } in
   Facts.declare context
     (Logic.Function (symbol, [ Facts.declare_sort context (make_sequence_type element) ], Logic.Int));
   Logic.Apply (symbol, [ term ])
@@ -45,12 +45,14 @@ let rec index_sequence (context : State.context) element term index =
   let sequence = make_sequence_type element in
   let index_trait = Well_known.make_path Index in
   match
-    Mir.Call_edges.list_impls_for context.lookups.interface Path.standard_package [ index_trait ]
-      sequence
+    Interface.Impls.list_impls_of_trait_for_type context.lookups.interface ~trait:index_trait
+      ~type_:sequence_path Path.standard_package
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "at"; receiver = Read } in
-      let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type sequence ] } in
+      let symbol =
+        Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type sequence ] }
+      in
       Facts.declare context
         (Logic.Function
            ( symbol,
@@ -91,7 +93,10 @@ let make_finite_function context (ty : Types.ty) name output inputs =
   | Types.Named { path; arguments } ->
       let symbol =
         Logic.Symbol.Function
-          { callee = Path.Method { owner = path; name; receiver = Read }; instance = arguments }
+          {
+            callee = Path.Method { owner = path; name; receiver = Read };
+            type_arguments = arguments;
+          }
       in
       Facts.declare context
         (Logic.Function (symbol, Facts.declare_sort context ty :: List.map snd inputs, output));
@@ -128,20 +133,34 @@ let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) sym
         in
         Facts.add_fact context fact)
 
+let find_model_impl (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
+  let interface = context.lookups.interface and list_bounds = Interface.Impls.list_no_bounds in
+  let model_trait : Types.trait_reference =
+    { trait = Well_known.make_path Model; trait_arguments = []; associated = [] }
+  in
+  let value =
+    Interface.Impls.normalize interface ~list_bounds
+      (Projection { base = ty; trait = model_trait; name = "Value" })
+  in
+  if value = model then
+    match
+      Interface.Impls.find_evidence interface ~list_bounds ~checks_conditions:false ty model_trait
+    with
+    | Some (From_impl { impl; _ }) -> Some impl
+    | _ -> None
+  else None
+
 let compute_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
-  let model_trait = Well_known.make_path Model in
-  match
-    Mir.Call_edges.list_impls_for context.lookups.interface Path.standard_package [ model_trait ] ty
-  with
-  | impl :: _ ->
+  match find_model_impl context ty ~model with
+  | Some impl ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
-      let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type ty ] } in
+      let symbol = Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type ty ] } in
       Facts.declare context
         (Logic.Function (symbol, [ Facts.declare_sort context ty ], Facts.declare_sort context model));
       rank_model context ty ~model symbol;
       (match ty with
       | Types.Named { path; arguments = [ Types.Type element; Types.Value count ] }
-        when Intrinsic.builtin_of_path path = Some Array ->
+        when Intrinsic.find_builtin path = Some Array ->
           Facts.run_once context (Array_length symbol) (fun () ->
               let each = Logic.Symbol.Variable { label = "array.value"; numbers = [] } in
               let elements = Logic.Apply (symbol, [ Logic.Symbol each ]) in
@@ -153,7 +172,7 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
                        (substitute_value_term context count) )))
       | _ -> ());
       Some (fun term -> Logic.Apply (symbol, [ term ]))
-  | [] -> None
+  | None -> None
 
 let find_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   let key = (ty, model) in
@@ -236,7 +255,7 @@ let quantify_over (context : State.context) (frame : State.frame) (quantifier : 
 let rec make_value_term context (frame : State.frame) (value : Types.value) =
   match value with
   | Value_parameter parameter -> (
-      match List.assoc_opt parameter frame.substitution with
+      match Types.find_argument parameter frame.substitution with
       | Some (Types.Value argument) when argument <> Value_parameter parameter ->
           make_value_term context frame argument
       | _ -> substitute_value_term context value)

@@ -9,3 +9,4 @@ val make_function_value_signature : Memory_layout.env -> Ground.function_type ->
 val make_function_value_shape : Ground.function_type -> Memory_layout.shape
 val drop_signature : Ground.ty -> Lowered.signature
 val evidence : Lowered.ty
+val capabilities : Lowered.ty

@@ -1,0 +1,12 @@
+trait Convert[Target] {
+  fn convert(self) -> Target
+}
+
+trait Feeds {
+  fn feed[Item: Convert[Int64] + Display](self, item: Item, visit: (fn(Item) uses generic Granted)) -> UInt64
+    uses generic Granted
+}
+
+type Reader()
+
+impl Feeds for Reader {}

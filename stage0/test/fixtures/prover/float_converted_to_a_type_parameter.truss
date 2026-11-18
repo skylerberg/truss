@@ -1,0 +1,5 @@
+use standard::intrinsic
+
+fn f[Target](value: Float64) -> Target {
+  intrinsic::convert(value)
+}

@@ -1,0 +1,5 @@
+use standard::serialization
+
+type Digits(values: List[UInt8])
+  invariant forall value: UInt8 => value > 9 ==> !values.contains(value)
+  derives serialization::Deserialize

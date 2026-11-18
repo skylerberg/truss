@@ -1,0 +1,13 @@
+type Version(major: Int64)
+  derives Equal, Ordered
+
+fn same[Item: Ordered](left: Item, right: Item) -> Bool
+{
+  left.compare(right) == Ordering.Equal
+}
+
+fn check(version: Version) -> Bool
+  ensures result == false
+{
+  same(version, right: version)
+}

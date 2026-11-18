@@ -1,19 +1,17 @@
 val make_variable : ?numbers:int list -> string -> 'a Logic.Symbol.t
 
 type unsupported = {
-  location : State.location;
+  location : Obligation.location;
   construct : string;
   foreign_definition : string option;
 }
 
 exception Unsupported of unsupported
 
-val raise_unsupported : State.location -> ('a, unit, string, 'b) format4 -> 'a
+val raise_unsupported : Obligation.location -> ('a, unit, string, 'b) format4 -> 'a
 val run_in_source : State.context -> State.source -> (unit -> 'a) -> 'a
 val raise_bug : ('a, unit, string, 'b) format4 -> 'a
 val read_parameter_name : Mir.parameter -> string
-val is_in_recursion_group : State.context -> Path.t -> bool
-val has_method_in_recursion_group : State.context -> Path.t -> bool
 val list_clauses : Mir.requirement list -> Mir.formula list
 val declare : State.context -> Logic.declaration -> unit
 val add_fact : State.context -> Logic.term -> unit
@@ -24,54 +22,63 @@ val mentions_fresh_after : State.context -> int -> Logic.term -> bool
 val close_over_binders : State.frame -> Logic.term -> Logic.term option
 val add_frame_fact : State.context -> State.frame -> Logic.term -> unit
 val assume : State.context -> State.frame -> Logic.term -> unit
-val add_requires : State.context -> State.frame -> State.message -> State.fix list
-val truss_of_value : State.context -> Logic.term -> string option
+val add_requires : State.context -> State.frame -> Obligation.message -> Obligation.fix list
+val show_truss_value : State.context -> Logic.term -> string option
 
 val oblige :
-  ?template_clause:State.template_clause ->
+  ?template_clause:Obligation.template_clause ->
   ?cited:Resolve.Names.key * Core.origin ->
-  ?fixes:State.fix list ->
+  ?fixes:Obligation.fix list ->
   State.context ->
   State.frame ->
   Diagnostic.Code.prover ->
-  State.location ->
-  State.message ->
+  Obligation.location ->
+  Obligation.message ->
   Logic.term ->
   unit
 
-val oblige_safe_operation :
-  ?cited:Resolve.Names.key * Core.origin ->
-  ?fixes:State.fix list ->
+val show_callee : Path.t -> string
+
+val reject_recursion_through_supplied_code :
+  State.context -> State.frame -> Obligation.location -> Mir.statement -> unit
+
+val find_recursive_callee :
   State.context ->
   State.frame ->
-  Diagnostic.Code.prover ->
-  State.location ->
-  State.message ->
-  Logic.term ->
+  Obligation.location ->
+  'operand Core.target ->
+  Mir.Call_edges.resolution * Path.t option
+
+val reject_uncompared_recursion :
+  State.context ->
+  State.frame ->
+  Obligation.location ->
+  Path.t option ->
+  describe:(string -> string) ->
   unit
 
 val make_closed_obligation :
-  ?template_clause:State.template_clause ->
+  ?template_clause:Obligation.template_clause ->
   State.context ->
   State.frame ->
   Diagnostic.Code.prover ->
-  State.location ->
-  State.message ->
+  Obligation.location ->
+  Obligation.message ->
   Logic.term ->
-  State.obligation option
+  Obligation.t option
 
 val make_obligation :
-  ?template_clause:State.template_clause ->
+  ?template_clause:Obligation.template_clause ->
   State.context ->
   State.frame ->
   Diagnostic.Code.prover ->
-  State.location ->
-  State.message ->
+  Obligation.location ->
+  Obligation.message ->
   Logic.term ->
-  State.obligation
+  Obligation.t
 
-val locate : State.context -> State.source -> Core.origin -> State.location
-val quote : State.source -> int -> State.piece
+val locate : State.context -> State.source -> Core.origin -> Obligation.location
+val quote : State.source -> int -> Obligation.piece
 val quote_span : string -> Source.Definition_span.t -> string
 val quote_origin : State.context -> State.frame -> Core.origin -> string
 val find_bounds : Types.ty -> (Z.t * Z.t) option
@@ -88,7 +95,7 @@ val find_constructors :
   State.context -> Types.ty -> (string option * (string * Types.ty) list) list option
 
 val declare_sort : State.context -> Types.ty -> Logic.sort
-val is_structural : State.context -> ?seen:Types.ty list -> Types.ty -> bool
+val is_equality_identity : State.context -> ?seen:Types.ty list -> Types.ty -> bool
 val make_in_range : Types.ty -> Logic.term -> Logic.term
 val run_once : State.context -> State.stated -> (unit -> unit) -> unit
 val arrive : State.context -> State.frame -> string -> Types.ty -> Logic.term
@@ -100,6 +107,8 @@ val bind : State.frame -> Locals.key -> Types.ty -> Logic.term -> State.frame
 val substitute_type : State.context -> State.frame -> Types.ty -> Types.ty
 val find_local_type : State.context -> State.frame -> Locals.key -> Types.ty option
 val mentions_potential : Logic.term -> bool
+val list_potentials : Logic.term -> Logic.term list
+val take_potential_as_zero : Logic.term -> Logic.term
 val restrict : State.frame -> Logic.term -> State.frame
 val name_path_condition : State.context -> State.frame -> Logic.term -> Logic.term
 

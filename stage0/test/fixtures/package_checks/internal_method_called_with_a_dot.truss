@@ -1,0 +1,9 @@
+public type Counter(count: Int64)
+
+internal fn Counter.doubled(self) -> Int64 {
+  self.count * 2
+}
+
+public fn report(counter: Counter) -> Int64 {
+  counter.doubled()
+}

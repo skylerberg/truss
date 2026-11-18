@@ -1,0 +1,8 @@
+fn show(text: String) {}
+
+fn f(names: mut Array[String, 3]) {
+  if names.first() is Some(name) {
+    names[0] = "changed"
+    show(name)
+  }
+}

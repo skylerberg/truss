@@ -1,9 +1,9 @@
 use standard::processes
 
 fn name_of(arrived: Option[processes::Signal]) -> String {
-  if arrived is Some(signal) && signal == processes::Signal.User1 {
+  if arrived == Some(processes::Signal.User1) {
     "user 1".copy()
-  } else if arrived is Some(signal) && signal == processes::Signal.Terminate {
+  } else if arrived == Some(processes::Signal.Terminate) {
     "terminate".copy()
   } else {
     "another".copy()

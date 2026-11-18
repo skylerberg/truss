@@ -106,8 +106,8 @@ let check_tree text (item : Syntax.definition Syntax.item) =
     fail "a definition's span is out of bounds in %s" quoted;
   List.iter
     (fun (span : Source.Definition_span.t) ->
-      if span.stop > length then fail "a recovery is out of bounds in %s" quoted)
-    item.positions.recovered;
+      if span.stop > length then fail "a syntax error is out of bounds in %s" quoted)
+    item.positions.syntax_errors;
   Syntax_walk.visit_definition (visit_expression definition_span) item.value
 
 let check_parse_robust text =
@@ -125,9 +125,9 @@ let check_parse_robust text =
       if
         diagnostics = []
         && List.exists
-             (fun (item : Syntax.definition Syntax.item) -> item.positions.recovered <> [])
+             (fun (item : Syntax.definition Syntax.item) -> item.positions.syntax_errors <> [])
              items
-      then fail "the parser recovered with no error in %s" (Diagnostic.quote text)
+      then fail "a syntax error has no diagnostic in %s" (Diagnostic.quote text)
 
 type verdict = Grammar_rejects | Grammar_accepts | Unknown
 
@@ -143,8 +143,8 @@ let judge : Diagnostic.Code.t -> verdict = function
   | Parser (Cost_word | Misplaced_potential | Interpolation_not_allowed) -> Unknown
   | Parser
       ( Use_after_definition | Let_else_brace | Nesting_too_deep | Misplaced_opaque
-      | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Finite_not_time
-      | Loop_cost_bound | Function_type_names | Misplaced_requires | Misplaced_function_type
+      | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Loop_cost_bound
+      | Function_type_names | Misplaced_requires | Misplaced_function_type
       | Misplaced_associated_type | Misplaced_constraint | Specification_only | Misplaced_assert
       | Misplaced_proof | Misplaced_loop_exit | Exits_parallel | Echo_in_specification
       | Reserved_specification_name )
@@ -297,7 +297,7 @@ let check_fixes_work text =
       let before = select_judged (List.filter (fun other -> other != diagnostic) diagnostics) in
       List.iter
         (fun (fix : Source.span Diagnostic.fix) ->
-          match Diagnostic.apply_fix text fix with
+          match Diagnostic.apply_edits text fix.edits with
           | exception Invalid_argument _ ->
               fail "the fix %S has overlapping edits in %s" fix.title (Diagnostic.quote text)
           | fixed ->
@@ -482,10 +482,12 @@ let round_trip random =
   in
   let others =
     Array.of_list
-      (List.map (fun (spelling, keyword) -> (spelling, Token.Keyword keyword)) Token.keywords
+      (List.map
+         (fun (spelling, keyword) -> (spelling, Token.Keyword keyword))
+         Token.For_testing.keywords
       @ List.map
           (fun (spelling, reserved) -> (spelling, Token.Reserved reserved))
-          Token.reserved_words
+          Token.For_testing.reserved_words
       @ List.filter_map
           (fun (spelling, punctuation) ->
             match punctuation with
@@ -533,7 +535,7 @@ let () =
     else []
   in
   let list_pieces path =
-    let source = Source.read_file path in
+    let source = Source.For_testing.read_file path in
     let tokens, _ = Lexer.lex source in
     List.map
       (fun (piece : Parser.For_testing.piece) ->

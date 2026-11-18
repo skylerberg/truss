@@ -1,0 +1,10 @@
+trait Visitor {
+  fn visit_all(self, visit: (fn(Int64) uses generic Granted))
+    uses generic Granted
+}
+
+fn ignore(value: Int64) {}
+
+fn f(visitor: any Visitor) {
+  visitor.visit_all(ignore)
+}

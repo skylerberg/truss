@@ -15,15 +15,15 @@ type run = {
 }
 
 let make_unit_callee : _ Core.target -> Invocation.callee = function
-  | Function { path; type_arguments } -> Function { path; type_arguments }
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } ->
-      Trait_method { trait; name; receiver; self_type; type_arguments; evidence }
+  | Function { path; instantiation } -> Function { path; instantiation }
+  | Trait_method { trait; name; receiver; self_type; instantiation; evidence } ->
+      Trait_method { trait; name; receiver; self_type; instantiation; evidence }
   | Capability_method { capability; name } -> Capability_method { capability; name }
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
   | Indirect _ -> Indirect ()
 
-let make_invocation (call : Mir.call) ~lends : Invocation.t =
-  { callee = make_unit_callee call.callee; lends; uses = call.uses }
+let make_invocation (callee : Mir.callee) ~lends : Invocation.t =
+  { callee = make_unit_callee callee.target; lends; uses = callee.uses }
 
 let find_declared_fields context ty variant =
   match Facts.find_visible_type context ty with
@@ -466,7 +466,7 @@ let evaluate_call_values context frame run (invocation : Invocation.t)
           arguments))
 
 let read_call context frame run (call : Mir.call) ~result_type =
-  let invocation = make_invocation call ~lends:None in
+  let invocation = make_invocation call.callee ~lends:None in
   match (invocation.callee, call.arguments) with
   | ( Trait_method { trait; name = "equal"; _ },
       [
@@ -484,7 +484,7 @@ let read_call context frame run (call : Mir.call) ~result_type =
             text )
   | _ ->
       let through =
-        match call.callee with
+        match call.callee.target with
         | Indirect callee ->
             Some
               ( compute_operand_type context frame callee,
@@ -500,7 +500,7 @@ let read_call context frame run (call : Mir.call) ~result_type =
 
 let read_lend context (frame : State.frame) run part (call : Mir.call) =
   let mode = match run.infos.(part).kind with Lent mode -> mode | _ -> Types.Read in
-  let invocation = make_invocation call ~lends:(Some mode) in
+  let invocation = make_invocation call.callee ~lends:(Some mode) in
   let site : Invocation.site = { origin = call.origin; type_ = run.infos.(part).type_ } in
   let location = Facts.locate context frame.source call.origin in
   let values = evaluate_call_values context frame run invocation call.arguments in
@@ -726,10 +726,17 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Value_parameter parameter ->
       (frame, Models.make_value_term context frame (Value_parameter parameter))
   | Convert { conversion = To_integer; value; _ } -> (frame, translate_operand value)
+  | Convert { conversion = View_to_owned; value; _ } ->
+      ( frame,
+        Values.make_owner_of_view context frame
+          ~view:(compute_operand_type context frame value)
+          ~owner:ty (translate_operand value) )
   | Convert { conversion = From_integer; value; _ } ->
       (frame, Operations.convert_from_integer context frame site (translate_operand value))
-  | Function_value { path; type_arguments; is_argument } ->
-      (frame, Values.translate_global_value context frame site path type_arguments ~is_argument)
+  | Function_value { path; instantiation; is_argument } ->
+      ( frame,
+        Values.translate_global_value context frame site path instantiation.type_arguments
+          ~is_argument )
   | To_any _ -> Operations.convert_to_any context frame site
   | Operation { operation; operands; type_arguments } ->
       let types =
@@ -788,8 +795,8 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       Values.apply_specification_function context frame ~location function_ values
         ~unconverted:(List.map (Facts.substitute_type context frame) unconverted)
         ~types:(List.map (compute_operand_type context frame) arguments)
-  | Specification (Method_time callee) ->
-      (frame, Amounts.compute_method_time context frame (make_unit_callee callee))
+  | Specification (Method_cost { metric; method_ }) ->
+      (frame, Amounts.compute_method_cost context frame metric (make_unit_callee method_))
   | Specification (Map entries) ->
       Values.apply_map_literal context frame ~ty ~location
         (List.map
@@ -936,6 +943,7 @@ and read_choice context frame run (choice : Mir.choice) =
 
 and read_statement context frame run (statement : Mir.statement) =
   let location = Facts.locate context frame.source statement.origin in
+  Facts.reject_recursion_through_supplied_code context frame location statement;
   match statement.kind with
   | Basic basic -> read_basic context frame run statement ~location basic
   | Assert_by_bit_vector { names; code; _ } ->
@@ -1152,7 +1160,7 @@ and read_statement context frame run (statement : Mir.statement) =
               {
                 cursor = make_passed_place context run cursor;
                 cursor_type = compute_place_type context frame run cursor;
-                next = make_unit_callee next;
+                next = make_invocation next ~lends:None;
               }
       in
       let for_loop =
@@ -1339,7 +1347,9 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       Some frame
   | Slice { destination; base; base_type; call } ->
       let values =
-        evaluate_call_values context frame run (make_invocation call ~lends:None) call.arguments
+        evaluate_call_values context frame run
+          (make_invocation call.callee ~lends:None)
+          call.arguments
       in
       let find_argument position =
         Option.map
@@ -1352,14 +1362,9 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       in
       let base_type = Facts.substitute_type context frame base_type in
       let collection = read_place context frame run base in
-      let is_checked =
-        match call.callee with
-        | Function { path; _ } -> Mir.list_checked_requires context.lookups.mir path <> []
-        | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
-      in
       let frame, viewed, low, high =
         Intrinsics.apply_slice context frame site ~base_type ~collection ~low
-          ~high:(find_argument 2) ~is_checked
+          ~high:(find_argument 2)
       in
       let collection = expand_place frame run base in
       let written = write_place context frame run destination viewed in
@@ -1378,8 +1383,14 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
             }
         | _ -> written)
   | Template { destination; literals; call } -> (
-      match (call.callee, call.arguments) with
+      match (call.callee.target, call.arguments) with
       | Trait_method { trait; name; receiver; evidence; _ }, [ Passed { value = template; _ } ] ->
+          Facts.reject_uncompared_recursion context frame location
+            (snd (Facts.find_recursive_callee context frame location call.callee.target))
+            ~describe:
+              (Printf.sprintf
+                 "This template calls `%s`, which calls back here, and a template passes no \
+                  arguments the prover can compare, so the recursion cannot be shown to end.");
           let frame, tagged =
             Values.apply_template context frame
               { origin = call.origin; type_ = compute_target_type context frame run destination }
@@ -1389,23 +1400,6 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
           Some (write_place context frame run destination tagged)
       | _ -> Facts.raise_unsupported location "a tagged template whose tag the prover cannot read")
   | Provide { provided; _ } ->
-      if context.terminates && frame.makes_obligations then
-        List.iter
-          (fun (implementation : Mir.provided) ->
-            List.iter
-              (fun (provided : Core.provided) ->
-                if Facts.has_method_in_recursion_group context provided.impl then
-                  Facts.oblige context frame Termination location
-                    [
-                      State.Text
-                        (Printf.sprintf
-                           "This `provide` gives `%s`, whose methods call back here, so the prover \
-                            cannot show that the recursion ends."
-                           (Path.show provided.impl));
-                    ]
-                    (Logic.Boolean false))
-              implementation.provides)
-          provided;
       Hashtbl.replace run.provides statement.origin provided;
       Some frame
   | Provide_end -> (
@@ -1472,7 +1466,6 @@ let read_formula context (frame : State.frame) (formula : Mir.formula) ~argument
       aliases = Locals.empty;
       slices = Locals.empty;
       lends = Locals.empty;
-      panic = Undeclarable;
     }
   in
   let inside =

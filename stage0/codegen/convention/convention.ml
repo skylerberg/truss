@@ -46,6 +46,7 @@ let make_destination result place : Lowered.destination =
   match result with Through_pointer _ -> Written place | Returned _ | Nothing -> Returned place
 
 let evidence = Lowered.Raw (Pointer Opaque)
+let capabilities = Lowered.Raw (Nullable_pointer Opaque)
 
 let make_function_value_signature env (function_type : Ground.function_type) : Lowered.signature =
   let result_ty, returns =
@@ -56,9 +57,8 @@ let make_function_value_signature env (function_type : Ground.function_type) : L
   let written =
     List.filter_map (fun (mode, ty) -> classify_parameter env mode ty) function_type.parameters
   in
-  let evidence = List.map (fun _ -> evidence) function_type.uses in
   let environment = Lowered.Raw (Nullable_pointer Opaque) in
-  let signature = make_signature ~returns (written @ evidence) result_ty in
+  let signature = make_signature ~returns (written @ [ capabilities ]) result_ty in
   { signature with parameters = environment :: signature.parameters }
 
 let make_function_value_shape function_type : Memory_layout.shape =

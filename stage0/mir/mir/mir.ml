@@ -70,7 +70,6 @@ let find_contract (definition : Core.definition) =
               (fun ({ origin; amortized; resource; bound } : Core.cost) ->
                 let bound : bound =
                   match bound with
-                  | Finite -> Finite
                   | Order_of amount -> Order_of (Builder.of_clause ~parameters amount)
                   | At_most amount -> At_most (Builder.of_clause ~parameters amount)
                   | Exactly amount -> Exactly (Builder.of_clause ~parameters amount)
@@ -96,7 +95,10 @@ let find_contract (definition : Core.definition) =
                     | None -> [])
                   parameters));
         }
-  | Type _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty -> None
+  | Test _ ->
+      Some
+        { parameters = []; requires = []; ensures = []; decreases = []; costs = []; callbacks = [] }
+  | Type _ | Trait _ | Constant _ | Law_proof _ | Empty -> None
 
 let list_laws (definition : Core.definition) =
   match definition with

@@ -8,8 +8,6 @@ public opaque type String(storage: intrinsic::Storage[UInt8])
 public opaque type StringSlice(bytes: intrinsic::View[UInt8])
   derives Plain
 
-public opaque type TextBuilder(text: String)
-
 public trait FromTemplate {
   type Part
   fn from_template(template: Template[Self.Part]) -> Self
@@ -25,7 +23,6 @@ impl Model for String {
 
   fn model(self) -> Sequence[UInt8]
     ensures identical(result, intrinsic::storage_model(self.storage))
-    cost time finite
   {
     intrinsic::storage_model(self.storage)
   }
@@ -36,7 +33,6 @@ impl Model for StringSlice {
 
   fn model(self) -> Sequence[UInt8]
     ensures identical(result, intrinsic::view_model(self.bytes))
-    cost time finite
   {
     intrinsic::view_model(self.bytes)
   }
@@ -47,7 +43,6 @@ impl Model for Literal {
 
   fn model(self) -> Sequence[UInt8]
     ensures identical(result, self.text.model())
-    cost time finite
   {
     self.text.model()
   }
@@ -59,13 +54,6 @@ public fn String.length(self) -> UInt64
   cost allocations == 0
 {
   intrinsic::storage_length(self.storage)
-}
-
-public fn String.is_empty(self) -> Bool
-  ensures result == (self.model().length() == 0)
-  cost time O(1)
-{
-  self.length() == 0
 }
 
 internal fn push_bytes(storage: mut intrinsic::Storage[UInt8], text: StringSlice)
@@ -104,13 +92,6 @@ public fn String.slice(self) -> StringSlice
   StringSlice(bytes: intrinsic::storage_view(self.storage))
 }
 
-public fn String.trim(self) -> StringSlice
-  ensures result.length() <= self.length()
-  cost time O(self.length())
-{
-  self.slice().trim()
-}
-
 internal fn String.from_bytes(bytes: own intrinsic::Storage[UInt8]) -> String {
   if valid_utf8(intrinsic::storage_view(bytes)) {
     String(storage: own bytes)
@@ -121,16 +102,14 @@ internal fn String.from_bytes(bytes: own intrinsic::Storage[UInt8]) -> String {
 
 fn valid_utf8(bytes: intrinsic::View[UInt8]) -> Bool {
   var at: UInt64 = 0
-  var valid = true
-  while valid && at < intrinsic::view_length(bytes) {
+  while at < intrinsic::view_length(bytes) {
     let step = utf8_sequence(bytes, at)
     if step == 0 {
-      valid = false
-    } else {
-      at += step
+      return false
     }
+    at += step
   }
-  valid
+  true
 }
 
 fn replaced(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
@@ -213,63 +192,38 @@ public fn StringSlice.to_string(self) -> String
   String(storage: own output)
 }
 
-public fn TextBuilder.new() -> TextBuilder
-  cost time O(1)
+internal fn String.push_byte(mut self, byte: UInt8)
+  ensures identical(self.model(), old(self.model()).append(byte))
+  cost amortized time O(1)
 {
-  TextBuilder(text: String(storage: intrinsic::storage_empty()))
+  growth::push(mut self.storage, value: byte)
 }
 
-public fn TextBuilder.write(mut self, text: StringSlice)
-  cost amortized time O(text.length())
+internal fn String.push_float32(mut self, value: Float32)
 {
-  mut self.text.push(text)
+  writing::float32(mut self.storage, value: value)
 }
 
-public fn TextBuilder.finish(own self) -> String
-  cost time O(1)
+internal fn String.push_float64(mut self, value: Float64)
 {
-  self.text
+  writing::float64(mut self.storage, value: value)
 }
 
-internal fn TextBuilder.write_byte(mut self, byte: UInt8)
-  cost time finite
+internal fn String.push_unsigned(mut self, value: UInt64)
 {
-  writing::byte(mut self.text.storage, value: byte)
+  writing::unsigned(mut self.storage, value: value)
 }
 
-internal fn TextBuilder.write_float32(mut self, value: Float32)
-  cost time finite
+internal fn String.push_signed(mut self, value: Int64)
 {
-  writing::float32(mut self.text.storage, value: value)
-}
-
-internal fn TextBuilder.write_float64(mut self, value: Float64)
-  cost time finite
-{
-  writing::float64(mut self.text.storage, value: value)
-}
-
-public fn TextBuilder.write_character(mut self, character: Character)
-  cost time finite
-{
-  writing::character(mut self.text.storage, value: character)
-}
-
-internal fn TextBuilder.write_unsigned(mut self, value: UInt64)
-  cost time finite
-{
-  writing::unsigned(mut self.text.storage, value: value)
-}
-
-internal fn TextBuilder.write_signed(mut self, value: Int64)
-  cost time finite
-{
-  writing::signed(mut self.text.storage, value: value)
+  writing::signed(mut self.storage, value: value)
 }
 
 impl Equal for String {
   fn equal(self, other: String) -> Bool
     ensures result == identical(self.model(), other.model())
+    cost time O(other.length())
+    cost allocations == 0
   {
     self.slice() == other.slice()
   }
@@ -279,6 +233,7 @@ impl Ordered for String {
   fn compare(self, other: String) -> Ordering
     ensures (result == Ordering.Less) == (intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage)) < 0)
     ensures (result == Ordering.Equal) == identical(self.model(), other.model())
+    cost allocations == 0
   {
     let order = intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage))
     if order < 0 { Ordering.Less } else if order > 0 { Ordering.Greater } else { Ordering.Equal }
@@ -286,7 +241,9 @@ impl Ordered for String {
 }
 
 impl Hash for String {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     let bytes = intrinsic::storage_view(self.storage)
     for index in 0..intrinsic::view_length(bytes) {
       mut hasher.write(intrinsic::convert(intrinsic::view_at(bytes, index: index)))
@@ -295,22 +252,24 @@ impl Hash for String {
 }
 
 impl Display for String {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write(self.slice())
+  fn display(self, output: mut String) {
+    mut output.push(self)
   }
 }
 
 impl Equal for StringSlice {
   fn equal(self, other: StringSlice) -> Bool
     ensures result == identical(self.model(), other.model())
+    cost time O(other.length())
+    cost allocations == 0
   {
-    intrinsic::compare_bytes(self.bytes, right: other.bytes) == 0
+    intrinsic::compare_bytes(other.bytes, right: self.bytes) == 0
   }
 }
 
 impl Display for StringSlice {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write(self)
+  fn display(self, output: mut String) {
+    mut output.push(self)
   }
 }
 
@@ -331,9 +290,9 @@ public type Utf8Error(valid_up_to: UInt64)
   derives Equal
 
 impl Display for Utf8Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write("the bytes are not UTF-8 at offset ")
+    mut output.push("the bytes are not UTF-8 at offset ")
     self.valid_up_to.display(mut output)
   }
 }
@@ -342,9 +301,9 @@ public type Utf16Error(valid_up_to: UInt64)
   derives Equal
 
 impl Display for Utf16Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write("the units are not UTF-16 at index ")
+    mut output.push("the units are not UTF-16 at index ")
     self.valid_up_to.display(mut output)
   }
 }
@@ -451,7 +410,7 @@ public fn String.from_utf8_lossy(bytes: Slice[UInt8]) -> String
 {
   let text = StringSlice(bytes: bytes.elements)
   if text.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   var budget: UInt64 = 0
   var offset: UInt64 = 0
@@ -501,7 +460,7 @@ public fn String.from_utf16(units: Slice[UInt16]) -> Result[String, Utf16Error]
   cost time O(units.length())
 {
   if units.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   var size: UInt64 = 0
   var index: UInt64 = 0
@@ -553,7 +512,7 @@ public fn String.from_utf16(units: Slice[UInt16]) -> Result[String, Utf16Error]
 }
 
 public fn String.collect[Source: Cursor[Element = Character]](source: own Source) -> String
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var cursor = own source
   var text: String = ""
@@ -590,22 +549,8 @@ public fn String.push_character(mut self, character: Character)
   ensures self.length() == old(self.length()) + character.utf8_length()
   cost amortized time O(1)
 {
-  let code = character.code()
-  if code < 128 {
-    growth::push(mut self.storage, value: intrinsic::convert(code))
-  } else if code < 2048 {
-    growth::push(mut self.storage, value: intrinsic::convert(192 + code / 64))
-    growth::push(mut self.storage, value: intrinsic::convert(128 + code % 64))
-  } else if code < 65536 {
-    growth::push(mut self.storage, value: intrinsic::convert(224 + code / 4096))
-    growth::push(mut self.storage, value: intrinsic::convert(128 + code / 64 % 64))
-    growth::push(mut self.storage, value: intrinsic::convert(128 + code % 64))
-  } else {
-    growth::push(mut self.storage, value: intrinsic::convert(240 + code / 262144))
-    growth::push(mut self.storage, value: intrinsic::convert(128 + code / 4096 % 64))
-    growth::push(mut self.storage, value: intrinsic::convert(128 + code / 64 % 64))
-    growth::push(mut self.storage, value: intrinsic::convert(128 + code % 64))
-  }
+  growth::reserve(mut self.storage, additional: character.utf8_length())
+  character.encode_onto(mut self.storage)
 }
 
 public fn String.pop_character(mut self) -> Option[Character]
@@ -694,14 +639,4 @@ public fn String.to_bytes(own self) -> List[UInt8]
   cost allocations == 0
 {
   List(storage: own self.storage)
-}
-
-public fn TextBuilder.with_capacity(capacity: UInt64) -> TextBuilder {
-  TextBuilder(text: String.with_capacity(capacity))
-}
-
-public fn TextBuilder.length(self) -> UInt64
-  cost time O(1)
-{
-  self.text.length()
 }

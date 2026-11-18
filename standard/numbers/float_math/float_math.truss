@@ -365,7 +365,6 @@ public fn Float32.sum(items: Slice[Float32]) -> Float32
 fn format_with(value: Float64, format: intrinsic::View[UInt8], precision: Int32) -> String
   requires intrinsic::view_length(format) > 0
   requires intrinsic::view_model(format)[intrinsic::view_length(format) - 1] == 0
-  cost time finite
 {
   var text: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(64)
   let length = intrinsic::libc_snprintf(mut text, size: 64, format: format, precision: precision, value: value)
@@ -392,7 +391,6 @@ fn format_with(value: Float64, format: intrinsic::View[UInt8], precision: Int32)
 }
 
 fn pad_with_zeros(text: own String, count: UInt64) -> String
-  cost time finite
 {
   var padded = own text
   var left = count
@@ -406,7 +404,6 @@ fn pad_with_zeros(text: own String, count: UInt64) -> String
 }
 
 fn format_fixed(value: Float64, decimals: UInt64) -> String
-  cost time finite
 {
   if value.is_nan() {
     return "NaN"
@@ -420,7 +417,6 @@ fn format_fixed(value: Float64, decimals: UInt64) -> String
 }
 
 fn format_scientific(value: Float64, decimals: UInt64) -> String
-  cost time finite
 {
   if value.is_nan() {
     return "NaN"
@@ -448,7 +444,6 @@ fn skip_digits(text: StringSlice, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
-  cost time finite
 {
   var index = from
   while index < text.length() && 48 <= text.byte(index) && text.byte(index) <= 57
@@ -463,7 +458,6 @@ fn skip_digits(text: StringSlice, from: UInt64) -> UInt64
 
 fn validate_decimal(text: StringSlice, from: UInt64) -> Option[core::ParseFloatError]
   requires from <= text.length()
-  cost time finite
 {
   let whole_end = skip_digits(text, from: from)
   var end = whole_end
@@ -496,7 +490,6 @@ fn validate_decimal(text: StringSlice, from: UInt64) -> Option[core::ParseFloatE
 fn null_terminated(text: StringSlice) -> intrinsic::Storage[UInt8]
   ensures intrinsic::storage_length(result) > 0
   ensures intrinsic::storage_model(result)[intrinsic::storage_length(result) - 1] == 0
-  cost time finite
 {
   var buffer: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(0)
   growth::reserve(mut buffer, additional: text.length())
@@ -518,7 +511,6 @@ type FloatText =
 
 fn classify_float_text(text: StringSlice) -> FloatText
   ensures !(result is Decimal(from) && from > text.length())
-  cost time finite
 {
   if text.length() == 0 {
     return FloatText.Invalid(error: core::ParseFloatError.Empty)
@@ -536,7 +528,6 @@ fn classify_float_text(text: StringSlice) -> FloatText
 }
 
 internal fn parse_float64(text: StringSlice) -> Result[Float64, core::ParseFloatError]
-  cost time finite
 {
   match classify_float_text(text) {
     Invalid(error) => Err(error)
@@ -552,13 +543,11 @@ internal fn parse_float64(text: StringSlice) -> Result[Float64, core::ParseFloat
 }
 
 public fn Float32.to_fixed(self, decimals: UInt64) -> String
-  cost time finite
 {
   format_fixed(intrinsic::convert(self), decimals: decimals)
 }
 
 public fn Float32.to_scientific(self, decimals: UInt64) -> String
-  cost time finite
 {
   format_scientific(intrinsic::convert(self), decimals: decimals)
 }
@@ -577,142 +566,6 @@ impl text::Parse for Float32 {
         let buffer = null_terminated(text)
         Ok(intrinsic::libc_strtof(intrinsic::storage_view(buffer)))
       }
-    }
-  }
-}
-
-impl From[Int8] for Float32 {
-  fn from(value: own Int8) -> Float32
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl From[Int16] for Float32 {
-  fn from(value: own Int16) -> Float32
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl From[UInt8] for Float32 {
-  fn from(value: own UInt8) -> Float32
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl From[UInt16] for Float32 {
-  fn from(value: own UInt16) -> Float32
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl TryFrom[Float32] for Int8 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float32) -> Result[Int8, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Int8](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float32] for Int16 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float32) -> Result[Int16, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Int16](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float32] for Int32 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float32) -> Result[Int32, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Int32](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float32] for Int64 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float32) -> Result[Int64, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Int64](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float32] for UInt8 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float32) -> Result[UInt8, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, UInt8](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float32] for UInt16 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float32) -> Result[UInt16, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, UInt16](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float32] for UInt32 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float32) -> Result[UInt32, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, UInt32](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float32] for UInt64 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float32) -> Result[UInt64, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, UInt64](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
     }
   }
 }
@@ -1604,13 +1457,11 @@ public fn Float64.sum(items: Slice[Float64]) -> Float64
 }
 
 public fn Float64.to_fixed(self, decimals: UInt64) -> String
-  cost time finite
 {
   format_fixed(self, decimals: decimals)
 }
 
 public fn Float64.to_scientific(self, decimals: UInt64) -> String
-  cost time finite
 {
   format_scientific(self, decimals: decimals)
 }
@@ -1623,164 +1474,11 @@ impl text::Parse for Float64 {
   }
 }
 
-impl From[Int8] for Float64 {
-  fn from(value: own Int8) -> Float64
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl From[Int16] for Float64 {
-  fn from(value: own Int16) -> Float64
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl From[Int32] for Float64 {
-  fn from(value: own Int32) -> Float64
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl From[UInt8] for Float64 {
-  fn from(value: own UInt8) -> Float64
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl From[UInt16] for Float64 {
-  fn from(value: own UInt16) -> Float64
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl From[UInt32] for Float64 {
-  fn from(value: own UInt32) -> Float64
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
-}
-
-impl TryFrom[Float64] for Int8 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float64) -> Result[Int8, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Int8](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float64] for Int16 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float64) -> Result[Int16, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Int16](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float64] for Int32 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float64) -> Result[Int32, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Int32](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float64] for Int64 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float64) -> Result[Int64, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Int64](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float64] for UInt8 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float64) -> Result[UInt8, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, UInt8](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float64] for UInt16 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float64) -> Result[UInt16, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, UInt16](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float64] for UInt32 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float64) -> Result[UInt32, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, UInt32](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl TryFrom[Float64] for UInt64 {
-  type Error = core::ConversionError
-
-  fn try_from(value: own Float64) -> Result[UInt64, core::ConversionError]
-  {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, UInt64](value) {
-      Ok(intrinsic::convert(value))
-    } else {
-      Err(core::ConversionError())
-    }
-  }
-}
-
-impl From[Float32] for Float64 {
-  fn from(value: own Float32) -> Float64
-    cost time O(1)
-  {
-    intrinsic::convert(value)
-  }
+public fn Float32.to_float64(self) -> Float64
+  ensures identical(result, intrinsic::convert[Float32, Float64](self))
+  cost time O(1)
+{
+  intrinsic::convert(self)
 }
 
 public fn Float64.to_float32(self) -> Float32

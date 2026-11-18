@@ -1,0 +1,10 @@
+fn f() -> Int64 {
+  let action: fn() -> Int64 = forever
+  action()
+}
+
+fn forever() -> Int64
+  uses RunForever
+{
+  while true {}
+}

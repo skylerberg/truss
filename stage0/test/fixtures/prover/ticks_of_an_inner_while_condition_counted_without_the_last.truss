@@ -1,0 +1,16 @@
+fn f(count: UInt32)
+  uses Meter, RunForever
+  cost calls(Meter.tick) == 2 * count
+{
+  for outer in 0..count
+    cost calls(Meter.tick) == 2 * outer
+  {
+    var index: UInt32 = 0
+    while step(index)
+      invariant index <= 2
+      cost calls(Meter.tick) == index
+    {
+      index = index + 1
+    }
+  }
+}

@@ -1,38 +1,6 @@
-type template_check = { from_template : Path.t; literals : string list; clauses : int list }
-type template_clause = { check : template_check; clause : int }
-
-type piece =
-  | Text of string
-  | Quote of Resolve.Names.key * Core.origin
-  | Substituted of {
-      key : Resolve.Names.key;
-      clause : Core.origin;
-      replacements : (Core.origin * string) list;
-    }
-
-type message = piece list
-type location = Node of Core.origin | Whole_definition
-type edit = { at : Source.Definition_span.t; replacement : message }
-type fix = { title : message; edits : edit list }
-
-type obligation = {
-  code : Diagnostic.Code.prover;
-  location : location;
-  message : message;
-  cited : (Resolve.Names.key * Core.origin) option;
-  fixes : fix list;
-  query : Logic.query;
-  values : (Logic.symbol * string) list;
-  locals : (Logic.term * string) list;
-  template_clause : template_clause option;
-  decisions : (string * string option * Logic.term * Logic.term) list;
-  panic_clause : Interface.Impls.declaring_clause option;
-}
-
-type outcome = { obligations : obligation list; holes : (Resolve.Names.key * location) list }
 type source = { key : Resolve.Names.key option; name : string }
 
-type part = {
+type clauses = {
   callee : source;
   parameters : Mir.parameter list;
   requires : Mir.requirement list;
@@ -43,7 +11,12 @@ type part = {
   inherited : bool;
 }
 
-type contract = { parts : part list; is_logic_function : bool; result_kind : [ `Returns | `Lends ] }
+type contract = {
+  callee_clauses : clauses;
+  trait_clauses : clauses option;
+  is_logic_function : bool;
+  result_kind : [ `Returns | `Lends ];
+}
 
 type slice = {
   made_at : Invocation.site;
@@ -53,7 +26,6 @@ type slice = {
 }
 
 type held_slice = Slices of (Logic.term * slice) list | Unknown_slice
-type panic = Declared | Undeclared of Interface.Impls.declaring_clause | Undeclarable
 
 type frame = {
   source : source;
@@ -65,7 +37,6 @@ type frame = {
   result : Logic.term option;
   condition : Logic.term;
   makes_obligations : bool;
-  panic : panic;
   bound : Logic.symbol list;
   binders : (Logic.symbol * Logic.sort * Logic.term) list;
   substitution : Types.substitution;
@@ -121,6 +92,7 @@ type stated = Tables.stated =
 type context = {
   lookups : Lookups.t;
   current : Path.t;
+  node : Path.t;
   mutable terminates : bool;
   mutable callbacks : (Core.local * string * Mir.callback) list;
   measures : Mir.formula list;
@@ -130,7 +102,7 @@ type context = {
   datatypes : unit Tables.Type_table.t;
   stated : unit Tables.Stated_table.t;
   mutable facts : Logic.term list;
-  mutable obligations : obligation list;
+  mutable obligations : Obligation.t list;
   mutable fresh : int;
   mutable values : (Logic.symbol * string) list;
   local_names : string Tables.Local_table.t;
@@ -142,18 +114,18 @@ type context = {
   axiom_clauses : unit Tables.Axiom_clause_table.t;
   mutable open_axioms : open_axiom list;
   axioms_of : open_axiom Tables.Symbol_table.t;
-  disjoint : (int * int) list;
+  disjoint : (int list * int list) list;
   mutable indexes : (int * place_value) list;
   mutable yielded_part : Types.ty option;
   mutable yield_ensures : (Mir.formula list * Mir.formula list) option;
   home : Resolve.Names.key;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   mutable counters : Costs.counter list;
-  mutable own_bounds : Costs.counter list;
+  mutable bounded_counters : Costs.counter list;
   fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
-  mutable lambda_times : (Logic.term * (Logic.term * obligation list)) list;
+  mutable lambda_costs : ((Logic.term * Metric.t) * (Logic.term * Obligation.t list)) list;
   mutable lambda_captures : (Logic.term * Core.local list) list;
   lambda_definitions : Logic.term Tables.Symbol_table.t;
   mutable potentials : Logic.term list;
@@ -165,7 +137,7 @@ type context = {
   mutable entry : Logic.symbol list;
   mutable proving : bool;
   inherits_precondition : bool;
-  mutable holes : (Resolve.Names.key * location) list;
+  mutable holes : (Resolve.Names.key * Obligation.location) list;
   mutable unfinished : Logic.term list;
   mutable call_targets : (Logic.term * Core.local) list;
   mutable reading_callback : bool;

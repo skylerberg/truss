@@ -39,22 +39,13 @@ internal fn listen_local(path: Path) -> Result[network::LocalListener, SystemErr
   Ok(network::LocalListener.from_handle(streams::Handle(descriptor: own handle, number: 0), path: path.copy()))
 }
 
-internal fn connect_local(path: Path) -> Result[network::LocalConnection, SystemError] {
+internal fn connect_local(path: Path) -> Result[network::LocalConnection, SystemError]
+  uses RunForever
+{
   let bytes = handles::with_file_error(local_address_bytes(path))?
   let handle = handles::with_file_error(opened(intrinsic::libc_af_unix(), kind: intrinsic::libc_sock_stream()))?
   let descriptor = intrinsic::handle_descriptor(handle)
-  let started = intrinsic::libc_connect(
-    descriptor,
-    address: intrinsic::storage_view(bytes),
-    length: intrinsic::storage_length(bytes),
-  )
-  if started != 0 {
-    let error = intrinsic::libc_errno()
-    if error != intrinsic::libc_einprogress() && error != intrinsic::libc_eintr() {
-      return Err(handles::file_error(error))
-    }
-    handles::with_file_error(connected(descriptor))?
-  }
+  handles::with_file_error(connected(descriptor, address: bytes))?
   Ok(network::LocalConnection.from_handle(streams::Handle(descriptor: own handle, number: 0)))
 }
 
@@ -100,7 +91,9 @@ internal fn open_datagram() -> Result[network::DatagramSocket, SystemError] {
 internal fn connect(
   address: network::SocketAddress,
   timeout: Option[Duration],
-) -> Result[network::Connection, SystemError] {
+) -> Result[network::Connection, SystemError]
+  uses RunForever
+{
   let handle = handles::with_file_error(opened(family_of(address), kind: intrinsic::libc_sock_stream()))?
   let descriptor = intrinsic::handle_descriptor(handle)
   let sending = network::Direction.Sending
@@ -108,18 +101,7 @@ internal fn connect(
     handles::with_file_error(set_timeout(descriptor, direction: sending, timeout: timeout))?
   }
   let bytes = address_bytes(address)
-  let started = intrinsic::libc_connect(
-    descriptor,
-    address: intrinsic::storage_view(bytes),
-    length: intrinsic::storage_length(bytes),
-  )
-  if started != 0 {
-    let error = intrinsic::libc_errno()
-    if error != intrinsic::libc_einprogress() && error != intrinsic::libc_eintr() {
-      return Err(handles::file_error(error))
-    }
-    handles::with_file_error(connected(descriptor))?
-  }
+  handles::with_file_error(connected(descriptor, address: bytes))?
   if timeout is Some(_) {
     let _ = set_timeout(descriptor, direction: sending, timeout: None)
   }
@@ -131,8 +113,17 @@ internal fn connect(
   ))
 }
 
-internal fn accept_local(listener: Int32) -> Result[streams::Handle, Int32] {
+internal fn accept_local(listener: Int32) -> Result[streams::Handle, Int32]
+  uses RunForever
+{
   var from = room_for_an_address()
+  accepted(listener, from: mut from)
+}
+
+fn accepted(listener: Int32, from: mut intrinsic::Storage[UInt8]) -> Result[streams::Handle, Int32]
+  uses RunForever
+  requires intrinsic::storage_length(from) == 28
+{
   var length: UInt32 = 28
   var ticket = calls::watch(listener, writing: false)
   var descriptor = intrinsic::libc_accept(listener, address: mut from, length: mut length)
@@ -186,24 +177,11 @@ fn level_option(descriptor: Int32, level: Int32, name: Int32, number: UInt64) ->
   )
 }
 
-internal fn accept(listener: Int32) -> Result[network::Accepted, Int32] {
+internal fn accept(listener: Int32) -> Result[network::Accepted, Int32]
+  uses RunForever
+{
   var from = room_for_an_address()
-  var length: UInt32 = 28
-  var ticket = calls::watch(listener, writing: false)
-  var descriptor = intrinsic::libc_accept(listener, address: mut from, length: mut length)
-  while descriptor < 0 && calls::retry_when_ready(listener, writing: false, ticket: ticket)
-    invariant intrinsic::storage_length(from) == 28
-  {
-    length = 28
-    ticket = calls::watch(listener, writing: false)
-    descriptor = intrinsic::libc_accept(listener, address: mut from, length: mut length)
-  }
-  if descriptor < 0 {
-    return Err(intrinsic::libc_errno())
-  }
-  let _ = intrinsic::libc_fcntl_setfd_cloexec(descriptor)
-  let handle = handles::of_descriptor(descriptor)
-  calls::without_blocking(descriptor)?
+  let handle = accepted(listener, from: mut from)?
   match address_from(intrinsic::storage_view(from)) {
     Some(peer) => Ok(network::Accepted(handle: own handle, peer: plain(peer)))
     None => Err(intrinsic::libc_einval())
@@ -247,7 +225,9 @@ internal fn send_to(
   descriptor: Int32,
   bytes: intrinsic::View[UInt8],
   address: network::SocketAddress,
-) -> Result[UInt64, Int32] {
+) -> Result[UInt64, Int32]
+  uses RunForever
+{
   let to = address_bytes(address_for(descriptor, address: address))
   var ticket = calls::watch(descriptor, writing: true)
   var sent = intrinsic::libc_sendto(
@@ -282,6 +262,7 @@ internal fn receive_from(
   limit: UInt64,
 ) -> Result[network::Datagram, Int32]
   ensures intrinsic::storage_length(buffer) >= old(intrinsic::storage_length(buffer))
+  uses RunForever
 {
   growth::reserve(mut buffer, additional: limit)
   let before = intrinsic::storage_length(buffer)
@@ -448,7 +429,21 @@ fn socket_option(descriptor: Int32, name: Int32, value: intrinsic::View[UInt8]) 
   )
 }
 
-fn connected(descriptor: Int32) -> Result[Unit, Int32] {
+fn connected(descriptor: Int32, address: intrinsic::Storage[UInt8]) -> Result[Unit, Int32]
+  uses RunForever
+{
+  let started = intrinsic::libc_connect(
+    descriptor,
+    address: intrinsic::storage_view(address),
+    length: intrinsic::storage_length(address),
+  )
+  if started == 0 {
+    return Ok(Unit)
+  }
+  let connect_error = intrinsic::libc_errno()
+  if connect_error != intrinsic::libc_einprogress() && connect_error != intrinsic::libc_eintr() {
+    return Err(connect_error)
+  }
   var waiting = true
   while waiting {
     let ticket = calls::watch(descriptor, writing: true)

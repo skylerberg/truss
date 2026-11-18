@@ -4,7 +4,7 @@ let list_package_parts package = Option.to_list package.owner @ [ package.name ]
 let show_package package = String.concat "::" (list_package_parts package)
 let compare_package left right = String.compare (show_package left) (show_package right)
 
-let package_of_parts = function
+let parse_package_parts = function
   | [ name ] -> Some { owner = None; name }
   | [ owner; name ] -> Some { owner = Some owner; name }
   | _ -> None
@@ -17,7 +17,7 @@ let parse_names text =
   in
   split_names (String.split_on_char ':' text)
 
-let parse_package text = Option.bind (parse_names text) package_of_parts
+let parse_package text = Option.bind (parse_names text) parse_package_parts
 
 type module_ = { package : package; modules : string list }
 
@@ -64,12 +64,34 @@ let make_standard_module modules = { package = standard_package; modules }
 let make_standard_path modules name = Top { module_ = make_standard_module modules; name }
 let make_capability_method capability name = Method { owner = capability; name; receiver = Static }
 
+let is_entry_point = function
+  | Top { module_ = { modules = []; _ }; name = "main" } -> true
+  | _ -> false
+
 let rec locate_package = function
   | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ } ->
       module_.package
   | Method { owner; _ } | Member_constant { owner; _ } -> locate_package owner
   | Derived { type_; _ } -> locate_package type_
   | Unresolved { file; _ } -> file.module_.package
+
+let rec is_resolved = function
+  | Top _ | Test _ -> true
+  | Method { owner; _ } | Member_constant { owner; _ } -> is_resolved owner
+  | Impl { trait; for_type; _ } | Law_proof { trait; for_type; _ } ->
+      is_resolved_reference trait && is_resolved for_type
+  | Derived { type_; trait } -> is_resolved type_ && is_resolved trait
+  | Unresolved _ -> false
+
+and is_resolved_reference { path; arguments; associated } =
+  is_resolved path
+  && List.for_all is_resolved_argument arguments
+  && List.for_all (fun (_, argument) -> is_resolved_argument argument) associated
+
+and is_resolved_argument = function
+  | Named reference | Any reference -> is_resolved_reference reference
+  | Constant path -> is_resolved path
+  | Parameter _ | Count _ -> true
 
 let show_receiver = function
   | Static -> "no `self`"
@@ -126,4 +148,3 @@ module Ordered = struct
 end
 
 module Map = Map.Make (Ordered)
-module Set = Set.Make (Ordered)

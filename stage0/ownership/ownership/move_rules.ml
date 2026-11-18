@@ -40,7 +40,8 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
             ~fixes:(Context.copy_fix context "Return a copy." type_ origin)
             (Printf.sprintf
                "A returned value must be owned, and `%s` is not owned here. Return a copy." shown))
-  else if List.exists (function Place.Element _ -> true | Field _ -> false) place.steps then
+  else if List.exists (function Place.Element _ | Range _ -> true | Field _ -> false) place.steps
+  then
     refuse
       (Printf.sprintf
          "`%s` is %s, which cannot be moved out of its collection. Copy it, or take it out with a \
@@ -48,7 +49,7 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
          shown
          (match List.rev place.steps with
          | Element _ :: _ -> "an element"
-         | Field _ :: _ | [] -> "part of an element"))
+         | Range _ :: _ | Field _ :: _ | [] -> "part of an element"))
   else
     match (root_mode, place.root) with
     | Read, Constant _ ->
@@ -114,7 +115,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
   in
   let reported_use_after_move = Place_table.create 8 in
   let check_use_after_move state (place : Mir.place) origin =
-    match Moves.path_of_place place with
+    match Moves.find_place_path place with
     | None -> ()
     | Some path -> (
         match Moves.find_possibly_empty moves state path with
