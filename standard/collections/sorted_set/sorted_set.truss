@@ -189,7 +189,7 @@ fn set_of[Element: Ordered](elements: own List[Element]) -> collections::SortedS
     let order = first.element.compare(second.element)
     if order == Ordering.Equal { first.ordinal.compare(second.ordinal) } else { order }
   })
-  var set: collections::SortedSet[Element] = collections::SortedSet.new()
+  var set: collections::SortedSet[Element] = []
   for item in own numbered
     invariant strictly_ascending(set.elements.model())
   {
@@ -349,14 +349,6 @@ fn combined[Element: Ordered + Copyable](
   }
 }
 
-public fn collections::SortedSet[Element: Ordered].new() -> collections::SortedSet[Element]
-  ensures result.length() == 0
-  cost time O(1)
-  cost allocations == 0
-{
-  collections::SortedSet(elements: [])
-}
-
 public fn collections::SortedSet[Element: Ordered].collect[Source: Cursor[Element = Element]](
   source: own Source,
 ) -> collections::SortedSet[Element]
@@ -388,6 +380,7 @@ public fn collections::SortedSet[Element: Ordered].contains(self, element: Eleme
 
 public fn collections::SortedSet[Element: Ordered].insert(mut self, element: own Element)
   ensures self.contains(element)
+  ensures self.length() == old(self.length()) + (if old(self.contains(element)) { 0 } else { 1 })
   cost time O(old(self.length()) + log(old(self.length())) * time(Element.compare))
 {
   let _ = mut self.insert_new(own element)
@@ -396,6 +389,7 @@ public fn collections::SortedSet[Element: Ordered].insert(mut self, element: own
 public fn collections::SortedSet[Element: Ordered].insert_new(mut self, element: own Element) -> Bool
   ensures self.contains(element)
   ensures result == !old(self.contains(element))
+  ensures self.length() == old(self.length()) + (if result { 1 } else { 0 })
   cost time O(old(self.length()) + log(old(self.length())) * time(Element.compare))
 {
   match self.search(element) {
@@ -728,12 +722,34 @@ impl Hash for collections::SortedSet[Element: Ordered + Hash] {
 
 impl Default for collections::SortedSet[Element: Ordered] {
   fn default() -> collections::SortedSet[Element] {
-    collections::SortedSet.new()
+    []
   }
 }
 
-impl From[List[Element]] for collections::SortedSet[Element: Ordered] {
-  fn from(value: own List[Element]) -> collections::SortedSet[Element] {
-    set_of(own value)
+impl FromElements for collections::SortedSet[Element: Ordered] {
+  type Element = Element
+
+  fn from_elements(elements: own List[Element]) -> collections::SortedSet[Element]
+    ensures result.length() <= elements.length()
+    cost time O(elements.length() * (elements.length() + time(Element.compare)))
+  {
+    let count = elements.length()
+    var pending = own elements
+    mut pending.reverse()
+    var set: collections::SortedSet[Element] = collections::SortedSet(elements: [])
+    while pending.length() > 0
+      invariant strictly_ascending(set.elements.model())
+      invariant set.length() + pending.length() <= count
+      decreases pending.length()
+      cost time O((count - pending.length()) * (count + time(Element.compare)))
+    {
+      match mut pending.pop() {
+        Some(element) => {
+          mut set.insert(own element)
+        }
+        None => {}
+      }
+    }
+    set
   }
 }

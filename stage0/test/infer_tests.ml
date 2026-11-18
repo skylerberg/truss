@@ -693,7 +693,42 @@ let () =
   Harness.test "an array literal must have its type's length" (fun () ->
       expect_one_diagnostic Fixtures.Infer.array_literal_of_the_wrong_length "types.mismatch");
   Harness.test "a list literal is a set where a set is expected" (fun () ->
-      expect_fine Fixtures.Infer.list_literal_as_a_set)
+      expect_fine Fixtures.Infer.list_literal_as_a_set);
+  Harness.test "a list literal is a deque where a deque is expected" (fun () ->
+      expect_fine Fixtures.Infer.list_literal_as_a_deque);
+  Harness.test "a map literal is a sorted map where a sorted map is expected" (fun () ->
+      expect_fine Fixtures.Infer.map_literal_as_a_sorted_map);
+  Harness.test "a list literal is a type that implements FromElements" (fun () ->
+      expect_fine Fixtures.Infer.list_literal_as_a_type_with_from_elements;
+      expect_type Fixtures.Infer.list_literal_as_a_type_with_from_elements "[1, 2, 3]"
+        "Stack[Int64]");
+  Harness.test "a map literal is a type that implements FromEntries" (fun () ->
+      expect_fine Fixtures.Infer.map_literal_as_a_type_with_from_entries);
+  Harness.test "a list literal is a type parameter that FromElements bounds" (fun () ->
+      expect_fine Fixtures.Infer.list_literal_as_a_bounded_type_parameter);
+  Harness.test "a literal's elements take the element type of the expected collection" (fun () ->
+      expect_type Fixtures.Infer.list_literal_of_set_literals "[1, 2]" "Set[Int64]");
+  Harness.test "a list literal needs the conditions of the collection's impl" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.list_literal_as_a_type_whose_impl_needs_more
+        "types.no_impl" ~says:"`Ranked[Point]` does not implement `FromElements`.");
+  Harness.test "a list literal is not a type that implements no literal trait" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.list_literal_as_a_heap "types.mismatch");
+  Harness.test "new on a type that takes a list literal names the literal" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.new_on_a_list "types.unknown_member"
+        ~says:"The literal `[]` is an empty `List[_]`." ~fixed:Fixtures.Infer.new_on_a_list_fixed);
+  Harness.test "new on a type that takes a map literal names the literal" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.new_on_a_sorted_map "types.unknown_member"
+        ~says:"The literal `[:]` is an empty" ~fixed:Fixtures.Infer.new_on_a_sorted_map_fixed);
+  Harness.test "new where nothing expects the collection names the literal and offers no fix"
+    (fun () ->
+      let text = Fixtures.Infer.new_on_a_list_with_type_arguments in
+      expect_one_diagnostic text "types.unknown_member"
+        ~says:"The literal `[]` is an empty `List[String]`.";
+      List.iter
+        (fun (diagnostic : Diagnostic.t) ->
+          if diagnostic.fixes <> [] then
+            Harness.fail "`[]` alone would not say which collection it is, and a fix is offered")
+        (check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main")))
 
 let () =
   Harness.test "deriving Deserialize needs every invariant clause to run" (fun () ->

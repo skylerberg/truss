@@ -1129,78 +1129,36 @@ let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(ou
         ];
     }
 
-let build_inserted_literal state ~origin (type_ : Types.ty) ~insert
-    (entries : Core.expression list list) : Core.kind =
-  let path, type_arguments =
-    match type_ with
-    | Types.Named { path; arguments } -> (path, arguments)
-    | _ -> State.raise_bug "a set or map literal of type `%s`" (Types.show type_)
-  in
-  let make = State.make_synthetic_expression state ~origin in
-  let make_statement kind : Core.statement = { id = State.allocate_node_id state; origin; kind } in
-  let make_call name receiver arguments result =
-    make result
-      (Call
-         (State.make_call state
-            ~callee:(Function { path = Method { owner = path; name; receiver }; type_arguments })
-            ~arguments ~lends:None))
-  in
-  let capacity = make (Types.make_builtin UInt64) (Integer (Z.of_int (List.length entries))) in
-  let created = make_call "with_capacity" Static [ Operands.build_argument Read capacity ] type_ in
-  match entries with
-  | [] -> created.kind
-  | _ ->
-      let local = State.allocate_synthetic_local state in
-      let collection : Core.place = Local { local; type_; origin } in
-      let bind =
-        make_statement
-          (Let
-             {
-               pattern =
-                 {
-                   id = State.allocate_node_id state;
-                   origin;
-                   type_;
-                   kind = Bind { local; is_var = true; mode = Own };
-                 };
-               value = Operands.build Own created;
-               else_ = None;
-             })
-      in
-      let inserts =
-        List.map
-          (fun entry ->
-            make_statement
-              (Evaluate
-                 (make_call insert Mut
-                    (Passed { mode = Mut; value = Place collection }
-                    :: List.map
-                         (fun argument : Core.argument -> Operands.build_argument Own argument)
-                         entry)
-                    Types.unit)))
-          entries
-      in
-      Block { statements = bind :: inserts; value = Some (make type_ (Use collection)) }
-
 let build_collection_literal state (value : Syntax.expression) (elements : Core.expression list) :
     Core.kind =
   match read_type state value with
   | Types.Named { path; arguments = [ Types.Type element ] } when Well_known.is List path ->
       build_list_literal state ~origin:value.id element elements
-  | Types.Named { path; _ } as type_ when Well_known.is Set path ->
-      build_inserted_literal state ~origin:value.id type_ ~insert:"insert"
-        (List.map (fun element -> [ element ]) elements)
   | Types.Named { path; _ } when Intrinsic.find_builtin path = Some Array ->
       Collection_literal { elements; construction = Array }
   | Types.Named { path; _ } when Well_known.is Sequence path || Well_known.is Finite_set path ->
       Collection_literal { elements; construction = Specification_only }
   | type_ -> State.raise_bug "a collection literal of type `%s`" (Types.show type_)
 
-let build_map_literal state (value : Syntax.expression)
-    (entries : (Core.expression * Core.expression) list) : Core.kind =
-  match read_type state value with
-  | Types.Named { path; _ } as type_ when Well_known.is Map path ->
-      build_inserted_literal state ~origin:value.id type_ ~insert:"insert_absent"
-        (List.map (fun (key, entry) -> [ key; entry ]) entries)
-  | Types.Named { path; _ } when Well_known.is Finite_map path -> Map_literal { entries }
-  | type_ -> State.raise_bug "a map literal of type `%s`" (Types.show type_)
+let build_converted_literal state (value : Syntax.expression) ~(element : Types.ty)
+    (elements : Core.expression list) : Core.kind =
+  let recorded = read_call state value.id in
+  let list =
+    State.make_synthetic_expression state ~origin:value.id
+      (Types.make_named (Well_known.make_path List) [ element ])
+      (build_list_literal state ~origin:value.id element elements)
+  in
+  Call
+    (State.make_call state ~callee:(convert_callee recorded.callee)
+       ~arguments:[ Operands.build_argument Own list ]
+       ~lends:None)
+
+let build_converted_map_literal state (value : Syntax.expression) ~(key : Types.ty)
+    ~(value_type : Types.ty) (entries : (Core.expression * Core.expression) list) : Core.kind =
+  let entry = Types.make_named (Well_known.make_path Entry) [ key; value_type ] in
+  build_converted_literal state value ~element:entry
+    (List.map
+       (fun (entry_key, entry_value) ->
+         State.make_synthetic_expression state ~origin:value.id entry
+           (build_record [ ("key", entry_key); ("value", entry_value) ]))
+       entries)

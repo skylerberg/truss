@@ -956,9 +956,12 @@ Rules: [Ranges](SPECIFICATION.md#ranges),
 | Rule | Reason |
 |---|---|
 | A range with no start or no end appears only in brackets. | `0..` anywhere else would allow a `for` loop with no end. |
-| Each collection has one literal form, `[a, b, c]` or `[key: value]`, which takes its type from its context. | *One spelling:* there is no `List.new()` or `List.of(...)`. A map uses brackets because `{` starts a block. |
+| Each collection has one literal form, `[a, b, c]` or `[key: value]`, which takes its type from its context. | *One spelling:* a collection that takes a literal has no `new()` and no `of(...)`. A map uses brackets because `{` starts a block. |
+| A type takes a literal by implementing `FromElements` or `FromEntries`. | Indexing, `for`, the operators, and tagged templates each belong to a prelude trait, so a package's collection is written as a standard one is. A literal for the compiler's types alone leaves every other collection to name a constructor of its own. |
+| `from_elements` and `from_entries` take a `List`. | The compiler builds one collection, and a collection that stores a list keeps the literal's storage. A trait of `with_capacity` and `insert` would give a `Deque` a second name for `push_back`. A cursor has no model, so nothing could be proven of the literal's elements. |
 | A non-empty list literal counts as one allocation. | A `cost` clause does not depend on whether an optimization keeps the list in static memory. |
-| A set or map literal desugars to calls of `insert`. | A `cost` clause is checked against the code that runs. Distinct keys are the `requires` of `insert`, so a duplicate key is a failed proof. Letting the last key win would hide a mistake. |
+| A literal of another collection costs its list and its call of `from_elements` or `from_entries`. | A `cost` clause is checked against the code that runs. |
+| Distinct keys are the `requires` of `from_entries`. | A duplicate key is a failed proof for every map type. Letting the last key win would hide a mistake. A repeated element of a set drops nothing, so `from_elements` requires nothing. |
 | A string cannot be indexed. | In UTF-8, byte `i` and character `i` differ, so code says which one it means. |
 
 ## Expressions
@@ -1816,6 +1819,7 @@ as every source of randomness is a capability.
 | Each module is one subject, one level below `standard`. | Code writes a name with its module, so the name of a type does not repeat the module: `json::Value`. A category above the module, as in Go's `encoding/json`, is not written at the use site, so it only adds something to remember. |
 | A method that needs no ownership of the storage is declared once, on the view type. | A `String`, a `List`, and an `Array` have the methods of their views ([Method lookup](#method-lookup)), so `mut names.sort()` works without `names[..]`, and a second declaration on the owning type would only forward. The owning type declares a method of that name where it uses its storage: `List.reverse` keeps the list's capacity. |
 | A method that works on any collection is a provided method of `Iterable`. | A user's collection gets the method by implementing `count` and `element`. |
+| A collection that is made from its elements alone takes a literal and has no `new()`. | *One spelling.* A constructor is for a collection that needs more than its elements: a `Heap` needs an order, and an `LruCache` a capacity. |
 | A collection method takes a pure callback. A method of `Option` or `Result` takes a callback that may use capabilities. | `map` and `sort_by` may later run their callback in parallel. `Option.map` calls its callback at most once, in place of an `if`. |
 | A lookup that can miss lends an `Option`. | Nothing is copied, whatever the element type. |
 | A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write, and every helper works with every implementation. |

@@ -1,0 +1,8 @@
+use standard::collections
+
+fn f() -> collections::Deque[Int64]
+  ensures result.length() == 3
+  cost allocations == 1
+{
+  [1, 2, 3]
+}

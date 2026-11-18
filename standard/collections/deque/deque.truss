@@ -3,14 +3,6 @@ use standard::intrinsic
 use standard::map
 use standard::list
 
-public fn collections::Deque[Element].new() -> collections::Deque[Element]
-  ensures result.length() == 0
-  cost time O(1)
-  cost allocations == 0
-{
-  collections::Deque(front: [], back: [])
-}
-
 public fn collections::Deque[Element].with_capacity(capacity: UInt64) -> collections::Deque[Element]
   ensures result.length() == 0
 {
@@ -316,12 +308,18 @@ impl Hash for collections::Deque[Element: Hash] {
 
 impl Default for collections::Deque[Element] {
   fn default() -> collections::Deque[Element] {
-    collections::Deque.new()
+    []
   }
 }
 
-impl From[List[Element]] for collections::Deque[Element] {
-  fn from(value: own List[Element]) -> collections::Deque[Element] {
-    collections::Deque(front: [], back: own value)
+impl FromElements for collections::Deque[Element] {
+  type Element = Element
+
+  fn from_elements(elements: own List[Element]) -> collections::Deque[Element]
+    ensures result.length() == elements.length()
+    cost time O(1)
+    cost allocations == 0
+  {
+    collections::Deque(front: [], back: own elements)
   }
 }

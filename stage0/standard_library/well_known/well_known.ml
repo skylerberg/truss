@@ -35,8 +35,10 @@ type t =
   | Literal
   | Template
   | From_template
-  | Set
+  | From_elements
   | Map
+  | Entry
+  | From_entries
   | Sequence
   | Finite_set
   | Finite_map
@@ -99,8 +101,10 @@ let all =
     Literal;
     Template;
     From_template;
-    Set;
+    From_elements;
     Map;
+    Entry;
+    From_entries;
     Sequence;
     Finite_set;
     Finite_map;
@@ -163,8 +167,10 @@ let locate_known = function
   | Literal -> ([ "text" ], "Literal")
   | Template -> ([ "text" ], "Template")
   | From_template -> ([ "text" ], "FromTemplate")
-  | Set -> ([ "set" ], "Set")
+  | From_elements -> ([ "list" ], "FromElements")
   | Map -> ([ "map" ], "Map")
+  | Entry -> ([ "map" ], "Entry")
+  | From_entries -> ([ "map" ], "FromEntries")
   | Sequence -> ([ "specification" ], "Sequence")
   | Finite_set -> ([ "specification" ], "FiniteSet")
   | Finite_map -> ([ "specification" ], "FiniteMap")
