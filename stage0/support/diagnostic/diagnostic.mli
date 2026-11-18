@@ -184,7 +184,13 @@ module Code : sig
     | Associated_type_not_fixed
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
-  type usage = Unused_variable | Unused_function | Unused_constant | Unreachable_code
+
+  type usage =
+    | Unused_variable
+    | Unused_function
+    | Unused_constant
+    | Unreachable_code
+    | Self_comparison
 
   type ownership =
     | Views_temporary
