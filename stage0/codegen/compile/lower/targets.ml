@@ -3,16 +3,8 @@ let resolve_impl (context : Definitions.context) substitution ~(trait : Types.tr
   let substitute = Types.substitute substitution in
   let impl, arguments =
     match evidence with
-    | Impl { impl; arguments } ->
-        ( impl,
-          {
-            arguments with
-            arguments =
-              List.map
-                (fun (parameter, argument) ->
-                  (parameter, Types.substitute_argument substitution argument))
-                arguments.arguments;
-          } )
+    | Impl { impl; substitution = impl_substitution } ->
+        (impl, Types.substitute_substitution substitution impl_substitution)
     | Bound -> (
         let self = context.monomorphic.normalize (substitute self_type) in
         match

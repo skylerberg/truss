@@ -859,17 +859,17 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | None -> []
   in
   let pair parameters arguments ~fixed =
-    let parameters =
-      List.filter (fun parameter -> Option.is_none (Types.find_argument parameter fixed)) parameters
-    in
-    let rec pair_remaining parameters arguments =
+    let rec bind_remaining substitution parameters arguments =
       match (parameters, arguments) with
       | parameter :: parameters, argument :: arguments ->
-          (parameter, argument) :: pair_remaining parameters arguments
-      | _ -> []
+          bind_remaining (Types.bind_argument parameter argument substitution) parameters arguments
+      | _ -> substitution
     in
-    Types.combine_substitutions fixed
-      { Types.no_substitution with arguments = pair_remaining parameters arguments }
+    bind_remaining fixed
+      (List.filter
+         (fun parameter -> Option.is_none (Types.find_argument parameter fixed))
+         parameters)
+      arguments
   in
   if context.terminates && frame.makes_obligations then
     List.iter
@@ -924,7 +924,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         match evidence with
         | Bound -> (
             match Operations.find_concrete_impl context trait self_type with
-            | Some (impl, arguments) -> Impl { impl; arguments }
+            | Some (impl, substitution) -> Impl { impl; substitution }
             | None -> evidence)
         | _ -> evidence
       in
@@ -969,16 +969,9 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           in
           let path, callee_substitution =
             match evidence with
-            | Impl { impl; arguments = impl_arguments } ->
+            | Impl { impl; substitution } ->
                 let impl_substitution =
-                  {
-                    impl_arguments with
-                    arguments =
-                      List.map
-                        (fun (parameter, argument) ->
-                          (parameter, Types.substitute_argument frame.substitution argument))
-                        impl_arguments.arguments;
-                  }
+                  Types.substitute_substitution frame.substitution substitution
                 in
                 let path = Path.Method { owner = impl; name; receiver } in
                 ( path,

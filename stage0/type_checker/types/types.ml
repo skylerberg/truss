@@ -277,6 +277,20 @@ and substitute_function substitution (function_type : function_type) =
     costs = function_type.costs;
   }
 
+let map_substitution ~argument ~capabilities substitution =
+  {
+    arguments =
+      List.map (fun (parameter, bound) -> (parameter, argument bound)) substitution.arguments;
+    capability_arguments =
+      List.map
+        (fun (parameter, bound) -> (parameter, capabilities bound))
+        substitution.capability_arguments;
+  }
+
+let substitute_substitution outer =
+  map_substitution ~argument:(substitute_argument outer)
+    ~capabilities:(substitute_capabilities outer)
+
 let extract_result_type = function Returns type_ | Lends (_, type_) -> type_
 let show_mode = function Read -> "" | Mut -> "mut " | Own -> "own "
 
@@ -721,3 +735,7 @@ let find_implementing_receiver trait (impl : impl_interface) declared =
        impl.impl_methods)
 
 type constant_interface = { constant_type : ty }
+
+module For_testing = struct
+  let list_arguments substitution = substitution.arguments
+end

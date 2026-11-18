@@ -628,16 +628,8 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   in
   let impl, impl_arguments =
     match evidence with
-    | Impl { impl; arguments } ->
-        ( impl,
-          {
-            arguments with
-            arguments =
-              List.map
-                (fun (parameter, argument) ->
-                  (parameter, Types.substitute_argument frame.substitution argument))
-                arguments.arguments;
-          } )
+    | Impl { impl; substitution } ->
+        (impl, Types.substitute_substitution frame.substitution substitution)
     | _ -> Facts.raise_bug "a cursor's evidence is not an impl"
   in
   let contract =
