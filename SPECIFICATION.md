@@ -1320,7 +1320,8 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
 - **Every value is used.** A statement whose value is not `Unit` is an error;
   `let _ = expression` discards a value.
 - **Every variable is used.** A binding that nothing reads is an error.
-  Parameters are exempt.
+  Parameters are exempt. Assigning a variable as a whole does not read it,
+  and a compound assignment such as `+=` does.
 - **Unreachable code is an error:** a statement after an expression of type
   `Never`. The check uses types alone, so `if false { ... }` is not
   reported. Code after a `todo` is exempt.

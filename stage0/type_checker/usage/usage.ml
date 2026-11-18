@@ -13,18 +13,20 @@ let report context ~fixes code (span : Source.Definition_span.t) message =
     Diagnostic.make ~fixes ~code:(Usage code) span message :: context.diagnostics
 
 type removal = Wildcard | Field_wildcard | Field_deletion of Source.Definition_span.t
-type binding = { name : Syntax.name; removal : removal }
+type binding = { name : Syntax.name; removal : removal; is_var : bool }
 
 let collect_bindings context (definition : Syntax.definition) =
-  let bindings = ref [] in
-  let bind (name : Syntax.name) removal = bindings := { name; removal } :: !bindings in
-  let rec visit_pattern (written : Syntax.pattern) =
+  let bindings = ref [] and assigned = ref [] in
+  let bind ~is_var (name : Syntax.name) removal =
+    bindings := { name; removal; is_var } :: !bindings
+  in
+  let rec visit_pattern ~is_var (written : Syntax.pattern) =
     match written.kind with
-    | Binding name -> bind name Wildcard
-    | Variant { fields = Some fields; _ } | Record fields -> visit_pattern_fields fields
-    | Alternatives alternatives -> List.iter visit_pattern alternatives
+    | Binding name -> bind ~is_var name Wildcard
+    | Variant { fields = Some fields; _ } | Record fields -> visit_pattern_fields ~is_var fields
+    | Alternatives alternatives -> List.iter (visit_pattern ~is_var) alternatives
     | _ -> ()
-  and visit_pattern_fields (fields : Syntax.pattern_field list) =
+  and visit_pattern_fields ~is_var (fields : Syntax.pattern_field list) =
     let has_rest = List.exists (fun (field : Syntax.pattern_field) -> field.kind = Rest) fields in
     let has_several_fields =
       List.length (List.filter (fun (field : Syntax.pattern_field) -> field.kind <> Rest) fields)
@@ -35,13 +37,13 @@ let collect_bindings context (definition : Syntax.definition) =
       | (field : Syntax.pattern_field) :: following ->
           (match (field.kind, following) with
           | Field { kind = Binding name; _ }, next :: _ when has_rest ->
-              bind name
+              bind ~is_var name
                 (Field_deletion
                    (Source.Definition_span.make context.spans.(field.id).start
                       context.spans.(next.id).start))
           | Field { kind = Binding name; _ }, _ when has_rest || has_several_fields ->
-              bind name Field_wildcard
-          | (Named_field (_, inner) | Field inner), _ -> visit_pattern inner
+              bind ~is_var name Field_wildcard
+          | (Named_field (_, inner) | Field inner), _ -> visit_pattern ~is_var inner
           | Rest, _ -> ());
           bind_fields following
     in
@@ -49,24 +51,28 @@ let collect_bindings context (definition : Syntax.definition) =
   in
   let rec visit_expression (value : Syntax.expression) =
     (match value.kind with
-    | Is { pattern = written; _ } -> visit_pattern written
-    | Lambda { parameters; _ } -> List.iter visit_pattern parameters
+    | Is { pattern = written; _ } -> visit_pattern ~is_var:false written
+    | Lambda { parameters; _ } -> List.iter (visit_pattern ~is_var:false) parameters
     | Match { arms; _ } ->
-        List.iter (fun (arm : Syntax.arm) -> List.iter visit_pattern arm.patterns) arms
-    | Quantified { binder = Binder_in (written, _); _ } -> visit_pattern written
+        List.iter
+          (fun (arm : Syntax.arm) -> List.iter (visit_pattern ~is_var:false) arm.patterns)
+          arms
+    | Quantified { binder = Binder_in (written, _); _ } -> visit_pattern ~is_var:false written
     | _ -> ());
     Syntax_walk.visit_expression_parts ~on_expression:visit_expression ~on_statement:visit_statement
       value
   and visit_statement (written : Syntax.statement) =
     (match written.kind with
-    | Let { pattern = written_pattern; _ } | For { pattern = written_pattern; _ } ->
-        visit_pattern written_pattern
+    | Let { pattern = written_pattern; is_var; _ } -> visit_pattern ~is_var written_pattern
+    | For { pattern = written_pattern; _ } -> visit_pattern ~is_var:false written_pattern
+    | Assignment { target = { kind = Name { modules = []; last }; _ }; operator = Assign; _ } ->
+        assigned := last.id :: !assigned
     | _ -> ());
     Syntax_walk.visit_statement_parts ~on_expression:visit_expression ~on_statement:visit_statement
       written
   in
   Syntax_walk.visit_definition ~on_statement:visit_statement visit_expression definition;
-  List.rev !bindings
+  (List.rev !bindings, !assigned)
 
 let describe_removal (binding : binding) =
   match binding.removal with
@@ -86,14 +92,29 @@ let make_edit context (binding : binding) =
 
 let check_unused context (definition : Syntax.definition) =
   let targets = context.resolved.names in
-  let bindings = collect_bindings context definition in
+  let bindings, assigned = collect_bindings context definition in
   let is_binding = Array.make (Array.length targets) false in
   List.iter (fun (binding : binding) -> is_binding.(binding.name.id) <- true) bindings;
+  let is_var = Array.make (Array.length targets) false in
+  List.iter
+    (fun (binding : binding) -> if binding.is_var then is_var.(binding.name.id) <- true)
+    bindings;
+  let is_assigned = Array.make (Array.length targets) false
+  and is_written = Array.make (Array.length targets) false in
+  List.iter
+    (fun id ->
+      match targets.(id) with
+      | Some (Resolve.Local binding) when is_var.(binding) ->
+          is_assigned.(id) <- true;
+          is_written.(binding) <- true
+      | _ -> ())
+    assigned;
   let is_used = Array.make (Array.length targets) false in
   Array.iteri
     (fun index target ->
       match target with
-      | Some (Resolve.Local id) when not is_binding.(index) -> is_used.(id) <- true
+      | Some (Resolve.Local id) when not (is_binding.(index) || is_assigned.(index)) ->
+          is_used.(id) <- true
       | _ -> ())
     targets;
   let rec read_first_alternative id =
@@ -111,17 +132,23 @@ let check_unused context (definition : Syntax.definition) =
     (fun (binding : binding) ->
       let name = binding.name in
       if targets.(name.id) = Some Binding && not is_used.(name.id) then
-        let occurrences = binding :: List.rev (Hashtbl.find_all later_alternatives name.id) in
-        let instruction, title =
-          match occurrences with
-          | [ only ] -> describe_removal only
-          | _ ->
-              ( "Remove it from every alternative of the pattern.",
-                Printf.sprintf "Remove `%s` from every alternative." name.text )
-        in
-        report context Unused_variable context.spans.(name.id)
-          ~fixes:[ Diagnostic.fix title (List.map (make_edit context) occurrences) ]
-          (Printf.sprintf "`%s` is never used. %s" name.text instruction))
+        if is_written.(name.id) then
+          report context Unused_variable context.spans.(name.id) ~fixes:[]
+            (Printf.sprintf
+               "`%s` is assigned but never read. Delete it and its assignments, or read it."
+               name.text)
+        else
+          let occurrences = binding :: List.rev (Hashtbl.find_all later_alternatives name.id) in
+          let instruction, title =
+            match occurrences with
+            | [ only ] -> describe_removal only
+            | _ ->
+                ( "Remove it from every alternative of the pattern.",
+                  Printf.sprintf "Remove `%s` from every alternative." name.text )
+          in
+          report context Unused_variable context.spans.(name.id)
+            ~fixes:[ Diagnostic.fix title (List.map (make_edit context) occurrences) ]
+            (Printf.sprintf "`%s` is never used. %s" name.text instruction))
     bindings
 
 let check_block context (written : Syntax.block) =
