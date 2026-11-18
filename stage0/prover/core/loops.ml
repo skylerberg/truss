@@ -534,19 +534,11 @@ let declare_elements_so_far context (head : State.frame) ~element ~collection ~c
   match collection with
   | Some read ->
       let collection_type, collected = read head in
-      let model_type =
-        Facts.substitute_type context head
-          (Projection
-             {
-               base = collection_type;
-               trait = { trait = Well_known.make_path Model; trait_arguments = []; associated = [] };
-               name = "Value";
-             })
-      in
-      if model_type = Models.make_sequence_type element then
-        Option.iter
-          (Values.assume_extensional context head model_type yielded)
-          (Models.find_model context collection_type collected ~element)
+      Option.iter
+        (Values.assume_extensional context head (Models.make_sequence_type element) yielded)
+        (Models.find_model context
+           (Facts.substitute_type context head collection_type)
+           collected ~element)
   | None -> ()
 
 let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context frame ~element_type
@@ -613,12 +605,85 @@ let declare_some_parts context frame element =
     Logic.(Operation (">=", [ Models.make_sequence_length context element parts; int 0 ]));
   parts
 
+let names_visited (clauses : Mir.loop_clause list) =
+  List.exists
+    (function
+      | Mir.Invariant invariant -> Amounts.mentions_history invariant
+      | Decreases measures -> List.exists Amounts.mentions_history measures
+      | Cost { bound = Order_of bound | At_most bound | Exactly bound; _ } ->
+          Amounts.mentions_history bound
+      | Cost { bound = Finite; _ } -> false)
+    clauses
+
+let assume_visited_is_a_prefix context (head : State.frame) ~element ~visited ~entry_model ~model =
+  let length = Models.make_sequence_length context element in
+  let position = Facts.make_fresh_name context "position" in
+  let index = Logic.Symbol position in
+  let is_below bound =
+    Logic.(Operation ("<=", [ int 0; index ]) &&& Operation ("<", [ index; bound ]))
+  in
+  match
+    ( Models.index_sequence context element visited index,
+      Models.index_sequence context element entry_model index,
+      Models.index_sequence context element model index,
+      Models.index_sequence context element entry_model (Costs.plus (length visited) index) )
+  with
+  | Some visited_value, Some entry_value, Some remaining_value, Some entry_value_ahead ->
+      Facts.assume context head
+        Logic.(
+          equal (Costs.plus (length visited) (length model)) (length entry_model)
+          &&& forall
+                ([ (position, Int) ], is_below (length visited) ==> equal visited_value entry_value)
+          &&& forall
+                ( [ (position, Int) ],
+                  is_below (length model) ==> equal remaining_value entry_value_ahead ));
+      Values.assume_extensional context head (Models.make_sequence_type element) visited entry_model
+  | _ -> ()
+
+let oblige_next_gives_the_model context (after : State.frame) location ~element ~has_another ~pulled
+    ~model ~model_after =
+  let length = Models.make_sequence_length context element in
+  let position = Facts.make_fresh_name context "position" in
+  let index = Logic.Symbol position in
+  match
+    ( Models.index_sequence context element model (Logic.int 0),
+      Models.index_sequence context element model_after index,
+      Models.index_sequence context element model (Costs.plus index (Logic.int 1)) )
+  with
+  | Some first, Some value_after, Some value_ahead ->
+      Facts.oblige context after Invariant location
+        [
+          State.Text
+            "This loop names `visited`, and the `next` of its cursor may not give the values of \
+             the cursor's `model()` in order.";
+        ]
+        Logic.(
+          has_another
+          ==> (Operation (">", [ length model; int 0 ])
+              &&& equal pulled first
+              &&& equal (Costs.plus (length model_after) (int 1)) (length model)
+              &&& forall
+                    ( [ (position, Int) ],
+                      Operation ("<=", [ int 0; index ])
+                      &&& Operation ("<", [ index; length model_after ])
+                      ==> equal value_after value_ahead ))
+          &&& (not_ has_another ==> equal (length model) (int 0)))
+  | _ -> ()
+
 let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     (cursor_access : State.passed_place) (next : Invocation.callee) ~cursor_type =
   let location = Facts.locate context frame.source for_loop.for_at in
   let clauses = for_loop.for_clauses in
   ignore (cursor_access.read frame);
   let element_type = Facts.substitute_type context frame for_loop.element_type in
+  let find_model (at : State.frame) =
+    if names_visited clauses then
+      Models.find_model context
+        (Facts.substitute_type context frame cursor_type)
+        (cursor_access.read at) ~element:element_type
+    else None
+  in
+  let entry_model = find_model frame in
   let trait, evidence =
     match next with
     | Trait_method { trait; evidence = Impl _ as evidence; _ } -> (trait, evidence)
@@ -698,6 +763,11 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
               &&& Operation
                     ("<=", [ Models.make_sequence_length context element_type before; entry ]))
       | _ -> ());
+      (match (entry_model, find_model head) with
+      | Some entry_model, Some model ->
+          assume_visited_is_a_prefix context head ~element:element_type ~visited:before ~entry_model
+            ~model
+      | _ -> ());
       before)
     ~receive:(fun head before ->
       let cursor = cursor_access.read head in
@@ -731,6 +801,11 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       let element =
         Logic.Apply (Facts.make_selector_symbol option_type (Some "Some") "value", [ pulled ])
       in
+      (match (find_model head, find_model after) with
+      | Some model, Some model_after ->
+          oblige_next_gives_the_model context after location ~element:element_type ~has_another
+            ~pulled:element ~model ~model_after
+      | _ -> ());
       let inside = Facts.restrict after has_another in
       Validity.assume_valid context inside element_type element;
       {

@@ -128,12 +128,26 @@ let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) sym
         in
         Facts.add_fact context fact)
 
+let find_model_impl (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
+  let interface = context.lookups.interface and list_bounds = Interface.Impls.list_no_bounds in
+  let model_trait : Types.trait_reference =
+    { trait = Well_known.make_path Model; trait_arguments = []; associated = [] }
+  in
+  let value =
+    Interface.Impls.normalize interface ~list_bounds
+      (Projection { base = ty; trait = model_trait; name = "Value" })
+  in
+  if value = model then
+    match
+      Interface.Impls.find_evidence interface ~list_bounds ~checks_conditions:false ty model_trait
+    with
+    | Some (From_impl { impl; _ }) -> Some impl
+    | _ -> None
+  else None
+
 let compute_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
-  let model_trait = Well_known.make_path Model in
-  match
-    Mir.Call_edges.list_impls_for context.lookups.interface Path.standard_package [ model_trait ] ty
-  with
-  | impl :: _ ->
+  match find_model_impl context ty ~model with
+  | Some impl ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
       let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type ty ] } in
       Facts.declare context
@@ -153,7 +167,7 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
                        (substitute_value_term context count) )))
       | _ -> ());
       Some (fun term -> Logic.Apply (symbol, [ term ]))
-  | [] -> None
+  | None -> None
 
 let find_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   let key = (ty, model) in

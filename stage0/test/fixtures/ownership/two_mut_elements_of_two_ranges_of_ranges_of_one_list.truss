@@ -1,0 +1,5 @@
+fn exchange(first: mut String, second: mut String) {}
+
+fn f(names: mut List[String]) {
+  exchange(mut names[..][..2][0], second: mut names[..][2..][0])
+}

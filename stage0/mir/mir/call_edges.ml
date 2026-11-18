@@ -141,17 +141,13 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
   in
   let rec visit_statement (statement : Tree.statement) =
     match statement.kind with
-    | Basic (Call { call; _ } | Template { call; _ }) ->
-        add_callee call.callee;
-        add_invariant_check call
-    | Basic (Lend { call; _ }) -> (
+    | Basic (Call { call; _ } | Lend { call; _ }) ->
         add_callee call.callee;
         add_invariant_check call;
-        match call.callee with
-        | Trait_method { evidence = Impl { impl; _ }; name; receiver; _ }
-          when Parts.is_index_call call.callee ->
-            add_requires_check (Path.Method { owner = impl; name; receiver })
-        | _ -> ())
+        add_index_requires_check call
+    | Basic (Template { call; _ }) ->
+        add_callee call.callee;
+        add_invariant_check call
     | Basic (Slice { call; _ }) -> (
         add_callee call.callee;
         add_invariant_check call;
@@ -206,12 +202,21 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
             then Walk.iter_code visit_statement default.value)
           defaults
     | Some { form = Parameter_defaults _; _ } | None -> ()
+  and add_index_requires_check (call : Tree.call) =
+    match call.callee with
+    | Trait_method { evidence = Impl { impl; _ }; name; receiver; _ }
+      when Parts.is_index_call call.callee ->
+        add_requires_check (Path.Method { owner = impl; name; receiver })
+    | _ -> ()
   and add_requires_check path =
     if may_panic && enters (`Requires path) then
-      List.iter
-        (fun (requirement : Tree.requirement) ->
-          Walk.iter_formula visit_statement requirement.clause)
-        (Parts.list_checked_requires lookups.mir path)
+      Option.iter
+        (fun ({ form = requires; _ } : Tree.requirement list Parts.sourced) ->
+          List.iter
+            (fun (requirement : Tree.requirement) ->
+              Walk.iter_formula visit_statement requirement.clause)
+            requires)
+        (Parts.find_checked_requires lookups.mir path)
   and add_invariant_check (call : Tree.call) =
     match (call.callee, call.arguments) with
     | ( Intrinsic { operation = Runtime Holds_invariant; type_arguments = [ Type checked ] },

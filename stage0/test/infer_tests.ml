@@ -753,7 +753,10 @@ let () =
     "a loop over a generic trait's elements leaves the trait's arguments to inference, not its \
      parameter" (fun () ->
       expect_one_diagnostic Fixtures.Infer.loop_over_the_elements_of_a_generic_trait
-        "types.cannot_infer");
+        "types.cannot_infer"
+        ~says:
+          "This loop does not determine the arguments of `Bag`, whose methods give its elements."
+        ~at:("pair {", 1));
   Harness.test "a list literal is a type that implements FromElements" (fun () ->
       expect_fine Fixtures.Infer.list_literal_as_a_type_with_from_elements;
       expect_type Fixtures.Infer.list_literal_as_a_type_with_from_elements "[1, 2, 3]"
@@ -788,10 +791,12 @@ let () =
 
 let () =
   Harness.test "deriving Deserialize needs every invariant clause to run" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.deserialize_of_scores_with_a_quantified_invariant
+      expect_one_diagnostic Fixtures.Infer.deserialize_of_digits_with_an_invariant_over_a_type
         "types.cannot_derive");
   Harness.test "deriving Deserialize accepts an invariant that runs" (fun () ->
       expect_fine Fixtures.Infer.deserialize_of_bounds_with_an_invariant);
+  Harness.test "deriving Deserialize accepts an invariant that quantifies over a range" (fun () ->
+      expect_fine Fixtures.Infer.deserialize_of_scores_with_an_invariant_over_a_range);
   Harness.test "integer arithmetic in a specification is exact" (fun () ->
       expect_type Fixtures.Infer.ensures_of_a_sum "a + b" "Integer");
   Harness.test "comparisons in a specification may mix integer types" (fun () ->

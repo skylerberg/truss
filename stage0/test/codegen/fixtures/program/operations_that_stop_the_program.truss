@@ -1,3 +1,5 @@
+use standard::collections
+
 fn total(items: Slice[Int64]) -> Int64
   uses Panic
 {
@@ -14,6 +16,40 @@ fn port(ports: Map[String, UInt16], name: String) -> UInt16
   ports[name]
 }
 
+fn marked(index: UInt64) -> UInt64
+  uses Panic
+{
+  var bits = collections::BitSet.new(2)
+  bits[index] = true
+  bits.count_ones()
+}
+
+type Shelf(items: List[Int64])
+
+impl Index for Shelf {
+  type Key = UInt64
+  type Output = Int64
+
+  fn contains_key(self, key: UInt64) -> Bool
+    ensures result == (key < self.items.length())
+    cost time O(1)
+  {
+    key < self.items.length()
+  }
+
+  fn at(self, key: UInt64) lends Int64
+    cost time O(1)
+  {
+    self.items[key]
+  }
+}
+
+fn shelved(shelf: Shelf, index: UInt64) -> Int64
+  uses Panic
+{
+  shelf[index]
+}
+
 fn main(arguments: List[String]) -> ExitCode
   uses Console, Panic
 {
@@ -26,7 +62,9 @@ fn main(arguments: List[String]) -> ExitCode
     "index" => Console.print_line("${numbers[count]}")
     "slice" => Console.print_line("${numbers[count + 1..].length()}")
     "key" => Console.print_line("${port(["http": 80], name: "https")}")
-    _ => Console.print_line("${total(numbers)} ${numbers[1]} ${numbers[1..].length()}")
+    "assignment" => Console.print_line("${marked(count)}")
+    "inherited" => Console.print_line("${shelved(Shelf(items: [4, 5]), index: count)}")
+    _ => Console.print_line("${total(numbers)} ${numbers[1]} ${numbers[1..].length()} ${marked(1)} ${shelved(Shelf(items: [4, 5]), index: 1)}")
   }
   ExitCode.success
 }

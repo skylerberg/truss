@@ -20,6 +20,7 @@ public fn collections::Deque[Element].collect[Source: Cursor[Element = Element]]
 public fn collections::Deque[Element].length(self) -> UInt64
   ensures result == (self.front.length() + self.back.length())
   cost time O(1)
+  cost allocations == 0
 {
   self.front.length() + self.back.length()
 }
@@ -27,6 +28,7 @@ public fn collections::Deque[Element].length(self) -> UInt64
 public fn collections::Deque[Element].is_empty(self) -> Bool
   ensures result == (self.length() == 0)
   cost time O(1)
+  cost allocations == 0
 {
   self.length() == 0
 }
@@ -204,6 +206,7 @@ impl Index for collections::Deque[Element] {
   fn contains_key(self, key: UInt64) -> Bool
     ensures result == (key < self.length())
     cost time O(1)
+    cost allocations == 0
   {
     key < self.length()
   }
@@ -211,6 +214,7 @@ impl Index for collections::Deque[Element] {
   fn at(self, key: UInt64) lends Element
     requires key < self.length()
     cost time O(1)
+    cost allocations == 0
   {
     if key < self.front.length() {
       self.front[self.front.length() - 1 - key]
@@ -224,6 +228,7 @@ impl IndexMut for collections::Deque[Element] {
   fn at(mut self, key: UInt64) lends mut Element
     requires key < self.length()
     cost time O(1)
+    cost allocations == 0
   {
     if key < self.front.length() {
       mut self.front[self.front.length() - 1 - key]
@@ -278,6 +283,7 @@ impl Equal for collections::Deque[Element: Equal] {
   fn equal(self, other: collections::Deque[Element]) -> Bool
     ensures result == (self.length() == other.length()
       && forall i in 0..self.length() => self[i] == other[i])
+    cost allocations <= self.length() * allocations(Element.equal)
   {
     if self.length() != other.length() {
       return false
@@ -287,6 +293,7 @@ impl Equal for collections::Deque[Element: Equal] {
       invariant index <= self.length()
       invariant forall i in 0..index => self[i] == other[i]
       decreases self.length() - index
+      cost allocations <= index * allocations(Element.equal)
     {
       if self[index] != other[index] {
         return false
@@ -298,7 +305,9 @@ impl Equal for collections::Deque[Element: Equal] {
 }
 
 impl Hash for collections::Deque[Element: Hash] {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations <= self.length() * allocations(Element.hash)
+  {
     self.length().hash(mut hasher)
     for index in 0..self.length() {
       self[index].hash(mut hasher)

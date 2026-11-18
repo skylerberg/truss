@@ -356,23 +356,22 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
           in
           match (by_position, consumed, State.find_evidence state type_ cursor) with
           | Visible (loop, element, lends), _, _ ->
-              state.tables.loops.(written.id) <- Some loop;
+              State.record_loop state ~loop:written.id ~iterable loop;
               (element, lends)
           | _, Visible (loop, element), _ ->
-              state.tables.loops.(written.id) <- Some loop;
+              State.record_loop state ~loop:written.id ~iterable loop;
               (element, Types.Own)
           | _, _, Some _ ->
-              state.tables.loops.(written.id) <-
-                Some
-                  (Pulled
-                     {
-                       cursor = type_;
-                       cursor_call = None;
-                       remaining =
-                         Name_lookup.find_remaining_call state
-                           (State.read_span state iterable.id)
-                           type_;
-                     });
+              State.record_loop state ~loop:written.id ~iterable
+                (Pulled
+                   {
+                     cursor = type_;
+                     cursor_call = None;
+                     remaining =
+                       Name_lookup.find_remaining_call state
+                         (State.read_span state iterable.id)
+                         type_;
+                   });
               ( State.resolve_associated_type state type_ cursor "Element"
                   ~at:(State.read_span state iterable.id),
                 Types.Own )

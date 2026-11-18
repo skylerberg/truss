@@ -526,7 +526,7 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
           collection_type Types.Read
       with
       | Visible (loop, element, _) ->
-          state.tables.loops.(quantifier.id) <- Some loop;
+          State.record_loop state ~loop:quantifier.id ~iterable:collection loop;
           element
       | Hidden hidden ->
           Members.make_hidden_error state (State.read_span state collection.id) hidden

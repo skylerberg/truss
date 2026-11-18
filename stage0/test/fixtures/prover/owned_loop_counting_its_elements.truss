@@ -1,0 +1,11 @@
+fn f(items: own List[String]) -> UInt64
+  ensures result == items.length()
+{
+  var count: UInt64 = 0
+  for _ in own items
+    invariant count == visited.length()
+  {
+    count += 1
+  }
+  count
+}

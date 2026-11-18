@@ -365,8 +365,20 @@ public fn List[Element].reverse(mut self)
 
 public opaque type ListCursor[Element](reversed: List[Element])
 
+impl Model for ListCursor[Element] {
+  type Value = Sequence[Element]
+
+  fn model(self) -> Sequence[Element]
+    ensures identical(result, self.reversed.model().reversed())
+    cost time finite
+  {
+    self.reversed.model().reversed()
+  }
+}
+
 public fn ListCursor[Element].remaining(self) -> UInt64
   ensures result == self.reversed.length()
+  ensures result == self.model().length()
   cost time O(1)
   cost allocations == 0
 {
@@ -380,6 +392,9 @@ impl Cursor for ListCursor[Element] {
     ensures (result is Some(_)) == (old(self.remaining()) > 0)
     ensures (result is Some(_)) ==> self.remaining() + 1 == old(self.remaining())
     ensures (result is None) ==> self.remaining() == old(self.remaining())
+    ensures !(result is Some(item) && !identical(item, old(self.model())[0]))
+    ensures forall i in 0..self.model().length() =>
+      identical(self.model()[i], old(self.model())[i + 1])
     cost time O(1)
     cost allocations == 0
   {
@@ -389,6 +404,7 @@ impl Cursor for ListCursor[Element] {
 
 public fn List[Element].cursor(own self) -> ListCursor[Element]
   ensures result.remaining() == self.length()
+  ensures identical(result.model(), self.model())
   cost time O(self.length())
   cost amortized time O(self.length())
 {
@@ -406,6 +422,7 @@ public fn Array[Element, count: UInt64].to_list(own self) -> List[Element]
 
 public fn Array[Element, count: UInt64].cursor(own self) -> ListCursor[Element]
   ensures result.remaining() == count
+  ensures identical(result.model(), self.model())
   cost time O(count)
   cost amortized time O(count)
 {
@@ -566,6 +583,7 @@ impl Equal for List[Element: Equal] {
   fn equal(self, other: List[Element]) -> Bool
     ensures result == (self.length() == other.length()
       && forall i in 0..self.length() => self.model()[i] == other.model()[i])
+    cost allocations <= self.length() * allocations(Element.equal)
   {
     if self.length() != other.length() {
       return false
@@ -888,6 +906,7 @@ impl FromElements for List[Element] {
 impl Ordered for List[Element: Ordered] {
   fn compare(self, other: List[Element]) -> Ordering
     ensures result == slice::lexicographic(self.model(), second: other.model(), from: 0)
+    cost allocations <= self.length() * allocations(Element.compare)
   {
     self.slice().compare(other.slice())
   }
@@ -906,7 +925,9 @@ proof Ordered.transitive for List[Element: Ordered] {
 }
 
 impl Hash for List[Element: Hash] {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations <= self.length() * allocations(Element.hash)
+  {
     self.slice().hash(mut hasher)
   }
 }
