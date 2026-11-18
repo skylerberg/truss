@@ -26,14 +26,14 @@ let p384_public: String = "046bbd818a239e18acf5ab997a27d6eac96c8a5f7b071fd7661b5
 
 let p384_peer_public: String = "044f0279f2a7023e9deab16842384b452917bd3dc3c6c39d2fac465c0fd06bd7e09e8c7d3728ed828551ec27effab7d3b41c6d3a46277d7e02a2db892b1f1c84f45593201d0de4d0bf735b4291493bd198e5371a7b591c1990cda64be7e0d5ce40"
 
-test "a P-256 and a P-384 public key is the private scalar times the base point" {
+test "a P-256 and a P-384 public key is the private scalar times the base point" uses Panic {
   let p256 = cryptography::EcdsaSigningKey.from_scalar(cryptography::Curve.P256, bytes: bytes_of(p256_private.slice())).expect("a scalar")
   assert hex_of(p256.verifying_key().sec1()) == p256_public
   let p384 = cryptography::EcdsaSigningKey.from_scalar(cryptography::Curve.P384, bytes: bytes_of(p384_private.slice())).expect("a scalar")
   assert hex_of(p384.verifying_key().sec1()) == p384_public
 }
 
-test "signatures OpenSSL made verify, and a changed message or signature does not" {
+test "signatures OpenSSL made verify, and a changed message or signature does not" uses Panic {
   let message = "hello truss".bytes()
   let p256 = cryptography::EcdsaVerifyingKey.from_sec1(cryptography::Curve.P256, bytes: bytes_of(p256_public.slice())).expect("a point")
   let p256_signature = bytes_of("0ddd551cdbbd731f065ec99a75a15b8643ee1c973bcbed98da4e07b21d6848461b691e69d1c439ce56263f3401c8e7732feafdbec12805d0f66c59dc4b06bfec")
@@ -48,7 +48,7 @@ test "signatures OpenSSL made verify, and a changed message or signature does no
   assert !p384.verify(message, signature: p256_signature)
 }
 
-test "signing is RFC 6979's deterministic ECDSA, and a signature verifies" {
+test "signing is RFC 6979's deterministic ECDSA, and a signature verifies" uses Panic {
   let key = cryptography::EcdsaSigningKey.from_scalar(
     cryptography::Curve.P256,
     bytes: bytes_of("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721"),
@@ -62,7 +62,7 @@ test "signing is RFC 6979's deterministic ECDSA, and a signature verifies" {
   assert signed == p384.sign("anything".bytes()) && p384.verifying_key().verify("anything".bytes(), signature: signed)
 }
 
-test "ECDH on P-256 and P-384 agrees with OpenSSL, and a point off the curve is refused" {
+test "ECDH on P-256 and P-384 agrees with OpenSSL, and a point off the curve is refused" uses Panic {
   let p256 = cryptography::EcdhKey.from_scalar(cryptography::Curve.P256, bytes: bytes_of(p256_private.slice())).expect("a scalar")
   assert own p256.agree(bytes_of(p256_peer_public.slice())) is Some(shared)
     && hex_of(shared) == "d74d065d1f1a146d8cf358f6b9ea15ca33c5b00da25422e5d3edba6f501319dc"

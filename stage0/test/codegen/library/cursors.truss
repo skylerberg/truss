@@ -209,7 +209,7 @@ fn typing(lines: own List[String]) -> simulation::World {
   simulation::World.from(simulation::Setup.new().with_input(own lines))
 }
 
-test "the adapters work on a cursor that uses a capability" {
+test "the adapters work on a cursor that uses a capability" uses Panic {
   let typed = Typed(most: 100)
   provide typing(["a", "bb", "ccc", "dddd", "eeeee", "ffffff"]) {
     let middle: List[UInt64] = [2, 3]

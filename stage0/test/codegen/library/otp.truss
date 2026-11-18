@@ -74,7 +74,7 @@ test "TOTP verification accepts a code within the window once, and refuses a rep
   assert totp.verify_at("", unix_seconds: now) == None
 }
 
-test "a generated TOTP has a secret of the hash's length, and its URI names every parameter" {
+test "a generated TOTP has a secret of the hash's length, and its URI names every parameter" uses Panic {
   provide simulation::World.new() {
     let generated = otp::Totp.generate(algorithm: otp::Algorithm.Sha256)
     assert generated.secret.length() == 32 && generated.is_valid()

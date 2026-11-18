@@ -32,7 +32,7 @@ test "cookies are read from the Cookie header" {
   assert request.cookie("d") is None
 }
 
-test "signed cookies verify, reject tampering and other keys, and survive key rotation" {
+test "signed cookies verify, reject tampering and other keys, and survive key rotation" uses Panic {
   let old_key = key_of(1)
   let new_key = key_of(2)
   let signed = old_key.sign(http::Cookie(name: "user", value: "ada; admin=false"))
@@ -47,7 +47,7 @@ test "signed cookies verify, reject tampering and other keys, and survive key ro
   assert request.signed_cookie([old_key.copy()], name: "user") == Some("ada; admin=false")
 }
 
-test "sealed cookies hide their value and open only with the key and the name" {
+test "sealed cookies hide their value and open only with the key and the name" uses Panic {
   provide simulation::World.new() {
     let key = key_of(3)
     let sealed = key.seal(http::Cookie(name: "secret", value: "the plan"))
@@ -59,7 +59,7 @@ test "sealed cookies hide their value and open only with the key and the name" {
   }
 }
 
-test "a session keeps its values in a sealed cookie and expires after its age" {
+test "a session keeps its values in a sealed cookie and expires after its age" uses Panic {
   provide simulation::World.new() {
     let key = key_of(5)
     var session = http::Session.new()

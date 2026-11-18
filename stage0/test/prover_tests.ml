@@ -123,7 +123,7 @@ let () =
       expect_proven Fixtures.Prover.payloads_through_expect);
   Harness.test "expect lends the payload of an Option it is lent" (fun () ->
       expect_proven Fixtures.Prover.elements_lent_through_expect);
-  Harness.test "a test has `Panic`, so an operation it cannot prove is checked when it runs"
+  Harness.test "a test that declares `Panic` checks an operation it cannot prove when it runs"
     (fun () -> expect_proven Fixtures.Prover.test_indexing_by_a_sum_from_a_loop);
   Harness.test "a lambda proves its operations, since it has no `uses` of its own" (fun () ->
       let actual = read_message Fixtures.Prover.overflow_in_a_lambda_of_a_function_that_may_panic in

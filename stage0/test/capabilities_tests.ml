@@ -149,7 +149,9 @@ let () =
   Harness.test "a capability parameter's set must be available at the call" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.for_each_of_a_lambda_using_clock
         "capabilities.not_available");
-  Harness.test "a test has Panic" (fun () -> expect_fine Fixtures.Capabilities.test_calling_panic);
+  Harness.test "a test that crashes declares Panic, as a function does" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.test_calling_panic "capabilities.not_available";
+      expect_fine Fixtures.Capabilities.test_declaring_panic);
   Harness.test "a place whose implementation mutates state is provided mut" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.counter_provided_as_tally
         "capabilities.provide_mode")

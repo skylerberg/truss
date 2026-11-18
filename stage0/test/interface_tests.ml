@@ -196,21 +196,16 @@ let () =
                 Harness.fail "%s has no real implementation" (Path.show capability.path))
             others
       | _ -> Harness.fail "the standard library does not declare Panic exactly once");
-  Harness.test "a test cannot declare Panic, with a fix that removes its uses" (fun () ->
-      expect_one_diagnostic "test \"t\" uses Panic {\n  assert 1 + 1 == 2\n}\n"
-        "types.no_real_implementation" ~fixed:"test \"t\" {\n  assert 1 + 1 == 2\n}\n");
-  Harness.test "the fix removes Panic and one comma beside it from a test's uses" (fun () ->
+  Harness.test "a test declares Panic, which leaves it deterministic" (fun () ->
       List.iter
-        (fun (written, fixed) ->
-          expect_one_diagnostic
-            (Printf.sprintf "test \"t\" uses %s {}\n" written)
-            "types.no_real_implementation"
-            ~fixed:(Printf.sprintf "test \"t\" uses %s {}\n" fixed))
-        [
-          ("Clock, Panic", "Clock");
-          ("Panic, Clock", "Clock");
-          ("Clock, Panic, Random", "Clock, Random");
-        ]);
+        (fun (written, is_external) ->
+          let text = Printf.sprintf "test \"t\" uses %s {}\n" written in
+          expect_no_diagnostics [ ("app::main", text) ];
+          let test : Path.t = Test { module_ = Support.parse_module "app::main"; name = "t" } in
+          let packages = Support.setup [ ("app::main", text) ] in
+          if Interface.Definition.is_external_test (make_interface packages) test <> is_external
+          then Harness.fail "a test that uses %s is external: %b" written (not is_external))
+        [ ("Panic", false); ("Clock, Panic", true) ]);
   Harness.test "a test cannot declare a capability that has no real implementation" (fun () ->
       expect_one_diagnostic "capability Greeter {\n  fn greet()\n}\n\ntest \"t\" uses Greeter {}\n"
         "types.no_real_implementation"
