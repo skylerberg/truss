@@ -188,7 +188,6 @@ val find_target : state -> Syntax.name -> Resolve.target option
 val decide_default_literal : state -> at:Source.Definition_span.t -> Types.ty -> Types.ty
 val find_head : state -> Syntax.expression -> Resolve.head option
 val is_variant_name : Syntax.name -> bool
-val is_member_constant : state -> Syntax.expression -> bool
 val show : state -> Types.ty -> string
 val describe : state -> Types.ty -> string
 
