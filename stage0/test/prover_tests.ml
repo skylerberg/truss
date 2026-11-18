@@ -971,7 +971,7 @@ let () =
   Harness.test "calls to O(1) functions are O(1)" (fun () ->
       expect_proven (constant_step ^ Fixtures.Prover.step_of_a_step));
   Harness.test "a call to a function with no bound on its time" (fun () ->
-      expect_not_proven Fixtures.Prover.call_of_a_finite_time_callee "prover.cost");
+      expect_not_proven Fixtures.Prover.call_of_a_callee_without_a_time_clause "prover.cost");
   Harness.test "a loop over a range is linear" (fun () ->
       expect_proven (constant_step ^ Fixtures.Prover.range_loop_of_linear_time));
   Harness.test "a loop over a range is not constant" (fun () ->
@@ -1023,7 +1023,7 @@ let () =
   Harness.test "functions in a cycle that branch are not linear" (fun () ->
       expect_not_proven Fixtures.Prover.branching_ping_and_pong "prover.cost");
   Harness.test "a callback's time is not free" (fun () ->
-      expect_not_proven Fixtures.Prover.each_visiting_a_finite_callback "prover.cost");
+      expect_not_proven Fixtures.Prover.each_visiting_a_callback_without_a_time_clause "prover.cost");
   Harness.test "calls through a lambda that captures the function value are not known" (fun () ->
       expect_not_proven Fixtures.Prover.each_visiting_through_a_capturing_lambda "prover.cost");
   Harness.test "a quantifier over a costly body is not linear" (fun () ->
@@ -2185,11 +2185,12 @@ let apply_function = Fixtures.Prover.apply_function
 
 let () =
   Harness.test "a pure function value gives the same result for the same argument" (fun () ->
-      expect_proven Fixtures.Prover.finite_measure_compared_with_itself);
+      expect_proven Fixtures.Prover.terminating_measure_compared_with_itself);
   Harness.test "a function value that uses a capability may give different results" (fun () ->
       expect_not_proven Fixtures.Prover.clock_reading_compared_with_itself "prover.ensures");
   Harness.test "a function value that may run forever is a fresh result" (fun () ->
-      expect_not_proven Fixtures.Prover.measure_compared_with_itself "prover.ensures");
+      expect_not_proven Fixtures.Prover.measure_that_may_run_forever_compared_with_itself
+        "prover.ensures");
   Harness.test "a lambda applied is its body" (fun () ->
       expect_proven (apply_function ^ Fixtures.Prover.apply_of_a_halving_lambda));
   Harness.test "a lambda whose body is not its definition gives its body's facts" (fun () ->
@@ -2318,7 +2319,7 @@ let () =
   Harness.test "a function that uses RunForever passes a lambda with a loop without a measure"
     (fun () -> expect_proven (apply ^ Fixtures.Prover.apply_of_a_lambda_looping_without_a_measure));
   Harness.test "an operator on a bound type terminates" (fun () ->
-      expect_proven Fixtures.Prover.sum_of_a_bound_type_under_a_time_clause)
+      expect_proven Fixtures.Prover.sum_of_a_bound_type_in_a_function_that_terminates)
 
 let () =
   let callbacks = Fixtures.Prover.apply_and_each_bounded_by_the_allocations_of_a_callback in
@@ -2457,5 +2458,5 @@ let () =
   Harness.test "a call of a method of an associated type's bound spends the method's time"
     (fun () ->
       expect_proven (ticker ^ Fixtures.Prover.movement_ticked_twice_bounded_by_the_time_of_its_tick));
-  Harness.test "the time of a followed method is the time that the type argument's impl states"
+  Harness.test "the time of a bound's method is the time that the type argument's impl states"
     (fun () -> expect_proven (ticker ^ Fixtures.Prover.tick_twice_of_a_countdown_in_constant_time))
