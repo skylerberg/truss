@@ -1,6 +1,6 @@
-let make_lowering_requests database packages =
+let make_lowered_lookups database packages =
   match Libc.host with
-  | Some _ -> Database.make_lowering_requests database packages
+  | Some _ -> Database.make_lowered_lookups database packages
   | None -> Outcome.raise_cannot_run "Stage0 builds programs only for Linux and macOS."
 
 let make_results cache : Backend.results =
@@ -25,5 +25,5 @@ let create database snapshot packages (profile : Backend.profile) =
   Backend.create ~show_file ~results:(make_results cache)
     ~programs:(Cache.make_programs_directory cache)
     ~is_worked_on:(fun package -> List.mem package own)
-    (make_lowering_requests database packages)
+    (make_lowered_lookups database packages)
     c_compiler profile
