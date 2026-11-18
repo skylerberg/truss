@@ -24,7 +24,7 @@ fn triangle(rows: Int64) -> Int64 {
   total
 }
 
-test "loops" {
+test "loops" uses RunForever {
   assert sum_of_odds_below(8) == 16
   assert triangle(4) == 10
 }

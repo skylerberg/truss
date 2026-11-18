@@ -52,7 +52,7 @@ fn longest(words: own List[String]) -> UInt64
   most
 }
 
-test "cursors" {
+test "cursors" uses RunForever {
   assert total(4) == 8
   assert longest(["abcd", "stop", "ab", "abc"]) == 3
 }

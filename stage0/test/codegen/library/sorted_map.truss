@@ -135,7 +135,7 @@ test "retain keeps the entries a function accepts, in order" {
   assert sorted.is_empty()
 }
 
-test "a sorted map is made from a cursor of entries in any order, the last of a key winning" {
+test "a sorted map is made from a cursor of entries in any order, the last of a key winning" uses RunForever {
   let entries: List[map::Entry[Int64, Int64]] = [
     map::Entry(key: 3, value: 1),
     map::Entry(key: 1, value: 2),

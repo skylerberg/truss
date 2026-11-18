@@ -92,7 +92,7 @@ fn submit() -> List[String]
   }
 }
 
-test "a server reads an urlencoded form and a multipart upload with a large file" uses Panic {
+test "a server reads an urlencoded form and a multipart upload with a large file" uses Panic, RunForever {
   provide simulation::World.new() {
     let seen = submit()
     assert seen.length() == 2

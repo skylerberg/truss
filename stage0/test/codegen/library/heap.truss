@@ -56,7 +56,7 @@ test "replace_first returns the first item and keeps the heap in order" {
   assert drained(own heap) == [1, 5, 6]
 }
 
-test "a heap is extended, reserved, and cleared" {
+test "a heap is extended, reserved, and cleared" uses RunForever {
   var heap: collections::Heap[Int64] = collections::Heap.smallest_first()
   mut heap.extend([3, 1, 2].cursor())
   mut heap.reserve(16)

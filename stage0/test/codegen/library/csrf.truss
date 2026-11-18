@@ -25,7 +25,7 @@ fn status(method: http::Method, headers: List[http::Header], policy: http::CsrfP
   response.status.code
 }
 
-test "respond runs a handler without a socket and gives back its status, headers, and body" uses Panic {
+test "respond runs a handler without a socket and gives back its status, headers, and body" uses Panic, RunForever {
   provide simulation::World.new() {
     let response = http::respond(fn(incoming, responder) {
       mut responder.set_header("X-Seen", value: incoming.target.slice())
@@ -41,7 +41,7 @@ test "respond runs a handler without a socket and gives back its status, headers
   }
 }
 
-test "csrf refuses a cross-site write and allows same-origin, safe, non-browser, and trusted requests" uses Panic {
+test "csrf refuses a cross-site write and allows same-origin, safe, non-browser, and trusted requests" uses Panic, RunForever {
   provide simulation::World.new() {
     let open = http::CsrfPolicy()
     let trusting = http::CsrfPolicy(trusted_origins: ["https://admin.example.net"])

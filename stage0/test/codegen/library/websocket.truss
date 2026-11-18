@@ -141,7 +141,7 @@ fn conversation() -> List[String]
   }
 }
 
-test "a WebSocket client and server exchange text, binary, and long messages, compressed or not, then close" uses Panic {
+test "a WebSocket client and server exchange text, binary, and long messages, compressed or not, then close" uses Panic, RunForever {
   provide simulation::World.new() {
     let seen = conversation()
     assert seen.length() == 14
