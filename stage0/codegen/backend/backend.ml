@@ -17,10 +17,12 @@ type requests = {
   list_reached_todo_types : Instance.key -> Path.t list;
 }
 
+type profile = Emit_c.profile = Development | Release
+
 exception Todo_type = Monomorphic.Todo_type
 exception Infinite_size = Memory_layout.Infinite_size
 
-let raise_bug format = Compiler_bug.raise_bug ~stage:"Compile" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
 
 let make (context : Lower.context) (key : Instance.key) : lowered =
   let env = Lower.env context in
@@ -53,7 +55,7 @@ let lower (settings : Lookups.settings) (lookups : Lookups.t) key =
       ~compute_shape:(Monomorphic.compute_shape (Lower.make_monomorphic_context lookups.interface))
   in
   match
-    Compiler_bug.run_while_doing ~stage:"Compile"
+    Compiler_bug.run_while_doing ~stage:"Backend"
       ("lowering " ^ Instance.to_string key)
       (fun () -> make (Lower.make_context settings ~env lookups) key)
   with
@@ -221,9 +223,8 @@ type results = { find : string -> string option; add : string -> string -> unit 
 type t = {
   requests : requests;
   monomorphic : Monomorphic.context;
-  toolchain : Toolchain.t;
-  cache : Build.cache;
-  settings : Build.settings;
+  c_compiler : C_compiler.t;
+  profile : profile;
   show_file : Path.file -> string;
   is_worked_on : Path.package -> bool;
   results : results option;
@@ -232,79 +233,92 @@ type t = {
   runs : (string, string ran) Hashtbl.t;
 }
 
-let make_env compiler =
-  Memory_layout.create compiler.requests.settings.system
-    ~compute_shape:(Monomorphic.compute_shape compiler.monomorphic)
+let make_env backend =
+  Memory_layout.create backend.requests.settings.system
+    ~compute_shape:(Monomorphic.compute_shape backend.monomorphic)
 
-let read_lowered compiler key =
-  match compiler.requests.find_lowered key with
+let read_lowered backend key =
+  match backend.requests.find_lowered key with
   | Some (Ok lowered) -> lowered
   | Some (Error unsupported) -> raise (Lower.Unsupported unsupported)
   | None -> raise_bug "%s is requested from code with errors" (Instance.to_string key)
 
-let read_test_key compiler root =
-  match compiler.requests.read_test_key root with
+let read_test_key backend root =
+  match backend.requests.read_test_key root with
   | Ok test_key -> test_key
   | Error unsupported -> raise (Lower.Unsupported unsupported)
 
 let programs_built = Atomic.make 0
 
-let make_program_path compiler =
-  Filename.concat compiler.programs
+let make_program_path backend =
+  Filename.concat backend.programs
     (Printf.sprintf "program-%d-%d" (Unix.getpid ()) (Atomic.fetch_and_add programs_built 1))
 
 exception Cannot_build of string
 
 let raise_cannot_build format = Printf.ksprintf (fun message -> raise (Cannot_build message)) format
-let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-13 result key"
 
-let make_result_key compiler root =
+let select_optimization : profile -> C_compiler.optimization = function
+  | Development -> O1
+  | Release -> O2_lto
+
+let show_profile = function Development -> "development" | Release -> "release"
+let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-17 result key"
+
+let make_result_key backend root =
   derive_result_key
     (Cbor.encode
        (Cbor.Array
           [
             Cbor.int Emit_c.version;
-            Cbor.Text (Libc.show_system compiler.requests.settings.system);
-            Bytes (read_test_key compiler root);
-            Cbor.Array (List.map (fun flag -> Cbor.Text flag) compiler.settings.extra);
+            Cbor.Text (Libc.show_system backend.requests.settings.system);
+            Cbor.Text (show_profile backend.profile);
+            Bytes
+              (C_compiler.make_fingerprint backend.c_compiler (select_optimization backend.profile));
+            Bytes (read_test_key backend root);
           ]))
 
-let locate_offset compiler (definition : Path.t) offset : Emit_c.position =
-  let names = compiler.requests.interface.names in
+type location = { file : Path.file; line : int; column : int }
+
+let locate_offset (requests : requests) (definition : Path.t) offset =
+  let names = requests.interface.names in
   match Option.map names.read_place (names.find_key definition) with
   | Some { file; base } ->
-      let line, column =
-        Source.compute_position (compiler.requests.read_source file) (base + offset)
-      in
-      { file = compiler.show_file file; line; column }
+      let line, column = Source.compute_position (requests.read_source file) (base + offset) in
+      { file; line; column }
   | None -> raise_bug "%s has no place in a file" (Path.show definition)
 
-let locate_site compiler (site : Lowered.site) = locate_offset compiler site.definition site.offset
+let locate_site requests (site : Lowered.site) = locate_offset requests site.definition site.offset
 
-let show_position (position : Emit_c.position) =
-  Printf.sprintf "%s:%d:%d" position.file position.line position.column
-
-let locate_todo_type compiler (path : Path.t) =
-  let names = compiler.requests.interface.names in
+let locate_todo_type (requests : requests) (path : Path.t) =
+  let names = requests.interface.names in
   match
     Option.map (fun key -> (names.read_definition key, names.read_spans key)) (names.find_key path)
   with
   | Some ({ kind = Type_definition { name; _ }; _ }, spans) ->
-      locate_offset compiler path spans.(name.id).start
+      locate_offset requests path spans.(name.id).start
   | Some _ | None ->
       raise_bug "%s is reached as a type defined as todo, and has no definition" (Path.show path)
 
+let make_position backend ({ file; line; column } : location) : Emit_c.position =
+  { file = backend.show_file file; line; column }
+
+let show_location backend ({ file; line; column } : location) =
+  Printf.sprintf "%s:%d:%d" (backend.show_file file) line column
+
 let list_small_callees ~find ~is_worked_on fragment =
   match Emit_c.key fragment with
-  | Code _ ->
+  | Code _ as caller ->
       List.filter_map
         (fun (key : Instance.key) ->
           match (key, find key) with
           | Code { path = callee; _ }, Some copy
-            when (not (is_worked_on (Path.locate_package callee))) && Emit_c.is_small copy ->
+            when (not (Instance.equal key caller))
+                 && (not (is_worked_on (Path.locate_package callee)))
+                 && Emit_c.is_small copy ->
               Some copy
           | _ -> None)
-        (Emit_c.called fragment)
+        (List.sort_uniq Instance.compare (Emit_c.called fragment))
   | _ -> []
 
 let test_runner : Instance.key =
@@ -316,39 +330,52 @@ let list_roots ~tests ~mains =
   (if tests = [] then [] else test_runner :: List.map make_test_root tests)
   @ List.map (fun main -> Instance.Generated (Program_main main)) mains
 
-let rec build ?report_progress ?tests ?(supplied = []) compiler ~roots ~startup ~output =
+let rec build ?report_progress ?(tests = false) ?(supplied = []) backend ~roots ~startup ~output =
   let lookup key =
     match List.find_opt (fun fragment -> Instance.equal (Emit_c.key fragment) key) supplied with
     | Some fragment -> fragment
-    | None -> compile_fragment compiler key
+    | None -> compile_fragment backend key
   in
-  let units = Emit_c.list_linked ~lookup roots in
-  let units_by_key =
-    Instance_table.of_seq (List.to_seq (List.map (fun unit -> (Emit_c.key unit, unit)) units))
+  let linked = Emit_c.list_linked ~lookup roots in
+  let linked_by_key =
+    Instance_table.of_seq (List.to_seq (List.map (fun unit -> (Emit_c.key unit, unit)) linked))
   in
-  let sources =
-    [
-      ("startup", startup);
-      ("sites", Emit_c.render_sites_file ~resolve_position:(locate_site compiler) units);
-    ]
-  in
-  let find key = Instance_table.find_opt units_by_key key in
   let list_copied =
-    match compiler.settings.build with
-    | Development -> list_small_callees ~find ~is_worked_on:compiler.is_worked_on
+    match backend.profile with
+    | Development ->
+        list_small_callees
+          ~find:(Instance_table.find_opt linked_by_key)
+          ~is_worked_on:backend.is_worked_on
     | Release -> fun _ -> []
   in
+  let env = make_env backend in
+  let render_unit index fragment =
+    ( Printf.sprintf "file %d" index,
+      Emit_c.render_file env backend.profile
+        ((fragment, Emit_c.External)
+        :: List.map (fun copy -> (copy, Emit_c.Internal)) (list_copied fragment)) )
+  in
+  let units =
+    (("the runtime", Startup.render_runtime ~tests) :: List.mapi render_unit linked)
+    @ [
+        ("startup", startup);
+        ( "sites",
+          Emit_c.render_sites_file
+            ~resolve_position:(fun site ->
+              make_position backend (locate_site backend.requests site))
+            linked );
+      ]
+  in
   match
-    Build.build_program ?report_progress ?tests ~list_copied compiler.toolchain compiler.cache
-      (make_env compiler) compiler.settings
-      ~files:(List.map (fun unit -> [ unit ]) units)
-      ~sources ~output
+    C_compiler.build_executable ?report_progress backend.c_compiler
+      (select_optimization backend.profile)
+      ~units ~output
   with
   | Ok () -> ()
   | Error message -> raise (Cannot_build message)
 
-and build_test_program ?report_progress ?supplied compiler ~time_limit_ms ~roots ~output =
-  build ?report_progress ?supplied compiler ~tests:true ~roots:(test_runner :: roots)
+and build_test_program ?report_progress ?supplied backend ~time_limit_ms ~roots ~output =
+  build ?report_progress ?supplied backend ~tests:true ~roots:(test_runner :: roots)
     ~startup:
       (Startup.render_tests_start ~time_limit_ms
          ~runner:(Instance.make_symbol test_runner)
@@ -357,41 +384,41 @@ and build_test_program ?report_progress ?supplied compiler ~time_limit_ms ~roots
 
 and build_and_run :
     'result. t -> roots:Instance.key list -> startup:string -> (string -> 'result) -> 'result =
- fun compiler ~roots ~startup run ->
-  let program = make_program_path compiler in
-  build compiler ~roots ~startup ~output:program;
+ fun backend ~roots ~startup run ->
+  let program = make_program_path backend in
+  build backend ~roots ~startup ~output:program;
   let result = run program in
   (try Sys.remove program with Sys_error _ -> ());
   result
 
 and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -> 'value ran =
- fun compiler root ~read ->
-  let key = make_result_key compiler root in
+ fun backend root ~read ->
+  let key = make_result_key backend root in
   let ran =
-    match Hashtbl.find_opt compiler.runs key with
+    match Hashtbl.find_opt backend.runs key with
     | Some ran -> ran
     | None ->
         let ran =
-          match Option.bind compiler.results (fun results -> results.find key) with
+          match Option.bind backend.results (fun results -> results.find key) with
           | Some output -> Ran output
           | None -> (
               match
-                build_and_run compiler ~roots:[ root ]
+                build_and_run backend ~roots:[ root ]
                   ~startup:(Startup.render_evaluator_start (Instance.make_symbol root))
                   (fun program ->
-                    Process.run_with_time_limit ~time_limit_ms:compiler.evaluation_time_limit_ms
+                    Process.run_with_time_limit ~time_limit_ms:backend.evaluation_time_limit_ms
                       program [])
               with
               | None -> Ran_too_long
               | Some (0, output, _) ->
-                  Option.iter (fun results -> results.add key output) compiler.results;
+                  Option.iter (fun results -> results.add key output) backend.results;
                   Ran output
               | Some (status, _, errors) -> (
                   match String.trim errors with
                   | "" -> Stopped (Printf.sprintf "it ended with status %d" status)
                   | report -> Stopped report))
         in
-        Hashtbl.replace compiler.runs key ran;
+        Hashtbl.replace backend.runs key ran;
         ran
   in
   match ran with
@@ -399,20 +426,20 @@ and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -
   | Ran_too_long -> Ran_too_long
   | Stopped report -> Stopped report
 
-and compile_fragment compiler key =
-  let emit_data (data : Lowered.data) = Emit_c.make_fragment (make_env compiler) (Data data) in
+and compile_fragment backend key =
+  let emit_data (data : Lowered.data) = Emit_c.make_fragment (make_env backend) (Data data) in
   let compiled =
-    match read_lowered compiler key with
+    match read_lowered backend key with
     | Compiled fragment | Folded (_, fragment) -> fragment
     | Evaluate (path, ty) -> (
         match
-          run_while_compiling compiler (Instance.Evaluator path) ~read:(fun encoded ->
-              Encoding.decode (make_env compiler) ty encoded)
+          run_while_compiling backend (Instance.Evaluator path) ~read:(fun encoded ->
+              Encoding.decode (make_env backend) ty encoded)
         with
         | Ran value -> emit_data { data_key = Constant path; ty; value }
         | Ran_too_long ->
             raise_cannot_build "Evaluating %s ran past the time limit of %d ms." (Path.show path)
-              compiler.evaluation_time_limit_ms
+              backend.evaluation_time_limit_ms
         | Stopped report -> raise_cannot_build "Evaluating %s stopped: %s" (Path.show path) report)
   in
   if not (Instance.equal (Emit_c.key compiled) key) then
@@ -420,19 +447,19 @@ and compile_fragment compiler key =
       (Instance.to_string (Emit_c.key compiled));
   compiled
 
-let show_unsupported compiler (unsupported : Lower.unsupported) =
+let show_unsupported backend (unsupported : Lower.unsupported) =
   let where =
     match unsupported.at with
     | None -> ""
-    | Some at -> show_position (locate_site compiler at) ^ ": "
+    | Some at -> show_location backend (locate_site backend.requests at) ^ ": "
   in
   where ^ "Stage0 cannot build this yet: " ^ unsupported.construct ^ "."
 
-let capture_failure compiler work =
+let capture_failure backend work =
   match work () with
   | result -> Ok result
   | exception Cannot_build message -> Error message
-  | exception Lower.Unsupported unsupported -> Error (show_unsupported compiler unsupported)
+  | exception Lower.Unsupported unsupported -> Error (show_unsupported backend unsupported)
 
 type outcome = Passed | Failed | Panicked | Incomplete | Timed_out | Crashed
 
@@ -587,7 +614,7 @@ type progress =
   | Started of { test : int }
   | Ended of { test : int; record : record }
 
-let make_incomplete_record compiler todo_types =
+let make_incomplete_record backend todo_types =
   {
     outcome = Incomplete;
     message =
@@ -596,7 +623,7 @@ let make_incomplete_record compiler todo_types =
            (List.map
               (fun path ->
                 Printf.sprintf "the type %s is defined as todo\n  at %s" (Path.show path)
-                  (show_position (locate_todo_type compiler path)))
+                  (show_location backend (locate_todo_type backend.requests path)))
               todo_types));
     echo = None;
     output = None;
@@ -604,22 +631,22 @@ let make_incomplete_record compiler todo_types =
     cached = false;
   }
 
-let run_tests ?(rerun = false) ?(report_progress = ignore) compiler ~time_limit_ms tests =
-  capture_failure compiler @@ fun () ->
-  let results = compiler.results in
+let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_ms tests =
+  capture_failure backend @@ fun () ->
+  let results = backend.results in
   let roots = List.map make_test_root tests in
   report_progress Lowering;
   let is_keyed test =
-    results <> None && not (Interface.Definition.is_external_test compiler.requests.interface test)
+    results <> None && not (Interface.Definition.is_external_test backend.requests.interface test)
   in
   let known =
     List.mapi
       (fun index (test, root) ->
-        match compiler.requests.list_reached_todo_types root with
+        match backend.requests.list_reached_todo_types root with
         | _ :: _ as todo_types ->
-            (index, root, None, Some (make_incomplete_record compiler todo_types))
+            (index, root, None, Some (make_incomplete_record backend todo_types))
         | [] ->
-            let key = if is_keyed test then Some (make_result_key compiler root) else None in
+            let key = if is_keyed test then Some (make_result_key backend root) else None in
             let known_record =
               match (results, key) with
               | Some results, Some key when not rerun -> find_stored results key
@@ -638,9 +665,9 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) compiler ~time_limit_
   let fresh = Array.make (Array.length missing) None in
   if Array.length missing > 0 then begin
     let roots = Array.to_list (Array.map (fun (_, root, _, _) -> root) missing) in
-    let output = make_program_path compiler in
-    build_test_program compiler ~time_limit_ms ~roots ~output
-      ~report_progress:(fun compiled total -> report_progress (Compiling { compiled; total }));
+    let output = make_program_path backend in
+    build_test_program backend ~time_limit_ms ~roots ~output ~report_progress:(fun compiled total ->
+        report_progress (Compiling { compiled; total }));
     report_progress (Running { tests = Array.length missing });
     let read_test_index number =
       if number < 0 || number >= Array.length missing then
@@ -681,11 +708,11 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) compiler ~time_limit_
           | [] -> raise_bug "fewer results than tests"))
     known
 
-let build_supplied_tests compiler ~time_limit_ms supplied ~output =
-  capture_failure compiler @@ fun () ->
-  let supplied_env = make_env compiler in
+let build_supplied_tests backend ~time_limit_ms supplied ~output =
+  capture_failure backend @@ fun () ->
+  let supplied_env = make_env backend in
   let supplied = List.map (fun make_instance -> make_instance supplied_env) supplied in
-  build_test_program compiler
+  build_test_program backend
     ~supplied:
       (List.map (fun instance -> Emit_c.make_fragment supplied_env (Code instance)) supplied)
     ~time_limit_ms
@@ -694,7 +721,7 @@ let build_supplied_tests compiler ~time_limit_ms supplied ~output =
 
 type unshippable = {
   failure : [ `Todo | `Echo ];
-  file : string;
+  file : Path.file;
   line : int;
   column : int;
   way : Path.t list;
@@ -703,16 +730,16 @@ type unshippable = {
 let make_root_key (root : Path.t) : Instance.key =
   match root with Test _ -> make_test_root root | _ -> Generated (Program_main root)
 
-let rec read_executed_fragment compiler key =
-  match compiler.requests.find_lowered key with
+let rec read_executed_fragment (requests : requests) key =
+  match requests.find_lowered key with
   | Some (Ok (Compiled fragment | Folded (_, fragment))) -> Some fragment
-  | Some (Ok (Evaluate (path, _))) -> read_executed_fragment compiler (Instance.Evaluator path)
+  | Some (Ok (Evaluate (path, _))) -> read_executed_fragment requests (Instance.Evaluator path)
   | Some (Error _) | None -> None
 
-let trace_root compiler root =
-  Emit_c.trace_reachable ~lookup:(read_executed_fragment compiler) [ make_root_key root ]
+let trace_root requests root =
+  Emit_c.trace_reachable ~lookup:(read_executed_fragment requests) [ make_root_key root ]
 
-let list_reached_definitions compiler root =
+let list_reached_definitions requests root =
   List.sort_uniq Path.compare
     (List.filter_map
        (fun (_, way) ->
@@ -720,10 +747,10 @@ let list_reached_definitions compiler root =
          | (Instance.Code { path; _ } | Constant path | Generated (Program_main path)) :: _ ->
              Some path
          | _ -> None)
-       (trace_root compiler root))
+       (trace_root requests root))
 
-let list_unshippable compiler ~main =
-  let reached = trace_root compiler main in
+let list_unshippable (requests : requests) ~main =
+  let reached = trace_root requests main in
   begin
     let list_definitions keys =
       List.fold_left
@@ -738,14 +765,14 @@ let list_unshippable compiler ~main =
     let reports =
       List.map
         (fun path ->
-          let ({ file; line; column } : Emit_c.position) = locate_todo_type compiler path in
+          let ({ file; line; column } : location) = locate_todo_type requests path in
           { failure = `Todo; file; line; column; way = [ main; path ] })
-        (compiler.requests.list_reached_todo_types (make_root_key main))
+        (requests.list_reached_todo_types (make_root_key main))
       @ List.concat_map
           (fun (compiled, keys) ->
             List.map
               (fun (failure, site) ->
-                let ({ file; line; column } : Emit_c.position) = locate_site compiler site in
+                let ({ file; line; column } : location) = locate_site requests site in
                 {
                   failure = (match failure with Emit_c.Echo -> `Echo | Todo -> `Todo);
                   file;
@@ -773,9 +800,9 @@ let list_unshippable compiler ~main =
     |> List.rev
   end
 
-let make_program_root compiler ~main =
+let make_program_root backend ~main =
   let root = make_root_key main in
-  match compiler.requests.list_reached_todo_types root with
+  match backend.requests.list_reached_todo_types root with
   | [] -> root
   | todo_types ->
       raise_cannot_build "%s"
@@ -785,31 +812,31 @@ let make_program_root compiler ~main =
                 Printf.sprintf
                   "%s: the type %s is defined as todo, and `main` can reach it, so the program \
                    cannot be built."
-                  (show_position (locate_todo_type compiler path))
+                  (show_location backend (locate_todo_type backend.requests path))
                   (Path.show path))
               todo_types))
 
-let run_program ?input compiler ~main ~arguments =
-  capture_failure compiler @@ fun () ->
-  let root = make_program_root compiler ~main in
-  build_and_run compiler ~roots:[ root ]
+let run_program ?input backend ~main ~arguments =
+  capture_failure backend @@ fun () ->
+  let root = make_program_root backend ~main in
+  build_and_run backend ~roots:[ root ]
     ~startup:(Startup.render_program_start (Instance.make_symbol root))
     (fun program -> Process.run ?input program arguments)
 
-let build_program compiler ~main ~output =
-  capture_failure compiler @@ fun () ->
-  let root = make_program_root compiler ~main in
-  build compiler ~roots:[ root ]
+let build_program backend ~main ~output =
+  capture_failure backend @@ fun () ->
+  let root = make_program_root backend ~main in
+  build backend ~roots:[ root ]
     ~startup:(Startup.render_program_start (Instance.make_symbol root))
     ~output
 
-let list_reached_todo_types compiler root =
-  compiler.requests.list_reached_todo_types (make_root_key root)
+let list_reached_todo_types (requests : requests) root =
+  requests.list_reached_todo_types (make_root_key root)
 
-let run_template_check compiler ~from_template ~literals ~clauses =
+let run_template_check backend ~from_template ~literals ~clauses =
   let ran =
-    capture_failure compiler @@ fun () ->
-    run_while_compiling compiler
+    capture_failure backend @@ fun () ->
+    run_while_compiling backend
       (Instance.Template_check { from_template; literals; clauses })
       ~read:(fun output ->
         let holds = Encoding.decode_booleans output in
@@ -821,29 +848,27 @@ let run_template_check compiler ~from_template ~literals ~clauses =
   match ran with
   | Ok (Ran holds) -> Ok holds
   | Ok Ran_too_long ->
-      Error (Printf.sprintf "it ran past the time limit of %d ms" compiler.evaluation_time_limit_ms)
+      Error (Printf.sprintf "it ran past the time limit of %d ms" backend.evaluation_time_limit_ms)
   | Ok (Stopped report) | Error report -> Error report
 
-let evaluate_call compiler ~function_ ~arguments =
-  capture_failure compiler @@ fun () ->
-  match Interface.Impls.read_signature compiler.requests.interface function_ with
+let evaluate_call backend ~function_ ~arguments =
+  capture_failure backend @@ fun () ->
+  match Interface.Impls.read_signature backend.requests.interface function_ with
   | Some { output = Returns result; _ } ->
-      let ty = Monomorphic.ground compiler.monomorphic Types.no_substitution result in
+      let ty = Monomorphic.ground backend.monomorphic Types.no_substitution result in
       let key = Instance.Call_evaluation { function_; arguments } in
-      run_while_compiling compiler key ~read:(fun encoded ->
-          Encoding.decode (make_env compiler) ty encoded)
+      run_while_compiling backend key ~read:(fun encoded ->
+          Encoding.decode (make_env backend) ty encoded)
   | _ -> raise_bug "%s has no result to evaluate" (Path.show function_)
 
 let create ?(show_file = Path.show_file) ?results ?(evaluation_time_limit_ms = 10_000)
     ?(programs = Filename.get_temp_dir_name ())
-    ?(is_worked_on = fun package -> package <> Path.standard_package) requests toolchain cache
-    settings =
+    ?(is_worked_on = fun package -> package <> Path.standard_package) requests c_compiler profile =
   {
     requests;
     monomorphic = Lower.make_monomorphic_context requests.interface;
-    toolchain;
-    cache;
-    settings;
+    c_compiler;
+    profile;
     show_file;
     is_worked_on;
     results;
@@ -853,8 +878,8 @@ let create ?(show_file = Path.show_file) ?results ?(evaluation_time_limit_ms = 1
   }
 
 module For_testing = struct
-  let is_folded compiler path =
-    match read_lowered compiler (Instance.Constant path) with
+  let is_folded backend path =
+    match read_lowered backend (Instance.Constant path) with
     | Folded _ -> true
     | Evaluate _ -> false
     | Compiled _ -> raise_bug "%s is not a constant" (Path.show path)

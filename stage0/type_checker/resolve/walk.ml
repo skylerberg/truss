@@ -187,19 +187,16 @@ let resolve_module_names state (first : Syntax.name) (rest : Syntax.name list) =
 let find_in_module state module_ (name : Syntax.name) ~types =
   let is_kind = if types then Names.is_type_kind else Names.is_value_kind in
   match Names.lookup_in state.lookups ~from:state.key.module_ module_ name.text ~is_kind with
-  | Found_name (item, path) ->
+  | Visible (item, path) ->
       set_target state name (Definition (item.kind, path));
       Some (path, item)
-  | Hidden_name item ->
+  | Hidden (path, visibility) ->
       set_target state name
         (Unknown
            (add_diagnostic state Not_visible (read_span state name.id)
-              (Printf.sprintf "`%s::%s` is %s." (Path.show_module module_) name.text
-                 (match item.visibility with
-                 | Private -> "private to its module, so it cannot be used here"
-                 | _ -> "internal to its package, so it cannot be used here"))));
+              (Names.describe_hidden path visibility)));
       None
-  | No_name ->
+  | Absent ->
       let candidates =
         List.filter_map
           (fun (item : Names.entry) ->

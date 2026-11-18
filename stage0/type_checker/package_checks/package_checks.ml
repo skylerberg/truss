@@ -137,16 +137,20 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
   with
   | Types.Named { path; _ }, Some trait when not trait.is_capability ->
       let view = Types.find_view impl.for_type in
+      let list_counted_members owner =
+        Resolve.Names.list_members_visible_to_package lookups.interface.names
+          ~package:declaration.module_.package owner
+      in
       List.filter_map
         (fun (method_ : Types.trait_method) ->
-          let own = lookups.interface.names.list_members path method_.method_name
+          let own = list_counted_members path method_.method_name
           and of_view =
             match view with
             | Some (Types.Named view) ->
                 List.filter
                   (fun (key : Resolve.Names.key) ->
                     match key.path with Method { receiver; _ } -> receiver <> Static | _ -> false)
-                  (lookups.interface.names.list_members view.path method_.method_name)
+                  (list_counted_members view.path method_.method_name)
             | _ -> []
           in
           let describe_method ~is_own =

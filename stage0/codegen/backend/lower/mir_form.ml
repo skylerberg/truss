@@ -1356,8 +1356,8 @@ and reads (value : Mir.rvalue) local =
   | Function_value _ | Lambda _ | Value_parameter _ | Specification _ -> false
 
 and alias st local (source : Lowered.place) ~writable =
-  let ty = Lowering.ground st (lookup_local_info st local).type_ in
-  if (lookup_local_info st local).has_several_bindings then begin
+  let info = lookup_local_info st local in
+  if info.has_several_bindings then begin
     let frame = require_mir_frame st in
     let pointer =
       match Hashtbl.find_opt frame.places local with
@@ -1367,21 +1367,12 @@ and alias st local (source : Lowered.place) ~writable =
       | _ ->
           let pointer =
             Lowering.allocate_local st ?name:(find_local_name st local)
-              (Pointer { target = Value ty; writable })
+              (Pointer { target = Value (Lowering.ground st info.type_); writable })
           in
           bind_local st local (Lowered.project pointer Deref);
           pointer
     in
     Emit_c.Builder.emit st.builder (Assign (pointer, Use (Address { place = source; writable })))
-  end
-  else if
-    (not writable)
-    && (match (Memory_layout.of_type st.context.env ty).form with Scalar _ -> true | _ -> false)
-    && match (lookup_local_info st local).kind with Source _ -> true | Temporary | Lent _ -> false
-  then begin
-    let copy = Lowering.allocate_local st ?name:(find_local_name st local) (Value ty) in
-    Emit_c.Builder.emit st.builder (Assign (copy, Use (Copy source)));
-    bind_local st local copy
   end
   else bind_local st local (Lowering.snapshot st source)
 

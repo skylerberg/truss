@@ -51,6 +51,11 @@ let () =
         "package.method_name_clash" ~says:"the `contains` of its view `Slice[Element]`");
   Harness.test "an impl may give a `String` a method that neither it nor its view has" (fun () ->
       expect_fine Fixtures.Package_checks.impl_giving_a_string_a_method_that_its_view_lacks);
+  Harness.test
+    "an impl in another package may give a `String` a method that its view has as `internal`"
+    (fun () ->
+      expect_fine
+        Fixtures.Package_checks.impl_giving_a_string_a_method_that_its_view_has_as_internal);
   Harness.test "a type's constant cannot share a name with a trait's method" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.constant_named_like_a_trait_method
         "package.method_name_clash");
@@ -303,5 +308,26 @@ let () =
       match Support.list_codes (check packages (Support.parse_file "app::main")) with
       | [ "package.method_name_clash" ] -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
+  Harness.test "an impl in another package may name a method after the type's `internal` method"
+    (fun () ->
+      let packages =
+        Support.setup
+          ~dependencies:[ ("app", "tools") ]
+          [
+            ("tools::kits", Fixtures.Package_checks.kit_with_an_internal_part);
+            ( "app::main",
+              Fixtures.Package_checks.impl_naming_a_method_after_an_internal_one_of_another_package
+            );
+          ]
+      in
+      match Support.list_codes (check packages (Support.parse_file "app::main")) with
+      | [] -> ()
+      | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
+  Harness.test "an impl in the type's package counts the type's private method of another module"
+    (fun () ->
+      expect_one_diagnostic
+        ~others:[ ("app::shapes", Fixtures.Package_checks.shape_with_a_private_measure) ]
+        Fixtures.Package_checks.impl_naming_a_method_after_a_private_one_of_another_module
+        "package.method_name_clash" ~says:"a `measure` of its own");
   Harness.test "impls whose heads unify only through an infinite type do not overlap" (fun () ->
       expect_fine Fixtures.Package_checks.impls_unifying_only_through_an_infinite_type)

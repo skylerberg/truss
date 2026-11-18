@@ -1,4 +1,3 @@
-type build = Development | Release
 type linkage = External | Internal
 type failure = Echo | Todo
 

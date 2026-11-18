@@ -558,9 +558,10 @@ fn Option[Value].take(mut self) -> Option[Value] {
   and records, sum types, and `Array`s built only from those, is `Plain`.
 - **A name bound to a `Plain` value is a copy.** A `let`, or a pattern of a
   `match` or an `is`, that binds a `Plain` value without `mut` copies it, so
-  the place it was bound from can be assigned while the name is live. The
-  variable of a `for` loop is not copied: the loop lends its collection for
-  the body.
+  the place it was bound from can be assigned while the name is live. A
+  compound assignment's `Plain` operand is a copy too, so an index key of
+  the target can assign the operand's place. The variable of a `for` loop is
+  not copied: the loop lends its collection for the body.
 - **`Copyable` types have `copy()`.** An implicit copy never allocates.
 - A copy has the original's capacity.
 - **Handles are not `Copyable`,** nor is a type that holds one.
@@ -2273,6 +2274,10 @@ type Priority =
 - A call with a dot finds the type's own methods, and the methods of the
   traits it implements from the standard library, the calling package, and
   the packages the calling package's manifest lists. No trait is imported.
+- A call finds only the methods and traits that its module can see
+  ([Visibility](#visibility)). A method it cannot see is not a candidate, so
+  a trait's method or the view's method of that name and mode is found
+  instead.
 - A `String` has the methods of `StringSlice` too, and a `List` and an
   `Array` those of `Slice`, in each mode of `self` that its own methods and
   its traits' methods do not take. The receiver becomes a view of itself, so
@@ -2282,11 +2287,14 @@ type Priority =
 - Two of those traits giving one name is an error at a call with a dot,
   which is then written in full: `Ordered.compare(first, second)`. A trait
   and a trait it requires are the exception.
-- A type's own method and a trait method it implements are never the same
-  name with the same mode. An `impl` in the type's own package may add
-  another overload of a name the type has, by writing the method. A provided
-  method that an `impl` does not override, and every method of an `impl` in
-  another package, takes no name that the type's methods have.
+- No module can see both a type's own method and a trait method it
+  implements with the same name and mode. An `impl` in the type's own
+  package may add another overload of a name the type has, by writing the
+  method. A provided method that an `impl` does not override, and every
+  method of an `impl` in another package, takes no name that the type's
+  methods have. These rules count the methods that the `impl`'s package can
+  see: every method of the type for an `impl` in its own package, and the
+  public ones for an `impl` in another package.
 
 ### Dynamic dispatch
 
@@ -2578,6 +2586,12 @@ and the prelude changes only with a language version.
 | `public` | Every package |
 
 - An `impl`, a test, and a law proof take no visibility.
+- A method and a member constant have their own visibility. A use that
+  reaches a member through its type finds it only where it is visible:
+  `Shape.unit`, `shape.area()`, a constant in a pattern, and the `count`,
+  `element`, and `cursor` of a `for` loop or a quantifier. A member that the
+  use cannot see is skipped, as if it did not exist. A use that finds no
+  member except one it cannot see is an error that names that member.
 - `opaque` appears only before `public type`. Outside its package, an opaque
   type's fields cannot be read, built, updated, or matched on. Visibility is
   set for a type as a whole.

@@ -1,3 +1,5 @@
+use standard::core
+
 test "a string's bytes are its UTF-8 encoding" {
   let text = "h\u{e9}llo"
   let bytes = text.bytes()
@@ -45,15 +47,12 @@ test "characters decodes each UTF-8 sequence" {
 }
 
 test "characters_with_offsets gives the byte offset of each character" {
-  var offsets: List[UInt64] = []
-  for entry in "a\u{e9}\u{20ac}z".characters_with_offsets() {
-    mut offsets.push(entry.index)
-  }
-  assert offsets.length() == 4
-  assert offsets[0] == 0
-  assert offsets[1] == 1
-  assert offsets[2] == 3
-  assert offsets[3] == 6
+  assert "a\u{e9}\u{20ac}z".characters_with_offsets().to_list() == [
+    core::Indexed(index: 0, element: Character"a"),
+    core::Indexed(index: 1, element: Character"\u{e9}"),
+    core::Indexed(index: 3, element: Character"\u{20ac}"),
+    core::Indexed(index: 6, element: Character"z"),
+  ]
 }
 
 test "the first and last characters are whole characters" {
@@ -247,13 +246,11 @@ test "split_at_most stops splitting when it has the parts asked for" {
 }
 
 test "split_once splits at the first separator and split_once_last at the last" {
-  assert "key=value=more".split_once("=") is Some(pair) && same(pair.first, expected: "key")
-    && same(pair.second, expected: "value=more")
-  assert "key=value=more".split_once_last("=") is Some(pair) && same(pair.first, expected: "key=value")
-    && same(pair.second, expected: "more")
+  assert "key=value=more".split_once("=") == Some(core::Pair(first: "key", second: "value=more"))
+  assert "key=value=more".split_once_last("=") == Some(core::Pair(first: "key=value", second: "more"))
   assert "none".split_once("=") is None
   assert "none".split_once_last("=") is None
-  assert "=".split_once("=") is Some(pair) && pair.first.is_empty() && pair.second.is_empty()
+  assert "=".split_once("=") == Some(core::Pair(first: "", second: ""))
 }
 
 fn collected(parts: List[String], expected: Slice[String]) -> Bool {

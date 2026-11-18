@@ -52,9 +52,6 @@ module Definition = Definition
 module Properties : sig
   exception Recursion_limit of string
 
-  val make_trait_substitution :
-    Types.trait_interface -> self:Types.ty -> Types.trait_reference -> Types.substitution
-
   val list_bound_closure :
     Lookups.t -> self:Types.ty -> Types.trait_reference -> Types.trait_reference list
 

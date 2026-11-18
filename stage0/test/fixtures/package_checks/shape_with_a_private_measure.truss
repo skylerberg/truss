@@ -1,0 +1,5 @@
+public type Shape(sides: UInt64)
+
+fn Shape.measure(self) -> UInt64 {
+  self.sides
+}
