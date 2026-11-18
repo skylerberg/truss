@@ -355,21 +355,22 @@ and is_structural ?(seen = []) state (type_ : Types.ty) =
     | _ -> false
 
 and check_qualified_constant state id span constant type_ =
-  let path =
+  let constant_lookup : Path.t Resolve.Names.lookup =
     match constant with
     | Module_constant written_path -> (
         match State.find_target state written_path.last with
-        | Some (Definition (Constant, path)) -> Some path
-        | _ -> None)
+        | Some (Definition (Constant, path)) -> Visible path
+        | _ -> Absent)
     | Type_constant (written_path, member) -> (
         match State.find_target state written_path.last with
         | Some (Definition (Type, owner)) ->
-            Members.find_own_constant state.lookups owner member.text
-        | _ -> None)
+            Members.lookup_member state (Member_constant { owner; name = member.text })
+        | _ -> Absent)
   in
-  match path with
-  | Some path -> check_constant_pattern state id span path type_
-  | None -> State.report state Unknown_member span "This names no constant."
+  match constant_lookup with
+  | Visible path -> check_constant_pattern state id span path type_
+  | Hidden hidden -> ignore (Members.make_hidden_error state span hidden)
+  | Absent -> State.report state Unknown_member span "This names no constant."
 
 and check_literal_fits state (value : Syntax.expression) number type_ =
   State.defer state (fun () ->

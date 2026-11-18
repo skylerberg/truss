@@ -1459,10 +1459,12 @@ Rules: [Method lookup](SPECIFICATION.md#method-lookup).
 |---|---|
 | A trait method needs no import. | A forgotten import is a common error in the languages that need one. |
 | A method call finds only the traits of the standard library, of the calling package, and of the packages that its manifest lists. | An edit deep in the dependency graph cannot break a distant call. |
+| A call skips a method that its module cannot see before it chooses an overload, and reports a hidden method only when it finds nothing it can see. | A private or `internal` method is a detail of its module or package, so adding, renaming, or removing one changes no call outside it. Every other name is looked up the same way. The cost is that one call can reach different methods in different modules: if `String` had a private `trim`, `name.trim()` would call it in its module and `StringSlice.trim` elsewhere. Both are written in one package. |
 | Two candidates for one name are an error, never a silent choice. | In Rust a type's own method wins over a trait's, so adding a method can silently change an existing call. In Truss an upgrade can break a call only with an error that names both candidates. A release that only adds names is still compatible, because otherwise no type could ever gain a method. |
 | A `String` has the methods of `StringSlice`, and a `List` and an `Array` those of `Slice`. | `self` is a parameter, and an argument of the owned type converts to its view. Without the rule, every method of a view needs a forwarding method on the owned type, whose contract is stated and proven a second time, and a view's method that has none cannot be called on the owned value. Rust reaches the methods of `str` from a `String` through `Deref`. |
 | A type's own method hides its view's method of the same name and mode. | The owned type can do better where it owns the storage: `String.to_bytes(own self)` hands over its buffer, and `StringSlice.to_bytes(self)` copies. Both are written in one package, so no other package can change which one a call reaches. |
 | An `impl` gives a type no method that its view has in that mode, and an `impl` in another package gives it none of that name. | Such a method would be found before the view's. A package added to a build could then capture a call that reached the view's method. |
+| The checks of an `impl`'s method names count a method of the type or its view only where the `impl`'s package can see it: every method for an `impl` in the type's package, and the public ones for an `impl` in another package. | A method that the `impl`'s package cannot see is called only in the type's package, and no code there can reach the `impl`: an `impl` in another package lives with its trait or with a type its trait names, so its package depends on the type's. No call can be captured, and an `internal` helper takes no name from other packages: a package may give `String` a trait method `part`, which `StringSlice` has only as `internal`. In the type's own package, the module that declares a private method can see the `impl` too, and a call there would have two methods of one name and mode. |
 
 ### Dynamic dispatch
 
@@ -2091,23 +2093,24 @@ data, and not on the database.
 **A reference is to a fully qualified name, whether or not a definition
 holds the name.** A name that is not local and not in the prelude belongs to
 the body's module, so an unqualified name resolves without a search. A
-method call names one entry of its type's methods, or of its view's methods
-where the type has none of that name and mode:
-[Method lookup](SPECIFICATION.md#method-lookup) rules out a trait method with
-the name and mode of one of the type's own methods or of its view's, and
-makes two traits that give one name an error at the call. An `impl` is named by its trait and its
-type, since `impl`s do not overlap and have one home. A law proof is named by
-its trait, its law, and its type, as `proof Ordered.transitive for Box[Item]`
-writes them, so a proof that assumes a law for a type refers to one name and
-scans no package.
+method call names one entry of the type's methods that its module can see,
+or of its view's methods where the type has none of that name and mode:
+[Method lookup](SPECIFICATION.md#method-lookup) lets no module see both a
+trait method and a method of the type or of its view with one name and mode,
+and makes two traits that give one name an error at the call. An
+`impl` is named by its trait and its type, since `impl`s do not overlap and
+have one home. A law proof is named by its trait, its law, and its type, as
+`proof Ordered.transitive for Box[Item]` writes them, so a proof that
+assumes a law for a type refers to one name and scans no package.
 
 **A namespace is derived state.** The database keeps the definitions that
 hold each name of a module, and each method name of a type. A type's entry
 holds its own methods and the methods of the traits its `impl`s implement. A
-call reads the entry as its package sees it, through the traits of the
+call reads the entry as its module sees it: through the traits of the
 standard library, of its own package, and of the packages its manifest
-lists. Adding or removing a definition changes the entries of its names and
-marks stale the parts that read them. A reference to a name that no
+lists, and without the members that the module cannot see. Adding or
+removing a definition changes the entries of its names and marks stale the
+parts that read them. A reference to a name that no
 definition holds is an error of the referring part, and adding the
 definition clears it.
 
