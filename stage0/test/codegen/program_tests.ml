@@ -678,7 +678,7 @@ let () =
             Codegen_support.make_example_package [ (Codegen_support.example_file, text) ]
           in
           if
-            Codegen_support.list_diagnostics
+            Database.list_file_diagnostics
               (Codegen_support.make_database packages)
               Codegen_support.example_file
             = []
@@ -687,10 +687,7 @@ let () =
               (Printf.sprintf "%s block %d lowers, and its tests pass" name (index + 1))
               (fun () ->
                 let checked = Codegen_support.make_database packages in
-                let interface =
-                  Database.make_interface_lookups checked
-                    [ Codegen_support.example_file.module_.package ]
-                in
+                let interface = Database.make_interface_lookups checked in
                 let functions =
                   List.filter_map
                     (fun (declaration : Resolve.Names.declaration) ->
@@ -710,8 +707,7 @@ let () =
                             (Lowered.Item.Code
                                { path = declaration.path; instantiation = Ground.no_instantiation })
                       | _ -> None)
-                    ((Database.make_name_lookups checked [ Codegen_support.example.package ])
-                       .list_declarations Codegen_support.example)
+                    ((Database.make_name_lookups checked).list_declarations Codegen_support.example)
                 in
                 let database, backend = Codegen_support.load ~roots:functions text in
                 List.iter

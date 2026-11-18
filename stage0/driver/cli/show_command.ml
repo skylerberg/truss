@@ -66,7 +66,7 @@ let find snapshot database names packages ~body text =
 let run ~paths ~body =
   let snapshot, packages = Command_packages.load_current () in
   let database = Workspace.open_database snapshot in
-  let names = Database.make_name_lookups database packages in
+  let names = Database.make_name_lookups database in
   let results =
     List.map (fun path -> (path, find snapshot database names packages ~body path)) paths
   in

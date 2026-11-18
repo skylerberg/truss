@@ -71,7 +71,7 @@ let () =
       match
         List.map
           (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code)
-          (Codegen_support.list_diagnostics
+          (Database.list_file_diagnostics
              (Codegen_support.make_database packages)
              Codegen_support.example_file)
       with

@@ -24,7 +24,6 @@ let c_compiler =
 
 let load text =
   let database = build_example_database text in
-  Database.check database [ example_file.module_.package ];
   if Database.list_file_diagnostics database example_file <> [] then None else Some database
 
 let make_backend database =
@@ -56,8 +55,8 @@ type candidate = {
 }
 
 let list_runnable database =
-  let mir = Database.For_testing.make_mir_lookups database example.package in
-  let interface = Database.make_interface_lookups database [ example.package ] in
+  let mir = Database.For_testing.make_mir_lookups database in
+  let interface = Database.make_interface_lookups database in
   let lookups = Database.make_proof_lookups database in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
@@ -137,8 +136,7 @@ let run_mutant ~samples text =
       in
       let candidates =
         List.filter
-          (fun candidate ->
-            is_proven (Database.make_name_lookups database [ example.package ]) candidate.key states)
+          (fun candidate -> is_proven (Database.make_name_lookups database) candidate.key states)
           (list_runnable database)
       in
       let with_admitting =
@@ -262,7 +260,6 @@ let () =
                 unproven = []
             | None ->
                 let database = build_example_database text in
-                Database.check database [ example_file.module_.package ];
                 print_diagnostics (Database.list_file_diagnostics database example_file);
                 false)
           (if Filename.check_suffix file ".md" then

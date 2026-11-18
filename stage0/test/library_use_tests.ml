@@ -1,6 +1,6 @@
 let check packages file =
   let database = Support.make_database packages in
-  match Support.list_diagnostics database file with
+  match Database.list_file_diagnostics database file with
   | [] -> Support.list_proof_diagnostics database file
   | errors -> errors
 

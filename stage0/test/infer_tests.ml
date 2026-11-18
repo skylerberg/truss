@@ -15,9 +15,9 @@ let locate_expression text written occurrence =
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.make_key declaration in
         match
-          ( (Support.make_names packages key.module_.package).read_definition key,
-            (Support.make_names packages key.module_.package).read_spans key,
-            (Support.make_names packages key.module_.package).read_place key,
+          ( (Support.make_names packages).read_definition key,
+            (Support.make_names packages).read_spans key,
+            (Support.make_names packages).read_place key,
             Database.read_checked_body (Support.make_database packages) key )
         with
         | definition, spans, { base; _ }, Some result ->
@@ -40,7 +40,7 @@ let locate_expression text written occurrence =
             Syntax_walk.visit_definition visit definition;
             Option.map (fun value -> (value, result)) !best
         | _ -> None)
-      ((Support.make_names packages file.module_.package).list_declarations_in file)
+      ((Support.make_names packages).list_declarations_in file)
   in
   match actual with
   | Some actual -> actual
@@ -894,7 +894,7 @@ let () =
                       | _ -> ()))
                     [ tables.types; tables.local_types ]
               | None -> ())
-            ((Support.make_names packages file.module_.package).list_declarations_in file))
+            ((Support.make_names packages).list_declarations_in file))
         Standard_library.files)
 
 let point = "type Point(x: Int64)\n\n"
