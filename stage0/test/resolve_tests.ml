@@ -560,4 +560,29 @@ let () =
       if Support.parse_errors packages file = [] then Harness.fail "parsed";
       match list_codes (check packages file) with
       | [] -> ()
-      | reported -> Harness.fail "reported [%s]" (String.concat "; " reported))
+      | reported -> Harness.fail "reported [%s]" (String.concat "; " reported));
+  Harness.test "impls rejected for different function type arguments have distinct keys" (fun () ->
+      let packages =
+        setup
+          [ ("app::main", Fixtures.Resolve.impls_rejected_for_different_function_type_arguments) ]
+      in
+      match
+        List.sort compare
+          (List.filter_map
+             (fun (declaration : Resolve.Names.declaration) ->
+               match declaration.path with
+               | Impl _ -> Some (Path.show declaration.path, declaration.ordinal)
+               | _ -> None)
+             (Support.list_declarations packages (parse_module "app::main")))
+      with
+      | [
+       ("app::main::impl app::main::Wraps[fn(Bool) -> Int64] for app::main::Box", 0);
+       ("app::main::impl app::main::Wraps[fn(Int64) -> Int64] for app::main::Box", 0);
+      ] ->
+          ()
+      | impls ->
+          Harness.fail "declared [%s]"
+            (String.concat "; "
+               (List.map
+                  (fun (shown, ordinal) -> Printf.sprintf "%s, ordinal %d" shown ordinal)
+                  impls)))
