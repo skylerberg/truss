@@ -1052,8 +1052,8 @@ an operation produces.
 
 Rules: [Failure](SPECIFICATION.md#failure).
 
-A function panics only if its signature declares `uses Panic`. The
-exceptions are running out of memory and overflowing the stack, which no
+Only a test and a function whose signature declares `uses Panic` can panic.
+The exceptions are running out of memory and overflowing the stack, which no
 language rules out.
 
 Every operation that can fail is a proof obligation: an integer overflow, a
@@ -1062,14 +1062,14 @@ division by zero, an index out of bounds, a shift that is too large, and
 the fact locally, requires the fact of its caller, calls a checked variant
 that returns an `Option` or a `Result`, or declares `uses Panic`.
 
-**`uses Panic` turns a proof into a check.** In a function that declares
-it, an operation that is not proven safe is checked when it runs, and the
-proof goes on as though it held, since a failed check ends the program. The
-check is in every build, so a release build panics where a test build does.
-An index checks the precondition of the `impl`'s `at`. An index through a
-bound is proven: the prover reads the trait's precondition there, and the
-call would check the `impl`'s, so a check would not be the fact the proof
-assumed.
+**`Panic` turns a proof into a check.** In a test, and in a function that
+declares `uses Panic`, an operation that is not proven safe is checked when
+it runs, and the proof goes on as though it held, since a failed check ends
+the program. The check is in every build, so a release build panics where a
+test build does. An index checks the precondition of the `impl`'s `at`. An
+index through a bound is proven: the prover reads the trait's precondition
+there, and the call would check the `impl`'s, so a check would not be the
+fact the proof assumed.
 
 **A lambda proves its operations.** Its capabilities are inferred before the
 prover runs. A lambda that could panic where its type allows no `Panic` would
@@ -1517,6 +1517,7 @@ in a test build takes constant time.
 | A test with `uses` is external: it gets the real implementations, and its result is never cached. | Its result depends on the world. It gets no hidden isolation: a test that wants a scratch directory narrows file access where a reader can see it. |
 | A test's standard input is empty. | Workers run tests at once, so input from the terminal would go to whichever test read first, and a test waiting for a person would run into its time limit. A test that needs input gets it from a `Console` it provides, or gives it to a program it runs through `Processes`. |
 | A test has `Panic` and cannot declare it. | A panic does not depend on the world. Declaring `Panic` would make the test external, so the suite would run it every time instead of caching its result. |
+| A test checks each operation that it cannot prove. | A test without `uses` runs one execution path, so running it decides what a proof of that path would. A proof would only make the test state loop invariants. |
 | A failed test is never retried. | A retry hides exactly the failures that an external test exists to catch. |
 | A test cannot expect a panic. | That would treat a panic as intended behavior, which is the job of `Result`. The misuse that other languages test this way, such as a violated precondition, does not compile. To check that a program crashes on bad input, an external test runs the program through `Processes`. |
 | A test has a time limit. | A loop that never ends fails its test. |
