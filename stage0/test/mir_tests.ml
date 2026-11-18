@@ -434,7 +434,7 @@ let () =
         (fun () ->
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
-              let key = Resolve.Names.make_key declaration in
+              let key = declaration.key in
               let definition = Resolve.Names.show_key key in
               match
                 try find_graph (Lazy.force parts) key
@@ -457,7 +457,7 @@ let lower_tree_and_graph text =
   match
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.make_key declaration in
+        let key = declaration.key in
         if key.path = Path.Top { module_ = Support.parse_module "app::main"; name = "g" } then
           Some key
         else None)

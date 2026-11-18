@@ -249,7 +249,7 @@ let load ?results ?roots ?profile text =
 let list_tests_in database (module_ : Path.module_) =
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
-      match declaration.path with Test _ -> Some declaration.path | _ -> None)
+      match declaration.key.path with Test _ -> Some declaration.key.path | _ -> None)
     ((Database.make_name_lookups database).list_declarations module_)
 
 let list_tests database = list_tests_in database example

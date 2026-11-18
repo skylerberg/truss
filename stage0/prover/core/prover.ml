@@ -580,8 +580,8 @@ let decide ~runs lookups solver proofs =
 
 let list_file_definitions (lookups : Lookups.t) table file =
   List.filter_map
-    (fun declaration ->
-      let key = Resolve.Names.make_key declaration in
+    (fun (declaration : Resolve.Names.declaration) ->
+      let key = declaration.key in
       Option.map
         (fun recorded -> ((lookups.interface.names.read_place key).base, recorded))
         (Key_table.find_opt table key))

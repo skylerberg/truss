@@ -8,8 +8,8 @@ let list_unfinished snapshot database packages =
     (fun file ->
       let source = Command_packages.read_source snapshot database packages file in
       List.concat_map
-        (fun declaration ->
-          let key = Resolve.Names.make_key declaration in
+        (fun (declaration : Resolve.Names.declaration) ->
+          let key = declaration.key in
           let ({ base; _ } : Resolve.Names.place) = names.read_place key in
           List.map
             (fun ({ keyword; span; _ } : Inspect.unfinished) ->

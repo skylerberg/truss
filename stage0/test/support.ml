@@ -117,8 +117,7 @@ let list_declarations packages (module_ : Path.module_) =
 
 let collect_first_core_nodes text =
   let packages = setup [ ("app::main", text) ] in
-  collect_core_nodes packages
-    (Resolve.Names.make_key (List.hd (list_declarations packages (parse_module "app::main"))))
+  collect_core_nodes packages (List.hd (list_declarations packages (parse_module "app::main"))).key
 
 let expect_no_diagnostics ~check files =
   let packages = setup files in

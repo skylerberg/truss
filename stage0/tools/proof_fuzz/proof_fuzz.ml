@@ -60,10 +60,10 @@ let list_runnable database =
   let lookups = Database.make_proof_lookups database in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.make_key declaration in
+      let key = declaration.key in
       match
-        ( Interface.Definition.find_declared_signature interface declaration.path,
-          Mir.read_contract mir declaration.path )
+        ( Interface.Definition.find_declared_signature interface key.path,
+          Mir.read_contract mir key.path )
       with
       | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),
           Some { form = { requires; _ }; _ } )
@@ -93,7 +93,7 @@ let list_runnable database =
           | ranges_written
             when List.length ranges_written = List.length ranges
                  && not (List.exists (fun admit -> String.includes ~affix:"==>" admit) admits) ->
-              Some { path = declaration.path; key; signature; admits; ranges = ranges_written }
+              Some { path = key.path; key; signature; admits; ranges = ranges_written }
           | _ -> None)
       | _ -> None)
     (lookups.interface.names.list_declarations example)

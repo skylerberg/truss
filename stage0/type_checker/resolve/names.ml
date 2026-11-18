@@ -52,20 +52,8 @@ let convert_visibility : Syntax.visibility option -> visibility = function
   | Some Public -> Public
   | Some Public_opaque -> Public_opaque
 
-type declaration = {
-  module_ : Path.module_;
-  path : Path.t;
-  ordinal : int;
-  kind : kind;
-  visibility : visibility;
-  generic : bool;
-}
-
 type key = { module_ : Path.module_; path : Path.t; ordinal : int }
-
-let make_key (declaration : declaration) =
-  { module_ = declaration.module_; path = declaration.path; ordinal = declaration.ordinal }
-
+type declaration = { key : key; kind : kind; visibility : visibility; generic : bool }
 type place = { file : Path.file; base : int }
 
 let show_key key =
@@ -321,7 +309,7 @@ let lookup_member lookups ~(from : Path.module_) member =
   match lookups.find_key member with
   | Some key ->
       let declaration = lookups.read_declaration key in
-      if is_visible ~from declaration.module_ declaration.visibility then Visible member
+      if is_visible ~from declaration.key.module_ declaration.visibility then Visible member
       else Hidden (member, declaration.visibility)
   | None -> Absent
 
@@ -377,7 +365,7 @@ let list_members_visible_to_package lookups ~(package : Path.package) owner name
   List.filter
     (fun key ->
       let declaration = lookups.read_declaration key in
-      declaration.module_.package = package || is_public declaration.visibility)
+      declaration.key.module_.package = package || is_public declaration.visibility)
     (lookups.list_members owner name)
 
 let find_bare_type lookups ~(from : Path.module_) name =
@@ -530,7 +518,7 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
       generic =
     Some
       {
-        declaration = { module_; path; ordinal = 0; kind; visibility; generic };
+        declaration = { key = { module_; path; ordinal = 0 }; kind; visibility; generic };
         file;
         index;
         container;
@@ -541,7 +529,7 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
   let declare_method index ~container ~(owner : declaration) ~is_capability
       (item : Syntax.definition Syntax.item) =
     let declare = make_written index ~container ~visibility:owner.visibility item in
-    let owner = owner.path in
+    let owner = owner.key.path in
     match item.value.kind with
     | Function { signature; _ } | Method_declaration signature ->
         let name = (extract_signature_name signature).text in
@@ -726,10 +714,13 @@ let number_written (written : written list) =
   let counts = Path_table.create 16 in
   List.map
     (fun (written : written) ->
-      let path = written.declaration.path in
+      let path = written.declaration.key.path in
       let ordinal = Option.value ~default:0 (Path_table.find_opt counts path) in
       Path_table.replace counts path (ordinal + 1);
-      { written with declaration = { written.declaration with ordinal } })
+      {
+        written with
+        declaration = { written.declaration with key = { written.declaration.key with ordinal } };
+      })
     written
 
 let is_derivable (trait : Path.t) =
@@ -750,15 +741,15 @@ let resolve_head lookups ~from ~imports (path : Syntax.path) ~kinds =
 
 let list_impl_entries lookups ~imports (declaration : declaration) (definition : Syntax.definition)
     =
-  match (declaration.path, definition.kind) with
+  match (declaration.key.path, definition.kind) with
   | Impl { trait = { path = trait; _ }; for_type; _ }, _ ->
       if
         is_head_kind lookups trait ~kinds:[ Trait; Capability ]
         && is_head_kind lookups for_type ~kinds:[ Type ]
-      then [ ((trait, for_type), declaration.path) ]
+      then [ ((trait, for_type), declaration.key.path) ]
       else []
   | _, Type_definition { clauses; _ } ->
-      let resolve_local_head = resolve_head lookups ~from:declaration.module_ ~imports in
+      let resolve_local_head = resolve_head lookups ~from:declaration.key.module_ ~imports in
       List.concat_map
         (fun (clause : Syntax.type_clause) ->
           match clause.kind with
@@ -768,8 +759,8 @@ let list_impl_entries lookups ~imports (declaration : declaration) (definition :
                   match resolve_local_head trait.path ~kinds:[ Trait ] with
                   | Some trait when is_derivable trait ->
                       Some
-                        ( (trait, declaration.path),
-                          (Derived { type_ = declaration.path; trait } : Path.t) )
+                        ( (trait, declaration.key.path),
+                          (Derived { type_ = declaration.key.path; trait } : Path.t) )
                   | _ -> None)
                 traits
           | Type_invariant _ | Potential _ -> [])
@@ -777,7 +768,7 @@ let list_impl_entries lookups ~imports (declaration : declaration) (definition :
   | _ -> []
 
 let find_law_proof_entry lookups (declaration : declaration) =
-  match declaration.path with
+  match declaration.key.path with
   | Law_proof { trait = { path = trait; _ }; law; for_type; _ }
     when is_head_kind lookups trait ~kinds:[ Trait ]
          && is_head_kind lookups for_type ~kinds:[ Type ] ->
@@ -843,8 +834,7 @@ let build_namespace lookups package
   let written = List.concat_map snd module_declarations in
   let index_by_key declarations =
     List.sort
-      (fun (left : declaration) (right : declaration) ->
-        compare_key (make_key left) (make_key right))
+      (fun (left : declaration) (right : declaration) -> compare_key left.key right.key)
       (List.map (fun (written : written) -> written.declaration) declarations)
   in
   let declarations = index_by_key written in
@@ -855,7 +845,7 @@ let build_namespace lookups package
         (written :: Option.value ~default:[] (File_table.find_opt by_file written.file)))
     written;
   let list_in_file file = List.rev (Option.value ~default:[] (File_table.find_opt by_file file)) in
-  let key_of_written (written : written) = make_key written.declaration in
+  let key_of_written (written : written) = written.declaration.key in
   let at_index = Item_table.create 64 and in_container = Item_table.create 64 in
   List.iter
     (fun (written : written) ->
@@ -889,11 +879,11 @@ let build_namespace lookups package
     Member_map.map List.rev
       (List.fold_left
          (fun index (declaration : declaration) ->
-           match declaration.path with
+           match declaration.key.path with
            | (Method { owner; name; _ } | Member_constant { owner; name })
-             when declaration.ordinal = 0 ->
+             when declaration.key.ordinal = 0 ->
                Member_map.update (owner, name)
-                 (fun keys -> Some (make_key declaration :: Option.value ~default:[] keys))
+                 (fun keys -> Some (declaration.key :: Option.value ~default:[] keys))
                  index
            | _ -> index)
          Member_map.empty declarations)
@@ -902,14 +892,14 @@ let build_namespace lookups package
     let trait_at =
       List.filter_map
         (fun (written : written) ->
-          if written.declaration.kind = Trait && written.declaration.ordinal = 0 then
-            Some ((written.file, written.index), written.declaration.path)
+          if written.declaration.kind = Trait && written.declaration.key.ordinal = 0 then
+            Some ((written.file, written.index), written.declaration.key.path)
           else None)
         written
     in
     List.fold_left
       (fun index (written : written) ->
-        match (written.declaration.path, written.container) with
+        match (written.declaration.key.path, written.container) with
         | Method { name; _ }, Some container -> (
             match List.assoc_opt (written.file, container) trait_at with
             | Some trait ->
@@ -924,7 +914,7 @@ let build_namespace lookups package
       String_map.empty written
   in
   let first_written =
-    List.filter (fun (written : written) -> written.declaration.ordinal = 0) written
+    List.filter (fun (written : written) -> written.declaration.key.ordinal = 0) written
   in
   let impl_entries =
     List.concat_map
@@ -1160,7 +1150,7 @@ let of_namespaces ~(read_namespace : Path.package -> namespace) ~split_module ~l
             if module_ = Intrinsic.module_ then None
             else
               Option.map
-                (fun declared -> make_key declared.declaration)
+                (fun (declared : declared) -> declared.declaration.key)
                 (find_declared { module_; path; ordinal = 0 })
         | Method { owner; name; _ } | Member_constant { owner; name } ->
             List.find_opt (fun (key : key) -> Path.equal key.path path) (list_members owner name)

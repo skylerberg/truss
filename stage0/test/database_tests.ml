@@ -334,13 +334,10 @@ let count_termination_obligations database ~of_:shown =
   let file = Support.parse_file "app::main" in
   let declaration =
     List.find
-      (fun (declaration : Resolve.Names.declaration) -> Path.show declaration.path = shown)
+      (fun (declaration : Resolve.Names.declaration) -> Path.show declaration.key.path = shown)
       ((Database.make_name_lookups database).list_declarations_in file)
   in
-  match
-    Database.For_testing.find_proof (Support.prove database file)
-      (Resolve.Names.make_key declaration)
-  with
+  match Database.For_testing.find_proof (Support.prove database file) declaration.key with
   | Some (Value (Obligations outcome)) ->
       List.length
         (List.filter
@@ -650,13 +647,10 @@ let () =
       let file = Support.parse_file "app::main" in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          match
-            Database.For_testing.find_proof (Support.prove database file)
-              (Resolve.Names.make_key declaration)
-          with
+          match Database.For_testing.find_proof (Support.prove database file) declaration.key with
           | Some (Value _) -> ()
           | Some (Failed _ | Blocked) | None ->
-              Harness.fail "%s has no proof" (Path.show declaration.path))
+              Harness.fail "%s has no proof" (Path.show declaration.key.path))
         ((Database.make_name_lookups database).list_declarations_in file));
   Harness.test
     "a field's type whose impl calls back joins the recursion group of a function that passes the \
@@ -1302,11 +1296,11 @@ let () =
   let read_callee_ownership database =
     let file = Support.parse_file "app::main" in
     Database.For_testing.read_ownership database
-      (Resolve.Names.make_key
-         (List.find
-            (fun (declaration : Resolve.Names.declaration) ->
-              Path.show declaration.path = "app::main::callee")
-            ((Database.make_name_lookups database).list_declarations_in file)))
+      (List.find
+         (fun (declaration : Resolve.Names.declaration) ->
+           Path.show declaration.key.path = "app::main::callee")
+         ((Database.make_name_lookups database).list_declarations_in file))
+        .key
   in
   let propagate_with_failing_callee () =
     let database = build [ ("app::main", callee_and_caller) ] in
