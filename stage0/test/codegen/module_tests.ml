@@ -1,19 +1,6 @@
 let root = Harness.make_workspace_path "stage0/test/codegen/modules"
 let list_entries directory = List.sort compare (Array.to_list (Sys.readdir directory))
-
-let exit_with_usage () =
-  prerr_endline
-    "usage: module_tests.exe [INDEX/COUNT], such as 0/4, to run one share of the modules";
-  exit 2
-
-let share_index, share_count =
-  match Sys.argv with
-  | [| _ |] -> (0, 1)
-  | [| _; share |] -> (
-      match List.map int_of_string_opt (String.split_on_char '/' share) with
-      | [ Some index; Some count ] when 0 <= index && index < count -> (index, count)
-      | _ -> exit_with_usage ())
-  | _ -> exit_with_usage ()
+let share_index, share_count = Option.value Harness.share ~default:(0, 1)
 
 let files =
   List.concat_map
@@ -52,7 +39,7 @@ let () =
   let loaded = ref None in
   let load () = loaded := Some (Codegen_support.load_files files) in
   let checking = "the modules check cleanly" in
-  if Harness.is_wanted checking then Codegen_support.test checking load else load ();
+  if Harness.is_wanted checking then Harness.test_always checking load else load ();
   match !loaded with
   | None -> ()
   | Some (database, backend) -> (
@@ -68,7 +55,7 @@ let () =
       | Ok records ->
           List.iter2
             (fun path (record : Backend.Test_report.record) ->
-              Codegen_support.test (name_of path) (fun () ->
+              Harness.test_always (name_of path) (fun () ->
                   match (find_expected_panic path, record.outcome, record.message) with
                   | None, Passed, _ -> ()
                   | Some expected, Panicked, Some message

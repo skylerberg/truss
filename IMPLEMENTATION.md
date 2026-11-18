@@ -184,14 +184,15 @@ Every stage of stage0 is tested the same way:
   `modules/library/` tests one module of the standard library and is named
   after it. The other directories, such as `modules/feature/` and
   `modules/owning/`, test the code generated for a construct. `module_tests`
-  builds the tests of every module in its share into one program and runs
-  it, and the `runtest` alias runs four shares in parallel. A new test
-  therefore adds its code to one build and starts no build of its own. A
-  test of a panic goes in the module `library::panics`: each of its tests
-  must panic with a message that contains the test's name. A test written
-  in OCaml that compiles a program of its own is for what a passing test
-  cannot show: a diagnostic, the generated code, a reported source
-  location, or a whole program's output.
+  divides the modules into the shares that `TRUSS_TEST_SHARE` names, builds
+  the tests of every module in its share into one program, and runs it. The
+  `runtest` alias runs two shares in parallel. A new test therefore adds
+  its code to one build and starts no build of its own. A test of a panic
+  goes in the module `library::panics`: each of its tests must panic with a
+  message that contains the test's name. A test written in OCaml that
+  compiles a program of its own is for what a passing test cannot show: a
+  diagnostic, the generated code, a reported source location, or a whole
+  program's output.
 - **A test's Truss source is a fixture file, not an OCaml string.** The
   text a test checks lives in `fixtures/<suite>/<name>.truss` beside the
   suite, where it can be read, edited, and renamed as Truss.

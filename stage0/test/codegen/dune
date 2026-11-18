@@ -113,28 +113,20 @@
  (deps
   (glob_files_rec modules/**.truss))
  (action
-  (run %{exe:module_tests.exe} 0/4)))
+  (setenv
+   TRUSS_TEST_SHARE
+   0/2
+   (run %{exe:module_tests.exe}))))
 
 (rule
  (alias runtest)
  (deps
   (glob_files_rec modules/**.truss))
  (action
-  (run %{exe:module_tests.exe} 1/4)))
-
-(rule
- (alias runtest)
- (deps
-  (glob_files_rec modules/**.truss))
- (action
-  (run %{exe:module_tests.exe} 2/4)))
-
-(rule
- (alias runtest)
- (deps
-  (glob_files_rec modules/**.truss))
- (action
-  (run %{exe:module_tests.exe} 3/4)))
+  (setenv
+   TRUSS_TEST_SHARE
+   1/2
+   (run %{exe:module_tests.exe}))))
 
 (rule
  (target fixtures.ml)
