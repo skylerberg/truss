@@ -123,7 +123,7 @@ let fold_literal st ty (constant : Mir.constant) =
 
 let fold_literal_value (st : Lowering.state) ty text =
   match Monomorphic.compute_shape st.context.monomorphic ty with
-  | Record [ (field, Typed storage) ] when Option.is_some (Storage.match_storage_element storage) ->
+  | Record [ (field, Typed storage) ] when Option.is_some (Storage.find_storage_element storage) ->
       let bytes =
         List.init (String.length text) (fun index ->
             Lowered.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[index]))))
@@ -337,7 +337,7 @@ let write_output (st : Lowering.state) output =
     (Assign
        ( view,
          Storage.build_view view_ty
-           ~elements:(Copy (Storage.project_buffer output))
+           ~buffer:(Copy (Storage.project_buffer output))
            ~length:(Copy (Storage.project_length output)) ));
   let signature = Definitions.read_signature st.context write_fully in
   let result =

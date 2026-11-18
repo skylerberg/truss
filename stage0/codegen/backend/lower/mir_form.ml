@@ -751,7 +751,7 @@ let lower_intrinsic st ?reported (operation : Intrinsic.operation) ~type_argumen
                 Intrinsics.Place (lower_operand_place st borrowed)
             | Passed { value = passed; _ } ->
                 let ty = compute_operand_type st passed in
-                if Storage.match_storage_element ty <> None || Storage.match_view_element ty <> None
+                if Storage.find_storage_element ty <> None || Storage.find_view_element ty <> None
                 then Intrinsics.Place (lower_operand_place st passed)
                 else Intrinsics.Value (lower_operand st passed)
             | Default -> Definitions.raise_bug "an intrinsic called with an omitted argument")
@@ -1403,8 +1403,8 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
               (fun operand ->
                 let operand_ty = compute_operand_type st operand in
                 if
-                  Storage.match_storage_element operand_ty <> None
-                  || Storage.match_view_element operand_ty <> None
+                  Storage.find_storage_element operand_ty <> None
+                  || Storage.find_view_element operand_ty <> None
                 then Intrinsics.Place (lower_operand_place st operand)
                 else Intrinsics.Value (lower_operand st operand))
               operands)
