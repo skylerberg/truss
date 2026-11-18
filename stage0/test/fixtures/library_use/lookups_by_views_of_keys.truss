@@ -1,0 +1,41 @@
+fn count_of(counts: Map[String, Int64], word: StringSlice) -> Int64
+  cost allocations == 0
+{
+  match counts.get(word) {
+    Some(count) => count
+    None => 0
+  }
+}
+
+fn has_name(names: Set[String], name: StringSlice) -> Bool
+  cost allocations == 0
+{
+  names.contains(name)
+}
+
+fn lists_name(names: List[String], name: StringSlice) -> Bool
+  cost allocations == 0
+{
+  names.contains(name)
+}
+
+fn counted(counts: Map[String, Int64], word: StringSlice) -> Int64
+  requires counts.contains(word)
+{
+  counts[word]
+}
+
+fn counted_or_zero(counts: Map[String, Int64], word: StringSlice) -> Int64 {
+  if counts.contains(word) {
+    counted(counts, word: word)
+  } else {
+    0
+  }
+}
+
+fn lists_its_own_text(text: String) -> Bool
+  ensures result
+{
+  let names: List[String] = [text.copy()]
+  names.contains(text.slice())
+}

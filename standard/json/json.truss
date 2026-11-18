@@ -736,11 +736,10 @@ public fn Value.as_members(self) lends Option[Map[String, Value]]
 public fn Value.get(self, name: StringSlice) lends Option[Value]
   cost time finite
 {
-  let key = name.to_string()
   match self {
     Object(members) => {
-      if members.contains(key) {
-        Some(members[key])
+      if members.contains(name) {
+        Some(members[name])
       } else {
         None
       }

@@ -269,6 +269,16 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
     | And _ | Or _ | Implies _ | Matches _ -> lower_truth builder node
     | Convert { conversion = Widen; value = converted } when is_function_expression converted ->
         Option.map fst (lower_function_expression builder node ~is_argument:false)
+    | Convert { conversion = View_to_owned as conversion; value = view } ->
+        let* value = lower_expression builder view in
+        let owner = Emitter.allocate_local builder (Lent Read) node.type_ origin in
+        Emitter.add_temporary builder owner;
+        Emitter.assign builder (Emitter.make_local_place owner)
+          (Convert { conversion; value; converts_function_expression = false })
+          origin;
+        Some
+          (Tree.Borrow
+             { place = Emitter.make_local_place owner; type_ = node.type_; mode = Read; origin })
     | Convert { conversion; value = converted } ->
         let* value = lower_expression builder converted in
         hold (Convert { conversion; value; converts_function_expression = false })

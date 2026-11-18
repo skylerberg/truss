@@ -1311,6 +1311,10 @@ and assign st (target : Mir.place) (value : Mir.rvalue) ~origin =
   match (target, value) with
   | { root = Local local; projections = [] }, Operand (Borrow { place = source; mode; _ }) ->
       alias st local (lower_place st source) ~writable:(mode = Mut)
+  | { root = Local local; projections = [] }, Convert { conversion = View_to_owned; value; _ } ->
+      Targets.lower_owner_of_view st
+        ~owner:(Lowering.ground st (lookup_local_info st local).type_)
+        ~view:(compute_operand_type st value) (lower_operand_place st value) (lower_place st target)
   | _ -> (
       let ty = compute_target_type st target value in
       let types_ty =
@@ -1424,6 +1428,8 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
   | Convert { conversion = Widen; value = inner; _ } -> write_operand st inner destination
   | Convert { conversion = To_integer | From_integer; _ } ->
       Definitions.raise_bug "a conversion that exists only in specifications"
+  | Convert { conversion = View_to_owned; _ } ->
+      Definitions.raise_bug "the owner of a view written outside its lent local"
   | To_any { value = inner; trait; evidence } ->
       let impl, type_arguments =
         Targets.resolve_impl st.context st.frame.code.substitution ~trait

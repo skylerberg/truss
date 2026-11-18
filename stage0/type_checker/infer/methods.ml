@@ -291,8 +291,8 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
               | Some expected, Returns output -> State.unify_as_hint state output expected
               | _ -> ());
               match
-                Calls.check_arguments state env value instance.signature.parameters arguments
-                  ~has_receiver:false
+                Calls.check_arguments state env value instance.signature.parameters
+                  ~declared:instance.declared.parameters arguments ~has_receiver:false
               with
               | Error error -> error
               | Ok (checked, left_out) ->
@@ -433,7 +433,9 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
             let parameter : Types.parameter_info =
               { name = "self"; mode; type_ = receiver_type; has_default = false }
             in
-            let mode = Calls.check_argument state env first.value parameter in
+            let mode =
+              Calls.check_argument state env first.value parameter ~has_generic_type:false
+            in
             ignore
               (State.decide_default_literal state ~at:(State.read_span state value.id) self_type);
             ([ { Tables.expression = first.value.id; core_argument_index = 0; mode } ], rest)
@@ -441,7 +443,8 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
     | None -> ([], arguments)
   in
   match
-    Calls.check_arguments state env value instance.signature.parameters arguments
+    Calls.check_arguments state env value instance.signature.parameters
+      ~declared:instance.declared.parameters arguments
       ~has_receiver:(Option.is_some instance.signature.receiver)
   with
   | Error error -> error
@@ -500,8 +503,8 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
           (Members.read_method_signature state.lookups capability method_)
       in
       match
-        Calls.check_arguments state env value instance.signature.parameters arguments
-          ~has_receiver:false
+        Calls.check_arguments state env value instance.signature.parameters
+          ~declared:instance.declared.parameters arguments ~has_receiver:false
       with
       | Error error -> error
       | Ok (checked, left_out) ->
@@ -694,8 +697,8 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
           | Some expected, Returns output -> State.unify_as_hint state output expected
           | _ -> ());
           match
-            Calls.check_arguments state env value instance.signature.parameters arguments
-              ~has_receiver:true
+            Calls.check_arguments state env value instance.signature.parameters
+              ~declared:instance.declared.parameters arguments ~has_receiver:true
           with
           | Error error -> error
           | Ok (checked, left_out) ->
@@ -754,8 +757,8 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
       | Error error -> Calls.check_arguments_alone state env arguments error
       | Ok () -> (
           match
-            Calls.check_arguments state env value instance.signature.parameters arguments
-              ~has_receiver:true
+            Calls.check_arguments state env value instance.signature.parameters
+              ~declared:instance.declared.parameters arguments ~has_receiver:true
           with
           | Error error -> error
           | Ok (checked, left_out) ->
