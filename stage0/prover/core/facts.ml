@@ -141,14 +141,14 @@ let close_over_binders (frame : State.frame) term =
              (Logic.conjunction (List.map (fun (_, _, premise) -> premise) outermost_first))
              term ))
 
-let add_scoped_fact (frame : State.frame) term =
+let add_binder_fact (frame : State.frame) term =
   let named = List.filter (fun name -> Logic.mentions [ name ] term) frame.bound in
   if List.for_all (fun name -> List.mem_assoc name frame.binder_facts) named then
     match List.find_opt (fun (name, _) -> List.mem name named) frame.binder_facts with
     | Some (_, facts) -> facts := term :: !facts
     | None -> ()
 
-let list_scope_facts (frame : State.frame) names =
+let list_binder_facts (frame : State.frame) names =
   List.concat_map
     (fun (name, facts) -> if List.mem name names then List.rev !facts else [])
     frame.binder_facts
@@ -193,7 +193,7 @@ let add_quantifier_facts ~binders (context : State.context) term =
 
 let add_frame_fact context (frame : State.frame) term =
   if not (Logic.mentions frame.bound term) then add_fact context term
-  else add_scoped_fact frame term
+  else add_binder_fact frame term
 
 let assume context (frame : State.frame) term =
   match term with
@@ -202,7 +202,7 @@ let assume context (frame : State.frame) term =
       let guarded = Logic.( ==> ) frame.condition term in
       if not (Logic.mentions frame.bound term || Logic.mentions frame.bound frame.condition) then
         add_fact context guarded
-      else add_scoped_fact frame guarded
+      else add_binder_fact frame guarded
 
 let locate (context : State.context) (source : State.source) origin =
   if source.key = Some context.definition.home then Obligation.Node origin else Whole_definition
@@ -330,7 +330,7 @@ let rec make_closed_obligation ?template_clause context (frame : State.frame) co
   else
     let names = List.map (fun (name, _, _) -> name) frame.binders in
     let goal =
-      match list_scope_facts frame names with
+      match list_binder_facts frame names with
       | [] -> goal
       | facts -> Logic.( ==> ) (Logic.conjunction facts) goal
     in
