@@ -319,7 +319,7 @@ fn is_safe_method(method: Method) -> Bool {
 
 fn is_trusted_origin(policy: CsrfPolicy, origin: StringSlice) -> Bool {
   for trusted in policy.trusted_origins {
-    if same_name(trusted.slice(), second: origin) {
+    if trusted.equal_ignoring_ascii_case(origin) {
       return true
     }
   }
@@ -340,7 +340,7 @@ fn is_cross_origin(request: Request, policy: CsrfPolicy) -> Bool {
   }
   match request.header("Sec-Fetch-Site") {
     Some(site) => {
-      if same_name(site, second: "same-origin") || same_name(site, second: "none") {
+      if site.equal_ignoring_ascii_case("same-origin") || site.equal_ignoring_ascii_case("none") {
         return false
       }
       return match request.header("Origin") {
@@ -358,7 +358,7 @@ fn is_cross_origin(request: Request, policy: CsrfPolicy) -> Bool {
     return false
   }
   match host_of_origin(origin), request.header("Host") {
-    Some(origin_host), Some(host) => !same_name(origin_host, second: host)
+    Some(origin_host), Some(host) => !origin_host.equal_ignoring_ascii_case(host)
     _, _ => true
   }
 }

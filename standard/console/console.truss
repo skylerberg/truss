@@ -157,6 +157,7 @@ public type Style(
   italic: Bool = false,
   underline: Bool = false,
 )
+  derives Equal
 
 internal fn Color.named_offset(self) -> UInt8
   ensures result <= 67

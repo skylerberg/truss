@@ -498,7 +498,7 @@ impl Display for AddressError {
 }
 
 public opaque type IpNetwork(address: IpAddress, prefix_length: UInt8)
-  derives Plain, Equal, Hash
+  derives Plain, Equal, Hash, Ordered
 
 internal fn mask_octet(octet: UInt8, index: UInt64, prefix_length: UInt8) -> UInt8
   requires index < 16
@@ -786,6 +786,7 @@ public fn LocalListener.accept(mut self) -> Result[LocalConnection, SystemError]
 }
 
 public type Datagram(length: UInt64, from: SocketAddress)
+  derives Equal
 
 public opaque type DatagramSocket(handle: streams::Handle, local: SocketAddress)
 
