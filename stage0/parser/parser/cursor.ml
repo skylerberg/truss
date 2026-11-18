@@ -10,7 +10,7 @@ type t = {
   mutable index : int;
   mutable nesting_depth : int;
   spans : Source.Definition_span.t Dynarray.t;
-  recoveries : Source.span list ref;
+  syntax_errors : Source.span list ref;
   mutable after_inserted_closer : bool;
   is_unterminated_interpolation : bool;
 }
@@ -44,7 +44,7 @@ let create ~diagnostics ~base tokens ~first ~stop =
     index = first;
     nesting_depth = 0;
     spans = Dynarray.create ();
-    recoveries = ref [];
+    syntax_errors = ref [];
     after_inserted_closer = false;
     is_unterminated_interpolation = false;
   }
@@ -55,7 +55,7 @@ let enter_interpolation cursor (inner : Token.interpolation) =
        ~stop:(Array.length inner.tokens - 1))
     with
     nesting_depth = cursor.nesting_depth;
-    recoveries = cursor.recoveries;
+    syntax_errors = cursor.syntax_errors;
     spans = cursor.spans;
     is_unterminated_interpolation = not inner.is_closed;
   }
@@ -81,13 +81,13 @@ let peek cursor = lookup_token cursor cursor.index
 let peek_kind cursor = (peek cursor).kind
 let peek_ahead cursor count = (lookup_token cursor (cursor.index + count)).kind
 
-let record_recovery cursor ~index (span : Source.span) =
+let record_syntax_error cursor ~index (span : Source.span) =
   let span =
     if span.start = span.stop && index > cursor.first then
       Source.make_span (min span.start (lookup_token cursor (index - 1)).span.start) span.stop
     else span
   in
-  cursor.recoveries := span :: !(cursor.recoveries)
+  cursor.syntax_errors := span :: !(cursor.syntax_errors)
 
 let advance cursor =
   if cursor.index < cursor.stop then begin
@@ -95,7 +95,7 @@ let advance cursor =
     (match token.kind with
     | Punctuation (Close _) when token.is_inserted_closer ->
         cursor.after_inserted_closer <- true;
-        record_recovery cursor ~index:cursor.index token.span
+        record_syntax_error cursor ~index:cursor.index token.span
     | _ -> ());
     cursor.index <- cursor.index + 1
   end
@@ -211,8 +211,8 @@ let has_reported cursor = Diagnostic.Collector.to_list cursor.diagnostics <> []
 
 let report cursor ?fixes code span message =
   (match code with
-  | Diagnostic.Code.Missing_body -> cursor.recoveries := span :: !(cursor.recoveries)
-  | _ -> record_recovery cursor ~index:cursor.index span);
+  | Diagnostic.Code.Missing_body -> cursor.syntax_errors := span :: !(cursor.syntax_errors)
+  | _ -> record_syntax_error cursor ~index:cursor.index span);
   Diagnostic.Collector.add cursor.diagnostics
     (Diagnostic.make ?fixes ~code:(Diagnostic.Code.Parser code) span message)
 
@@ -236,7 +236,7 @@ let fail cursor expected =
     || (token.kind = End_of_file && cursor.is_unterminated_interpolation)
   in
   (match token.kind with
-  | _ when is_reported_by_lexer -> record_recovery cursor ~index:cursor.index token.span
+  | _ when is_reported_by_lexer -> record_syntax_error cursor ~index:cursor.index token.span
   | Reserved reserved ->
       report cursor Reserved_word token.span
         (Printf.sprintf "`%s` is reserved for possible later use, and means nothing in Truss yet."
@@ -384,5 +384,6 @@ let parse_lines cursor ~parse_item ~recover =
 let collect_positions cursor : Syntax.positions =
   {
     spans = Dynarray.to_array cursor.spans;
-    recovered = List.sort_uniq compare (List.map (make_definition_span cursor) !(cursor.recoveries));
+    syntax_errors =
+      List.sort_uniq compare (List.map (make_definition_span cursor) !(cursor.syntax_errors));
   }

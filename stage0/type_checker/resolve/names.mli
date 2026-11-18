@@ -62,7 +62,7 @@ type lookups = {
   read_definition : key -> Syntax.definition;
   read_text : key -> string;
   read_spans : key -> Source.Definition_span.t array;
-  list_recovered : key -> Source.Definition_span.t list;
+  list_syntax_errors : key -> Source.Definition_span.t list;
   read_place : key -> place;
   find_container : key -> key option;
   list_contained : key -> key list;
@@ -100,7 +100,7 @@ val find_law_parameters : lookups -> Path.t -> string -> string list option
 
 type generic_kind = Type_kind | Value_kind
 
-val find_recovery_report : lookups -> key -> Parts.part -> Diagnostic.reported option
+val find_syntax_error : lookups -> key -> Parts.part -> Diagnostic.reported option
 val is_broken : lookups -> key -> Parts.part -> bool
 val find_generics : lookups -> Path.t -> (string * generic_kind) list option
 

@@ -374,7 +374,7 @@ let () =
       expect_one_diagnostic ~others
         "use app::shapes\n\nfn f() -> Int64 {\n  shapes::missing::area()\n}\n"
         "resolve.unknown_module");
-  Harness.test "a file where the parser recovered reports no unused import" (fun () ->
+  Harness.test "a file with a syntax error reports no unused import" (fun () ->
       let packages =
         setup
           (others
