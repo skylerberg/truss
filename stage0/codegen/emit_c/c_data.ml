@@ -1,9 +1,6 @@
-let allocate_static_name (context : C_types.context) =
-  let name = Printf.sprintf "%s_static_%d" context.prefix (List.length context.statics) in
-  name
-
-let rec render_initializer context ty (value : Lowered.static_value) : string option =
-  let layout = C_types.compute_layout context ty in
+let rec render_initializer (emission : Emission.t) ty (value : Lowered.static_value) : string option
+    =
+  let layout = C_types.compute_layout emission.types ty in
   let render_fields (fields : Memory_layout.field list)
       (values : (string * Lowered.static_value) list) prefix =
     String.concat ", "
@@ -13,52 +10,53 @@ let rec render_initializer context ty (value : Lowered.static_value) : string op
            | Some value, Typed field_ty ->
                Option.map
                  (Printf.sprintf "%s.f_%s = %s" prefix field.name)
-                 (render_initializer context field_ty value)
+                 (render_initializer emission field_ty value)
            | _ -> None)
          fields)
   in
   let render_block variant fields =
     let key = C_types.Block (ty, variant) in
-    C_types.register context key;
+    C_types.register emission.types key;
     let block_fields =
-      match (Memory_layout.lay_out_block context.env ty variant).form with
+      match (Memory_layout.lay_out_block emission.types.env ty variant).form with
       | Struct fields -> fields
       | _ -> []
     in
     let block_value = render_fields block_fields fields "" in
-    let name = allocate_static_name context in
-    context.statics <-
-      Printf.sprintf "static const %s %s = { %s };\n" (C_types.render_key_name key) name block_value
-      :: context.statics;
+    let name =
+      Emission.add_static emission (fun name ->
+          Printf.sprintf "static const %s %s = { %s };\n" (C_types.render_key_name key) name
+            block_value)
+    in
     Printf.sprintf "((%s *)&%s)" (C_types.render_key_name key) name
   in
   match (layout.form, value) with
   | Zero_size, _ -> None
   | _, Static_storage { element; elements } ->
-      let element_c = C_types.render_value_type context element in
+      let element_c = C_types.render_value_type emission.types element in
       let count = List.length elements in
       let buffer =
-        if count = 0 || Memory_layout.has_zero_size context.env element then
-          "((void *)" ^ C_values.render_bytes_name context "" ^ ")"
+        if count = 0 || Memory_layout.has_zero_size emission.types.env element then
+          "((void *)" ^ Emission.render_bytes_name emission "" ^ ")"
         else begin
-          let values = List.filter_map (render_initializer context element) elements in
-          let name = allocate_static_name context in
-          context.statics <-
-            Printf.sprintf "static const %s %s[%d] = { %s };\n" element_c name count
-              (String.concat ", " values)
-            :: context.statics;
+          let values = List.filter_map (render_initializer emission element) elements in
+          let name =
+            Emission.add_static emission (fun name ->
+                Printf.sprintf "static const %s %s[%d] = { %s };\n" element_c name count
+                  (String.concat ", " values))
+          in
           Printf.sprintf "((%s *)%s)" element_c name
         end
       in
       Some
         (Printf.sprintf "{ .f_%s = %s, .f_%s = %d, .f_%s = %d }" Storage.buffer_field buffer
            Storage.length_field count Storage.capacity_field count)
-  | Scalar _, Static_scalar constant -> Some (fst (C_values.render_constant context constant))
+  | Scalar _, Static_scalar constant -> Some (fst (C_values.render_constant emission constant))
   | Struct fields, Static_record values -> Some ("{ " ^ render_fields fields values "" ^ " }")
   | Array { element; _ }, Static_array values ->
       Some
         ("{ .items = { "
-        ^ String.concat ", " (List.filter_map (render_initializer context element) values)
+        ^ String.concat ", " (List.filter_map (render_initializer emission element) values)
         ^ " } }")
   | Tag_only { variants; _ }, Static_variant (name, _) -> (
       match List.find_index (String.equal name) variants with
@@ -93,7 +91,7 @@ let rec render_initializer context ty (value : Lowered.static_value) : string op
             match List.assoc_opt name niche_values with
             | None -> C_runtime.raise_bug "no variant %s" name
             | Some value -> (
-                let stored = C_values.render_niche_value context niche value in
+                let stored = C_values.render_niche_value emission niche value in
                 match niche.path with
                 | [] -> Some stored
                 | path -> Some (Printf.sprintf "{ %s = %s }" (C_values.render_path "" path) stored))
@@ -102,13 +100,13 @@ let rec render_initializer context ty (value : Lowered.static_value) : string op
         end
   | _ -> C_runtime.raise_bug "static data that does not fit %s" (Ground.to_string ty)
 
-let render_table context (table : Lowered.table) =
+let render_table (emission : Emission.t) (table : Lowered.table) =
   let entries =
     List.map
       (fun (item, signature) ->
         let symbol = Mangling.make_symbol item in
-        C_values.declare_prototype context symbol
-          (C_values.render_prototype context "" symbol ~linkage:External signature ^ ";\n");
+        Emission.declare_prototype emission symbol
+          (C_values.render_prototype emission "" symbol ~linkage:External signature ^ ";\n");
         Printf.sprintf "(const void *)&%s" symbol)
       table.entries
   in
@@ -117,9 +115,11 @@ let render_table context (table : Lowered.table) =
     (max 1 (List.length entries))
     (if entries = [] then "0" else String.concat ", " entries)
 
-let render_data context (data : Lowered.data) =
+let render_data (emission : Emission.t) (data : Lowered.data) =
   let symbol = Mangling.make_symbol data.data_item in
-  match render_initializer context data.ty data.value with
+  match render_initializer emission data.ty data.value with
   | None -> ""
   | Some value ->
-      Printf.sprintf "const %s %s = %s;\n" (C_types.render_value_type context data.ty) symbol value
+      Printf.sprintf "const %s %s = %s;\n"
+        (C_types.render_value_type emission.types data.ty)
+        symbol value

@@ -126,28 +126,28 @@ module Ir_builder = Ir_builder
 let make_symbol = Mangling.make_symbol
 
 let make_data_fragment env (data : Lowered.data) =
-  let context = C_types.make_context env (Mangling.make_symbol data.data_item) in
-  let definition = C_data.render_data context data in
-  Fragment.make context ~item:data.data_item ~kind:Static_data ~functions:[] ~definition
-    ~references:(C_types.list_referenced_items context ~referrer:data.data_item)
+  let emission = Emission.create env ~prefix:(Mangling.make_symbol data.data_item) in
+  let definition = C_data.render_data emission data in
+  Fragment.make emission ~item:data.data_item ~kind:Static_data ~functions:[] ~definition
+    ~references:(Emission.list_referenced_items emission ~referrer:data.data_item)
 
 let make_table_fragment env (table : Lowered.table) =
-  let context = C_types.make_context env (Mangling.make_symbol table.table_item) in
-  let definition = C_data.render_table context table in
-  Fragment.make context ~item:table.table_item ~kind:(Table_entries table.capability) ~functions:[]
+  let emission = Emission.create env ~prefix:(Mangling.make_symbol table.table_item) in
+  let definition = C_data.render_table emission table in
+  Fragment.make emission ~item:table.table_item ~kind:(Table_entries table.capability) ~functions:[]
     ~definition ~references:(List.map fst table.entries)
 
 let render_file env profile (fragments : (fragment * linkage) list) =
-  let context = C_types.make_context env "" in
+  let types = C_types.create env in
   let local_types = Key_table.create 16 in
   List.iter
     (fun ((fragment : fragment), _) ->
-      List.iter (C_types.register context) fragment.types;
+      List.iter (C_types.register types) fragment.types;
       List.iter
         (fun (key, (defined : C_types.defined)) ->
           Key_table.replace local_types key defined;
-          C_types.register context key;
-          List.iter (C_types.register context) defined.references)
+          C_types.register types key;
+          List.iter (C_types.register types) defined.references)
         fragment.environments)
     fragments;
   let render_linkage = function Internal -> "static inline " | External -> "" in
@@ -187,11 +187,11 @@ let render_file env profile (fragments : (fragment * linkage) list) =
   let define_key key =
     match Key_table.find_opt local_types key with
     | Some defined -> defined
-    | None -> C_types.define context key
+    | None -> C_types.define types key
   in
   let rec close () =
     let pending =
-      List.filter (fun key -> not (C_types.Keys.mem key !definitions)) (List.rev context.order)
+      List.filter (fun key -> not (C_types.Keys.mem key !definitions)) (List.rev types.order)
     in
     if pending <> [] then begin
       List.iter
@@ -201,7 +201,7 @@ let render_file env profile (fragments : (fragment * linkage) list) =
     end
   in
   close ();
-  let keys = List.rev context.order in
+  let keys = List.rev types.order in
   let read_defined key = C_types.Keys.find key !definitions in
   let buffer = Buffer.create 4096 in
   Buffer.add_string buffer C_runtime.runtime_declarations;
@@ -217,7 +217,7 @@ let render_file env profile (fragments : (fragment * linkage) list) =
          (void)(length), (void)(site), (void)(trace), __builtin_unreachable())\n");
   let helpers_used =
     List.sort_uniq String.compare
-      (context.helpers_used
+      (types.helpers_used
       @ List.concat_map (fun ((fragment : fragment), _) -> fragment.helpers) fragments)
   in
   List.iter
