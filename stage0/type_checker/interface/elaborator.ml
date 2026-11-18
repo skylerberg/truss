@@ -109,12 +109,6 @@ let resolve_parameter context (name : Syntax.name) =
       match Parameter_table.find_opt context.broken_parameters parameter with
       | Some report -> Error report
       | None -> Ok parameter)
-  | Some (Capability_parameter _) ->
-      Error
-        (record_diagnostic context.diagnostics Unknown_associated_type context.spans.(name.id)
-           (Printf.sprintf
-              "`%s` is a capability parameter, which has no associated types or capability sets."
-              name.text))
   | Some (Unknown report) -> Error report
   | _ -> raise_bug "`%s` is not resolved as a generic parameter" name.text
 
@@ -292,7 +286,7 @@ and check_arity context (path : Syntax.path_type) shown expected :
                      report_argument_kind
                        (Printf.sprintf "`%s`'s parameter `%s` is a `UInt64` value, not a type."
                           shown name)
-                 | (Resolve.Names.Type_kind | Resolve.Names.Capability_kind), true ->
+                 | Resolve.Names.Type_kind, true ->
                      report_argument_kind
                        (Printf.sprintf "`%s`'s parameter `%s` is a type, not a value." shown name)
                  | _ -> [])
@@ -310,9 +304,6 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
       match Parameter_table.find_opt context.broken_parameters parameter with
       | Some report -> Types.Error report
       | None -> Types.Parameter parameter)
-  | Some (Capability_parameter _) ->
-      report_error_type context Not_a_type context.spans.(path.id)
-        (Printf.sprintf "`%s` is a capability parameter, not a type." shown)
   | Some (Definition (Type, definition_path)) -> (
       match Intrinsic.find_builtin definition_path with
       | Some Never -> Types.Never
@@ -364,7 +355,7 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
       Error
         (record_diagnostic context.diagnostics Not_a_trait context.spans.(path.id)
            (Printf.sprintf "`%s` is not a trait." shown))
-  | Some (Type_parameter _ | Capability_parameter _) ->
+  | Some (Type_parameter _) ->
       Error
         (record_diagnostic context.diagnostics Not_a_trait context.spans.(path.id)
            (Printf.sprintf "`%s` is a generic parameter, not a trait." shown))
@@ -379,12 +370,12 @@ and elaborate_trait_bounds context paths =
 and elaborate_capability_path context (path : Syntax.path_type) : Types.capability list =
   let shown = show_path path.path in
   match find_target context path.path.last with
-  | Some (Capability_parameter parameter) -> [ Types.Capability_parameter parameter ]
   | Some (Type_parameter _) ->
       report_error_capability context Not_a_capability context.spans.(path.id)
         (Printf.sprintf
-           "`%s` is a type parameter. A capability parameter is declared `capability %s`." shown
-           shown)
+           "`%s` is a type parameter, not a capability. A capability parameter is written `generic \
+            %s` at each use."
+           shown shown)
   | Some (Definition (Capability, path_)) -> [ Types.Capability path_ ]
   | Some (Definition _) ->
       report_error_capability context Not_a_capability context.spans.(path.id)
@@ -405,6 +396,11 @@ and find_capability_projection context base traits (key : Syntax.name) =
 and elaborate_capability context (written : Syntax.capability_reference) : Types.capability list =
   match written.kind with
   | Capability_path path -> elaborate_capability_path context path
+  | Generic_capability name -> (
+      match find_target context name with
+      | Some (Capability_parameter parameter) -> [ Types.Capability_parameter parameter ]
+      | Some (Unknown report) -> [ Types.Capability_error report ]
+      | _ -> raise_bug "`generic %s` is not resolved as a capability parameter" name.text)
   | Self_capabilities key -> (
       match List.assoc_opt key.text context.self_capabilities with
       | Some set -> (set :> Types.capability list)
@@ -553,7 +549,6 @@ let elaborate_generics context owner (written : Syntax.generic_parameter list) :
         match generic.kind with
         | Type_parameter (name, bounds) -> Some (make_parameter name, `Type bounds)
         | Value_parameter (name, type_) -> Some (make_parameter name, `Value type_)
-        | Capability_parameter name -> Some (make_parameter name, `Capability)
         | Generic_error -> None)
       written
   in
@@ -565,8 +560,7 @@ let elaborate_generics context owner (written : Syntax.generic_parameter list) :
           Parameter_table.replace context.bounds parameter bounds;
           Option.iter (Parameter_table.replace context.broken_parameters parameter) broken;
           { Types.generic = parameter; kind = Type_generic bounds }
-      | `Value _ -> { Types.generic = parameter; kind = Value_generic }
-      | `Capability -> { Types.generic = parameter; kind = Capability_generic })
+      | `Value _ -> { Types.generic = parameter; kind = Value_generic })
     declared
 
 let mentions_specification_only_type type_ =
@@ -685,6 +679,14 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
   let result_type = Types.extract_result_type output in
   {
     generics = generics_;
+    capability_parameters =
+      Array.fold_left
+        (fun listed -> function
+          | Some (Resolve.Capability_parameter (parameter : Types.parameter))
+            when Path.equal parameter.owner owner && not (List.mem parameter listed) ->
+              listed @ [ parameter ]
+          | _ -> listed)
+        [] context.resolved.names;
     receiver;
     parameters;
     output;

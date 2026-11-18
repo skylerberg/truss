@@ -1,5 +1,5 @@
-fn repeat[capability Mine](action: (fn() -> Instant uses Mine), again: Bool) -> Instant
-  uses Mine
+fn repeat(action: (fn() -> Instant uses generic Mine), again: Bool) -> Instant
+  uses generic Mine
 {
   if again {
     repeat(action, again: false)

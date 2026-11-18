@@ -280,12 +280,12 @@ public trait Iterable {
     requires position < self.count()
     cost time finite
 
-  fn fold[Total, capability Granted](
+  fn fold[Total](
     self,
     initial: own Total,
-    combine: (fn(own Total, Self.Element) -> Total uses Granted),
+    combine: (fn(own Total, Self.Element) -> Total uses generic Granted),
   ) -> Total
-    uses Granted
+    uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(combine)))
   {
     var total = own initial
@@ -295,8 +295,8 @@ public trait Iterable {
     total
   }
 
-  fn map[Output, capability Granted](self, transform: (fn(Self.Element) -> Output uses Granted)) -> List[Output]
-    uses Granted
+  fn map[Output](self, transform: (fn(Self.Element) -> Output uses generic Granted)) -> List[Output]
+    uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
     let count = self.count()
@@ -310,11 +310,11 @@ public trait Iterable {
     List.from_storage(own outputs)
   }
 
-  fn filter_map[Output, capability Granted](
+  fn filter_map[Output](
     self,
-    transform: (fn(Self.Element) -> Option[Output] uses Granted),
+    transform: (fn(Self.Element) -> Option[Output] uses generic Granted),
   ) -> List[Output]
-    uses Granted
+    uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
     let count = self.count()
@@ -347,8 +347,8 @@ public trait Iterable {
     results
   }
 
-  fn count_where[capability Granted](self, predicate: (fn(Self.Element) -> Bool uses Granted)) -> UInt64
-    uses Granted
+  fn count_where(self, predicate: (fn(Self.Element) -> Bool uses generic Granted)) -> UInt64
+    uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(predicate)))
   {
     var count: UInt64 = 0
@@ -360,8 +360,8 @@ public trait Iterable {
     count
   }
 
-  fn find[capability Granted](self, predicate: (fn(Self.Element) -> Bool uses Granted)) lends Option[Self.Element]
-    uses Granted
+  fn find(self, predicate: (fn(Self.Element) -> Bool uses generic Granted)) lends Option[Self.Element]
+    uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(predicate)))
   {
     for item in self {
@@ -413,12 +413,12 @@ public trait Cursor {
     last
   }
 
-  fn fold[Total, capability Granted](
+  fn fold[Total](
     own self,
     initial: own Total,
-    combine: (fn(own Total, own Self.Element) -> Total uses Granted),
+    combine: (fn(own Total, own Self.Element) -> Total uses generic Granted),
   ) -> Total
-    uses Self.Uses, Granted
+    uses Self.Uses, generic Granted
   {
     var cursor = own self
     var total = own initial

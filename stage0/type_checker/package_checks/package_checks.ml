@@ -497,7 +497,7 @@ let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
   let edges = ref [] in
   Core_walk.walk_definition
     (Core_walk.make_callee_visitor (function
-      | Function { path; type_arguments }
+      | Function { path; instantiation = { type_arguments; _ } }
         when Path.locate_package path = key.module_.package && type_arguments <> [] ->
           edges := (path, List.exists grows type_arguments) :: !edges
       | _ -> ()))

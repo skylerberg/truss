@@ -21,7 +21,7 @@ let record_conversion (state : State.state) (value : Syntax.expression) (collect
               name;
               receiver = Static;
               self_type = collection;
-              type_arguments = [];
+              instantiation = Types.no_instantiation;
               evidence = Built_in;
             };
         arguments = [];
@@ -67,7 +67,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
             name;
             receiver;
             self_type;
-            type_arguments = [];
+            instantiation = Types.no_instantiation;
             evidence = State.convert_evidence evidence;
           };
       arguments =

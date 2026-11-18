@@ -2,9 +2,9 @@ fn forever() {
   while true {}
 }
 
-fn run[capability Mine](work: (fn() uses Mine))
-  uses Mine
+fn run(work: (fn() uses generic Mine))
+  uses generic Mine
 {
-  let again: (fn() uses Mine) = forever
+  let again: (fn() uses generic Mine) = forever
   again()
 }

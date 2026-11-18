@@ -222,14 +222,20 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                state."
           else begin
             let written_generics = Types.list_generic_arguments written.generics in
+            let capability_renaming =
+              Types.make_capability_substitution declared.capability_parameters
+                (Types.list_capability_arguments written.capability_parameters)
+            in
             let expected =
               Impls.normalize_signature_in_impl state.lookups ~list_bounds ~missing_associated
                 implementation
-                (if List.length declared.generics = List.length written_generics then
-                   Types.substitute_signature
-                     (Types.make_substitution declared.generics written_generics)
-                     declared
-                 else declared)
+                (Types.substitute_signature
+                   (if List.length declared.generics = List.length written_generics then
+                      Types.combine_substitutions
+                        (Types.make_substitution declared.generics written_generics)
+                        capability_renaming
+                    else capability_renaming)
+                   declared)
             in
             let expected =
               if trait.is_capability then { expected with receiver = written.receiver }
@@ -262,9 +268,17 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                      | left, right -> left = right)
                    expected.generics written.generics
             in
+            let list_names (parameters : Types.parameter list) =
+              List.sort String.compare
+                (List.map (fun (parameter : Types.parameter) -> parameter.name) parameters)
+            in
+            let capability_parameters_agree =
+              list_names declared.capability_parameters = list_names written.capability_parameters
+            in
             if
               not
                 (parameters_agree && receivers_agree && generics_agree
+               && capability_parameters_agree
                 && results_agree expected.output written.output)
             then
               Checking.report state Signature_mismatch state.spans.(name.id)

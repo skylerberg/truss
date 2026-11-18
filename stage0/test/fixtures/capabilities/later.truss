@@ -1,4 +1,4 @@
-fn later[capability Granted](action: (fn() -> Instant uses Granted)) -> (fn() -> Instant uses Granted) {
+fn later(action: (fn() -> Instant uses generic Granted)) -> (fn() -> Instant uses generic Granted) {
   action
 }
 

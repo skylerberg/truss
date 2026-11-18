@@ -385,7 +385,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                             name = "at";
                             receiver = Read;
                             self_type = base_type;
-                            type_arguments = [];
+                            instantiation = Types.no_instantiation;
                             evidence = State.convert_evidence evidence;
                           };
                       arguments =

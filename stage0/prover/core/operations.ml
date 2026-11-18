@@ -149,7 +149,8 @@ let find_concrete_impl (context : State.context) (trait : Types.trait_reference)
                 List.map (fun (generic : Types.generic) -> generic.generic) interface.impl_generics
               in
               match
-                Option.bind (Interface.Impls.match_type ~variables [] interface.for_type ty)
+                Option.bind
+                  (Interface.Impls.match_type ~variables Types.no_substitution interface.for_type ty)
                   (fun arguments ->
                     Interface.Impls.match_arguments ~variables arguments
                       interface.implements.trait_arguments trait.trait_arguments)

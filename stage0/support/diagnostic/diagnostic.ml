@@ -109,6 +109,7 @@ module Code = struct
     | Not_a_constant
     | Alternative_bindings
     | Not_a_generic_parameter
+    | Unconstrained_capability_parameter
     | Null
 
   type types =
@@ -155,7 +156,6 @@ module Code = struct
     | Not_a_type
     | Not_a_trait
     | Not_a_capability
-    | Misplaced_capability_parameter
     | Arity
     | Argument_kind
     | Unsatisfied_bound
@@ -368,6 +368,7 @@ module Code = struct
     | Not_a_constant -> "not_a_constant"
     | Alternative_bindings -> "alternative_bindings"
     | Not_a_generic_parameter -> "not_a_generic_parameter"
+    | Unconstrained_capability_parameter -> "unconstrained_capability_parameter"
     | Null -> "null"
 
   let name_types_code code =
@@ -415,7 +416,6 @@ module Code = struct
     | Not_a_type -> "not_a_type"
     | Not_a_trait -> "not_a_trait"
     | Not_a_capability -> "not_a_capability"
-    | Misplaced_capability_parameter -> "misplaced_capability_parameter"
     | Arity -> "arity"
     | Argument_kind -> "argument_kind"
     | Unsatisfied_bound -> "unsatisfied_bound"

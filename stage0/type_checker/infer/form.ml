@@ -16,10 +16,10 @@ let convert_evidence : Tables.evidence -> Core.evidence = function
 
 let convert_callee (callee : Tables.callee) : Core.callee =
   match callee with
-  | Function { path; type_arguments } -> Function { path; type_arguments }
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence = inferred } ->
+  | Function { path; instantiation } -> Function { path; instantiation }
+  | Trait_method { trait; name; receiver; self_type; instantiation; evidence = inferred } ->
       Trait_method
-        { trait; name; receiver; self_type; type_arguments; evidence = convert_evidence inferred }
+        { trait; name; receiver; self_type; instantiation; evidence = convert_evidence inferred }
   | Capability_method { capability; name } -> Capability_method { capability; name }
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
   | Constructor _ | Indirect | Built_in_operator -> State.raise_bug "this callee has no core callee"
@@ -175,7 +175,7 @@ let read_type (state : State.state) (value : Syntax.expression) =
 
 let build_function_value (state : State.state) (value : Syntax.expression) : Core.kind =
   match state.tables.resolutions.(value.id) with
-  | Some (Global { path; type_arguments }) -> Function_value { path; type_arguments }
+  | Some (Global { path; instantiation }) -> Function_value { path; instantiation }
   | _ ->
       State.raise_bug "`%s` is not recorded as a function"
         (State.quote_span state (State.read_span state value.id))
@@ -323,7 +323,7 @@ let build_text_builder_callee name receiver : Core.callee =
   Function
     {
       path = Method { owner = Well_known.make_path Text_builder; name; receiver };
-      type_arguments = [];
+      instantiation = Types.no_instantiation;
     }
 
 let read_template (state : State.state) (literal : Syntax.string_literal) =
@@ -457,7 +457,8 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
               path =
                 Method
                   { owner = Well_known.make_path List; name = "from_storage"; receiver = Static };
-              type_arguments = [ Types.Type element ];
+              instantiation =
+                { Types.no_instantiation with type_arguments = [ Types.Type element ] };
             })
        ~arguments:[ Passed { mode = Own; value = Value storage } ]
        ~lends:None)
@@ -544,7 +545,7 @@ let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant
                   name = "equal";
                   receiver = Read;
                   self_type = type_;
-                  type_arguments = [];
+                  instantiation = Types.no_instantiation;
                   evidence = convert_evidence (State.convert_evidence implementation);
                 };
           }
@@ -905,7 +906,7 @@ let build_cursor_next state (cursor : Types.ty) : Core.callee =
           name = "next";
           receiver = Mut;
           self_type = cursor;
-          type_arguments = [];
+          instantiation = Types.no_instantiation;
           evidence = convert_evidence (State.convert_evidence implementation);
         }
   | None ->

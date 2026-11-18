@@ -41,7 +41,7 @@ let derive_interface lookups ~type_ ~trait =
             match generic.kind with
             | Type_generic bounds ->
                 { generic with kind = Type_generic (bounds @ [ trait_reference ]) }
-            | Value_generic | Capability_generic -> generic)
+            | Value_generic -> generic)
           type_interface.type_generics
       in
       let for_type =
@@ -113,11 +113,11 @@ let is_open_value = function
 let rec match_type ~variables (substitution : Types.substitution) pattern type_ =
   match (pattern, type_) with
   | Types.Parameter parameter, _ when List.mem parameter variables -> (
-      match List.assoc_opt parameter substitution with
+      match Types.find_argument parameter substitution with
       | Some (Types.Type bound) ->
           if Types.equal bound type_ || Types.is_open_type type_ then Some substitution else None
-      | Some (Types.Value _ | Types.Capabilities _) -> None
-      | None -> Some ((parameter, Types.Type type_) :: substitution))
+      | Some (Types.Value _) -> None
+      | None -> Some (Types.bind_argument parameter (Types.Type type_) substitution))
   | _, argument_type when Types.is_open_type argument_type -> Some substitution
   | Types.Named left, Types.Named right when Path.equal left.path right.path ->
       match_arguments ~variables substitution left.arguments right.arguments
@@ -136,9 +136,9 @@ and match_arguments ~variables substitution patterns arguments =
                 match_type ~variables substitution pattern argument
             | Types.Value (Types.Value_parameter parameter), Types.Value value
               when List.mem parameter variables -> (
-                match List.assoc_opt parameter substitution with
+                match Types.find_argument parameter substitution with
                 | Some (Types.Value bound) -> if bound = value then Some substitution else None
-                | _ -> Some ((parameter, Types.Value value) :: substitution))
+                | _ -> Some (Types.bind_argument parameter (Types.Value value) substitution))
             | Types.Value left, Types.Value right -> (
                 if left = right then Some substitution
                 else match right with Types.Value_variable _ -> Some substitution | _ -> None)
@@ -172,7 +172,7 @@ let classify_through_any lookups ~(trait : Path.t) (method_ : Types.trait_method
   in
   let signature = Definition.read_method_signature lookups ~owner:trait method_ in
   let result = Types.extract_result_type signature.output in
-  if signature.generics <> [] then Has_generics
+  if signature.generics <> [] || signature.capability_parameters <> [] then Has_generics
   else if
     List.exists (fun (info : Types.parameter_info) -> names_self info.type_) signature.parameters
     || names_self result
@@ -186,7 +186,7 @@ let list_no_bounds _ = []
 let list_required_bounds (generics : Types.generic list) (substitution : Types.substitution) =
   List.concat_map
     (fun (generic : Types.generic) ->
-      match (generic.kind, List.assoc_opt generic.generic substitution) with
+      match (generic.kind, Types.find_argument generic.generic substitution) with
       | Type_generic generic_bounds, Some (Types.Type argument) ->
           List.map
             (fun bound -> (argument, Types.substitute_trait substitution bound))
@@ -263,7 +263,7 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
                 let variables =
                   List.map (fun (generic : Types.generic) -> generic.generic) impl.impl_generics
                 in
-                match match_type ~variables [] impl.for_type type_ with
+                match match_type ~variables Types.no_substitution impl.for_type type_ with
                 | None -> None
                 | Some substitution -> (
                     match

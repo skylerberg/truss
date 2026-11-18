@@ -282,7 +282,7 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
                       name = "assign";
                       receiver = Mut;
                       self_type = base_type;
-                      type_arguments = [];
+                      instantiation = Types.no_instantiation;
                       evidence = State.convert_evidence evidence_source;
                     };
                 arguments =

@@ -843,15 +843,26 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         | other -> other)
       type_arguments
   in
+  let list_capability_arguments (instantiation : Types.instantiation) =
+    List.map
+      (fun (name, argument) -> (name, Types.substitute_capabilities frame.substitution argument))
+      instantiation.capability_arguments
+  in
+  let read_signature path = Interface.Impls.read_signature context.lookups.interface path in
   let list_generics path =
-    match Interface.Impls.read_signature context.lookups.interface path with
+    match read_signature path with
     | Some (signature : Types.signature) ->
         List.map (fun (generic : Types.generic) -> generic.generic) signature.generics
     | None -> []
   in
+  let list_capability_parameters path =
+    match read_signature path with
+    | Some (signature : Types.signature) -> signature.capability_parameters
+    | None -> []
+  in
   let pair parameters arguments ~fixed =
     let parameters =
-      List.filter (fun parameter -> not (List.mem_assoc parameter fixed)) parameters
+      List.filter (fun parameter -> Option.is_none (Types.find_argument parameter fixed)) parameters
     in
     let rec pair_remaining parameters arguments =
       match (parameters, arguments) with
@@ -859,7 +870,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           (parameter, argument) :: pair_remaining parameters arguments
       | _ -> []
     in
-    fixed @ pair_remaining parameters arguments
+    Types.combine_substitutions fixed
+      { Types.no_substitution with arguments = pair_remaining parameters arguments }
   in
   if context.terminates && frame.makes_obligations then
     List.iter
@@ -878,7 +890,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       (Mir.Call_edges.list_impls_used context.lookups.interface
          (Path.locate_package context.current)
          invocation.callee);
-  let with_contract ?(substitution_of = fun _ -> []) ?(instance = []) path = function
+  let with_contract ?(substitution_of = fun _ -> Types.no_substitution) ?(instance = []) path =
+    function
     | Some contract ->
         Some
           (call_contract ~lent_final:leave_lent context frame site invocation path contract values
@@ -892,15 +905,21 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         Some (frame, Facts.arrive context frame "result" result_type)
   in
   match invocation.callee with
-  | Function { path; type_arguments } ->
-      let arguments = list_arguments type_arguments in
-      let substitution = pair (list_generics path) arguments ~fixed:[] in
+  | Function { path; instantiation } ->
+      let arguments = list_arguments instantiation.type_arguments in
+      let substitution =
+        Types.combine_substitutions
+          (pair (list_generics path) arguments ~fixed:Types.no_substitution)
+          (Types.make_capability_substitution (list_capability_parameters path)
+             (list_capability_arguments instantiation))
+      in
       with_contract
         ~substitution_of:(fun _ -> substitution)
         ~instance:arguments path
         (Contracts.find_function_contract context.lookups path)
-  | Trait_method { trait; name; receiver; evidence; self_type; type_arguments } -> (
-      let arguments = list_arguments type_arguments in
+  | Trait_method { trait; name; receiver; evidence; self_type; instantiation } -> (
+      let arguments = list_arguments instantiation.type_arguments in
+      let capability_arguments = list_capability_arguments instantiation in
       let self_type = Facts.substitute_type context frame self_type in
       let trait = { trait with trait_arguments = list_arguments trait.trait_arguments } in
       let evidence : Core.evidence =
@@ -943,20 +962,32 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           | _ -> ());
           let trait_path = Path.Method { owner = trait.trait; name; receiver } in
           let trait_substitution =
-            pair (list_generics trait_path) arguments
-              ~fixed:(Contracts.make_trait_substitution context.lookups trait self_type)
+            Types.combine_substitutions
+              (pair (list_generics trait_path) arguments
+                 ~fixed:(Contracts.make_trait_substitution context.lookups trait self_type))
+              (Types.make_capability_substitution
+                 (list_capability_parameters trait_path)
+                 capability_arguments)
           in
           let path, declared_substitution =
             match evidence with
             | Impl { impl; arguments = impl_arguments } ->
                 let impl_substitution =
-                  List.map
-                    (fun (parameter, argument) ->
-                      (parameter, Types.substitute_argument frame.substitution argument))
-                    impl_arguments
+                  {
+                    impl_arguments with
+                    arguments =
+                      List.map
+                        (fun (parameter, argument) ->
+                          (parameter, Types.substitute_argument frame.substitution argument))
+                        impl_arguments.arguments;
+                  }
                 in
                 let path = Path.Method { owner = impl; name; receiver } in
-                (path, pair (list_generics path) arguments ~fixed:impl_substitution)
+                ( path,
+                  Types.combine_substitutions
+                    (pair (list_generics path) arguments ~fixed:impl_substitution)
+                    (Types.make_capability_substitution (list_capability_parameters path)
+                       capability_arguments) )
             | _ -> (trait_path, trait_substitution)
           in
           let compute_substitution (part : State.part) =

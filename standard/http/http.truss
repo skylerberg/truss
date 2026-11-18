@@ -1197,11 +1197,11 @@ fn collect_response(outbound: tasks::Channel[flow::Outbound]) -> Response
   Response(status: received, headers: own headers, body: own body)
 }
 
-public fn respond[capability Granted](
-  handler: (fn(own Request, mut Responder) uses Granted),
+public fn respond(
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   request: own Request,
 ) -> Response
-  uses Tasks, Granted
+  uses Tasks, generic Granted
 {
   let outbound = tasks::Channel[flow::Outbound].new(capacity: 2)
   let is_head = request.method == Method.Head
@@ -1399,14 +1399,14 @@ fn read_head_within[Stream: streams::Duplex](connection: Stream, inbox: mut two:
 type Handled = Completed | Disconnected | TimedOut
   derives Equal
 
-fn run_handler[capability Granted](
-  handler: (fn(own Request, mut Responder) uses Granted),
+fn run_handler(
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   request: own Request,
   responder: mut Responder,
   gone: tasks::Channel[Unit],
   seconds: Int64,
 ) -> Handled
-  uses Tasks, Clock, Granted
+  uses Tasks, Clock, generic Granted
 {
   concurrent {
     {
@@ -1529,16 +1529,16 @@ fn await_request[Stream: streams::Duplex](connection: Stream, inbox: mut two::In
   }
 }
 
-fn serve_one[Stream: streams::Duplex, capability Granted](
+fn serve_one[Stream: streams::Duplex](
   connection: Stream,
   inbox: own two::Inbox,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   stopping: tasks::Channel[Unit],
   peer: Option[network::SocketAddress],
   certificates: Slice[x509::Certificate],
 )
-  uses Tasks, Handles, Clock, Granted
+  uses Tasks, Handles, Clock, generic Granted
 {
   var unread = own inbox
   while true {
@@ -1712,14 +1712,14 @@ fn arrived_of(fields: Slice[hpack::Field]) -> Result[Arrived, Status] {
   Ok(Arrived(method: Method.from_name(method_name.slice()), target: own target, headers: own headers))
 }
 
-fn answer_arrival[capability Granted](
+fn answer_arrival(
   arrival: own two::Arrival,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   peer: Option[network::SocketAddress],
   certificates: Slice[x509::Certificate],
 )
-  uses Tasks, Clock, Granted
+  uses Tasks, Clock, generic Granted
 {
   let limits = options.limits
   let stream = arrival.stream
@@ -1755,13 +1755,13 @@ fn answer_arrival[capability Granted](
   arrival.chunks.close()
 }
 
-fn serve_connection[capability Granted](
+fn serve_connection(
   connection: own network::Connection,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   stopping: tasks::Channel[Unit],
 )
-  uses Tasks, Handles, Clock, Granted
+  uses Tasks, Handles, Clock, generic Granted
 {
   var opened = own connection
   prepare(mut opened, options: options)
@@ -1800,14 +1800,14 @@ fn accept_within(connection: own network::Connection, config: tls::ServerConfig,
   }
 }
 
-fn serve_secured[capability Granted](
+fn serve_secured(
   connection: own network::Connection,
   config: tls::ServerConfig,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   stopping: tasks::Channel[Unit],
 )
-  uses Tasks, Handles, Clock, Random, Panic, Granted
+  uses Tasks, Handles, Clock, Random, Panic, generic Granted
 {
   var opened = own connection
   prepare(mut opened, options: options)
@@ -1861,13 +1861,13 @@ fn accept_until(
   }
 }
 
-fn drain_until[capability Work](
+fn drain_until(
   connections: tasks::Channel[network::Connection],
   stopping: tasks::Channel[Unit],
   grace_seconds: Int64,
-  serve_each: (fn(own network::Connection) uses Work),
+  serve_each: (fn(own network::Connection) uses generic Work),
 )
-  uses Tasks, Clock, Work
+  uses Tasks, Clock, generic Work
 {
   concurrent {
     {
@@ -1886,13 +1886,13 @@ fn drain_until[capability Work](
   }
 }
 
-fn run[capability Work](
+fn run(
   listener: mut network::Listener,
   stopping: tasks::Channel[Unit],
   options: ServerOptions,
-  serve_each: (fn(own network::Connection) uses Work),
+  serve_each: (fn(own network::Connection) uses generic Work),
 )
-  uses Tasks, Handles, Clock, Work
+  uses Tasks, Handles, Clock, generic Work
 {
   let connections = tasks::Channel[network::Connection].new()
   let slots = tasks::Channel[Unit].new(capacity: if options.connection_limit == 0 { 1 } else { options.connection_limit })
@@ -1908,13 +1908,13 @@ fn run[capability Work](
   }
 }
 
-public fn serve[capability Granted](
+public fn serve(
   listener: mut network::Listener,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions = ServerOptions(),
   shutdown: Option[Shutdown] = None,
 )
-  uses Tasks, Handles, Clock, Granted
+  uses Tasks, Handles, Clock, generic Granted
 {
   let stopping = stopping_of(shutdown)
   run(mut listener, stopping: stopping, options: options, serve_each: fn(connection) {
@@ -1922,14 +1922,14 @@ public fn serve[capability Granted](
   })
 }
 
-public fn serve_tls[capability Granted](
+public fn serve_tls(
   listener: mut network::Listener,
   config: tls::ServerConfig,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions = ServerOptions(),
   shutdown: Option[Shutdown] = None,
 )
-  uses Tasks, Handles, Clock, Random, Panic, Granted
+  uses Tasks, Handles, Clock, Random, Panic, generic Granted
 {
   var configured = config.copy()
   if configured.protocols.is_empty() {
@@ -2837,15 +2837,15 @@ fn without_headers(headers: Headers, drops: fn(StringSlice) -> Bool) -> Headers 
   kept
 }
 
-public fn Client.stream[Output, capability Granted](
+public fn Client.stream[Output](
   mut self,
   method: Method,
   url: url::Url,
-  receive: (fn(Status, Headers, mut Body) -> Output uses Granted),
+  receive: (fn(Status, Headers, mut Body) -> Output uses generic Granted),
   headers: Headers = Headers(entries: []),
   body: List[UInt8] = [],
 ) -> Result[Output, Error]
-  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, Granted
+  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, generic Granted
 {
   var current_method = method.copy()
   var address = url.copy()
@@ -3518,7 +3518,7 @@ fn write_raw[Stream: streams::Duplex](connection: Stream, outbound: tasks::Chann
   let _ = connection.close_sending()
 }
 
-fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
+fn run_websocket[Stream: streams::Duplex, Output](
   connection: Stream,
   inbox: own two::Inbox,
   request: Slice[UInt8],
@@ -3528,9 +3528,9 @@ fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
   message_limit: UInt64,
   is_deflate_offered: Bool,
   seed: UInt64,
-  session: (fn(mut WebSocket) -> Output uses Granted),
+  session: (fn(mut WebSocket) -> Output uses generic Granted),
 ) -> Result[Output, Error]
-  uses Handles, Tasks, Granted
+  uses Handles, Tasks, generic Granted
 {
   var unread = own inbox
   system(connection.send_all(request))?
@@ -3579,16 +3579,16 @@ fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
   }
 }
 
-public fn Client.websocket[Output, capability Granted](
+public fn Client.websocket[Output](
   mut self,
   url: url::Url,
-  session: (fn(mut WebSocket) -> Output uses Granted),
+  session: (fn(mut WebSocket) -> Output uses generic Granted),
   headers: Headers = Headers(entries: []),
   protocols: List[String] = [],
   message_limit: UInt64 = 16777216,
   compresses: Bool = true,
 ) -> Result[Output, Error]
-  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, Granted
+  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, generic Granted
 {
   let is_secure = url.scheme() == "wss".slice()
   if !is_secure && url.scheme() != "ws".slice() {

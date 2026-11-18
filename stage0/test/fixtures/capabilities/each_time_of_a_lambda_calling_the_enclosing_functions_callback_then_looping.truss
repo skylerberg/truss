@@ -1,5 +1,5 @@
-fn run[capability Mine](work: (fn() -> Instant uses Mine)) -> Instant
-  uses Mine
+fn run(work: (fn() -> Instant uses generic Mine)) -> Instant
+  uses generic Mine
 {
   each_time(fn() {
     let _ = work()

@@ -13,7 +13,7 @@ val make_trait_method_key :
   name:string ->
   receiver:Path.receiver ->
   self_type:Types.ty ->
-  type_arguments:Types.argument list ->
+  instantiation:Types.instantiation ->
   evidence:Core.evidence ->
   Instance.key
 

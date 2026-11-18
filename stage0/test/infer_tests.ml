@@ -963,6 +963,15 @@ let () =
       expect_one_diagnostic Fixtures.Infer.uint8_let_of_minus_one "types.negated_unsigned");
   Harness.test "explicit type arguments give exactly the function's own" (fun () ->
       expect_one_diagnostic Fixtures.Infer.pick_with_one_type_argument "types.arity");
+  Harness.test
+    "a written type argument gives the type parameter of a function that has a capability parameter"
+    (fun () ->
+      let text = Fixtures.Infer.make_with_a_type_argument_and_a_capability_parameter in
+      expect_fine text;
+      expect_type text "make[String](ignore)" "Option[String]");
+  Harness.test "a capability parameter takes no written type argument" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.make_with_a_type_argument_for_its_capability_parameter
+        "types.arity" ~says:"This takes 1 type argument, and 2 are given.");
   Harness.test "a type given too few arguments is one error, not a mismatch for each field"
     (fun () -> expect_one_diagnostic Fixtures.Infer.pair_built_with_one_type_argument "types.arity");
   Harness.test "an associated type that a supertrait fixes to Self is Self" (fun () ->
@@ -1221,6 +1230,9 @@ let () =
       expect_one_diagnostic (make_clause_source "Clock.later") "types.unknown_member");
   Harness.test "a method with generic parameters is not object-safe" (fun () ->
       expect_one_diagnostic Fixtures.Infer.generic_visit_through_any "types.not_callable");
+  Harness.test "a method with a capability parameter cannot be called through any" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.visitor_with_a_capability_parameter_called_through_any
+        "types.not_callable");
   Harness.test "a method that takes or returns Self cannot be called through any" (fun () ->
       expect_one_diagnostic Fixtures.Infer.join_through_any "types.not_callable");
   Harness.test "a method whose result holds Self cannot be called through any" (fun () ->

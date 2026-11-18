@@ -236,7 +236,7 @@ let quantify_over (context : State.context) (frame : State.frame) (quantifier : 
 let rec make_value_term context (frame : State.frame) (value : Types.value) =
   match value with
   | Value_parameter parameter -> (
-      match List.assoc_opt parameter frame.substitution with
+      match Types.find_argument parameter frame.substitution with
       | Some (Types.Value argument) when argument <> Value_parameter parameter ->
           make_value_term context frame argument
       | _ -> substitute_value_term context value)

@@ -97,8 +97,8 @@ grants none, so the package can only do pure computation.
 - **A missing grant is never added by a tool.** `truss check --fix` never
   widens a grant.
 - **Running a caller's callback does not count.** A function that runs a
-  callback with a `capability Granted` parameter uses no capability of its
-  own by doing so.
+  callback through a capability parameter, as in `uses generic Granted`,
+  uses no capability of its own by doing so.
 - Nothing in a package runs when it is fetched or built: there are no build
   scripts, and the code that runs while compiling is pure.
 

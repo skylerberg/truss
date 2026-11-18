@@ -497,9 +497,12 @@ let () =
       Parse_support.expect_error "fn f(visits: List[(fn(index: UInt64) requires index < 3)]) {}"
         ~code:Misplaced_requires ~at:"requires");
   Harness.test "generic parameters" (fun () ->
+      Parse_support.expect_definition "fn f[Key: Hash + Ordered, count: UInt64]() {}"
+        "(fn f[Key: Hash + Ordered, count: UInt64] () (block))");
+  Harness.test "a capability parameter is written `generic` at each use" (fun () ->
       Parse_support.expect_definition
-        "fn f[Key: Hash + Ordered, count: UInt64, capability Granted]() {}"
-        "(fn f[Key: Hash + Ordered, count: UInt64, capability Granted] () (block))")
+        "fn f(visit: (fn() uses Clock, generic Granted)) uses generic Granted {}"
+        "(fn f ((visit: (fn () (uses Clock generic Granted)))) (uses generic Granted) (block))")
 
 let () =
   let expect_pattern text expected =
