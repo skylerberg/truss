@@ -9,7 +9,7 @@ let make_zero_width position = make_span position position
 module Definition_span = struct
   type t = { start : int; stop : int }
 
-  let make start stop =
+  let make start stop : t =
     if start < 0 || stop < start then
       invalid_arg (Printf.sprintf "Source.Definition_span.make %d %d" start stop);
     { start; stop }
@@ -28,7 +28,7 @@ module Definition_span = struct
            (Array.length spans));
     spans.(origin)
 
-  let quote text span =
+  let quote text (span : t) =
     if span.stop > String.length text then
       invalid_arg
         (Printf.sprintf "Source.Definition_span.quote: %d..%d is past a text of %d" span.start

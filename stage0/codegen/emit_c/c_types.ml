@@ -40,7 +40,7 @@ let create env =
 
 let add_environment types key fields = types.environments <- Keys.add key fields types.environments
 
-let register types key =
+let register (types : t) key =
   (match types.references with
   | Some references -> types.references <- Some (key :: references)
   | None -> ());
@@ -134,7 +134,7 @@ let render_signature_parameters types symbol (parameters : Lowered.ty list) name
              | Some names -> qualified ^ " " ^ List.nth names position)
            parameters)
 
-let rec define types key =
+let rec define (types : t) key =
   types.references <- Some [];
   let definition = define_text types key in
   let references =

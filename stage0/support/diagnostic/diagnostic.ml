@@ -582,7 +582,7 @@ let list_spelling_fixes span ~written candidates =
 let show_count count singular plural =
   Printf.sprintf "%d %s" count (if count = 1 then singular else plural)
 
-let map_spans convert diagnostic =
+let map_spans convert (diagnostic : _ diagnostic) : _ diagnostic =
   {
     diagnostic with
     span = convert diagnostic.span;

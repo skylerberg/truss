@@ -333,8 +333,8 @@ let contains_capability_variable capabilities =
   List.exists (function Capability_variable _ -> true | _ -> false) capabilities
 
 let equal left right = left = right
-let is_error = function Error _ -> true | _ -> false
-let is_open_type = function Error _ | Variable _ | Hole -> true | _ -> false
+let is_error : ty -> bool = function Error _ -> true | _ -> false
+let is_open_type : ty -> bool = function Error _ | Variable _ | Hole -> true | _ -> false
 
 let rec contains_unsolved = function
   | Variable _ | Literal _ | Hole -> true

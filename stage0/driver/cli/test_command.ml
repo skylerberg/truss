@@ -144,7 +144,7 @@ type progress = {
   running : (int, int) Hashtbl.t;
 }
 
-let draw progress =
+let draw (progress : progress) =
   let now = read_microseconds () in
   let total = Array.length progress.tests in
   let width = String.length (string_of_int total) in
