@@ -231,7 +231,7 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
                      with
                      result = Some result;
                    })
-                 ~uses:[] ~values:[] ~change:None)
+                 ~uses:Types.no_capabilities ~values:[] ~change:None)
           in
           (frame, result)
       | None ->

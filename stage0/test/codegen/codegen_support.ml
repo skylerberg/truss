@@ -210,12 +210,32 @@ let make_database packages =
 let make_example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
 
-let make_backend ?results ?evaluation_time_limit_ms ?(profile = Backend.Development) database =
+let create_backend ?results ?evaluation_time_limit_ms ?(profile = Backend.Development) ~package
+    database =
   Backend.create ?results ?evaluation_time_limit_ms
-    (match Database.find_lowered_lookups database [ example.package ] with
+    (match Database.find_lowered_lookups database [ package ] with
     | Ok lookups -> lookups
     | Error message -> failwith message)
     (Lazy.force c_compiler) profile
+
+let make_backend ?results ?evaluation_time_limit_ms ?profile database =
+  create_backend ?results ?evaluation_time_limit_ms ?profile ~package:example.package database
+
+let extend_standard_library files =
+  Database.For_testing.extend_package
+    ~loaded:[ Lazy.force standard_package_database ]
+    ~package:Path.standard_package files
+
+let load_standard_probe ?(roots = []) (file : Path.file) text =
+  let database = extend_standard_library [ (file, text) ] in
+  List.iter (Database.For_testing.add_root database) roots;
+  (match list_fragment_diagnostics database file with
+  | [] -> ()
+  | diagnostics ->
+      let source = Source.create ~path:(Path.show_file file) text in
+      fail "the source has diagnostics:\n%s"
+        (String.concat "" (List.map (Diagnostic.render source) diagnostics)));
+  (database, create_backend ~package:Path.standard_package database)
 
 let load_checked ~list_diagnostics ?results ?(roots = []) ?profile files =
   let packages = make_example_package files in

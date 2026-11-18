@@ -619,10 +619,10 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
                       List.iter
                         (fun name ->
                           match
-                            (Interface.Impls.project_capability_set state.lookups.interface
-                               ~list_bounds:(State.lookup_bounds state) inner_type
-                               { bound with associated = [] } name
-                              :> Types.capability list)
+                            Types.list_capabilities
+                              (Interface.Impls.project_capability_set state.lookups.interface
+                                 ~list_bounds:(State.lookup_bounds state) inner_type
+                                 { bound with associated = [] } name)
                           with
                           | [] -> ()
                           | set ->
