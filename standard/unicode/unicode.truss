@@ -201,7 +201,7 @@ public fn normalize(text: StringSlice, form: Form = Form.Composed) -> String
 public fn is_normalized(text: StringSlice, form: Form = Form.Composed) -> Bool
   cost time finite
 {
-  is_below(text, limit: first_changed_code(form)) || normalize(text, form: form).slice() == text
+  is_below(text, limit: first_changed_code(form)) || normalize(text, form: form) == text
 }
 
 public fn fold_case(text: StringSlice) -> String

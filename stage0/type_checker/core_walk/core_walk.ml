@@ -328,14 +328,3 @@ let find_local_name : Core.local -> string option = function
   | Declared { name; _ } | Trait_parameter { name; _ } -> Some name
   | Self -> Some "self"
   | Synthetic _ -> None
-
-module For_testing = struct
-  exception Found
-
-  let expression_exists is_wanted node =
-    let visit =
-      make_deep_visitor
-        { ignore_all with expression = (fun node -> if is_wanted node then raise Found) }
-    in
-    match visit.expression node with () -> false | exception Found -> true
-end

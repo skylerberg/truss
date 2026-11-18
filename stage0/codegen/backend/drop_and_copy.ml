@@ -49,8 +49,8 @@ let any_drop_signature = make_box_signature None
 let any_copy_signature = make_box_signature (Some (Raw (Pointer Opaque)))
 
 let list_any_entries ty ~is_copyable =
-  (Instance.Any_drop ty, any_drop_signature)
-  :: (if is_copyable then [ (Instance.Any_copy ty, any_copy_signature) ] else [])
+  (Lowered.Item.Any_drop ty, any_drop_signature)
+  :: (if is_copyable then [ (Lowered.Item.Any_copy ty, any_copy_signature) ] else [])
 
 let compute_first_method_slot ~is_copyable =
   if is_copyable then any_copy_slot + 1 else any_drop_slot + 1
@@ -138,7 +138,7 @@ let drop context ty =
                    target =
                      Direct
                        {
-                         function_ = Instance (Drop inner);
+                         function_ = Item (Drop inner);
                          signature = Convention.drop_signature inner;
                        };
                    arguments = [ Copy (Lowered.make_local_place typed) ];
@@ -222,8 +222,7 @@ let build_any_drop context ty =
     Emit_c.Builder.emit builder
       (Call
          {
-           target =
-             Direct { function_ = Instance (Drop ty); signature = Convention.drop_signature ty };
+           target = Direct { function_ = Item (Drop ty); signature = Convention.drop_signature ty };
            arguments = [ Copy (Lowered.make_local_place typed) ];
            result = Discarded;
          })
@@ -249,7 +248,7 @@ let copy_into context builder ~destination ~source ty =
     Emit_c.Builder.emit builder
       (Call
          {
-           target = Direct { function_ = Instance (Copy ty); signature = copy_signature context ty };
+           target = Direct { function_ = Item (Copy ty); signature = copy_signature context ty };
            arguments;
            result =
              Convention.make_destination (Convention.classify_result context.env ty) destination;

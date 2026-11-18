@@ -24,7 +24,7 @@
   ownership
   package_checks
   backend
-  instance
+  lowered
   ground
   libc
   prover

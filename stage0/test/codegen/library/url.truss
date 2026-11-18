@@ -2,7 +2,7 @@ use standard::url
 
 fn shows(text: StringSlice, expected: StringSlice) -> Bool {
   match url::parse(text) {
-    Ok(parsed) => "${parsed}" == expected.to_string()
+    Ok(parsed) => "${parsed}" == expected
     Err(_) => false
   }
 }
@@ -115,7 +115,7 @@ test "text is percent-encoded and decoded" {
 fn joins(reference: StringSlice, expected: StringSlice) -> Bool {
   match url::parse("http://a/b/c/d;p?q") {
     Ok(start) => match start.join(reference) {
-      Ok(parsed) => "${parsed}" == expected.to_string()
+      Ok(parsed) => "${parsed}" == expected
       Err(_) => false
     }
     Err(_) => false

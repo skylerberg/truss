@@ -99,7 +99,7 @@ type function_ = {
   blocks : block list;
 }
 
-type instance = Memory_layout.env -> Emit_c.Builder.instance
+type item = Memory_layout.env -> Emit_c.Builder.item_code
 
 let local ?name ty = { ty; name }
 let value ty = Lowered.Value ty
@@ -112,7 +112,7 @@ let block statements terminator = { statements; terminator }
 let function_ ?(parameters = []) ?result ?(environment = []) locals blocks =
   { parameters; result; returns = true; environment; locals; blocks }
 
-let key name = Instance.Code { path = definition name; instantiation = Ground.no_instantiation }
+let key name = Lowered.Item.Code { path = definition name; instantiation = Ground.no_instantiation }
 
 let write builder (function_ : function_) =
   List.iter
@@ -129,7 +129,7 @@ let write builder (function_ : function_) =
   ({ parameters = function_.parameters; result = function_.result; returns = function_.returns }
     : Emit_c.Builder.prototype)
 
-let instance ?(nested = []) name main : instance =
+let item ?(nested = []) name main : item =
  fun env ->
   let builder = Emit_c.Builder.create env ~key:(key name) in
   List.iteri
@@ -139,18 +139,17 @@ let instance ?(nested = []) name main : instance =
     nested;
   Emit_c.Builder.build builder (write builder main)
 
-let make_constant_instance instance : instance = fun _ -> instance
+let make_constant_item code : item = fun _ -> code
 
 let entry ?nested locals blocks =
-  instance ?nested "entry" (function_ ~result:(value int32) locals blocks)
+  item ?nested "entry" (function_ ~result:(value int32) locals blocks)
 
 let call name ?(result = Some (value int32)) ?(parameters = []) arguments place : Lowered.statement
     =
   Call
     {
       target =
-        Direct
-          { function_ = Instance (key name); signature = { parameters; result; returns = true } };
+        Direct { function_ = Item (key name); signature = { parameters; result; returns = true } };
       arguments;
       result = (match place with Some place -> Returned place | None -> Discarded);
     }
@@ -172,13 +171,11 @@ let list_worker_counts () =
 let test_position (site : Lowered.site) : Emit_c.position =
   { file = "test.truss"; line = 1; column = site.offset + 1 }
 
-let run_program ?(extra = []) ?env ?input (instances : instance list) =
+let run_program ?(extra = []) ?env ?input (items : item list) =
   incr counter;
   let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "program%d" !counter) in
   let env = match env with Some env -> env | None -> make_shape_env ~extra () in
-  let fragments =
-    List.map (fun instance -> Emit_c.make_fragment env (Code (instance env))) instances
-  in
+  let fragments = List.map (fun item -> Emit_c.make_fragment env (Code (item env))) items in
   match
     C_compiler.build_executable (Lazy.force c_compiler) O1
       ~units:
@@ -187,7 +184,7 @@ let run_program ?(extra = []) ?env ?input (instances : instance list) =
           ( "the program",
             Emit_c.render_file env Development
               (List.map (fun fragment -> (fragment, Emit_c.External)) fragments) );
-          ("main", Startup.For_testing.render_main_start (Instance.make_symbol (key "entry")));
+          ("main", Startup.For_testing.render_main_start (Emit_c.make_symbol (key "entry")));
           ("sites", Emit_c.render_sites_file ~resolve_position:test_position fragments);
         ]
       ~output
@@ -195,8 +192,8 @@ let run_program ?(extra = []) ?env ?input (instances : instance list) =
   | Ok () -> Process.run ?input output []
   | Error message -> failwith message
 
-let expect_status ?extra expected instances =
-  let status, _, errors = run_program ?extra instances in
+let expect_status ?extra expected items =
+  let status, _, errors = run_program ?extra items in
   if status <> expected then fail "expected status %d, got %d (%s)" expected status errors
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }

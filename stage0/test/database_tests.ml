@@ -653,7 +653,7 @@ let () =
            ~before:[ ("app::main", callee_and_caller) ]
            ~after:[ ("app::main", "fn caller() -> Int64 { 1 }\n") ])
         ~names:[ show_lowered "callee" ]);
-  Harness.test "a removed reference collects exactly the instances that only it reached" (fun () ->
+  Harness.test "a removed reference collects exactly the items that only it reached" (fun () ->
       let make_program test =
         [
           ( "app::main",
@@ -670,8 +670,7 @@ let () =
       if observed.collected <> [ show_lowered "only"; test_key "only" ] then
         Harness.fail "collected %s" (String.concat ", " observed.collected);
       expect_untouched observed.recomputed ~names:[ show_lowered "shared"; show_lowered "kept" ]);
-  Harness.test "removing a type collects the instances at that type without computing them"
-    (fun () ->
+  Harness.test "removing a type collects the items at that type without computing them" (fun () ->
       let make_program shape =
         [
           ( "app::main",

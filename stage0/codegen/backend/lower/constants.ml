@@ -345,14 +345,14 @@ let write_output (st : Lowering.state) output =
     | Returns ty -> Monomorphic.ground st.context.monomorphic Types.no_substitution ty
     | Lends _ -> Definitions.raise_bug "write_fully does not return"
   in
-  Targets.lower_instance_call st
+  Targets.lower_item_call st
     (Code { path = write_fully; instantiation = Ground.no_instantiation })
     ~signature ~substitution:Types.no_substitution
     ~arguments:[ (Read, int32, descriptor); (Read, view_ty, view) ]
     ~destination:(Lowering.allocate_temporary st result)
     ()
 
-let build_evaluator context path : Emit_c.Builder.instance =
+let build_evaluator context path : Emit_c.Builder.item_code =
   let st, mir, ty = make_constant_state context path in
   Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
   Lowering.run_in_scope st (fun () ->
@@ -363,4 +363,4 @@ let build_evaluator context path : Emit_c.Builder.instance =
         ~output:(Address { place = output; writable = true })
         ty place;
       write_output st output);
-  Lowering.finish_instance st ~rest:[] ()
+  Lowering.finish_item st ~rest:[] ()

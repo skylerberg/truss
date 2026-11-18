@@ -9,7 +9,7 @@ fn ip(text: StringSlice) -> network::IpAddress {
 
 fn reads(text: StringSlice, expected: StringSlice) -> Bool {
   match network::IpAddress.parse(text) {
-    Ok(address) => "${address}" == expected.to_string()
+    Ok(address) => "${address}" == expected
     Err(_) => false
   }
 }
@@ -91,7 +91,7 @@ test "text that is not an address says where it stops being one" {
 
 fn reads_socket(text: StringSlice, expected: StringSlice) -> Bool {
   match network::SocketAddress.parse(text) {
-    Ok(address) => "${address}" == expected.to_string()
+    Ok(address) => "${address}" == expected
     Err(_) => false
   }
 }

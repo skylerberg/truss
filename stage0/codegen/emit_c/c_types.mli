@@ -28,14 +28,14 @@ type context = {
   mutable references : key list option;
   mutable helpers_used : string list;
   mutable statics : string list;
-  mutable instances : Instance.key list;
-  mutable called : Instance.key list;
+  mutable referenced_items : Lowered.Item.t list;
+  mutable called : Lowered.Item.t list;
   mutable calls : (Path.t * int) list;
   mutable failures : (C_runtime.failure * Lowered.site) list;
 }
 
 val make_context : Memory_layout.env -> string -> context
-val refer : context -> Instance.key -> unit
+val refer : context -> Lowered.Item.t -> unit
 val use_helper : context -> string -> string
 val register : context -> Keys.key -> unit
 val compute_layout : context -> Ground.ty -> Memory_layout.t

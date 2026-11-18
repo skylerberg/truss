@@ -111,7 +111,7 @@ public fn Request.cookies(self) -> List[CookiePair] {
 
 public fn Request.cookie(self, name: StringSlice) -> Option[String] {
   for pair in self.cookies() {
-    if pair.name.slice() == name {
+    if pair.name == name {
       return Some(pair.value.copy())
     }
   }
@@ -293,7 +293,7 @@ public fn Session.get(self, name: StringSlice) -> Option[StringSlice] {
 public fn Session.set(mut self, name: StringSlice, value: StringSlice) {
   var kept = Form.new()
   for field in self.values.entries() {
-    if field.name.slice() != name {
+    if field.name != name {
       mut kept.add(field.name.slice(), value: field.value.slice())
     }
   }
@@ -305,7 +305,7 @@ public fn Session.set(mut self, name: StringSlice, value: StringSlice) {
 public fn Session.remove(mut self, name: StringSlice) {
   var kept = Form.new()
   for field in self.values.entries() {
-    if field.name.slice() != name {
+    if field.name != name {
       mut kept.add(field.name.slice(), value: field.value.slice())
     }
   }

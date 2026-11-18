@@ -18,7 +18,7 @@ type kind =
   | Table_entries of Path.t option
 
 type fragment = {
-  key : Instance.key;
+  key : Lowered.Item.t;
   kind : kind;
   functions : (string * string) list;
   definition : string;
@@ -28,9 +28,9 @@ type fragment = {
   statics : string list;
   sites : Lowered.site list;
   helpers : string list;
-  references : Instance.key list;
+  references : Lowered.Item.t list;
   calls : (Path.t * int) list;
-  called : Instance.key list;
+  called : Lowered.Item.t list;
   failures : (failure * Lowered.site) list;
 }
 
@@ -39,10 +39,10 @@ let references fragment = fragment.references
 let called fragment = fragment.called
 let failures fragment = fragment.failures
 
-module Instance_table = Hashtbl.Make (Instance)
+module Item_table = Hashtbl.Make (Lowered.Item)
 
 let walk ~lookup ~follows_only_called_entries roots =
-  let visited = Instance_table.create 256 in
+  let visited = Item_table.create 256 in
   let queue = Queue.create () in
   List.iter (fun root -> Queue.add (root, []) queue) roots;
   let reachable = ref [] in
@@ -52,12 +52,12 @@ let walk ~lookup ~follows_only_called_entries roots =
     | Some entry -> Queue.add (entry, chain) queue
     | None ->
         Compiler_bug.raise_bug ~stage:"Emit_c" "a call of method %d of %s" slot
-          (Instance.to_string table.key)
+          (Lowered.Item.to_string table.key)
   in
   while not (Queue.is_empty queue) do
     let key, chain = Queue.pop queue in
-    if not (Instance_table.mem visited key) then begin
-      Instance_table.replace visited key ();
+    if not (Item_table.mem visited key) then begin
+      Item_table.replace visited key ();
       match lookup key with
       | None -> ()
       | Some fragment -> (
@@ -133,8 +133,8 @@ let render_fragment fragment =
           Hashtbl.replace names name (Printf.sprintf "%s%d" prefix position))
       list
   in
-  let self = Instance.make_symbol fragment.key in
-  number "@instance_" (List.map Instance.make_symbol fragment.references);
+  let self = Mangling.make_symbol fragment.key in
+  number "@item_" (List.map Mangling.make_symbol fragment.references);
   number "@type_"
     (List.map C_types.render_key_name
        (fragment.types
@@ -169,6 +169,8 @@ let render_fragment fragment =
 
 module Builder = Builder
 
+let make_symbol = Mangling.make_symbol
+
 let render_bytes_definition (text, name) =
   let bytes =
     List.init (String.length text) (fun index -> string_of_int (Char.code text.[index]))
@@ -191,15 +193,15 @@ let name_bytes context ~texts =
       let name = C_values.render_bytes_symbol context index in
       if Hashtbl.mem named name then Some (render_bytes_definition (text, name)) else None)
 
-type compiled = Code of Builder.instance | Data of Lowered.data | Table of Lowered.table
+type compiled = Code of Builder.item_code | Data of Lowered.data | Table of Lowered.table
 
 let make_fragment env (compiled : compiled) =
   let key, context =
     match compiled with
-    | Code code -> (code.C_instance.key, code.context)
-    | Data data -> (data.data_key, C_types.make_context env (Instance.make_symbol data.data_key))
+    | Code code -> (code.Item_code.key, code.context)
+    | Data data -> (data.data_key, C_types.make_context env (Mangling.make_symbol data.data_key))
     | Table table ->
-        (table.table_key, C_types.make_context env (Instance.make_symbol table.table_key))
+        (table.table_key, C_types.make_context env (Mangling.make_symbol table.table_key))
   in
   let functions, definition, kind =
     match compiled with
@@ -234,7 +236,9 @@ let make_fragment env (compiled : compiled) =
       (match compiled with
       | Table table -> List.map fst table.entries
       | Code _ | Data _ ->
-          List.filter (fun other -> not (Instance.equal other key)) (List.rev context.instances));
+          List.filter
+            (fun other -> not (Lowered.Item.equal other key))
+            (List.rev context.referenced_items));
     calls = List.rev context.calls;
     called = List.rev context.called;
     failures = List.rev context.failures;

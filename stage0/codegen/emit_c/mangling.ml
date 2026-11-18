@@ -1,59 +1,3 @@
-type key =
-  | Code of { path : Path.t; instantiation : Ground.instantiation }
-  | Constant of Path.t
-  | Drop of Ground.ty
-  | Copy of Ground.ty
-  | Debug of Ground.ty
-  | Any_drop of Ground.ty
-  | Any_copy of Ground.ty
-  | Encode of Ground.ty
-  | Evaluator of Path.t
-  | Template_check of { from_template : Path.t; literals : string list; clauses : int list }
-  | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
-  | Generated of generated
-  | Table of table
-
-and generated =
-  | Entry of impl_method
-  | Any_entry of impl_method
-  | Locked_entry of { capability : Path.t; name : string }
-  | Adapter of {
-      function_ : Path.t;
-      instantiation : Ground.instantiation;
-      ty : Ground.function_type;
-    }
-  | Program_main of Path.t
-
-and table =
-  | Impl_table of { impl : Path.t; type_arguments : Ground.argument list }
-  | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
-  | Locked_table of Path.t
-
-and impl_method = {
-  impl : Path.t;
-  name : string;
-  receiver : Path.receiver;
-  type_arguments : Ground.argument list;
-}
-
-let make_method_path { impl; name; receiver; _ } = Path.Method { owner = impl; name; receiver }
-
-let make_method_code (impl_method : impl_method) =
-  Code
-    {
-      path = make_method_path impl_method;
-      instantiation = { Ground.no_instantiation with type_arguments = impl_method.type_arguments };
-    }
-
-type t = key
-
-module Key = Structural_key.Make (struct
-  type nonrec t = t
-end)
-
-let compare = Key.compare
-let equal = Key.equal
-let hash = Key.hash
 let render_marker word = "_" ^ word ^ "_"
 
 let mangle_module_path (module_ : Path.module_) =
@@ -67,10 +11,10 @@ let mangle_module_path (module_ : Path.module_) =
 let mangle_text value =
   String.concat ""
     (List.map
-       (fun order ->
-         match order with
-         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> String.of_char order
-         | order -> Printf.sprintf "_C%02X_" (Char.code order))
+       (fun character ->
+         match character with
+         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> String.of_char character
+         | character -> Printf.sprintf "_C%02X_" (Char.code character))
        (List.of_seq (String.to_seq value)))
 
 let mangle_receiver : Path.receiver -> string = function
@@ -130,13 +74,12 @@ let mangle_mode : Ground.mode -> string = function
 
 let rec mangle_ty (ty : Ground.ty) =
   match ty with
-  | Named { path = instance_path; arguments } ->
-      mangle_path instance_path ^ mangle_arguments arguments
+  | Named { path; arguments } -> mangle_path path ^ mangle_arguments arguments
   | Function { parameters; result; uses } ->
       render_marker "Fn"
       ^ String.concat ""
           (List.map
-             (fun (module_, ty) -> mangle_mode module_ ^ mangle_ty ty ^ render_marker "And")
+             (fun (mode, ty) -> mangle_mode mode ^ mangle_ty ty ^ render_marker "And")
              parameters)
       ^ render_marker "Returns" ^ mangle_ty result
       ^ (match uses with
@@ -173,19 +116,19 @@ let mangle_capability_arguments arguments =
          ^ render_marker "End")
        arguments)
 
-let rec mangle = function
-  | Code { path = instance_path; instantiation } ->
-      mangle_path instance_path
+let rec mangle : Lowered.Item.t -> string = function
+  | Code { path; instantiation } ->
+      mangle_path path
       ^ mangle_arguments instantiation.type_arguments
       ^ mangle_capability_arguments instantiation.capability_arguments
-  | Constant instance_path -> render_marker "Constant" ^ mangle_path instance_path
+  | Constant path -> render_marker "Constant" ^ mangle_path path
   | Drop ty -> render_marker "Drop" ^ mangle_ty ty
   | Copy ty -> render_marker "Copy" ^ mangle_ty ty
   | Debug ty -> render_marker "Debug" ^ mangle_ty ty
   | Encode ty -> render_marker "Encode" ^ mangle_ty ty
   | Any_drop ty -> render_marker "AnyDrop" ^ mangle_ty ty
   | Any_copy ty -> render_marker "AnyCopy" ^ mangle_ty ty
-  | Evaluator instance_path -> render_marker "Evaluator" ^ mangle_path instance_path
+  | Evaluator path -> render_marker "Evaluator" ^ mangle_path path
   | Template_check { from_template; literals; clauses } ->
       render_marker "Check" ^ mangle_path from_template
       ^ String.concat ""
@@ -207,11 +150,12 @@ let rec mangle = function
       ^ mangle (Code { path = function_; instantiation })
       ^ render_marker "As" ^ mangle_ty (Function ty)
   | Generated (Any_entry impl_method) ->
-      render_marker "Dynamic" ^ mangle (make_method_code impl_method)
+      render_marker "Dynamic" ^ mangle (Lowered.Item.make_method_code impl_method)
   | Generated (Locked_entry { capability; name }) ->
       render_marker "LockedEntry" ^ mangle_path capability ^ render_marker "Method"
       ^ mangle_text name
-  | Generated (Entry impl_method) -> render_marker "Entry" ^ mangle (make_method_code impl_method)
+  | Generated (Entry impl_method) ->
+      render_marker "Entry" ^ mangle (Lowered.Item.make_method_code impl_method)
   | Generated (Program_main main) -> render_marker "Program" ^ mangle_path main
   | Table (Any_table { impl; type_arguments }) ->
       render_marker "Vtable" ^ mangle_path impl ^ mangle_arguments type_arguments
@@ -226,52 +170,5 @@ let shorten name =
   if String.length name <= limit then name
   else String.sub name 0 prefix_length ^ "_Hash_" ^ Blake3.hash_to_hex ~digits:32 name
 
-let make_symbol key = shorten ("t_" ^ mangle key)
-let make_type_symbol ty = shorten ("t_" ^ mangle_ty ty)
-
-let rec to_string = function
-  | Code { path; instantiation } ->
-      Path.show path
-      ^ show_arguments instantiation.type_arguments
-      ^ show_capability_arguments instantiation.capability_arguments
-  | Constant path -> Path.show path
-  | Drop ty -> "drop " ^ Ground.to_string ty
-  | Copy ty -> "copy " ^ Ground.to_string ty
-  | Debug ty -> "debug " ^ Ground.to_string ty
-  | Encode ty -> "encode " ^ Ground.to_string ty
-  | Any_drop ty -> "any drop " ^ Ground.to_string ty
-  | Any_copy ty -> "any copy " ^ Ground.to_string ty
-  | Evaluator path -> "evaluator " ^ Path.show path
-  | Template_check { from_template; literals; clauses } ->
-      "template check " ^ Path.show from_template ^ " of "
-      ^ String.concat ", " (List.map (Printf.sprintf "%S") literals)
-      ^ " for clauses "
-      ^ String.concat ", " (List.map string_of_int clauses)
-  | Call_evaluation { function_; arguments } ->
-      "evaluation " ^ Path.show function_ ^ "("
-      ^ String.concat ", " (List.map Z.to_string arguments)
-      ^ ")"
-  | Generated (Adapter { function_; instantiation; _ }) ->
-      "adapter " ^ to_string (Code { path = function_; instantiation })
-  | Generated (Any_entry impl_method) -> "any entry " ^ to_string (make_method_code impl_method)
-  | Generated (Locked_entry { capability; name }) ->
-      "locked entry " ^ Path.show capability ^ "." ^ name
-  | Generated (Entry impl_method) -> "entry " ^ to_string (make_method_code impl_method)
-  | Generated (Program_main main) -> "program " ^ Path.show main
-  | Table (Any_table { impl; type_arguments }) ->
-      "any table " ^ Path.show impl ^ show_arguments type_arguments
-  | Table (Locked_table capability) -> "locked table " ^ Path.show capability
-  | Table (Impl_table { impl; type_arguments }) ->
-      "table " ^ Path.show impl ^ show_arguments type_arguments
-
-and show_arguments = function
-  | [] -> ""
-  | arguments -> "[" ^ String.concat ", " (List.map Ground.show_argument arguments) ^ "]"
-
-and show_capability_arguments arguments =
-  String.concat ""
-    (List.map
-       (fun (name, set) ->
-         Printf.sprintf " generic %s = {%s}" name
-           (String.concat ", " (List.map Ground.show_path_name set)))
-       arguments)
+let make_symbol item = shorten ("t_" ^ mangle item)
+let make_type_name ty = shorten ("t_" ^ mangle_ty ty)

@@ -36,7 +36,7 @@ let make_sequence_type element =
 
 let make_sequence_length context element term =
   let path = Path.Method { owner = sequence_path; name = "length"; receiver = Read } in
-  let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type element ] } in
+  let symbol = Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type element ] } in
   Facts.declare context
     (Logic.Function (symbol, [ Facts.declare_sort context (make_sequence_type element) ], Logic.Int));
   Logic.Apply (symbol, [ term ])
@@ -50,7 +50,9 @@ let rec index_sequence (context : State.context) element term index =
   with
   | impl :: _ ->
       let path = Path.Method { owner = impl; name = "at"; receiver = Read } in
-      let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type sequence ] } in
+      let symbol =
+        Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type sequence ] }
+      in
       Facts.declare context
         (Logic.Function
            ( symbol,
@@ -91,7 +93,10 @@ let make_finite_function context (ty : Types.ty) name output inputs =
   | Types.Named { path; arguments } ->
       let symbol =
         Logic.Symbol.Function
-          { callee = Path.Method { owner = path; name; receiver = Read }; instance = arguments }
+          {
+            callee = Path.Method { owner = path; name; receiver = Read };
+            type_arguments = arguments;
+          }
       in
       Facts.declare context
         (Logic.Function (symbol, Facts.declare_sort context ty :: List.map snd inputs, output));
@@ -149,7 +154,7 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
   match find_model_impl context ty ~model with
   | Some impl ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
-      let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type ty ] } in
+      let symbol = Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type ty ] } in
       Facts.declare context
         (Logic.Function (symbol, [ Facts.declare_sort context ty ], Facts.declare_sort context model));
       rank_model context ty ~model symbol;

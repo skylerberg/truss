@@ -17,7 +17,7 @@ let operate builder ?destination ?(type_arguments = []) operation arguments =
        builder intrinsic_types operation ~type_arguments arguments ~destination
        ~site:{ definition = Codegen_support.definition "entry"; offset = 0 })
 
-let build_entry build_body : Codegen_support.instance =
+let build_entry build_body : Codegen_support.item =
  fun env ->
   let builder = Emit_c.Builder.create env ~key:(Codegen_support.key "entry") in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
@@ -722,9 +722,8 @@ let () =
       let status, _, errors =
         Codegen_support.run_program ~env
           [
-            Codegen_support.make_constant_instance entry;
-            Codegen_support.make_constant_instance
-              (Backend.For_testing.drop drop_and_copy handle_ty);
+            Codegen_support.make_constant_item entry;
+            Codegen_support.make_constant_item (Backend.For_testing.drop drop_and_copy handle_ty);
           ]
       in
       if status <> 1 then
@@ -737,8 +736,8 @@ let operate_checked builder ?destination ?(type_arguments = []) operation argume
        builder intrinsic_types operation ~type_arguments arguments ~destination
        ~site:{ definition = Codegen_support.definition "entry"; offset = 0 })
 
-let expect_panic ~saying instances =
-  let status, _, errors = Codegen_support.run_program ~extra instances in
+let expect_panic ~saying items =
+  let status, _, errors = Codegen_support.run_program ~extra items in
   if status <> 101 then Codegen_support.fail "expected a panic, got status %d (%s)" status errors;
   if not (String.includes ~affix:saying errors) then
     Codegen_support.fail "expected %S in %S" saying errors

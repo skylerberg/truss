@@ -1,4 +1,4 @@
-type key =
+type t =
   | Code of { path : Path.t; instantiation : Ground.instantiation }
   | Constant of Path.t
   | Drop of Ground.ty
@@ -36,13 +36,9 @@ and impl_method = {
   type_arguments : Ground.argument list;
 }
 
-type t = key
-
 val make_method_path : impl_method -> Path.t
-val compare : key -> key -> int
-val equal : key -> key -> bool
-val hash : key -> int
-val make_symbol : key -> string
-val mangle_path : Path.t -> string
-val make_type_symbol : Ground.ty -> string
-val to_string : key -> string
+val make_method_code : impl_method -> t
+val compare : t -> t -> int
+val equal : t -> t -> bool
+val hash : t -> int
+val to_string : t -> string

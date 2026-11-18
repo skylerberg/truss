@@ -162,15 +162,13 @@ let render_call context fc (target : Lowered.target) arguments =
   match target with
   | Direct { function_; signature } ->
       (match function_ with
-      | Instance key ->
+      | Item key ->
           C_types.refer context key;
-          if not (List.exists (Instance.equal key) context.called) then
+          if not (List.exists (Lowered.Item.equal key) context.called) then
             context.called <- key :: context.called
       | Nested _ -> ());
       let symbol = C_values.render_function_ref_symbol fc function_ in
-      let linkage =
-        match function_ with Nested _ -> C_runtime.Internal | Instance _ -> External
-      in
+      let linkage = match function_ with Nested _ -> C_runtime.Internal | Item _ -> External in
       C_values.declare_prototype context symbol
         (C_values.render_prototype context fc.symbol symbol ~linkage signature ^ ";\n");
       Printf.sprintf "%s(%s)" symbol texts
@@ -287,7 +285,7 @@ let write_statement context fc buffer (statement : Lowered.statement) =
       | None -> ()
       | Some (text, Value ty) ->
           C_types.refer context (Drop ty);
-          let symbol = Instance.make_symbol (Drop ty) in
+          let symbol = Mangling.make_symbol (Drop ty) in
           C_values.declare_prototype context symbol
             (C_values.render_prototype context fc.symbol symbol ~linkage:External
                (Convention.drop_signature ty)

@@ -1,3 +1,10 @@
 (library
  (name lowered)
- (libraries compiler_bug path ground instance memory_layout libc zarith))
+ (libraries
+  compiler_bug
+  structural_key
+  path
+  ground
+  memory_layout
+  libc
+  zarith))

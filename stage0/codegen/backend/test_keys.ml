@@ -1,20 +1,20 @@
-module Instance_table = Hashtbl.Make (Instance)
+module Item_table = Hashtbl.Make (Lowered.Item)
 
 let derive_test_key = Blake3.derive_key ~context:"truss 2026-11-12 reach key"
 let encode_test_key fields = derive_test_key (Cbor.encode (Cbor.Array fields))
 
 let derive_cycle_member_key ~read_known_key members start =
-  let visit_order = Instance_table.create 8 in
+  let visit_order = Item_table.create 8 in
   let rec visit visited = function
     | [] -> List.rev visited
     | key :: queue ->
-        if Instance_table.mem visit_order key then visit visited queue
+        if Item_table.mem visit_order key then visit visited queue
         else begin
-          Instance_table.replace visit_order key (Instance_table.length visit_order);
-          let fragment_hash, references = Instance_table.find members key in
+          Item_table.replace visit_order key (Item_table.length visit_order);
+          let fragment_hash, references = Item_table.find members key in
           visit
             ((fragment_hash, references) :: visited)
-            (queue @ List.filter (Instance_table.mem members) references)
+            (queue @ List.filter (Item_table.mem members) references)
         end
   in
   encode_test_key
@@ -29,9 +29,8 @@ let derive_cycle_member_key ~read_known_key members start =
                  Cbor.Array
                    (List.map
                       (fun reference ->
-                        if Instance_table.mem members reference then
-                          Cbor.Array
-                            [ Text "in"; Cbor.int (Instance_table.find visit_order reference) ]
+                        if Item_table.mem members reference then
+                          Cbor.Array [ Text "in"; Cbor.int (Item_table.find visit_order reference) ]
                         else Cbor.Array [ Text "out"; Bytes (read_known_key reference) ])
                       references);
                ])
@@ -53,9 +52,9 @@ let derive ~read_hash_and_references ~read_known_key component =
             ] );
       ]
   | component ->
-      let members = Instance_table.create 8 in
+      let members = Item_table.create 8 in
       List.iter
-        (fun member -> Instance_table.replace members member (read_hash_and_references member))
+        (fun member -> Item_table.replace members member (read_hash_and_references member))
         component;
       List.map
         (fun member -> (member, derive_cycle_member_key ~read_known_key members member))

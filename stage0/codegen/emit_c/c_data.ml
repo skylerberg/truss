@@ -106,19 +106,19 @@ let render_table context (table : Lowered.table) =
   let entries =
     List.map
       (fun (key, signature) ->
-        let symbol = Instance.make_symbol key in
+        let symbol = Mangling.make_symbol key in
         C_values.declare_prototype context symbol
           (C_values.render_prototype context "" symbol ~linkage:External signature ^ ";\n");
         Printf.sprintf "(const void *)&%s" symbol)
       table.entries
   in
   Printf.sprintf "const void *const %s[%d] = { %s };\n"
-    (Instance.make_symbol table.table_key)
+    (Mangling.make_symbol table.table_key)
     (max 1 (List.length entries))
     (if entries = [] then "0" else String.concat ", " entries)
 
 let render_data context (data : Lowered.data) =
-  let symbol = Instance.make_symbol data.data_key in
+  let symbol = Mangling.make_symbol data.data_key in
   match render_initializer context data.ty data.value with
   | None -> ""
   | Some value ->

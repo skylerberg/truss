@@ -11,9 +11,9 @@ type lowered_lookups = {
   system : Libc.system;
   read_source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
-  find_lowered : Instance.key -> (lowered, unsupported) result option;
-  read_test_key : Instance.key -> (string, unsupported) result;
-  list_reached_todo_types : Instance.key -> Path.t list;
+  find_lowered : Lowered.Item.t -> (lowered, unsupported) result option;
+  read_test_key : Lowered.Item.t -> (string, unsupported) result;
+  list_reached_todo_types : Lowered.Item.t -> Path.t list;
 }
 
 type profile = Emit_c.profile = Development | Release
@@ -23,11 +23,11 @@ exception Infinite_size = Memory_layout.Infinite_size
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
 
-let make (context : Lower.context) (key : Instance.key) : lowered =
+let make (context : Lower.context) (key : Lowered.Item.t) : lowered =
   let env = Lower.env context in
   let emit compiled = Compiled (Emit_c.make_fragment env compiled) in
   let drop_and_copy = Lower.drop_and_copy context in
-  let emit_code instance = emit (Code instance) in
+  let emit_code code = emit (Code code) in
   match key with
   | Code { path; instantiation } -> emit_code (Lower.lower_source_code context ~path ~instantiation)
   | Generated generated -> emit_code (Lower.lower_generated context generated)
@@ -55,7 +55,7 @@ let lower (settings : Lookups.settings) (lookups : Lookups.t) key =
   in
   match
     Compiler_bug.run_while_doing ~stage:"Backend"
-      ("lowering " ^ Instance.to_string key)
+      ("lowering " ^ Lowered.Item.to_string key)
       (fun () -> make (Lower.make_context settings ~env lookups) key)
   with
   | lowered -> Ok lowered
@@ -63,15 +63,15 @@ let lower (settings : Lookups.settings) (lookups : Lookups.t) key =
 
 let list_references = function
   | Compiled fragment | Folded (_, fragment) -> Emit_c.references fragment
-  | Evaluate (path, _) -> [ Instance.Evaluator path ]
+  | Evaluate (path, _) -> [ Lowered.Item.Evaluator path ]
 
 let check_calls interface ~find_call_edges key = function
   | Compiled fragment -> Call_edge_check.check interface ~find_call_edges key fragment
   | Folded _ | Evaluate _ -> ()
 
-module Instance_table = Hashtbl.Make (Instance)
+module Item_table = Hashtbl.Make (Lowered.Item)
 
-let derive_fragment_hash = Blake3.derive_key ~context:"truss 2026-11-16 instance fragment hash"
+let derive_fragment_hash = Blake3.derive_key ~context:"truss 2026-11-17 item fragment hash"
 
 let evaluated_fragment_hash =
   Blake3.derive_key ~context:"truss 2026-11-16 evaluated constant fragment hash" ""
@@ -110,7 +110,7 @@ let read_lowered backend key =
   match backend.lookups.find_lowered key with
   | Some (Ok lowered) -> lowered
   | Some (Error unsupported) -> raise (Lower.Unsupported unsupported)
-  | None -> raise_bug "%s is requested from code with errors" (Instance.to_string key)
+  | None -> raise_bug "%s is requested from code with errors" (Lowered.Item.to_string key)
 
 let read_test_key backend root =
   match backend.lookups.read_test_key root with
@@ -179,41 +179,41 @@ let list_small_callees ~find ~is_worked_on fragment =
   match Emit_c.key fragment with
   | Code _ as caller ->
       List.filter_map
-        (fun (key : Instance.key) ->
+        (fun (key : Lowered.Item.t) ->
           match (key, find key) with
           | Code { path = callee; _ }, Some copy
-            when (not (Instance.equal key caller))
+            when (not (Lowered.Item.equal key caller))
                  && (not (is_worked_on (Path.locate_package callee)))
                  && Emit_c.is_small copy ->
               Some copy
           | _ -> None)
-        (List.sort_uniq Instance.compare (Emit_c.called fragment))
+        (List.sort_uniq Lowered.Item.compare (Emit_c.called fragment))
   | _ -> []
 
-let test_runner : Instance.key =
+let test_runner : Lowered.Item.t =
   Code { path = Well_known.make_path Run_tests; instantiation = Ground.no_instantiation }
 
-let make_test_root path = Instance.Code { path; instantiation = Ground.no_instantiation }
+let make_test_root path = Lowered.Item.Code { path; instantiation = Ground.no_instantiation }
 
 let list_roots ~tests ~mains =
   (if tests = [] then [] else test_runner :: List.map make_test_root tests)
-  @ List.map (fun main -> Instance.Generated (Program_main main)) mains
+  @ List.map (fun main -> Lowered.Item.Generated (Program_main main)) mains
 
 let rec build ?report_progress ?(tests = false) ?(supplied = []) backend ~roots ~startup ~output =
   let lookup key =
-    match List.find_opt (fun fragment -> Instance.equal (Emit_c.key fragment) key) supplied with
+    match List.find_opt (fun fragment -> Lowered.Item.equal (Emit_c.key fragment) key) supplied with
     | Some fragment -> fragment
     | None -> compile_fragment backend key
   in
   let linked = Emit_c.list_linked ~lookup roots in
   let linked_by_key =
-    Instance_table.of_seq (List.to_seq (List.map (fun unit -> (Emit_c.key unit, unit)) linked))
+    Item_table.of_seq (List.to_seq (List.map (fun unit -> (Emit_c.key unit, unit)) linked))
   in
   let list_copied =
     match backend.profile with
     | Development ->
         list_small_callees
-          ~find:(Instance_table.find_opt linked_by_key)
+          ~find:(Item_table.find_opt linked_by_key)
           ~is_worked_on:backend.is_worked_on
     | Release -> fun _ -> []
   in
@@ -245,13 +245,12 @@ let rec build ?report_progress ?(tests = false) ?(supplied = []) backend ~roots 
 and build_test_program ?report_progress ?supplied backend ~time_limit_ms ~roots ~output =
   build ?report_progress ?supplied backend ~tests:true ~roots:(test_runner :: roots)
     ~startup:
-      (Startup.render_tests_start ~time_limit_ms
-         ~runner:(Instance.make_symbol test_runner)
-         (List.map Instance.make_symbol roots))
+      (Startup.render_tests_start ~time_limit_ms ~runner:(Emit_c.make_symbol test_runner)
+         (List.map Emit_c.make_symbol roots))
     ~output
 
 and build_and_run :
-    'result. t -> roots:Instance.key list -> startup:string -> (string -> 'result) -> 'result =
+    'result. t -> roots:Lowered.Item.t list -> startup:string -> (string -> 'result) -> 'result =
  fun backend ~roots ~startup run ->
   let program = make_program_path backend in
   build backend ~roots ~startup ~output:program;
@@ -259,7 +258,7 @@ and build_and_run :
   (try Sys.remove program with Sys_error _ -> ());
   result
 
-and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -> 'value ran =
+and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value) -> 'value ran =
  fun backend root ~read ->
   let key = make_result_key backend root in
   let ran =
@@ -272,7 +271,7 @@ and run_while_compiling : 'value. t -> Instance.key -> read:(string -> 'value) -
           | None -> (
               match
                 build_and_run backend ~roots:[ root ]
-                  ~startup:(Startup.render_evaluator_start (Instance.make_symbol root))
+                  ~startup:(Startup.render_evaluator_start (Emit_c.make_symbol root))
                   (fun program ->
                     Process.run_with_time_limit ~time_limit_ms:backend.evaluation_time_limit_ms
                       program [])
@@ -301,7 +300,7 @@ and compile_fragment backend key =
     | Compiled fragment | Folded (_, fragment) -> fragment
     | Evaluate (path, ty) -> (
         match
-          run_while_compiling backend (Instance.Evaluator path) ~read:(fun encoded ->
+          run_while_compiling backend (Lowered.Item.Evaluator path) ~read:(fun encoded ->
               Encoding.decode (make_env backend) ty encoded)
         with
         | Ran value -> emit_data { data_key = Constant path; ty; value }
@@ -310,9 +309,9 @@ and compile_fragment backend key =
               backend.evaluation_time_limit_ms
         | Stopped report -> raise_cannot_build "Evaluating %s stopped: %s" (Path.show path) report)
   in
-  if not (Instance.equal (Emit_c.key compiled) key) then
-    raise_bug "%s compiled to %s" (Instance.to_string key)
-      (Instance.to_string (Emit_c.key compiled));
+  if not (Lowered.Item.equal (Emit_c.key compiled) key) then
+    raise_bug "%s compiled to %s" (Lowered.Item.to_string key)
+      (Lowered.Item.to_string (Emit_c.key compiled));
   compiled
 
 let show_unsupported backend (unsupported : Lower.unsupported) =
@@ -453,13 +452,11 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
 let build_supplied_tests backend ~time_limit_ms supplied ~output =
   capture_failure backend @@ fun () ->
   let supplied_env = make_env backend in
-  let supplied = List.map (fun make_instance -> make_instance supplied_env) supplied in
-  build_test_program backend
-    ~supplied:
-      (List.map (fun instance -> Emit_c.make_fragment supplied_env (Code instance)) supplied)
-    ~time_limit_ms
-    ~roots:(List.map Emit_c.Builder.instance_key supplied)
-    ~output
+  let fragments =
+    List.map (fun build -> Emit_c.make_fragment supplied_env (Code (build supplied_env))) supplied
+  in
+  build_test_program backend ~supplied:fragments ~time_limit_ms
+    ~roots:(List.map Emit_c.key fragments) ~output
 
 type unshippable = {
   failure : [ `Todo | `Echo ];
@@ -469,13 +466,13 @@ type unshippable = {
   way : Path.t list;
 }
 
-let make_root_key (root : Path.t) : Instance.key =
+let make_root_key (root : Path.t) : Lowered.Item.t =
   match root with Test _ -> make_test_root root | _ -> Generated (Program_main root)
 
 let rec read_executed_fragment (lookups : lowered_lookups) key =
   match lookups.find_lowered key with
   | Some (Ok (Compiled fragment | Folded (_, fragment))) -> Some fragment
-  | Some (Ok (Evaluate (path, _))) -> read_executed_fragment lookups (Instance.Evaluator path)
+  | Some (Ok (Evaluate (path, _))) -> read_executed_fragment lookups (Lowered.Item.Evaluator path)
   | Some (Error _) | None -> None
 
 let trace_root lookups root =
@@ -486,7 +483,7 @@ let list_reached_definitions lookups root =
     (List.filter_map
        (fun (_, way) ->
          match List.rev way with
-         | (Instance.Code { path; _ } | Constant path | Generated (Program_main path)) :: _ ->
+         | (Lowered.Item.Code { path; _ } | Constant path | Generated (Program_main path)) :: _ ->
              Some path
          | _ -> None)
        (trace_root lookups root))
@@ -496,7 +493,7 @@ let list_unshippable (lookups : lowered_lookups) ~main =
   begin
     let list_definitions keys =
       List.fold_left
-        (fun acc (key : Instance.key) ->
+        (fun acc (key : Lowered.Item.t) ->
           match key with
           | Code { path; _ } | Constant path -> (
               match acc with last :: _ when Path.equal last path -> acc | _ -> path :: acc)
@@ -562,14 +559,14 @@ let run_program ?input backend ~main ~arguments =
   capture_failure backend @@ fun () ->
   let root = make_program_root backend ~main in
   build_and_run backend ~roots:[ root ]
-    ~startup:(Startup.render_program_start (Instance.make_symbol root))
+    ~startup:(Startup.render_program_start (Emit_c.make_symbol root))
     (fun program -> Process.run ?input program arguments)
 
 let build_program backend ~main ~output =
   capture_failure backend @@ fun () ->
   let root = make_program_root backend ~main in
   build backend ~roots:[ root ]
-    ~startup:(Startup.render_program_start (Instance.make_symbol root))
+    ~startup:(Startup.render_program_start (Emit_c.make_symbol root))
     ~output
 
 let list_reached_todo_types (lookups : lowered_lookups) root =
@@ -579,7 +576,7 @@ let run_template_check backend ~from_template ~literals ~clauses =
   let ran =
     capture_failure backend @@ fun () ->
     run_while_compiling backend
-      (Instance.Template_check { from_template; literals; clauses })
+      (Lowered.Item.Template_check { from_template; literals; clauses })
       ~read:(fun output ->
         let holds = Encoding.decode_booleans output in
         if List.length holds <> List.length clauses then
@@ -598,7 +595,7 @@ let evaluate_call backend ~function_ ~arguments =
   match Interface.Impls.read_signature backend.lookups.interface function_ with
   | Some { output = Returns result; _ } ->
       let ty = Monomorphic.ground backend.monomorphic Types.no_substitution result in
-      let key = Instance.Call_evaluation { function_; arguments } in
+      let key = Lowered.Item.Call_evaluation { function_; arguments } in
       run_while_compiling backend key ~read:(fun encoded ->
           Encoding.decode (make_env backend) ty encoded)
   | _ -> raise_bug "%s has no result to evaluate" (Path.show function_)
@@ -621,7 +618,7 @@ let create ?(show_file = Path.show_file) ?results ?(evaluation_time_limit_ms = 1
 
 module For_testing = struct
   let is_folded backend path =
-    match read_lowered backend (Instance.Constant path) with
+    match read_lowered backend (Lowered.Item.Constant path) with
     | Folded _ -> true
     | Evaluate _ -> false
     | Compiled _ -> raise_bug "%s is not a constant" (Path.show path)

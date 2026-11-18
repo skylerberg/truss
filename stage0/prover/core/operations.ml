@@ -3,10 +3,13 @@ let make_float_operation name left right =
 
 let is_nan value = Logic.Operation ("fp.isNaN", [ value ])
 
-let truncate value =
+let round_toward_zero value =
+  Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTZ", []); value ])
+
+let make_float_of_integer (exponent, significand) rounding integer =
   Logic.Operation
-    ( "fp.to_real",
-      [ Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTZ", []); value ]) ] )
+    ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
+      [ Logic.Operation (rounding, []); Logic.Operation ("to_real", [ integer ]) ] )
 
 let make_float_equal left right =
   Logic.(Operation ("fp.eq", [ left; right ]) ||| (is_nan left &&& is_nan right))
@@ -188,7 +191,7 @@ let find_written_equal context ty left right =
             Logic.Symbol.Function
               {
                 callee = Path.Method { owner = impl; name = "equal"; receiver = Read };
-                instance = [ Types.Type ty ];
+                type_arguments = [ Types.Type ty ];
               }
           in
           let sort = Facts.declare_sort context ty in
@@ -383,16 +386,16 @@ let translate_arithmetic context (frame : State.frame) (site : Invocation.site) 
   | None -> ());
   exact
 
-let make_float_fits target value =
-  match Facts.find_bounds target with
-  | Some (low, high) ->
-      let cut = truncate value in
+let make_float_fits source target value =
+  match (Facts.find_float_format source, Facts.find_bounds target) with
+  | Some format, Some (low, high) ->
+      let cut = round_toward_zero value in
       Logic.(
-        not_ (is_nan value)
-        &&& not_ (Operation ("fp.isInfinite", [ value ]))
-        &&& Operation ("<=", [ Integer low; cut ])
-        &&& Operation ("<=", [ cut; Integer high ]))
-  | None -> Logic.Boolean false
+        Operation ("fp.leq", [ make_float_of_integer format "RTP" (Integer low); cut ])
+        &&& Operation ("fp.leq", [ cut; make_float_of_integer format "RTN" (Integer high) ]))
+  | _ ->
+      Facts.raise_bug "a float check from `%s` to `%s` needs a float source and a bounded target"
+        (Types.show source) (Types.show target)
 
 let find_innermost_axiom (context : State.context) (frame : State.frame) term =
   match context.open_axioms with
@@ -616,7 +619,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
       Facts.make_in_range target value
   | Fits, [ source; target ], [ value ]
     when Facts.find_float_format source <> None && Facts.find_bounds target <> None ->
-      make_float_fits target value
+      make_float_fits source target value
   | Convert, [ source; target ], [ value ]
     when Facts.find_bounds source <> None
          && Facts.find_bounds target <> None
@@ -689,8 +692,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
                   Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTN", []); value ])
               | Ceiling ->
                   Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTP", []); value ])
-              | Truncate ->
-                  Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTZ", []); value ])
+              | Truncate -> round_toward_zero value
               | _ -> Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RNE", []); value ]))
           | _ -> fallback ())
       | Fused_multiply_add, ty :: _ when Facts.find_float_format ty <> None -> (
@@ -735,7 +737,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
       | Convert, [ source; target ]
         when Facts.find_float_format source <> None && Facts.find_bounds target <> None -> (
           match operands with
-          | [ value ] ->
+          | [ value ] -> (
               Facts.oblige context frame Requires
                 (Facts.locate context frame.source site.origin)
                 [
@@ -747,16 +749,20 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
                         range."
                        (Types.show target));
                 ]
-                (make_float_fits target value);
-              Logic.Operation ("to_int", [ truncate value ])
+                (make_float_fits source target value);
+              match (find_width target, Facts.find_bounds target) with
+              | Some width, Some (low, _) ->
+                  let is_signed = Z.lt low Z.zero in
+                  Logic.integer_of_bits ~is_signed ~width
+                    (Logic.Operation
+                       ( Printf.sprintf "(_ fp.to_%cbv %d)" (if is_signed then 's' else 'u') width,
+                         [ Logic.Operation ("RTZ", []); value ] ))
+              | _ -> fallback ())
           | _ -> fallback ())
       | Convert, [ source; target ]
         when Facts.find_bounds source <> None && Facts.find_float_format target <> None -> (
           match (operands, Facts.find_float_format target) with
-          | [ value ], Some (exponent, significand) ->
-              Logic.Operation
-                ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
-                  [ Logic.Operation ("RNE", []); Logic.Operation ("to_real", [ value ]) ] )
+          | [ value ], Some format -> make_float_of_integer format "RNE" value
           | _ -> fallback ())
       | Convert, [ _; target ] when Types.is_builtin Character target -> (
           match operands with

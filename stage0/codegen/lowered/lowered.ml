@@ -1,3 +1,4 @@
+module Item = Item
 include Lowered_types
 
 let make_local_place local = { root = Local local; projections = [] }

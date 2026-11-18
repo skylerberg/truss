@@ -80,7 +80,7 @@ let () =
 
 let () =
   Codegen_support.test "a derived equal stops at the first field that differs" (fun () ->
-      let equal : Instance.key =
+      let equal : Lowered.Item.t =
         Code
           {
             path =
@@ -128,7 +128,7 @@ let () =
           "list_bump";
         ]
       in
-      let function_ name : Instance.key =
+      let function_ name : Lowered.Item.t =
         Code
           {
             path = Top { module_ = Codegen_support.example; name };
@@ -185,7 +185,7 @@ let () =
 let () =
   Codegen_support.test "a C local is named after the Truss local it holds, and no other is named"
     (fun () ->
-      let sum : Instance.key =
+      let sum : Lowered.Item.t =
         Code
           {
             path = Top { module_ = Codegen_support.example; name = "sum" };
