@@ -29,8 +29,7 @@ let list_target_declarations (names : Resolve.Names.lookups) packages :
           Resolve.Names.is_public declaration.visibility)
         (list_top_level names (names.list_package_declarations package))
   | Module module_ ->
-      List.filter
-        (Path_argument.is_shown names packages)
+      List.filter (Path_argument.is_shown packages)
         (list_top_level names (names.list_declarations module_))
   | Definition path -> (
       let declared = Option.to_list (Option.map names.read_declaration (names.find_key path)) in

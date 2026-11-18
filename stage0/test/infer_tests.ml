@@ -1496,6 +1496,28 @@ let () =
       in
       expect_fine (make_implemented_source "public ");
       expect_fine (make_implemented_source "internal "));
+  Harness.test "an impl whose trait names a private type has clauses no other package reads"
+    (fun () ->
+      let make_converting_source visibility =
+        Fixtures.Infer.helper
+        ^ Printf.sprintf
+            "public trait Converts[Source] {\n\
+            \  fn convert(source: Source) -> Self\n\
+             }\n\n\
+             %stype Secret(value: Int64)\n\n\
+             public type Shown(value: Int64)\n\n\
+             impl Converts[Secret] for Shown {\n\
+            \  fn convert(source: Secret) -> Shown\n\
+            \    cost time O(1)\n\
+            \    requires small(source.value)\n\
+            \  {\n\
+            \    Shown(value: source.value)\n\
+            \  }\n\
+             }\n"
+            visibility
+      in
+      expect_fine (make_converting_source "");
+      expect_one_diagnostic (make_converting_source "public ") "types.private_in_public");
   Harness.test "a function's body can call a function that other packages cannot" (fun () ->
       expect_fine
         (make_helper_source "internal " ^ Fixtures.Infer.public_function_calling_a_private_one))

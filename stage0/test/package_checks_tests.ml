@@ -370,6 +370,8 @@ let () =
         ~others:[ ("app::helpers", Fixtures.Package_checks.internal_helpers) ]);
   Harness.test "an internal method called with a dot is used" (fun () ->
       expect_used Fixtures.Package_checks.internal_method_called_with_a_dot);
+  Harness.test "a method of an internal trait called through the trait is used" (fun () ->
+      expect_used Fixtures.Package_checks.internal_trait_method_called_with_a_dot);
   Harness.test "an internal function returned as a value is used" (fun () ->
       expect_used Fixtures.Package_checks.internal_function_returned_as_a_value);
   Harness.test "an internal function named only in an `ensures` is used" (fun () ->

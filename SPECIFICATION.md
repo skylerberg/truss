@@ -2540,13 +2540,18 @@ and the prelude changes only with a language version.
 | `internal` | The whole package |
 | `public` | Every package |
 
-- An `impl`, a test, and a law proof take no visibility.
-- A method and a member constant have their own visibility. A use that
-  reaches a member through its type finds it only where it is visible:
-  `Shape.unit`, `shape.area()`, a constant in a pattern, and the `count`,
-  `element`, and `cursor` of a `for` loop or a quantifier. A member that the
-  use cannot see is skipped, as if it did not exist. A use that finds no
-  member except one it cannot see is an error that names that member.
+- An `impl`, a test, and a law proof take no visibility. An `impl` is as
+  visible as the least visible of its trait and the types it names, since
+  it applies only where all of them are visible.
+- A method or constant written in a trait, a capability, or an `impl` takes
+  no visibility, and is as visible as the definition it is written in.
+- A method or member constant defined on its own, such as `fn Shape.area`,
+  has its own visibility. A use that reaches a member through its type
+  finds it only where it is visible: `Shape.unit`, `shape.area()`, a
+  constant in a pattern, and the `count`, `element`, and `cursor` of a `for`
+  loop or a quantifier. A member that the use cannot see is skipped, as if
+  it did not exist. A use that finds no member except one it cannot see is
+  an error that names that member.
 - `opaque` appears only before `public type`. Outside its package, an opaque
   type's fields cannot be read, built, updated, or matched on. Visibility is
   set for a type as a whole.
@@ -2557,12 +2562,13 @@ and the prelude changes only with a language version.
   use call no private or `internal` function and name no such constant. An
   `ensures` may name any function the definition can, so that callers in its
   package can know its result in terms of private helpers.
-- An `internal` function, method, or constant that no definition of its
-  package uses is an error. A use counts when the user is not `internal` or
-  is itself used, so `internal` definitions that use only each other are an
-  error together. A definition the compiler calls is exempt, such as the
+- A function, method, or constant declared `internal` that no definition of
+  its package uses is an error. A use counts when the user is not `internal`
+  or is itself used, so `internal` definitions that use only each other are
+  an error together. A definition the compiler calls is exempt, such as the
   static `new` of a `system` module's type, which builds the implementation
-  of a capability.
+  of a capability. A method written in an `internal` trait is not declared
+  `internal`, so the rule does not apply to it.
 
 ## No foreign code
 
