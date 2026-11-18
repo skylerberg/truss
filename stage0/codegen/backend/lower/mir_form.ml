@@ -491,7 +491,7 @@ let rec drop_path st (path : Moves.path) =
                       | Variant_field { variant; field } -> Printf.sprintf ".(%s).%s" variant field)
                     path.projections))
       in
-      Emit_c.Ir_builder.emit_when st.builder (Copy flag) (fun () -> drop_held st path)
+      Emit_c.Ir_builder.emit_when st.builder (Use (Copy flag)) (fun () -> drop_held st path)
 
 and drop_held st (path : Moves.path) =
   let frame = require_mir_frame st in
@@ -903,7 +903,7 @@ let cancel (st : Lowering.state) ~(task : Mir.task) ~winner ~number ~value =
       and lost = Emit_c.Ir_builder.allocate_block st.builder
       and after = Emit_c.Ir_builder.allocate_block st.builder in
       Emit_c.Ir_builder.branch st.builder
-        (call_tasks_bool st "cancel" [ current.group ])
+        (Use (call_tasks_bool st "cancel" [ current.group ]))
         ~yes:won ~no:lost;
       Emit_c.Ir_builder.start st.builder won;
       Emit_c.Ir_builder.emit st.builder
@@ -948,7 +948,7 @@ let spawn_iteration (st : Lowering.state) (loop : Lowering.spawn_loop)
   in
   let next = Emit_c.Ir_builder.allocate_block st.builder
   and cancelled = Emit_c.Ir_builder.allocate_block st.builder in
-  Emit_c.Ir_builder.branch st.builder spawned ~yes:next ~no:cancelled;
+  Emit_c.Ir_builder.branch st.builder (Use spawned) ~yes:next ~no:cancelled;
   Emit_c.Ir_builder.start st.builder cancelled;
   on_not_spawned ();
   break_loop st;
@@ -1223,7 +1223,7 @@ and lower_statement st (statement : Mir.Graph.statement) =
       let holds = lower_operand st condition in
       let failed = Emit_c.Ir_builder.allocate_block st.builder
       and after = Emit_c.Ir_builder.allocate_block st.builder in
-      Emit_c.Ir_builder.branch st.builder holds ~yes:after ~no:failed;
+      Emit_c.Ir_builder.branch st.builder (Use holds) ~yes:after ~no:failed;
       Emit_c.Ir_builder.start st.builder failed;
       let message = "assert " ^ Lowering.quote_span st (read_spans st).(origin) in
       Emit_c.Ir_builder.finish st.builder
@@ -1910,10 +1910,9 @@ and lend_part st ~(mode : Types.mode) (part : Mir.yielded) =
         | Part (Borrow { place = written; _ }) when find_lent_in_place written <> None ->
             Address { place = Option.get (find_lent_in_place written); writable = mode = Mut }
         | _ ->
-            let has_no_slot = Lowering.allocate_local st (Raw Bool) in
-            Emit_c.Ir_builder.emit st.builder
-              (Assign (has_no_slot, Binary (Equal, Copy slot_pointer, Constant Null)));
-            Emit_c.Ir_builder.emit_when st.builder (Copy has_no_slot) (fun () ->
+            Emit_c.Ir_builder.emit_when st.builder
+              (Binary (Equal, Copy slot_pointer, Constant Null))
+              (fun () ->
                 Emit_c.Ir_builder.emit st.builder
                   (Call
                      {
@@ -1940,7 +1939,7 @@ and lower_terminator st region (ending : Mir.Graph.terminator) ~origin =
   | Branch { condition; yes; no; _ } ->
       let condition = Lowering.run_in_statement st (fun () -> lower_operand st condition) in
       let yes = resolve_jump st region yes and no = resolve_jump st region no in
-      Emit_c.Ir_builder.branch st.builder condition ~yes ~no;
+      Emit_c.Ir_builder.branch st.builder (Use condition) ~yes ~no;
       Emit_c.Ir_builder.start st.builder (Emit_c.Ir_builder.allocate_block st.builder)
   | Unreachable | Written_unreachable -> Lowering.emit_unreachable_block st
   | Todo ->
@@ -2103,17 +2102,8 @@ and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
     | _ -> Definitions.raise_bug "a range of %s" (Ground.to_string element)
   in
   let characters = scalar = Character in
-  let conjoin first second =
-    let answer = Emit_c.Ir_builder.allocate_local st.builder (Raw Bool) in
-    Emit_c.Ir_builder.emit st.builder
-      (Assign (Lowered.make_local_place answer, Binary (Bit_and, first, second)));
-    Lowered.Copy (Lowered.make_local_place answer)
-  in
   let compare op left right =
-    let answer = Emit_c.Ir_builder.allocate_local st.builder (Raw Bool) in
-    Emit_c.Ir_builder.emit st.builder
-      (Assign (Lowered.make_local_place answer, Binary (op, left, right)));
-    Lowered.Copy (Lowered.make_local_place answer)
+    Emit_c.Ir_builder.emit_temporary st.builder (Raw Bool) (Binary (op, left, right))
   in
   match schedule with
   | Chunked ->
@@ -2123,53 +2113,44 @@ and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
       let last_value = Lowering.allocate_binding st element in
       Emit_c.Ir_builder.emit st.builder (Assign (first_value, Use (lower_operand st low)));
       Emit_c.Ir_builder.emit st.builder (Assign (last_value, Use (lower_operand st high)));
-      let going = Emit_c.Ir_builder.allocate_local st.builder (Raw Bool) in
-      Emit_c.Ir_builder.emit st.builder
-        (Assign
-           ( Lowered.make_local_place going,
-             Binary ((if inclusive then Less_equal else Less), Copy first_value, Copy last_value) ));
       let inside = Emit_c.Ir_builder.allocate_block st.builder
       and after = Emit_c.Ir_builder.allocate_block st.builder in
       let depth = List.length st.scopes in
       Emit_c.Ir_builder.branch st.builder
-        (Copy (Lowered.make_local_place going))
+        (Binary ((if inclusive then Less_equal else Less), Copy first_value, Copy last_value))
         ~yes:inside ~no:after;
       Emit_c.Ir_builder.start st.builder inside;
       let first = Emit_c.Ir_builder.allocate_local st.builder wide
       and last = Emit_c.Ir_builder.allocate_local st.builder wide in
-      let low_wide = Emit_c.Ir_builder.allocate_local st.builder wide
-      and high_wide = Emit_c.Ir_builder.allocate_local st.builder wide in
       Emit_c.Ir_builder.emit st.builder
         (Assign (Lowered.make_local_place first, Use (Lowering.make_int_constant UInt64 Z.zero)));
+      let low_wide =
+        Emit_c.Ir_builder.emit_temporary st.builder wide
+          (Convert (Copy first_value, Integer UInt64))
+      in
+      let high_wide =
+        Emit_c.Ir_builder.emit_temporary st.builder wide (Convert (Copy last_value, Integer UInt64))
+      in
       Emit_c.Ir_builder.emit st.builder
-        (Assign (Lowered.make_local_place low_wide, Convert (Copy first_value, Integer UInt64)));
-      Emit_c.Ir_builder.emit st.builder
-        (Assign (Lowered.make_local_place high_wide, Convert (Copy last_value, Integer UInt64)));
-      Emit_c.Ir_builder.emit st.builder
-        (Assign
-           ( Lowered.make_local_place last,
-             Binary
-               ( Subtract,
-                 Copy (Lowered.make_local_place high_wide),
-                 Copy (Lowered.make_local_place low_wide) ) ));
+        (Assign (Lowered.make_local_place last, Binary (Subtract, high_wide, low_wide)));
       if not inclusive then
         Emit_c.Ir_builder.emit st.builder
           (Assign
              ( Lowered.make_local_place last,
                Binary (Subtract, Copy (Lowered.make_local_place last), one) ));
-      if characters then
-        Emit_c.Ir_builder.emit_when st.builder
-          (conjoin
-             (compare Less (Copy first_value) (make_constant 0xD800))
-             (compare Greater (Copy last_value) (make_constant 0xDFFF)))
-          (fun () ->
-            Emit_c.Ir_builder.emit st.builder
-              (Assign
-                 ( Lowered.make_local_place last,
-                   Binary
-                     ( Subtract,
-                       Copy (Lowered.make_local_place last),
-                       Lowering.make_int_constant UInt64 (Z.of_int 0x800) ) )));
+      (if characters then
+         let starts_below_surrogates = compare Less (Copy first_value) (make_constant 0xD800) in
+         let ends_above_surrogates = compare Greater (Copy last_value) (make_constant 0xDFFF) in
+         Emit_c.Ir_builder.emit_when st.builder
+           (Binary (Bit_and, starts_below_surrogates, ends_above_surrogates))
+           (fun () ->
+             Emit_c.Ir_builder.emit st.builder
+               (Assign
+                  ( Lowered.make_local_place last,
+                    Binary
+                      ( Subtract,
+                        Copy (Lowered.make_local_place last),
+                        Lowering.make_int_constant UInt64 (Z.of_int 0x800) ) ))));
       let body, environment =
         Lowering.outline st ~parts:[ first; last ] (fun () ->
             let index = Emit_c.Ir_builder.allocate_local st.builder wide in
@@ -2187,28 +2168,25 @@ and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
                   (Assign (offset, Convert (Copy (Lowered.make_local_place index), scalar)));
                 Emit_c.Ir_builder.emit st.builder
                   (Assign (bound, Binary (Add, Copy first_value, Copy offset)));
-                if characters then
-                  Emit_c.Ir_builder.emit_when st.builder
-                    (conjoin
-                       (compare Less (Copy first_value) (make_constant 0xD800))
-                       (compare Greater_equal (Copy bound) (make_constant 0xD800)))
-                    (fun () ->
-                      Emit_c.Ir_builder.emit st.builder
-                        (Assign (bound, Binary (Add, Copy bound, make_constant 0x800))));
+                (if characters then
+                   let starts_below_surrogates =
+                     compare Less (Copy first_value) (make_constant 0xD800)
+                   in
+                   let reaches_surrogates =
+                     compare Greater_equal (Copy bound) (make_constant 0xD800)
+                   in
+                   Emit_c.Ir_builder.emit_when st.builder
+                     (Binary (Bit_and, starts_below_surrogates, reaches_surrogates))
+                     (fun () ->
+                       Emit_c.Ir_builder.emit st.builder
+                         (Assign (bound, Binary (Add, Copy bound, make_constant 0x800)))));
                 Lowering.run_in_loop st ~continue_:step ~break_:done_ ~depth (fun () -> each bound));
             Emit_c.Ir_builder.finish st.builder (Goto step);
             Emit_c.Ir_builder.start st.builder step;
-            let ended = Emit_c.Ir_builder.allocate_local st.builder (Raw Bool) in
-            Emit_c.Ir_builder.emit st.builder
-              (Assign
-                 ( Lowered.make_local_place ended,
-                   Binary
-                     ( Equal,
-                       Copy (Lowered.make_local_place index),
-                       Copy (Lowered.make_local_place last) ) ));
             let next = Emit_c.Ir_builder.allocate_block st.builder in
             Emit_c.Ir_builder.branch st.builder
-              (Copy (Lowered.make_local_place ended))
+              (Binary
+                 (Equal, Copy (Lowered.make_local_place index), Copy (Lowered.make_local_place last)))
               ~yes:done_ ~no:next;
             Emit_c.Ir_builder.start st.builder next;
             Emit_c.Ir_builder.emit st.builder
@@ -2242,13 +2220,8 @@ and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
       let depth = List.length st.scopes in
       Emit_c.Ir_builder.finish st.builder (Goto test);
       Emit_c.Ir_builder.start st.builder test;
-      let going = Emit_c.Ir_builder.allocate_local st.builder (Raw Bool) in
-      Emit_c.Ir_builder.emit st.builder
-        (Assign
-           ( Lowered.make_local_place going,
-             Binary ((if inclusive then Less_equal else Less), Copy index, Copy stop) ));
       Emit_c.Ir_builder.branch st.builder
-        (Copy (Lowered.make_local_place going))
+        (Binary ((if inclusive then Less_equal else Less), Copy index, Copy stop))
         ~yes:inside ~no:after;
       Emit_c.Ir_builder.start st.builder inside;
       Lowering.run_in_loop st ~continue_:step ~break_:after ~depth (fun () ->
@@ -2269,19 +2242,16 @@ and lower_range_loop st ~schedule ~(low : Mir.operand) ~(high : Mir.operand) ~in
       Emit_c.Ir_builder.finish st.builder (Goto step);
       Emit_c.Ir_builder.start st.builder step;
       if inclusive then begin
-        let last = Emit_c.Ir_builder.allocate_local st.builder (Raw Bool) in
-        Emit_c.Ir_builder.emit st.builder
-          (Assign (Lowered.make_local_place last, Binary (Equal, Copy index, Copy stop)));
         let next = Emit_c.Ir_builder.allocate_block st.builder in
         Emit_c.Ir_builder.branch st.builder
-          (Copy (Lowered.make_local_place last))
+          (Binary (Equal, Copy index, Copy stop))
           ~yes:after ~no:next;
         Emit_c.Ir_builder.start st.builder next
       end;
       Emit_c.Ir_builder.emit st.builder (Assign (index, Binary (Add, Copy index, make_constant 1)));
       if characters then
         Emit_c.Ir_builder.emit_when st.builder
-          (compare Equal (Copy index) (make_constant 0xD800))
+          (Binary (Equal, Copy index, make_constant 0xD800))
           (fun () -> Emit_c.Ir_builder.emit st.builder (Assign (index, Use (make_constant 0xE000))));
       Emit_c.Ir_builder.finish st.builder (Goto test);
       Emit_c.Ir_builder.start st.builder after
@@ -2299,26 +2269,21 @@ let fill_defaults (st : Lowering.state) (mask : Lowered.place) (body : Mir.Graph
           incr bit;
           let bit = !bit in
           let ty = Lowering.ground st type_ in
-          let passed_bit = Emit_c.Ir_builder.allocate_local builder (Raw (Integer UInt64))
-          and is_omitted = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-          Emit_c.Ir_builder.emit builder
-            (Assign
-               ( Lowered.make_local_place passed_bit,
-                 Binary
-                   (Bit_and, Copy mask, Lowering.make_int_constant UInt64 (Z.shift_left Z.one bit))
-               ));
+          let passed_bit =
+            Emit_c.Ir_builder.emit_temporary builder (Raw (Integer UInt64))
+              (Binary
+                 (Bit_and, Copy mask, Lowering.make_int_constant UInt64 (Z.shift_left Z.one bit)))
+          in
+          let is_omitted = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
           Emit_c.Ir_builder.emit builder
             (Assign
                ( Lowered.make_local_place is_omitted,
-                 Binary
-                   ( Equal,
-                     Copy (Lowered.make_local_place passed_bit),
-                     Lowering.make_int_constant UInt64 Z.zero ) ));
+                 Binary (Equal, passed_bit, Lowering.make_int_constant UInt64 Z.zero) ));
           let fill = Emit_c.Ir_builder.allocate_block builder
           and after = Emit_c.Ir_builder.allocate_block builder in
           let fill_unless_passed other =
             Emit_c.Ir_builder.branch builder
-              (Copy (Lowered.make_local_place is_omitted))
+              (Use (Copy (Lowered.make_local_place is_omitted)))
               ~yes:fill ~no:other
           in
           let place =

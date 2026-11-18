@@ -23,17 +23,22 @@ let definition name : Path.t =
   Top { module_ = { package = { owner = None; name = "test" }; modules = [] }; name }
 
 let named ?(arguments = []) name = Ground.Named { path = definition name; arguments }
-let int64 = named "Int64"
-let bool = named "Bool"
-let character = named "Character"
-let unit = named "Unit"
+let int32 = Ground.make_builtin Int32
+let int64 = Ground.make_builtin Int64
+let uint8 = Ground.make_builtin UInt8
+let uint64 = Ground.make_builtin UInt64
+let float64 = Ground.make_builtin Float64
+let bool = Ground.make_builtin Bool
+let character = Ground.make_builtin Character
+let unit = Ground.make_builtin Unit
+
+let array element count =
+  Ground.make_builtin Array ~arguments:[ Type element; Value (Z.of_int count) ]
+
 let text = named "Text"
 let pair = named "Pair"
-let float64 = named "Float64"
-let uint8 = named "UInt8"
 let option value = named "Option" ~arguments:[ Type value ]
 let list element = named "List" ~arguments:[ Type element ]
-let array element count = named "Array" ~arguments:[ Type element; Value (Z.of_int count) ]
 let host = match Libc.host with Ok system -> system | Error message -> failwith message
 let field name ty = (name, Memory_layout.Typed ty)
 
@@ -41,34 +46,20 @@ let variant ?(indirect = false) name fields : Memory_layout.variant_shape =
   { name; indirect; fields }
 
 let compute_shape extra (ty : Ground.ty) : Memory_layout.shape =
-  match ty with
-  | Named { path = Top { name = "Int64"; _ }; _ } -> Scalar (Integer Int64)
-  | Named { path = Top { name = "UInt8"; _ }; _ } -> Scalar (Integer UInt8)
-  | Named { path = Top { name = "UInt64"; _ }; _ } -> Scalar (Integer UInt64)
-  | Named { path = Top { name = "Float64"; _ }; _ } -> Scalar Float64
-  | Named { path = Top { name = "Bool"; _ }; _ } -> Scalar Bool
-  | Named { path = Top { name = "Character"; _ }; _ } -> Scalar Character
-  | Named { path = Top { name = "Unit"; _ }; _ } -> Record []
-  | Never -> Sum []
-  | Named { path = Top { name = "Option"; _ }; arguments = [ Type value ] } ->
+  match (Monomorphic.find_builtin_shape ty, ty) with
+  | Some shape, _ -> shape
+  | None, Named { path = Top { name = "Option"; _ }; arguments = [ Type value ] } ->
       Sum [ variant "Some" [ field "value" value ]; variant "None" [] ]
-  | Named { path = Top { name = "List" | "Storage"; _ }; arguments = [ Type element ] } ->
+  | None, Named { path = Top { name = "List"; _ }; arguments = [ Type element ] } ->
       Storage.make_storage_shape element
-  | Named { path = Top { name = "Array"; _ }; arguments = [ Type element; Value count ] } ->
-      Array (element, Z.to_int count)
-  | Named { path = Top { name = "Int32"; _ }; _ } -> Scalar (Integer Int32)
-  | Function function_type -> Convention.make_function_value_shape function_type
-  | _ -> (
+  | None, _ -> (
       match List.assoc_opt (Ground.to_string ty) extra with
       | Some shape -> shape
       | None -> invalid_arg ("no shape for " ^ Ground.to_string ty))
 
-let lay_out ?(extra = []) ty =
-  Memory_layout.of_type (Memory_layout.create host ~compute_shape:(compute_shape extra)) ty
-
+let make_shape_env ?(extra = []) () = Memory_layout.create host ~compute_shape:(compute_shape extra)
+let lay_out ?extra ty = Memory_layout.of_type (make_shape_env ?extra ()) ty
 let describe ?extra ty = Memory_layout.For_testing.to_string (lay_out ?extra ty)
-let int32 = named "Int32"
-let uint64 = named "UInt64"
 
 type local_info = { ty : Lowered.ty; name : string option }
 type block = { statements : Lowered.statement list; terminator : Lowered.terminator }
@@ -139,7 +130,6 @@ let call name ?(result = Some (value int32)) ?(parameters = []) arguments place 
       result = (match place with Some place -> Returned place | None -> Discarded);
     }
 
-let make_shape_env ?(extra = []) () = Memory_layout.create host ~compute_shape:(compute_shape extra)
 let scratch = lazy (Harness.make_scratch_directory "codegen")
 
 let c_compiler =
