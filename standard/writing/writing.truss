@@ -219,7 +219,7 @@ internal fn quoted_text(output: mut intrinsic::Storage[UInt8], text: intrinsic::
     if code == 36 && at + 1 < count && intrinsic::view_at(text, index: at + 1) == 123 {
       append(mut output, bytes: "\\$".slice().bytes)
     } else {
-      match Character.try_from(code) {
+      match Character.try_from_code(code) {
         Ok(character) => escaped(mut output, character: character, quote: 34)
         Err(_) => escaped_code(mut output, code: code)
       }
