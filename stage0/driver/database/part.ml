@@ -47,7 +47,7 @@ type _ stored =
   | Mir_call_edges : Path.t -> Path.t list stored
   | Patterns : Resolve.Names.key -> unit stored
   | Usage : Resolve.Names.key -> unit stored
-  | Ownership : Resolve.Names.key -> (Core.origin * Core.origin) list stored
+  | Ownership : Resolve.Names.key -> (Core.origin list * Core.origin list) list stored
   | Import_check : Path.file -> Diagnostic.t list stored
   | Package_check : Path.package * Package_checks.check -> Package_checks.outcome stored
   | Call_edges : Path.t * Path.package -> Path.t list stored
