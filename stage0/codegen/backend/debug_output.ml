@@ -31,7 +31,7 @@ let emit_debug_call env builder ~output ty (place : Lowered.place) =
   Emit_c.Builder.emit builder
     (Call
        {
-         target = Direct { function_ = Instance (Debug ty); signature = make_signature env ty };
+         target = Direct { function_ = Item (Debug ty); signature = make_signature env ty };
          arguments = value_argument @ [ output ];
          result = Discarded;
        })

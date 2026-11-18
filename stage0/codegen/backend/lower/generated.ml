@@ -15,10 +15,10 @@ let read_impl_capability context impl =
     interface.implements.trait,
     Definitions.list_evidence context Types.no_substitution interface.impl_uses )
 
-let build_entry context (key : Instance.key) (impl_method : Instance.impl_method) :
-    Emit_c.Builder.instance =
-  let { Instance.impl; name; receiver; type_arguments } = impl_method in
-  let path = Instance.make_method_path impl_method in
+let build_entry context (key : Lowered.Item.t) (impl_method : Lowered.Item.impl_method) :
+    Emit_c.Builder.item_code =
+  let { Lowered.Item.impl; name; receiver; type_arguments } = impl_method in
+  let path = Lowered.Item.make_method_path impl_method in
   let interface, capability, captured = read_impl_capability context impl in
   let _, capability_signature = Targets.lookup_capability_method context capability name in
   let _, result = Targets.make_entry_signature context capability_signature in
@@ -76,7 +76,7 @@ let build_entry context (key : Instance.key) (impl_method : Instance.impl_method
     Monomorphic.ground context.monomorphic Types.no_substitution
       (Types.extract_result_type capability_signature.output)
   in
-  Targets.lower_instance_call st
+  Targets.lower_item_call st
     (Code { path; instantiation = { Ground.no_instantiation with type_arguments } })
     ~signature:method_signature ~substitution
     ~arguments:
@@ -91,7 +91,7 @@ let build_entry context (key : Instance.key) (impl_method : Instance.impl_method
        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
        ())
 
-let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.Builder.instance =
+let build_locked_entry context (key : Lowered.Item.t) ~capability ~name : Emit_c.Builder.item_code =
   let slot, capability_signature = Targets.lookup_capability_method context capability name in
   let c_signature, result = Targets.make_entry_signature context capability_signature in
   let st =
@@ -184,7 +184,7 @@ let build_locked_entry context (key : Instance.key) ~capability ~name : Emit_c.B
        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
        ())
 
-let build_locked_table (context : Definitions.context) (key : Instance.key) ~capability :
+let build_locked_table (context : Definitions.context) (key : Lowered.Item.t) ~capability :
     Lowered.table =
   let interface = Definitions.read_trait_interface context capability in
   {
@@ -193,7 +193,7 @@ let build_locked_table (context : Definitions.context) (key : Instance.key) ~cap
     entries =
       List.map
         (fun (trait_method : Types.trait_method) ->
-          ( Instance.Generated (Locked_entry { capability; name = trait_method.method_name }),
+          ( Lowered.Item.Generated (Locked_entry { capability; name = trait_method.method_name }),
             fst
               (Targets.make_entry_signature context
                  (Interface.Definition.read_method_signature context.lookups.interface
@@ -201,7 +201,7 @@ let build_locked_table (context : Definitions.context) (key : Instance.key) ~cap
         interface.methods;
   }
 
-let build_impl_table context (key : Instance.key) ~impl ~type_arguments : Lowered.table =
+let build_impl_table context (key : Lowered.Item.t) ~impl ~type_arguments : Lowered.table =
   let interface, capability, _ = read_impl_capability context impl in
   let capability_interface = Definitions.read_trait_interface context capability in
   let entries =
@@ -213,7 +213,7 @@ let build_impl_table context (key : Instance.key) ~impl ~type_arguments : Lowere
           | None ->
               Definitions.raise_bug "%s does not write %s" (Path.show impl) trait_method.method_name
         in
-        ( Instance.Generated
+        ( Lowered.Item.Generated
             (Entry { impl; name = trait_method.method_name; receiver; type_arguments }),
           fst
             (Targets.make_entry_signature context
@@ -250,7 +250,7 @@ let list_real_implementations (st : Lowering.state) ~user capabilities =
                 Definitions.raise_bug "%s implements %s" (Ground.to_string ty)
                   (Path.show capability)
           in
-          Targets.lower_instance_call st
+          Targets.lower_item_call st
             (Code { path = constructor; instantiation = Ground.no_instantiation })
             ~signature:(Definitions.read_signature st.context constructor)
             ~substitution:Types.no_substitution ~arguments:[] ~destination:value ();
@@ -262,7 +262,7 @@ let list_real_implementations (st : Lowering.state) ~user capabilities =
 
 let text_copied_from = Well_known.make_path Text_copied_from
 
-let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.instance =
+let build_program_main context (key : Lowered.Item.t) main_path : Emit_c.Builder.item_code =
   let st =
     make_generated_state context ~key ~definition:main_path ~substitution:Types.no_substitution
   in
@@ -321,7 +321,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
                ~elements:(Copy (Lowered.make_local_place bytes))
                ~length:(Copy (Lowered.make_local_place length)) ));
       let text = Lowering.allocate_temporary st string_ty in
-      Targets.lower_instance_call st
+      Targets.lower_item_call st
         (Code { path = text_copied_from; instantiation = Ground.no_instantiation })
         ~signature:(Definitions.read_signature context text_copied_from)
         ~substitution:Types.no_substitution
@@ -339,7 +339,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
     | _ -> Definitions.raise_bug "main lends"
   in
   let exit = Lowering.allocate_temporary st exit_ty in
-  Targets.lower_instance_call st
+  Targets.lower_item_call st
     (Code { path = main_path; instantiation = Ground.no_instantiation })
     ~signature ~substitution:Types.no_substitution
     ~arguments:[ (list_mode, list_ty, list) ]
@@ -352,8 +352,8 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
   Emit_c.Builder.build st.builder
     (Lowering.finish_function st ~first:[ count; arguments_pointer ] ~rest:[] ())
 
-let build_adapter context (key : Instance.key) ~(function_ : Path.t) ~instantiation
-    ~(ty : Ground.function_type) : Emit_c.Builder.instance =
+let build_adapter context (key : Lowered.Item.t) ~(function_ : Path.t) ~instantiation
+    ~(ty : Ground.function_type) : Emit_c.Builder.item_code =
   let signature = Definitions.read_signature context function_ in
   let substitution = Monomorphic.make_signature_substitution signature instantiation in
   let st = make_generated_state context ~key ~definition:function_ ~substitution in
@@ -369,7 +369,7 @@ let build_adapter context (key : Instance.key) ~(function_ : Path.t) ~instantiat
   in
   let evidence = Lowering.list_evidence_parameters st ty.uses in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
-  Targets.lower_instance_call st
+  Targets.lower_item_call st
     (Code { path = function_; instantiation })
     ~signature ~substitution
     ~arguments:(List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
@@ -380,10 +380,10 @@ let build_adapter context (key : Instance.key) ~(function_ : Path.t) ~instantiat
        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
        ())
 
-let build_any_entry context (key : Instance.key) (impl_method : Instance.impl_method) :
-    Emit_c.Builder.instance =
-  let { Instance.impl; name; receiver; type_arguments } = impl_method in
-  let path = Instance.make_method_path impl_method in
+let build_any_entry context (key : Lowered.Item.t) (impl_method : Lowered.Item.impl_method) :
+    Emit_c.Builder.item_code =
+  let { Lowered.Item.impl; name; receiver; type_arguments } = impl_method in
+  let path = Lowered.Item.make_method_path impl_method in
   let interface = Definitions.read_impl_interface context impl in
   let trait = interface.implements.trait in
   let _, trait_signature = Targets.lookup_dynamic_method context trait name receiver in
@@ -433,7 +433,7 @@ let build_any_entry context (key : Instance.key) (impl_method : Instance.impl_me
           (Monomorphic.ground context.monomorphic substitution result_type)
     | Lends _, None -> Lowering.allocate_temporary st (Ground.make_builtin Unit)
   in
-  Targets.lower_instance_call st
+  Targets.lower_item_call st
     (Code { path; instantiation = { Ground.no_instantiation with type_arguments } })
     ~signature:method_signature ~substitution
     ~arguments:
@@ -450,7 +450,7 @@ let build_any_entry context (key : Instance.key) (impl_method : Instance.impl_me
          @ evidence @ lending)
        ())
 
-let build_any_table context (key : Instance.key) ~impl ~type_arguments : Lowered.table =
+let build_any_table context (key : Lowered.Item.t) ~impl ~type_arguments : Lowered.table =
   let interface = Definitions.read_impl_interface context impl in
   let trait = interface.implements.trait in
   let substitution = Definitions.bind interface.impl_generics type_arguments in
@@ -465,7 +465,7 @@ let build_any_table context (key : Instance.key) ~impl ~type_arguments : Lowered
           | Some receiver -> receiver
           | None -> trait_method.method_receiver
         in
-        ( Instance.Generated
+        ( Lowered.Item.Generated
             (Any_entry { impl; name = trait_method.method_name; receiver; type_arguments }),
           let signature, _, _ =
             Targets.make_any_entry_signature context ~any ~trait
@@ -483,8 +483,8 @@ let build_any_table context (key : Instance.key) ~impl ~type_arguments : Lowered
       @ entries;
   }
 
-let lower context (generated : Instance.generated) : Emit_c.Builder.instance =
-  let key = Instance.Generated generated in
+let lower context (generated : Lowered.Item.generated) : Emit_c.Builder.item_code =
+  let key = Lowered.Item.Generated generated in
   match generated with
   | Entry impl_method -> build_entry context key impl_method
   | Any_entry impl_method -> build_any_entry context key impl_method
@@ -493,8 +493,8 @@ let lower context (generated : Instance.generated) : Emit_c.Builder.instance =
       build_adapter context key ~function_ ~instantiation ~ty
   | Program_main main -> build_program_main context key main
 
-let lower_table context (table : Instance.table) : Lowered.table =
-  let key = Instance.Table table in
+let lower_table context (table : Lowered.Item.table) : Lowered.table =
+  let key = Lowered.Item.Table table in
   match table with
   | Impl_table { impl; type_arguments } -> build_impl_table context key ~impl ~type_arguments
   | Any_table { impl; type_arguments } -> build_any_table context key ~impl ~type_arguments

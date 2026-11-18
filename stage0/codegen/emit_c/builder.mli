@@ -1,9 +1,8 @@
 type t
-type instance = C_instance.t
+type item_code = Item_code.t
 type prototype = { parameters : Lowered.local list; result : Lowered.ty option; returns : bool }
 
-val instance_key : instance -> Instance.key
-val create : Memory_layout.env -> key:Instance.key -> t
+val create : Memory_layout.env -> key:Lowered.Item.t -> t
 
 val build_nested :
   t -> index:int -> environment:(string * Lowered.ty) list -> (t -> prototype) -> unit
@@ -22,4 +21,4 @@ val emit_loop :
   t -> ?integer:Memory_layout.integer -> count:Lowered.operand -> (Lowered.local -> unit) -> unit
 
 val outline : t -> index:int -> parts:Lowered.local list -> (unit -> unit) -> Lowered.local
-val build : t -> prototype -> instance
+val build : t -> prototype -> item_code

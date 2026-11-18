@@ -107,7 +107,7 @@ let list_structural_parameters context (frame : State.frame) (clauses : State.cl
 
 let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
     path (contract : State.contract) (values : State.passed list) ~lent_final ~havoc_mut
-    ~substitution_of ~instance =
+    ~substitution_of ~type_arguments =
   let is_logic_call = contract.is_logic_function && invocation.uses = Types.no_capabilities in
   let values =
     if is_logic_call then
@@ -317,7 +317,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let is_limited_call = ref false in
   let result =
     if is_logic_call && List.length callee_arguments = List.length callee_bindings then begin
-      let function_symbol = Logic.Symbol.Function { callee = path; instance } in
+      let function_symbol = Logic.Symbol.Function { callee = path; type_arguments } in
       let sorts =
         List.mapi
           (fun index ((parameter : Mir.parameter), _) ->
@@ -343,7 +343,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       let symbol =
         if List.mem function_symbol context.axiomatizing then begin
           is_limited_call := true;
-          let limited = Logic.Symbol.Limited { callee = path; instance } in
+          let limited = Logic.Symbol.Limited { callee = path; type_arguments } in
           Facts.declare context (Logic.Function (limited, sorts, result_sort));
           Facts.run_once context (Limited_link function_symbol) (fun () ->
               let parameters =
@@ -909,12 +909,12 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       (Mir.Call_edges.list_impls_used context.lookups.interface
          (Path.locate_package context.current)
          invocation.callee);
-  let with_contract ?(substitution_of = fun _ -> Types.no_substitution) ?(instance = []) path =
-    function
+  let with_contract ?(substitution_of = fun _ -> Types.no_substitution) ?(type_arguments = []) path
+      = function
     | Some contract ->
         Some
           (call_contract ~lent_final:leave_lent context frame site invocation path contract values
-             ~havoc_mut ~substitution_of ~instance)
+             ~havoc_mut ~substitution_of ~type_arguments)
     | None ->
         let frame = havoc_mut frame in
         let frame =
@@ -934,7 +934,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       in
       with_contract
         ~substitution_of:(fun _ -> substitution)
-        ~instance:arguments path
+        ~type_arguments:arguments path
         (Contracts.find_function_contract context.lookups path)
   | Trait_method { trait; name; receiver; evidence; self_type; instantiation } -> (
       let arguments = list_arguments instantiation.type_arguments in
@@ -1006,7 +1006,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             if clauses.inherited then trait_substitution else callee_substitution
           in
           with_contract ~substitution_of:compute_substitution
-            ~instance:(Types.Type self_type :: arguments)
+            ~type_arguments:(Types.Type self_type :: arguments)
             path
             (Contracts.find_method_contract context.lookups trait name receiver evidence))
   | Indirect () ->

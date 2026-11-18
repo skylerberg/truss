@@ -1,3 +1,5 @@
+module Item = Item
+
 include module type of struct
   include Lowered_types
 end

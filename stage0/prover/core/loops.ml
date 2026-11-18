@@ -793,7 +793,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
               (Types.bind_argument
                  (Types.make_self_parameter cursor_trait)
                  (Types.Type cursor_type) Types.no_substitution))
-          ~instance:[ Types.Type cursor_type ]
+          ~type_arguments:[ Types.Type cursor_type ]
       in
       let has_another =
         Logic.Is (Facts.make_constructor_symbol option_type (Some "Some"), pulled)

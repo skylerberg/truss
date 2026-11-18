@@ -66,8 +66,8 @@ let make_code_state context ~key path =
       (Lowering.make_frame code),
     code )
 
-let lower_template_check context ~from_template ~literals ~clauses : Emit_c.Builder.instance =
-  let key = Instance.Template_check { from_template; literals; clauses } in
+let lower_template_check context ~from_template ~literals ~clauses : Emit_c.Builder.item_code =
+  let key = Lowered.Item.Template_check { from_template; literals; clauses } in
   let st, _ = make_code_state context ~key from_template in
   let template_type =
     match
@@ -95,10 +95,10 @@ let lower_template_check context ~from_template ~literals ~clauses : Emit_c.Buil
             context.bool holds)
         (Definitions.list_template_clauses context from_template clauses);
       Constants.write_output st output);
-  Lowering.finish_instance st ~rest:[] ()
+  Lowering.finish_item st ~rest:[] ()
 
-let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.instance =
-  let key = Instance.Call_evaluation { function_; arguments } in
+let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.item_code =
+  let key = Lowered.Item.Call_evaluation { function_; arguments } in
   let st, _ = make_code_state context ~key function_ in
   Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
   let signature = Definitions.read_signature context function_ in
@@ -127,7 +127,7 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.instanc
         | _ -> Definitions.raise_bug "an evaluated call that does not return"
       in
       let result = Lowering.allocate_temporary st result_ty in
-      Targets.lower_instance_call st
+      Targets.lower_item_call st
         (Code { path = function_; instantiation = Ground.no_instantiation })
         ~signature ~substitution:Types.no_substitution ~arguments:passed ~destination:result ();
       let output = Targets.begin_output st in
@@ -135,10 +135,10 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.instanc
         ~output:(Address { place = output; writable = true })
         result_ty result;
       Constants.write_output st output);
-  Lowering.finish_instance st ~rest:[] ()
+  Lowering.finish_item st ~rest:[] ()
 
-let lower_source_code context ~path ~instantiation : Emit_c.Builder.instance =
-  let key = Instance.Code { path; instantiation } in
+let lower_source_code context ~path ~instantiation : Emit_c.Builder.item_code =
+  let key = Lowered.Item.Code { path; instantiation } in
   let code = Definitions.make_code context path instantiation in
   let body = (Mir_form.read_mir_graph context path).body in
   let st =
@@ -169,4 +169,4 @@ let lower_source_code context ~path ~instantiation : Emit_c.Builder.instance =
     | _ -> None
   in
   Mir_form.lower_code st path ~parameters:places ?lending ();
-  Lowering.finish_instance st ~returns ~rest:(parameter_locals @ lending_locals) ()
+  Lowering.finish_item st ~returns ~rest:(parameter_locals @ lending_locals) ()

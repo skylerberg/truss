@@ -24,7 +24,7 @@ let resolve_impl (context : Definitions.context) substitution ~(trait : Types.tr
         | Some (From_impl { impl; substitution }) -> (impl, substitution)
         | _ ->
             Definitions.raise_bug "no impl of %s for %s" (Types.show_trait trait) (Types.show self))
-    | Dynamic -> Definitions.raise_bug "a call through any, which reaches no one instance"
+    | Dynamic -> Definitions.raise_bug "a call through any, which reaches no single impl"
   in
   let impl_interface = Definitions.read_impl_interface context impl in
   let impl_arguments =
@@ -42,7 +42,7 @@ let make_trait_method_key context substitution ~(trait : Types.trait_reference) 
     ~self_type ~(instantiation : Types.instantiation) ~(evidence : Core.evidence) =
   let impl, impl_arguments = resolve_impl context substitution ~trait ~self_type ~evidence in
   let own = Monomorphic.ground_instantiation context.monomorphic substitution instantiation in
-  Instance.Code
+  Lowered.Item.Code
     {
       path = Method { owner = impl; name; receiver };
       instantiation = { own with type_arguments = impl_arguments @ own.type_arguments };
@@ -447,7 +447,7 @@ let count_passed (signature : Types.signature) =
   in
   (1 lsl defaulted) - 1
 
-let lower_instance_call (st : Lowering.state) key ~(signature : Types.signature) ~substitution
+let lower_item_call (st : Lowering.state) key ~(signature : Types.signature) ~substitution
     ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?mask ?(lending = []) ~destination
     () =
   let mask = match mask with Some mask -> mask | None -> count_passed signature in
@@ -465,7 +465,7 @@ let lower_instance_call (st : Lowering.state) key ~(signature : Types.signature)
     @ List.map (lookup_evidence st)
         (Definitions.list_evidence st.context substitution signature.uses)
   in
-  let target = Lowered.Direct { function_ = Instance key; signature = c_signature } in
+  let target = Lowered.Direct { function_ = Item key; signature = c_signature } in
   Emit_c.Builder.emit st.builder
     (Call
        {

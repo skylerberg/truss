@@ -107,17 +107,17 @@ let () =
         (Fork { branches = [ (0, take_address first); (1, take_address second) ] });
       Emit_c.Builder.emit builder (Assign (Codegen_support.at sum, add sum other));
       Emit_c.Builder.finish builder (Return (Some (Codegen_support.copy sum)));
-      let instance =
+      let code =
         Emit_c.Builder.build builder { parameters = []; result = Some int; returns = true }
       in
-      let c = Emit_c.For_testing.render_c (Emit_c.make_fragment env (Code instance)) in
+      let c = Emit_c.For_testing.render_c (Emit_c.make_fragment env (Code code)) in
       List.iter
         (fun text ->
           if not (String.includes ~affix:text c) then Codegen_support.fail "no %s in:\n%s" text c)
         [ "f_capture0"; "f_capture1"; "int32_t l6_own;" ];
       if String.includes ~affix:"f_capture2" c then
         Codegen_support.fail "a function reaches three locals:\n%s" c;
-      Codegen_support.expect_status 20 [ Codegen_support.make_constant_instance instance ])
+      Codegen_support.expect_status 20 [ Codegen_support.make_constant_item code ])
 
 let () =
   Codegen_support.test
