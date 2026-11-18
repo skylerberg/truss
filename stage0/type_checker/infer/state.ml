@@ -15,6 +15,7 @@ let is_compiled (env : env) = not env.specification
 
 type subset_constraint = {
   subset : Types.capability_set;
+  restriction : Types.capability_set option;
   superset : Types.capability_set;
   report_missing : Types.capability_set -> unit;
 }
@@ -615,8 +616,8 @@ let settle state frame =
              (Types.show_capabilities (resolve_capabilities state right)))
       in
       state.capability_constraints <-
-        { subset = left; superset = right; report_missing }
-        :: { subset = right; superset = left; report_missing }
+        { subset = left; restriction = None; superset = right; report_missing }
+        :: { subset = right; restriction = None; superset = left; report_missing }
         :: state.capability_constraints)
     state.unifier.deferred_capability_equalities;
   state.unifier.deferred_capability_equalities <- [];
@@ -1295,6 +1296,7 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
               state.capability_constraints <-
                 {
                   subset = actual_function.uses;
+                  restriction = None;
                   superset = wanted_function.uses;
                   report_missing =
                     (fun _ ->

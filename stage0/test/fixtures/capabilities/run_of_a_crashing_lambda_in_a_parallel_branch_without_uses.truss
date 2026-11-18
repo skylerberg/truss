@@ -1,0 +1,6 @@
+fn f(values: Slice[Int64]) -> Int64 {
+  parallel {
+    let first = run(fn() { first_or_crash(values) })
+  }
+  first
+}

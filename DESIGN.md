@@ -1230,10 +1230,10 @@ left.saturating_add(right)
 | Rule | Reason |
 |---|---|
 | A place that one branch mutates is used by no other branch. | This is the rule for calls, where a place passed `mut` is used by nothing else during the call: `swap(mut first, second: mut first)` is rejected. Applied across branches, it prevents every data race. |
-| A branch uses no capabilities. | Two branches that called one stateful implementation would race, and the order of their calls would vary from run to run. A function that contains `parallel` is therefore still pure, and a test that runs it is cached. Code whose branches use capabilities is [concurrent](#concurrency). |
+| A branch uses no capability except `Panic`, and uses `Panic` only where the enclosing function has it. | Two branches that called one stateful implementation would race, and the order of their calls would vary from run to run. No code can `provide` `Panic`, so no branch calls a stateful implementation of it. A branch that panicked in a function without `Panic` would end a program that relies on the function's signature, such as a server whose handler type has no `Panic` ([Failure](#failure)). A function that contains `parallel` is therefore still pure, and a test that runs it is cached. Code whose branches use capabilities is [concurrent](#concurrency). |
 | The input decides where a computation is split, never the number of cores. | The result does not depend on the machine: a parallel float sum gives the same bits everywhere (*determinism*). |
 | A test runs the branches in order. | The test runner already runs one test on each core, and a failed check is the same on every run. |
-| A branch cannot exit the block early. | A branch uses no capabilities, so it cannot be asked to stop. An early exit would have to abandon the other branches, or wait for work whose result is discarded. |
+| A branch cannot exit the block early. | A branch uses no capability except `Panic`, so it cannot be asked to stop. An early exit would have to abandon the other branches, or wait for work whose result is discarded. |
 
 ## Concurrency
 

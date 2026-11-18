@@ -779,7 +779,7 @@ let elaborate_divergence context ~(parameters : Types.parameter_info list)
   match time_bounds with
   | [] -> Types.make_capability_set [ Types.unconditional_divergence ]
   | bounds ->
-      Types.intersect_divergence
+      Types.intersect_capabilities
         (List.map
            (fun (bound : Syntax.bound) ->
              match bound with
