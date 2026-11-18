@@ -1,15 +1,5 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"MIR" format
 
-type undecided =
-  | Undecided_connective of {
-      target : Tree.place;
-      connective : Tree.connective;
-      left : Tree.operand;
-      right : Tree.block;
-      origin : Core.origin;
-    }
-  | Undecided_not of { target : Tree.place; negated : Tree.operand; origin : Core.origin }
-
 type jump_targets = {
   break_ : Graph.block option;
   continue_ : Graph.terminator option;
@@ -47,37 +37,40 @@ let expand_body (body : Tree.body) : Graph.body =
     match value with
     | Immediate { value = Boolean true; _ } -> close current (Goto yes) origin
     | Immediate { value = Boolean false; _ } -> close current (Goto no) origin
-    | _ -> close current (Branch { condition = value; yes; no; is_if_condition = false }) origin
+    | _ -> close current (Branch { condition = value; yes; no }) origin
   in
-  let rec emit targets current (undecided : undecided list) (statements : Tree.statement list) =
-    let emit_decided () = with_values targets current undecided in
-    let reads_undecided (operand : Tree.operand) =
-      match List.rev undecided with
-      | (Undecided_connective { target; _ } | Undecided_not { target; _ }) :: _ ->
-          is_use_of target operand
-      | [] -> false
-    in
+  let rec emit targets current (statements : Tree.statement list) =
     match statements with
-    | [] -> Some (current, undecided)
+    | [] -> Some current
     | statement :: rest -> (
         let origin = statement.origin in
-        let emit_rest current = emit targets (current, []) [] rest in
+        let emit_rest current = emit targets (current, []) rest in
         match statement.kind with
         | Choose { target; choice = Connective { connective; left; right } } ->
-            let pending = Undecided_connective { target; connective; left; right; origin } in
-            if reads_undecided left then emit targets current (undecided @ [ pending ]) rest
-            else emit targets (emit_decided ()) [ pending ] rest
-        | Basic
-            (Assign { target = { root = Local _; projections = [] } as target; value = Not negated })
-          when reads_undecided negated ->
-            emit targets current (undecided @ [ Undecided_not { target; negated; origin } ]) rest
+            let evaluated = take_fresh_number ()
+            and decided = take_fresh_number ()
+            and joined = take_fresh_number () in
+            let yes, no =
+              match connective with
+              | And | Implies -> (evaluated, decided)
+              | Or -> (decided, evaluated)
+            in
+            branch targets current left.statements left.value ~yes ~no origin;
+            ignore (expand_arm targets evaluated right ~target ~joined origin);
+            close
+              ( decided,
+                [
+                  make_assignment target
+                    (Immediate { value = Boolean (connective <> And); type_ = Types.bool })
+                    origin;
+                ] )
+              (Goto joined) origin;
+            emit_rest joined
         | Choose { target; choice = Conditional { condition; then_; else_; _ } } ->
             let yes = take_fresh_number ()
             and no = take_fresh_number ()
             and joined = take_fresh_number () in
-            if reads_undecided condition then
-              branch_undecided targets current undecided condition ~yes ~no origin
-            else branch targets (emit_decided ()) [] (Some condition) ~yes ~no origin;
+            branch targets current condition.statements condition.value ~yes ~no origin;
             let reaches_then = expand_arm targets yes then_ ~target ~joined origin in
             let reaches_else = expand_arm targets no else_ ~target ~joined origin in
             if reaches_then || reaches_else then emit_rest joined else None
@@ -99,34 +92,32 @@ let expand_body (body : Tree.body) : Graph.body =
                         expand_arm targets passed case.value ~target ~joined origin
                   in
                   ((next, []), reaches || reaches_value))
-                (emit_decided (), false)
-                cases
+                (current, false) cases
             in
             close unmatched Unreachable origin;
             if reaches then emit_rest joined else None
         | Assert_by_bit_vector { condition; code; _ } ->
-            let index, emitted = expand_block targets (emit_decided ()) code.statements in
-            emit targets (index, { kind = Assert condition; origin } :: emitted) [] rest
+            let index, emitted = expand_block targets current code.statements in
+            emit targets (index, { kind = Assert condition; origin } :: emitted) rest
         | While { condition; body; failed; _ } ->
             let header = take_fresh_number ()
             and inside = take_fresh_number ()
             and failing = take_fresh_number () in
             let after = take_fresh_number () in
-            close (emit_decided ()) (Goto header) origin;
+            close current (Goto header) origin;
             branch targets (header, []) condition.statements condition.value ~yes:inside ~no:failing
               origin;
             let in_loop = { targets with break_ = Some after; continue_ = Some (Goto header) } in
-            (match emit in_loop (inside, []) [] body.statements with
-            | Some (current, undecided) ->
-                close (with_values in_loop current undecided) (Goto header) origin
+            (match emit in_loop (inside, []) body.statements with
+            | Some ended -> close ended (Goto header) origin
             | None -> ());
             close (expand_block targets (failing, []) failed) (Goto after) origin;
             emit_rest after
         | For { loop; iteration; part; lent; body; _ } ->
             let index, emitted =
               match lent with
-              | Some lent -> expand_block targets (emit_decided ()) lent.count.statements
-              | None -> emit_decided ()
+              | Some lent -> expand_block targets current lent.count.statements
+              | None -> current
             in
             let after = take_fresh_number () in
             let inside = take_fresh_number () in
@@ -138,9 +129,8 @@ let expand_body (body : Tree.body) : Graph.body =
                 continue_ = Some (Iteration_end { loop = index });
               }
             in
-            (match emit in_loop (inside, []) [] body.statements with
-            | Some (current, undecided) -> (
-                let ended = with_values in_loop current undecided in
+            (match emit in_loop (inside, []) body.statements with
+            | Some ended -> (
                 match loop.quantified with
                 | None -> close ended (Iteration_end { loop = index }) origin
                 | Some { quantifier; decides } ->
@@ -179,7 +169,6 @@ let expand_body (body : Tree.body) : Graph.body =
               origin;
             emit_rest after
         | Fork { fork; concurrent; branches } ->
-            let current = emit_decided () in
             let join = take_fresh_number () in
             let entries = List.map (fun _ -> take_fresh_number ()) branches in
             let branches =
@@ -201,11 +190,7 @@ let expand_body (body : Tree.body) : Graph.body =
                         }
                     | None -> targets
                   in
-                  let ended =
-                    Option.map
-                      (fun (current, undecided) -> with_values in_branch current undecided)
-                      (emit in_branch (entry, []) [] branch.statements)
-                  in
+                  let ended = emit in_branch (entry, []) branch.statements in
                   (match branch_end with
                   | Some branch_end ->
                       Option.iter (fun ended -> close ended (Goto branch_end) origin) ended;
@@ -218,15 +203,13 @@ let expand_body (body : Tree.body) : Graph.body =
             close current (Fork { fork; concurrent; branches; join = Some join }) origin;
             emit_rest join
         | Resume { winner; exits } ->
-            let current = emit_decided () in
             let next = take_fresh_number () in
             let exits =
               List.map
                 (fun (exit : Tree.early_exit) ->
                   let entry = take_fresh_number () in
-                  (match emit targets (entry, []) [] exit.resumed.statements with
-                  | Some (current, undecided) ->
-                      close (with_values targets current undecided) (Goto next) origin
+                  (match emit targets (entry, []) exit.resumed.statements with
+                  | Some ended -> close ended (Goto next) origin
                   | None -> ());
                   { Graph.resume = entry; returned = exit.returned })
                 exits
@@ -235,7 +218,7 @@ let expand_body (body : Tree.body) : Graph.body =
             emit_rest next
         | Yield { mode; part } ->
             let resume = take_fresh_number () in
-            close (emit_decided ()) (Yield { mode; part; resume }) origin;
+            close current (Yield { mode; part; resume }) origin;
             emit_rest resume
         | Jump jump ->
             let terminator : Graph.terminator =
@@ -262,20 +245,20 @@ let expand_body (body : Tree.body) : Graph.body =
               | Written_unreachable -> Written_unreachable
               | Todo -> Todo
             in
-            close (emit_decided ()) terminator origin;
+            close current terminator origin;
             None
         | Basic basic ->
-            let index, emitted = emit_decided () in
-            emit targets (index, { kind = basic; origin } :: emitted) [] rest)
+            let index, emitted = current in
+            emit targets (index, { kind = basic; origin } :: emitted) rest)
   and expand_block targets current (statements : Tree.statement list) =
-    match emit targets current [] statements with
-    | Some (current, undecided) -> with_values targets current undecided
+    match emit targets current statements with
+    | Some current -> current
     | None -> raise_bug "statements that control leaves, where it goes on after them"
   and branch targets current (statements : Tree.statement list) (value : Tree.operand option) ~yes
       ~no origin =
     match value with
     | None -> (
-        match emit targets current [] statements with
+        match emit targets current statements with
         | None -> ()
         | Some _ -> raise_bug "statements with no value, whose end control reaches")
     | Some value -> (
@@ -283,21 +266,13 @@ let expand_body (body : Tree.body) : Graph.body =
         | { kind = Choose { target; choice = Connective { connective; left; right } }; _ } :: before
           when is_use_of target value ->
             branch_connective targets connective right ~yes ~no origin ~left:(fun ~yes ~no ->
-                branch targets current (List.rev before) (Some left) ~yes ~no origin)
+                branch targets current
+                  (List.rev_append before left.statements)
+                  left.value ~yes ~no origin)
         | { kind = Basic (Assign { target; value = Not negated; _ }); _ } :: before
           when is_use_of target value ->
             branch targets current (List.rev before) (Some negated) ~yes:no ~no:yes origin
         | _ -> branch_on (expand_block targets current statements) value ~yes ~no origin)
-  and branch_undecided targets current (undecided : undecided list) (value : Tree.operand) ~yes ~no
-      origin =
-    match List.rev undecided with
-    | Undecided_connective { target; connective; left; right; _ } :: before
-      when is_use_of target value ->
-        branch_connective targets connective right ~yes ~no origin ~left:(fun ~yes ~no ->
-            branch_undecided targets current (List.rev before) left ~yes ~no origin)
-    | Undecided_not { target; negated; _ } :: before when is_use_of target value ->
-        branch_undecided targets current (List.rev before) negated ~yes:no ~no:yes origin
-    | _ -> branch_on (with_values targets current undecided) value ~yes ~no origin
   and branch_connective targets connective (right : Tree.block) ~left ~yes ~no origin =
     let evaluated = take_fresh_number () in
     (match connective with
@@ -305,34 +280,9 @@ let expand_body (body : Tree.body) : Graph.body =
     | Or -> left ~yes ~no:evaluated
     | Implies -> left ~yes:evaluated ~no:yes);
     branch targets (evaluated, []) right.statements right.value ~yes ~no origin
-  and with_values targets current (undecided : undecided list) =
-    match List.rev undecided with
-    | [] -> current
-    | Undecided_connective { target; connective; left; right; origin } :: before ->
-        let evaluated = take_fresh_number ()
-        and decided = take_fresh_number ()
-        and joined = take_fresh_number () in
-        let yes, no =
-          match connective with And | Implies -> (evaluated, decided) | Or -> (decided, evaluated)
-        in
-        branch_undecided targets current (List.rev before) left ~yes ~no origin;
-        ignore (expand_arm targets evaluated right ~target ~joined origin);
-        close
-          ( decided,
-            [
-              make_assignment target
-                (Immediate { value = Boolean (connective <> And); type_ = Types.bool })
-                origin;
-            ] )
-          (Goto joined) origin;
-        (joined, [])
-    | Undecided_not { target; negated; origin } :: before ->
-        let index, emitted = with_values targets current (List.rev before) in
-        (index, { kind = Assign { target; value = Not negated }; origin } :: emitted)
   and expand_arm targets entry (block : Tree.block) ~target ~joined origin =
-    match (emit targets (entry, []) [] block.statements, block.value) with
-    | Some (current, undecided), Some value ->
-        let index, emitted = with_values targets current undecided in
+    match (emit targets (entry, []) block.statements, block.value) with
+    | Some (index, emitted), Some value ->
         close (index, make_assignment target value origin :: emitted) (Goto joined) origin;
         true
     | None, None -> false
@@ -340,7 +290,7 @@ let expand_body (body : Tree.body) : Graph.body =
   in
   let entry = take_fresh_number () in
   (match
-     emit { break_ = None; continue_ = None; task_ends = [] } (entry, []) [] body.code.statements
+     emit { break_ = None; continue_ = None; task_ends = [] } (entry, []) body.code.statements
    with
   | None -> ()
   | Some _ -> raise_bug "a body whose end control reaches");

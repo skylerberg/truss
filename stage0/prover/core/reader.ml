@@ -879,16 +879,18 @@ and merge_alternatives context ~outer ~condition (entered, read) (entered_otherw
 
 and read_choice context frame run (choice : Mir.choice) =
   match choice with
-  | Conditional { condition; then_; else_; if_condition } ->
-      let test = read_operand context frame run condition in
-      (match if_condition with
-      | Some origin -> note_decision context frame origin test
-      | None -> ());
-      let entered_then = Facts.restrict frame test
-      and entered_else = Facts.restrict frame (Logic.not_ test) in
-      merge_alternatives context ~outer:frame ~condition:test
-        (entered_then, read_block context entered_then run then_)
-        (entered_else, read_block context entered_else run else_)
+  | Conditional { condition; then_; else_; if_condition } -> (
+      match read_block context frame run condition with
+      | None -> None
+      | Some (frame, test) ->
+          (match if_condition with
+          | Some origin -> note_decision context frame origin test
+          | None -> ());
+          let entered_then = Facts.restrict frame test
+          and entered_else = Facts.restrict frame (Logic.not_ test) in
+          merge_alternatives context ~outer:frame ~condition:test
+            (entered_then, read_block context entered_then run then_)
+            (entered_else, read_block context entered_else run else_))
   | Cases cases ->
       let rec find_first_taken (current : State.frame) = function
         | [] -> Facts.raise_bug "a `match` with no case"
@@ -925,21 +927,24 @@ and read_choice context frame run (choice : Mir.choice) =
       in
       find_first_taken frame cases
   | Connective { connective; left; right } -> (
-      let left = read_operand context frame run left in
-      let reads_right = match connective with And | Implies -> left | Or -> Logic.not_ left in
-      let entered = Facts.restrict frame reads_right in
-      match read_block context entered run right with
-      | Some (after, right) ->
-          let skipped = Facts.restrict frame (Logic.not_ reads_right) in
-          Some
-            ( join_after_either context ~outer:frame ~condition:reads_right (entered, after)
-                (skipped, skipped),
-              match connective with
-              | And -> Logic.( &&& ) left right
-              | Or -> Logic.( ||| ) left right
-              | Implies -> Logic.( ==> ) left right )
-      | None ->
-          Some (Facts.restrict frame (Logic.not_ reads_right), Logic.Boolean (connective <> And)))
+      match read_block context frame run left with
+      | None -> None
+      | Some (frame, left) -> (
+          let reads_right = match connective with And | Implies -> left | Or -> Logic.not_ left in
+          let entered = Facts.restrict frame reads_right in
+          match read_block context entered run right with
+          | Some (after, right) ->
+              let skipped = Facts.restrict frame (Logic.not_ reads_right) in
+              Some
+                ( join_after_either context ~outer:frame ~condition:reads_right (entered, after)
+                    (skipped, skipped),
+                  match connective with
+                  | And -> Logic.( &&& ) left right
+                  | Or -> Logic.( ||| ) left right
+                  | Implies -> Logic.( ==> ) left right )
+          | None ->
+              Some (Facts.restrict frame (Logic.not_ reads_right), Logic.Boolean (connective <> And))
+          ))
 
 and read_statement context frame run (statement : Mir.statement) =
   let location = Facts.locate context frame.source statement.origin in
