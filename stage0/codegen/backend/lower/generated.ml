@@ -1,6 +1,6 @@
-let make_generated_state context ~key ~definition ~substitution =
+let make_generated_state context ~item ~definition ~substitution =
   Lowering.enter context
-    ~builder:(Emit_c.Builder.create context.env ~key)
+    ~builder:(Emit_c.Builder.create context.env ~item)
     (Lowering.make_frame
        (Definitions.make_unwritten_code ~definition ~substitution ~result:(Returns Types.unit)))
 
@@ -15,8 +15,8 @@ let read_impl_capability context impl =
     interface.implements.trait,
     Definitions.list_evidence context Types.no_substitution interface.impl_uses )
 
-let build_entry context (key : Lowered.Item.t) (impl_method : Lowered.Item.impl_method) :
-    Emit_c.Builder.item_code =
+let build_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl_method) :
+    Emit_c.fragment =
   let { Lowered.Item.impl; name; receiver; type_arguments } = impl_method in
   let path = Lowered.Item.make_method_path impl_method in
   let interface, capability, captured = read_impl_capability context impl in
@@ -24,7 +24,7 @@ let build_entry context (key : Lowered.Item.t) (impl_method : Lowered.Item.impl_
   let _, result = Targets.make_entry_signature context capability_signature in
   let method_signature = Definitions.read_signature context path in
   let substitution = Definitions.bind method_signature.generics type_arguments in
-  let st = make_generated_state context ~key ~definition:impl ~substitution in
+  let st = make_generated_state context ~item ~definition:impl ~substitution in
   let builder = st.builder in
   let evidence = Emit_c.Builder.allocate_local builder Convention.evidence in
   Lowering.set_result_slot st result;
@@ -91,11 +91,11 @@ let build_entry context (key : Lowered.Item.t) (impl_method : Lowered.Item.impl_
        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
        ())
 
-let build_locked_entry context (key : Lowered.Item.t) ~capability ~name : Emit_c.Builder.item_code =
+let build_locked_entry context (item : Lowered.Item.t) ~capability ~name : Emit_c.fragment =
   let slot, capability_signature = Targets.lookup_capability_method context capability name in
   let c_signature, result = Targets.make_entry_signature context capability_signature in
   let st =
-    make_generated_state context ~key ~definition:capability ~substitution:Types.no_substitution
+    make_generated_state context ~item ~definition:capability ~substitution:Types.no_substitution
   in
   let builder = st.builder in
   let evidence = Emit_c.Builder.allocate_local builder Convention.evidence in
@@ -184,11 +184,11 @@ let build_locked_entry context (key : Lowered.Item.t) ~capability ~name : Emit_c
        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
        ())
 
-let build_locked_table (context : Definitions.context) (key : Lowered.Item.t) ~capability :
+let build_locked_table (context : Definitions.context) (item : Lowered.Item.t) ~capability :
     Lowered.table =
   let interface = Definitions.read_trait_interface context capability in
   {
-    table_key = key;
+    table_item = item;
     capability = Some capability;
     entries =
       List.map
@@ -201,7 +201,7 @@ let build_locked_table (context : Definitions.context) (key : Lowered.Item.t) ~c
         interface.methods;
   }
 
-let build_impl_table context (key : Lowered.Item.t) ~impl ~type_arguments : Lowered.table =
+let build_impl_table context (item : Lowered.Item.t) ~impl ~type_arguments : Lowered.table =
   let interface, capability, _ = read_impl_capability context impl in
   let capability_interface = Definitions.read_trait_interface context capability in
   let entries =
@@ -221,7 +221,7 @@ let build_impl_table context (key : Lowered.Item.t) ~impl ~type_arguments : Lowe
                   ~owner:capability trait_method)) ))
       capability_interface.methods
   in
-  { table_key = key; capability = Some capability; entries }
+  { table_item = item; capability = Some capability; entries }
 
 let list_real_implementations (st : Lowering.state) ~user capabilities =
   List.map
@@ -262,9 +262,9 @@ let list_real_implementations (st : Lowering.state) ~user capabilities =
 
 let text_copied_from = Well_known.make_path Text_copied_from
 
-let build_program_main context (key : Lowered.Item.t) main_path : Emit_c.Builder.item_code =
+let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragment =
   let st =
-    make_generated_state context ~key ~definition:main_path ~substitution:Types.no_substitution
+    make_generated_state context ~item ~definition:main_path ~substitution:Types.no_substitution
   in
   let builder = st.builder in
   let count = Emit_c.Builder.allocate_local builder (Raw (Integer Int32)) in
@@ -352,11 +352,11 @@ let build_program_main context (key : Lowered.Item.t) main_path : Emit_c.Builder
   Emit_c.Builder.build st.builder
     (Lowering.finish_function st ~first:[ count; arguments_pointer ] ~rest:[] ())
 
-let build_adapter context (key : Lowered.Item.t) ~(function_ : Path.t) ~instantiation
-    ~(ty : Ground.function_type) : Emit_c.Builder.item_code =
+let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instantiation
+    ~(ty : Ground.function_type) : Emit_c.fragment =
   let signature = Definitions.read_signature context function_ in
   let substitution = Monomorphic.make_signature_substitution signature instantiation in
-  let st = make_generated_state context ~key ~definition:function_ ~substitution in
+  let st = make_generated_state context ~item ~definition:function_ ~substitution in
   let builder = st.builder in
   let environment = Emit_c.Builder.allocate_local builder (Raw (Nullable_pointer Opaque)) in
   Lowering.set_result_slot st (Convention.classify_result context.env ty.result);
@@ -380,8 +380,8 @@ let build_adapter context (key : Lowered.Item.t) ~(function_ : Path.t) ~instanti
        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
        ())
 
-let build_any_entry context (key : Lowered.Item.t) (impl_method : Lowered.Item.impl_method) :
-    Emit_c.Builder.item_code =
+let build_any_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl_method) :
+    Emit_c.fragment =
   let { Lowered.Item.impl; name; receiver; type_arguments } = impl_method in
   let path = Lowered.Item.make_method_path impl_method in
   let interface = Definitions.read_impl_interface context impl in
@@ -393,7 +393,7 @@ let build_any_entry context (key : Lowered.Item.t) (impl_method : Lowered.Item.i
   let _, result, capabilities =
     Targets.make_any_entry_signature context ~any ~trait trait_signature
   in
-  let st = make_generated_state context ~key ~definition:impl ~substitution in
+  let st = make_generated_state context ~item ~definition:impl ~substitution in
   let builder = st.builder in
   let value = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
   Lowering.set_result_slot st result;
@@ -450,7 +450,7 @@ let build_any_entry context (key : Lowered.Item.t) (impl_method : Lowered.Item.i
          @ evidence @ lending)
        ())
 
-let build_any_table context (key : Lowered.Item.t) ~impl ~type_arguments : Lowered.table =
+let build_any_table context (item : Lowered.Item.t) ~impl ~type_arguments : Lowered.table =
   let interface = Definitions.read_impl_interface context impl in
   let trait = interface.implements.trait in
   let substitution = Definitions.bind interface.impl_generics type_arguments in
@@ -476,26 +476,26 @@ let build_any_table context (key : Lowered.Item.t) ~impl ~type_arguments : Lower
       (Targets.list_any_methods context trait)
   in
   {
-    table_key = key;
+    table_item = item;
     capability = None;
     entries =
       Drop_and_copy.list_any_entries self_ty ~is_copyable:(Targets.is_copyable_any context any)
       @ entries;
   }
 
-let lower context (generated : Lowered.Item.generated) : Emit_c.Builder.item_code =
-  let key = Lowered.Item.Generated generated in
+let lower context (generated : Lowered.Item.generated) : Emit_c.fragment =
+  let item = Lowered.Item.Generated generated in
   match generated with
-  | Entry impl_method -> build_entry context key impl_method
-  | Any_entry impl_method -> build_any_entry context key impl_method
-  | Locked_entry { capability; name } -> build_locked_entry context key ~capability ~name
+  | Entry impl_method -> build_entry context item impl_method
+  | Any_entry impl_method -> build_any_entry context item impl_method
+  | Locked_entry { capability; name } -> build_locked_entry context item ~capability ~name
   | Adapter { function_; instantiation; ty } ->
-      build_adapter context key ~function_ ~instantiation ~ty
-  | Program_main main -> build_program_main context key main
+      build_adapter context item ~function_ ~instantiation ~ty
+  | Program_main main -> build_program_main context item main
 
 let lower_table context (table : Lowered.Item.table) : Lowered.table =
-  let key = Lowered.Item.Table table in
+  let item = Lowered.Item.Table table in
   match table with
-  | Impl_table { impl; type_arguments } -> build_impl_table context key ~impl ~type_arguments
-  | Any_table { impl; type_arguments } -> build_any_table context key ~impl ~type_arguments
-  | Locked_table capability -> build_locked_table context key ~capability
+  | Impl_table { impl; type_arguments } -> build_impl_table context item ~impl ~type_arguments
+  | Any_table { impl; type_arguments } -> build_any_table context item ~impl ~type_arguments
+  | Locked_table capability -> build_locked_table context item ~capability

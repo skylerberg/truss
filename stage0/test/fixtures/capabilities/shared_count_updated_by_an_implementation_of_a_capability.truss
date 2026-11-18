@@ -1,0 +1,16 @@
+use standard::intrinsic
+
+capability Counter {
+  fn bump() -> Int64
+}
+
+type Tally(count: intrinsic::Shared[Int64])
+
+impl Counter for Tally {
+  fn bump(self) -> Int64 {
+    intrinsic::shared_update(self.count, input: 1, change: fn(held, by) {
+      held = held.saturating_add(by)
+      held
+    })
+  }
+}

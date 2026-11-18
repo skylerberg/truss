@@ -319,10 +319,10 @@ let build_provide state (implementations : Syntax.expression list) (body : Synta
   in
   Provide { implementations; body = State.build_block state body }
 
-let build_text_builder_callee name receiver : Core.operand Core.target =
+let push_target : Core.operand Core.target =
   Function
     {
-      path = Method { owner = Well_known.make_path Text_builder; name; receiver };
+      path = Method { owner = Well_known.make_path String; name = "push"; receiver = Mut };
       instantiation = Types.no_instantiation;
     }
 
@@ -339,13 +339,9 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
       let make_statement kind : Core.statement =
         { id = State.allocate_node_id state; origin; kind }
       in
-      let builder_type = Types.make_named (Well_known.make_path Text_builder) [] in
-      let builder = State.allocate_synthetic_local state in
-      let builder_place : Core.place = Local { local = builder; type_ = builder_type; origin } in
-      let make_call callee arguments : Core.kind =
-        Call (State.make_call state ~callee ~arguments ~lends:None)
-      in
-      let let_builder =
+      let text = State.allocate_synthetic_local state in
+      let text_place : Core.place = Local { local = text; type_ = State.string_type; origin } in
+      let let_text =
         make_statement
           (Let
              {
@@ -353,36 +349,36 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
                  {
                    id = State.allocate_node_id state;
                    origin;
-                   type_ = builder_type;
-                   kind = Bind { local = builder; is_var = true; mode = Own };
+                   type_ = State.string_type;
+                   kind = Bind { local = text; is_var = true; mode = Own };
                  };
-               value =
-                 Operands.build Own
-                   (make builder_type (make_call (build_text_builder_callee "new" Static) []));
+               value = Operands.build Own (make State.string_type (String literal.first.value));
                else_ = None;
              })
       in
-      let write (written : Syntax.text) =
-        if written.value = "" then []
+      let push (pushed : Syntax.text) =
+        if pushed.value = "" then []
         else
           [
             make_statement
               (Evaluate
                  (make Types.unit
-                    (make_call
-                       (build_text_builder_callee "write" Mut)
-                       [
-                         Passed { mode = Mut; value = Place builder_place };
-                         Passed
-                           {
-                             mode = Read;
-                             value =
-                               Value
-                                 (make
-                                    (Types.make_named (Well_known.make_path String_slice) [])
-                                    (String written.value));
-                           };
-                       ])));
+                    (Call
+                       (State.make_call state ~callee:push_target
+                          ~arguments:
+                            [
+                              Passed { mode = Mut; value = Place text_place };
+                              Passed
+                                {
+                                  mode = Read;
+                                  value =
+                                    Value
+                                      (make
+                                         (Types.make_named (Well_known.make_path String_slice) [])
+                                         (String pushed.value));
+                                };
+                            ]
+                          ~lends:None))));
           ]
       in
       let make_display part (conversion : Tables.call option) =
@@ -396,7 +392,7 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
                           ~arguments:
                             [
                               Operands.build_argument Read (State.build_expression state part);
-                              Passed { mode = Mut; value = Place builder_place };
+                              Passed { mode = Mut; value = Place text_place };
                             ]
                           ~lends:None))))
         | None -> State.raise_bug "an interpolated value has no `display`"
@@ -404,17 +400,12 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
       Block
         {
           statements =
-            (let_builder :: write literal.first)
-            @ List.concat
-                (List.map2
-                   (fun (part, after) conversion -> make_display part conversion :: write after)
-                   rest (read_template state literal).part_conversions);
-          value =
-            Some
-              (make State.string_type
-                 (make_call
-                    (build_text_builder_callee "finish" Own)
-                    [ Operands.build_argument Own (make builder_type (Use builder_place)) ]));
+            let_text
+            :: List.concat
+                 (List.map2
+                    (fun (part, after) conversion -> make_display part conversion :: push after)
+                    rest (read_template state literal).part_conversions);
+          value = Some (make State.string_type (Use text_place));
         }
 
 let build_list_literal state ~origin (element : Types.ty) (elements : Core.expression list) :

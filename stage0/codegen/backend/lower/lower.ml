@@ -59,16 +59,16 @@ let begin_body (st : Lowering.state) ~(body : Mir.Graph.body) ~defaults =
   in
   (List.filter_map (fun (arrives, _, _) -> arrives) bound @ Option.to_list mask @ evidence, places)
 
-let make_code_state context ~key path =
+let make_code_state context ~item path =
   let code = Definitions.make_code context path Ground.no_instantiation in
   ( Lowering.enter context
-      ~builder:(Emit_c.Builder.create context.env ~key)
+      ~builder:(Emit_c.Builder.create context.env ~item)
       (Lowering.make_frame code),
     code )
 
-let lower_template_check context ~from_template ~literals ~clauses : Emit_c.Builder.item_code =
-  let key = Lowered.Item.Template_check { from_template; literals; clauses } in
-  let st, _ = make_code_state context ~key from_template in
+let lower_template_check context ~from_template ~literals ~clauses : Emit_c.fragment =
+  let item = Lowered.Item.Template_check { from_template; literals; clauses } in
+  let st, _ = make_code_state context ~item from_template in
   let template_type =
     match
       Definitions.list_interface_parameters (Definitions.read_signature context from_template)
@@ -97,9 +97,9 @@ let lower_template_check context ~from_template ~literals ~clauses : Emit_c.Buil
       Constants.write_output st output);
   Lowering.finish_item st ~rest:[] ()
 
-let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.item_code =
-  let key = Lowered.Item.Call_evaluation { function_; arguments } in
-  let st, _ = make_code_state context ~key function_ in
+let lower_call_evaluation context ~function_ ~arguments : Emit_c.fragment =
+  let item = Lowered.Item.Call_evaluation { function_; arguments } in
+  let st, _ = make_code_state context ~item function_ in
   Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
   let signature = Definitions.read_signature context function_ in
   Lowering.run_in_scope st (fun () ->
@@ -137,13 +137,13 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.item_co
       Constants.write_output st output);
   Lowering.finish_item st ~rest:[] ()
 
-let lower_source_code context ~path ~instantiation : Emit_c.Builder.item_code =
-  let key = Lowered.Item.Code { path; instantiation } in
+let lower_source_code context ~path ~instantiation : Emit_c.fragment =
+  let item = Lowered.Item.Code { path; instantiation } in
   let code = Definitions.make_code context path instantiation in
   let body = (Mir_form.read_mir_graph context path).body in
   let st =
     Lowering.enter context
-      ~builder:(Emit_c.Builder.create context.env ~key)
+      ~builder:(Emit_c.Builder.create context.env ~item)
       (Lowering.make_frame code)
   in
   let convention, returns = Definitions.classify_result context code.substitution code.result in

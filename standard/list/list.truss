@@ -935,7 +935,7 @@ impl Hash for List[Element: Hash] {
 }
 
 impl Display for List[Element: Display] {
-  fn display(self, output: mut TextBuilder) {
+  fn display(self, output: mut String) {
     self.slice().display(mut output)
   }
 }

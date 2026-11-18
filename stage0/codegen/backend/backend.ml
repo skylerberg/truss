@@ -23,40 +23,38 @@ exception Infinite_size = Memory_layout.Infinite_size
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
 
-let make (context : Lower.context) (key : Lowered.Item.t) : lowered =
+let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
   let env = Lower.env context in
-  let emit compiled = Compiled (Emit_c.make_fragment env compiled) in
   let drop_and_copy = Lower.drop_and_copy context in
-  let emit_code code = emit (Code code) in
-  match key with
-  | Code { path; instantiation } -> emit_code (Lower.lower_source_code context ~path ~instantiation)
-  | Generated generated -> emit_code (Lower.lower_generated context generated)
-  | Table table -> emit (Table (Lower.lower_table context table))
+  match item with
+  | Code { path; instantiation } -> Compiled (Lower.lower_source_code context ~path ~instantiation)
+  | Generated generated -> Compiled (Lower.lower_generated context generated)
+  | Table table -> Compiled (Emit_c.make_fragment env (Table (Lower.lower_table context table)))
   | Constant path -> (
       match Lower.lower_constant context path with
       | Folded data -> Folded (data, Emit_c.make_fragment env (Data data))
       | Run ty -> Evaluate (path, ty))
-  | Drop ty -> emit_code (Drop_and_copy.drop drop_and_copy ty)
-  | Copy ty -> emit_code (Drop_and_copy.copy drop_and_copy ty)
-  | Any_drop ty -> emit_code (Drop_and_copy.build_any_drop drop_and_copy ty)
-  | Any_copy ty -> emit_code (Drop_and_copy.build_any_copy drop_and_copy ty)
-  | Debug ty -> emit_code (Debug_output.build_debug env ty)
-  | Encode ty -> emit_code (Encoding.encode env ty)
-  | Evaluator path -> emit_code (Lower.lower_evaluator context path)
+  | Drop ty -> Compiled (Drop_and_copy.drop drop_and_copy ty)
+  | Copy ty -> Compiled (Drop_and_copy.copy drop_and_copy ty)
+  | Any_drop ty -> Compiled (Drop_and_copy.build_any_drop drop_and_copy ty)
+  | Any_copy ty -> Compiled (Drop_and_copy.build_any_copy drop_and_copy ty)
+  | Debug ty -> Compiled (Debug_output.build_debug env ty)
+  | Encode ty -> Compiled (Encoding.encode env ty)
+  | Evaluator path -> Compiled (Lower.lower_evaluator context path)
   | Template_check { from_template; literals; clauses } ->
-      emit_code (Lower.lower_template_check context ~from_template ~literals ~clauses)
+      Compiled (Lower.lower_template_check context ~from_template ~literals ~clauses)
   | Call_evaluation { function_; arguments } ->
-      emit_code (Lower.lower_call_evaluation context ~function_ ~arguments)
+      Compiled (Lower.lower_call_evaluation context ~function_ ~arguments)
 
-let lower (settings : Lookups.settings) (lookups : Lookups.t) key =
+let lower (settings : Lookups.settings) (lookups : Lookups.t) item =
   let env =
     Memory_layout.create settings.system
       ~compute_shape:(Monomorphic.compute_shape (Lower.make_monomorphic_context lookups.interface))
   in
   match
     Compiler_bug.run_while_doing ~stage:"Backend"
-      ("lowering " ^ Lowered.Item.to_string key)
-      (fun () -> make (Lower.make_context settings ~env lookups) key)
+      ("lowering " ^ Lowered.Item.to_string item)
+      (fun () -> make (Lower.make_context settings ~env lookups) item)
   with
   | lowered -> Ok lowered
   | exception Lower.Unsupported unsupported -> Error unsupported
@@ -65,8 +63,8 @@ let list_references = function
   | Compiled fragment | Folded (_, fragment) -> Emit_c.references fragment
   | Evaluate (path, _) -> [ Lowered.Item.Evaluator path ]
 
-let check_calls interface ~find_call_edges key = function
-  | Compiled fragment -> Call_edge_check.check interface ~find_call_edges key fragment
+let check_calls interface ~find_call_edges item = function
+  | Compiled fragment -> Call_edge_check.check interface ~find_call_edges item fragment
   | Folded _ | Evaluate _ -> ()
 
 module Item_table = Hashtbl.Make (Lowered.Item)
@@ -82,8 +80,8 @@ let hash_fragment = function
   | Evaluate _ -> evaluated_fragment_hash
 
 let derive_test_keys ~read_lowered ~read_known_key =
-  Test_keys.derive ~read_known_key ~read_hash_and_references:(fun key ->
-      let lowered = read_lowered key in
+  Test_keys.derive ~read_known_key ~read_hash_and_references:(fun item ->
+      let lowered = read_lowered item in
       (hash_fragment lowered, list_references lowered))
 
 type 'a ran = Ran of 'a | Ran_too_long | Stopped of string
@@ -106,11 +104,11 @@ let make_env backend =
   Memory_layout.create backend.lookups.system
     ~compute_shape:(Monomorphic.compute_shape backend.monomorphic)
 
-let read_lowered backend key =
-  match backend.lookups.find_lowered key with
+let read_lowered backend item =
+  match backend.lookups.find_lowered item with
   | Some (Ok lowered) -> lowered
   | Some (Error unsupported) -> raise (Lower.Unsupported unsupported)
-  | None -> raise_bug "%s is requested from code with errors" (Lowered.Item.to_string key)
+  | None -> raise_bug "%s is requested from code with errors" (Lowered.Item.to_string item)
 
 let read_test_key backend root =
   match backend.lookups.read_test_key root with
@@ -176,13 +174,13 @@ let show_location backend ({ file; line; column } : location) =
   Printf.sprintf "%s:%d:%d" (backend.show_file file) line column
 
 let list_small_callees ~find ~is_worked_on fragment =
-  match Emit_c.key fragment with
+  match Emit_c.item fragment with
   | Code _ as caller ->
       List.filter_map
-        (fun (key : Lowered.Item.t) ->
-          match (key, find key) with
+        (fun (item : Lowered.Item.t) ->
+          match (item, find item) with
           | Code { path = callee; _ }, Some copy
-            when (not (Lowered.Item.equal key caller))
+            when (not (Lowered.Item.equal item caller))
                  && (not (is_worked_on (Path.locate_package callee)))
                  && Emit_c.is_small copy ->
               Some copy
@@ -200,20 +198,23 @@ let list_roots ~tests ~mains =
   @ List.map (fun main -> Lowered.Item.Generated (Program_main main)) mains
 
 let rec build ?report_progress ?(tests = false) ?(supplied = []) backend ~roots ~startup ~output =
-  let lookup key =
-    match List.find_opt (fun fragment -> Lowered.Item.equal (Emit_c.key fragment) key) supplied with
+  let lookup item =
+    match
+      List.find_opt (fun fragment -> Lowered.Item.equal (Emit_c.item fragment) item) supplied
+    with
     | Some fragment -> fragment
-    | None -> compile_fragment backend key
+    | None -> compile_fragment backend item
   in
   let linked = Emit_c.list_linked ~lookup roots in
-  let linked_by_key =
-    Item_table.of_seq (List.to_seq (List.map (fun unit -> (Emit_c.key unit, unit)) linked))
+  let linked_by_item =
+    Item_table.of_seq
+      (List.to_seq (List.map (fun fragment -> (Emit_c.item fragment, fragment)) linked))
   in
   let list_copied =
     match backend.profile with
     | Development ->
         list_small_callees
-          ~find:(Item_table.find_opt linked_by_key)
+          ~find:(Item_table.find_opt linked_by_item)
           ~is_worked_on:backend.is_worked_on
     | Release -> fun _ -> []
   in
@@ -293,25 +294,25 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
   | Ran_too_long -> Ran_too_long
   | Stopped report -> Stopped report
 
-and compile_fragment backend key =
+and compile_fragment backend item =
   let emit_data (data : Lowered.data) = Emit_c.make_fragment (make_env backend) (Data data) in
   let compiled =
-    match read_lowered backend key with
+    match read_lowered backend item with
     | Compiled fragment | Folded (_, fragment) -> fragment
     | Evaluate (path, ty) -> (
         match
           run_while_compiling backend (Lowered.Item.Evaluator path) ~read:(fun encoded ->
               Encoding.decode (make_env backend) ty encoded)
         with
-        | Ran value -> emit_data { data_key = Constant path; ty; value }
+        | Ran value -> emit_data { data_item = Constant path; ty; value }
         | Ran_too_long ->
             raise_cannot_build "Evaluating %s ran past the time limit of %d ms." (Path.show path)
               backend.evaluation_time_limit_ms
         | Stopped report -> raise_cannot_build "Evaluating %s stopped: %s" (Path.show path) report)
   in
-  if not (Lowered.Item.equal (Emit_c.key compiled) key) then
-    raise_bug "%s compiled to %s" (Lowered.Item.to_string key)
-      (Lowered.Item.to_string (Emit_c.key compiled));
+  if not (Lowered.Item.equal (Emit_c.item compiled) item) then
+    raise_bug "%s compiled to %s" (Lowered.Item.to_string item)
+      (Lowered.Item.to_string (Emit_c.item compiled));
   compiled
 
 let show_unsupported backend (unsupported : Lower.unsupported) =
@@ -452,11 +453,9 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
 let build_supplied_tests backend ~time_limit_ms supplied ~output =
   capture_failure backend @@ fun () ->
   let supplied_env = make_env backend in
-  let fragments =
-    List.map (fun build -> Emit_c.make_fragment supplied_env (Code (build supplied_env))) supplied
-  in
+  let fragments = List.map (fun build -> build supplied_env) supplied in
   build_test_program backend ~supplied:fragments ~time_limit_ms
-    ~roots:(List.map Emit_c.key fragments) ~output
+    ~roots:(List.map Emit_c.item fragments) ~output
 
 type unshippable = {
   failure : [ `Todo | `Echo ];
@@ -469,8 +468,8 @@ type unshippable = {
 let make_root_key (root : Path.t) : Lowered.Item.t =
   match root with Test _ -> make_test_root root | _ -> Generated (Program_main root)
 
-let rec read_executed_fragment (lookups : lowered_lookups) key =
-  match lookups.find_lowered key with
+let rec read_executed_fragment (lookups : lowered_lookups) item =
+  match lookups.find_lowered item with
   | Some (Ok (Compiled fragment | Folded (_, fragment))) -> Some fragment
   | Some (Ok (Evaluate (path, _))) -> read_executed_fragment lookups (Lowered.Item.Evaluator path)
   | Some (Error _) | None -> None
@@ -493,8 +492,8 @@ let list_unshippable (lookups : lowered_lookups) ~main =
   begin
     let list_definitions keys =
       List.fold_left
-        (fun acc (key : Lowered.Item.t) ->
-          match key with
+        (fun acc (item : Lowered.Item.t) ->
+          match item with
           | Code { path; _ } | Constant path -> (
               match acc with last :: _ when Path.equal last path -> acc | _ -> path :: acc)
           | _ -> acc)
@@ -595,8 +594,8 @@ let evaluate_call backend ~function_ ~arguments =
   match Interface.Impls.read_signature backend.lookups.interface function_ with
   | Some { output = Returns result; _ } ->
       let ty = Monomorphic.ground backend.monomorphic Types.no_substitution result in
-      let key = Lowered.Item.Call_evaluation { function_; arguments } in
-      run_while_compiling backend key ~read:(fun encoded ->
+      let item = Lowered.Item.Call_evaluation { function_; arguments } in
+      run_while_compiling backend item ~read:(fun encoded ->
           Encoding.decode (make_env backend) ty encoded)
   | _ -> raise_bug "%s has no result to evaluate" (Path.show function_)
 

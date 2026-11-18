@@ -126,9 +126,6 @@ let () =
         "capabilities.not_available");
   Harness.test "a law may use no capability" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.law_calling_stamp "capabilities.not_available");
-  Harness.test "a parallel branch has only Panic" (fun () ->
-      expect_one_diagnostic Fixtures.Capabilities.clock_call_in_a_parallel_branch
-        "capabilities.not_available");
   Harness.test "a lambda's uses must fit the function type it is passed as" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.lambda_using_clock_passed_as_plain
         "capabilities.lambda_uses");
@@ -156,6 +153,81 @@ let () =
   Harness.test "a place whose implementation mutates state is provided mut" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.counter_provided_as_tally
         "capabilities.provide_mode")
+
+let first_or_crash = Fixtures.Capabilities.first_or_crash
+let run = first_or_crash ^ Fixtures.Capabilities.run
+
+let () =
+  let declare_panic =
+    "This call uses `Panic`, which is not available here. Declare it with `uses Panic`."
+  in
+  let only_panic description =
+    Printf.sprintf
+      "This call uses `Clock`, but %s may use no capability except `Panic`, even one that is \
+       available outside it. Parallel calls of one implementation could race."
+      description
+  in
+  Harness.test "a call in a parallel branch needs Panic as the same call outside the branch does"
+    (fun () ->
+      expect_one_diagnostic
+        (first_or_crash ^ Fixtures.Capabilities.first_or_crash_in_a_parallel_branch_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("first_or_crash(left)", 1);
+      expect_fine
+        (first_or_crash ^ Fixtures.Capabilities.first_or_crash_in_a_parallel_branch_using_panic));
+  Harness.test "a call in a nested parallel branch needs the function's Panic" (fun () ->
+      expect_one_diagnostic
+        (first_or_crash
+       ^ Fixtures.Capabilities.first_or_crash_in_a_nested_parallel_branch_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("first_or_crash(left)", 1));
+  Harness.test "a call in a parallel for needs Panic as the same call outside the loop does"
+    (fun () ->
+      expect_one_diagnostic
+        (first_or_crash ^ Fixtures.Capabilities.first_or_crash_in_a_parallel_for_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("first_or_crash(row)", 1);
+      expect_fine
+        (first_or_crash ^ Fixtures.Capabilities.first_or_crash_in_a_parallel_for_using_panic));
+  Harness.test "a parallel branch may use no capability but Panic, even one its function declares"
+    (fun () ->
+      expect_not_available Fixtures.Capabilities.clock_call_in_a_parallel_branch
+        ~message:(only_panic "a `parallel` branch");
+      expect_not_available Fixtures.Capabilities.clock_call_in_a_parallel_for
+        ~message:(only_panic "a `parallel for`"));
+  Harness.test "a capability that a parallel branch may not use is reported once, by the branch"
+    (fun () ->
+      expect_not_available Fixtures.Capabilities.clock_call_in_a_parallel_branch_without_uses
+        ~message:(only_panic "a `parallel` branch"));
+  Harness.test "a parallel branch may use a capability that it provides" (fun () ->
+      expect_fine Fixtures.Capabilities.provide_of_a_fixed_clock_in_a_parallel_branch);
+  Harness.test "a parallel branch in a lambda uses Panic only where the lambda's type allows it"
+    (fun () ->
+      expect_one_diagnostic
+        (first_or_crash
+       ^ Fixtures.Capabilities.lambda_with_a_crashing_parallel_branch_passed_as_plain)
+        "capabilities.lambda_uses"
+        ~says:"This lambda uses `Panic`, which the function type it is passed as does not allow."
+        ~at:("fn() {", 1));
+  Harness.test "a parallel branch in a lambda adds Panic to the lambda's inferred uses" (fun () ->
+      expect_one_diagnostic
+        (run ^ Fixtures.Capabilities.run_of_a_lambda_with_a_crashing_parallel_branch_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("run(fn", 1);
+      let text =
+        run ^ Fixtures.Capabilities.run_of_a_lambda_with_a_crashing_parallel_branch_using_panic
+      in
+      expect_fine text;
+      match
+        List.filter_map
+          (fun (node : Core.expression) ->
+            match (node.kind, node.type_) with
+            | Lambda _, Function { uses; _ } -> Some (Types.may_panic uses)
+            | _ -> None)
+          (list_core_expressions text ~of_function:"f")
+      with
+      | [ true ] -> ()
+      | _ -> Harness.fail "the lambda's inferred uses leave out Panic");
+  Harness.test "a call in a parallel branch needs the Panic of a lambda passed to it" (fun () ->
+      expect_one_diagnostic
+        (run ^ Fixtures.Capabilities.run_of_a_crashing_lambda_in_a_parallel_branch_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("run(fn", 1))
 
 let () =
   Harness.test "a dependency can use only the capabilities that it is granted" (fun () ->
@@ -737,7 +809,26 @@ let () =
         "capabilities.may_not_terminate");
   Harness.test "an impl's time clause follows no callback that its trait's does not" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.visit_impl_naming_the_time_of_its_callback
-        "types.impl_uses")
+        "types.impl_uses");
+  Harness.test "an impl cannot take only the callbacks that terminate where its trait takes any"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.spin_passed_to_an_impl_whose_callback_adds_a_time_clause
+        "types.signature_mismatch" ~at:("each", 2));
+  Harness.test "a capability's implementation cannot take only the callbacks that terminate"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.spin_passed_to_a_capability_whose_impl_adds_a_time_clause
+        "types.signature_mismatch" ~at:("run", 2));
+  Harness.test "an impl cannot take only the callbacks that use no capability" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.note_passed_to_an_impl_whose_callback_drops_the_journal
+        "types.signature_mismatch" ~at:("each", 2));
+  Harness.test "an impl cannot swap the capability parameters of its trait's callbacks" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities
+        .note_passed_to_an_impl_that_swaps_the_capability_parameters_of_its_callbacks
+        "types.signature_mismatch" ~at:("each", 2))
 
 let () =
   let apply = Fixtures.Capabilities.apply_bounded_by_the_time_of_change in
@@ -1119,3 +1210,56 @@ let () =
      loop or called" (fun () ->
       expect_fine
         (spawning ^ Fixtures.Capabilities.spawning_cursor_under_a_tally_provided_with_tasks))
+
+let () =
+  let make_standard_packages files : Project.package list =
+    [
+      {
+        name = Path.standard_package;
+        dependencies = [];
+        files =
+          Standard_library.files
+          @ List.map (fun (name, text) -> (Support.parse_file name, text)) files;
+      };
+    ]
+  in
+  let check_in_standard packages =
+    Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ] (Database.create packages)
+  in
+  let expect_one_in_standard =
+    Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard::probe"
+      ~check:check_in_standard
+  in
+  let expect_fine_in_standard text =
+    match
+      check_in_standard
+        (make_standard_packages [ ("standard::probe", text) ])
+        (Support.parse_file "standard::probe")
+    with
+    | [] -> ()
+    | reported -> Harness.fail "found [%s]" (String.concat "; " (Support.list_codes reported))
+  in
+  Harness.test "a call of an intrinsic needs the capabilities that the intrinsic uses" (fun () ->
+      expect_one_in_standard Fixtures.Capabilities.shared_count_updated_without_tasks
+        "capabilities.not_available"
+        ~says:"This call uses `Tasks`, which is not available here. Declare it with `uses Tasks`"
+        ~at:("intrinsic::shared_update", 1);
+      expect_fine_in_standard Fixtures.Capabilities.shared_count_updated_using_tasks);
+  Harness.test
+    "an implementation of a capability calls an intrinsic without the capabilities that the \
+     intrinsic uses" (fun () ->
+      expect_fine_in_standard
+        Fixtures.Capabilities.shared_count_updated_by_an_implementation_of_a_capability);
+  Harness.test
+    "an intrinsic named as a value has a function type that uses the capabilities of the intrinsic"
+    (fun () ->
+      expect_one_in_standard
+        Fixtures.Capabilities.shared_key_named_as_a_value_of_a_type_without_uses "types.mismatch"
+        ~says:"found `(fn(Shared[Int64]) -> UInt64 uses Tasks cost time finite)`"
+        ~at:("intrinsic::shared_key", 1));
+  Harness.test "a monitor needs `Tasks` where its body calls an intrinsic that uses `Tasks`"
+    (fun () ->
+      expect_one_in_standard
+        ("use standard::intrinsic\n\n" ^ Fixtures.Infer.tally
+       ^ Fixtures.Capabilities.shared_count_updated_under_a_tally_provided_without_tasks)
+        "capabilities.monitor_needs_tasks" ~at:("mut tally {", 1))

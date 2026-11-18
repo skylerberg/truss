@@ -35,8 +35,8 @@ impl Default for Int8 {
 }
 
 impl Display for Int8 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_signed(intrinsic::convert(self))
+  fn display(self, output: mut String) {
+    mut output.push_signed(intrinsic::convert(self))
   }
 }
 
@@ -284,8 +284,8 @@ impl Default for Int16 {
 }
 
 impl Display for Int16 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_signed(intrinsic::convert(self))
+  fn display(self, output: mut String) {
+    mut output.push_signed(intrinsic::convert(self))
   }
 }
 
@@ -527,8 +527,8 @@ impl Default for Int32 {
 }
 
 impl Display for Int32 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_signed(intrinsic::convert(self))
+  fn display(self, output: mut String) {
+    mut output.push_signed(intrinsic::convert(self))
   }
 }
 
@@ -764,8 +764,8 @@ impl Default for Int64 {
 }
 
 impl Display for Int64 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_signed(self)
+  fn display(self, output: mut String) {
+    mut output.push_signed(self)
   }
 }
 

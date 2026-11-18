@@ -7,7 +7,7 @@ let expect_bug ~saying work =
         Codegen_support.fail "expected %S in %S" saying text
 
 let env = Codegen_support.make_shape_env ()
-let emit env item = ignore (Emit_c.make_fragment env (Code (item env)))
+let emit env item = ignore (item env)
 
 let make_caller arguments =
   Codegen_support.entry
@@ -61,7 +61,7 @@ let () =
             target =
               Direct
                 {
-                  function_ = Item (Codegen_support.key "swapped");
+                  function_ = Item (Codegen_support.code_item "swapped");
                   signature =
                     { parameters = [ pointer true; pointer false ]; result = None; returns = true };
                 };
@@ -89,7 +89,7 @@ let () =
         {
           root =
             Static
-              { key = Constant (Codegen_support.definition "words"); ty = Codegen_support.text };
+              { item = Constant (Codegen_support.definition "words"); ty = Codegen_support.text };
           projections = [];
         }
       in

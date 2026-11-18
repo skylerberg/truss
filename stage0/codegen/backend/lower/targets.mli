@@ -6,7 +6,7 @@ val resolve_impl :
   evidence:Core.evidence ->
   Path.t * Ground.argument list
 
-val make_trait_method_key :
+val make_trait_method_item :
   Definitions.context ->
   Types.substitution ->
   trait:Types.trait_reference ->

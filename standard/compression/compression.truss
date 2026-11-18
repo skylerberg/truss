@@ -15,19 +15,19 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       Malformed(offset) => {
-        mut output.write("the compressed data is malformed at byte ")
+        mut output.push("the compressed data is malformed at byte ")
         offset.display(mut output)
       }
       TooLarge(limit) => {
-        mut output.write("the data decompresses to more than ")
+        mut output.push("the data decompresses to more than ")
         limit.display(mut output)
-        mut output.write(" bytes")
+        mut output.push(" bytes")
       }
-      ChecksumMismatch => mut output.write("the decompressed data does not match its checksum")
+      ChecksumMismatch => mut output.push("the decompressed data does not match its checksum")
     }
   }
 }

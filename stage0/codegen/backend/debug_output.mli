@@ -6,4 +6,4 @@ val emit_debug_call :
   Lowered.place ->
   unit
 
-val build_debug : Memory_layout.env -> Ground.ty -> Emit_c.Builder.item_code
+val build_debug : Memory_layout.env -> Ground.ty -> Emit_c.fragment

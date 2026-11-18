@@ -67,6 +67,7 @@ module For_testing : sig
   type checker = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
 
   val list_diagnostics : checker list -> t -> Path.file -> Diagnostic.t list
+  val make_unchecked_interface_lookups : t -> Path.package list -> Interface.Lookups.t
   val read_derived_form : t -> Path.t -> Core.t option
   val read_core : t -> Path.t -> (Core.t * Types.substitution) option
   val make_mir_lookups : t -> Path.package -> Mir.lookups

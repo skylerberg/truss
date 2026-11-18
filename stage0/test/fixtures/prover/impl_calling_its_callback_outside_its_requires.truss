@@ -1,0 +1,12 @@
+trait Generates {
+  fn generate(self, count: UInt64, make: (fn(index: UInt64) -> Int64 requires index < count cost time finite)) -> Int64
+    requires count > 0
+}
+
+type Eager()
+
+impl Generates for Eager {
+  fn generate(self, count: UInt64, make: (fn(index: UInt64) -> Int64 requires index < count cost time finite)) -> Int64 {
+    make(count)
+  }
+}

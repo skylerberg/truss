@@ -9,7 +9,7 @@ fn push_two_digits(output: mut String, value: UInt8) {
   if value < 10 {
     mut output.push("0")
   }
-  mut output.push("${value}".slice())
+  value.display(mut output)
 }
 
 internal fn format(instant: Instant) -> String {
@@ -25,7 +25,7 @@ internal fn format(instant: Instant) -> String {
   let month: UInt64 = intrinsic::convert(date.month().number())
   mut output.push(if month >= 1 && month <= 12 { month_names[month - 1].slice() } else { "Jan".slice() })
   mut output.push(" ")
-  mut output.push("${date.year()}".slice())
+  date.year().display(mut output)
   mut output.push(" ")
   push_two_digits(mut output, value: clock.hour())
   mut output.push(":")

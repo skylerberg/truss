@@ -44,12 +44,6 @@ internal fn code_point(output: mut intrinsic::Storage[UInt8], code: UInt32)
   }
 }
 
-internal fn character(output: mut intrinsic::Storage[UInt8], value: Character)
-  cost time finite
-{
-  code_point(mut output, code: intrinsic::convert(value))
-}
-
 internal fn unsigned(output: mut intrinsic::Storage[UInt8], value: UInt64)
   decreases value
   cost time finite

@@ -119,6 +119,8 @@ let () =
         Harness.fail "message %S" actual);
   Harness.test "a function that declares `uses Panic` stops at an operation that fails" (fun () ->
       expect_proven Fixtures.Prover.failing_operations_of_a_function_that_may_panic);
+  Harness.test "a test checks an operation it cannot prove when it runs, as `uses Panic` does"
+    (fun () -> expect_proven Fixtures.Prover.test_indexing_by_a_sum_from_a_loop);
   Harness.test "a lambda proves its operations, since it has no `uses` of its own" (fun () ->
       let actual = read_message Fixtures.Prover.overflow_in_a_lambda_of_a_function_that_may_panic in
       if
@@ -1259,6 +1261,13 @@ let () =
       expect_not_proven Fixtures.Prover.callback_requires_naming_a_mut_limit "prover.requires");
   Harness.test "a forwarded callback must be promised its requires" (fun () ->
       expect_not_proven Fixtures.Prover.callback_forwarded_without_its_requires "prover.requires");
+  Harness.test "an impl's method proves the requires that its callback type states" (fun () ->
+      expect_not_proven Fixtures.Prover.impl_calling_its_callback_outside_its_requires
+        "prover.requires");
+  Harness.test "a lambda passed to a trait's method cannot rely on the callback type's requires"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.lambda_relying_on_the_requires_of_a_trait_methods_callback
+        "prover.requires");
   Harness.test "a call through a function value gives a valid result" (fun () ->
       expect_proven Fixtures.Prover.positive_made_by_a_function_value);
   Harness.test "a lambda returns a valid value" (fun () ->
@@ -2387,6 +2396,17 @@ let () =
       | codes -> Harness.fail "expected prover.requires, found %s" (String.concat ", " codes))
 
 let () =
+  let expect_unsupported text =
+    match Support.list_codes (check_in_standard text) with
+    | [ "prover.unsupported" ] -> ()
+    | codes -> Harness.fail "expected prover.unsupported, found %s" (String.concat ", " codes)
+  in
+  Harness.test "a float converted to a type parameter is unsupported, not unchecked" (fun () ->
+      expect_unsupported Fixtures.Prover.float_converted_to_a_type_parameter);
+  Harness.test "an intrinsic sum at a type parameter with no integer bound is unsupported"
+    (fun () -> expect_unsupported Fixtures.Prover.intrinsic_sum_at_a_type_parameter)
+
+let () =
   let expect_only_requires text =
     match Support.list_codes (check_in_standard text) with
     | [ "prover.requires" ] -> ()
@@ -2530,7 +2550,9 @@ let () =
     (fun () -> expect_proven Fixtures.Prover.standard_combinators_under_an_allocation_bound);
   Harness.test "a standard combinator spends the allocations of the lambda it is passed" (fun () ->
       expect_proven Fixtures.Prover.standard_map_of_a_lambda_that_allocates_once;
-      expect_not_proven Fixtures.Prover.standard_map_of_a_lambda_that_allocates "prover.cost")
+      expect_not_proven Fixtures.Prover.standard_map_of_a_lambda_that_allocates "prover.cost");
+  Harness.test "a collection's map has one output for each element" (fun () ->
+      expect_proven Fixtures.Prover.standard_map_keeping_the_length)
 
 let () =
   let ticker = Fixtures.Prover.ticker_without_a_time_clause in

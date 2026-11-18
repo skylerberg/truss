@@ -2228,8 +2228,8 @@ public type AuthenticationError()
   derives Equal
 
 impl Display for AuthenticationError {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write("the authentication tag does not match the data and key")
+  fn display(self, output: mut String) {
+    mut output.push("the authentication tag does not match the data and key")
   }
 }
 

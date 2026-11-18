@@ -1,0 +1,9 @@
+capability Steps {
+  fn step(by: Int64 = 3) -> Int64
+}
+
+type Walker()
+
+impl Steps for Walker {
+  fn step(self, by: Int64) -> Int64 { todo }
+}

@@ -8,8 +8,6 @@ public opaque type String(storage: intrinsic::Storage[UInt8])
 public opaque type StringSlice(bytes: intrinsic::View[UInt8])
   derives Plain
 
-public opaque type TextBuilder(text: String)
-
 public trait FromTemplate {
   type Part
   fn from_template(template: Template[Self.Part]) -> Self
@@ -199,58 +197,35 @@ public fn StringSlice.to_string(self) -> String
   String(storage: own output)
 }
 
-public fn TextBuilder.new() -> TextBuilder
-  cost time O(1)
+internal fn String.push_byte(mut self, byte: UInt8)
+  ensures identical(self.model(), old(self.model()).append(byte))
+  cost amortized time O(1)
 {
-  TextBuilder(text: String(storage: intrinsic::storage_empty()))
+  growth::push(mut self.storage, value: byte)
 }
 
-public fn TextBuilder.write(mut self, text: StringSlice)
-  cost amortized time O(text.length())
-{
-  mut self.text.push(text)
-}
-
-public fn TextBuilder.finish(own self) -> String
-  cost time O(1)
-{
-  self.text
-}
-
-internal fn TextBuilder.write_byte(mut self, byte: UInt8)
+internal fn String.push_float32(mut self, value: Float32)
   cost time finite
 {
-  writing::byte(mut self.text.storage, value: byte)
+  writing::float32(mut self.storage, value: value)
 }
 
-internal fn TextBuilder.write_float32(mut self, value: Float32)
+internal fn String.push_float64(mut self, value: Float64)
   cost time finite
 {
-  writing::float32(mut self.text.storage, value: value)
+  writing::float64(mut self.storage, value: value)
 }
 
-internal fn TextBuilder.write_float64(mut self, value: Float64)
+internal fn String.push_unsigned(mut self, value: UInt64)
   cost time finite
 {
-  writing::float64(mut self.text.storage, value: value)
+  writing::unsigned(mut self.storage, value: value)
 }
 
-public fn TextBuilder.write_character(mut self, character: Character)
+internal fn String.push_signed(mut self, value: Int64)
   cost time finite
 {
-  writing::character(mut self.text.storage, value: character)
-}
-
-internal fn TextBuilder.write_unsigned(mut self, value: UInt64)
-  cost time finite
-{
-  writing::unsigned(mut self.text.storage, value: value)
-}
-
-internal fn TextBuilder.write_signed(mut self, value: Int64)
-  cost time finite
-{
-  writing::signed(mut self.text.storage, value: value)
+  writing::signed(mut self.storage, value: value)
 }
 
 impl Equal for String {
@@ -286,8 +261,8 @@ impl Hash for String {
 }
 
 impl Display for String {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write(self.slice())
+  fn display(self, output: mut String) {
+    mut output.push(self.slice())
   }
 }
 
@@ -302,8 +277,8 @@ impl Equal for StringSlice {
 }
 
 impl Display for StringSlice {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write(self)
+  fn display(self, output: mut String) {
+    mut output.push(self)
   }
 }
 
@@ -324,9 +299,9 @@ public type Utf8Error(valid_up_to: UInt64)
   derives Equal
 
 impl Display for Utf8Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write("the bytes are not UTF-8 at offset ")
+    mut output.push("the bytes are not UTF-8 at offset ")
     self.valid_up_to.display(mut output)
   }
 }
@@ -335,9 +310,9 @@ public type Utf16Error(valid_up_to: UInt64)
   derives Equal
 
 impl Display for Utf16Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write("the units are not UTF-16 at index ")
+    mut output.push("the units are not UTF-16 at index ")
     self.valid_up_to.display(mut output)
   }
 }
@@ -687,14 +662,4 @@ public fn String.to_bytes(own self) -> List[UInt8]
   cost allocations == 0
 {
   List(storage: own self.storage)
-}
-
-public fn TextBuilder.with_capacity(capacity: UInt64) -> TextBuilder {
-  TextBuilder(text: String.with_capacity(capacity))
-}
-
-public fn TextBuilder.length(self) -> UInt64
-  cost time O(1)
-{
-  self.text.length()
 }

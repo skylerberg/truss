@@ -150,7 +150,7 @@ public trait Default {
 }
 
 public trait Display {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
     cost time finite
 }
 
@@ -303,10 +303,13 @@ public trait Iterable {
 
   fn map[Output](self, transform: (fn(Self.Element) -> Output uses generic Granted)) -> List[Output]
     uses generic Granted
+    ensures result.length() == self.count()
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
     var outputs: List[Output] = List.with_capacity(self.count())
-    for item in self {
+    for item in self
+      invariant outputs.length() == visited.length()
+    {
       mut outputs.push(transform(item))
     }
     outputs
@@ -598,9 +601,9 @@ public type ConversionError()
   derives Equal
 
 impl Display for ConversionError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write("the value does not fit the type")
+    mut output.push("the value does not fit the type")
   }
 }
 
@@ -611,16 +614,16 @@ public type ParseIntegerError =
   derives Equal
 
 impl Display for ParseIntegerError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Empty => mut output.write("the text has no digits")
+      Empty => mut output.push("the text has no digits")
       InvalidDigit(offset) => {
-        mut output.write("the byte at offset ")
+        mut output.push("the byte at offset ")
         offset.display(mut output)
-        mut output.write(" is not a digit")
+        mut output.push(" is not a digit")
       }
-      OutOfRange => mut output.write("the number does not fit the type")
+      OutOfRange => mut output.push("the number does not fit the type")
     }
   }
 }
@@ -631,27 +634,27 @@ public type ParseFloatError =
   derives Equal
 
 impl Display for ParseFloatError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Empty => mut output.write("the text is empty")
+      Empty => mut output.push("the text is empty")
       InvalidCharacter(offset) => {
-        mut output.write("the byte at offset ")
+        mut output.push("the byte at offset ")
         offset.display(mut output)
-        mut output.write(" is not part of a number")
+        mut output.push(" is not part of a number")
       }
     }
   }
 }
 
 impl Display for Bool {
-  fn display(self, output: mut TextBuilder) {
-    if self { mut output.write("true") } else { mut output.write("false") }
+  fn display(self, output: mut String) {
+    if self { mut output.push("true") } else { mut output.push("false") }
   }
 }
 
 impl Display for Character {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_character(self)
+  fn display(self, output: mut String) {
+    mut output.push_character(self)
   }
 }

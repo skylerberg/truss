@@ -1128,10 +1128,10 @@ fn List[Element].with_capacity(capacity: UInt64) -> List[Element]
 
 fn List[Element].push(mut self, item: own Element)
 
-fn List[Element: Ordered].sort(mut self)
+fn Slice[Element: Ordered].sort(mut self)
   cost time O(self.length() * log(self.length()) * time(Element.compare))
 
-fn List[Element].zip[Other](self, other: Slice[Other]) -> Zipped[Element, Other]
+fn Slice[Element].zip[Other](self, other: Slice[Other]) -> Zipped[Element, Other]
 ```
 
 - A method is a function declared as `fn Type.name`. One whose first
@@ -1851,8 +1851,8 @@ public trait Add[Right] {
 
 ## Failure
 
-Code panics only where its signature declares `uses Panic`. Running out of
-memory and overflowing the stack are the exceptions.
+Code panics only in a test and where its signature declares `uses Panic`.
+Running out of memory and overflowing the stack are the exceptions.
 
 Every operation that can fail is a proof obligation: integer overflow,
 division by zero, indexing or slicing out of bounds, a shift that is too
@@ -1866,10 +1866,10 @@ is an error, and one of these makes it compile:
 
 `unreachable` admits only the first.
 
-In the body of a function that declares `uses Panic`, an operation that is
-not proven safe is checked when it runs, in every build, and panics when it
-fails. The check prevents the out-of-bounds read or the wrapped result that
-the unchecked operation would give.
+In a test, and in the body of a function that declares `uses Panic`, an
+operation that is not proven safe is checked when it runs, in every build,
+and panics when it fails. The check prevents the out-of-bounds read or the
+wrapped result that the unchecked operation would give.
 
 - An overflow, a division by zero, and a shift that is too large are checked
   where they happen.
@@ -1918,7 +1918,9 @@ let rolled = provide LoadedDie(face: 5) {
 - Code calls a capability's methods through its name, as in `Random.next()`,
   and never calls an implementation directly.
 - An implementation is a type with an `impl`. Its methods take `self`, or
-  `mut self` where they mutate its state.
+  `mut self` where they mutate its state, and then the capability's
+  parameters without their defaults: the capability's method fills a
+  default in before the call reaches an implementation.
 - `provide implementation, ... { body }` runs the body with the given
   implementations, passed as arguments are: a place is written with `mut`
   when its methods mutate it, and it holds the mutations afterward.
@@ -2010,8 +2012,9 @@ fn total_score(players: Slice[Player]) -> Int64
   scope after the block.
 - **Branches cannot race.** Any branch may read any place, and a place that
   one branch mutates is used by no other branch.
-- Branches use no capability but `Panic`, so a function that contains
-  `parallel` is still pure.
+- A branch uses no capability except `Panic`, and uses `Panic` only where
+  the enclosing function has it, so a function that contains `parallel` is
+  still pure.
 - A branch cannot exit the block with `return`, `break`, `continue`, or `?`.
 - A `parallel` block has the result of running its branches in order, and
   its `time` is the sum of theirs.
@@ -2165,6 +2168,19 @@ trait Ordered: Equal {
 - A `law` holds for every implementation and every set of values that meets
   its `requires`.
 - A trait's contracts bind every `impl` and are proven for each.
+- **An `impl`'s method has its trait's signature.** It restates that
+  signature: the generic parameters with their bounds; the parameters with
+  their names, modes, and types, and a default exactly where the trait's
+  parameter has one; and the result. `Self`, the trait's arguments, and the
+  associated types are as the `impl` gives them, and a function type has the
+  trait's `uses` and `cost` clauses. The method's generic parameters may
+  have other names, its capability parameters have the trait's names (see
+  [Capability parameters](#capability-parameters)), and a type parameter's
+  bounds and a function type's `cost` clauses may come in another order.
+  The body of the method and every call of it are checked against this one
+  signature. The method states of its own only its `uses`, which stays
+  within the trait's, the values of its defaults, and the contract clauses
+  that the next two rules allow.
 - **An `impl`'s method may promise more than its trait.** Its contract is
   the trait method's, with the method's own `ensures` and `cost` clauses
   added, and its own `requires`, if it has any, in place of the trait's.

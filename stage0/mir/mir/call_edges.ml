@@ -321,9 +321,10 @@ let list_path_edges (lookups : lookups) path =
     | Some { form = No_code; _ } | None -> []
   in
   let may_panic =
-    match Interface.Impls.read_signature lookups.interface path with
-    | Some (signature : Types.signature) -> Types.may_panic signature.uses
-    | None -> false
+    match (path, Interface.Impls.read_signature lookups.interface path) with
+    | Test _, _ -> true
+    | _, Some (signature : Types.signature) -> Types.may_panic signature.uses
+    | _, None -> false
   in
   let instance =
     match lookups.mir.find_form_origin path with

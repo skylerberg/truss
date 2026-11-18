@@ -153,7 +153,7 @@ let make_constant_state (context : Definitions.context) path =
   in
   let st =
     Lowering.enter context
-      ~builder:(Emit_c.Builder.create context.env ~key:(Evaluator path))
+      ~builder:(Emit_c.Builder.create context.env ~item:(Evaluator path))
       (Lowering.make_frame code)
   in
   (st, mir, ty)
@@ -321,7 +321,7 @@ type constant = Folded of Lowered.data | Run of Ground.ty
 
 let compile_constant context path =
   match fold_initializer context ~visiting:[] path with
-  | ty, Some value -> Folded { data_key = Constant path; ty; value }
+  | ty, Some value -> Folded { data_item = Constant path; ty; value }
   | ty, None -> Run ty
 
 let write_fully = Well_known.make_path Write_fully
@@ -352,7 +352,7 @@ let write_output (st : Lowering.state) output =
     ~destination:(Lowering.allocate_temporary st result)
     ()
 
-let build_evaluator context path : Emit_c.Builder.item_code =
+let build_evaluator context path : Emit_c.fragment =
   let st, mir, ty = make_constant_state context path in
   Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder);
   Lowering.run_in_scope st (fun () ->

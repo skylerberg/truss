@@ -15,8 +15,8 @@ let list_code_supplied_to (interface : Interface.Lookups.t) path instantiation =
         (Monomorphic.make_signature_substitution signature instantiation)
   | None -> []
 
-let check (interface : Interface.Lookups.t) ~find_call_edges (key : Lowered.Item.t) fragment =
-  match key with
+let check (interface : Interface.Lookups.t) ~find_call_edges (item : Lowered.Item.t) fragment =
+  match item with
   | Code { path = caller; instantiation } -> (
       match find_call_edges caller with
       | None -> ()
@@ -34,7 +34,7 @@ let check (interface : Interface.Lookups.t) ~find_call_edges (key : Lowered.Item
               | Code { path = callee; _ }
                 when not (is_runtime_call callee || List.exists (Path.equal callee) allowed) ->
                   raise_bug "%s calls %s, which is not among its call edges"
-                    (Lowered.Item.to_string key) (Lowered.Item.to_string called)
+                    (Lowered.Item.to_string item) (Lowered.Item.to_string called)
               | _ -> ())
             (Emit_c.called fragment))
   | _ -> ()

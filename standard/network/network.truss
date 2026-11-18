@@ -50,15 +50,15 @@ public fn IpAddress.is_multicast(self) -> Bool
   }
 }
 
-internal fn write_dotted(output: mut TextBuilder, first: UInt8, second: UInt8, third: UInt8, fourth: UInt8)
+internal fn write_dotted(output: mut String, first: UInt8, second: UInt8, third: UInt8, fourth: UInt8)
   cost time finite
 {
   first.display(mut output)
-  mut output.write(".")
+  mut output.push(".")
   second.display(mut output)
-  mut output.write(".")
+  mut output.push(".")
   third.display(mut output)
-  mut output.write(".")
+  mut output.push(".")
   fourth.display(mut output)
 }
 
@@ -105,11 +105,11 @@ internal fn is_ipv4_mapped(octets: Array[UInt8, 16]) -> Bool
   (forall index in 0..10 => octets[index] == 0) && octets[10] == 255 && octets[11] == 255
 }
 
-internal fn write_groups(output: mut TextBuilder, octets: Array[UInt8, 16])
+internal fn write_groups(output: mut String, octets: Array[UInt8, 16])
   cost time finite
 {
   if is_ipv4_mapped(octets) {
-    mut output.write("::ffff:")
+    mut output.push("::ffff:")
     write_dotted(mut output, first: octets[12], second: octets[13], third: octets[14], fourth: octets[15])
     return
   }
@@ -120,20 +120,20 @@ internal fn write_groups(output: mut TextBuilder, octets: Array[UInt8, 16])
     decreases 8 - index
   {
     if run.length >= 2 && index == run.start {
-      mut output.write("::")
+      mut output.push("::")
       index += run.length
     } else {
       if index > 0 && !(run.length >= 2 && index == run.start + run.length) {
-        mut output.write(":")
+        mut output.push(":")
       }
-      mut output.write(group(octets, index: index).format(radix: 16))
+      mut output.push(group(octets, index: index).format(radix: 16))
       index += 1
     }
   }
 }
 
 impl Display for IpAddress {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       Version4(octets) =>
@@ -450,17 +450,17 @@ public type SocketAddress(address: IpAddress, port: UInt16)
   derives Equal, Hash, Ordered
 
 impl Display for SocketAddress {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self.address {
       Version4(_) => self.address.display(mut output)
       Version6(_) => {
-        mut output.write("[")
+        mut output.push("[")
         self.address.display(mut output)
-        mut output.write("]")
+        mut output.push("]")
       }
     }
-    mut output.write(":")
+    mut output.push(":")
     self.port.display(mut output)
   }
 }
@@ -490,9 +490,9 @@ public type AddressError(offset: UInt64)
   derives Equal
 
 impl Display for AddressError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write("the text is not an address at offset ")
+    mut output.push("the text is not an address at offset ")
     self.offset.display(mut output)
   }
 }
@@ -554,10 +554,10 @@ public fn IpNetwork.contains(self, address: IpAddress) -> Bool
 }
 
 impl Display for IpNetwork {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     self.address.display(mut output)
-    mut output.write("/")
+    mut output.push("/")
     self.prefix_length.display(mut output)
   }
 }

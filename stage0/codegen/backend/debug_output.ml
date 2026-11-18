@@ -54,7 +54,7 @@ let write_scalar_debug env builder ~output (scalar : Memory_layout.scalar) (plac
   | Pointer _ | Nullable_pointer _ -> write_text env builder ~output "pointer"
 
 let build_debug env ty =
-  let builder = Emit_c.Builder.create env ~key:(Debug ty) in
+  let builder = Emit_c.Builder.create env ~item:(Debug ty) in
   let parameter =
     if Memory_layout.has_zero_size env ty then None
     else Some (Emit_c.Builder.allocate_local builder (Writing.make_value_parameter ty))

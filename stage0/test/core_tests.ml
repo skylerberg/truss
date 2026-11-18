@@ -657,4 +657,40 @@ let () =
       "standard::list::List.slice_from uses []";
       "standard::core::Equal.equal uses []";
       "standard::list::Slice.length uses []";
-    ]
+    ];
+  Harness.test "the callee of an intrinsic holds the capabilities that the intrinsic uses"
+    (fun () ->
+      let probe = Support.parse_file "standard::probe" in
+      let database =
+        Database.create
+          [
+            {
+              name = Path.standard_package;
+              dependencies = [];
+              files =
+                Standard_library.files
+                @ [ (probe, Fixtures.Capabilities.shared_count_updated_using_tasks) ];
+            };
+          ]
+      in
+      let key : Resolve.Names.key =
+        {
+          module_ = probe.module_;
+          path = Top { module_ = probe.module_; name = "add" };
+          ordinal = 0;
+        }
+      in
+      match Database.read_checked_body database key with
+      | Some { form; _ } ->
+          Core_lint.check
+            (Database.make_interface_lookups database [ Path.standard_package ])
+            key form;
+          expect_observed
+            [ "intrinsic::shared_update uses [standard::capabilities::Tasks]" ]
+            (List.filter_map
+               (fun (call : Core.call) ->
+                 match call.callee.target with
+                 | Intrinsic _ -> Some (show_callee call.callee)
+                 | Function _ | Trait_method _ | Capability_method _ | Indirect _ -> None)
+               (list_calls form))
+      | None -> Harness.fail "`add` has no core form")

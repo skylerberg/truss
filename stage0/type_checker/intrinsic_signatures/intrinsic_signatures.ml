@@ -31,7 +31,9 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
       receiver = None;
       parameters;
       output;
-      uses = Types.no_capabilities;
+      uses =
+        Types.make_capability_set
+          (List.map (fun capability -> Types.Capability capability) (Intrinsic.list_uses operation));
       costs = [];
       specification_only = false;
       capture_free_parameters = [];

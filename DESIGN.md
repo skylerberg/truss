@@ -1026,7 +1026,10 @@ Code for every integer width is written once, against the integer traits, as
 Swift's extensions of `FixedWidthInteger` are. The traits are sealed, so
 generic code over one is proven once for each built-in type, with that
 type's range and bit width. For the same reason, a literal under such a
-bound must fit every type that implements the trait.
+bound must fit every type that implements the trait. The prover rejects an
+intrinsic at any other type parameter: the obligations that prevent an
+overflow or an out-of-range conversion need a range and a width that the
+parameter lacks.
 
 ### Floats
 
@@ -1055,8 +1058,8 @@ an operation produces.
 
 Rules: [Failure](SPECIFICATION.md#failure).
 
-A function panics only if its signature declares `uses Panic`. The
-exceptions are running out of memory and overflowing the stack, which no
+Only a test and a function whose signature declares `uses Panic` can panic.
+The exceptions are running out of memory and overflowing the stack, which no
 language rules out.
 
 Every operation that can fail is a proof obligation: an integer overflow, a
@@ -1065,14 +1068,14 @@ division by zero, an index out of bounds, a shift that is too large, and
 the fact locally, requires the fact of its caller, calls a checked variant
 that returns an `Option` or a `Result`, or declares `uses Panic`.
 
-**`uses Panic` turns a proof into a check.** In a function that declares
-it, an operation that is not proven safe is checked when it runs, and the
-proof goes on as though it held, since a failed check ends the program. The
-check is in every build, so a release build panics where a test build does.
-An index checks the precondition of the `impl`'s `at`. An index through a
-bound is proven: the prover reads the trait's precondition there, and the
-call would check the `impl`'s, so a check would not be the fact the proof
-assumed.
+**`Panic` turns a proof into a check.** In a test, and in a function that
+declares `uses Panic`, an operation that is not proven safe is checked when
+it runs, and the proof goes on as though it held, since a failed check ends
+the program. The check is in every build, so a release build panics where a
+test build does. An index checks the precondition of the `impl`'s `at`. An
+index through a bound is proven: the prover reads the trait's precondition
+there, and the call would check the `impl`'s, so a check would not be the
+fact the proof assumed.
 
 **A lambda proves its operations.** Its capabilities are inferred before the
 prover runs. A lambda that could panic where its type allows no `Panic` would
@@ -1230,10 +1233,10 @@ left.saturating_add(right)
 | Rule | Reason |
 |---|---|
 | A place that one branch mutates is used by no other branch. | This is the rule for calls, where a place passed `mut` is used by nothing else during the call: `swap(mut first, second: mut first)` is rejected. Applied across branches, it prevents every data race. |
-| A branch uses no capabilities. | Two branches that called one stateful implementation would race, and the order of their calls would vary from run to run. A function that contains `parallel` is therefore still pure, and a test that runs it is cached. Code whose branches use capabilities is [concurrent](#concurrency). |
+| A branch uses no capability except `Panic`, and uses `Panic` only where the enclosing function has it. | Two branches that called one stateful implementation would race, and the order of their calls would vary from run to run. No code can `provide` `Panic`, so no branch calls a stateful implementation of it. A branch that panicked in a function without `Panic` would end a program that relies on the function's signature, such as a server whose handler type has no `Panic` ([Failure](#failure)). A function that contains `parallel` is therefore still pure, and a test that runs it is cached. Code whose branches use capabilities is [concurrent](#concurrency). |
 | The input decides where a computation is split, never the number of cores. | The result does not depend on the machine: a parallel float sum gives the same bits everywhere (*determinism*). |
 | A test runs the branches in order. | The test runner already runs one test on each core, and a failed check is the same on every run. |
-| A branch cannot exit the block early. | A branch uses no capabilities, so it cannot be asked to stop. An early exit would have to abandon the other branches, or wait for work whose result is discarded. |
+| A branch cannot exit the block early. | A branch uses no capability except `Panic`, so it cannot be asked to stop. An early exit would have to abandon the other branches, or wait for work whose result is discarded. |
 
 ## Concurrency
 
@@ -1393,6 +1396,7 @@ it is.
 |---|---|
 | A trait can require other traits. | A law can then span traits. `Hash` requires `Equal`, so its law, that equal values hash equally, is stated and proven. In Rust, `Hash` does not require `Eq`, and that law is only a comment. |
 | A type has one `impl` of each trait. | Two traits that both require `Equal` share that `impl`, so there is no diamond problem. |
+| An `impl`'s method has its trait's signature, which the `impl` restates. | The body of the method and every call of it are checked against the same types. A method with a signature of its own would have a body checked against types that no call is checked against: with a bound of its own, the body calls a method of a trait that the type argument does not implement, and with a callback type that adds a `time` clause, the body counts on a callback that terminates while a caller passes one that does not. The written signature must equal the trait's so that the source states the types that are checked. If that comparison missed a difference, the body would still be checked against the trait's types: the outcome would be a confusing error in the body, never an accepted wrong program. |
 
 ### Implementations
 
@@ -1520,6 +1524,7 @@ in a test build takes constant time.
 | A test with `uses` is external: it gets the real implementations, and its result is never cached. | Its result depends on the world. It gets no hidden isolation: a test that wants a scratch directory narrows file access where a reader can see it. |
 | A test's standard input is empty. | Workers run tests at once, so input from the terminal would go to whichever test read first, and a test waiting for a person would run into its time limit. A test that needs input gets it from a `Console` it provides, or gives it to a program it runs through `Processes`. |
 | A test has `Panic` and cannot declare it. | A panic does not depend on the world. Declaring `Panic` would make the test external, so the suite would run it every time instead of caching its result. |
+| A test checks each operation that it cannot prove. | A test without `uses` runs one execution path, so running it decides what a proof of that path would. A proof would only make the test state loop invariants. |
 | A failed test is never retried. | A retry hides exactly the failures that an external test exists to catch. |
 | A test cannot expect a panic. | That would treat a panic as intended behavior, which is the job of `Result`. The misuse that other languages test this way, such as a violated precondition, does not compile. To check that a program crashes on bad input, an external test runs the program through `Processes`. |
 | A test has a time limit. | A loop that never ends fails its test. |
@@ -1833,7 +1838,6 @@ as every source of randomness is a capability.
 | A method that needs no ownership of the storage is declared once, on the view type. | A `String`, a `List`, and an `Array` have the methods of their views ([Method lookup](#method-lookup)), so `mut names.sort()` works without `names[..]`, and a second declaration on the owning type would only forward. The owning type declares a method of that name where it uses its storage: `List.reverse` keeps the list's capacity. |
 | A method that works on any collection is a provided method of `Iterable`. | A user's collection gets the method by implementing `count` and `element`. |
 | A collection that is made from its elements alone takes a literal and has no `new()`. | *One spelling.* A constructor is for a collection that needs more than its elements: a `Heap` needs an order, and an `LruCache` a capacity. |
-| A collection method takes a pure callback. A method of `Option` or `Result` takes a callback that may use capabilities. | `map` and `sort_by` may later run their callback in parallel. `Option.map` calls its callback at most once, in place of an `if`. |
 | A lookup that can miss lends an `Option`. | Nothing is copied, whatever the element type. |
 | A comparison, a hash, and a lookup state an allocation bound, in terms of `allocations(Element.equal)` for a generic collection. | A function with an allocation bound otherwise cannot compare two strings or look up a key. |
 | A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write, and every helper works with every implementation. |
