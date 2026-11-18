@@ -571,8 +571,11 @@ let () =
         ~at:"{ it" ~fixed:"let x = statuses.map(fn(element) { element.code })");
   Harness.test "x as Int64" (fun () ->
       Parse_support.expect_body_error "let n = size as Int64" ~code:As_conversion ~at:"as"
-        ~fixed:"let n = Int64.from(size)"
-        ~alternatives:[ "let n = Int64.try_from(size)" ]);
+        ~fixed:"let n = Int64.from_integer(size)"
+        ~alternatives:[ "let n = Int64.try_from_integer(size)" ]);
+  Harness.test "x as Float64" (fun () ->
+      Parse_support.expect_body_error "let ratio = count as Float64" ~code:As_conversion ~at:"as"
+        ~fixed:"let ratio = count.to_float64()");
   Harness.test "loop" (fun () ->
       Parse_support.expect_body_error "loop {\n  todo\n}" ~code:Reserved_word ~at:"loop"
         ~fixed:"while true {\n  todo\n}");

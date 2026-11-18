@@ -636,7 +636,7 @@ let () =
   Harness.test "a constant under a type is read by name" (fun () ->
       expect_type Fixtures.Infer.uint8_maximum "UInt8.maximum" "UInt8");
   Harness.test "a trait method through a type chooses the impl by the argument" (fun () ->
-      expect_fine Fixtures.Infer.int64_from_an_int32)
+      expect_fine Fixtures.Infer.big_integer_from_an_int64)
 
 let () =
   Harness.test "an unknown variant in a pattern is an error" (fun () ->

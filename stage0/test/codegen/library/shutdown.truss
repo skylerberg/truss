@@ -97,7 +97,7 @@ test "a shutdown cancels a request that outlasts the grace period" {
 }
 
 fn frame(kind: UInt8, flags: UInt8, stream: UInt8, payload: Slice[UInt8]) -> List[UInt8] {
-  var bytes: List[UInt8] = [0, 0, UInt8.try_from(payload.length()).unwrap_or(0), kind, flags, 0, 0, 0, stream]
+  var bytes: List[UInt8] = [0, 0, UInt8.try_from_integer(payload.length()).unwrap_or(0), kind, flags, 0, 0, 0, stream]
   mut bytes.append(payload.to_list())
   bytes
 }
@@ -106,7 +106,7 @@ fn frame_kinds(bytes: Slice[UInt8]) -> List[String] {
   var kinds: List[String] = []
   var at: UInt64 = 0
   while at + 9 <= bytes.length() {
-    let length = UInt64.from(bytes[at]) * 65536 + UInt64.from(bytes[at + 1]) * 256 + UInt64.from(bytes[at + 2])
+    let length = UInt64.from_integer(bytes[at]) * 65536 + UInt64.from_integer(bytes[at + 1]) * 256 + UInt64.from_integer(bytes[at + 2])
     let kind = bytes[at + 3]
     let start = at + 9
     if start + length > bytes.length() {

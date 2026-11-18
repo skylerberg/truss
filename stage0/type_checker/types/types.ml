@@ -213,6 +213,11 @@ let bind_argument parameter argument substitution =
 
 let find_argument parameter substitution = List.assoc_opt parameter substitution.arguments
 
+let list_type_arguments substitution =
+  List.filter_map
+    (function parameter, Type ty -> Some (parameter, ty) | _, Value _ -> None)
+    substitution.arguments
+
 let rec substitute substitution type_ =
   if is_empty_substitution substitution then type_
   else

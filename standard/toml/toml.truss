@@ -148,7 +148,7 @@ fn end_of_line(text: StringSlice, at: mut UInt64) -> Result[Unit, Failure] {
 }
 
 fn push_code(output: mut String, code: UInt32, at: UInt64) -> Result[Unit, Failure] {
-  match Character.try_from(code) {
+  match Character.try_from_code(code) {
     Ok(character) => {
       mut output.push_character(character)
       Ok(Unit)
@@ -1000,7 +1000,7 @@ impl serialization::Tree for Value {
   }
 
   fn from_unsigned(value: UInt64) -> Option[Value] {
-    match Int64.try_from(value) {
+    match Int64.try_from_integer(value) {
       Ok(integer) => Some(Value.Integer(value: integer))
       Err(_) => None
     }

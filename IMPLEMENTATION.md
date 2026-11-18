@@ -72,8 +72,9 @@ develop as well as make it easier to bootstrap the compiler in parts.
 ### The parser
 
 - **The parser reads tokens, never the source text.** A fix that would move
-  code edits around it instead, so the fix never respells the code: `x as T`
-  becomes `T.from(x)` by inserting `T.from(` and replacing ` as T` with `)`.
+  code edits around it instead, so the fix never respells the code:
+  `x as Int64` becomes `Int64.from_integer(x)` by inserting
+  `Int64.from_integer(` and replacing ` as Int64` with `)`.
 - **The tree holds no positions.** A node holds an id, and its item's span
   table holds the node's span at that index. A definition that only moved
   parses to an equal tree, so a change to positions alone re-runs only the

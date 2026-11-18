@@ -1,5 +1,5 @@
 fn f() -> Int8 {
-  match Int8.try_from(2.5) {
+  match Int8.try_from_float64(2.5) {
     Ok(_) => unreachable
     Err(_) => 0
   }

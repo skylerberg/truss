@@ -866,7 +866,7 @@ reason: a later release of the trait can add one.
 3. A reader could not tell which `process` runs in `process(item)`.
 
 A trait with type parameters covers most uses of overloading:
-`Int64.from(count)` selects an `impl` of `From[Source]` by the type of
+`BigInteger.from(count)` selects an `impl` of `From[Source]` by the type of
 `count`. It avoids all three costs, because the argument types are inferred
 first, nothing is selected by the expected result type, and the candidate
 `impl`s live in known packages ([Implementations](#implementations)).
@@ -1027,6 +1027,15 @@ bound must fit every type that implements the trait. The prover rejects an
 intrinsic at any other type parameter: the obligations that prevent an
 overflow or an out-of-range conversion need a range and a width that the
 parameter lacks.
+
+**A conversion between built-in scalars is a method of the target type,
+not an `impl` of `From` or `TryFrom`.** `Int64.from_integer(count)` requires
+that `count` fits, and `Int64.try_from_integer(count)` returns a `Result`.
+Each is one method of `FixedWidthInteger`, generic over the source and proven
+for every pair of integer types, with one contract. Impls would need one per
+pair. A float converts with `try_from_float64` and `to_float64`, and a
+`Character` with `from_code` and `code`. `From` and `TryFrom` are for
+conversions that involve a library type, as in `BigInteger.from(count)`.
 
 ### Floats
 
@@ -2044,7 +2053,7 @@ pass, so only the cache's user can write its directory.
 | Generators and coroutines | [Lending methods](#lending-methods) and [Loops](#loops) |
 | Closures that mutate captured variables, trailing lambdas, short lambda forms, and implicit lambda parameters | [Lambdas](#lambdas) |
 | Overloading by parameter type | [Overloads by receiver mode](#overloads-by-receiver-mode) |
-| `into()` | Rust infers the target of `into()` from context, which is a common source of inference failures. A conversion names its target, as in `Int64.from(count)`. |
+| `into()` | Rust infers the target of `into()` from context, which is a common source of inference failures. A conversion names its target, as in `Int64.from_integer(count)`. |
 | `++`, `--`, and chained comparisons | [Operators](#operators) |
 | A string concatenation operator | [Strings](#strings) |
 | Exceptions and catching a panic | [Failure](#failure) |

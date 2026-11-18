@@ -37,7 +37,7 @@ fn noise(count: UInt64) -> List[UInt8] {
   var state: UInt64 = 11
   for _ in 0..count {
     state = (state * 1103515245 + 12345) % 2147483648
-    mut bytes.push(UInt8.try_from((state >> 16) & 255).unwrap_or(0))
+    mut bytes.push(UInt8.try_from_integer((state >> 16) & 255).unwrap_or(0))
   }
   bytes
 }

@@ -323,7 +323,38 @@ let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
     | Node origin -> origin
     | Whole_definition -> (names.read_definition key).id)
 
-let substitute_clause text spans clause replacements =
+let is_word_character character =
+  character = '_'
+  || (character >= 'a' && character <= 'z')
+  || (character >= 'A' && character <= 'Z')
+  || (character >= '0' && character <= '9')
+
+let replace_type_names type_names text =
+  if type_names = [] then text
+  else begin
+    let buffer = Buffer.create (String.length text) in
+    let length = String.length text in
+    let rec scan index =
+      if index < length then
+        if is_word_character text.[index] then begin
+          let stop = ref index in
+          while !stop < length && is_word_character text.[!stop] do
+            incr stop
+          done;
+          let word = String.sub text index (!stop - index) in
+          Buffer.add_string buffer (Option.value (List.assoc_opt word type_names) ~default:word);
+          scan !stop
+        end
+        else begin
+          Buffer.add_char buffer text.[index];
+          scan (index + 1)
+        end
+    in
+    scan 0;
+    Buffer.contents buffer
+  end
+
+let substitute_clause text spans clause replacements type_names =
   let clause_span = Source.Definition_span.locate spans clause in
   let clause_text = Facts.quote_span text clause_span in
   let buffer = Buffer.create (String.length clause_text) in
@@ -333,7 +364,8 @@ let substitute_clause text spans clause replacements =
         let start = span.start - clause_span.start and stop = span.stop - clause_span.start in
         if start < next || stop > String.length clause_text then next
         else begin
-          Buffer.add_string buffer (String.sub clause_text next (start - next));
+          Buffer.add_string buffer
+            (replace_type_names type_names (String.sub clause_text next (start - next)));
           Buffer.add_string buffer replacement;
           stop
         end)
@@ -343,7 +375,7 @@ let substitute_clause text spans clause replacements =
             (fun (origin, replacement) -> (Source.Definition_span.locate spans origin, replacement))
             replacements))
   in
-  Buffer.add_string buffer (String.drop_first next clause_text);
+  Buffer.add_string buffer (replace_type_names type_names (String.drop_first next clause_text));
   Buffer.contents buffer
 
 let render (lookups : Lookups.t) (message : State.message) =
@@ -355,11 +387,11 @@ let render (lookups : Lookups.t) (message : State.message) =
              Facts.quote_span
                (lookups.interface.names.read_text key)
                (Source.Definition_span.locate (lookups.interface.names.read_spans key) origin)
-         | Substituted { key; clause; replacements } ->
+         | Substituted { key; clause; replacements; type_names } ->
              substitute_clause
                (lookups.interface.names.read_text key)
                (lookups.interface.names.read_spans key)
-               clause replacements)
+               clause replacements type_names)
        message)
 
 let render_fix lookups ({ title; edits } : State.fix) =

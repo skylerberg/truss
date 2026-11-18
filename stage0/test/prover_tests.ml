@@ -620,6 +620,10 @@ let () =
       expect_proven Fixtures.Prover.checked_add_of_255);
   Harness.test "a conversion succeeds exactly when the value fits" (fun () ->
       expect_proven Fixtures.Prover.try_from_of_an_int64);
+  Harness.test "a widening conversion needs no check of its range" (fun () ->
+      expect_proven Fixtures.Prover.integer_widened_without_a_check);
+  Harness.test "a float conversion keeps the value of a float or an integer" (fun () ->
+      expect_proven Fixtures.Prover.float_conversions_keep_the_value);
   Harness.test "a widening conversion keeps the value" (fun () ->
       expect_proven Fixtures.Prover.to_index);
   Harness.test "a widening conversion costs constant time" (fun () ->
@@ -1504,6 +1508,26 @@ let () =
           Fixtures.Prover.increment_in_a_greeter_impl;
           Fixtures.Prover.decrement_in_a_countdown_cursor;
         ]);
+  Harness.test "a narrowing conversion names its callee and offers its requires at the target"
+    (fun () ->
+      let packages =
+        Support.setup [ ("app::main", Fixtures.Prover.integer_narrowed_without_a_check) ]
+      in
+      match check packages (Support.parse_file "app::main") with
+      | [ { message; fixes = [ { title; _ } ]; _ } ]
+        when String.includes ~affix:"for this call to `Int8.from_integer`" message
+             && title
+                = "Add `requires Int8.minimum_value() <= value && value <= Int8.maximum_value()`" ->
+          ()
+      | actual ->
+          Harness.fail "%s"
+            (String.concat "; "
+               (List.map
+                  (fun (diagnostic : Diagnostic.t) ->
+                    String.concat ", "
+                      (diagnostic.message
+                      :: List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes))
+                  actual)));
   Harness.test "a divisor that may be zero offers a requires that it is not" (fun () ->
       match fix_titles Fixtures.Prover.halves_of_an_unchecked_divisor with
       | [ "Add `requires parts != 0`" ] -> ()

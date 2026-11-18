@@ -545,35 +545,25 @@ and add_operand_mismatch state (value : Syntax.expression) (left : Syntax.expres
   let left_type = State.normalize state left_type
   and right_type = State.normalize state right_type in
   if State.is_integer_type state left_type && State.is_integer_type state right_type then begin
-    let from =
-      State.make_trait_reference ~arguments:[ Types.Type right_type ] (Well_known.make_path From)
+    let is_within narrower wider =
+      match (Types.find_integer_range narrower, Types.find_integer_range wider) with
+      | Some (low, high), Some (wider_low, wider_high) ->
+          Z.geq low wider_low && Z.leq high wider_high
+      | _ -> false
+    in
+    let make_widening_fix side (operand : Syntax.expression) target =
+      State.fix
+        (Printf.sprintf "Convert the %s side to `%s`." side (Types.show target))
+        [
+          State.replace
+            (State.read_span state operand.id)
+            (Printf.sprintf "%s.from_integer(%s)" (Types.show target)
+               (State.quote_span state (State.read_span state operand.id)));
+        ]
     in
     let fixes =
-      if Option.is_some (State.find_evidence state left_type from) then
-        [
-          State.fix
-            (Printf.sprintf "Convert the right side to `%s`." (Types.show left_type))
-            [
-              State.replace (State.read_span state right.id)
-                (Printf.sprintf "%s.from(%s)" (Types.show left_type)
-                   (State.quote_span state (State.read_span state right.id)));
-            ];
-        ]
-      else if
-        Option.is_some
-          (State.find_evidence state right_type
-             (State.make_trait_reference ~arguments:[ Types.Type left_type ]
-                (Well_known.make_path From)))
-      then
-        [
-          State.fix
-            (Printf.sprintf "Convert the left side to `%s`." (Types.show right_type))
-            [
-              State.replace (State.read_span state left.id)
-                (Printf.sprintf "%s.from(%s)" (Types.show right_type)
-                   (State.quote_span state (State.read_span state left.id)));
-            ];
-        ]
+      if is_within right_type left_type then [ make_widening_fix "right" right left_type ]
+      else if is_within left_type right_type then [ make_widening_fix "left" left right_type ]
       else []
     in
     State.add_mismatch_diagnostic state Mismatched_integers (State.read_span state value.id) ~sides

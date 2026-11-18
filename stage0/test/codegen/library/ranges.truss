@@ -86,7 +86,7 @@ test "a range of a narrow type reaches its largest value without overflowing" {
   var count: UInt64 = 0
   let high: Range[UInt8] = 250..=255
   for value in high {
-    total += UInt64.from(value)
+    total += UInt64.from_integer(value)
     count += 1
   }
   assert count == 6 && total == 1515
