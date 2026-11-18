@@ -18,8 +18,8 @@ val compute_callee_amount :
   State.context ->
   State.frame ->
   path:Path.t ->
-  parts:State.part list ->
-  bind_frame:(State.part -> State.frame) ->
+  clauses:State.clauses list ->
+  bind_frame:(State.clauses -> State.frame) ->
   uses:Types.capability list ->
   values:State.passed list ->
   change:(unit -> Logic.term) option ->

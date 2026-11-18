@@ -52,7 +52,7 @@ that its signatures and its grant allow. The cost is a `uses` clause on
 every function that has an effect. See [Capabilities](#capabilities).
 
 **There is no foreign code.** A C function can do anything, so its
-capabilities, contract, and cost could only be assumed, and the three
+capabilities and contract could only be assumed, and the three
 decisions above would hold for only part of a program. The cost is reach:
 the operating system and special hardware are available only through the
 standard library. See [No foreign code](#no-foreign-code).
@@ -1528,9 +1528,8 @@ deterministic.
 
 Rules: [Proofs](SPECIFICATION.md#proofs).
 
-Every promise of a program is proven at compile time: contracts, cost
-clauses, invariants, laws, loop invariants, and every operation that can
-fail.
+Every promise of a program is proven at compile time: contracts,
+invariants, laws, loop invariants, and every operation that can fail.
 
 ```truss
 theorem reverse_twice[Element](items: Slice[Element])
@@ -1752,8 +1751,8 @@ Rules: [No foreign code](SPECIFICATION.md#no-foreign-code).
 Truss code cannot call code written in another language.
 
 **Foreign code would escape every guarantee.** A C function can do anything,
-so its capabilities, contract, and cost could only be assumed, and Truss has
-no `assume`.
+so its capabilities and contract could only be assumed, and Truss has no
+`assume`.
 
 **An ecosystem that could wrap C would be built on C.** Wrapping an existing
 library is the quickest way to get one, and an LLM would take that shortcut

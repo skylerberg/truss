@@ -212,7 +212,7 @@ let run_reading_callback : 'a. _ -> (unit -> 'a) -> 'a =
   context.reading_callback <- true;
   Fun.protect ~finally:(fun () -> context.reading_callback <- saved) read
 
-let bind_part_arguments frame (part : State.part) ~arguments ~substitution =
+let bind_arguments frame (clauses : State.clauses) ~arguments ~substitution =
   let locals, types, self =
     List.fold_left
       (fun (locals, types, self) (position, (parameter : Mir.parameter)) ->
@@ -224,11 +224,11 @@ let bind_part_arguments frame (part : State.part) ~arguments ~substitution =
               self )
         | _, None -> (locals, types, self))
       (Locals.empty, Locals.empty, None)
-      (List.mapi (fun position parameter -> (position, parameter)) part.parameters)
+      (List.mapi (fun position parameter -> (position, parameter)) clauses.parameters)
   in
   {
     frame with
-    State.source = part.callee;
+    State.source = clauses.callee;
     locals;
     types;
     old_locals = locals;
@@ -250,10 +250,10 @@ let list_callback_facts (context : State.context) frame (invocation : Invocation
   | Function { path; instantiation } -> (
       match
         Option.bind (Contracts.find_source context.lookups path) (fun (callee, _, _) ->
-            Contracts.find_part context.lookups path callee)
+            Contracts.find_clauses context.lookups path callee)
       with
-      | Some part -> (
-          match List.assoc_opt position part.callbacks with
+      | Some clauses -> (
+          match List.assoc_opt position clauses.callbacks with
           | Some { inputs; requires } when List.length inputs = List.length arguments ->
               let substitution =
                 match Interface.Impls.read_signature context.lookups.interface path with
@@ -261,7 +261,7 @@ let list_callback_facts (context : State.context) frame (invocation : Invocation
                     make_callee_substitution frame signature instantiation
                 | None -> Types.no_substitution
               in
-              let inside = bind_part_arguments frame part ~arguments:known ~substitution in
+              let inside = bind_arguments frame clauses ~arguments:known ~substitution in
               let inside =
                 {
                   inside with
