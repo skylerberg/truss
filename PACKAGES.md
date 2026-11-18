@@ -132,8 +132,7 @@ change that is not compatible is published under a new name, the old one
 with `_v2` after it, as in `acme::geometry_v2`. `acme::geometry` and
 `acme::geometry_v2` are two packages, and both can be in one build.
 
-The registry checks compatibility from the signatures. A release is
-compatible with the one before when:
+A release is compatible with the one before when:
 
 - every public definition is still there, at the same path
 - a function, method, or theorem has the same parameters and result, no
@@ -150,10 +149,13 @@ Bodies are not promised: a release may change a function's results within
 its contract, including a body that the prover reads as a definition and a
 parameter's default.
 
-The registry numbers each release. The first is `N.0.0`, where `N` is the
-number after `_v` in the package's name, or 1. After that, a release whose
-public signatures are unchanged gets the next patch number, and one that
-added to them gets the next minor number. There are no 0.x versions.
+The author gives each release its version, as in `truss publish 1.4.2`. Its
+first number is the number after `_v` in the package's name, or 1, so there
+are no 0.x versions. It is higher than the newest release's version. A
+release that adds to the public signatures takes the next minor number, and
+any other release takes the next patch number. The registry checks the first
+number and the order of versions. It does not check compatibility: the author
+promises it.
 
 ## The lock file
 

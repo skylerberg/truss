@@ -1182,10 +1182,10 @@ each dependency its capabilities.
 
 Grants need no rule for transitive dependencies. The `uses` of a function
 includes every capability that its callees use, so a package cannot pass its
-own dependencies more than it holds. A new release cannot take more
-capabilities for a function that is already called, because adding a
-capability to a function's `uses` is not a compatible release
-([Versions](#versions)).
+own dependencies more than it holds. A new release cannot give a function
+that is already called more capabilities unnoticed: each caller's `uses` must
+name them, so the upgrade fails to compile until the caller's author adds
+them.
 
 Grants cannot stop a wrong answer: a pure dependency can still return a
 result that its user acts on. Contracts narrow that risk, and a project's
@@ -1566,16 +1566,16 @@ fn is_sorted(items: Slice[Int64]) -> Bool
   ensures result == (forall index in 1..items.length() => items[index - 1] <= items[index])
 ```
 
-The dependency is then in the signature, where a reader and the registry's
-compatibility check see it, and an edit to the body re-proves that function
-alone. Verus knows an `exec fn` by its contract in the same way. Truss needs
-no second function, for specifications only, to state the definition.
+The dependency is then in the signature, where a reader sees it, and an edit
+to the body re-proves that function alone. Verus knows an `exec fn` by its
+contract in the same way. Truss needs no second function, for specifications
+only, to state the definition.
 
 | Rule | Reason |
 |---|---|
-| A method of a trait or of an `impl` is known by its contract too. | An `impl` states what it adds to the trait's contract in its own `ensures`: `Int64.compare` ensures the order of the integers. An edit to a provided body then changes no fact that callers know, so the compatibility check compares a method's contract and whether it has a body, never the body. An edit to an `impl`'s body re-proves that method and the `impl`'s laws alone. |
+| A method of a trait or of an `impl` is known by its contract too. | An `impl` states what it adds to the trait's contract in its own `ensures`: `Int64.compare` ensures the order of the integers. An edit to a provided body then changes no fact that callers know. An edit to an `impl`'s body re-proves that method and the `impl`'s laws alone. |
 | A clause applies only where every name it mentions is visible. | An `ensures` that reads the fields of an opaque type is a fact inside the type's package and no fact elsewhere, so `opaque` hides the representation from proofs too. |
-| A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The contract of a function that other packages cannot see is not compared between releases. The `ensures` lets callers inside the package know a result in terms of private helpers. |
+| A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The proofs of callers in other packages read a `requires` and a `cost`, and a clause applies only where every name it mentions is visible. The `ensures` lets callers inside the package know a result in terms of private helpers. |
 | A bit-level fact is requested with `assert ... by bit_vector`. | The assertion is proven alone by bit-blasting, universally over the integers and booleans it names, as Verus's `by (bit_vector)` is. Elsewhere the prover knows a bitwise operation by a few facts, and it never retries a query with bit-blasting. |
 | A quantifier over a range or a collection is also an expression in code. | The binder carries its range, so the body may rely on it. A lambda passed to a method would know nothing about its argument. The standard library therefore has no `all` or `any` methods, and a test of every element has *one spelling*. |
 
@@ -1851,12 +1851,7 @@ Rust's "expected `Vector`, found `Vector`".
 
 **A release therefore never breaks the API of an earlier release of the same
 name.** A breaking change is published under a new name with `_v2`, as Go
-requires `/v2` for the second major version of a module. Where compatibility
-is left to the care of each author, breaking changes are routine in releases
-that claim to be compatible. So the registry checks compatibility from the
-signatures and numbers each release itself, and a version number is never
-wrong about a change. Elm's registry checks releases in the same way, from
-types alone. A Truss signature holds more, so the check covers more.
+requires `/v2` for the second major version of a module.
 
 **A build uses the newest version that any of its packages was checked with,
 and nothing newer.** This is Go's minimal version selection. Selecting the

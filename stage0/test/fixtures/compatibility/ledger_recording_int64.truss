@@ -1,3 +1,0 @@
-public capability Ledger {
-  fn record(amount: Int64)
-}

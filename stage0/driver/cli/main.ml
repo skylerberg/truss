@@ -266,11 +266,20 @@ let upgrade =
              ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."))
 
 let publish =
+  let version =
+    Cmdliner.Arg.(
+      required
+      & pos 0 (some string) None
+      & info [] ~docv:"VERSION"
+          ~doc:
+            "The release's version, such as $(b,1.4.2). It starts with the number after $(b,_v) at \
+             the end of the package's name, or 1, and is higher than the newest release's.")
+  in
   make_command "publish"
-    ~doc:
-      "Publish the package to the registry as its next version, if it is complete and compatible \
-       with its previous version."
-    (make_project_term Cmdliner.Term.(const (fun () -> Outcome.Exit (Publish_command.run ()))))
+    ~doc:"Publish the package to the registry as $(i,VERSION), if it is complete."
+    (make_project_term
+       Cmdliner.Term.(
+         const (fun version () -> Outcome.Exit (Publish_command.run ~version)) $ version))
 
 let new_ =
   let name = Cmdliner.Arg.(required & pos 0 (some string) None & info [] ~docv:"NAME") in
