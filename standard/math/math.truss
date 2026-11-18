@@ -387,7 +387,7 @@ fn multiply_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt
     return []
   }
   if first.length() > UInt64.maximum - second.length() {
-    intrinsic::crash("a big integer cannot hold that many limbs".slice())
+    intrinsic::crash("a big integer cannot hold that many limbs")
   }
   let count = first.length() + second.length()
   var product = zero_limbs(count)
@@ -615,7 +615,7 @@ fn divide_digits(dividend: Slice[UInt64], divisor: Slice[UInt64]) -> DigitDivisi
   let leading = scaled[count - 1]
   let second = scaled[count - 2]
   if leading == 0 {
-    intrinsic::crash("the divisor of a big integer has a zero leading digit".slice())
+    intrinsic::crash("the divisor of a big integer has a zero leading digit")
   }
   var quotient = zero_limbs(extra + 1)
   var position = extra + 1
@@ -1355,7 +1355,7 @@ impl Default for BigInteger {
 
 impl Display for BigInteger {
   fn display(self, output: mut String) {
-    mut output.push(self.format().slice())
+    mut output.push(self.format())
   }
 }
 
@@ -1505,7 +1505,7 @@ public fn Decimal.quotient(
   let wanted: Int64 = intrinsic::convert[Int32, Int64](decimals) + intrinsic::convert[Int32, Int64](divisor.scale)
   let shift = wanted - intrinsic::convert[Int32, Int64](self.scale)
   if shift > 4294967295 || shift < -4294967295 {
-    intrinsic::crash("a decimal cannot hold that many digits".slice())
+    intrinsic::crash("a decimal cannot hold that many digits")
   }
   if shift >= 0 {
     let numerator = self.coefficient.times(power_of_ten(intrinsic::convert(shift)))
@@ -1526,7 +1526,7 @@ public fn Decimal.to_float64(self) -> Float64
   cost time finite
 {
   let text = "${self}"
-  match float_math::parse_float64(text.slice()) {
+  match float_math::parse_float64(text) {
     Ok(value) => value
     Err(_) => Float64.not_a_number
   }
@@ -1660,7 +1660,7 @@ fn Decimal.key(self) -> DecimalKey
   }
   let text = self.coefficient.absolute().format()
   if text.length() > 4294967295 {
-    intrinsic::crash("a decimal cannot hold that many digits".slice())
+    intrinsic::crash("a decimal cannot hold that many digits")
   }
   let bytes = text.slice()
   var count = bytes.length()
@@ -1825,7 +1825,7 @@ impl Display for Decimal {
       mut output.push("-")
     }
     if self.scale <= 0 {
-      mut output.push(digits.slice())
+      mut output.push(digits)
       write_zeros(mut output, count: intrinsic::convert(scale_gap(0, smaller: self.scale)))
       return
     }
@@ -1838,7 +1838,7 @@ impl Display for Decimal {
     } else {
       mut output.push("0.")
       write_zeros(mut output, count: places - digits.length())
-      mut output.push(digits.slice())
+      mut output.push(digits)
     }
   }
 }

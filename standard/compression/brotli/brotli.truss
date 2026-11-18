@@ -12,7 +12,7 @@ impl Display for Error {
     match self {
       Malformed(message) => {
         mut output.push("malformed Brotli data: ")
-        mut output.push(message.slice())
+        mut output.push(message)
       }
       TooLarge(limit) => {
         mut output.push("the decompressed data is longer than ")
@@ -513,7 +513,7 @@ fn dictionary_word(stream: mut Stream, length: UInt64, word_id: UInt64, output: 
     return malformed("a dictionary reference with an unknown transform")
   }
   if stream.dictionary is None {
-    match base64::decode(dictionary_text().slice()) {
+    match base64::decode(dictionary_text()) {
       Ok(bytes) => stream.dictionary = Some(own bytes)
       Err(_) => return malformed("the static dictionary")
     }

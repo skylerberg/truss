@@ -148,7 +148,7 @@ internal fn join_paths(first: StringSlice, second: StringSlice) -> Path
     return Path(text: second.to_string())
   }
   if first.length() > UInt64.maximum / 4 || second.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a path cannot hold that many bytes".slice())
+    intrinsic::crash("a path cannot hold that many bytes")
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(first.length() + 1 + second.length())
   first.copy_onto(mut output)
@@ -169,11 +169,11 @@ public fn Path.is_absolute(self) -> Bool
 public fn Path.join(self, part: StringSlice) -> Path
   cost time O(self.text.length() + part.length())
 {
-  join_paths(self.text.slice(), second: part)
+  join_paths(self.text, second: part)
 }
 
 public fn Path.join_path(self, other: Path) -> Path
-  ensures identical(result, join_paths(self.text.slice(), second: other.text.slice()))
+  ensures identical(result, join_paths(self.text, second: other.text))
   cost time O(self.text.length() + other.text.length())
 {
   join_paths(self.text.slice(), second: other.text.slice())
@@ -267,7 +267,7 @@ public fn Path.with_extension(self, extension: StringSlice) -> Path
   }
   let stem = text.part(0, to: extension_start(text, name: name))
   if stem.length() > UInt64.maximum / 4 || extension.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a path cannot hold that many bytes".slice())
+    intrinsic::crash("a path cannot hold that many bytes")
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(stem.length() + 1 + extension.length())
   stem.copy_onto(mut output)
@@ -288,7 +288,7 @@ public fn Path.with_file_name(self, name: StringSlice) -> Path
   }
   let before = text.part(0, to: last.start)
   if before.length() > UInt64.maximum / 4 || name.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a path cannot hold that many bytes".slice())
+    intrinsic::crash("a path cannot hold that many bytes")
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(before.length() + name.length())
   before.copy_onto(mut output)
@@ -346,7 +346,7 @@ public fn Path.normalized(self) -> Path
   let text = self.text.slice()
   let absolute = self.is_absolute()
   if text.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a path cannot hold that many bytes".slice())
+    intrinsic::crash("a path cannot hold that many bytes")
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(text.length() + 1)
   if absolute {
@@ -495,7 +495,7 @@ impl Hash for Path {
 
 impl Display for Path {
   fn display(self, output: mut String) {
-    mut output.push(self.text.slice())
+    mut output.push(self.text)
   }
 }
 
@@ -756,9 +756,9 @@ public fn write_atomically(file: Path, contents: Slice[UInt8]) -> Result[Unit, S
   }
   var temporary_name = name.to_string()
   mut temporary_name.push(".")
-  mut temporary_name.push(Random.next().format(radix: 16, minimum_digits: 16).slice())
+  mut temporary_name.push(Random.next().format(radix: 16, minimum_digits: 16))
   mut temporary_name.push(".tmp")
-  let temporary = file.with_file_name(temporary_name.slice())
+  let temporary = file.with_file_name(temporary_name)
   let written = write_new_file(temporary, contents: contents)
   let renamed = match written {
     Ok(_) => FileWrite.rename(temporary, to: file)
@@ -836,7 +836,7 @@ public fn remove_all(path: Path) -> Result[Unit, SystemError]
 {
   if FileRead.metadata(path, follow_links: false)?.is_directory() {
     for entry in FileRead.list(path)? {
-      remove_all(path.join(entry.name.slice()))?
+      remove_all(path.join(entry.name))?
     }
   }
   FileWrite.remove(path)
@@ -848,8 +848,8 @@ public fn create_temporary_directory(parent: Path, prefix: StringSlice) -> Resul
   var failure = SystemError.AlreadyExists
   for _ in 0..16 {
     var name = prefix.to_string()
-    mut name.push(Random.next().format(radix: 16, minimum_digits: 16).slice())
-    let directory = parent.join(name.slice())
+    mut name.push(Random.next().format(radix: 16, minimum_digits: 16))
+    let directory = parent.join(name)
     match FileWrite.create_directory(directory) {
       Ok(_) => return Ok(own directory)
       Err(AlreadyExists) => {}
@@ -866,7 +866,7 @@ public fn temporary_root() -> Path
   uses Environment
 {
   match Environment.variable("TMPDIR") {
-    Some(directory) => if directory.slice().trim().is_empty() { Path.new("/tmp") } else { Path.new(directory.slice()) }
+    Some(directory) => if directory.slice().trim().is_empty() { Path.new("/tmp") } else { Path.new(directory) }
     None => Path.new("/tmp")
   }
 }
@@ -916,7 +916,7 @@ public fn walk(root: Path, follow_links: Bool = false) -> Result[List[WalkEntry]
       var children = FileRead.list(entry.path)?
       mut children.reverse()
       for child in children {
-        let path = entry.path.join(child.name.slice())
+        let path = entry.path.join(child.name)
         let child_kind = if follow_links && child.kind == FileKind.SymbolicLink {
           FileRead.metadata(path, follow_links: true)?.kind
         } else {
@@ -1174,7 +1174,7 @@ public fn Glob.matches(self, path: Path) -> Bool
     matches_one: fn(index, position) {
       match self.components[index] {
         AnyDirectories => false
-        Name(tokens) => name_matches(tokens.slice(), name: names[position].slice())
+        Name(tokens) => name_matches(tokens.slice(), name: names[position])
       }
     },
   )
@@ -1382,7 +1382,7 @@ public fn MemoryFiles.with_bytes(own self, file: Path, contents: Slice[UInt8]) -
   var directory = Path.new("/")
   var components = reversed_components(file)
   while mut components.pop() is Some(name) {
-    let path = directory.join(name.slice())
+    let path = directory.join(name)
     mut changed.remove_tree(path, keep_directory: !components.is_empty())
     if components.is_empty() {
       let inode = mut changed.add_inode(
@@ -1499,7 +1499,7 @@ internal fn MemoryFiles.locate(self, path: Path, follow_last: Bool) -> Result[Lo
       current = current.parent().unwrap_or(Path.new("/"))
       continue
     }
-    let candidate = current.join(name.slice())
+    let candidate = current.join(name)
     let inode = match self.names.get(candidate) {
       Some(number) => number
       None => {

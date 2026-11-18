@@ -2294,7 +2294,7 @@ public fn local_zone() -> TimeZone
   uses Environment
 {
   match Environment.local_zone() {
-    Some(name) => match zone(name.slice()) {
+    Some(name) => match zone(name) {
       Ok(named_zone) => named_zone
       Err(_) => TimeZone.utc()
     }
@@ -2414,13 +2414,13 @@ public fn DateTime.format(self, layout: Layout) -> String
     decreases layout.parts.length() - index
   {
     match layout.parts[index] {
-      Text(text) => mut output.push(text.slice())
+      Text(text) => mut output.push(text)
       Year => {
         let year = if civil.year < 0 { -civil.year } else { civil.year }
         if civil.year < 0 {
           mut output.push("-")
         }
-        mut output.push(year.format(minimum_digits: 4).slice())
+        mut output.push(year.format(minimum_digits: 4))
       }
       Month => write_two_digits(mut output, value: civil.month)
       Day => write_two_digits(mut output, value: civil.day)
@@ -2482,7 +2482,7 @@ public fn Layout.parse_date_time(self, text: StringSlice) -> Result[DateTime, Pa
   {
     match self.parts[index] {
       Text(expected) => {
-        if expected.length() > text.length() - position || !text.matches_at(expected.slice(), offset: position) {
+        if expected.length() > text.length() - position || !text.matches_at(expected, offset: position) {
           return Err(ParseTimeError.Malformed(offset: position))
         }
         position += expected.length()

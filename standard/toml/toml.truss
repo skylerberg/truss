@@ -21,7 +21,7 @@ public type ParseError(message: String, line: UInt64, column: UInt64)
 impl Display for ParseError {
   fn display(self, output: mut String)
   {
-    mut output.push(self.message.slice())
+    mut output.push(self.message)
     mut output.push(" at line ")
     self.line.display(mut output)
     mut output.push(", column ")
@@ -50,7 +50,7 @@ public type EncodeError(message: String)
 impl Display for EncodeError {
   fn display(self, output: mut String)
   {
-    mut output.push(self.message.slice())
+    mut output.push(self.message)
   }
 }
 
@@ -504,7 +504,7 @@ fn number_value(text: StringSlice, at: mut UInt64) -> Result[Value, Failure] {
     if digits.is_empty() || digits.slice().starts_with("+") || digits.slice().starts_with("-") {
       return Err(failure_at("a number with no digits", offset: start))
     }
-    return match Int64.parse_radix(digits.slice(), radix: radix) {
+    return match Int64.parse_radix(digits, radix: radix) {
       Ok(number) => Ok(Value.Integer(value: number))
       Err(_) => Err(failure_at("a number that does not fit a 64-bit integer", offset: start))
     }
@@ -805,7 +805,7 @@ fn build(document: Document, leaves: mut Map[UInt64, Value], index: UInt64) -> V
       let names = if index < document.names.length() { document.names[index].copy() } else { [] }
       var entries: Map[String, Value] = Map.with_capacity(names.length())
       for name in own names {
-        match document.child(index, key: name.slice()) {
+        match document.child(index, key: name) {
           Some(child) => {
             let built = build(document, leaves: mut leaves, index: child)
             let _ = mut entries.replace(own name, value: own built)
@@ -1127,7 +1127,7 @@ fn write_float(output: mut String, value: Float64) {
     return
   }
   let text = "${value}"
-  mut output.push(text.slice())
+  mut output.push(text)
   if !text.slice().contains(".") && !text.slice().contains("e") && !text.slice().contains("E") {
     mut output.push(".0")
   }
@@ -1135,7 +1135,7 @@ fn write_float(output: mut String, value: Float64) {
 
 fn write_inline(output: mut String, value: Value) {
   match value {
-    String(text) => write_string(mut output, text: text.slice())
+    String(text) => write_string(mut output, text: text)
     Integer(number) => number.display(mut output)
     Float(number) => write_float(mut output, value: number)
     Boolean(flag) => {
@@ -1173,7 +1173,7 @@ fn write_inline(output: mut String, value: Value) {
           mut output.push(", ")
         }
         first = false
-        write_key(mut output, key: entry.key.slice())
+        write_key(mut output, key: entry.key)
         mut output.push(" = ")
         write_inline(mut output, value: entry.value)
       }
@@ -1208,7 +1208,7 @@ fn write_header(output: mut String, path: Slice[String], opening: StringSlice, c
       mut output.push(".")
     }
     first = false
-    write_key(mut output, key: key.slice())
+    write_key(mut output, key: key)
   }
   mut output.push(closing)
   mut output.push("\n")
@@ -1217,7 +1217,7 @@ fn write_header(output: mut String, path: Slice[String], opening: StringSlice, c
 fn write_table(output: mut String, table: Map[String, Value], path: mut List[String]) {
   for entry in table {
     if !(entry.value is Table(_)) && !is_array_of_tables(entry.value) {
-      write_key(mut output, key: entry.key.slice())
+      write_key(mut output, key: entry.key)
       mut output.push(" = ")
       write_inline(mut output, value: entry.value)
       mut output.push("\n")

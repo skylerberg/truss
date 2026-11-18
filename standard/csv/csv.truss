@@ -248,7 +248,7 @@ fn push_row(text: mut String, fields: Slice[String], options: Options)
     if index > 0 {
       mut text.push_character(options.delimiter)
     }
-    push_field(mut text, field: fields[index].slice(), options: options, alone: fields.length() == 1)
+    push_field(mut text, field: fields[index], options: options, alone: fields.length() == 1)
   }
 }
 
@@ -268,7 +268,7 @@ public fn format_row(fields: Slice[String], output: mut String, options: Options
 {
   var text = ""
   push_row(mut text, fields: fields, options: options)
-  mut output.push(text.slice())
+  mut output.push(text)
 }
 
 public type Table(header: List[String], rows: List[List[String]])
@@ -327,7 +327,7 @@ public fn Table.format(self, options: Options = Options()) -> String
   var text = ""
   push_row(mut text, fields: self.header.slice(), options: options)
   mut text.push("\n")
-  mut text.push(format(self.rows.slice(), options: options).slice())
+  mut text.push(format(self.rows.slice(), options: options))
   text
 }
 
@@ -373,10 +373,10 @@ public fn RowReader[Source: streams::Reader].next_row(mut self) -> Result[Option
           mut record.push("\n")
         }
         has_line = true
-        if quotes_in(line.slice(), quote: self.options.quote) % 2 == 1 {
+        if quotes_in(line, quote: self.options.quote) % 2 == 1 {
           in_quotes = !in_quotes
         }
-        mut record.push(line.slice())
+        mut record.push(line)
         more = in_quotes
       }
       Ok(None) => {
@@ -388,7 +388,7 @@ public fn RowReader[Source: streams::Reader].next_row(mut self) -> Result[Option
   if !has_line {
     return Ok(None)
   }
-  match parse(record.slice(), options: self.options) {
+  match parse(record, options: self.options) {
     Ok(rows) => {
       var read = own rows
       if read.length() == 0 {

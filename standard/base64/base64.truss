@@ -71,7 +71,7 @@ public fn encode(bytes: Slice[UInt8], alphabet: Alphabet = Alphabet.Standard, pa
 {
   let count = bytes.length()
   if count > UInt64.maximum / 2 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(4 * ((count + 2) / 3))
   var index: UInt64 = 0
@@ -123,7 +123,7 @@ public fn encode_onto(
   cost amortized time O(bytes.length())
 {
   let text = encode(bytes, alphabet: alphabet, padding: padding)
-  mut output.push(text.slice())
+  mut output.push(text)
 }
 
 internal fn unpadded_length(text: StringSlice) -> UInt64

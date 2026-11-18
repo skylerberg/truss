@@ -47,31 +47,31 @@ impl Environment for SystemEnvironment {
   fn location(self, location: environment::Location) -> Option[Path] {
     match location {
       Home => home()
-      Temporary => Some(set_or(variable("TMPDIR".slice()), otherwise: "/tmp".slice()))
+      Temporary => Some(set_or(variable("TMPDIR"), otherwise: "/tmp"))
       Executable => match calls::executable() {
         Ok(path) => Some(Path(text: String.from_bytes(own path)))
         Err(_) => None
       }
       Configuration => for_this_user(
-        "XDG_CONFIG_HOME".slice(),
-        on_linux: ".config".slice(),
-        on_macos: "Library/Application Support".slice(),
+        "XDG_CONFIG_HOME",
+        on_linux: ".config",
+        on_macos: "Library/Application Support",
       )
       Cache => for_this_user(
-        "XDG_CACHE_HOME".slice(),
-        on_linux: ".cache".slice(),
-        on_macos: "Library/Caches".slice(),
+        "XDG_CACHE_HOME",
+        on_linux: ".cache",
+        on_macos: "Library/Caches",
       )
       Data => for_this_user(
-        "XDG_DATA_HOME".slice(),
-        on_linux: ".local/share".slice(),
-        on_macos: "Library/Application Support".slice(),
+        "XDG_DATA_HOME",
+        on_linux: ".local/share",
+        on_macos: "Library/Application Support",
       )
     }
   }
 
   fn local_zone(self) -> Option[String] {
-    if variable("TZ".slice()) is Some(zone) && !zone.is_empty() {
+    if variable("TZ") is Some(zone) && !zone.is_empty() {
       let bytes = zone.slice().bytes
       let start: UInt64 = if intrinsic::view_at(bytes, index: 0) == 58 { 1 } else { 0 }
       return Some(calls::text_copied_from(intrinsic::view_slice(bytes, start: start, stop: intrinsic::view_length(bytes))))
@@ -153,15 +153,15 @@ fn architecture() -> environment::Architecture {
 
 fn set_or(value: Option[String], otherwise: StringSlice) -> Path {
   if value is Some(text) && !text.is_empty() {
-    Path.new(text.slice())
+    Path.new(text)
   } else {
     Path.new(otherwise)
   }
 }
 
 fn home() -> Option[Path] {
-  if variable("HOME".slice()) is Some(text) && !text.is_empty() {
-    Some(Path.new(text.slice()))
+  if variable("HOME") is Some(text) && !text.is_empty() {
+    Some(Path.new(text))
   } else {
     None
   }
@@ -169,7 +169,7 @@ fn home() -> Option[Path] {
 
 fn for_this_user(name: StringSlice, on_linux: StringSlice, on_macos: StringSlice) -> Option[Path] {
   if intrinsic::system_is_linux() && variable(name) is Some(text) && !text.is_empty() {
-    return Some(Path.new(text.slice()))
+    return Some(Path.new(text))
   }
   let under_home = if intrinsic::system_is_macos() { on_macos } else { on_linux }
   match home() {

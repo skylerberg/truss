@@ -976,7 +976,7 @@ public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
     mut pattern.push(literals[index].text())
     index += 1
   }
-  literals.length() > 0 && compile(pattern.slice(), placeholders: true) is Ok(_)
+  literals.length() > 0 && compile(pattern, placeholders: true) is Ok(_)
 }
 
 public opaque type Part(source: String)
@@ -989,7 +989,7 @@ impl From[StringSlice] for Part {
 
 impl From[String] for Part {
   fn from(value: own String) -> Part {
-    Part(source: escape(value.slice()))
+    Part(source: escape(value))
   }
 }
 
@@ -997,7 +997,7 @@ impl From[Character] for Part {
   fn from(value: own Character) -> Part {
     var text = ""
     mut text.push_character(value)
-    Part(source: escape(text.slice()))
+    Part(source: escape(text))
   }
 }
 
@@ -1022,12 +1022,12 @@ impl FromTemplate for Regex {
       mut pattern.push(template.literals[index].text())
       if index < template.parts.length() {
         mut pattern.push("(?:")
-        mut pattern.push(template.parts[index].source.slice())
+        mut pattern.push(template.parts[index].source)
         mut pattern.push(")")
       }
       index += 1
     }
-    match compile(pattern.slice(), placeholders: false) {
+    match compile(pattern, placeholders: false) {
       Ok(regex) => regex
       Err(_) => Regex(pattern: own pattern, program: [0], group_names: [])
     }
@@ -1542,7 +1542,7 @@ public fn Regex.replace_all_with(
           return output
         }
         mut output.push(text.part(copied_up_to, to: whole.start))
-        mut output.push(replace(captures).slice())
+        mut output.push(replace(captures))
         copied_up_to = whole.end
         position = step_after(text, matched: whole)
       }
@@ -1596,7 +1596,7 @@ impl Equal for Regex {
 
 impl Display for Regex {
   fn display(self, output: mut String) {
-    mut output.push(self.pattern.slice())
+    mut output.push(self.pattern)
   }
 }
 

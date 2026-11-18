@@ -476,9 +476,9 @@ internal fn State.send(mut self, endpoint: UInt64, bytes: Slice[UInt8]) -> Resul
     Console(errors) => {
       let text = String.from_utf8_lossy(bytes)
       if errors {
-        mut self.console.errors.push(text.slice())
+        mut self.console.errors.push(text)
       } else {
-        mut self.console.output.push(text.slice())
+        mut self.console.output.push(text)
       }
       Ok(bytes.length())
     }
@@ -666,7 +666,7 @@ internal fn State.start(mut self, command: processes::Command) -> Result[Started
       match command.output {
         Inherit => {
           let text = String.from_utf8_lossy(output.slice())
-          mut self.console.output.push(text.slice())
+          mut self.console.output.push(text)
         }
         Discard => {}
         _ => {
@@ -676,7 +676,7 @@ internal fn State.start(mut self, command: processes::Command) -> Result[Started
       match command.error_output {
         Inherit => {
           let text = String.from_utf8_lossy(error_output.slice())
-          mut self.console.errors.push(text.slice())
+          mut self.console.errors.push(text)
         }
         Discard => {}
         _ => {

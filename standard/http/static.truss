@@ -61,7 +61,7 @@ let sibling_codings: Array[String, 3] = ["br", "zstd", "gzip"]
 
 fn sibling_of(file: Path, coding: StringSlice) -> Path {
   let suffix = if coding == "br" { ".br" } else if coding == "zstd" { ".zst" } else { ".gz" }
-  Path.new("${file}${suffix}".slice())
+  Path.new("${file}${suffix}")
 }
 
 fn is_compressible_type(media_type: StringSlice) -> Bool {
@@ -159,10 +159,10 @@ public fn serve_file(request: Request, responder: mut Responder, file: Path, opt
   let length = metadata.length
   let tag = "\"${length.format(radix: 16)}-${metadata.modified.unix_seconds().format(radix: 16)}\""
   var headers = Headers.new()
-  mut headers.add("ETag", value: tag.slice())
-  mut headers.add("Last-Modified", value: format_date(metadata.modified).slice())
+  mut headers.add("ETag", value: tag)
+  mut headers.add("Last-Modified", value: format_date(metadata.modified))
   mut headers.add("Cache-Control", value: if options.max_age_seconds > 0 { "public, max-age=${options.max_age_seconds}".slice() } else { "no-cache".slice() })
-  if is_unchanged(request, tag: tag.slice(), modified: metadata.modified) {
+  if is_unchanged(request, tag: tag, modified: metadata.modified) {
     return mut responder.send(Response(status: Status(code: 304), headers: own headers))
   }
   let media_type = media_type_of(file)
@@ -175,12 +175,12 @@ public fn serve_file(request: Request, responder: mut Responder, file: Path, opt
   let ranged = if is_range_allowed { range_of(request.headers.get("Range"), length: length) } else { Ranged.Whole }
   match ranged {
     Unsatisfiable => {
-      mut headers.add("Content-Range", value: "bytes */${length}".slice())
+      mut headers.add("Content-Range", value: "bytes */${length}")
       return mut responder.send(Response(status: Status(code: 416), headers: own headers))
     }
     Part(span) => {
-      mut headers.add("Content-Range", value: "bytes ${span.start}-${span.end}/${length}".slice())
-      mut headers.add("Content-Length", value: "${span.length}".slice())
+      mut headers.add("Content-Range", value: "bytes ${span.start}-${span.end}/${length}")
+      mut headers.add("Content-Length", value: "${span.length}")
       var reader = system(FileRead.open(file))?
       let _ = system(mut reader.seek(streams::Position.FromStart(offset: span.start)))?
       var limited = streams::Limited.new(own reader, limit: span.length)
@@ -193,7 +193,7 @@ public fn serve_file(request: Request, responder: mut Responder, file: Path, opt
     if request.headers.contains("Accept-Encoding") {
       var precompressed: List[String] = []
       for coding in sibling_codings {
-        match FileRead.metadata(sibling_of(file, coding: coding.slice())) {
+        match FileRead.metadata(sibling_of(file, coding: coding)) {
           Ok(sibling) => {
             if sibling.is_file() {
               mut precompressed.push(coding.copy())
@@ -204,10 +204,10 @@ public fn serve_file(request: Request, responder: mut Responder, file: Path, opt
       }
       match request.preferred_encoding(precompressed.slice()) {
         Some(coding) => {
-          let sibling = sibling_of(file, coding: coding.slice())
+          let sibling = sibling_of(file, coding: coding)
           let sibling_length = system(FileRead.metadata(sibling))?.length
-          mut headers.add("Content-Encoding", value: coding.slice())
-          mut headers.add("Content-Length", value: "${sibling_length}".slice())
+          mut headers.add("Content-Encoding", value: coding)
+          mut headers.add("Content-Length", value: "${sibling_length}")
           var reader = system(FileRead.open(sibling))?
           return mut responder.stream(mut reader, headers: headers)
         }
@@ -218,14 +218,14 @@ public fn serve_file(request: Request, responder: mut Responder, file: Path, opt
       match coding_on_the_fly(request) {
         Some(coding) => {
           let plain = system(FileRead.read(file))?
-          mut headers.add("Content-Encoding", value: coding.slice())
-          return mut responder.send(Response(status: Status.ok, headers: own headers, body: encoded_body(plain.slice(), coding: coding.slice())))
+          mut headers.add("Content-Encoding", value: coding)
+          return mut responder.send(Response(status: Status.ok, headers: own headers, body: encoded_body(plain.slice(), coding: coding)))
         }
         None => {}
       }
     }
   }
-  mut headers.add("Content-Length", value: "${length}".slice())
+  mut headers.add("Content-Length", value: "${length}")
   var reader = system(FileRead.open(file))?
   mut responder.stream(mut reader, headers: headers)
 }
@@ -280,10 +280,10 @@ public fn serve_directory(
             }
             None => {}
           }
-          let moved = Response(status: Status(code: 301)).with_header("Location", value: location.slice())
+          let moved = Response(status: Status(code: 301)).with_header("Location", value: location)
           return mut responder.send(own moved)
         }
-        return serve_file(request, responder: mut responder, file: target.join(options.index.slice()), options: options)
+        return serve_file(request, responder: mut responder, file: target.join(options.index), options: options)
       }
       serve_file(request, responder: mut responder, file: target, options: options)
     }
