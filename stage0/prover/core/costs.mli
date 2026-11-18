@@ -15,6 +15,7 @@ val larger : Logic.term -> Logic.term -> Logic.term
 val units : Logic.term -> Logic.term
 val normalize : Logic.term -> Logic.term
 val since : start:Logic.term -> Logic.term -> Logic.term
+val grows_with : varies:(Logic.term -> bool) -> Logic.term -> bool
 
 val find_cost_bound :
   varies:(Logic.term -> bool) -> facts:Logic.term list -> Logic.term -> Logic.term option

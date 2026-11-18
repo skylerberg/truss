@@ -1182,7 +1182,19 @@ let () =
     (fun () ->
       expect_not_proven
         Fixtures.Prover.loop_pushing_onto_a_list_that_a_callback_returns_without_a_cost_clause
-        "prover.cost")
+        "prover.cost");
+  Harness.test
+    "a loop without a cost clause around one that pushes lists costs both loops' iterations"
+    (fun () ->
+      expect_proven Fixtures.Prover.unstated_loop_around_a_loop_pushing_lists_of_unknown_length);
+  Harness.test
+    "a loop's cost clause holds where a callee with only an amortized bound pops its list"
+    (fun () ->
+      expect_proven Fixtures.Prover.loop_popping_through_a_callee_with_only_an_amortized_bound);
+  Harness.test "a loop's cost clause holds where a branch pops its list through such a callee"
+    (fun () ->
+      expect_proven
+        Fixtures.Prover.loop_popping_in_a_branch_through_a_callee_with_only_an_amortized_bound)
 
 let check_across library program =
   let packages =

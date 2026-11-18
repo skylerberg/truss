@@ -100,6 +100,7 @@ val bind : State.frame -> Locals.key -> Types.ty -> Logic.term -> State.frame
 val substitute_type : State.context -> State.frame -> Types.ty -> Types.ty
 val find_local_type : State.context -> State.frame -> Locals.key -> Types.ty option
 val mentions_potential : Logic.term -> bool
+val list_potentials : Logic.term -> Logic.term list
 val take_potential_as_zero : Logic.term -> Logic.term
 val restrict : State.frame -> Logic.term -> State.frame
 val name_path_condition : State.context -> State.frame -> Logic.term -> Logic.term

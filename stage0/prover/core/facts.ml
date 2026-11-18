@@ -528,9 +528,11 @@ let find_local_type context frame local =
   Option.map (substitute_type context frame) (Locals.find_opt local frame.types)
 
 let is_potential = function
-  | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _)
-  | Logic.Apply (_, [ _; Logic.Symbol (Logic.Symbol.Potential_measure _) ]) ->
-      true
+  | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _) -> true
+  | Logic.Apply (_, arguments) ->
+      List.exists
+        (function Logic.Symbol (Logic.Symbol.Potential_measure _) -> true | _ -> false)
+        arguments
   | _ -> false
 
 let mentions_potential term =
@@ -542,6 +544,10 @@ let mentions_potential term =
     | term -> List.exists walk (Logic.list_arguments term)
   in
   walk term
+
+let rec list_potentials term =
+  if is_potential term then [ term ]
+  else List.concat_map list_potentials (Logic.list_arguments term)
 
 let rec take_potential_as_zero term =
   if is_potential term then Logic.Integer Z.zero

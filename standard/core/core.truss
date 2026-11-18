@@ -293,7 +293,7 @@ public trait Iterable {
     uses Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
-    var outputs: List[Output] = []
+    var outputs: List[Output] = List.with_capacity(self.count())
     for item in self {
       mut outputs.push(transform(item))
     }
