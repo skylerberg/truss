@@ -1399,7 +1399,10 @@ let compute database unit =
     | Test_key_component items -> compute_test_keys database items
   with Interface.Properties.Recursion_limit message ->
     Compiler_bug.raise_bug ~stage:"Database"
-      "a stage after the checks reached a recursion limit: %s" message
+      "a stage after the checks reached a recursion limit computing %s: %s"
+      (String.concat ", "
+         (List.map (fun part -> Part.show (Part.Stored part)) (list_component_parts unit)))
+      message
 
 let list_components database (stage : Stage.t) package parts =
   match stage with
