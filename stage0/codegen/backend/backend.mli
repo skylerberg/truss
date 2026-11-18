@@ -3,11 +3,10 @@ module Lookups = Lookups
 type unsupported = { construct : string; at : Lowered.site option }
 type lowered
 
-type requests = {
-  settings : Lookups.settings;
+type lowered_lookups = {
+  system : Libc.system;
   read_source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
-  mir : Mir.lookups;
   find_lowered : Instance.key -> (lowered, unsupported) result option;
   read_test_key : Instance.key -> (string, unsupported) result;
   list_reached_todo_types : Instance.key -> Path.t list;
@@ -28,30 +27,19 @@ val create :
   ?evaluation_time_limit_ms:int ->
   ?programs:string ->
   ?is_worked_on:(Path.package -> bool) ->
-  requests ->
+  lowered_lookups ->
   C_compiler.t ->
   profile ->
   t
 
-type outcome = Passed | Failed | Panicked | Incomplete | Timed_out | Crashed
-
-val show_outcome : outcome -> string
-
-type record = {
-  outcome : outcome;
-  message : string option;
-  echo : string option;
-  output : string option;
-  microseconds : int;
-  cached : bool;
-}
+module Test_report = Test_report
 
 type progress =
   | Lowering
   | Compiling of { compiled : int; total : int }
   | Running of { tests : int }
   | Started of { test : int }
-  | Ended of { test : int; record : record }
+  | Ended of { test : int; record : Test_report.record }
 
 val run_tests :
   ?rerun:bool ->
@@ -59,7 +47,7 @@ val run_tests :
   t ->
   time_limit_ms:int ->
   Path.t list ->
-  (record list, string) result
+  (Test_report.record list, string) result
 
 type unshippable = {
   failure : [ `Todo | `Echo ];
@@ -69,9 +57,9 @@ type unshippable = {
   way : Path.t list;
 }
 
-val list_unshippable : requests -> main:Path.t -> unshippable list
-val list_reached_definitions : requests -> Path.t -> Path.t list
-val list_reached_todo_types : requests -> Path.t -> Path.t list
+val list_unshippable : lowered_lookups -> main:Path.t -> unshippable list
+val list_reached_definitions : lowered_lookups -> Path.t -> Path.t list
+val list_reached_todo_types : lowered_lookups -> Path.t -> Path.t list
 val make_program_path : t -> string
 val build_program : t -> main:Path.t -> output:string -> (unit, string) result
 
@@ -104,8 +92,6 @@ module For_testing : sig
   val make_lowered : Emit_c.fragment -> lowered
 
   module Intrinsics = Intrinsics
-
-  val parse_report : string -> (record list, string) result
 
   val build_supplied_tests :
     t ->

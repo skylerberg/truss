@@ -117,25 +117,30 @@ public opaque type Hasher(state: UInt64)
 
 public fn Hasher.new() -> Hasher
   cost time O(1)
+  cost allocations == 0
 {
   Hasher(state: 14695981039346656037)
 }
 
 public fn Hasher.write(mut self, value: UInt64)
   cost time O(1)
+  cost allocations == 0
 {
   self.state = intrinsic::wrapping_multiply(intrinsic::bit_xor(self.state, right: value), right: 1099511628211)
 }
 
 public fn Hasher.write_bytes(mut self, bytes: Slice[UInt8])
   cost time O(bytes.length())
+  cost allocations == 0
 {
   for index in 0..bytes.length() {
     mut self.write(intrinsic::convert(bytes[index]))
   }
 }
 
-public fn Hasher.finish(self) -> UInt64 {
+public fn Hasher.finish(self) -> UInt64
+  cost allocations == 0
+{
   self.state
 }
 
@@ -534,19 +539,25 @@ public let ExitCode.success: ExitCode = ExitCode(0)
 public let ExitCode.failure: ExitCode = ExitCode(1)
 
 impl Equal for Bool {
-  fn equal(self, other: Bool) -> Bool {
+  fn equal(self, other: Bool) -> Bool
+    cost allocations == 0
+  {
     intrinsic::equal(self, right: other)
   }
 }
 
 impl Hash for Bool {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(if self { 1 } else { 0 })
   }
 }
 
 impl Equal for Character {
-  fn equal(self, other: Character) -> Bool {
+  fn equal(self, other: Character) -> Bool
+    cost allocations == 0
+  {
     intrinsic::equal(self, right: other)
   }
 }
@@ -555,6 +566,7 @@ impl Ordered for Character {
   fn compare(self, other: Character) -> Ordering
     ensures (result == Ordering.Less) == (self.code() < other.code())
     ensures (result == Ordering.Equal) == (self.code() == other.code())
+    cost allocations == 0
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -567,13 +579,17 @@ impl Ordered for Character {
 }
 
 impl Hash for Character {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(intrinsic::convert(self))
   }
 }
 
 impl Equal for Unit {
-  fn equal(self, other: Unit) -> Bool {
+  fn equal(self, other: Unit) -> Bool
+    cost allocations == 0
+  {
     true
   }
 }

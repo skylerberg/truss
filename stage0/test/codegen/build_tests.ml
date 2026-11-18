@@ -266,7 +266,7 @@ let () =
                    "test 6 panicked\nmessage 45\ncompiler bug: the test left 1 block allocated\n";
                    "test 7 crashed\nmessage 19\nended with status 3\n";
                  ])
-            (match Backend.For_testing.parse_report out with
+            (match Backend.Test_report.For_testing.parse ~tests:8 out with
             | Ok records -> Codegen_support.render_records records
             | Error message -> message))
 

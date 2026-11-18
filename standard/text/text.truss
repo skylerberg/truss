@@ -257,6 +257,7 @@ impl Equal for String {
   fn equal(self, other: String) -> Bool
     ensures result == identical(self.model(), other.model())
     cost time O(other.length())
+    cost allocations == 0
   {
     self.slice() == other.slice()
   }
@@ -266,6 +267,7 @@ impl Ordered for String {
   fn compare(self, other: String) -> Ordering
     ensures (result == Ordering.Less) == (intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage)) < 0)
     ensures (result == Ordering.Equal) == identical(self.model(), other.model())
+    cost allocations == 0
   {
     let order = intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage))
     if order < 0 { Ordering.Less } else if order > 0 { Ordering.Greater } else { Ordering.Equal }
@@ -273,7 +275,9 @@ impl Ordered for String {
 }
 
 impl Hash for String {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     let bytes = intrinsic::storage_view(self.storage)
     for index in 0..intrinsic::view_length(bytes) {
       mut hasher.write(intrinsic::convert(intrinsic::view_at(bytes, index: index)))
@@ -291,6 +295,7 @@ impl Equal for StringSlice {
   fn equal(self, other: StringSlice) -> Bool
     ensures result == identical(self.model(), other.model())
     cost time O(other.length())
+    cost allocations == 0
   {
     intrinsic::compare_bytes(other.bytes, right: self.bytes) == 0
   }

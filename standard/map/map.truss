@@ -48,6 +48,7 @@ public fn Map[Key: Hash + Ordered, Value].length(self) -> UInt64
   ensures result == self.model().size()
   ensures result == (self.entries.length())
   cost time O(1)
+  cost allocations == 0
 {
   self.entries.length()
 }
@@ -62,6 +63,7 @@ internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> UInt64
   ensures result < self.entries.length() ==> forall other: Key =>
     self.model().contains_key(other) && other == key ==> identical(other, self.entries.model()[result].key)
   cost time O(self.entries.length() * time(Key.equal))
+  cost allocations <= self.entries.length() * allocations(Key.equal)
 {
   var index: UInt64 = 0
   var match_index = self.entries.length()
@@ -73,6 +75,7 @@ internal fn Map[Key: Hash + Ordered, Value].index_of(self, key: Key) -> UInt64
       forall i in 0..index => !(self.entries.model()[i].key == key)
     decreases self.entries.length() - index
     cost time O(index * time(Key.equal))
+    cost allocations <= index * allocations(Key.equal)
   {
     if self.entries[index].key == key {
       match_index = index
@@ -161,6 +164,7 @@ internal fn Map[Key: Hash + Ordered, Value].replace_value_at(mut self, position:
 public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool
   ensures result == contains_equal_key(self.model(), key: key)
   cost time O(self.length() * time(Key.equal))
+  cost allocations <= self.length() * allocations(Key.equal)
 {
   self.index_of(key) < self.entries.length()
 }
@@ -291,6 +295,7 @@ public fn Map[Key: Hash + Ordered, Value].collect[Source: Cursor[Element = Entry
 public fn Map[Key: Hash + Ordered, Value].is_empty(self) -> Bool
   ensures result == (self.length() == 0)
   cost time O(1)
+  cost allocations == 0
 {
   self.length() == 0
 }
@@ -301,6 +306,7 @@ public fn Map[Key: Hash + Ordered, Value].get(self, key: Key) lends Option[Value
     !(result is Some(value) && self.model().contains_key(other) && other == key
       && !identical(self.model().get(other), value))
   cost time O(self.length() * time(Key.equal))
+  cost allocations <= self.length() * allocations(Key.equal)
 {
   let position = self.index_of(key)
   if position < self.entries.length() {
@@ -437,6 +443,7 @@ impl Index for Map[Key: Hash + Ordered, Value] {
   fn contains_key(self, key: Key) -> Bool
     ensures result == self.contains(key)
     cost time finite
+    cost allocations <= self.length() * allocations(Key.equal)
   {
     self.contains(key)
   }
@@ -446,6 +453,7 @@ impl Index for Map[Key: Hash + Ordered, Value] {
     ensures forall other: Key =>
       self.model().contains_key(other) && other == key ==> identical(self.model().get(other), result)
     cost time O(self.length() * time(Key.equal))
+    cost allocations <= self.length() * allocations(Key.equal)
   {
     self.entries[self.index_of(key)].value
   }
@@ -455,6 +463,7 @@ impl IndexMut for Map[Key: Hash + Ordered, Value] {
   fn at(mut self, key: Key) lends mut Value
     requires self.contains(key)
     cost time O(self.length() * time(Key.equal))
+    cost allocations <= self.length() * allocations(Key.equal)
   {
     let position = self.index_of(key)
     mut self.entries[position].value
@@ -598,6 +607,7 @@ internal fn Map[Key: Hash + Ordered, Value: Equal].entries_included_in(self, oth
     self.entries.model()[i].key == other.entries.model()[j].key
       && self.entries.model()[i].value == other.entries.model()[j].value)
   cost time O(self.entries.length() * (1 + other.entries.length() * time(Key.equal) + time(Value.equal)))
+  cost allocations <= self.entries.length() * (other.entries.length() * allocations(Key.equal) + allocations(Value.equal))
 {
   var index: UInt64 = 0
   while index < self.entries.length()
@@ -607,6 +617,7 @@ internal fn Map[Key: Hash + Ordered, Value: Equal].entries_included_in(self, oth
         && self.entries.model()[i].value == other.entries.model()[j].value
     decreases self.entries.length() - index
     cost time O(index * (1 + other.entries.length() * time(Key.equal) + time(Value.equal)))
+    cost allocations <= index * (other.entries.length() * allocations(Key.equal) + allocations(Value.equal))
   {
     let position = other.index_of(self.entries[index].key)
     if position == other.entries.length() || !(self.entries[index].value == other.entries[position].value) {
@@ -632,6 +643,7 @@ internal theorem entries_inclusion_is_transitive[Key: Hash + Ordered, Value: Equ
 impl Equal for Map[Key: Hash + Ordered, Value: Equal] {
   fn equal(self, other: Map[Key, Value]) -> Bool
     ensures result == (self.entries.length() == other.entries.length() && self.entries_included_in(other) && other.entries_included_in(self))
+    cost allocations <= 2 * self.length() * other.length() * allocations(Key.equal) + (self.length() + other.length()) * allocations(Value.equal)
   {
     self.entries.length() == other.entries.length() && self.entries_included_in(other) && other.entries_included_in(self)
   }

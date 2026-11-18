@@ -1,0 +1,5 @@
+fn f(items: Slice[Int64]) -> Int64
+  requires forall index in 0..items.length() => items[index] >= 0
+{
+  0
+}

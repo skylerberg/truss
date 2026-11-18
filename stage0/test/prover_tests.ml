@@ -760,6 +760,23 @@ let () =
 let () =
   Harness.test "a list literal of three hundred elements has its length and each element" (fun () ->
       expect_proven Fixtures.Prover.list_literal_of_three_hundred_elements);
+  Harness.test "a loop that moves the elements out of a list visits the list's elements in order"
+    (fun () -> expect_proven Fixtures.Prover.owned_loop_moving_each_element);
+  Harness.test "a loop that moves the elements out of a list visits as many as the list holds"
+    (fun () -> expect_proven Fixtures.Prover.owned_loop_counting_its_elements);
+  Harness.test "a loop that moves the elements out of an array visits the array's elements"
+    (fun () -> expect_proven Fixtures.Prover.owned_loop_over_an_array);
+  Harness.test "a loop that moves the elements out of a set visits members of the set" (fun () ->
+      expect_proven Fixtures.Prover.owned_loop_over_a_set);
+  Harness.test "a cursor pulled again after a `break` gives the elements that it had left"
+    (fun () -> expect_proven Fixtures.Prover.cursor_pulled_again_after_a_break);
+  Harness.test "a loop that names `visited` proves that its cursor gives its model in order"
+    (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:"the `next` of its cursor may not give the values of the cursor's `model()` in order"
+        Fixtures.Prover.visited_over_a_cursor_that_gives_its_model_backward "prover.invariant");
+  Harness.test "a loop that does not name `visited` asks nothing of its cursor's model" (fun () ->
+      expect_proven Fixtures.Prover.cursor_that_gives_its_model_backward);
   Harness.test "a map literal holds each key's value" (fun () ->
       expect_proven Fixtures.Prover.map_literal_read);
   Harness.test "a map literal's keys must be distinct" (fun () ->
@@ -848,6 +865,22 @@ let () =
         "prover.disjoint");
   Harness.test "elements of two ranges that do not overlap can be lent together" (fun () ->
       expect_proven (swap ^ Fixtures.Prover.exchange_of_elements_of_disjoint_ranges));
+  Harness.test "elements of two ranges of ranges that do not overlap can be lent together"
+    (fun () ->
+      expect_proven (swap ^ Fixtures.Prover.exchange_of_elements_of_disjoint_ranges_of_ranges));
+  Harness.test "elements of two ranges of ranges lent together must be different elements"
+    (fun () ->
+      expect_not_proven
+        (swap ^ Fixtures.Prover.exchange_of_elements_of_overlapping_ranges_of_ranges)
+        "prover.disjoint");
+  Harness.test "an element reached through a range and directly is one element" (fun () ->
+      expect_not_proven
+        (swap ^ Fixtures.Prover.exchange_of_one_element_through_a_range_and_directly)
+        "prover.disjoint");
+  Harness.test "different elements of two equal ranges can be lent together" (fun () ->
+      expect_proven (swap ^ Fixtures.Prover.exchange_of_elements_of_two_equal_ranges));
+  Harness.test "elements of different rows of a range of rows can be lent together" (fun () ->
+      expect_proven (swap ^ Fixtures.Prover.exchange_of_elements_of_two_rows_of_a_range));
   Harness.test "an element of a range lent `mut` must not be the element that an argument views"
     (fun () ->
       expect_not_proven Fixtures.Prover.element_of_a_range_pushed_onto_itself "prover.disjoint");

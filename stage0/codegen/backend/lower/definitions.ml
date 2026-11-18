@@ -77,23 +77,61 @@ let read_signature context (path : Path.t) =
   | Some signature -> signature
   | None -> raise_bug "no signature for %s" (Path.show path)
 
-let make_code context (path : Path.t) (instantiation : Ground.instantiation) : code =
-  let make_function_code ~enclosing_impl (key : Resolve.Names.key) ~(interface : Types.signature)
-      ~substitution =
-    {
-      definition = key.path;
-      written = Some (read_written context key);
-      enclosing_impl;
-      result = interface.output;
-      substitution;
-      uses = interface.uses;
-      real = [];
-      has_defaults =
-        List.exists
-          (fun (parameter : Types.parameter_info) -> parameter.has_default)
-          interface.parameters;
-    }
+let make_function_code context ~enclosing_impl (key : Resolve.Names.key)
+    ~(interface : Types.signature) ~substitution =
+  {
+    definition = key.path;
+    written = Some (read_written context key);
+    enclosing_impl;
+    result = interface.output;
+    substitution;
+    uses = interface.uses;
+    real = [];
+    has_defaults =
+      List.exists
+        (fun (parameter : Types.parameter_info) -> parameter.has_default)
+        interface.parameters;
+  }
+
+let make_declared_code context ~impl ~(declaration : Resolve.Names.key) ~trait_substitution
+    (path : Path.t) (instantiation : Ground.instantiation) =
+  let substitution =
+    Monomorphic.make_signature_substitution (read_signature context path) instantiation
   in
+  let impl_interface = read_impl_interface context impl in
+  let trait = impl_interface.implements.trait in
+  let trait_signature = read_signature context declaration.path in
+  let count = List.length impl_interface.impl_generics in
+  let of_trait =
+    Types.substitute_substitution
+      (bind impl_interface.impl_generics (List.take count instantiation.type_arguments))
+      trait_substitution
+  in
+  let own_generics =
+    List.filter
+      (fun (generic : Types.generic) -> not (Path.equal generic.generic.owner trait))
+      trait_signature.generics
+  in
+  let own = List.drop count instantiation.type_arguments in
+  make_function_code context ~enclosing_impl:(Some impl) declaration ~interface:trait_signature
+    ~substitution:
+      (Types.combine_substitutions of_trait
+         (Types.combine_substitutions (bind own_generics own)
+            (Types.combine_substitutions substitution
+               (Types.make_capability_substitution trait_signature.capability_parameters
+                  (Monomorphic.convert_capability_arguments instantiation)))))
+
+let make_declaration_code context (path : Path.t) instantiation =
+  match (path, Interface.Impls.find_implemented_method context.lookups.interface path) with
+  | Method { owner = (Impl _ | Derived _) as impl; _ }, Some implemented -> (
+      match context.lookups.interface.names.find_key implemented.declaration with
+      | Some declaration ->
+          make_declared_code context ~impl ~declaration
+            ~trait_substitution:implemented.implementation.substitution path instantiation
+      | None -> raise_bug "%s has no declaration" (Path.show implemented.declaration))
+  | _ -> raise_bug "%s implements no method of a trait" (Path.show path)
+
+let make_code context (path : Path.t) (instantiation : Ground.instantiation) : code =
   match path with
   | Test _ -> (
       match Resolve.Names.find_definition context.lookups.interface.names path with
@@ -117,37 +155,17 @@ let make_code context (path : Path.t) (instantiation : Ground.instantiation) : c
         | _ -> None
       in
       match (context.lookups.mir.find_form_origin path, path) with
-      | Some (Written key, _), _ -> make_function_code ~enclosing_impl key ~interface ~substitution
+      | Some (Written key, _), _ ->
+          make_function_code context ~enclosing_impl key ~interface ~substitution
       | Some (Derived type_key, _), _ ->
           {
             (make_unwritten_code ~definition:type_key.path ~substitution ~result:interface.output) with
             written = Some (read_written context type_key);
             enclosing_impl;
           }
-      | ( Some (Inherited provided, trait_substitution),
+      | ( Some (Inherited declaration, trait_substitution),
           Method { owner = (Impl _ | Derived _) as impl; _ } ) ->
-          let impl_interface = read_impl_interface context impl in
-          let trait = impl_interface.implements.trait in
-          let trait_signature = read_signature context provided.path in
-          let count = List.length impl_interface.impl_generics in
-          let of_trait =
-            Types.substitute_substitution
-              (bind impl_interface.impl_generics (List.take count instantiation.type_arguments))
-              trait_substitution
-          in
-          let own_generics =
-            List.filter
-              (fun (generic : Types.generic) -> not (Path.equal generic.generic.owner trait))
-              trait_signature.generics
-          in
-          let own = List.drop count instantiation.type_arguments in
-          make_function_code ~enclosing_impl provided ~interface:trait_signature
-            ~substitution:
-              (Types.combine_substitutions of_trait
-                 (Types.combine_substitutions (bind own_generics own)
-                    (Types.combine_substitutions substitution
-                       (Types.make_capability_substitution trait_signature.capability_parameters
-                          (Monomorphic.convert_capability_arguments instantiation)))))
+          make_declared_code context ~impl ~declaration ~trait_substitution path instantiation
       | Some (Inherited _, _), _ ->
           raise_bug "%s inherits a method outside an impl" (Path.show path)
       | None, _ -> raise_bug "%s is not a function" (Path.show path))

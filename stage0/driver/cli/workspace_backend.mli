@@ -1,2 +1,4 @@
-val make_lowering_requests : Database.t -> Path.package list -> Backend.requests
-val create : Database.t -> Workspace.snapshot -> Path.package list -> Backend.profile -> Backend.t
+val require_lowered_lookups : Database.t -> Path.package list -> Backend.lowered_lookups
+
+val create :
+  Workspace.snapshot -> Path.package list -> Backend.lowered_lookups -> Backend.profile -> Backend.t

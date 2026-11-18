@@ -16,3 +16,9 @@ fn g(view: mut Slice[String]) {
     mut item.push("x")
   }
 }
+
+fn h(rows: mut List[List[Int64]]) {
+  var view = rows[..]
+  view[0][0] = 7
+  mut view[0][..].sort()
+}

@@ -253,6 +253,7 @@ theorem limbs_order_is_transitive(
 fn compare_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> Ordering
   ensures result == magnitude_order(first.model(), second: second.model())
   cost time finite
+  cost allocations == 0
 {
   if first.length() < second.length() {
     return Ordering.Less
@@ -266,6 +267,7 @@ fn compare_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> Ordering
     invariant limbs_order(first.model(), second: second.model(), below: first.length())
       == limbs_order(first.model(), second: second.model(), below: index)
     decreases index
+    cost allocations == 0
   {
     index -= 1
     if first[index] < second[index] {
@@ -1212,6 +1214,7 @@ impl Ordered for BigInteger {
       } else {
         compare_magnitudes(self.magnitude.slice(), second: other.magnitude.slice())
       })
+    cost allocations == 0
   {
     if self.negative != other.negative {
       if self.negative { Ordering.Less } else { Ordering.Greater }

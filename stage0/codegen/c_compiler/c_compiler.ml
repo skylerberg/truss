@@ -201,6 +201,9 @@ module For_testing = struct
         @ compiler.added_flags;
     }
 
+  let has_sanitizer compiler =
+    List.exists (String.starts_with ~prefix:"-fsanitize=") compiler.added_flags
+
   let compile compiler optimization ~source ~output =
     compile compiler (list_compile_flags compiler optimization) ~source ~output
 

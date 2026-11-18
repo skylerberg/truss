@@ -17,8 +17,8 @@ let render_records records =
   in
   String.concat ""
     (List.mapi
-       (fun index (record : Backend.record) ->
-         Printf.sprintf "test %d %s\n" index (Backend.show_outcome record.outcome)
+       (fun index (record : Backend.Test_report.record) ->
+         Printf.sprintf "test %d %s\n" index (Backend.Test_report.show_outcome record.outcome)
          ^ render_block "message" record.message
          ^ render_block "echo" record.echo
          ^ render_block "output" record.output)
@@ -39,10 +39,7 @@ let uint8 = named "UInt8"
 let option value = named "Option" ~arguments:[ Type value ]
 let list element = named "List" ~arguments:[ Type element ]
 let array element count = named "Array" ~arguments:[ Type element; Value (Z.of_int count) ]
-
-let host =
-  match Libc.host with Some os -> os | None -> failwith "these tests run only on Linux and macOS"
-
+let host = match Libc.host with Ok system -> system | Error message -> failwith message
 let field name ty = (name, Memory_layout.Typed ty)
 
 let variant ?(indirect = false) name fields : Memory_layout.variant_shape =
@@ -169,10 +166,8 @@ let c_compiler =
 
 let counter = ref 0
 
-let worker_counts =
-  match Sys.getenv_opt "TRUSS_CFLAGS" with
-  | Some flags when String.includes ~affix:"-fsanitize=" flags -> [ 8 ]
-  | Some _ | None -> [ 1; 2; 8; 32 ]
+let list_worker_counts () =
+  if C_compiler.For_testing.has_sanitizer (Lazy.force c_compiler) then [ 8 ] else [ 1; 2; 8; 32 ]
 
 let test_position (site : Lowered.site) : Emit_c.position =
   { file = "test.truss"; line = 1; column = site.offset + 1 }
@@ -216,7 +211,9 @@ let make_example_package files : Project.package list =
 
 let make_backend ?results ?evaluation_time_limit_ms database =
   Backend.create ?results ?evaluation_time_limit_ms
-    (Database.make_lowering_requests database [ example.package ])
+    (match Database.find_lowered_lookups database [ example.package ] with
+    | Ok lookups -> lookups
+    | Error message -> failwith message)
     (Lazy.force c_compiler) Development
 
 let load_files ?results ?(roots = []) ?checks files =

@@ -13,6 +13,7 @@ public fn StringSlice.is_empty(self) -> Bool
 public fn StringSlice.bytes(self) -> Slice[UInt8]
   ensures result.length() == self.length()
   cost time O(1)
+  cost allocations == 0
 {
   Slice(elements: self.bytes)
 }
@@ -1302,6 +1303,7 @@ impl Ordered for StringSlice {
   fn compare(self, other: StringSlice) -> Ordering
     ensures (result == Ordering.Less) == (intrinsic::compare_bytes(self.bytes, right: other.bytes) < 0)
     ensures (result == Ordering.Equal) == identical(self.model(), other.model())
+    cost allocations == 0
   {
     let order = intrinsic::compare_bytes(self.bytes, right: other.bytes)
     if order < 0 { Ordering.Less } else if order > 0 { Ordering.Greater } else { Ordering.Equal }
@@ -1309,7 +1311,9 @@ impl Ordered for StringSlice {
 }
 
 impl Hash for StringSlice {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write_bytes(self.bytes())
   }
 }

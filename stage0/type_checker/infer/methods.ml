@@ -412,21 +412,17 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
               (Diagnostic.show_count (List.length trait_generics) "type argument" "type arguments")
               (Diagnostic.show_count (List.length written) "is" "are")))
   | Some trait_arguments ->
-      check_trait_method_call state env value self_type trait method_ arguments ~trait_generics
-        ~trait_arguments
+      check_trait_method_call state env value self_type trait method_ arguments ~trait_arguments
   | None ->
-      check_trait_method_call state env value self_type trait method_ arguments ~trait_generics
+      check_trait_method_call state env value self_type trait method_ arguments
         ~trait_arguments:(Instantiation.make_fresh_generic_arguments state trait_generics)
 
 and check_trait_method_call state env (value : Syntax.expression) self_type
-    (trait : Types.trait_reference) (method_ : Types.trait_method) arguments ~trait_generics
-    ~trait_arguments =
-  let extra =
-    Types.make_trait_substitution trait_generics ~self:self_type { trait with trait_arguments }
-  in
-  let signature = Members.read_method_signature state.lookups trait.trait method_ in
-  let instance =
-    Instantiation.instantiate state (State.read_span state value.id) ~extra signature
+    (trait : Types.trait_reference) (method_ : Types.trait_method) arguments ~trait_arguments =
+  let reference = { trait with trait_arguments } in
+  let instance, callee =
+    Name_lookup.instantiate_trait_method state (State.read_span state value.id) ~self_type reference
+      method_ ~evidence:Built_in
   in
   let receiver_argument, arguments =
     match instance.signature.receiver with
@@ -450,25 +446,12 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
   with
   | Error error -> error
   | Ok (checked, left_out) ->
-      let reference = { trait with trait_arguments } in
       let result = Types.extract_result_type instance.signature.output in
       Modes.note_lending state value instance.signature.output;
-      let own_arguments =
-        List.take (List.length signature.generics) instance.instantiation.type_arguments
-      in
       state.tables.calls.(value.id) <-
         Some
           {
-            callee =
-              Trait_method
-                {
-                  trait = reference;
-                  name = method_.method_name;
-                  receiver = method_.method_receiver;
-                  self_type;
-                  instantiation = { instance.instantiation with type_arguments = own_arguments };
-                  evidence = Built_in;
-                };
+            callee;
             arguments = receiver_argument @ checked;
             omitted_defaults = left_out;
             callee_result = result;
@@ -734,11 +717,6 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
 and check_trait_method_with_receiver state env (value : Syntax.expression)
     ~(receiver : Syntax.expression) ~receiver_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) ~type_arguments arguments =
-  let extra =
-    Types.make_trait_substitution
-      (Members.list_trait_generics state.lookups trait.trait)
-      ~self:receiver_type trait
-  in
   let not_callable =
     match receiver_type with
     | Types.Any _ -> (
@@ -767,9 +745,10 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
   match not_callable with
   | Some error -> Calls.check_arguments_alone state env arguments error
   | None -> (
-      let instance =
-        Instantiation.instantiate state (State.read_span state value.id) ~extra
-          (Members.read_method_signature state.lookups trait.trait method_)
+      let instance, callee =
+        Name_lookup.instantiate_trait_method state (State.read_span state value.id)
+          ~self_type:receiver_type trait method_
+          ~evidence:(match receiver_type with Types.Any _ -> Dynamic | _ -> Built_in)
       in
       match Name_lookup.check_explicit_type_arguments state value instance type_arguments with
       | Error error -> Calls.check_arguments_alone state env arguments error
@@ -789,22 +768,10 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                   mode = (match method_.method_receiver with Mut -> Mut | Own -> Own | _ -> Read);
                 }
               in
-              let evidence =
-                match receiver_type with Types.Any _ -> Tables.Dynamic | _ -> Tables.Built_in
-              in
               state.tables.calls.(value.id) <-
                 Some
                   {
-                    callee =
-                      Trait_method
-                        {
-                          trait;
-                          name = method_.method_name;
-                          receiver = method_.method_receiver;
-                          self_type = receiver_type;
-                          instantiation = instance.instantiation;
-                          evidence;
-                        };
+                    callee;
                     arguments = receiver_argument :: checked;
                     omitted_defaults = left_out;
                     callee_result = result;

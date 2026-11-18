@@ -12,7 +12,10 @@ let () =
           Backend.run_tests backend ~time_limit_ms:2000 (Codegen_support.list_tests database)
         with
         | Ok records ->
-            ( (if List.for_all (fun (record : Backend.record) -> record.outcome = Passed) records
+            ( (if
+                 List.for_all
+                   (fun (record : Backend.Test_report.record) -> record.outcome = Passed)
+                   records
                then 0
                else 1),
               Codegen_support.render_records records )
@@ -62,7 +65,7 @@ let () =
       | Ok records -> (
           let results_by_name =
             List.map2
-              (fun (test : Path.t) (record : Backend.record) ->
+              (fun (test : Path.t) (record : Backend.Test_report.record) ->
                 match test with
                 | Test { name; _ } -> (name, (record.outcome, record.output))
                 | _ -> failwith "list_tests gave a path that is not a test")
@@ -181,10 +184,12 @@ let () =
           ("index", "index out of bounds");
           ("slice", "slice out of bounds");
           ("key", "index out of bounds");
+          ("assignment", "index out of bounds");
+          ("inherited", "index out of bounds");
         ];
       let status, output, _ = run "none" in
       Codegen_support.expect_int ~expected:0 status;
-      Codegen_support.expect_string ~expected:"9223372036854775807 0 1\n" output)
+      Codegen_support.expect_string ~expected:"9223372036854775807 0 1 1 5\n" output)
 
 let () =
   Codegen_support.test "a program writes a file, reads it back, and reports a missing one"
