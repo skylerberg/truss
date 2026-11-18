@@ -36,32 +36,26 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Integer number ->
       state.tables.literals.(value.id) <- Some (Integer_value number);
       State.register_expression state value (fun () -> Form.build_numeric_literal state value.id);
-      let type_ = Name_lookup.infer_literal_type state ~expected Integer_literal in
-      Pattern_typing.check_literal_fits state value number type_;
-      type_
+      Pattern_typing.require_literal_fits state (State.read_span state value.id) number
+        (Name_lookup.infer_literal_type state ~expected Integer_literal)
   | Float number ->
       State.register_expression state value (fun () -> Form.build_numeric_literal state value.id);
       let type_ = Name_lookup.infer_literal_type state ~expected Float_literal in
       let significand = number.significand and exponent = number.exponent in
-      State.defer state (fun () ->
-          match State.resolve state type_ with
-          | Types.Literal _ | Types.Variable _ -> false
-          | resolved ->
-              let rounded =
-                if Types.is_builtin Float32 resolved then
-                  Literals.round_float32 ~significand ~exponent
-                else Literals.round_float64 ~significand ~exponent
-              in
-              (match rounded with
-              | Some rounded_value ->
-                  state.tables.literals.(value.id) <- Some (Float_value rounded_value)
-              | None ->
-                  State.report state Literal_out_of_range (State.read_span state value.id)
-                    (Printf.sprintf
-                       "This literal is too large for `%s`; it would round to infinity."
-                       (Types.show resolved)));
-              true);
-      type_
+      let round resolved =
+        if Types.is_builtin Float32 resolved then Literals.round_float32 ~significand ~exponent
+        else Literals.round_float64 ~significand ~exponent
+      in
+      Solver.require_type state type_
+        ~holds:(fun resolved -> Option.is_some (round resolved))
+        ~on_met:(fun resolved ->
+          state.tables.literals.(value.id) <-
+            Option.map (fun rounded -> Tables.Float_value rounded) (round resolved))
+        ~on_unmet:(fun resolved ->
+          State.add_diagnostic state Literal_out_of_range (State.read_span state value.id)
+            (Printf.sprintf "This literal is too large for `%s`; it would round to infinity."
+               (Types.show resolved)))
+        ()
   | String literal -> (
       match Pattern_typing.find_character_tag state literal with
       | Some builtin ->
@@ -124,7 +118,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       Operators.check_binary state env ?expected value operator left right
   | Is { value = tested; pattern = written; _ } ->
       let tested_type =
-        State.run_in_statement state env (State.read_span state tested.id) (fun () ->
+        Solver.run_in_statement state env (State.read_span state tested.id) (fun () ->
             check_expression state env tested)
       in
       let mode = Modes.classify_scrutinee_mode state tested in

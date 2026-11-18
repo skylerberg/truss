@@ -49,6 +49,9 @@ val list_trait_static_methods :
 
 val resolve_evidence : State.state -> Syntax.expression -> Types.ty -> Types.trait_reference -> unit
 
+val name_unknown_associated_types :
+  State.state -> Types.ty -> Types.trait_reference -> Types.ty -> Types.ty * Types.trait_reference
+
 val instantiate_trait_method :
   State.state ->
   Source.Definition_span.t ->

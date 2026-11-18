@@ -1,15 +1,10 @@
+val check_evidence_grants :
+  State.state -> Source.Definition_span.t -> Interface.Impls.evidence -> unit
+
 type static_ =
   | Static_type of Types.ty
   | Static_trait of Path.t * Types.argument list option
   | Static_capability of Path.t
-
-val require :
-  State.state ->
-  at:Source.Definition_span.t ->
-  Types.ty ->
-  Types.trait_reference ->
-  on_unmet:(Types.ty -> (string * Types.ty) option -> unit) ->
-  unit
 
 val make_fresh_generic_arguments : State.state -> Types.generic list -> Types.argument list
 val make_fresh_arguments : State.state -> Path.t -> Types.argument list

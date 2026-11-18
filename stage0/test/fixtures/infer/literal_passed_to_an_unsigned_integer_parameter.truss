@@ -1,0 +1,8 @@
+fn kept[Value: UnsignedInteger](value: Value) -> Value {
+  value
+}
+
+fn f() {
+  let count = kept(3)
+  let _ = count
+}

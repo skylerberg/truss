@@ -20,14 +20,28 @@ type subset_constraint = {
   report_missing : Types.capability_set -> unit;
 }
 
+type requirement =
+  | Implements of {
+      trait : Types.trait_reference;
+      on_met : Interface.Impls.evidence -> unit;
+      on_unmet : Types.ty -> (string * Types.ty) option -> Diagnostic.reported;
+    }
+  | Satisfies of {
+      holds : Types.ty -> bool;
+      on_met : Types.ty -> unit;
+      on_unmet : Types.ty -> Diagnostic.reported;
+    }
+
+type obligation = { subject : Types.ty; requirement : requirement }
+
 type frame = {
   first_variable : int;
   mutable recorded_expressions : int list;
   mutable recorded_loops : (Syntax.id * Syntax.id) list;
   mutable bindings : int list;
   mutable declared : int list;
-  mutable deferred_checks : (unit -> bool) list;
-  mutable reported_unmet_bounds : (Types.ty * Types.trait_reference) list;
+  mutable obligations : obligation list;
+  mutable reported_unmet_bounds : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
   mutable compiled_expressions : int list;
   mutable compiled_bindings : int list;
   mutable specification_only_report : Diagnostic.reported option;
@@ -89,6 +103,7 @@ type state = {
   mutable undecided : undecided_literal list;
   decisions : (int, literal_decision) Hashtbl.t;
   annotatable : (Syntax.id, unit) Hashtbl.t;
+  mutable elaborations : (unit -> unit) list;
 }
 
 let add_diagnostic state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
@@ -361,11 +376,6 @@ let compare_in_source_order state left right =
   and right : Source.Definition_span.t = read_span state right in
   compare (left.start, -left.stop) (right.start, -right.stop)
 
-let defer state check =
-  match find_current_frame state with
-  | Some frame -> if not (check ()) then frame.deferred_checks <- check :: frame.deferred_checks
-  | None -> ignore (check ())
-
 let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
 let make_fresh_type state = Unify.make_fresh_type state.unifier
@@ -567,269 +577,6 @@ let make_trait_reference ~arguments trait : Types.trait_reference =
 
 let string_type = Types.Named { path = Well_known.make_path String; arguments = [] }
 
-let make_undecided_type (undecided : undecided_literal) =
-  Types.Literal (undecided.kind, undecided.index)
-
-let decide_literals state ~(at : Source.Definition_span.t) ~is_default =
-  state.undecided <-
-    List.filter
-      (fun (undecided : undecided_literal) ->
-        match Unify.resolve state.unifier (make_undecided_type undecided) with
-        | Types.Literal _ -> true
-        | _ ->
-            Hashtbl.replace state.decisions undecided.index
-              {
-                decided_local = undecided.local;
-                decided_type = Unify.zonk state.unifier (make_undecided_type undecided);
-                decided_at = at;
-                is_default;
-                decision_report = None;
-              };
-            false)
-      state.undecided
-
-let settle state frame =
-  List.iter
-    (fun (left, right) ->
-      let report_missing _ =
-        report state Mismatch frame.span
-          (Printf.sprintf
-             "Two function types here must use the same capabilities, and one uses `%s` where the \
-              other uses `%s`."
-             (Types.show_capabilities (resolve_capabilities state left))
-             (Types.show_capabilities (resolve_capabilities state right)))
-      in
-      state.capability_constraints <-
-        { subset = left; restriction = None; superset = right; report_missing }
-        :: { subset = right; restriction = None; superset = left; report_missing }
-        :: state.capability_constraints)
-    state.unifier.deferred_capability_equalities;
-  state.unifier.deferred_capability_equalities <- [];
-  let run_pending () =
-    let rec loop pending =
-      let left = List.filter (fun check -> not (check ())) pending in
-      if List.length left < List.length pending then loop left else left
-    in
-    frame.deferred_checks <- loop frame.deferred_checks
-  in
-  run_pending ();
-  let parent = match state.frames with _ :: parent :: _ -> Some parent | _ -> None in
-  decide_literals state ~at:frame.span ~is_default:false;
-  let list_types ids table = List.filter_map (fun id -> table.(id)) ids in
-  let list_all_types () =
-    list_types frame.recorded_expressions state.tables.types
-    @ list_types frame.bindings state.tables.local_types
-  in
-  let list_call_arguments () =
-    List.concat_map
-      (fun id ->
-        match state.tables.calls.(id) with
-        | Some { callee = Trait_method { trait; instantiation; _ }; _ } ->
-            trait.trait_arguments @ instantiation.type_arguments
-        | Some
-            {
-              callee =
-                ( Function { instantiation = { type_arguments; _ }; _ }
-                | Constructor { type_arguments; _ }
-                | Intrinsic { type_arguments; _ } );
-              _;
-            } ->
-            type_arguments
-        | _ -> [])
-      frame.recorded_expressions
-  in
-  let list_unknowns () =
-    List.concat_map (Unify.list_unknowns state.unifier) (list_all_types ())
-    @ List.concat_map (Unify.list_argument_unknowns state.unifier) (list_call_arguments ())
-  in
-  (match parent with
-  | Some parent when parent.frame_specification = frame.frame_specification ->
-      List.iter
-        (fun local ->
-          match state.tables.local_types.(local) with
-          | Some type_ ->
-              List.iter
-                (function
-                  | Unify.Unknown_literal (kind, index) when index >= frame.first_variable ->
-                      if not frame.frame_specification then
-                        Hashtbl.replace state.unifier.code_literals index ();
-                      state.undecided <- { index; kind; local; owner = parent } :: state.undecided
-                  | _ -> ())
-                (Unify.list_unknowns state.unifier type_)
-          | None -> ())
-        frame.declared
-  | _ -> ());
-  let undecided =
-    List.filter_map
-      (fun (undecided : undecided_literal) ->
-        if undecided.owner == frame then None
-        else
-          match Unify.resolve state.unifier (make_undecided_type undecided) with
-          | Types.Literal (_, root) -> Some root
-          | _ -> None)
-      state.undecided
-  in
-  let is_undecided index = List.mem index undecided in
-  List.iter
-    (function
-      | Unify.Unknown_literal (kind, index)
-        when index >= frame.first_variable && not (is_undecided index) ->
-          Hashtbl.replace state.unifier.type_solutions index
-            (match kind with
-            | Integer_literal ->
-                if frame.frame_specification then Types.Integer else Types.make_builtin Int64
-            | Float_literal -> Types.make_builtin Float64)
-      | _ -> ())
-    (list_unknowns ());
-  run_pending ();
-  let unsolved =
-    List.filter
-      (function
-        | Unify.Unknown_type index | Unknown_value index -> index >= frame.first_variable
-        | Unknown_literal (_, index) -> index >= frame.first_variable && not (is_undecided index))
-      (list_unknowns ())
-  in
-  state.undecided <-
-    List.filter (fun (undecided : undecided_literal) -> undecided.owner != frame) state.undecided;
-  if unsolved <> [] then begin
-    let list_trait_unknowns (trait : Types.trait_reference) =
-      List.concat_map (Unify.list_argument_unknowns state.unifier) trait.trait_arguments
-    in
-    let find_undetermined_trait : Tables.callee -> Types.trait_reference option = function
-      | Trait_method { trait; self_type; _ }
-        when (not (Types.contains_unsolved (zonk state self_type)))
-             && List.exists (fun unknown -> List.mem unknown unsolved) (list_trait_unknowns trait)
-        ->
-          Some trait
-      | _ -> None
-    in
-    let list_loop_calls : Tables.loop -> Tables.call list = function
-      | Elements { count; element; _ } -> [ count; element ]
-      | Pulled { cursor_call; remaining; _ } -> List.filter_map Fun.id [ cursor_call; remaining ]
-      | Integer_range _ -> []
-    in
-    let undetermined =
-      List.filter_map
-        (fun id ->
-          Option.bind state.tables.calls.(id) (fun (call : Tables.call) ->
-              Option.map
-                (fun trait ->
-                  ( id,
-                    trait,
-                    Printf.sprintf
-                      "This call does not determine the arguments of `%s`. Write the call in full \
-                       with them." ))
-                (find_undetermined_trait call.callee)))
-        frame.recorded_expressions
-      @ List.filter_map
-          (fun (loop, iterable) ->
-            Option.bind state.tables.loops.(loop) (fun record ->
-                Option.map
-                  (fun trait ->
-                    ( iterable,
-                      trait,
-                      Printf.sprintf
-                        "This loop does not determine the arguments of `%s`, whose methods give \
-                         its elements." ))
-                  (List.find_map
-                     (fun (call : Tables.call) -> find_undetermined_trait call.callee)
-                     (list_loop_calls record))))
-          frame.recorded_loops
-    in
-    let trait_reports =
-      List.map
-        (fun (id, (trait : Types.trait_reference), describe) ->
-          add_diagnostic state Cannot_infer (read_span state id)
-            (describe (match trait.trait with Top { name; _ } -> name | path -> Path.show path)))
-        undetermined
-    in
-    let explained = List.concat_map (fun (_, trait, _) -> list_trait_unknowns trait) undetermined in
-    let report =
-      match trait_reports with
-      | first :: _ when List.for_all (fun unknown -> List.mem unknown explained) unsolved -> first
-      | _ ->
-          add_diagnostic state Cannot_infer frame.span
-            "The types in this statement cannot be inferred from it alone. Give the `let` a type, \
-             or the call type arguments, such as `var names: List[String] = []`."
-    in
-    if Option.is_none state.unsolved then state.unsolved <- Some report;
-    List.iter
-      (function
-        | Unify.Unknown_type index | Unknown_literal (_, index) ->
-            Hashtbl.replace state.unifier.type_solutions index (Types.Error report)
-        | Unknown_value _ -> ())
-      unsolved;
-    frame.deferred_checks <- []
-  end;
-  let is_open = function
-    | Unify.Unknown_type index | Unknown_value index -> index < frame.first_variable
-    | Unknown_literal (_, index) -> index < frame.first_variable || is_undecided index
-  in
-  let finish table ids keep =
-    List.iter
-      (fun id ->
-        match table.(id) with
-        | Some type_ -> (
-            let type_ =
-              Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
-                (zonk state type_)
-            in
-            table.(id) <- Some type_;
-            if List.exists is_open (Unify.list_unknowns state.unifier type_) then
-              match parent with Some parent -> keep parent id | None -> ())
-        | None -> ())
-      ids
-  in
-  finish state.tables.types frame.recorded_expressions (fun parent id ->
-      parent.recorded_expressions <- id :: parent.recorded_expressions);
-  finish state.tables.local_types frame.bindings (fun parent id ->
-      parent.bindings <- id :: parent.bindings);
-  let is_settled table id =
-    match table.(id) with
-    | Some type_ -> not (List.exists is_open (Unify.list_unknowns state.unifier type_))
-    | None -> true
-  in
-  let settled_bindings, open_bindings =
-    List.partition (is_settled state.tables.local_types) (List.rev frame.compiled_bindings)
-  in
-  let settled_expressions, open_expressions =
-    List.partition (is_settled state.tables.types) (List.rev frame.compiled_expressions)
-  in
-  Option.iter
-    (fun parent ->
-      parent.compiled_bindings <- List.rev_append open_bindings parent.compiled_bindings;
-      parent.compiled_expressions <- List.rev_append open_expressions parent.compiled_expressions)
-    parent;
-  List.iter (check_compiled_binding state) settled_bindings;
-  List.iter (check_compiled_expression state)
-    (List.sort (compare_in_source_order state) settled_expressions);
-  match parent with
-  | Some parent -> parent.deferred_checks <- frame.deferred_checks @ parent.deferred_checks
-  | None -> ()
-
-let run_in_statement state env (span : Source.Definition_span.t) body =
-  let frame =
-    {
-      first_variable = state.unifier.next + 1;
-      recorded_expressions = [];
-      recorded_loops = [];
-      bindings = [];
-      declared = [];
-      deferred_checks = [];
-      reported_unmet_bounds = [];
-      compiled_expressions = [];
-      compiled_bindings = [];
-      specification_only_report = None;
-      frame_specification = env.specification;
-      span;
-    }
-  in
-  state.frames <- frame :: state.frames;
-  let result = body () in
-  settle state frame;
-  state.frames <- List.tl state.frames;
-  result
-
 let rec diverges ~is_never (written : Syntax.statement) =
   match written.kind with
   | Expression value | Let { value; _ } | Assignment { value; _ } -> is_never value
@@ -876,21 +623,6 @@ let declare_compiled state env (name : Syntax.name) type_ ~is_var ~mode =
   | _ -> ()
 
 let find_target state (name : Syntax.name) = state.resolved.names.(name.id)
-
-let decide_default_literal state ~at type_ =
-  let decide default =
-    (match find_current_frame state with
-    | Some frame -> decide_literals state ~at:frame.span ~is_default:false
-    | None -> ());
-    ignore (Unify.unify state.unifier type_ default);
-    decide_literals state ~at ~is_default:true;
-    default
-  in
-  match Unify.resolve state.unifier type_ with
-  | Types.Literal (Integer_literal, _) -> decide (Types.make_builtin Int64)
-  | Types.Literal (Float_literal, _) -> decide (Types.make_builtin Float64)
-  | _ -> type_
-
 let find_head state (value : Syntax.expression) = Resolve.find_head state.resolved value
 
 let is_variant_name (member : Syntax.name) =
@@ -928,10 +660,10 @@ let add_mismatch_diagnostic state ?(fixes = []) code (span : Source.Definition_s
       let decided = Types.show decision.decided_type and wanted = zonk state wanted in
       let explanation, note =
         if decision.is_default then
-          ( Printf.sprintf "%s took its default type, `%s`, at an earlier method call." local decided,
-            Printf.sprintf
-              "Method lookup needs the type of %s, so %s takes its default type `%s` here." local
-              local decided )
+          ( Printf.sprintf "%s took its default type, `%s`, at a method call that needs its type."
+              local decided,
+            Printf.sprintf "This call needs the type of %s, so %s takes its default type `%s` here."
+              local local decided )
         else
           ( Printf.sprintf "An earlier statement decided that the type of %s is `%s`." local decided,
             Printf.sprintf "This statement decides that the type of %s is `%s`." local decided )

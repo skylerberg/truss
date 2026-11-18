@@ -196,15 +196,6 @@ let classify_argument state (value : Syntax.expression) =
       | Some mode -> Lent mode
       | None -> if State.is_place state value then Place else Temporary)
 
-let run_once_solved state type_ check =
-  State.defer state (fun () ->
-      let is_solved =
-        not
-          (Types.exists (function Types.Variable _ -> true | _ -> false) (State.zonk state type_))
-      in
-      if is_solved then check ();
-      is_solved)
-
 let is_known_not_plain state type_ =
   State.decide_property state Interface.Properties.Plain type_ = Interface.Properties.Fails
 
@@ -258,7 +249,7 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
         (Printf.sprintf "`%s` mutates its argument in place, so it must be a place passed `mut`."
            name)
   | Own, With_mode (Own, inner) ->
-      run_once_solved state type_ (fun () ->
+      Solver.check_solved state type_ (fun type_ ->
           if
             State.decide_property state Interface.Properties.Plain type_
             = Interface.Properties.Holds

@@ -21,56 +21,44 @@ type static_ =
   | Static_trait of Path.t * Types.argument list option
   | Static_capability of Path.t
 
-let require state ~(at : Source.Definition_span.t) type_ (bound : Types.trait_reference) ~on_unmet =
-  let trait = { bound with associated = [] } in
-  State.defer state (fun () ->
-      let type_ = State.normalize state type_ in
-      if Unify.list_unknowns state.unifier type_ <> [] then false
-      else begin
-        (match State.find_evidence state type_ trait with
-        | None -> on_unmet type_ None
-        | Some evidence ->
-            check_evidence_grants state at evidence;
-            List.iter
-              (fun (name, wanted) ->
-                match
-                  Interface.Impls.project_associated_type state.lookups.interface
-                    ~list_bounds:(State.lookup_bounds state) type_ trait name
-                with
-                | Some associated_type when not (State.unify state associated_type wanted) ->
-                    on_unmet type_ (Some (name, associated_type))
-                | _ -> ())
-              bound.associated);
-        true
-      end)
-
 let require_bounds state (span : Source.Definition_span.t) ?of_type generics substitution =
   List.iter
     (fun (argument, bound) ->
-      require state ~at:span argument bound ~on_unmet:(fun argument other ->
+      Solver.require state argument bound ~on_met:(check_evidence_grants state span)
+        ~on_unmet:(fun argument other ->
           let bound = Unify.zonk_trait state.unifier bound in
-          let reported =
-            match State.find_current_frame state with
-            | Some frame ->
-                let reported = List.mem (argument, bound) frame.reported_unmet_bounds in
-                frame.reported_unmet_bounds <- (argument, bound) :: frame.reported_unmet_bounds;
-                reported
-            | None -> false
+          let earlier =
+            Option.bind (State.find_current_frame state) (fun (frame : State.frame) ->
+                List.find_map
+                  (fun (reported_argument, reported_bound, report) ->
+                    if reported_argument = argument && reported_bound = bound then Some report
+                    else None)
+                  frame.reported_unmet_bounds)
           in
-          if not reported then
-            let needs =
-              Printf.sprintf "%s needs `%s: %s`"
-                (match of_type with
-                | Some type_ -> Printf.sprintf "`%s`" (State.show state type_)
-                | None -> "This")
-                (Types.show argument) (Types.show_trait bound)
-            in
-            State.report state Unsatisfied_bound span
-              (match other with
-              | None -> needs ^ ", which does not hold."
-              | Some (name, associated_type) ->
-                  Printf.sprintf "%s, and its `%s` is `%s`." needs name
-                    (State.show state associated_type))))
+          match earlier with
+          | Some report -> report
+          | None ->
+              let needs =
+                Printf.sprintf "%s needs `%s: %s`"
+                  (match of_type with
+                  | Some type_ -> Printf.sprintf "`%s`" (State.show state type_)
+                  | None -> "This")
+                  (Types.show argument) (Types.show_trait bound)
+              in
+              let report =
+                State.add_diagnostic state Unsatisfied_bound span
+                  (match other with
+                  | None -> needs ^ ", which does not hold."
+                  | Some (name, associated_type) ->
+                      Printf.sprintf "%s, and its `%s` is `%s`." needs name
+                        (State.show state associated_type))
+              in
+              Option.iter
+                (fun (frame : State.frame) ->
+                  frame.reported_unmet_bounds <-
+                    (argument, bound, report) :: frame.reported_unmet_bounds)
+                (State.find_current_frame state);
+              report))
     (Interface.Impls.list_required_bounds generics substitution)
 
 let make_fresh_generic_arguments (state : State.state) (generics : Types.generic list) =

@@ -1,0 +1,5 @@
+fn f() {
+  let value: UInt64 = 1
+  let bytes = value.to_big_endian_bytes()
+  let small: UInt64 = value
+}

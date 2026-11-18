@@ -137,6 +137,9 @@ Rules: [Number literals](SPECIFICATION.md#number-literals).
 |---|---|
 | A literal takes its type from its context, and has no suffix. | *One spelling:* `3` is written one way for every integer type. |
 | A literal operand takes the type of the other operand. | Go's untyped constants work this way. The rule never consults the set of `impl`s, so adding an `impl` never changes the type of an existing literal. Rust lets the search for an `impl` decide, so an `impl` added later can make an existing call ambiguous. |
+| A literal that no use decides takes the first default type that its uses allow. | A shift amount and a literal too large for `Int64` need no rule of their own. |
+| Only the sealed integer traits take part in choosing a default. | No package can implement them, so adding an `impl` never changes the default of an existing literal. Haskell limits its defaulting to the standard classes for the same reason. |
+| A literal has the methods of a trait that every type of its kind implements. | `count.saturating_add(1)` would otherwise fix `count` at `Int64` before a later use decides it, and the type of a local would depend on the order of its uses. |
 | A leading zero is an error. | `0755` is octal in C and the shell, where it sets file permissions. Read as decimal, it would silently set the wrong permissions (*LLM habits*). |
 
 [Functions](#functions) explains how a local that is declared from a literal
@@ -594,8 +597,9 @@ person, an LLM, and the language server, and type checking stays fast
 cannot decide, as in `var names: List[String] = []`.
 
 A local declared from literals alone is the exception: it takes its type
-from its first use. Otherwise `let limit = 10` would fix `limit` at `Int64`,
-and code that works in `UInt8` or `UInt64` would annotate every such local.
+from its uses, whatever their order. Otherwise `let limit = 10` would fix
+`limit` at `Int64`, and code that works in `UInt8` or `UInt64` would annotate
+every such local.
 Only the type of a literal is left undecided, and it can only become a
 number type, so the declaration still tells the reader that the local is a
 number.

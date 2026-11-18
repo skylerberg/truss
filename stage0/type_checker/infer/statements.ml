@@ -18,20 +18,18 @@ let check_bit_vector_names state (value : Core.expression) =
 
 let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
     (range : Syntax.expression) element ~inclusive =
-  State.defer state (fun () ->
-      let element = State.normalize state element in
-      if Types.contains_unsolved element then false
-      else begin
-        if
-          State.is_integer_type state element
-          || Types.is_builtin Character element
-          || (admits_integer && Types.equal element Types.Integer)
-        then state.tables.loops.(loop) <- Some (Integer_range { element; inclusive })
-        else if not (Types.is_error element) then
-          State.report state Not_indexable (State.read_span state range.id)
-            (Printf.sprintf "%s range is of integers, not `%s`." described (Types.show element));
-        true
-      end)
+  ignore
+    (Solver.require_type state element
+       ~holds:(fun element ->
+         State.is_integer_type state element
+         || Types.is_builtin Character element
+         || (admits_integer && Types.equal element Types.Integer))
+       ~on_met:(fun element ->
+         state.tables.loops.(loop) <- Some (Integer_range { element; inclusive }))
+       ~on_unmet:(fun element ->
+         State.add_diagnostic state Not_indexable (State.read_span state range.id)
+           (Printf.sprintf "%s range is of integers, not `%s`." described (Types.show element)))
+       ())
 
 let rec check_block_value state env ?expected (written : Syntax.block) =
   let rec infer_statements_value = function
@@ -44,7 +42,7 @@ let rec check_block_value state env ?expected (written : Syntax.block) =
             if State.statement_diverges state last then Types.Never else Types.unit)
     | (first : Syntax.statement) :: rest ->
         ignore
-          (State.run_in_statement state env (State.read_span state first.id) (fun () ->
+          (Solver.run_in_statement state env (State.read_span state first.id) (fun () ->
                check_statement state env first ~last:false));
         infer_statements_value rest
   in
@@ -57,25 +55,17 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
           Evaluate (State.build_expression state value));
       let type_ = Hooks.check_expression state env value in
       if not last then
-        State.defer state (fun () ->
-            match State.normalize state type_ with
-            | Types.Variable _ | Types.Literal _ -> false
-            | resolved ->
-                if
-                  not
-                    (resolved = Types.unit || resolved = Types.Never || Types.is_error resolved
-                   || resolved = Types.Hole)
-                then
-                  State.report state Unused_value (State.read_span state value.id)
-                    ~fixes:
-                      [
-                        State.fix "Discard it on purpose."
-                          [ State.insert (State.read_span state value.id).start "let _ = " ];
-                      ]
-                    (Printf.sprintf
-                       "This value of type `%s` is not used. Use it, or discard it with `let _ =`."
-                       (Types.show resolved));
-                true)
+        Solver.check_solved state type_ (fun resolved ->
+            if not (resolved = Types.unit || resolved = Types.Never || resolved = Types.Hole) then
+              State.report state Unused_value (State.read_span state value.id)
+                ~fixes:
+                  [
+                    State.fix "Discard it on purpose."
+                      [ State.insert (State.read_span state value.id).start "let _ = " ];
+                  ]
+                (Printf.sprintf
+                   "This value of type `%s` is not used. Use it, or discard it with `let _ =`."
+                   (Types.show resolved)))
   | Let { is_var; pattern = written_pattern; annotation; value; else_ } ->
       let type_ =
         match annotation with
@@ -173,7 +163,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
         | _ -> (Types.Read, iterable)
       in
       let loop_element = ref None in
-      State.run_in_statement state env (State.read_span state iterable.id) (fun () ->
+      Solver.run_in_statement state env (State.read_span state iterable.id) (fun () ->
           let element, variable_mode = check_loop_iterable state env written ~mode inner in
           (match annotation with
           | Some written_annotation ->
@@ -216,7 +206,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       check_loop_body state env body
   | While { condition = test; clauses; body } ->
       State.reject_in_formula state env (State.read_span state written.id) "A `while` loop";
-      State.run_in_statement state env (State.read_span state test.id) (fun () ->
+      Solver.run_in_statement state env (State.read_span state test.id) (fun () ->
           Hooks.check state env test Types.bool);
       List.iter (check_loop_clause state env) clauses;
       State.register_statement state written (fun () ->
@@ -240,7 +230,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
           if concurrent then Concurrent branches else Parallel branches);
       List.iter
         (fun (branch : Syntax.statement) ->
-          State.run_in_statement state env (State.read_span state branch.id) (fun () ->
+          Solver.run_in_statement state env (State.read_span state branch.id) (fun () ->
               check_statement state env branch ~last:false))
         body.statements
   | Proof body ->
@@ -319,7 +309,7 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
 and check_loop_body state env (body : Syntax.block) =
   List.iter
     (fun (written : Syntax.statement) ->
-      State.run_in_statement state env (State.read_span state written.id) (fun () ->
+      Solver.run_in_statement state env (State.read_span state written.id) (fun () ->
           check_statement state env written ~last:false))
     body.statements
 

@@ -163,6 +163,10 @@ let find_integer_range type_ =
 let is_signed type_ =
   match find_integer_bits type_ with Some (_, signed) -> signed | None -> false
 
+let list_literal_types (kind : literal_kind) =
+  List.map make_builtin
+    (match kind with Integer_literal -> integer_types | Float_literal -> float_types)
+
 let is_float_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin float_types | None -> false
 

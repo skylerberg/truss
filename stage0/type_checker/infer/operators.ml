@@ -5,46 +5,27 @@ let select_arithmetic_trait : Syntax.arithmetic -> Path.t * string = function
   | Divide -> (Well_known.make_path Divide, "divide")
   | Remainder -> (Well_known.make_path Remainder, "remainder")
 
-let infer_integer_result state span type_ ~(describe : string -> string) =
-  let is_integer resolved = State.is_integer_type state resolved || Types.is_error resolved in
-  match State.normalize state type_ with
-  | Types.Literal _ | Types.Variable _ ->
-      State.defer state (fun () ->
-          match State.normalize state type_ with
-          | Types.Literal _ | Types.Variable _ -> false
-          | resolved ->
-              if not (is_integer resolved) then
-                State.report state No_impl span (describe (Types.show resolved));
-              true);
-      type_
-  | resolved when is_integer resolved -> type_
-  | resolved -> State.make_error_type state No_impl span (describe (Types.show resolved))
+let is_unsigned_integer state type_ =
+  State.is_integer_type state type_ && not (State.is_signed_type state type_)
+
+let require_integer state span type_ ~(describe : Types.ty -> string) =
+  Solver.require_type state type_ ~holds:(State.is_integer_type state)
+    ~on_unmet:(fun resolved -> State.add_diagnostic state No_impl span (describe resolved))
+    ()
 
 let infer_bitwise_result state span type_ =
-  infer_integer_result state span type_
-    ~describe:(Printf.sprintf "Bitwise operators work on built-in integers, not `%s`.")
+  require_integer state span type_ ~describe:(fun resolved ->
+      Printf.sprintf "Bitwise operators work on built-in integers, not `%s`." (Types.show resolved))
 
 let infer_shift_result state ~left:(left_span, left_type) ~right:(right_span, right_type) =
-  (match State.resolve state right_type with
-  | Types.Literal (Integer_literal, _) ->
-      ignore (State.unify state right_type (Types.make_builtin UInt64))
-  | _ -> ());
-  State.defer state (fun () ->
-      match State.normalize state right_type with
-      | Types.Literal _ | Types.Variable _ -> false
-      | right_resolved ->
-          if
-            not
-              (State.is_integer_type state right_resolved
-               && not (State.is_signed_type state right_resolved)
-              || Types.is_error right_resolved)
-          then
-            State.report state Mismatch right_span
-              (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
-                 (Types.show right_resolved));
-          true);
-  infer_integer_result state left_span left_type
-    ~describe:(Printf.sprintf "Shifts work on built-in integers, not `%s`.")
+  ignore
+    (Solver.require_type state right_type ~holds:(is_unsigned_integer state)
+       ~on_unmet:(fun resolved ->
+         State.add_diagnostic state Mismatch right_span
+           (Printf.sprintf "A shift amount is an unsigned integer, not `%s`." (Types.show resolved)))
+       ());
+  require_integer state left_span left_type ~describe:(fun resolved ->
+      Printf.sprintf "Shifts work on built-in integers, not `%s`." (Types.show resolved))
 
 let is_integer_operand state type_ =
   let type_ = State.normalize state type_ in
@@ -183,16 +164,8 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
       check_built_in_operator state value [ inner ] type_;
       State.register_expression state value (fun () ->
           Form.build_operator state value Complement [ inner ]);
-      if
-        State.is_integer_type state (State.normalize state type_)
-        ||
-        match State.resolve state type_ with
-        | Types.Literal (Integer_literal, _) -> true
-        | _ -> false
-      then type_
-      else
-        State.make_error_type state No_impl (State.read_span state value.id)
-          (Printf.sprintf "`~` works on built-in integers, not %s." (State.describe state type_))
+      require_integer state (State.read_span state value.id) type_ ~describe:(fun resolved ->
+          Printf.sprintf "`~` works on built-in integers, not %s." (Types.describe resolved))
   | Negate -> (
       match inner.kind with
       | Integer number ->
@@ -202,29 +175,33 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
               Form.build_numeric_literal state value.id);
           let type_ = Name_lookup.infer_literal_type state ~expected Integer_literal in
           State.record state inner type_;
-          State.defer state (fun () ->
-              match State.resolve state type_ with
-              | Types.Literal _ | Types.Variable _ -> false
-              | resolved ->
-                  if
-                    State.is_integer_type state resolved
-                    && (not (State.is_signed_type state resolved))
-                    && not (Z.equal number Z.zero)
-                  then
-                    State.report state Negated_unsigned (State.read_span state value.id)
-                      (Printf.sprintf "`%s` is unsigned, so it cannot be negated."
-                         (Types.show resolved))
-                  else Pattern_typing.check_literal_fits state value (Z.neg number) type_;
-                  true);
-          type_
+          Solver.require_type state type_
+            ~holds:(fun resolved ->
+              (Z.equal number Z.zero || not (is_unsigned_integer state resolved))
+              && Pattern_typing.is_within_range state (Z.neg number) resolved)
+            ~on_unmet:(fun resolved ->
+              if is_unsigned_integer state resolved && not (Z.equal number Z.zero) then
+                report_negated_unsigned state value resolved
+              else
+                Pattern_typing.report_out_of_range state (State.read_span state value.id)
+                  (Z.neg number) resolved)
+            ()
       | _ ->
           let type_ = Hooks.check_expression state env ?expected inner in
           let resolved = State.normalize state type_ in
           if resolved = Types.Hole then Types.Hole
-          else if State.is_integer_type state resolved && not (State.is_signed_type state resolved)
-          then
-            State.make_error_type state Negated_unsigned (State.read_span state value.id)
-              (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (Types.show resolved))
+          else if
+            is_unsigned_integer state resolved
+            || match resolved with Types.Literal _ -> true | _ -> false
+          then begin
+            check_built_in_operator state value [ inner ] type_;
+            State.register_expression state value (fun () ->
+                Form.build_operator state value Negate [ inner ]);
+            Solver.require_type state type_
+              ~holds:(fun resolved -> not (is_unsigned_integer state resolved))
+              ~on_unmet:(report_negated_unsigned state value)
+              ()
+          end
           else if
             env.specification && (State.is_integer_type state resolved || resolved = Types.Integer)
           then begin
@@ -241,77 +218,48 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
               ~right:None
           end)
 
+and report_negated_unsigned state (value : Syntax.expression) resolved =
+  State.add_diagnostic state Negated_unsigned (State.read_span state value.id)
+    (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (Types.show resolved))
+
 and check_operator_call ~operands state (value : Syntax.expression) ~trait ~method_ ~left ~right =
   let arguments = match right with Some right -> [ Types.Type right ] | None -> [] in
   let reference = State.make_trait_reference ~arguments trait in
   let result = State.make_fresh_type state in
-  state.tables.calls.(value.id) <-
-    Some
-      {
-        callee =
-          Trait_method
-            {
-              trait = reference;
-              name = method_;
-              receiver = Read;
-              self_type = left;
-              instantiation = Types.no_instantiation;
-              evidence = Built_in;
-            };
-        arguments = operands;
-        omitted_defaults = [];
-        callee_result = result;
-      };
-  State.defer state (fun () ->
-      let left = State.normalize state left in
-      let reference = Unify.zonk_trait state.unifier reference in
-      if
-        Types.contains_unsolved left
-        || List.exists
-             (function Types.Type type_ -> Types.contains_unsolved type_ | _ -> false)
-             reference.trait_arguments
-      then false
-      else begin
-        (match State.find_evidence state left reference with
-        | Some evidence ->
-            let output =
-              State.resolve_associated_type state left reference "Output"
-                ~at:(State.read_span state value.id)
-            in
-            let decided = State.zonk state result in
-            if not (State.unify state result output) then
-              State.report state Mismatch (State.read_span state value.id)
-                (Printf.sprintf "This operator gives `%s`, and `%s` is expected."
-                   (Types.show (State.zonk state output))
-                   (Types.show decided));
-            state.tables.calls.(value.id) <-
-              Some
-                {
-                  callee =
-                    Trait_method
-                      {
-                        trait = reference;
-                        name = method_;
-                        receiver = Read;
-                        self_type = left;
-                        instantiation = Types.no_instantiation;
-                        evidence = State.convert_evidence evidence;
-                      };
-                  arguments = operands;
-                  omitted_defaults = [];
-                  callee_result = output;
-                }
-        | None ->
-            let unknown =
-              if Types.is_error left then left
-              else
-                State.make_error_type state No_impl (State.read_span state value.id)
-                  (Printf.sprintf "`%s` does not implement `%s`, so the operator does not apply."
-                     (Types.show left) (Types.show_trait reference))
-            in
-            ignore (State.unify state result unknown));
-        true
-      end);
+  let make_call evidence : Tables.call =
+    {
+      callee =
+        Trait_method
+          {
+            trait = Unify.zonk_trait state.unifier reference;
+            name = method_;
+            receiver = Read;
+            self_type = left;
+            instantiation = Types.no_instantiation;
+            evidence;
+          };
+      arguments = operands;
+      omitted_defaults = [];
+      callee_result = result;
+    }
+  in
+  state.tables.calls.(value.id) <- Some (make_call Built_in);
+  Solver.require state left
+    { reference with associated = [ ("Output", result) ] }
+    ~on_met:(fun evidence ->
+      state.tables.calls.(value.id) <- Some (make_call (State.convert_evidence evidence)))
+    ~on_unmet:(fun left output ->
+      match output with
+      | None ->
+          State.add_diagnostic state No_impl (State.read_span state value.id)
+            (Printf.sprintf "`%s` does not implement `%s`, so the operator does not apply."
+               (Types.show left)
+               (Types.show_trait (Unify.zonk_trait state.unifier reference)))
+      | Some (_, output) ->
+          State.add_diagnostic state Mismatch (State.read_span state value.id)
+            (Printf.sprintf "This operator gives `%s`, and `%s` is expected."
+               (Types.show (State.zonk state output))
+               (Types.show (State.zonk state result))));
   result
 
 and check_literal_operands state ~left ~right =
@@ -594,9 +542,41 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
                   evidence = Form.convert_evidence (State.convert_evidence implementation);
                 }
           | _ -> State.raise_bug "`any` of a value whose type does not implement the trait");
-      Instantiation.require state ~at:(State.read_span state value.id) inner_type trait
+      Solver.require state inner_type trait
+        ~on_met:(fun evidence ->
+          Instantiation.check_evidence_grants state (State.read_span state value.id) evidence;
+          let inner_type = State.normalize state inner_type in
+          List.iter
+            (fun (bound : Types.trait_reference) ->
+              match
+                Interface.Definition.find_trait_interface state.lookups.interface bound.trait
+              with
+              | Some interface ->
+                  List.iter
+                    (fun name ->
+                      match
+                        Types.list_capabilities
+                          (Interface.Impls.project_capability_set state.lookups.interface
+                             ~list_bounds:(State.lookup_bounds state) inner_type
+                             { bound with associated = [] } name)
+                      with
+                      | [] -> ()
+                      | set ->
+                          State.report state No_impl (State.read_span state value.id)
+                            (Printf.sprintf
+                               "`%s` cannot be an `%s`: its `%s` is %s, and code that holds an \
+                                `any` value has no capability to give to its methods."
+                               (Types.show inner_type) (Types.show any_type) name
+                               (String.concat ", "
+                                  (List.map
+                                     (fun capability ->
+                                       "`" ^ Types.show_capability capability ^ "`")
+                                     set))))
+                    interface.associated_capabilities
+              | None -> ())
+            (Interface.Properties.list_bound_closure state.lookups.interface ~self:inner_type trait))
         ~on_unmet:(fun inner_type other ->
-          State.report state No_impl (State.read_span state value.id)
+          State.add_diagnostic state No_impl (State.read_span state value.id)
             (match other with
             | None ->
                 Printf.sprintf "`%s` does not implement `%s`." (Types.show inner_type)
@@ -605,43 +585,6 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
                 Printf.sprintf "`%s` is expected, and the `%s` of `%s` is `%s`."
                   (Types.show any_type) name (Types.show inner_type)
                   (State.show state associated_type)));
-      State.defer state (fun () ->
-          let inner_type = State.normalize state inner_type in
-          Unify.list_unknowns state.unifier inner_type = []
-          && begin
-            if Option.is_some (State.find_evidence state inner_type trait) then
-              List.iter
-                (fun (bound : Types.trait_reference) ->
-                  match
-                    Interface.Definition.find_trait_interface state.lookups.interface bound.trait
-                  with
-                  | Some interface ->
-                      List.iter
-                        (fun name ->
-                          match
-                            Types.list_capabilities
-                              (Interface.Impls.project_capability_set state.lookups.interface
-                                 ~list_bounds:(State.lookup_bounds state) inner_type
-                                 { bound with associated = [] } name)
-                          with
-                          | [] -> ()
-                          | set ->
-                              State.report state No_impl (State.read_span state value.id)
-                                (Printf.sprintf
-                                   "`%s` cannot be an `%s`: its `%s` is %s, and code that holds an \
-                                    `any` value has no capability to give to its methods."
-                                   (Types.show inner_type) (Types.show any_type) name
-                                   (String.concat ", "
-                                      (List.map
-                                         (fun capability ->
-                                           "`" ^ Types.show_capability capability ^ "`")
-                                         set))))
-                        interface.associated_capabilities
-                  | None -> ())
-                (Interface.Properties.list_bound_closure state.lookups.interface ~self:inner_type
-                   trait);
-            true
-          end);
       any_type
   | _ ->
       ignore (Hooks.check_expression state env inner);

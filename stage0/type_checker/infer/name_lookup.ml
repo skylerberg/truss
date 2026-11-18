@@ -380,38 +380,49 @@ and list_trait_static_methods (state : State.state) path name receiver =
 
 and resolve_evidence state (value : Syntax.expression) self_type (reference : Types.trait_reference)
     =
-  State.defer state (fun () ->
-      let self_type = State.zonk state self_type in
-      let reference = State.solve_trait_arguments state self_type reference in
-      if
-        Types.contains_unsolved self_type
-        || List.exists Types.is_unsolved_argument reference.trait_arguments
-      then false
-      else begin
-        (match State.find_evidence state self_type reference with
-        | Some evidence -> (
-            match state.tables.calls.(value.id) with
-            | Some ({ callee = Trait_method method_; _ } as call) ->
-                state.tables.calls.(value.id) <-
-                  Some
+  Solver.require state self_type reference
+    ~on_met:(fun evidence ->
+      match state.tables.calls.(value.id) with
+      | Some ({ callee = Trait_method method_; _ } as call) ->
+          state.tables.calls.(value.id) <-
+            Some
+              {
+                call with
+                callee =
+                  Trait_method
                     {
-                      call with
-                      callee =
-                        Trait_method
-                          {
-                            method_ with
-                            trait = reference;
-                            evidence = State.convert_evidence evidence;
-                          };
-                    }
-            | _ -> ())
-        | None ->
-            if not (Types.is_error self_type) then
-              State.report state No_impl (State.read_span state value.id)
-                (Printf.sprintf "`%s` does not implement `%s`." (Types.show self_type)
-                   (Types.show_trait reference)));
-        true
-      end)
+                      method_ with
+                      trait = Unify.zonk_trait state.unifier reference;
+                      evidence = State.convert_evidence evidence;
+                    };
+              }
+      | _ -> State.raise_bug "evidence for a call that is not of a trait method")
+    ~on_unmet:(fun self_type _ ->
+      State.add_diagnostic state No_impl (State.read_span state value.id)
+        (Printf.sprintf "`%s` does not implement `%s`." (Types.show self_type)
+           (Types.show_trait (Unify.zonk_trait state.unifier reference))))
+
+and name_unknown_associated_types state self_type (reference : Types.trait_reference) result =
+  let self_type = State.zonk state self_type in
+  let associated = ref [] in
+  let result =
+    Types.map
+      (function
+        | Types.Projection { base; trait; name }
+          when Path.equal trait.trait reference.trait
+               && Types.equal (State.zonk state base) self_type
+               && Unify.list_unknowns state.unifier self_type <> [] ->
+            Some
+              (match List.assoc_opt name !associated with
+              | Some variable -> variable
+              | None ->
+                  let variable = State.make_fresh_type state in
+                  associated := (name, variable) :: !associated;
+                  variable)
+        | _ -> None)
+      (State.normalize state result)
+  in
+  (result, { reference with associated = List.rev !associated })
 
 and list_trait_candidates (state : State.state) receiver_type name =
   let with_method (trait : Types.trait_reference) =

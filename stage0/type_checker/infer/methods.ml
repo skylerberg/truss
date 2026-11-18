@@ -436,8 +436,6 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
             let mode =
               Calls.check_argument state env first.value parameter ~has_generic_type:false
             in
-            ignore
-              (State.decide_default_literal state ~at:(State.read_span state value.id) self_type);
             ([ { Tables.expression = first.value.id; core_argument_index = 0; mode } ], rest)
         | [] -> ([], []))
     | None -> ([], arguments)
@@ -449,7 +447,10 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
   with
   | Error error -> error
   | Ok (checked, left_out) ->
-      let result = Types.extract_result_type instance.signature.output in
+      let result, reference =
+        Name_lookup.name_unknown_associated_types state self_type reference
+          (Types.extract_result_type instance.signature.output)
+      in
       Modes.note_lending state value instance.signature.output;
       state.tables.calls.(value.id) <-
         Some
@@ -461,7 +462,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
           };
       Form.register_call state value;
       Name_lookup.resolve_evidence state value self_type reference;
-      State.normalize state result
+      result
 
 and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_arguments
     (member : Syntax.name) arguments =
@@ -521,10 +522,7 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
 
 and check_method_call state env ?expected (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) ~type_arguments arguments =
-  let receiver_type =
-    State.decide_default_literal state ~at:(State.read_span state value.id)
-      (State.normalize state (Hooks.check_expression state env base))
-  in
+  let receiver_type = State.normalize state (Hooks.check_expression state env base) in
   let has_mode_keyword = List.mem_assoc value.id state.keyword_modes in
   let lent_mode = if has_mode_keyword then None else Modes.find_lent_mode state base in
   let wanted : Path.receiver =
@@ -591,7 +589,16 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
         arguments;
       receiver_type
   | _ -> (
-      match Name_lookup.resolve_overloads state receiver_type member.text with
+      let receiver_type, overloads =
+        match (receiver_type, Name_lookup.resolve_overloads state receiver_type member.text) with
+        | Types.Literal _, Ok Absent ->
+            let decided =
+              Solver.decide_for_method_call state ~at:(State.read_span state value.id) receiver_type
+            in
+            (decided, Name_lookup.resolve_overloads state decided member.text)
+        | lookup -> lookup
+      in
+      match overloads with
       | Ok (Hidden hidden) ->
           Calls.check_arguments_alone state env arguments
             (Members.make_hidden_error state (State.read_span state member.id) hidden)
@@ -751,7 +758,10 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
           with
           | Error error -> error
           | Ok (checked, left_out) ->
-              let result = Types.extract_result_type instance.signature.output in
+              let result, trait =
+                Name_lookup.name_unknown_associated_types state receiver_type trait
+                  (Types.extract_result_type instance.signature.output)
+              in
               Modes.note_lending state value instance.signature.output;
               let receiver_argument =
                 {
@@ -770,4 +780,4 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                   };
               Form.register_call state value;
               Name_lookup.resolve_evidence state value receiver_type trait;
-              State.normalize state result))
+              result))

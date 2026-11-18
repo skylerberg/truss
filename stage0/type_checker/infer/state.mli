@@ -19,14 +19,28 @@ type subset_constraint = {
   report_missing : Types.capability_set -> unit;
 }
 
+type requirement =
+  | Implements of {
+      trait : Types.trait_reference;
+      on_met : Interface.Impls.evidence -> unit;
+      on_unmet : Types.ty -> (string * Types.ty) option -> Diagnostic.reported;
+    }
+  | Satisfies of {
+      holds : Types.ty -> bool;
+      on_met : Types.ty -> unit;
+      on_unmet : Types.ty -> Diagnostic.reported;
+    }
+
+type obligation = { subject : Types.ty; requirement : requirement }
+
 type frame = {
   first_variable : int;
   mutable recorded_expressions : int list;
   mutable recorded_loops : (Syntax.id * Syntax.id) list;
   mutable bindings : int list;
   mutable declared : int list;
-  mutable deferred_checks : (unit -> bool) list;
-  mutable reported_unmet_bounds : (Types.ty * Types.trait_reference) list;
+  mutable obligations : obligation list;
+  mutable reported_unmet_bounds : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
   mutable compiled_expressions : int list;
   mutable compiled_bindings : int list;
   mutable specification_only_report : Diagnostic.reported option;
@@ -88,7 +102,17 @@ type state = {
   mutable undecided : undecided_literal list;
   decisions : (int, literal_decision) Hashtbl.t;
   annotatable : (Syntax.id, unit) Hashtbl.t;
+  mutable elaborations : (unit -> unit) list;
 }
+
+val add_diagnostic :
+  state ->
+  ?notes:(Source.Definition_span.t * string) list ->
+  ?fixes:Source.Definition_span.t Diagnostic.fix list ->
+  Diagnostic.Code.types ->
+  Source.Definition_span.t ->
+  string ->
+  Diagnostic.reported
 
 val report :
   state ->
@@ -140,7 +164,9 @@ val record : state -> Syntax.expression -> Types.ty -> unit
 val record_loop : state -> loop:Syntax.id -> iterable:Syntax.expression -> Tables.loop -> unit
 val note_compiled_expression : state -> env -> Syntax.expression -> unit
 val report_specification_only : state -> Source.Definition_span.t -> string -> Diagnostic.reported
-val defer : state -> (unit -> bool) -> unit
+val check_compiled_binding : state -> Syntax.id -> unit
+val check_compiled_expression : state -> Syntax.id -> unit
+val compare_in_source_order : state -> Syntax.id -> Syntax.id -> int
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty
 val make_fresh_type : state -> Types.ty
@@ -148,12 +174,14 @@ val is_integer_type : state -> Types.ty -> bool
 val is_signed_type : state -> Types.ty -> bool
 val lookup_bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Types.ty -> Types.ty
+val resolve_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_type : state -> Types.ty -> Types.ty
 val finalize_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_argument : state -> Types.argument -> Types.argument
 val finalize_instantiation : state -> Types.instantiation -> Types.instantiation
 val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
+val normalize_trait : state -> Types.trait_reference -> Types.trait_reference
 val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impls.evidence option
 val solve_trait_arguments : state -> Types.ty -> Types.trait_reference -> Types.trait_reference
 
@@ -179,7 +207,6 @@ val make_call :
 val convert_evidence : Interface.Impls.evidence -> Tables.evidence
 val make_trait_reference : arguments:Types.argument list -> Path.t -> Types.trait_reference
 val string_type : Types.ty
-val run_in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) -> 'a
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
 val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
@@ -189,7 +216,6 @@ val declare_compiled :
   state -> env -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> unit
 
 val find_target : state -> Syntax.name -> Resolve.target option
-val decide_default_literal : state -> at:Source.Definition_span.t -> Types.ty -> Types.ty
 val find_head : state -> Syntax.expression -> Resolve.head option
 val is_variant_name : Syntax.name -> bool
 val show : state -> Types.ty -> string
