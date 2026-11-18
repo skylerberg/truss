@@ -23,12 +23,10 @@ type t = {
   mutable registered : unit Keys.t;
   mutable environments : (string * Lowered.ty) list Keys.t;
   mutable references : key list option;
-  mutable helpers_used : string list;
 }
 
 val create : Memory_layout.env -> t
 val add_environment : t -> key -> (string * Lowered.ty) list -> unit
-val use_helper : t -> string -> string
 val register : t -> Keys.key -> unit
 val compute_layout : t -> Ground.ty -> Memory_layout.t
 val is_struct : t -> Ground.ty -> bool

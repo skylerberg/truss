@@ -43,6 +43,35 @@ let is_signed : Memory_layout.integer -> bool = function
   | Int8 | Int16 | Int32 | Int64 -> true
   | UInt8 | UInt16 | UInt32 | UInt64 -> false
 
+let lend_structs =
+  {|struct t_lend_deferred {
+  struct t_lend_deferred *next;
+  void (*drop)(void *);
+  void *target;
+  const void *source;
+  uint64_t size;
+};
+struct t_lend_block {
+  struct t_lend_block *next;
+};
+struct t_lend {
+  struct t_lend_deferred *deferred;
+  struct t_lend_block *blocks;
+  uint64_t used;
+  uint64_t lends;
+  _Alignas(16) uint8_t storage[128];
+};
+struct t_lend_mark {
+  struct t_lend_deferred *deferred_before;
+  struct t_lend_deferred *deferred_after;
+  struct t_lend_block *blocks_before;
+  struct t_lend_block *blocks_after;
+  uint64_t used_before;
+  uint64_t used_after;
+  uint8_t is_lent;
+};
+|}
+
 let runtime_declarations =
   String.concat ""
     [
@@ -87,38 +116,13 @@ let runtime_declarations =
       "void t_runtime_run_test(uint32_t index);\n";
       "void t_runtime_report_tests_to(int32_t descriptor);\n";
       "uint64_t t_runtime_live_blocks(void);\n";
+      lend_structs;
     ]
 
 let helpers =
   [
     ( "t_lend",
-      {|struct t_lend_deferred {
-  struct t_lend_deferred *next;
-  void (*drop)(void *);
-  void *target;
-  const void *source;
-  uint64_t size;
-};
-struct t_lend_block {
-  struct t_lend_block *next;
-};
-struct t_lend {
-  struct t_lend_deferred *deferred;
-  struct t_lend_block *blocks;
-  uint64_t used;
-  uint64_t lends;
-  _Alignas(16) uint8_t storage[128];
-};
-struct t_lend_mark {
-  struct t_lend_deferred *deferred_before;
-  struct t_lend_deferred *deferred_after;
-  struct t_lend_block *blocks_before;
-  struct t_lend_block *blocks_after;
-  uint64_t used_before;
-  uint64_t used_after;
-  uint8_t is_lent;
-};
-__attribute__((unused)) static inline void *t_lend_allocate(struct t_lend *lend, uint64_t size, uint64_t alignment) {
+      {|__attribute__((unused)) static inline void *t_lend_allocate(struct t_lend *lend, uint64_t size, uint64_t alignment) {
   uint64_t start = (lend->used + alignment - 1) & ~(alignment - 1);
   if (alignment <= 16 && start + size <= sizeof lend->storage) {
     lend->used = start + size;
