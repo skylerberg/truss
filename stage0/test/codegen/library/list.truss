@@ -289,8 +289,8 @@ test "get, first, and last lend an element, or nothing when there is none" {
 
 test "split_first and split_last lend one element and view the rest" {
   let items: List[Int64] = [1, 2, 3]
-  assert items.split_first() is Some(split) && split.first == 1 && split.rest.to_list() == [2, 3]
-  assert items.split_last() is Some(split) && split.last == 3 && split.rest.to_list() == [1, 2]
+  assert items.split_first() is Some(split) && split.first == 1 && split.rest == [2, 3]
+  assert items.split_last() is Some(split) && split.last == 3 && split.rest == [1, 2]
   let one: List[Int64] = [5]
   assert one.split_first() is Some(split) && split.first == 5 && split.rest.length() == 0
   let none: List[Int64] = []

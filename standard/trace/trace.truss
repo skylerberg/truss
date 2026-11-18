@@ -40,10 +40,10 @@ public fn Context.parse(header: StringSlice) -> Option[Context] {
     return None
   }
   let version = field(text, from: 0, length: 2)?
-  if version == "ff".slice() {
+  if version == "ff" {
     return None
   }
-  if version == "00".slice() && text.length() != 55 {
+  if version == "00" && text.length() != 55 {
     return None
   }
   if text.length() > 55 && bytes[55] != 45 {

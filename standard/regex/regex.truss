@@ -86,7 +86,7 @@ public fn Captures.named(self, name: StringSlice) -> Option[Match]
     invariant index <= self.names.length()
     decreases self.names.length() - index
   {
-    if self.names[index].slice() == name && name.length() > 0 {
+    if self.names[index] == name && name.length() > 0 {
       return self.get(index + 1)
     }
     index += 1

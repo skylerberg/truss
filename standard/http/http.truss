@@ -38,23 +38,23 @@ public type Method =
 public fn Method.from_name(name: StringSlice) -> Method
   cost time finite
 {
-  if name == "GET".slice() {
+  if name == "GET" {
     Method.Get
-  } else if name == "HEAD".slice() {
+  } else if name == "HEAD" {
     Method.Head
-  } else if name == "POST".slice() {
+  } else if name == "POST" {
     Method.Post
-  } else if name == "PUT".slice() {
+  } else if name == "PUT" {
     Method.Put
-  } else if name == "PATCH".slice() {
+  } else if name == "PATCH" {
     Method.Patch
-  } else if name == "DELETE".slice() {
+  } else if name == "DELETE" {
     Method.Delete
-  } else if name == "OPTIONS".slice() {
+  } else if name == "OPTIONS" {
     Method.Options
-  } else if name == "CONNECT".slice() {
+  } else if name == "CONNECT" {
     Method.Connect
-  } else if name == "TRACE".slice() {
+  } else if name == "TRACE" {
     Method.Trace
   } else {
     Method.Other(name: name.to_string())
@@ -243,7 +243,7 @@ public fn Request.query_parameter(self, name: StringSlice) -> Option[String] {
     Some(query) => match url::decode_query(query) {
       Ok(parameters) => {
         for parameter in parameters {
-          if parameter.name.slice() == name {
+          if parameter.name == name {
             return Some(parameter.value.copy())
           }
         }
@@ -673,7 +673,7 @@ fn is_compressible(content_type: Option[StringSlice]) -> Bool {
 }
 
 internal fn encoded_body(bytes: Slice[UInt8], coding: StringSlice) -> List[UInt8] {
-  if coding == "zstd".slice() {
+  if coding == "zstd" {
     zstd::compress(bytes)
   } else {
     compression::compress(bytes, format: compression::Format.Gzip, level: compression::Level.Fastest)
@@ -905,14 +905,14 @@ fn read_head[Stream: streams::Duplex](
     return Err(malformed("a request line that is not a method, a target, and a version"))
   }
   let version = parts[2]
-  if version != "HTTP/1.1".slice() && version != "HTTP/1.0".slice() {
+  if version != "HTTP/1.1" && version != "HTTP/1.0" {
     return Err(Error.Unsupported(message: "an HTTP version other than 1.0 and 1.1"))
   }
   let headers = read_headers(connection, inbox: mut inbox, budget: mut budget)?
   Ok(Some(Head(
     method: Method.from_name(parts[0]),
     target: parts[1].to_string(),
-    version_one_zero: version == "HTTP/1.0".slice(),
+    version_one_zero: version == "HTTP/1.0",
     headers: own headers,
   )))
 }
@@ -1640,23 +1640,23 @@ fn arrived_of(fields: Slice[hpack::Field]) -> Result[Arrived, Status] {
       if is_regular {
         return Err(Status.bad_request)
       }
-      if name == ":method".slice() && method is None {
+      if name == ":method" && method is None {
         method = Some(field.value.copy())
-      } else if name == ":path".slice() && path is None && !field.value.is_empty() {
+      } else if name == ":path" && path is None && !field.value.is_empty() {
         path = Some(field.value.copy())
-      } else if name == ":authority".slice() && authority is None {
+      } else if name == ":authority" && authority is None {
         authority = Some(field.value.copy())
-      } else if name == ":scheme".slice() && !has_scheme {
+      } else if name == ":scheme" && !has_scheme {
         has_scheme = true
       } else {
         return Err(Status.bad_request)
       }
     } else {
       is_regular = true
-      if has_uppercase(name) || is_connection_specific(name) || (name == "te".slice() && field.value != "trailers") {
+      if has_uppercase(name) || is_connection_specific(name) || (name == "te" && field.value != "trailers") {
         return Err(Status.bad_request)
       }
-      if name == "cookie".slice() {
+      if name == "cookie" {
         mut cookies.push(field.value.copy())
       } else {
         mut headers.add(name, value: field.value.slice())
@@ -1938,7 +1938,7 @@ public opaque type Parameters(names: List[String], values: List[String])
 
 public fn Parameters.get(self, name: StringSlice) -> Option[StringSlice] {
   for index in 0..self.names.length() {
-    if self.names[index].slice() == name && index < self.values.length() {
+    if self.names[index] == name && index < self.values.length() {
       return Some(self.values[index].slice())
     }
   }
@@ -2016,7 +2016,7 @@ fn parse_route(text: StringSlice) -> Option[Route]
         return None
       }
       for known in names {
-        if known.slice() == name {
+        if known == name {
           return None
         }
       }
@@ -2082,7 +2082,7 @@ public fn Request.matches(self, route: Route) -> Option[Parameters] {
   for segment in route.segments {
     match segment {
       Fixed(text) => {
-        if index >= pieces.length() || pieces[index] != text.slice() {
+        if index >= pieces.length() || pieces[index] != text {
           return None
         }
         index += 1
@@ -2200,7 +2200,7 @@ fn is_excluded(excluded: Slice[String], host: StringSlice) -> Bool {
   let bare = name.strip_suffix("]").unwrap_or(name).to_ascii_lowercase()
   for entry in excluded {
     let listed = entry.slice()
-    if listed == "*".slice() {
+    if listed == "*" {
       return true
     }
     match network_of(listed) {
@@ -2218,7 +2218,7 @@ fn is_excluded(excluded: Slice[String], host: StringSlice) -> Bool {
       None => {}
     }
     let suffix = listed.strip_prefix(".").unwrap_or(listed)
-    if bare.slice() == suffix || (bare.slice().ends_with(suffix) && bare.slice().ends_with(".${suffix}".slice())) {
+    if bare == suffix || (bare.slice().ends_with(suffix) && bare.slice().ends_with(".${suffix}".slice())) {
       return true
     }
   }
@@ -2278,7 +2278,7 @@ fn content_codings(header: Option[StringSlice]) -> List[String] {
     Some(value) => {
       for part in value.split(",") {
         let coding = part.trim().to_ascii_lowercase()
-        if !coding.is_empty() && coding.slice() != "identity".slice() {
+        if !coding.is_empty() && coding != "identity" {
           mut codings.push(own coding)
         }
       }
@@ -2289,18 +2289,18 @@ fn content_codings(header: Option[StringSlice]) -> List[String] {
 }
 
 fn is_decodable(coding: StringSlice) -> Bool {
-  coding == "gzip".slice() || coding == "x-gzip".slice() || coding == "br".slice() || coding == "zstd".slice()
+  coding == "gzip" || coding == "x-gzip" || coding == "br" || coding == "zstd"
 }
 
 fn decoded_body(bytes: Slice[UInt8], coding: StringSlice, limit: UInt64) -> Result[List[UInt8], Error] {
-  if coding == "br".slice() {
+  if coding == "br" {
     return match brotli::decompress(bytes, limit: limit) {
       Ok(plain) => Ok(own plain)
       Err(TooLarge(_)) => Err(Error.BodyTooLarge)
       Err(_) => Err(malformed("a Brotli body that does not decompress"))
     }
   }
-  if coding == "zstd".slice() {
+  if coding == "zstd" {
     return match zstd::decompress(bytes, limit: limit) {
       Ok(plain) => Ok(own plain)
       Err(TooLarge(_)) => Err(Error.BodyTooLarge)
@@ -2608,7 +2608,7 @@ fn open_link(
   let route = proxy_for(options, host: host, is_secure: is_secure)
   var connection = match route {
     Some(proxy) => {
-      if proxy.scheme() != "http".slice() {
+      if proxy.scheme() != "http" {
         return Err(Error.Unsupported(message: "a proxy whose scheme is not http"))
       }
       let proxy_host = match proxy.host() {
@@ -2656,7 +2656,7 @@ fn is_idempotent(method: Method) -> Bool {
 
 fn take_pooled(pool: mut List[Pooled], origin: StringSlice) -> Option[Link] {
   for index in 0..pool.length() {
-    if index < pool.length() && pool[index].origin.slice() == origin {
+    if index < pool.length() && pool[index].origin == origin {
       let pooled = mut pool.remove_at(index)
       return Some(own pooled.link)
     }
@@ -2682,8 +2682,8 @@ fn keep(pool: mut List[Pooled], origin: own String, link: own Option[Link], limi
 type Target(is_secure: Bool, host: String, port: UInt16, origin: String)
 
 fn target_of(address: url::Url) -> Result[Target, Error] {
-  let is_secure = address.scheme() == "https".slice()
-  if !is_secure && address.scheme() != "http".slice() {
+  let is_secure = address.scheme() == "https"
+  if !is_secure && address.scheme() != "http" {
     return Err(Error.Unsupported(message: "a URL whose scheme is not http or https"))
   }
   let host = match address.host() {
@@ -3258,7 +3258,7 @@ fn offered_protocol(header: Option[StringSlice], protocols: Slice[String]) -> Op
       for part in value.split(",") {
         let name = part.trim()
         for protocol in protocols {
-          if protocol.slice() == name {
+          if protocol == name {
             return Some(protocol.copy())
           }
         }
@@ -3285,7 +3285,7 @@ public fn websocket(
     let _ = mut responder.send(Response.text("a WebSocket upgrade is expected here", status: Status.bad_request))
     return Err(malformed("a request that is not a WebSocket upgrade"))
   }
-  if request.headers.get("Sec-WebSocket-Version").unwrap_or("".slice()).trim() != "13".slice() {
+  if request.headers.get("Sec-WebSocket-Version").unwrap_or("".slice()).trim() != "13" {
     let refused = Response.text("only WebSocket version 13 is supported", status: Status(code: 426)).with_header("Sec-WebSocket-Version", value: "13")
     let _ = mut responder.send(own refused)
     return Err(Error.Unsupported(message: "a WebSocket version other than 13"))
@@ -3419,19 +3419,19 @@ fn parse_field(parser: mut EventParser, line: StringSlice) {
   if value.starts_with(" ") {
     value = value.part(1, to: value.length())
   }
-  if field == "data".slice() {
+  if field == "data" {
     if parser.has_data {
       mut parser.data.push("\n")
     }
     mut parser.data.push(value)
     parser.has_data = true
-  } else if field == "event".slice() {
+  } else if field == "event" {
     parser.name = Some(value.to_string())
-  } else if field == "id".slice() {
+  } else if field == "id" {
     if !value.contains("\u{0}") {
       parser.id = Some(value.to_string())
     }
-  } else if field == "retry".slice() {
+  } else if field == "retry" {
     match UInt64.parse(value) {
       Ok(milliseconds) => parser.retry = Some(milliseconds)
       Err(_) => {}
@@ -3573,8 +3573,8 @@ public fn Client.websocket[Output](
 ) -> Result[Output, Error]
   uses NetworkClient, Handles, Tasks, Random, Clock, Panic, generic Granted
 {
-  let is_secure = url.scheme() == "wss".slice()
-  if !is_secure && url.scheme() != "ws".slice() {
+  let is_secure = url.scheme() == "wss"
+  if !is_secure && url.scheme() != "ws" {
     return Err(Error.Unsupported(message: "a WebSocket URL whose scheme is not ws or wss"))
   }
   let host = match url.host() {

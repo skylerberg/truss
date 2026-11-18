@@ -59,9 +59,9 @@ fn bytes_of(value: json::Value, name: StringSlice) -> Result[List[UInt8], Error]
 }
 
 fn curve_named(name: StringSlice) -> Result[cryptography::Curve, Error] {
-  if name == "P-256".slice() {
+  if name == "P-256" {
     Ok(cryptography::Curve.P256)
-  } else if name == "P-384".slice() {
+  } else if name == "P-384" {
     Ok(cryptography::Curve.P384)
   } else {
     Err(Error(message: "the curve ${name}, which is not supported"))
@@ -345,7 +345,7 @@ public fn KeySet.find(self, id: StringSlice) -> Option[Key] {
   for key in self.keys {
     match key.id {
       Some(key_id) => {
-        if key_id.slice() == id {
+        if key_id == id {
           return Some(key.copy())
         }
       }

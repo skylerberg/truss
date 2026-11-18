@@ -410,7 +410,7 @@ fn command[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, line: Stri
 fn has_extension(reply: Reply, name: StringSlice) -> Bool {
   for line in reply.lines {
     let upper = line.slice().to_ascii_uppercase()
-    if upper.slice() == name || upper.slice().starts_with("${name} ".slice()) {
+    if upper == name || upper.slice().starts_with("${name} ".slice()) {
       return true
     }
   }

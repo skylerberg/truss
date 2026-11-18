@@ -59,7 +59,7 @@ test "a reader that gives a little at a time is read to an exact count, to its e
     var source = drip("hello world", step: 3)
     var buffer: List[UInt8] = []
     assert mut source.read_exactly(mut buffer, count: 5) is Ok(_)
-    assert buffer == "hello".to_bytes()
+    assert buffer == "hello".bytes()
     assert mut source.skip(1) == Ok(1)
     assert mut source.read_text() == Ok("world")
     assert mut source.read_to_end(mut buffer) == Ok(0)
@@ -68,7 +68,7 @@ test "a reader that gives a little at a time is read to an exact count, to its e
     var whole = drip("abcdefgh", step: 3)
     var all: List[UInt8] = [33]
     assert mut whole.read_to_end(mut all) == Ok(8)
-    assert all == "!abcdefgh".to_bytes()
+    assert all == "!abcdefgh".bytes()
     var broken = Drip(bytes: [104, 255], position: 0, step: 5)
     assert mut broken.read_text() == Err(SystemError.InvalidData)
   }
@@ -122,16 +122,16 @@ test "a buffered reader reads up to a byte, peeks at the next bytes, and returns
     var reader = streams::BufferedReader.new(drip("key=value;rest", step: 5), capacity: 4)
     var buffer: List[UInt8] = []
     assert mut reader.read_until(61, buffer: mut buffer) == Ok(4)
-    assert buffer == "key=".to_bytes()
+    assert buffer == "key=".bytes()
     assert mut reader.peek(3) == Ok("val".bytes())
     assert mut reader.peek(3) == Ok("val".bytes())
     mut buffer.clear()
     assert mut reader.read_until(59, buffer: mut buffer) == Ok(6)
-    assert buffer == "value;".to_bytes()
+    assert buffer == "value;".bytes()
     mut buffer.clear()
     assert mut reader.read(mut buffer, limit: 2) == Ok(2)
     assert mut reader.read_until(59, buffer: mut buffer) == Ok(2)
-    assert buffer == "rest".to_bytes()
+    assert buffer == "rest".bytes()
     assert mut reader.read_until(59, buffer: mut buffer) == Ok(0)
     assert mut reader.peek(5) is Ok(coming) && coming.length() == 0
     let source = own reader.finish()
@@ -147,12 +147,12 @@ test "a buffered writer holds bytes until it has no more room, or is flushed" {
     assert mut writer.write_line("fghij") is Ok(_)
     assert mut writer.flush() is Ok(_)
     let sink = own writer.finish()
-    assert sink.received == "abcdefghij\n".to_bytes()
+    assert sink.received == "abcdefghij\n".bytes()
     var slow = streams::BufferedWriter.new(Trickle(received: [], step: 1), capacity: 3)
     assert mut slow.write_all("abcdefg".bytes()) is Ok(_)
     assert mut slow.flush() is Ok(_)
     let trickled = own slow.finish()
-    assert trickled.received == "abcdefg".to_bytes()
+    assert trickled.received == "abcdefg".bytes()
   }
 }
 
@@ -165,7 +165,7 @@ test "copy moves every byte, and a limited reader stops at its limit" {
     var limited = streams::Limited.new(drip("0123456789", step: 3), limit: 4)
     var buffer: List[UInt8] = []
     assert mut limited.read_to_end(mut buffer) == Ok(4)
-    assert buffer == "0123".to_bytes()
+    assert buffer == "0123".bytes()
     let rest = own limited.finish()
     assert rest.position == 4
   }

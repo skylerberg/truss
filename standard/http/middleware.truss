@@ -18,7 +18,7 @@ fn allowed_origin(policy: CorsPolicy, origin: StringSlice) -> Option[String] {
     if allowed == "*" {
       return Some(if policy.allow_credentials { origin.to_string() } else { "*" })
     }
-    if allowed.slice() == origin {
+    if allowed == origin {
       return Some(origin.to_string())
     }
   }

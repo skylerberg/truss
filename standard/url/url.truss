@@ -779,7 +779,7 @@ public fn Url.query_parameter(self, name: StringSlice) -> Option[String]
 {
   let parameters = self.query_parameters()
   for index in 0..parameters.length() {
-    if parameters[index].name.slice() == name {
+    if parameters[index].name == name {
       return Some(parameters[index].value.copy())
     }
   }

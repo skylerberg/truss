@@ -1003,7 +1003,10 @@ cannot be trusted to remember one table (*LLM habits*).
 **An arithmetic operator calls a trait with a type parameter for its right
 operand,** because times, geometry, and money need mixed types, as in
 `instant + duration`. A comparison takes one type on both sides, because the
-laws of `Equal` and `Ordered` relate a type to itself.
+laws of `Equal` and `Ordered` relate a type to itself. A `List`, an `Array`,
+or a `String` compared with its view is viewed first. The view allocates
+nothing and compares the same elements. Without this conversion, tests wrote
+helpers with `Slice` parameters to get the one that a call makes.
 
 **An operator trait states the domain of its operation.** If `add` promised
 a result for every pair of values, the `impl` for a fixed-width integer

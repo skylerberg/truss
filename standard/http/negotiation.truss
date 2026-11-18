@@ -62,7 +62,7 @@ fn media_specificity(range: StringSlice, offered_type: StringSlice) -> Option[UI
     Some(at) => offered_type.split_at(at).first.trim()
     None => offered_type
   }
-  if range == "*/*".slice() {
+  if range == "*/*" {
     return Some(0)
   }
   if range.ends_with("/*") {
@@ -73,7 +73,7 @@ fn media_specificity(range: StringSlice, offered_type: StringSlice) -> Option[UI
 }
 
 fn language_specificity(range: StringSlice, offered: StringSlice) -> Option[UInt8] {
-  if range == "*".slice() {
+  if range == "*" {
     return Some(0)
   }
   if range == offered {
@@ -87,7 +87,7 @@ fn language_specificity(range: StringSlice, offered: StringSlice) -> Option[UInt
 }
 
 fn coding_specificity(range: StringSlice, offered: StringSlice) -> Option[UInt8] {
-  if range == "*".slice() {
+  if range == "*" {
     Some(0)
   } else if range == offered {
     Some(1)
