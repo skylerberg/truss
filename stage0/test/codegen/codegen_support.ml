@@ -17,8 +17,8 @@ let render_records records =
   in
   String.concat ""
     (List.mapi
-       (fun index (record : Compile.record) ->
-         Printf.sprintf "test %d %s\n" index (Compile.show_outcome record.outcome)
+       (fun index (record : Backend.Test_report.record) ->
+         Printf.sprintf "test %d %s\n" index (Backend.Test_report.show_outcome record.outcome)
          ^ render_block "message" record.message
          ^ render_block "echo" record.echo
          ^ render_block "output" record.output)
@@ -39,10 +39,7 @@ let uint8 = named "UInt8"
 let option value = named "Option" ~arguments:[ Type value ]
 let list element = named "List" ~arguments:[ Type element ]
 let array element count = named "Array" ~arguments:[ Type element; Value (Z.of_int count) ]
-
-let host =
-  match Libc.host with Some os -> os | None -> failwith "these tests run only on Linux and macOS"
-
+let host = match Libc.host with Ok system -> system | Error message -> failwith message
 let field name ty = (name, Memory_layout.Typed ty)
 
 let variant ?(indirect = false) name fields : Memory_layout.variant_shape =
@@ -102,7 +99,7 @@ type function_ = {
   blocks : block list;
 }
 
-type instance = Memory_layout.env -> Emit_c.Builder.instance
+type item = Memory_layout.env -> Emit_c.Builder.item_code
 
 let local ?name ty = { ty; name }
 let value ty = Lowered.Value ty
@@ -115,7 +112,7 @@ let block statements terminator = { statements; terminator }
 let function_ ?(parameters = []) ?result ?(environment = []) locals blocks =
   { parameters; result; returns = true; environment; locals; blocks }
 
-let key name = Instance.Code { path = definition name; type_arguments = [] }
+let key name = Lowered.Item.Code { path = definition name; instantiation = Ground.no_instantiation }
 
 let write builder (function_ : function_) =
   List.iter
@@ -132,7 +129,7 @@ let write builder (function_ : function_) =
   ({ parameters = function_.parameters; result = function_.result; returns = function_.returns }
     : Emit_c.Builder.prototype)
 
-let instance ?(nested = []) name main : instance =
+let item ?(nested = []) name main : item =
  fun env ->
   let builder = Emit_c.Builder.create env ~key:(key name) in
   List.iteri
@@ -142,18 +139,17 @@ let instance ?(nested = []) name main : instance =
     nested;
   Emit_c.Builder.build builder (write builder main)
 
-let make_constant_instance instance : instance = fun _ -> instance
+let make_constant_item code : item = fun _ -> code
 
 let entry ?nested locals blocks =
-  instance ?nested "entry" (function_ ~result:(value int32) locals blocks)
+  item ?nested "entry" (function_ ~result:(value int32) locals blocks)
 
 let call name ?(result = Some (value int32)) ?(parameters = []) arguments place : Lowered.statement
     =
   Call
     {
       target =
-        Direct
-          { function_ = Instance (key name); signature = { parameters; result; returns = true } };
+        Direct { function_ = Item (key name); signature = { parameters; result; returns = true } };
       arguments;
       result = (match place with Some place -> Returned place | None -> Discarded);
     }
@@ -161,63 +157,43 @@ let call name ?(result = Some (value int32)) ?(parameters = []) arguments place 
 let make_shape_env ?(extra = []) () = Memory_layout.create host ~compute_shape:(compute_shape extra)
 let scratch = lazy (Harness.make_scratch_directory "codegen")
 
-let compiler =
+let c_compiler =
   lazy
-    (match Toolchain.find () with Ok toolchain -> toolchain | Error message -> failwith message)
-
-let strict =
-  lazy
-    [
-      "-Wall";
-      "-Wextra";
-      "-Wtype-limits";
-      "-Werror";
-      "-Wno-unused-parameter";
-      "-Wno-unused-but-set-variable";
-      "-Wno-array-parameter";
-      (if String.includes ~affix:"clang" (Lazy.force compiler).identity then
-         "-Wno-sometimes-uninitialized"
-       else "-Wno-maybe-uninitialized");
-    ]
+    (match C_compiler.find ~objects:(Cache.make_objects_directory (Workspace.open_cache ())) with
+    | Ok c_compiler -> C_compiler.For_testing.reject_warnings c_compiler
+    | Error message -> failwith message)
 
 let counter = ref 0
-let cache = lazy (Build.make_cache (Cache.make_objects_directory (Workspace.open_cache ())))
 
-let added_flags =
-  Toolchain.split_flags (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
-
-let settings : Build.settings Lazy.t =
-  lazy { build = Development; optimization = O1; extra = Lazy.force strict @ added_flags }
-
-let worker_counts =
-  if List.exists (String.starts_with ~prefix:"-fsanitize=") added_flags then [ 8 ]
-  else [ 1; 2; 8; 32 ]
+let list_worker_counts () =
+  if C_compiler.For_testing.has_sanitizer (Lazy.force c_compiler) then [ 8 ] else [ 1; 2; 8; 32 ]
 
 let test_position (site : Lowered.site) : Emit_c.position =
   { file = "test.truss"; line = 1; column = site.offset + 1 }
 
-let run_program ?(extra = []) ?env ?input (instances : instance list) =
+let run_program ?(extra = []) ?env ?input (items : item list) =
   incr counter;
   let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "program%d" !counter) in
   let env = match env with Some env -> env | None -> make_shape_env ~extra () in
-  let fragments =
-    List.map (fun instance -> Emit_c.make_fragment env (Code (instance env))) instances
-  in
-  let sources =
-    [
-      ("main", Startup.For_testing.render_main_start (Instance.make_symbol (key "entry")));
-      ("sites", Emit_c.render_sites_file ~resolve_position:test_position fragments);
-    ]
-  in
+  let fragments = List.map (fun item -> Emit_c.make_fragment env (Code (item env))) items in
   match
-    Build.build_program (Lazy.force compiler) (Lazy.force cache) env (Lazy.force settings)
-      ~files:[ fragments ] ~sources ~output
+    C_compiler.build_executable (Lazy.force c_compiler) O1
+      ~units:
+        [
+          ("the runtime", Startup.render_runtime ~tests:false);
+          ( "the program",
+            Emit_c.render_file env Development
+              (List.map (fun fragment -> (fragment, Emit_c.External)) fragments) );
+          ("main", Startup.For_testing.render_main_start (Emit_c.make_symbol (key "entry")));
+          ("sites", Emit_c.render_sites_file ~resolve_position:test_position fragments);
+        ]
+      ~output
   with
   | Ok () -> Process.run ?input output []
   | Error message -> failwith message
 
-let expect_status ?extra expected instances =
-  let status, _, errors = run_program ?extra instances in
+let expect_status ?extra expected items =
+  let status, _, errors = run_program ?extra items in
   if status <> expected then fail "expected status %d, got %d (%s)" expected status errors
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
@@ -230,10 +206,12 @@ let make_database ?checks packages =
 let make_example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
 
-let compile ?results ?evaluation_time_limit_ms database =
-  Compile.create ?results ?evaluation_time_limit_ms
-    (Database.make_lowering_requests database [ example.package ])
-    (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings)
+let make_backend ?results ?evaluation_time_limit_ms database =
+  Backend.create ?results ?evaluation_time_limit_ms
+    (match Database.find_lowered_lookups database [ example.package ] with
+    | Ok lookups -> lookups
+    | Error message -> failwith message)
+    (Lazy.force c_compiler) Development
 
 let load_files ?results ?(roots = []) ?checks files =
   let packages = make_example_package files in
@@ -256,7 +234,7 @@ let load_files ?results ?(roots = []) ?checks files =
           fail "the source has diagnostics:\n%s"
             (String.concat "" (List.map (Diagnostic.render source) diagnostics)))
     files;
-  (database, compile ?results database)
+  (database, make_backend ?results database)
 
 let load ?results ?roots ?checks text = load_files ?results ?roots ?checks [ (example_file, text) ]
 
@@ -269,8 +247,8 @@ let list_tests_in database (module_ : Path.module_) =
 let list_tests database = list_tests_in database example
 
 let run_source text =
-  let database, compile = load text in
-  match Compile.run_tests compile ~time_limit_ms:2000 (list_tests database) with
+  let database, backend = load text in
+  match Backend.run_tests backend ~time_limit_ms:2000 (list_tests database) with
   | Ok records -> render_records records
   | Error message -> failwith message
 
@@ -278,9 +256,9 @@ let expect_output text expected = expect_string ~expected (run_source text)
 let expect_pass name source = test name (fun () -> expect_output source "test 0 passed\n")
 
 let run_main ?(arguments = []) ?input ?checks text =
-  let _, compile = load ?checks text in
+  let _, backend = load ?checks text in
   match
-    Compile.For_testing.run_program ?input compile
+    Backend.For_testing.run_program ?input backend
       ~main:(Top { module_ = example; name = "main" })
       ~arguments
   with

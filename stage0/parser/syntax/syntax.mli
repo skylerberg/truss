@@ -44,7 +44,6 @@ and generic_parameter = generic_kind node
 and generic_kind =
   | Type_parameter of name * path_type list
   | Value_parameter of name * type_expression
-  | Capability_parameter of name
   | Generic_error
 
 and capability_reference = capability_reference_kind node
@@ -53,6 +52,7 @@ and capability_reference_kind =
   | Capability_path of path_type
   | Self_capabilities of name
   | Associated_capabilities of name * name
+  | Generic_capability of name
 
 and clause = clause_kind node
 
@@ -65,7 +65,7 @@ and clause_kind =
   | Clause_error
 
 and cost = { amortized : bool; resource : resource; bound : bound }
-and resource = Time | Allocations | Allocated_bytes | Calls of call_target
+and resource = Metric of Metric.t | Calls of call_target
 
 and call_target =
   | Call_parameter of name

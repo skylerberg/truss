@@ -32,8 +32,8 @@ module Stored_table = Make_table (struct
   type t = Part.any
 end)
 
-module Instance_table = Make_table (Instance)
-module References = Graph.Make (Instance)
+module Item_table = Make_table (Lowered.Item)
+module References = Graph.Make (Lowered.Item)
 
 module Entry = struct
   type t =
@@ -68,11 +68,11 @@ type t = {
   stale : unit Stored_table.t Package_stage_table.t;
   implied : Part.any list Package_table.t;
   graphs : Call_graph.t Package_table.t;
-  lowering : Compile.Lookups.settings option;
-  instance_values : binding Stored_table.t;
+  lowering : (Backend.Lookups.settings, string) result;
+  item_values : binding Stored_table.t;
   references : References.t;
-  claimants : Part.t list Instance_table.t;
-  claimed_roots : Instance.key list Part_table.t;
+  claimants : Part.t list Item_table.t;
+  claimed_roots : Lowered.Item.t list Part_table.t;
   unsaved : unit Entry_table.t;
 }
 
@@ -189,10 +189,10 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       stale = Package_stage_table.create 64;
       implied = Package_table.create 8;
       graphs = Package_table.create 8;
-      lowering = Option.map (fun system -> { Compile.Lookups.checks; system }) Libc.host;
-      instance_values = Stored_table.create 2048;
+      lowering = Result.map (fun system -> { Backend.Lookups.checks; system }) Libc.host;
+      item_values = Stored_table.create 2048;
       references = References.create ~tracks_blocked:false;
-      claimants = Instance_table.create 64;
+      claimants = Item_table.create 64;
       claimed_roots = Part_table.create 64;
       unsaved = Entry_table.create 4096;
     }
@@ -244,9 +244,9 @@ let copy database =
     implied = Package_table.copy database.implied;
     graphs;
     lowering = database.lowering;
-    instance_values = Stored_table.copy database.instance_values;
+    item_values = Stored_table.copy database.item_values;
     references = References.copy database.references;
-    claimants = Instance_table.copy database.claimants;
+    claimants = Item_table.copy database.claimants;
     claimed_roots = Part_table.copy database.claimed_roots;
     unsaved = Entry_table.create 64;
   }
@@ -348,7 +348,7 @@ let obtain_call_graph database package =
 
 let locate_values database (Part.Any typed as part) =
   match typed with
-  | Lowered _ | Test_key _ -> database.instance_values
+  | Lowered _ | Test_key _ -> database.item_values
   | _ -> (obtain_owner database (Part.locate_package part)).values
 
 let find_stored (type a) database (typed : a Part.stored) : a part option =
@@ -362,21 +362,22 @@ let find_stored (type a) database (typed : a Part.stored) : a part option =
           Compiler_bug.raise_bug ~stage:"Database" "%s holds a value of another kind"
             (Part.show (Stored part)))
 
-let list_instance_parts key = [ Part.Any (Lowered key); Part.Any (Test_key key) ]
+let list_item_parts key = [ Part.Any (Lowered key); Part.Any (Test_key key) ]
 
-let create_instance database key =
+let create_item database key =
   List.iter
     (fun part ->
-      if not (is_stale database part || Stored_table.mem database.instance_values part) then
+      if not (is_stale database part || Stored_table.mem database.item_values part) then
         mark_stale database part)
-    (list_instance_parts key)
+    (list_item_parts key)
 
 let list_call_edges = function
   | Some (Value edges) -> edges
   | Some (Failed _ | Blocked) | None -> []
 
 let list_lowered_references = function
-  | Some (Value (Ok lowered)) -> List.sort_uniq Instance.compare (Compile.list_references lowered)
+  | Some (Value (Ok lowered)) ->
+      List.sort_uniq Lowered.Item.compare (Backend.list_references lowered)
   | Some (Value (Error _) | Failed _ | Blocked) | None -> []
 
 let update_indexes (type a) database (part : a Part.stored) ~(before : a part option)
@@ -389,7 +390,7 @@ let update_indexes (type a) database (part : a Part.stored) ~(before : a part op
            (obtain_call_graph database calling_package)
            path ~before:(list_call_edges before) ~after:(list_call_edges after))
   | Lowered key ->
-      List.iter (create_instance database)
+      List.iter (create_item database)
         (References.change_successors database.references key
            ~before:(list_lowered_references before) ~after:(list_lowered_references after))
   | _ -> ()
@@ -403,7 +404,7 @@ let write_value database typed value =
   | None -> Stored_table.remove values part);
   update_indexes database typed ~before ~after:value
 
-let list_instance_edges database key = list_lowered_references (find_stored database (Lowered key))
+let list_item_edges database key = list_lowered_references (find_stored database (Lowered key))
 
 let make_value_slot database typed =
   {
@@ -640,7 +641,8 @@ let list_derived_methods (names : Resolve.Names.lookups) package =
           List.filter_map
             (fun (member : Resolve.Names.key) ->
               match member.path with
-              | Method { name; receiver; _ } -> Some (Path.Method { owner = impl; name; receiver })
+              | Method { name; receiver; _ } when Infer.derives trait name ->
+                  Some (Path.Method { owner = impl; name; receiver })
               | _ -> None)
             (names.list_contained trait_key)
       | _ -> [])
@@ -652,6 +654,7 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.a
   let paths =
     List.map (fun (declaration : Resolve.Names.declaration) -> declaration.path) declarations
   in
+  let derived_methods = list_derived_methods names package in
   let of_declaration (declaration : Resolve.Names.declaration) : Part.any list =
     let key = Resolve.Names.make_key declaration in
     List.map (fun section -> Part.Any (Resolved (key, section))) Resolve.sections
@@ -684,10 +687,10 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.a
         | _, Path.Derived { type_; trait } -> Some (Part.Any (Derived_interface { type_; trait }))
         | _ -> None)
       (names.list_impls package)
-  @ List.map (fun path -> Part.Any (Generated_mir path)) (list_derived_methods names package)
+  @ List.map (fun path -> Part.Any (Generated_mir path)) derived_methods
   @ List.concat_map
       (fun path -> [ Part.Any (Mir_call_edges path); Any (Call_edges (path, package)) ])
-      (List.sort_uniq Path.compare paths)
+      (List.sort_uniq Path.compare (paths @ derived_methods))
   @ List.map
       (fun dependency -> Part.Any (Grant (package, dependency)))
       (List.sort_uniq Path.compare_package (names.list_dependency_names package))
@@ -814,13 +817,13 @@ let make_recording_proof_lookups database note : Prover.Lookups.t =
     list_recursion_group = read_recursion_group database note;
   }
 
-let make_recording_lowering_lookups database note : Compile.Lookups.t =
+let make_recording_lowering_lookups database note : Backend.Lookups.t =
   {
     interface = make_recording_interface_lookups database note ~is_checked:true;
     mir = make_recording_mir_lookups database note;
   }
 
-exception Reaches_unsupported of Compile.unsupported
+exception Reaches_unsupported of Backend.unsupported
 
 let compute_test_keys database keys =
   let outcome =
@@ -832,7 +835,7 @@ let compute_test_keys database keys =
           | Error unsupported -> raise (Reaches_unsupported unsupported)
         in
         match
-          Compile.derive_test_keys
+          Backend.derive_test_keys
             ~read_lowered:(fun key -> require_supported (read_value database note (Lowered key)))
             ~read_known_key:(fun key -> require_supported (read_value database note (Test_key key)))
             keys
@@ -894,7 +897,7 @@ let discard database part =
   mark_unsaved database (Reads part)
 
 let is_current database part =
-  (not (is_stale database part)) && Stored_table.mem database.instance_values part
+  (not (is_stale database part)) && Stored_table.mem database.item_values part
 
 let rec subtract_sorted compare left right =
   match (left, right) with
@@ -923,27 +926,27 @@ let rec forget database parts =
 
 and claim_roots database claimant roots =
   let before = Option.value (Part_table.find_opt database.claimed_roots claimant) ~default:[] in
-  let roots = List.sort_uniq Instance.compare roots in
+  let roots = List.sort_uniq Lowered.Item.compare roots in
   if roots <> before then begin
     if roots = [] then Part_table.remove database.claimed_roots claimant
     else Part_table.replace database.claimed_roots claimant roots;
     mark_unsaved database (Claimed claimant);
     let list_claimants root =
-      Option.value (Instance_table.find_opt database.claimants root) ~default:[]
+      Option.value (Item_table.find_opt database.claimants root) ~default:[]
     in
     List.iter
       (fun root ->
         match List.filter (fun other -> other <> claimant) (list_claimants root) with
         | [] ->
-            Instance_table.remove database.claimants root;
+            Item_table.remove database.claimants root;
             References.remove_root database.references root
-        | others -> Instance_table.replace database.claimants root others)
-      (subtract_sorted Instance.compare before roots);
+        | others -> Item_table.replace database.claimants root others)
+      (subtract_sorted Lowered.Item.compare before roots);
     List.iter
       (fun root ->
-        Instance_table.replace database.claimants root (claimant :: list_claimants root);
-        if References.add_root database.references root then create_instance database root)
-      (subtract_sorted Instance.compare roots before);
+        Item_table.replace database.claimants root (claimant :: list_claimants root);
+        if References.add_root database.references root then create_item database root)
+      (subtract_sorted Lowered.Item.compare roots before);
     settle_references database
   end
 
@@ -951,20 +954,20 @@ and settle_references database =
   if References.has_changes database.references then
     collect database
       (References.update database.references ~find_successors:(fun key ->
-           Some (list_instance_edges database key)))
+           Some (list_item_edges database key)))
         .removed
 
-and collect database keys = forget database (List.concat_map list_instance_parts keys)
+and collect database keys = forget database (List.concat_map list_item_parts keys)
 
 let list_current_edges database key =
-  if is_stale database (Any (Lowered key)) then [] else list_instance_edges database key
+  if is_stale database (Any (Lowered key)) then [] else list_item_edges database key
 
-let collect_ready_instances database =
-  let ready = Instance_table.create 1024 in
+let collect_ready_items database =
+  let ready = Item_table.create 1024 in
   let pending = Queue.create () in
   let reach key =
-    if not (Instance_table.mem ready key) then begin
-      Instance_table.replace ready key ();
+    if not (Item_table.mem ready key) then begin
+      Item_table.replace ready key ();
       Queue.add key pending
     end
   in
@@ -973,7 +976,7 @@ let collect_ready_instances database =
     | Stored claimant -> not (is_stale database claimant)
     | Input _ | Name _ -> true
   in
-  Instance_table.iter
+  Item_table.iter
     (fun root claimants -> if List.exists is_current_claimant claimants then reach root)
     database.claimants;
   while not (Queue.is_empty pending) do
@@ -982,14 +985,12 @@ let collect_ready_instances database =
   ready
 
 let is_drained ~ready (Part.Any part) =
-  match part with
-  | Lowered key | Test_key key -> Instance_table.mem (Lazy.force ready) key
-  | _ -> true
+  match part with Lowered key | Test_key key -> Item_table.mem (Lazy.force ready) key | _ -> true
 
 let read_lowering_settings database =
   match database.lowering with
-  | Some settings -> settings
-  | None -> Compiler_bug.raise_bug ~stage:"Database" "this host has no lowering settings"
+  | Ok settings -> settings
+  | Error _ -> Compiler_bug.raise_bug ~stage:"Database" "this host has no lowering settings"
 
 let list_proof_template_checks : Prover.proof part -> _ = function
   | Value (Obligations { obligations; _ }) ->
@@ -1002,10 +1003,10 @@ let list_proof_template_checks : Prover.proof part -> _ = function
   | Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked -> []
 
 let make_template_check_root ({ from_template; literals; clauses } : Prover.State.template_check) =
-  Instance.Template_check { from_template; literals; clauses }
+  Lowered.Item.Template_check { from_template; literals; clauses }
 
 let claim_template_check_roots database (key : Resolve.Names.key) =
-  if Option.is_some database.lowering then
+  if Result.is_ok database.lowering then
     claim_roots database (Stored (Any (Proof key)))
       (List.map make_template_check_root
          (list_proof_template_checks (read_stored database (Proof key))))
@@ -1020,9 +1021,9 @@ let find_entry_point (names : Resolve.Names.lookups) package =
     (names.list_declarations { package; modules = [] })
 
 let claim_lowering_roots database (names : Resolve.Names.lookups) package =
-  if Option.is_some database.lowering then
+  if Result.is_ok database.lowering then
     claim_roots database (Stored (Any (Namespace package)))
-      (Compile.list_roots
+      (Backend.list_roots
          ~tests:
            (List.filter_map
               (fun (declaration : Resolve.Names.declaration) ->
@@ -1348,20 +1349,20 @@ let compute_part database (Part.Any typed as part) =
   | Lowered key ->
       compute_value (Lowered key) (fun note ->
           match
-            Compile.lower (read_lowering_settings database)
+            Backend.lower (read_lowering_settings database)
               (make_recording_lowering_lookups database note)
               key
           with
           | lowered -> Value lowered
           | exception Reads_failed_part -> Blocked
-          | exception (Compile.Todo_type _ | Compile.Infinite_size _) -> Failed []);
+          | exception (Backend.Todo_type _ | Backend.Infinite_size _) -> Failed []);
       settle_references database
   | Test_key key -> compute_test_keys database [ key ]
 
 type component =
   | Single of Part.any
   | Type_fact_component of Path.t list
-  | Test_key_component of Instance.key list
+  | Test_key_component of Lowered.Item.t list
 
 let list_component_parts = function
   | Single part -> [ part ]
@@ -1404,13 +1405,13 @@ let list_components database (stage : Stage.t) package parts =
 
 let list_test_key_components database parts =
   let keys = List.filter_map (function Part.Any (Test_key key) -> Some key | _ -> None) parts in
-  let in_closure = Instance_table.of_seq (Seq.map (fun key -> (key, ())) (List.to_seq keys)) in
+  let in_closure = Item_table.of_seq (Seq.map (fun key -> (key, ())) (List.to_seq keys)) in
   List.map
     (fun keys -> Test_key_component keys)
     (Strongly_connected.list_components
-       (module Instance)
+       (module Lowered.Item)
        ~list_successors:(fun key ->
-         List.filter (Instance_table.mem in_closure) (list_instance_edges database key))
+         List.filter (Item_table.mem in_closure) (list_item_edges database key))
        keys)
 
 let find_call_successors database calling_package node =
@@ -1519,7 +1520,7 @@ let drain_where ?on_bug database ~drains requested =
     | _ -> raise raised
   in
   let rec drain_next () =
-    let ready = lazy (collect_ready_instances database) in
+    let ready = lazy (collect_ready_items database) in
     let is_drained part = is_drained ~ready part && not (Stored_table.mem broken part) in
     let has_drained_work stage =
       List.exists
@@ -1892,8 +1893,8 @@ let restore_references database =
     (fun claimant roots ->
       List.iter
         (fun root ->
-          Instance_table.replace database.claimants root
-            (claimant :: Option.value (Instance_table.find_opt database.claimants root) ~default:[]);
+          Item_table.replace database.claimants root
+            (claimant :: Option.value (Item_table.find_opt database.claimants root) ~default:[]);
           ignore (References.add_root database.references root))
         roots)
     database.claimed_roots;
@@ -1905,7 +1906,7 @@ let restore_references database =
             (References.change_successors database.references key ~before:[]
                ~after:(list_lowered_references (Some value)))
       | Binding _ -> ())
-    database.instance_values;
+    database.item_values;
   settle_references database
 
 let restore ~loaded ~find_text entries =
@@ -2094,6 +2095,27 @@ let list_package_diagnostics (package_database : package_database) = package_dat
 
 type proofs = { database : t; keys : Resolve.Names.key list }
 
+let has_diagnostics database package =
+  match find_package database package with
+  | Some package_database when List.mem package database.project ->
+      List.exists (fun file -> list_file_diagnostics database file <> []) package_database.files
+  | Some package_database -> package_database.diagnostics <> []
+  | None -> true
+
+let require_diagnostics_for_blocked_proofs database packages keys =
+  let is_blocked key =
+    match read_stored database (Proof key) with Value _ -> false | Failed _ | Blocked -> true
+  in
+  match List.find_opt is_blocked keys with
+  | Some key
+    when not (List.exists (has_diagnostics database) (sort_in_dependency_order database packages))
+    ->
+      Compiler_bug.raise_bug ~stage:"Database"
+        "the proof of %s is blocked, and no code of its package or of a package it depends on has \
+         a diagnostic"
+        (Resolve.Names.show_key key)
+  | Some _ | None -> ()
+
 let prove database files =
   let packages =
     List.sort_uniq Path.compare_package
@@ -2110,6 +2132,7 @@ let prove database files =
       end
       else claim_template_check_roots database key)
     keys;
+  require_diagnostics_for_blocked_proofs database packages keys;
   { database; keys }
 
 let find_proof proofs key =
@@ -2180,20 +2203,17 @@ let read_resolved database (key : Resolve.Names.key) =
   | [] -> None
   | parts -> Some (Resolve.merge parts)
 
-let request database packages ~through ~list_needs keys =
-  drain database ~through packages;
-  List.iter
-    (fun key ->
-      if not (List.for_all (is_current database) (list_needs key)) then
-        Compiler_bug.raise_bug ~stage:"Database"
-          "%s is requested, and no root of lowering reaches it" (Instance.to_string key))
-    keys
+let check_reached database part =
+  if not (is_current database part) then
+    Compiler_bug.raise_bug ~stage:"Database" "%s is read, and no root of lowering reaches it"
+      (Part.show (Stored part))
 
-let read_requested database typed =
+let read_reached database typed =
+  check_reached database (Part.Any typed);
   match read_part database (note_untracked_read database) typed with
   | Value value -> value
   | Failed _ | Blocked ->
-      Compiler_bug.raise_bug ~stage:"Database" "%s is requested from code with errors"
+      Compiler_bug.raise_bug ~stage:"Database" "%s is read from code with errors"
         (Part.show (Stored (Part.Any typed)))
 
 let make_interface_lookups database packages =
@@ -2205,7 +2225,7 @@ let check_calls database interface viewers key = function
       List.iter
         (fun calling_package ->
           if Package_table.mem database.graphs calling_package then
-            Compile.check_calls interface
+            Backend.check_calls interface
               ~find_call_edges:(fun path ->
                 match
                   find_part database (note_untracked_read database)
@@ -2257,39 +2277,34 @@ let list_reached_todo_types database key =
   in
   List.sort_uniq Path.compare (visit [] (Stored (Any (Test_key key))))
 
-let make_lowering_requests database packages : Compile.requests =
-  let interface = make_interface_lookups database packages in
-  {
-    settings = read_lowering_settings database;
-    read_source =
-      (fun file ->
-        note_untracked_read database (Input (Source file));
-        read_source database file);
-    interface;
-    mir = make_recording_mir_lookups database (note_untracked_read database);
-    find_lowered =
-      (fun key ->
-        request database packages ~through:Lowered_code
-          ~list_needs:(fun key -> [ Part.Any (Lowered key) ])
-          [ key ];
-        match read_part database (note_untracked_read database) (Lowered key) with
-        | Value lowered ->
-            check_calls database interface packages key lowered;
-            Some lowered
-        | Failed _ | Blocked -> None);
-    read_test_key =
-      (fun key ->
-        request database packages ~through:Test_keys
-          ~list_needs:(fun key -> [ Part.Any (Test_key key) ])
-          [ key ];
-        read_requested database (Test_key key));
-    list_reached_todo_types =
-      (fun key ->
-        request database packages ~through:Test_keys
-          ~list_needs:(fun key -> [ Part.Any (Test_key key) ])
-          [ key ];
-        list_reached_todo_types database key);
-  }
+let find_lowered_lookups database packages : (Backend.lowered_lookups, string) result =
+  match database.lowering with
+  | Error message -> Error message
+  | Ok { system; _ } ->
+      drain database ~through:Test_keys packages;
+      let interface = make_interface_lookups database packages in
+      Ok
+        {
+          system;
+          read_source =
+            (fun file ->
+              note_untracked_read database (Input (Source file));
+              read_source database file);
+          interface;
+          find_lowered =
+            (fun key ->
+              check_reached database (Part.Any (Lowered key));
+              match read_part database (note_untracked_read database) (Lowered key) with
+              | Value lowered ->
+                  check_calls database interface packages key lowered;
+                  Some lowered
+              | Failed _ | Blocked -> None);
+          read_test_key = (fun key -> read_reached database (Test_key key));
+          list_reached_todo_types =
+            (fun key ->
+              check_reached database (Part.Any (Test_key key));
+              list_reached_todo_types database key);
+        }
 
 let find_main database package =
   drain database ~through:Namespaces [ package ];
@@ -2321,6 +2336,10 @@ module For_testing = struct
     in
     drain database ~through [ file.module_.package ];
     List.concat_map (list_checker_diagnostics database file) checkers
+
+  let make_unchecked_interface_lookups database packages =
+    drain database ~through:Signature_checks packages;
+    make_recording_interface_lookups database (note_untracked_read database) ~is_checked:false
 
   let read_derived_form database path =
     drain database ~through:Checked_bodies [ Path.locate_package path ];

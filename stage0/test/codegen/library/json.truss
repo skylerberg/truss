@@ -14,7 +14,7 @@ fn kind_of(text: StringSlice) -> Option[json::ParseErrorKind] {
 
 fn round_trip(text: StringSlice) -> Bool {
   match json::parse(text) {
-    Ok(value) => value.to_text().slice() == text
+    Ok(value) => value.to_text() == text
     Err(_) => false
   }
 }
@@ -219,6 +219,20 @@ test "deserialize rejects a value that breaks its type's invariant, at the value
   assert cold is Err(Deserialize(_))
   let mild: Result[Reading, json::Error] = json::decode("{\"Celsius\":{\"degrees\":-1}}")
   assert mild is Ok(Celsius(degrees)) && degrees == -1
+}
+
+type Grades(scores: List[UInt32])
+  invariant forall index in 0..scores.length() => scores[index] <= 100
+  invariant forall score in scores => score >= 50
+  derives serialization::Deserialize
+
+test "deserialize rejects a value that breaks an invariant over a range or a list" {
+  let high: Result[Grades, json::Error] = json::decode("{\"scores\":[90,101]}")
+  assert high is Err(Deserialize(error)) && error.message == "breaks the invariant `forall index in 0..scores.length() => scores[index] <= 100`"
+  let low: Result[Grades, json::Error] = json::decode("{\"scores\":[90,40]}")
+  assert low is Err(Deserialize(error)) && error.message == "breaks the invariant `forall score in scores => score >= 50`"
+  let passing: Result[Grades, json::Error] = json::decode("{\"scores\":[90,50]}")
+  assert passing is Ok(grades) && grades.scores.length() == 2
 }
 
 test "a value is read from a reader and written to a writer" {

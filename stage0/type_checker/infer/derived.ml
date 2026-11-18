@@ -1,6 +1,6 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
 
-let gives (trait : Path.t) name =
+let derives (trait : Path.t) name =
   match (Well_known.of_path trait, name) with
   | Some Equal, "equal"
   | Some Hash, "hash"
@@ -23,7 +23,7 @@ let collapse_spaces text =
 
 let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
   match path with
-  | Method { owner = Derived { type_; trait } as impl; name; receiver = _ } when gives trait name
+  | Method { owner = Derived { type_; trait } as impl; name; receiver = _ } when derives trait name
     -> (
       match
         ( Interface.Definition.find_impl_interface lookups.interface impl,
@@ -98,7 +98,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
               match
                 Interface.Impls.find_evidence lookups.interface ~list_bounds of_type reference
               with
-              | Some (From_impl { impl; substitution }) -> Impl { impl; arguments = substitution }
+              | Some (From_impl { impl; substitution }) -> Impl { impl; substitution }
               | Some From_bound -> Bound
               | Some From_any -> Dynamic
               | Some Built_in | Some (Accepted _) | None ->
@@ -115,7 +115,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                            name;
                            receiver;
                            self_type = of_type;
-                           type_arguments;
+                           instantiation = { Types.no_instantiation with type_arguments };
                            evidence;
                          })
                     ~arguments ~lends:None))
@@ -131,7 +131,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                            name;
                            receiver;
                            self_type;
-                           type_arguments = [];
+                           instantiation = Types.no_instantiation;
                            evidence;
                          })
                     ~arguments ~lends:None))
@@ -293,7 +293,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                        path =
                                          Method
                                            { owner = hasher_path; name = "write"; receiver = Mut };
-                                       type_arguments = [];
+                                       instantiation = Types.no_instantiation;
                                      })
                                 ~arguments:
                                   [
@@ -596,8 +596,12 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                (Function
                                   {
                                     path = Well_known.make_path function_;
-                                    type_arguments =
-                                      [ Types.Type field.field_type; Types.Type source_type ];
+                                    instantiation =
+                                      {
+                                        Types.no_instantiation with
+                                        type_arguments =
+                                          [ Types.Type field.field_type; Types.Type source_type ];
+                                      };
                                   })
                              ~arguments:[ make_source_argument Mut; text_argument field.field_name ]
                              ~lends:None)))
@@ -857,8 +861,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                               name = "equal";
                               receiver = Read;
                               self_type = string_type;
-                              type_arguments = [];
-                              evidence = Impl { impl; arguments = substitution };
+                              instantiation = Types.no_instantiation;
+                              evidence = Impl { impl; substitution };
                             }
                       | _ -> raise_bug "`String` has no `Equal`"
                     in
@@ -885,8 +889,12 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                                  path =
                                                                    Well_known.make_path
                                                                      Unknown_variant;
-                                                                 type_arguments =
-                                                                   [ Types.Type source_type ];
+                                                                 instantiation =
+                                                                   {
+                                                                     Types.no_instantiation with
+                                                                     type_arguments =
+                                                                       [ Types.Type source_type ];
+                                                                   };
                                                                })
                                                           ~arguments:
                                                             [

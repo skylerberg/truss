@@ -1,0 +1,18 @@
+trait Convert[Target] {
+  fn convert(self) -> Target
+}
+
+trait Feeds {
+  fn feed_each[Item: Convert[Int64]](self, item: Item, visit: (fn(Item) uses generic Granted))
+    uses generic Granted
+}
+
+type Reader()
+
+impl Feeds for Reader {
+  fn feed_each[Morsel: Convert[String]](self, item: Morsel, visit: (fn(Morsel) uses generic Granted))
+    uses generic Granted
+  {
+    todo
+  }
+}

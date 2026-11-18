@@ -617,6 +617,9 @@ impl TryFrom[Float32] for Int8 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float32) -> Result[Int8, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float32, Int8](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float32, Int8](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Int8](value) {
       Ok(intrinsic::convert(value))
@@ -630,6 +633,9 @@ impl TryFrom[Float32] for Int16 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float32) -> Result[Int16, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float32, Int16](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float32, Int16](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Int16](value) {
       Ok(intrinsic::convert(value))
@@ -643,6 +649,9 @@ impl TryFrom[Float32] for Int32 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float32) -> Result[Int32, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float32, Int32](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float32, Int32](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Int32](value) {
       Ok(intrinsic::convert(value))
@@ -656,6 +665,9 @@ impl TryFrom[Float32] for Int64 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float32) -> Result[Int64, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float32, Int64](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float32, Int64](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Int64](value) {
       Ok(intrinsic::convert(value))
@@ -669,6 +681,9 @@ impl TryFrom[Float32] for UInt8 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float32) -> Result[UInt8, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float32, UInt8](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float32, UInt8](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float32, UInt8](value) {
       Ok(intrinsic::convert(value))
@@ -682,6 +697,9 @@ impl TryFrom[Float32] for UInt16 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float32) -> Result[UInt16, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float32, UInt16](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float32, UInt16](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float32, UInt16](value) {
       Ok(intrinsic::convert(value))
@@ -695,6 +713,9 @@ impl TryFrom[Float32] for UInt32 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float32) -> Result[UInt32, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float32, UInt32](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float32, UInt32](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float32, UInt32](value) {
       Ok(intrinsic::convert(value))
@@ -708,6 +729,9 @@ impl TryFrom[Float32] for UInt64 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float32) -> Result[UInt64, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float32, UInt64](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float32, UInt64](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float32, UInt64](value) {
       Ok(intrinsic::convert(value))
@@ -1675,6 +1699,9 @@ impl TryFrom[Float64] for Int8 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float64) -> Result[Int8, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float64, Int8](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float64, Int8](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Int8](value) {
       Ok(intrinsic::convert(value))
@@ -1688,6 +1715,9 @@ impl TryFrom[Float64] for Int16 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float64) -> Result[Int16, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float64, Int16](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float64, Int16](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Int16](value) {
       Ok(intrinsic::convert(value))
@@ -1701,6 +1731,9 @@ impl TryFrom[Float64] for Int32 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float64) -> Result[Int32, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float64, Int32](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float64, Int32](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Int32](value) {
       Ok(intrinsic::convert(value))
@@ -1714,6 +1747,9 @@ impl TryFrom[Float64] for Int64 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float64) -> Result[Int64, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float64, Int64](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float64, Int64](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Int64](value) {
       Ok(intrinsic::convert(value))
@@ -1727,6 +1763,9 @@ impl TryFrom[Float64] for UInt8 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float64) -> Result[UInt8, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float64, UInt8](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float64, UInt8](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float64, UInt8](value) {
       Ok(intrinsic::convert(value))
@@ -1740,6 +1779,9 @@ impl TryFrom[Float64] for UInt16 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float64) -> Result[UInt16, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float64, UInt16](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float64, UInt16](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float64, UInt16](value) {
       Ok(intrinsic::convert(value))
@@ -1753,6 +1795,9 @@ impl TryFrom[Float64] for UInt32 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float64) -> Result[UInt32, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float64, UInt32](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float64, UInt32](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float64, UInt32](value) {
       Ok(intrinsic::convert(value))
@@ -1766,6 +1811,9 @@ impl TryFrom[Float64] for UInt64 {
   type Error = core::ConversionError
 
   fn try_from(value: own Float64) -> Result[UInt64, core::ConversionError]
+    ensures (result is Ok(_)) == (value == value.truncate() && intrinsic::fits[Float64, UInt64](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float64, UInt64](value))
+    cost time O(1)
   {
     if value == intrinsic::truncate(value) && intrinsic::fits[Float64, UInt64](value) {
       Ok(intrinsic::convert(value))

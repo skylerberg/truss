@@ -7,17 +7,17 @@ let extra =
       Storage.make_view_shape ~uint64:Codegen_support.uint64 Codegen_support.uint8 );
   ]
 
-let intrinsic_types : Compile.For_testing.Intrinsics.types =
+let intrinsic_types : Backend.For_testing.Intrinsics.types =
   { uint64 = Codegen_support.uint64; string_slice = Codegen_support.named "StringSlice" }
 
 let operate builder ?destination ?(type_arguments = []) operation arguments =
   ignore
-    (Compile.For_testing.Intrinsics.lower
+    (Backend.For_testing.Intrinsics.lower
        (Codegen_support.make_shape_env ~extra ())
        builder intrinsic_types operation ~type_arguments arguments ~destination
        ~site:{ definition = Codegen_support.definition "entry"; offset = 0 })
 
-let build_entry build_body : Codegen_support.instance =
+let build_entry build_body : Codegen_support.item =
  fun env ->
   let builder = Emit_c.Builder.create env ~key:(Codegen_support.key "entry") in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
@@ -66,11 +66,9 @@ let try_compile text =
   let directory = Lazy.force Codegen_support.scratch in
   let source = Filename.temp_file ~temp_dir:directory "libc" ".c" in
   Out_channel.with_open_text source (fun channel -> output_string channel text);
-  Toolchain.compile
-    (Lazy.force Codegen_support.compiler)
-    ~optimization:O1
-    ~extra:(Lazy.force Codegen_support.strict)
-    ~source ~output:(source ^ ".o")
+  C_compiler.For_testing.compile
+    (Lazy.force Codegen_support.c_compiler)
+    O1 ~source ~output:(source ^ ".o")
 
 let linux : Libc.system = { os = Linux; architecture = X86_64 }
 
@@ -110,7 +108,7 @@ let () =
       in
       let path = Emit_c.Builder.allocate_local builder (Codegen_support.value bytes_ty) in
       ignore
-        (Compile.For_testing.Intrinsics.lower env builder intrinsic_types
+        (Backend.For_testing.Intrinsics.lower env builder intrinsic_types
            (Runtime (Libc Proc_pidpath)) ~type_arguments:[]
            [
              Value (Codegen_support.constant_int32 1);
@@ -444,7 +442,7 @@ let () =
       let extra = extra @ [ (Ground.to_string uint32, Memory_layout.Scalar (Integer UInt32)) ] in
       let operate builder ~destination operation arguments =
         ignore
-          (Compile.For_testing.Intrinsics.lower
+          (Backend.For_testing.Intrinsics.lower
              (Codegen_support.make_shape_env ~extra ())
              builder intrinsic_types operation ~type_arguments:[] arguments
              ~destination:(Some destination)
@@ -467,7 +465,7 @@ let () =
               let name = Emit_c.Builder.allocate_local builder (Codegen_support.value bytes_ty) in
               let operate_on_bytes ?destination operation arguments =
                 ignore
-                  (Compile.For_testing.Intrinsics.lower
+                  (Backend.For_testing.Intrinsics.lower
                      (Codegen_support.make_shape_env ~extra ())
                      builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ]
                      arguments ~destination
@@ -655,11 +653,11 @@ let () =
         Memory_layout.create Codegen_support.host
           ~compute_shape:(Monomorphic.compute_shape Codegen_support.standard_context)
       in
-      let drop_and_copy = Compile.For_testing.drop_and_copy env in
+      let drop_and_copy = Backend.For_testing.drop_and_copy env in
       let int32 = Ground.make_builtin Int32 in
       let view_ty = Storage.make_view_type (Ground.make_builtin UInt8) in
       let handle_ty = Ground.make_builtin Handle in
-      let types : Compile.For_testing.Intrinsics.types =
+      let types : Backend.For_testing.Intrinsics.types =
         {
           uint64 = Ground.make_builtin UInt64;
           string_slice = Codegen_support.make_standard_type "text" "StringSlice" ();
@@ -678,7 +676,7 @@ let () =
         let open_test_file () =
           let descriptor = Emit_c.Builder.allocate_local builder (Codegen_support.value int32) in
           ignore
-            (Compile.For_testing.Intrinsics.lower env builder types (Runtime (Libc Open))
+            (Backend.For_testing.Intrinsics.lower env builder types (Runtime (Libc Open))
                ~type_arguments:[]
                [
                  Place (Lowered.make_local_place name);
@@ -724,9 +722,8 @@ let () =
       let status, _, errors =
         Codegen_support.run_program ~env
           [
-            Codegen_support.make_constant_instance entry;
-            Codegen_support.make_constant_instance
-              (Compile.For_testing.drop drop_and_copy handle_ty);
+            Codegen_support.make_constant_item entry;
+            Codegen_support.make_constant_item (Backend.For_testing.drop drop_and_copy handle_ty);
           ]
       in
       if status <> 1 then
@@ -734,13 +731,13 @@ let () =
 
 let operate_checked builder ?destination ?(type_arguments = []) operation arguments =
   ignore
-    (Compile.For_testing.Intrinsics.lower ~checks:true
+    (Backend.For_testing.Intrinsics.lower ~checks:true
        (Codegen_support.make_shape_env ~extra ())
        builder intrinsic_types operation ~type_arguments arguments ~destination
        ~site:{ definition = Codegen_support.definition "entry"; offset = 0 })
 
-let expect_panic ~saying instances =
-  let status, _, errors = Codegen_support.run_program ~extra instances in
+let expect_panic ~saying items =
+  let status, _, errors = Codegen_support.run_program ~extra items in
   if status <> 101 then Codegen_support.fail "expected a panic, got status %d (%s)" status errors;
   if not (String.includes ~affix:saying errors) then
     Codegen_support.fail "expected %S in %S" saying errors
@@ -848,7 +845,7 @@ let () =
           Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
         in
         ignore
-          (Compile.For_testing.Intrinsics.lower ~checks:true
+          (Backend.For_testing.Intrinsics.lower ~checks:true
              (Codegen_support.make_shape_env ~extra ())
              builder intrinsic_types (Scalar Convert)
              ~type_arguments:[ float64; Codegen_support.int32 ]

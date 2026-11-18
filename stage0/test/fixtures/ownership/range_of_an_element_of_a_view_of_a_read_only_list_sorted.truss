@@ -1,0 +1,4 @@
+fn f(items: List[List[Int64]]) {
+  var view = items[..]
+  mut view[0][..].sort()
+}

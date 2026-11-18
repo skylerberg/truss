@@ -1,0 +1,11 @@
+use app::shapes
+
+trait Measured {
+  fn measure(self) -> UInt64
+}
+
+impl Measured for shapes::Shape {
+  fn measure(self) -> UInt64 {
+    0
+  }
+}

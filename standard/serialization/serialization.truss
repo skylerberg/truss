@@ -56,14 +56,14 @@ public type Error(path: String, message: String)
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     if self.path.length() > 0 {
-      mut output.write("at ")
-      mut output.write(self.path.slice())
-      mut output.write(": ")
+      mut output.push("at ")
+      mut output.push(self.path.slice())
+      mut output.push(": ")
     }
-    mut output.write(self.message.slice())
+    mut output.push(self.message.slice())
   }
 }
 

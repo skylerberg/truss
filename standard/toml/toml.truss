@@ -19,12 +19,12 @@ public type ParseError(message: String, line: UInt64, column: UInt64)
   derives Equal
 
 impl Display for ParseError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write(self.message.slice())
-    mut output.write(" at line ")
+    mut output.push(self.message.slice())
+    mut output.push(" at line ")
     self.line.display(mut output)
-    mut output.write(", column ")
+    mut output.push(", column ")
     self.column.display(mut output)
   }
 }
@@ -35,7 +35,7 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       Parse(error) => error.display(mut output)
@@ -48,9 +48,9 @@ public type EncodeError(message: String)
   derives Equal
 
 impl Display for EncodeError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write(self.message.slice())
+    mut output.push(self.message.slice())
   }
 }
 
@@ -489,10 +489,10 @@ fn number_value(text: StringSlice, at: mut UInt64) -> Result[Value, Failure] {
   let signed = token.byte(0) == 43 || token.byte(0) == 45
   let negative = token.byte(0) == 45
   let body = if signed { text.part(start + 1, to: end) } else { token }
-  if body == "inf".slice() {
+  if body == "inf" {
     return Ok(Value.Float(value: if negative { Float64.negative_infinity } else { Float64.infinity }))
   }
-  if body == "nan".slice() {
+  if body == "nan" {
     return Ok(Value.Float(value: Float64.not_a_number))
   }
   if body.length() >= 2 && (body.starts_with("0x") || body.starts_with("0o") || body.starts_with("0b")) {
@@ -606,11 +606,11 @@ fn parse_value(text: StringSlice, at: mut UInt64, depth: UInt64) -> Result[Value
       let end = token_end(text, from: at)
       if end <= text.length() {
         let token = text.part(at, to: end)
-        if token == "true".slice() {
+        if token == "true" {
           at = end
           return Ok(Value.Boolean(value: true))
         }
-        if token == "false".slice() {
+        if token == "false" {
           at = end
           return Ok(Value.Boolean(value: false))
         }
@@ -1075,74 +1075,74 @@ fn is_bare_key(key: StringSlice) -> Bool {
   true
 }
 
-fn write_key(output: mut TextBuilder, key: StringSlice) {
+fn write_key(output: mut String, key: StringSlice) {
   if is_bare_key(key) {
-    mut output.write(key)
+    mut output.push(key)
   } else {
     write_string(mut output, text: key)
   }
 }
 
-fn write_string(output: mut TextBuilder, text: StringSlice) {
-  mut output.write("\"")
+fn write_string(output: mut String, text: StringSlice) {
+  mut output.push("\"")
   for character in text.characters() {
     let code = character.code()
     if code == 34 {
-      mut output.write("\\\"")
+      mut output.push("\\\"")
     } else if code == 92 {
-      mut output.write("\\\\")
+      mut output.push("\\\\")
     } else if code == 10 {
-      mut output.write("\\n")
+      mut output.push("\\n")
     } else if code == 9 {
-      mut output.write("\\t")
+      mut output.push("\\t")
     } else if code == 13 {
-      mut output.write("\\r")
+      mut output.push("\\r")
     } else if code < 32 || code == 127 {
-      mut output.write("\\u00")
+      mut output.push("\\u00")
       write_hex_digit(mut output, value: code / 16)
       write_hex_digit(mut output, value: code % 16)
     } else {
-      mut output.write_character(character)
+      mut output.push_character(character)
     }
   }
-  mut output.write("\"")
+  mut output.push("\"")
 }
 
-fn write_hex_digit(output: mut TextBuilder, value: UInt32) {
+fn write_hex_digit(output: mut String, value: UInt32) {
   let digit: UInt8 = intrinsic::convert(value % 16)
-  mut output.write_byte(if digit < 10 { 48 + digit } else { 87 + digit })
+  mut output.push_byte(if digit < 10 { 48 + digit } else { 87 + digit })
 }
 
-fn write_float(output: mut TextBuilder, value: Float64) {
+fn write_float(output: mut String, value: Float64) {
   if value.is_nan() {
-    mut output.write("nan")
+    mut output.push("nan")
     return
   }
   if value == Float64.infinity {
-    mut output.write("inf")
+    mut output.push("inf")
     return
   }
   if value == Float64.negative_infinity {
-    mut output.write("-inf")
+    mut output.push("-inf")
     return
   }
   let text = "${value}"
-  mut output.write(text.slice())
+  mut output.push(text.slice())
   if !text.slice().contains(".") && !text.slice().contains("e") && !text.slice().contains("E") {
-    mut output.write(".0")
+    mut output.push(".0")
   }
 }
 
-fn write_inline(output: mut TextBuilder, value: Value) {
+fn write_inline(output: mut String, value: Value) {
   match value {
     String(text) => write_string(mut output, text: text.slice())
     Integer(number) => number.display(mut output)
     Float(number) => write_float(mut output, value: number)
     Boolean(flag) => {
       if flag {
-        mut output.write("true")
+        mut output.push("true")
       } else {
-        mut output.write("false")
+        mut output.push("false")
       }
     }
     OffsetDateTime(instant) => instant.display(mut output)
@@ -1150,34 +1150,34 @@ fn write_inline(output: mut TextBuilder, value: Value) {
     LocalDate(date) => date.display(mut output)
     LocalTime(time) => time.display(mut output)
     Array(items) => {
-      mut output.write("[")
+      mut output.push("[")
       var first = true
       for item in items {
         if !first {
-          mut output.write(", ")
+          mut output.push(", ")
         }
         first = false
         write_inline(mut output, value: item)
       }
-      mut output.write("]")
+      mut output.push("]")
     }
     Table(entries) => {
       if entries.is_empty() {
-        mut output.write("{}")
+        mut output.push("{}")
         return
       }
-      mut output.write("{ ")
+      mut output.push("{ ")
       var first = true
       for entry in entries {
         if !first {
-          mut output.write(", ")
+          mut output.push(", ")
         }
         first = false
         write_key(mut output, key: entry.key.slice())
-        mut output.write(" = ")
+        mut output.push(" = ")
         write_inline(mut output, value: entry.value)
       }
-      mut output.write(" }")
+      mut output.push(" }")
     }
   }
 }
@@ -1199,28 +1199,28 @@ fn is_array_of_tables(value: Value) -> Bool {
   }
 }
 
-fn write_header(output: mut TextBuilder, path: Slice[String], opening: StringSlice, closing: StringSlice) {
-  mut output.write("\n")
-  mut output.write(opening)
+fn write_header(output: mut String, path: Slice[String], opening: StringSlice, closing: StringSlice) {
+  mut output.push("\n")
+  mut output.push(opening)
   var first = true
   for key in path {
     if !first {
-      mut output.write(".")
+      mut output.push(".")
     }
     first = false
     write_key(mut output, key: key.slice())
   }
-  mut output.write(closing)
-  mut output.write("\n")
+  mut output.push(closing)
+  mut output.push("\n")
 }
 
-fn write_table(output: mut TextBuilder, table: Map[String, Value], path: mut List[String]) {
+fn write_table(output: mut String, table: Map[String, Value], path: mut List[String]) {
   for entry in table {
     if !(entry.value is Table(_)) && !is_array_of_tables(entry.value) {
       write_key(mut output, key: entry.key.slice())
-      mut output.write(" = ")
+      mut output.push(" = ")
       write_inline(mut output, value: entry.value)
-      mut output.write("\n")
+      mut output.push("\n")
     }
   }
   for entry in table {
@@ -1252,10 +1252,9 @@ fn write_table(output: mut TextBuilder, table: Map[String, Value], path: mut Lis
 }
 
 public fn to_text(table: Map[String, Value]) -> String {
-  var output = TextBuilder.new()
+  var text = ""
   var path: List[String] = []
-  write_table(mut output, table: table, path: mut path)
-  let text = own output.finish()
+  write_table(mut text, table: table, path: mut path)
   if text.length() > 0 && text.slice().starts_with("\n") {
     text.slice().part(1, to: text.length()).to_string()
   } else {

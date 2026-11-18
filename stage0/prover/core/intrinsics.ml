@@ -251,7 +251,7 @@ let measure_type element : Types.function_type =
 
 let make_sequence_sum context element term measure =
   let path = Path.Method { owner = Models.sequence_path; name = "sum"; receiver = Read } in
-  let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type element ] } in
+  let symbol = Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type element ] } in
   Facts.declare context
     (Logic.Function
        ( symbol,

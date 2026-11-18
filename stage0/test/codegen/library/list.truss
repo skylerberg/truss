@@ -103,18 +103,6 @@ test "chunks gives runs of a size, with a shorter last one" {
   assert empty == 0
 }
 
-fn same_items(actual: Slice[Int64], expected: Slice[Int64]) -> Bool {
-  if actual.length() != expected.length() {
-    return false
-  }
-  for index in 0..actual.length() {
-    if actual[index] != expected[index] {
-      return false
-    }
-  }
-  true
-}
-
 fn reverse_part(part: mut Slice[Int64]) {
   mut part.reverse()
 }
@@ -128,12 +116,12 @@ fn double_each(part: mut Slice[Int64]) {
 test "a list and a part of a list are reversed in place" {
   var items: List[Int64] = [1, 2, 3, 4, 5]
   mut items.reverse()
-  assert same_items(items, expected: [5, 4, 3, 2, 1])
+  assert items == [5, 4, 3, 2, 1]
   reverse_part(mut items[1..4])
-  assert same_items(items, expected: [5, 2, 3, 4, 1])
+  assert items == [5, 2, 3, 4, 1]
   var one: List[Int64] = [7]
   mut one.reverse()
-  assert same_items(one, expected: [7])
+  assert one == [7]
   var none: List[Int64] = []
   mut none.reverse()
   assert none.length() == 0
@@ -142,32 +130,32 @@ test "a list and a part of a list are reversed in place" {
 test "rotating moves elements round, left and right" {
   var items: List[Int64] = [1, 2, 3, 4, 5]
   mut items.rotate_left(2)
-  assert same_items(items, expected: [3, 4, 5, 1, 2])
+  assert items == [3, 4, 5, 1, 2]
   mut items.rotate_right(2)
-  assert same_items(items, expected: [1, 2, 3, 4, 5])
+  assert items == [1, 2, 3, 4, 5]
   mut items.rotate_right(1)
-  assert same_items(items, expected: [5, 1, 2, 3, 4])
+  assert items == [5, 1, 2, 3, 4]
   mut items.rotate_left(0)
-  assert same_items(items, expected: [5, 1, 2, 3, 4])
+  assert items == [5, 1, 2, 3, 4]
   mut items.rotate_left(5)
-  assert same_items(items, expected: [5, 1, 2, 3, 4])
+  assert items == [5, 1, 2, 3, 4]
 }
 
 test "fill and copy_from replace every element" {
   var items: List[Int64] = [1, 2, 3]
   mut items.fill(9)
-  assert same_items(items, expected: [9, 9, 9])
+  assert items == [9, 9, 9]
   let source: List[Int64] = [4, 5, 6]
   mut items.copy_from(source)
-  assert same_items(items, expected: [4, 5, 6])
+  assert items == [4, 5, 6]
 }
 
 test "update_each and a mut loop change elements where they are" {
   var items: List[Int64] = [1, 2, 3, 4]
   mut items.update_each(fn(item) { item = item + 10 })
-  assert same_items(items, expected: [11, 12, 13, 14])
+  assert items == [11, 12, 13, 14]
   double_each(mut items[2..])
-  assert same_items(items, expected: [11, 12, 26, 28])
+  assert items == [11, 12, 26, 28]
 }
 
 test "contains and the index searches compare elements" {
@@ -267,9 +255,9 @@ test "a list is displayed with brackets and commas" {
 test "to_list copies a slice, and filter copies the elements that pass" {
   let items: List[Int64] = [1, 2, 3, 4, 5, 6]
   let tail = items[2..].to_list()
-  assert same_items(tail, expected: [3, 4, 5, 6])
+  assert tail == [3, 4, 5, 6]
   let even = items.filter(fn(item) { item % 2 == 0 })
-  assert same_items(even, expected: [2, 4, 6])
+  assert even == [2, 4, 6]
   let none = items.filter(fn(item) { item > 10 })
   assert none.length() == 0
   let words: List[String] = ["a${1}", "bb${2}", "c${3}"]
@@ -283,26 +271,26 @@ test "to_list copies a slice, and filter copies the elements that pass" {
 
 test "get, first, and last lend an element, or nothing when there is none" {
   let words: List[String] = ["a${1}", "b${2}", "c${3}"]
-  assert words.get(1) is Some(word) && word == "b2"
+  assert words.get(1) == Some("b2")
   assert words.get(3) is None
-  assert words.first() is Some(word) && word == "a1"
-  assert words.last() is Some(word) && word == "c3"
+  assert words.first() == Some("a1")
+  assert words.last() == Some("c3")
   let none: List[String] = []
   assert none.get(0) is None
   assert none.first() is None
   assert none.last() is None
-  assert words[1..].first() is Some(word) && word == "b2"
+  assert words[1..].first() == Some("b2")
   let fixed: Array[Int64, 3] = [7, 8, 9]
-  assert fixed.get(2) is Some(item) && item == 9
-  assert fixed.first() is Some(item) && item == 7
-  assert fixed.last() is Some(item) && item == 9
+  assert fixed.get(2) == Some(9)
+  assert fixed.first() == Some(7)
+  assert fixed.last() == Some(9)
   assert words.length() == 3
 }
 
 test "split_first and split_last lend one element and view the rest" {
   let items: List[Int64] = [1, 2, 3]
-  assert items.split_first() is Some(split) && split.first == 1 && same_items(split.rest, expected: [2, 3])
-  assert items.split_last() is Some(split) && split.last == 3 && same_items(split.rest, expected: [1, 2])
+  assert items.split_first() is Some(split) && split.first == 1 && split.rest == [2, 3]
+  assert items.split_last() is Some(split) && split.last == 3 && split.rest == [1, 2]
   let one: List[Int64] = [5]
   assert one.split_first() is Some(split) && split.first == 5 && split.rest.length() == 0
   let none: List[Int64] = []
@@ -341,12 +329,12 @@ test "a list's elements change by position, from the last to the first" {
     items[index] = next
     next += 1
   }
-  assert same_items(items, expected: [102, 101, 100])
+  assert items == [102, 101, 100]
 }
 
 test "a list is made of copies of a value, or of a function's result for each index" {
   let zeros: List[Int64] = List.filled(0, count: 3)
-  assert same_items(zeros, expected: [0, 0, 0])
+  assert zeros == [0, 0, 0]
   let words: List[String] = List.filled("ab${1}", count: 2)
   assert words.length() == 2
   assert words[1] == "ab1"
@@ -362,9 +350,9 @@ test "clear and truncate drop elements from the end and keep the room" {
   var items: List[Int64] = [1, 2, 3, 4, 5]
   let room = items.capacity()
   mut items.truncate(3)
-  assert same_items(items, expected: [1, 2, 3])
+  assert items == [1, 2, 3]
   mut items.truncate(10)
-  assert same_items(items, expected: [1, 2, 3])
+  assert items == [1, 2, 3]
   mut items.clear()
   assert items.length() == 0
   assert items.capacity() == room
@@ -382,7 +370,7 @@ test "a copy of a list keeps its capacity" {
   mut items.push(1)
   let copied = items.copy()
   assert copied.capacity() == items.capacity()
-  assert same_items(copied, expected: [1])
+  assert copied == [1]
   let reserved: List[String] = List.with_capacity(4)
   assert reserved.copy().capacity() == 4
   let none: List[Int64] = []
@@ -392,41 +380,41 @@ test "a copy of a list keeps its capacity" {
 test "swap_remove, remove_range, and split_off take elements out" {
   var items: List[Int64] = [1, 2, 3, 4, 5, 6, 7]
   assert mut items.swap_remove(1) == 2
-  assert same_items(items, expected: [1, 7, 3, 4, 5, 6])
+  assert items == [1, 7, 3, 4, 5, 6]
   assert mut items.swap_remove(5) == 6
-  assert same_items(items, expected: [1, 7, 3, 4, 5])
+  assert items == [1, 7, 3, 4, 5]
   mut items.remove_range(1..3)
-  assert same_items(items, expected: [1, 4, 5])
+  assert items == [1, 4, 5]
   mut items.remove_range(1..1)
-  assert same_items(items, expected: [1, 4, 5])
+  assert items == [1, 4, 5]
   mut items.remove_range(0..3)
   assert items.length() == 0
   var letters: List[Int64] = [10, 20, 30, 40, 50]
   mut letters.remove_range(0..2)
-  assert same_items(letters, expected: [30, 40, 50])
+  assert letters == [30, 40, 50]
   let tail = mut letters.split_off(1)
-  assert same_items(letters, expected: [30])
-  assert same_items(tail, expected: [40, 50])
+  assert letters == [30]
+  assert tail == [40, 50]
   let everything = mut letters.split_off(0)
   assert letters.length() == 0
-  assert same_items(everything, expected: [30])
+  assert everything == [30]
 }
 
 test "retain, filter, and deduplicate keep elements in their order" {
   var items: List[Int64] = [1, 2, 3, 4, 5, 6]
   mut items.retain(fn(item) { item % 2 == 0 })
-  assert same_items(items, expected: [2, 4, 6])
+  assert items == [2, 4, 6]
   mut items.retain(fn(item) { item > 100 })
   assert items.length() == 0
   let odd: List[Int64] = [1, 2, 3, 4, 5]
   let odds = own odd.filter(fn(item) { item % 2 == 1 })
-  assert same_items(odds, expected: [1, 3, 5])
+  assert odds == [1, 3, 5]
   var runs: List[Int64] = [1, 1, 2, 2, 2, 3, 1, 1]
   mut runs.deduplicate()
-  assert same_items(runs, expected: [1, 2, 3, 1])
+  assert runs == [1, 2, 3, 1]
   var single: List[Int64] = [9]
   mut single.deduplicate()
-  assert same_items(single, expected: [9])
+  assert single == [9]
   var empty: List[Int64] = []
   mut empty.deduplicate()
   assert empty.length() == 0
@@ -434,24 +422,24 @@ test "retain, filter, and deduplicate keep elements in their order" {
 
 test "the smallest and the largest element are lent, the first of equals" {
   let items: List[Int64] = [3, 1, 4, 1, 5, 9, 2, 6]
-  assert items.minimum() is Some(least) && least == 1
-  assert items.maximum() is Some(greatest) && greatest == 9
+  assert items.minimum() == Some(1)
+  assert items.maximum() == Some(9)
   let part = items[4..]
-  assert part.minimum() is Some(least) && least == 2
+  assert part.minimum() == Some(2)
   let none: List[Int64] = []
   assert none.minimum() is None
   assert none.maximum() is None
   let fixed: Array[Int64, 3] = [7, -2, 7]
-  assert fixed.minimum() is Some(least) && least == -2
-  assert fixed.maximum() is Some(greatest) && greatest == 7
+  assert fixed.minimum() == Some(-2)
+  assert fixed.maximum() == Some(7)
 }
 
 test "a slice is repeated, and split where an element is" {
   let items: List[Int64] = [1, 2]
-  assert same_items(items.repeated(3), expected: [1, 2, 1, 2, 1, 2])
+  assert items.repeated(3) == [1, 2, 1, 2, 1, 2]
   assert items.repeated(0).length() == 0
   let fixed: Array[Int64, 1] = [5]
-  assert same_items(fixed.repeated(2), expected: [5, 5])
+  assert fixed.repeated(2) == [5, 5]
   let fields: List[Int64] = [1, 0, 2, 3, 0, 0, 4]
   var lengths: List[UInt64] = []
   var total = 0
@@ -479,12 +467,12 @@ test "a slice is repeated, and split where an element is" {
 test "append moves another list's elements onto the end, in order" {
   var items: List[Int64] = [1, 2]
   mut items.append([3, 4, 5])
-  assert same_items(items, expected: [1, 2, 3, 4, 5])
+  assert items == [1, 2, 3, 4, 5]
   mut items.append([])
-  assert same_items(items, expected: [1, 2, 3, 4, 5])
+  assert items == [1, 2, 3, 4, 5]
   var empty: List[Int64] = []
   mut empty.append([9])
-  assert same_items(empty, expected: [9])
+  assert empty == [9]
   var words: List[String] = ["a${1}"]
   let more: List[String] = ["b${2}", "c${3}"]
   mut words.append(own more)

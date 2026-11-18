@@ -22,6 +22,11 @@ let list_written_methods (names : Resolve.Names.lookups) impl =
       List.map (fun (member : Resolve.Names.key) -> member.path) (names.list_contained impl_key)
   | None -> []
 
+let defines (names : Resolve.Names.lookups) (impl : Path.t) (method_ : Path.t) =
+  match (impl, method_) with
+  | Derived { trait; _ }, Method { name; _ } -> Infer.derives trait name
+  | _ -> List.exists (Path.equal method_) (list_written_methods names impl)
+
 let list_impl_methods (interface : Interface.Lookups.t) impl =
   let implementation = Interface.Definition.read_impl_interface interface impl in
   let trait = implementation.implements.trait in
@@ -29,13 +34,13 @@ let list_impl_methods (interface : Interface.Lookups.t) impl =
   List.map
     (fun (declared : Types.trait_method) ->
       let name = declared.method_name in
+      let inherited = Path.Method { owner = trait; name; receiver = declared.method_receiver } in
       match Types.find_implementing_receiver trait_interface implementation declared with
-      | Some receiver -> Path.Method { owner = impl; name; receiver }
-      | None -> Path.Method { owner = trait; name; receiver = declared.method_receiver })
+      | Some receiver ->
+          let own = Path.Method { owner = impl; name; receiver } in
+          if defines interface.names impl own then own else inherited
+      | None -> inherited)
     trait_interface.methods
-
-let writes (lookups : lookups) impl method_ =
-  List.exists (Path.equal method_) (list_written_methods lookups.interface.names impl)
 
 let list_impls_for interface package traits ty =
   match find_head ty with
@@ -48,7 +53,7 @@ let list_impls_for interface package traits ty =
 
 let list_impls_used interface package (callee : _ Core.target) =
   match callee with
-  | Function { path; type_arguments } -> (
+  | Function { path; instantiation = { type_arguments; _ } } -> (
       match Interface.Impls.read_signature interface path with
       | Some (signature : Types.signature) ->
           let rec pair_generics generics arguments =
@@ -68,7 +73,7 @@ let list_impls_used interface package (callee : _ Core.target) =
                          list_traits_with_required interface bound.trait)
                        bounds)
                     ty
-              | Value_generic | Capability_generic -> [])
+              | Value_generic -> [])
             (pair_generics signature.generics type_arguments)
       | None -> [])
   | _ -> []
@@ -104,7 +109,7 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
         let own = Path.Method { owner = impl; name; receiver } in
         add
           [
-            (if writes lookups impl own then own
+            (if defines lookups.interface.names impl own then own
              else Path.Method { owner = trait.trait; name; receiver });
           ]
     | Trait_method
@@ -116,7 +121,7 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
               List.filter_map
                 (fun impl ->
                   let method_ = Path.Method { owner = impl; name; receiver } in
-                  if writes lookups impl method_ then Some method_ else None)
+                  if defines lookups.interface.names impl method_ then Some method_ else None)
                 (list_package_impls_for [ trait.trait ] (Types.make_builtin builtin)))
             integer_types
         in
@@ -136,17 +141,13 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
   in
   let rec visit_statement (statement : Tree.statement) =
     match statement.kind with
-    | Basic (Call { call; _ } | Template { call; _ }) ->
-        add_callee call.callee;
-        add_invariant_check call
-    | Basic (Lend { call; _ }) -> (
+    | Basic (Call { call; _ } | Lend { call; _ }) ->
         add_callee call.callee;
         add_invariant_check call;
-        match call.callee with
-        | Trait_method { evidence = Impl { impl; _ }; name; receiver; _ }
-          when Parts.is_index_call call.callee ->
-            add_requires_check (Path.Method { owner = impl; name; receiver })
-        | _ -> ())
+        add_index_requires_check call
+    | Basic (Template { call; _ }) ->
+        add_callee call.callee;
+        add_invariant_check call
     | Basic (Slice { call; _ }) -> (
         add_callee call.callee;
         add_invariant_check call;
@@ -201,12 +202,21 @@ let list_edges (lookups : lookups) ~package ~may_panic (code : Tree.t) =
             then Walk.iter_code visit_statement default.value)
           defaults
     | Some { form = Parameter_defaults _; _ } | None -> ()
+  and add_index_requires_check (call : Tree.call) =
+    match call.callee with
+    | Trait_method { evidence = Impl { impl; _ }; name; receiver; _ }
+      when Parts.is_index_call call.callee ->
+        add_requires_check (Path.Method { owner = impl; name; receiver })
+    | _ -> ()
   and add_requires_check path =
     if may_panic && enters (`Requires path) then
-      List.iter
-        (fun (requirement : Tree.requirement) ->
-          Walk.iter_formula visit_statement requirement.clause)
-        (Parts.list_checked_requires lookups.mir path)
+      Option.iter
+        (fun ({ form = requires; _ } : Tree.requirement list Parts.sourced) ->
+          List.iter
+            (fun (requirement : Tree.requirement) ->
+              Walk.iter_formula visit_statement requirement.clause)
+            requires)
+        (Parts.find_checked_requires lookups.mir path)
   and add_invariant_check (call : Tree.call) =
     match (call.callee, call.arguments) with
     | ( Intrinsic { operation = Runtime Holds_invariant; type_arguments = [ Type checked ] },
@@ -237,9 +247,10 @@ let list_path_edges (lookups : lookups) path =
     | Some { form = No_code; _ } | None -> []
   in
   let may_panic =
-    match Interface.Impls.read_signature lookups.interface path with
-    | Some (signature : Types.signature) -> Types.may_panic signature.uses
-    | None -> false
+    match (path, Interface.Impls.read_signature lookups.interface path) with
+    | Test _, _ -> true
+    | _, Some (signature : Types.signature) -> Types.may_panic signature.uses
+    | _, None -> false
   in
   List.sort_uniq Path.compare
     (List.concat_map
@@ -256,7 +267,7 @@ let list_implementations (lookups : lookups) ~calling_package (path : Path.t) =
               List.filter_map
                 (fun impl ->
                   let method_ = Path.Method { owner = impl; name; receiver } in
-                  if writes lookups impl method_ then Some method_ else None)
+                  if defines lookups.interface.names impl method_ then Some method_ else None)
                 (Interface.Impls.list_impls_of_trait lookups.interface ~trait:owner package))
             (calling_package
             :: Resolve.Names.list_transitive_dependencies lookups.interface.names calling_package)

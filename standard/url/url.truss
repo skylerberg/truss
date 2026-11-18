@@ -6,19 +6,19 @@ use standard::text
 public type Host =
   | Domain(name: String)
   | Address(address: network::IpAddress)
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 impl Display for Host {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Domain(name) => mut output.write(name.slice())
+      Domain(name) => mut output.push(name.slice())
       Address(address) => match address {
         Version4(_) => address.display(mut output)
         Version6(_) => {
-          mut output.write("[")
+          mut output.push("[")
           address.display(mut output)
-          mut output.write("]")
+          mut output.push("]")
         }
       }
     }
@@ -34,7 +34,7 @@ public opaque type Url(
   query: Option[String],
   fragment: Option[String],
 )
-  derives Copyable, Equal, Hash
+  derives Copyable, Equal, Hash, Ordered
 
 public type ParseError =
   | MissingScheme
@@ -46,22 +46,22 @@ public type ParseError =
   derives Equal
 
 impl Display for ParseError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      MissingScheme => mut output.write("the URL has no scheme")
-      InvalidScheme => mut output.write("the scheme is not letters, digits, `+`, `-`, and `.` after a letter")
-      InvalidHost => mut output.write("the host is not a name or an address")
-      InvalidPort => mut output.write("the port is not a number up to 65535")
+      MissingScheme => mut output.push("the URL has no scheme")
+      InvalidScheme => mut output.push("the scheme is not letters, digits, `+`, `-`, and `.` after a letter")
+      InvalidHost => mut output.push("the host is not a name or an address")
+      InvalidPort => mut output.push("the port is not a number up to 65535")
       InvalidCharacter(offset) => {
-        mut output.write("a character at offset ")
+        mut output.push("a character at offset ")
         offset.display(mut output)
-        mut output.write(" cannot appear there in a URL")
+        mut output.push(" cannot appear there in a URL")
       }
       InvalidPercentEncoding(offset) => {
-        mut output.write("the `%` at offset ")
+        mut output.push("the `%` at offset ")
         offset.display(mut output)
-        mut output.write(" is not followed by two hexadecimal digits")
+        mut output.push(" is not followed by two hexadecimal digits")
       }
     }
   }
@@ -577,12 +577,6 @@ internal fn remove_dot_segments(path: StringSlice) -> String
   String(storage: own output)
 }
 
-internal fn text_equals(scheme: StringSlice, name: StringSlice) -> Bool
-  cost time O(name.length())
-{
-  scheme.length() == name.length() && scheme.matches_at(name, offset: 0)
-}
-
 internal fn Url.merge_path(self, relative: StringSlice) -> String
   cost time finite
 {
@@ -712,13 +706,13 @@ public fn Url.port_or_default(self) -> Option[UInt16]
     Some(port) => Some(port)
     None => {
       let scheme = self.scheme.slice()
-      if text_equals(scheme, name: "http") || text_equals(scheme, name: "ws") {
+      if scheme == "http" || scheme == "ws" {
         Some(80)
-      } else if text_equals(scheme, name: "https") || text_equals(scheme, name: "wss") {
+      } else if scheme == "https" || scheme == "wss" {
         Some(443)
-      } else if text_equals(scheme, name: "ftp") {
+      } else if scheme == "ftp" {
         Some(21)
-      } else if text_equals(scheme, name: "ssh") {
+      } else if scheme == "ssh" {
         Some(22)
       } else {
         None
@@ -785,7 +779,7 @@ public fn Url.query_parameter(self, name: StringSlice) -> Option[String]
 {
   let parameters = self.query_parameters()
   for index in 0..parameters.length() {
-    if parameters[index].name.slice() == name {
+    if parameters[index].name == name {
       return Some(parameters[index].value.copy())
     }
   }
@@ -912,24 +906,24 @@ public fn Url.with_port(own self, port: Option[UInt16]) -> Url
 }
 
 impl Display for Url {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write(self.scheme.slice())
-    mut output.write(":")
+    mut output.push(self.scheme.slice())
+    mut output.push(":")
     match self.host {
       Some(host) => {
-        mut output.write("//")
+        mut output.push("//")
         match self.user_information {
           Some(user) => {
-            mut output.write(user.slice())
-            mut output.write("@")
+            mut output.push(user.slice())
+            mut output.push("@")
           }
           None => {}
         }
         host.display(mut output)
         match self.port {
           Some(port) => {
-            mut output.write(":")
+            mut output.push(":")
             port.display(mut output)
           }
           None => {}
@@ -937,18 +931,18 @@ impl Display for Url {
       }
       None => {}
     }
-    mut output.write(self.path.slice())
+    mut output.push(self.path.slice())
     match self.query {
       Some(query) => {
-        mut output.write("?")
-        mut output.write(query.slice())
+        mut output.push("?")
+        mut output.push(query.slice())
       }
       None => {}
     }
     match self.fragment {
       Some(fragment) => {
-        mut output.write("#")
-        mut output.write(fragment.slice())
+        mut output.push("#")
+        mut output.push(fragment.slice())
       }
       None => {}
     }
@@ -965,6 +959,7 @@ impl text::Parse for Url {
 }
 
 public opaque type Component(text: String)
+  derives Equal
 
 impl From[StringSlice] for Component {
   fn from(value: own StringSlice) -> Component {

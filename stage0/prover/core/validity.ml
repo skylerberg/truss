@@ -1,16 +1,35 @@
+let find_selected_place (context : State.context) selection =
+  let shift offset : State.place_value -> State.place_value = function
+    | One index -> One (Costs.plus offset index)
+    | Run (start, stop) -> Run (Costs.plus offset start, Costs.plus offset stop)
+  in
+  let rec find_from offset = function
+    | [] -> Facts.raise_bug "a selection of no range or element"
+    | [ innermost ] -> Option.map (shift offset) (List.assoc_opt innermost context.indexes)
+    | range :: inner -> (
+        match List.assoc_opt range context.indexes with
+        | Some (Run (start, _)) -> find_from (Costs.plus offset start) inner
+        | Some (One _) -> Facts.raise_bug "a selection that selects inside an element"
+        | None -> None)
+  in
+  find_from (Logic.int 0) selection
+
+let read_innermost selection =
+  match List.rev selection with
+  | innermost :: _ -> innermost
+  | [] -> Facts.raise_bug "a selection of no range or element"
+
 let note_place (context : State.context) (frame : State.frame) origin place =
-  if
-    frame.source.key = Some context.home
-    && List.exists (fun (first, second) -> first = origin || second = origin) context.disjoint
-  then begin
+  let mentions (first, second) = List.mem origin first || List.mem origin second in
+  if frame.source.key = Some context.home && List.exists mentions context.disjoint then begin
     context.indexes <- (origin, place) :: context.indexes;
     let outside index start stop =
       Logic.(Operation ("<", [ index; start ]) ||| Operation ("<=", [ stop; index ]))
     in
     List.iter
       (fun (first, second) ->
-        if first = origin || second = origin then
-          match (List.assoc_opt first context.indexes, List.assoc_opt second context.indexes) with
+        if read_innermost first = origin || read_innermost second = origin then
+          match (find_selected_place context first, find_selected_place context second) with
           | Some left, Some right ->
               let apart =
                 match (left, right) with
@@ -30,9 +49,9 @@ let note_place (context : State.context) (frame : State.frame) origin place =
                 (Facts.locate context frame.source origin)
                 [
                   Text "`";
-                  Facts.quote frame.source first;
+                  Facts.quote frame.source (read_innermost first);
                   Text "` and `";
-                  Facts.quote frame.source second;
+                  Facts.quote frame.source (read_innermost second);
                   Text "` may reach the same elements, which are used together.";
                 ]
                 apart
@@ -61,7 +80,9 @@ let select_field context ty variant field term =
 
 let make_type_frame context frame source (ty : Types.ty) ~self =
   let substitution =
-    match Facts.find_visible_type context ty with Some (_, symbol) -> symbol | None -> []
+    match Facts.find_visible_type context ty with
+    | Some (_, substitution) -> substitution
+    | None -> Types.no_substitution
   in
   {
     frame with
@@ -210,7 +231,7 @@ let run_reading_callback : 'a. _ -> (unit -> 'a) -> 'a =
   context.reading_callback <- true;
   Fun.protect ~finally:(fun () -> context.reading_callback <- saved) read
 
-let bind_part_arguments frame (part : State.part) ~arguments ~substitution =
+let bind_arguments frame (clauses : State.clauses) ~arguments ~substitution =
   let locals, types, self =
     List.fold_left
       (fun (locals, types, self) (position, (parameter : Mir.parameter)) ->
@@ -222,11 +243,11 @@ let bind_part_arguments frame (part : State.part) ~arguments ~substitution =
               self )
         | _, None -> (locals, types, self))
       (Locals.empty, Locals.empty, None)
-      (List.mapi (fun position parameter -> (position, parameter)) part.parameters)
+      (List.mapi (fun position parameter -> (position, parameter)) clauses.parameters)
   in
   {
     frame with
-    State.source = part.callee;
+    State.source = clauses.callee;
     locals;
     types;
     old_locals = locals;
@@ -238,28 +259,28 @@ let bind_part_arguments frame (part : State.part) ~arguments ~substitution =
     substitution;
   }
 
-let make_callee_substitution (frame : State.frame) (signature : Types.signature) type_arguments =
-  Types.make_substitution signature.generics
-    (List.map (Types.substitute_argument frame.substitution) type_arguments)
+let make_callee_substitution (frame : State.frame) (signature : Types.signature) instantiation =
+  Types.make_signature_substitution signature
+    (Types.substitute_instantiation frame.substitution instantiation)
 
 let list_callback_facts (context : State.context) frame (invocation : Invocation.t) position known
     arguments =
   match invocation.callee with
-  | Function { path; type_arguments } -> (
+  | Function { path; instantiation } -> (
       match
         Option.bind (Contracts.find_source context.lookups path) (fun (callee, _, _) ->
-            Contracts.find_part context.lookups path callee)
+            Contracts.find_clauses context.lookups path callee)
       with
-      | Some part -> (
-          match List.assoc_opt position part.callbacks with
+      | Some clauses -> (
+          match List.assoc_opt position clauses.callbacks with
           | Some { inputs; requires } when List.length inputs = List.length arguments ->
               let substitution =
                 match Interface.Impls.read_signature context.lookups.interface path with
                 | Some (signature : Types.signature) ->
-                    make_callee_substitution frame signature type_arguments
-                | None -> []
+                    make_callee_substitution frame signature instantiation
+                | None -> Types.no_substitution
               in
-              let inside = bind_part_arguments frame part ~arguments:known ~substitution in
+              let inside = bind_arguments frame clauses ~arguments:known ~substitution in
               let inside =
                 {
                   inside with
@@ -276,7 +297,7 @@ let list_callback_facts (context : State.context) frame (invocation : Invocation
 
 let find_parameter_type (context : State.context) frame (invocation : Invocation.t) index =
   match invocation.callee with
-  | Function { path; type_arguments } -> (
+  | Function { path; instantiation } -> (
       match Interface.Impls.read_signature context.lookups.interface path with
       | Some (signature : Types.signature) ->
           let types =
@@ -286,7 +307,7 @@ let find_parameter_type (context : State.context) frame (invocation : Invocation
             @ List.map (fun (info : Types.parameter_info) -> info.type_) signature.parameters
           in
           Option.map
-            (Types.substitute (make_callee_substitution frame signature type_arguments))
+            (Types.substitute (make_callee_substitution frame signature instantiation))
             (List.nth_opt types index)
       | None -> None)
   | _ -> None

@@ -4,13 +4,13 @@ public type Level = Debug | Information | Warning | Error
   derives Equal, Hash, Ordered
 
 impl Display for Level {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Debug => mut output.write("debug")
-      Information => mut output.write("information")
-      Warning => mut output.write("warning")
-      Error => mut output.write("error")
+      Debug => mut output.push("debug")
+      Information => mut output.push("information")
+      Warning => mut output.push("warning")
+      Error => mut output.push("error")
     }
   }
 }
@@ -22,8 +22,10 @@ public type Value =
   | Bool(value: Bool)
   | Duration(value: Duration)
   | Instant(value: Instant)
+  derives Equal
 
 public type Field(name: String, value: Value)
+  derives Equal
 
 public fn Field.string(name: StringSlice, value: StringSlice) -> Field {
   Field(name: name.to_string(), value: Value.String(value.to_string()))
@@ -50,6 +52,7 @@ public fn Field.display[Shown: Display](name: StringSlice, value: Shown) -> Fiel
 }
 
 public type Record(level: Level, message: String, fields: List[Field])
+  derives Equal
 
 public fn debug(message: StringSlice, fields: own List[Field] = [])
   uses Log
@@ -123,19 +126,19 @@ fn needs_quotes(text: StringSlice) -> Bool {
   false
 }
 
-fn write_value(output: mut TextBuilder, value: Value, as_json: Bool) {
+fn write_value(output: mut String, value: Value, as_json: Bool) {
   match value {
     String(text) => {
       if as_json || needs_quotes(text.slice()) {
-        mut output.write(json::quote(text.slice()).slice())
+        mut output.push(json::quote(text.slice()).slice())
       } else {
-        mut output.write(text.slice())
+        mut output.push(text.slice())
       }
     }
     Integer(number) => number.display(mut output)
     Float(number) => {
       if as_json && !number.is_finite() {
-        mut output.write(json::quote("${number}").slice())
+        mut output.push(json::quote("${number}").slice())
       } else {
         number.display(mut output)
       }
@@ -143,14 +146,14 @@ fn write_value(output: mut TextBuilder, value: Value, as_json: Bool) {
     Bool(flag) => flag.display(mut output)
     Duration(duration) => {
       if as_json {
-        mut output.write(json::quote("${duration}").slice())
+        mut output.push(json::quote("${duration}").slice())
       } else {
         duration.display(mut output)
       }
     }
     Instant(instant) => {
       if as_json {
-        mut output.write(json::quote("${instant}").slice())
+        mut output.push(json::quote("${instant}").slice())
       } else {
         instant.display(mut output)
       }
@@ -158,46 +161,45 @@ fn write_value(output: mut TextBuilder, value: Value, as_json: Bool) {
   }
 }
 
-fn write_line(output: mut TextBuilder, time: Instant, record: Record) {
+fn write_line(output: mut String, time: Instant, record: Record) {
   time.display(mut output)
-  mut output.write(" ")
+  mut output.push(" ")
   record.level.display(mut output)
-  mut output.write(" ")
-  mut output.write(record.message.slice())
+  mut output.push(" ")
+  mut output.push(record.message.slice())
   for index in 0..record.fields.length() {
-    mut output.write(" ")
-    mut output.write(record.fields[index].name.slice())
-    mut output.write("=")
+    mut output.push(" ")
+    mut output.push(record.fields[index].name.slice())
+    mut output.push("=")
     write_value(mut output, value: record.fields[index].value, as_json: false)
   }
 }
 
-fn write_json(output: mut TextBuilder, time: Instant, record: Record) {
-  mut output.write("{\"time\":")
-  mut output.write(json::quote("${time}").slice())
-  mut output.write(",\"level\":")
-  mut output.write(json::quote("${record.level}").slice())
-  mut output.write(",\"message\":")
-  mut output.write(json::quote(record.message.slice()).slice())
+fn write_json(output: mut String, time: Instant, record: Record) {
+  mut output.push("{\"time\":")
+  mut output.push(json::quote("${time}").slice())
+  mut output.push(",\"level\":")
+  mut output.push(json::quote("${record.level}").slice())
+  mut output.push(",\"message\":")
+  mut output.push(json::quote(record.message.slice()).slice())
   for index in 0..record.fields.length() {
-    mut output.write(",")
-    mut output.write(json::quote(record.fields[index].name.slice()).slice())
-    mut output.write(":")
+    mut output.push(",")
+    mut output.push(json::quote(record.fields[index].name.slice()).slice())
+    mut output.push(":")
     write_value(mut output, value: record.fields[index].value, as_json: true)
   }
-  mut output.write("}")
+  mut output.push("}")
 }
 
 impl Log for ConsoleLog
   uses Console, Clock
 {
   fn record(self, record: Record) {
-    var output = TextBuilder.new()
+    var line = ""
     match self.format {
-      Lines => write_line(mut output, time: Clock.now(), record: record)
-      Json => write_json(mut output, time: Clock.now(), record: record)
+      Lines => write_line(mut line, time: Clock.now(), record: record)
+      Json => write_json(mut line, time: Clock.now(), record: record)
     }
-    let line = own output.finish()
     Console.print_error(line.slice())
   }
 

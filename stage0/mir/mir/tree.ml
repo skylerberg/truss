@@ -61,7 +61,7 @@ type task = Branch of { block : Core.origin; index : int } | Iteration of { loop
 
 type iteration =
   | Range of { start : operand; stop : operand; inclusive : bool }
-  | Pull of { cursor : place; next : callee }
+  | Pull of { cursor : place; next : callee; uses : Types.capability_set }
 
 type connective = And | Or | Implies
 
@@ -88,7 +88,7 @@ type rvalue =
     }
   | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
   | Copy of operand
-  | Function_value of { path : Path.t; type_arguments : Types.argument list; is_argument : bool }
+  | Function_value of { path : Path.t; instantiation : Types.instantiation; is_argument : bool }
   | Lambda of { body : int; captures : capture list; is_argument : bool }
   | Value_parameter of Types.parameter
   | Specification of specification
@@ -113,7 +113,7 @@ and specification =
       arguments : operand list;
       unconverted : Types.ty list;
     }
-  | Method_time of callee
+  | Method_cost of { metric : Metric.t; method_ : callee }
   | Map of (operand * operand) list
   | Quantified of {
       quantifier : Core.quantifier;

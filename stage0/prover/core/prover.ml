@@ -16,14 +16,12 @@ type proof =
   | Unsupported of State.location * string
   | Not_proven_here
 
-let find_inherited_part (lookups : Lookups.t) (path : Path.t) =
+let find_inherited_clauses (lookups : Lookups.t) (path : Path.t) =
   Option.bind (Interface.Impls.find_implemented_method lookups.interface path)
     (fun (implemented : Interface.Impls.implemented_method) ->
       Option.map
-        (fun part -> (part, implemented.implementation.substitution))
-        (Contracts.find_declared_part
-           ~inherited:(not implemented.implementation.trait.is_capability)
-           lookups implemented.declaration))
+        (fun clauses -> (clauses, implemented.implementation.substitution))
+        (Contracts.find_declared_clauses lookups implemented.declaration))
 
 let translate_impl_laws (lookups : Lookups.t) (key : Resolve.Names.key) source =
   let interface = Interface.Definition.read_impl_interface lookups.interface key.path in
@@ -49,7 +47,7 @@ let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
             match generic.kind with
             | Type_generic bounds ->
                 Some (generic.generic, Types.find_bound_integer_implementors bounds)
-            | Value_generic | Capability_generic -> None)
+            | Value_generic -> None)
           signature.generics
     | None -> []
   in
@@ -73,10 +71,12 @@ let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
                         Printf.sprintf "`%s` is `%s`" parameter.name
                           (Intrinsic.show_builtin builtin);
                       ],
-                    (parameter, Types.Type (Types.make_builtin builtin)) :: substitution ))
+                    Types.bind_argument parameter
+                      (Types.Type (Types.make_builtin builtin))
+                      substitution ))
                 builtins)
             instances)
-    [ ([], []) ]
+    [ ([], Types.no_substitution) ]
     (self @ generics)
   |> List.filter (fun (shown, _) -> shown <> [])
 
@@ -130,11 +130,11 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
             let prove_with substitution =
               Translate.translate_function
                 ~is_updating_helper:(Contracts.is_updating_helper lookups key.path)
-                ?inherited:(find_inherited_part lookups key.path)
+                ?inherited:(find_inherited_clauses lookups key.path)
                 ~substitution lookups source ~path:key.path
             in
             match list_integer_instances lookups key.path with
-            | [] -> Obligations (prove_with [])
+            | [] -> Obligations (prove_with Types.no_substitution)
             | instances ->
                 let outcomes =
                   List.map

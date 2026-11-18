@@ -66,8 +66,21 @@ let make_substitution context generics arguments ~subject =
   else begin
     context.report "%s has %d type arguments for %d generic parameters" subject
       (List.length arguments) (List.length generics);
-    []
+    Types.no_substitution
   end
+
+let make_capability_substitution context (signature : Types.signature) arguments ~subject =
+  let parameters =
+    List.sort compare
+      (List.map
+         (fun (parameter : Types.parameter) -> parameter.name)
+         signature.capability_parameters)
+  in
+  if List.sort compare (List.map fst arguments) <> parameters then
+    context.report "%s gives capability arguments for [%s], and its callee has [%s]" subject
+      (String.concat ", " (List.map fst arguments))
+      (String.concat ", " parameters);
+  Types.make_capability_substitution signature.capability_parameters arguments
 
 let instantiate context (callee : Core.callee) =
   let subject = "a call of `" ^ show_callee callee ^ "`" in
@@ -84,30 +97,38 @@ let instantiate context (callee : Core.callee) =
         signature.output )
   in
   match callee with
-  | Function { path; type_arguments } -> (
+  | Function { path; instantiation } -> (
       match Interface.Impls.read_signature context.interface path with
       | Some signature ->
           of_signature
-            (make_substitution context signature.generics type_arguments ~subject)
+            (Types.combine_substitutions
+               (make_substitution context signature.generics instantiation.type_arguments ~subject)
+               (make_capability_substitution context signature instantiation.capability_arguments
+                  ~subject))
             signature
       | None -> None)
   | Intrinsic { operation; type_arguments } ->
       let signature = Intrinsic_signatures.make_signature operation in
       of_signature (make_substitution context signature.generics type_arguments ~subject) signature
-  | Trait_method { trait = reference; name; receiver; self_type; type_arguments; _ } -> (
+  | Trait_method { trait = reference; name; receiver; self_type; instantiation; _ } -> (
       match
         ( find_method_signature context.interface reference.trait name receiver,
           Interface.Definition.find_trait_interface context.interface reference.trait )
       with
       | Some signature, Some interface ->
           of_signature
-            (Interface.Properties.make_trait_substitution interface ~self:self_type reference
-            @ make_substitution context signature.generics type_arguments ~subject)
+            (Types.combine_substitutions
+               (Types.make_trait_substitution interface.trait_generics ~self:self_type reference)
+               (Types.combine_substitutions
+                  (make_substitution context signature.generics instantiation.type_arguments
+                     ~subject)
+                  (make_capability_substitution context signature instantiation.capability_arguments
+                     ~subject)))
             signature
       | _ -> None)
   | Capability_method { capability; name } -> (
       match find_method_signature context.interface capability name Static with
-      | Some signature -> of_signature ~has_receiver:false [] signature
+      | Some signature -> of_signature ~has_receiver:false Types.no_substitution signature
       | None -> None)
   | Indirect function_value -> (
       match read_operand_type function_value with
@@ -284,40 +305,11 @@ let list_free_locals (parameters : Core.pattern list) (body : Core.block) =
     body;
   List.rev !read
 
-let is_executable context (condition : Core.expression) =
-  not
-    (Core_walk.For_testing.expression_exists
-       (fun (node : Core.expression) ->
-         Types.equal node.type_ Integer
-         ||
-         match node.kind with
-         | Quantified _ | Old _ | Result | Specification_function _ | Method_time _ -> true
-         | Call { callee = Function { path; _ }; _ } -> (
-             match Interface.Impls.read_signature context.interface path with
-             | Some signature -> signature.specification_only
-             | None -> false)
-         | _ -> false)
-       condition)
-
 let check_semantics context (form : Core.t) =
-  let check_executable subject (condition : Core.condition) =
-    if condition.executable <> is_executable context condition.value then
-      context.report "%s is marked %sexecutable" subject
-        (if condition.executable then "" else "not ")
-  in
-  (match form.definition with
-  | Function { contract; _ } -> List.iter (check_executable "a `requires` clause") contract.requires
-  | Type { invariants; _ } -> List.iter (check_executable "an `invariant` clause") invariants
-  | _ -> ());
   Core_walk.walk_definition
     (track_location context.at
        {
          Core_walk.ignore_all with
-         statement =
-           (fun (node : Core.statement) ->
-             match node.kind with
-             | Assert { condition; _ } -> check_executable "an `assert`" condition
-             | _ -> ());
          expression =
            (fun (node : Core.expression) ->
              match node.kind with
@@ -424,16 +416,26 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     | Some container -> list_declared container.path
     | None -> []
   in
+  let own_capability_parameters =
+    match Interface.Impls.read_signature interface path with
+    | Some signature -> signature.capability_parameters
+    | None -> []
+  in
   let check_parameter subject (mentioned : Types.parameter) =
     if not (List.mem mentioned own) then
       report "%s mentions `%s`, a generic parameter of `%s`" subject mentioned.name
+        (Path.show mentioned.owner)
+  in
+  let check_capability_parameter subject (mentioned : Types.parameter) =
+    if not (List.mem mentioned own_capability_parameters) then
+      report "%s mentions `generic %s`, a capability parameter of `%s`" subject mentioned.name
         (Path.show mentioned.owner)
   in
   let rec check_capabilities subject (set : Types.capability_set) =
     List.iter
       (function
         | Types.Capability _ -> ()
-        | Types.Capability_parameter mentioned -> check_parameter subject mentioned
+        | Types.Capability_parameter mentioned -> check_capability_parameter subject mentioned
         | Types.Capability_projection { base; trait = reference; name } ->
             (match base with
             | Parameter _ | Projection _ -> ()
@@ -445,7 +447,16 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
             report "%s contains a capability inference variable" subject
         | Types.Capability_error _ -> report "%s contains a capability with an error" subject
         | Types.Divergence Always -> ()
-        | Types.Divergence (Of_parameter mentioned) -> check_parameter subject mentioned)
+        | Types.Divergence (Of_parameter mentioned) -> check_capability_parameter subject mentioned
+        | Types.Divergence (Of_impl_method { self_type; trait = reference; name; _ }) ->
+            (match self_type with
+            | Parameter _ | Projection _ -> ()
+            | _ ->
+                report
+                  "%s holds the divergence of `%s.%s`, which is not resolved through the `impl`"
+                  subject (Types.show self_type) name);
+            check_type subject self_type;
+            check_trait subject reference)
       (set :> Types.capability list)
   and check_type subject (ty : Types.ty) =
     match ty with
@@ -467,7 +478,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     | Types.Value (Value_parameter named) -> check_parameter subject named
     | Types.Value (Known _) -> ()
     | Types.Value (Value_variable _) -> report "%s contains a value inference variable" subject
-    | Types.Capabilities set -> check_capabilities subject set
   and check_trait subject (reference : Types.trait_reference) =
     List.iter (check_argument subject) reference.trait_arguments;
     List.iter (fun (_, inner) -> check_type subject inner) reference.associated
@@ -489,17 +499,24 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         Hashtbl.replace task_origins node.origin ()
     | _ -> ()
   in
+  let check_instantiation subject (instantiation : Types.instantiation) =
+    List.iter (check_argument (subject ^ "'s type argument")) instantiation.type_arguments;
+    List.iter
+      (fun (_, argument) -> check_capabilities (subject ^ "'s capability argument") argument)
+      instantiation.capability_arguments
+  in
   let check_callee (callee : Core.callee) =
     match callee with
-    | Function { type_arguments; _ } ->
-        List.iter (check_argument "a call's type argument") type_arguments
-    | Trait_method { trait = reference; self_type; type_arguments; evidence; _ } -> (
+    | Function { instantiation; _ } -> check_instantiation "a call" instantiation
+    | Trait_method { trait = reference; self_type; instantiation; evidence; _ } -> (
         check_trait "a call's trait" reference;
         check_type "a call's `Self`" self_type;
-        List.iter (check_argument "a call's type argument") type_arguments;
+        check_instantiation "a call" instantiation;
         match evidence with
-        | Impl { arguments; _ } ->
-            List.iter (fun (_, inner) -> check_argument "an `impl`'s type argument" inner) arguments
+        | Impl { substitution; _ } ->
+            List.iter
+              (fun (_, inner) -> check_argument "an `impl`'s type argument" inner)
+              (Types.For_testing.list_arguments substitution)
         | Bound | Dynamic -> ())
     | Intrinsic { type_arguments; _ } ->
         List.iter (check_argument "an intrinsic's type argument") type_arguments
@@ -690,10 +707,10 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                        report "a `match` arm does not have one pattern per scrutinee";
                      List.iter2 (check_binds_own "a `match`") scrutinees arm.patterns)
                    arms
-             | Function_value { type_arguments; _ } ->
-                 List.iter (check_argument "a function value's type argument") type_arguments
+             | Function_value { instantiation; _ } ->
+                 check_instantiation "a function value" instantiation
              | Value_parameter named -> check_parameter "a value" named
-             | Method_time method_ -> check_callee method_
+             | Method_cost { method_; _ } -> check_callee method_
              | Lambda { result; captures; _ } ->
                  check_type "a lambda's result" result;
                  List.iter
@@ -763,8 +780,9 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  | Bind { is_var = true; _ }, Place _ ->
                      report "a `let` that binds a mutable local receives a place"
                  | _ -> ())
-             | For { iteration = Cursor { cursor; _ }; _ } ->
-                 check_mutable_place "a `for` loop" cursor
+             | For { iteration = Cursor { cursor; uses; _ }; _ } ->
+                 check_mutable_place "a `for` loop" cursor;
+                 check_capabilities "a pulled `next`'s `uses`" uses
              | For { iteration = Elements { count; position; element }; _ } -> (
                  (match count.kind with
                  | Call _ -> ()

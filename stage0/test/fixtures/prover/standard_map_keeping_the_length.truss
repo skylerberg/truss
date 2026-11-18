@@ -1,0 +1,5 @@
+fn f(items: List[Int64]) -> List[Bool]
+  ensures result.length() == items.length()
+{
+  items.map(fn(item) { item > 0 })
+}

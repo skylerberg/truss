@@ -1,30 +1,32 @@
-type build = Development | Release
+type profile = Development | Release
 type linkage = External | Internal
 type failure = C_runtime.failure = Echo | Todo
 
 module Builder = Builder
 
-type compiled = Code of Builder.instance | Data of Lowered.data | Table of Lowered.table
+val make_symbol : Lowered.Item.t -> string
+
+type compiled = Code of Builder.item_code | Data of Lowered.data | Table of Lowered.table
 
 val version : int
 
 type fragment
 
 val make_fragment : Memory_layout.env -> compiled -> fragment
-val key : fragment -> Instance.key
-val references : fragment -> Instance.key list
-val called : fragment -> Instance.key list
-val list_linked : lookup:(Instance.key -> fragment) -> Instance.key list -> fragment list
+val key : fragment -> Lowered.Item.t
+val references : fragment -> Lowered.Item.t list
+val called : fragment -> Lowered.Item.t list
+val list_linked : lookup:(Lowered.Item.t -> fragment) -> Lowered.Item.t list -> fragment list
 
 val trace_reachable :
-  lookup:(Instance.key -> fragment option) ->
-  Instance.key list ->
-  (fragment * Instance.key list) list
+  lookup:(Lowered.Item.t -> fragment option) ->
+  Lowered.Item.t list ->
+  (fragment * Lowered.Item.t list) list
 
 val is_small : fragment -> bool
 val failures : fragment -> (failure * Lowered.site) list
 val render_fragment : fragment -> string
-val render_file : Memory_layout.env -> build -> (fragment * linkage) list -> string
+val render_file : Memory_layout.env -> profile -> (fragment * linkage) list -> string
 val site_struct : string
 
 type position = { file : string; line : int; column : int }

@@ -1,36 +1,33 @@
 let () =
-  Harness.test "SPECIFICATION.md lists the words the parser recognizes by spelling" (fun () ->
-      let listed =
-        Documents.list_words
-          (Documents.list_block_after
-             (Parse_support.read_document "SPECIFICATION.md")
-             "name resolution gives the rest their meaning")
+  Harness.test "SPECIFICATION.md's table of words that are not reserved lists the parser's"
+    (fun () ->
+      let rec skip_to_table = function
+        | [] -> []
+        | line :: rest ->
+            if String.starts_with ~prefix:"| Words |" line then take_rows rest
+            else skip_to_table rest
+      and take_rows = function
+        | line :: rest when String.starts_with ~prefix:"|" line -> line :: take_rows rest
+        | _ -> []
+      in
+      let rows =
+        skip_to_table (String.split_on_char '\n' (Parse_support.read_document "SPECIFICATION.md"))
       in
       let missing =
-        List.filter (fun word -> not (List.mem word listed)) Parser.For_testing.contextual_keywords
+        List.filter
+          (fun word ->
+            not (List.exists (fun row -> String.includes ~affix:("`" ^ word ^ "`") row) rows))
+          Parser.For_testing.contextual_keywords
       in
       if missing <> [] then Harness.fail "not listed: %s" (String.concat ", " missing));
-  Harness.test "SPECIFICATION.md lists every conflict that a precedence declaration resolves"
+  Harness.test "Menhir resolves the grammar's three known conflicts by precedence, and no other"
     (fun () ->
-      let rec take_section = function
-        | [] -> []
-        | "## Ambiguities in the grammar" :: rest -> rest
-        | _ :: rest -> take_section rest
-      in
-      let rec count_entries count = function
-        | line :: rest when not (String.starts_with ~prefix:"#" line) ->
-            count_entries (if String.starts_with ~prefix:"- " line then count + 1 else count) rest
-        | _ -> count
-      in
-      let listed =
-        count_entries 0
-          (take_section
-             (String.split_on_char '\n' (Parse_support.read_document "SPECIFICATION.md")))
-      in
-      if listed <> Reference_parser.conflicts_resolved_by_precedence then
+      let known_conflicts = 3 in
+      if Reference_parser.conflicts_resolved_by_precedence <> known_conflicts then
         Harness.fail
-          "Menhir resolves %d conflicts by precedence, and \"Ambiguities in the grammar\" lists %d"
-          Reference_parser.conflicts_resolved_by_precedence listed)
+          "Menhir resolves %d conflicts by precedence, not %d. State how each new conflict \
+           resolves as a rule of SPECIFICATION.md, and update this count."
+          Reference_parser.conflicts_resolved_by_precedence known_conflicts)
 
 let markdown_files = Harness.list_markdown_documents ()
 

@@ -25,7 +25,7 @@ let list_nested_blocks_of_kind (kind : Tree.statement_kind) : Tree.block list =
               ( Operand _ | Operation _ | Compare _ | Not _ | Construct _ | Array _ | Is_variant _
               | Convert _ | To_any _ | Copy _ | Function_value _ | Lambda _ | Value_parameter _
               | Specification
-                  (Result | Entry _ | Yielded | Identical _ | Applied _ | Method_time _ | Map _) );
+                  (Result | Entry _ | Yielded | Identical _ | Applied _ | Method_cost _ | Map _) );
             _;
           }
       | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Provide _
@@ -54,7 +54,7 @@ let visit_iteration_places visit = function
   | Tree.Range { start; stop; _ } ->
       visit_operand_places visit start;
       visit_operand_places visit stop
-  | Pull { cursor; next } ->
+  | Pull { cursor; next; uses = _ } ->
       visit cursor;
       visit_callee_places visit next
 
@@ -72,7 +72,7 @@ let visit_rvalue_places visit rvalue =
         visit_operand first;
         visit_operand second
     | Applied { arguments; _ } -> List.iter visit_operand arguments
-    | Method_time method_ -> visit_callee_places visit method_
+    | Method_cost { method_; _ } -> visit_callee_places visit method_
     | Map entries ->
         List.iter
           (fun (key, value) ->

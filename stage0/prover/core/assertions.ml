@@ -87,17 +87,7 @@ let add_bitwise_definitions (query : Logic.query) =
             in
             Option.map
               (fun result ->
-                let unsigned = Logic.Operation ("bv2nat", [ result ]) in
-                let value =
-                  if signed then
-                    let half = Logic.Integer (Z.shift_left Z.one (bits - 1)) in
-                    Logic.ite
-                      (Logic.Operation (">=", [ unsigned; half ]))
-                      (Logic.Operation ("-", [ unsigned; Logic.Integer (Z.shift_left Z.one bits) ]))
-                      unsigned
-                  else unsigned
-                in
-                Logic.equal term value)
+                Logic.equal term (Logic.integer_of_bits ~is_signed:signed ~width:bits result))
               result
         | _ -> None)
     | _ -> None

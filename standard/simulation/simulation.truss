@@ -11,7 +11,7 @@ use standard::streams
 use standard::tasks
 
 public type Operation = Open | Read | Write | Connect | Accept | Resolve | Spawn
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 type Fault(operation: Operation, error: SystemError)
 
@@ -248,7 +248,7 @@ internal fn State.resolve(mut self, host: StringSlice) -> Result[List[network::I
   }
   var addresses: List[network::IpAddress] = []
   for known in self.hosts {
-    if known.name.slice() == host {
+    if known.name == host {
       mut addresses.push(known.address)
     }
   }
@@ -630,24 +630,12 @@ internal fn State.attempt(mut self, blocking: Blocking, cancelled: Bool) -> Atte
   if cancelled { Attempt.Finished(Err(SystemError.Cancelled)) } else { Attempt.Waiting }
 }
 
-fn begins_with(arguments: Slice[String], beginning: Slice[String]) -> Bool {
-  if beginning.length() > arguments.length() {
-    return false
-  }
-  for index in 0..beginning.length() {
-    if arguments[index] != beginning[index] {
-      return false
-    }
-  }
-  true
-}
-
 internal fn State.program_for(self, command: processes::Command) -> Option[UInt64] {
   var chosen: Option[UInt64] = None
   var most: UInt64 = 0
   for index in 0..self.programs.length() {
-    if self.programs[index].name.slice() == command.program()
-      && begins_with(command.argument_list(), beginning: self.programs[index].arguments.slice())
+    if self.programs[index].name == command.program()
+      && command.argument_list().starts_with(self.programs[index].arguments.slice())
       && self.programs[index].arguments.length() >= most
     {
       chosen = Some(index)

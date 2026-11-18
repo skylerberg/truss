@@ -10,9 +10,9 @@ public type Error(message: String)
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write(self.message.slice())
+    mut output.push(self.message.slice())
   }
 }
 
@@ -503,10 +503,10 @@ public fn pem_blocks(text: StringSlice, label: StringSlice) -> List[List[UInt8]]
   var body = ""
   for line in text.lines() {
     let trimmed = line.trim()
-    if trimmed == begin.slice() {
+    if trimmed == begin {
       inside = true
       body = ""
-    } else if trimmed == end.slice() {
+    } else if trimmed == end {
       if inside {
         match base64::decode(body.slice()) {
           Ok(bytes) => mut blocks.push(own bytes)
@@ -648,19 +648,19 @@ public type VerifyError =
   derives Equal
 
 impl Display for VerifyError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Expired => mut output.write("a certificate in the chain has expired")
-      NotYetValid => mut output.write("a certificate in the chain is not valid yet")
-      UnknownIssuer => mut output.write("the chain does not lead to a trusted root")
-      NotAuthority => mut output.write("a certificate that signs another is not a certificate authority")
-      PathTooLong => mut output.write("the chain is longer than an authority allows")
-      WrongHost => mut output.write("the certificate is not for this host")
-      NotForServers => mut output.write("the certificate is not for servers")
-      NotForClients => mut output.write("the certificate is not for clients")
-      UnsupportedCritical => mut output.write("a certificate has a critical extension that is not supported")
-      Empty => mut output.write("there is no certificate")
+      Expired => mut output.push("a certificate in the chain has expired")
+      NotYetValid => mut output.push("a certificate in the chain is not valid yet")
+      UnknownIssuer => mut output.push("the chain does not lead to a trusted root")
+      NotAuthority => mut output.push("a certificate that signs another is not a certificate authority")
+      PathTooLong => mut output.push("the chain is longer than an authority allows")
+      WrongHost => mut output.push("the certificate is not for this host")
+      NotForServers => mut output.push("the certificate is not for servers")
+      NotForClients => mut output.push("the certificate is not for clients")
+      UnsupportedCritical => mut output.push("a certificate has a critical extension that is not supported")
+      Empty => mut output.push("there is no certificate")
     }
   }
 }

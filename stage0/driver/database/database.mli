@@ -34,7 +34,7 @@ val read_parsed : t -> Path.file -> Syntax.file
 val make_name_lookups : t -> Path.package list -> Resolve.Names.lookups
 val read_resolved : t -> Resolve.Names.key -> Resolve.resolved option
 val make_interface_lookups : t -> Path.package list -> Interface.Lookups.t
-val make_lowering_requests : t -> Path.package list -> Compile.requests
+val find_lowered_lookups : t -> Path.package list -> (Backend.lowered_lookups, string) result
 val find_main : t -> Path.package -> Path.t option
 
 type read = { dependent : Part.t; dependency : Part.t }
@@ -67,10 +67,11 @@ module For_testing : sig
   type checker = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
 
   val list_diagnostics : checker list -> t -> Path.file -> Diagnostic.t list
+  val make_unchecked_interface_lookups : t -> Path.package list -> Interface.Lookups.t
   val read_derived_form : t -> Path.t -> Core.t option
   val read_core : t -> Path.t -> (Core.t * Types.substitution) option
   val make_mir_lookups : t -> Path.package -> Mir.lookups
-  val read_ownership : t -> Resolve.Names.key -> (Core.origin * Core.origin) list part
+  val read_ownership : t -> Resolve.Names.key -> (Core.origin list * Core.origin list) list part
   val find_proof : proofs -> Resolve.Names.key -> Prover.proof part option
   val list_reads : t -> string -> string list
   val list_unread_parts : t -> Path.package list -> Part.any list
@@ -79,5 +80,5 @@ module For_testing : sig
   type observed = { recomputed : string list; collected : string list }
 
   val observe : (unit -> unit) -> observed
-  val add_root : t -> Instance.key -> unit
+  val add_root : t -> Lowered.Item.t -> unit
 end

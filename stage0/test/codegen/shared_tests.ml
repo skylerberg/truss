@@ -24,17 +24,18 @@ let loaded =
          Codegen_support.fail "the source has diagnostics:\n%s"
            (String.concat "" (List.map (Diagnostic.render text) diagnostics)));
      ( database,
-       Compile.create
-         (Database.make_lowering_requests database [ Path.standard_package ])
-         (Lazy.force Codegen_support.compiler)
-         (Lazy.force Codegen_support.cache)
-         (Lazy.force Codegen_support.settings) ))
+       Backend.create
+         (match Database.find_lowered_lookups database [ Path.standard_package ] with
+         | Ok lookups -> lookups
+         | Error message -> failwith message)
+         (Lazy.force Codegen_support.c_compiler)
+         Development ))
 
 let () =
   Codegen_support.test "shared values are updated, copied, and dropped without a leak" (fun () ->
-      let database, compile = Lazy.force loaded in
+      let database, backend = Lazy.force loaded in
       match
-        Compile.run_tests compile ~time_limit_ms:2000
+        Backend.run_tests backend ~time_limit_ms:2000
           (Codegen_support.list_tests_in database probe.module_)
       with
       | Ok records ->
@@ -46,19 +47,19 @@ let () =
 let () =
   Codegen_support.test "on threads, references to one shared value are copied and dropped"
     (fun () ->
-      let _, compile = Lazy.force loaded in
+      let _, backend = Lazy.force loaded in
       List.iter
         (fun workers ->
           Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
           match
-            Compile.For_testing.run_program compile
+            Backend.For_testing.run_program backend
               ~main:(Top { module_ = probe.module_; name = "main" })
               ~arguments:[]
           with
           | Ok (0, output, _) -> Codegen_support.expect_string ~expected:"released\n" output
           | Ok (status, _, errors) -> Codegen_support.fail "ended with status %d: %s" status errors
           | Error message -> failwith message)
-        Codegen_support.worker_counts)
+        (Codegen_support.list_worker_counts ()))
 
 let checks : Path.file =
   { module_ = { package = Path.standard_package; modules = [ "shared_checks" ] }; name = "checks" }

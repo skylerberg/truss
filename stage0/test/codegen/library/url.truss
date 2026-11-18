@@ -1,42 +1,28 @@
 use standard::url
 
-fn same(actual: StringSlice, expected: StringSlice) -> Bool {
-  actual == expected
-}
-
-fn holds(actual: Option[StringSlice], expected: StringSlice) -> Bool {
-  match actual {
-    Some(text) => text == expected
-    None => false
-  }
-}
-
 fn shows(text: StringSlice, expected: StringSlice) -> Bool {
   match url::parse(text) {
-    Ok(parsed) => "${parsed}" == expected.to_string()
+    Ok(parsed) => "${parsed}" == expected
     Err(_) => false
   }
 }
 
 fn fails(text: StringSlice, expected: url::ParseError) -> Bool {
-  match url::parse(text) {
-    Ok(_) => false
-    Err(error) => error == expected
-  }
+  url::parse(text) == Err(expected)
 }
 
 test "a URL is taken apart into its parts" {
   assert url::parse("https://user:pw@Example.COM:8443/a/b%20c?x=1&y=two#frag") is Ok(parsed)
-    && same(parsed.scheme(), expected: "https")
-    && holds(parsed.user_information(), expected: "user:pw")
+    && parsed.scheme() == "https"
+    && parsed.user_information() == Some("user:pw")
     && parsed.port() == Some(8443)
-    && same(parsed.path(), expected: "/a/b%20c")
-    && holds(parsed.query(), expected: "x=1&y=two")
-    && holds(parsed.fragment(), expected: "frag")
+    && parsed.path() == "/a/b%20c"
+    && parsed.query() == Some("x=1&y=two")
+    && parsed.fragment() == Some("frag")
   assert url::parse("https://Example.COM/") is Ok(parsed) && parsed.host() is Some(Domain(name)) && name == "example.com"
   assert url::parse("mailto:someone@example.com") is Ok(parsed)
     && parsed.host() is None
-    && same(parsed.path(), expected: "someone@example.com")
+    && parsed.path() == "someone@example.com"
     && parsed.query() is None
     && parsed.fragment() is None
     && parsed.user_information() is None
@@ -129,7 +115,7 @@ test "text is percent-encoded and decoded" {
 fn joins(reference: StringSlice, expected: StringSlice) -> Bool {
   match url::parse("http://a/b/c/d;p?q") {
     Ok(start) => match start.join(reference) {
-      Ok(parsed) => "${parsed}" == expected.to_string()
+      Ok(parsed) => "${parsed}" == expected
       Err(_) => false
     }
     Err(_) => false
@@ -221,7 +207,7 @@ test "a template builds a URL around values that are percent-encoded" {
   assert built.query_parameter("q") == Some("a&b=c")
   let empty = ""
   let rooted = url::Url"file:///${empty.slice()}/notes"
-  assert same(rooted.path(), expected: "//notes")
+  assert rooted.path() == "//notes"
   let plain = url::Url"mailto:${"a b"}@example.com"
-  assert same(plain.path(), expected: "a%20b@example.com")
+  assert plain.path() == "a%20b@example.com"
 }

@@ -5,10 +5,10 @@ public type SendError = Closed | Cancelled
   derives Equal
 
 impl Display for SendError {
-  fn display(self, output: mut TextBuilder) {
+  fn display(self, output: mut String) {
     match self {
-      Closed => mut output.write("the channel is closed")
-      Cancelled => mut output.write("the task was cancelled")
+      Closed => mut output.push("the channel is closed")
+      Cancelled => mut output.push("the task was cancelled")
     }
   }
 }
@@ -200,8 +200,8 @@ public fn Channel[Message: Storable].messages(self) -> Messages[Message] {
   Messages(channel: self.copy())
 }
 
-public fn with_timeout[Output, capability Granted](limit: Duration, work: (fn() -> Output uses Granted)) -> Option[Output]
-  uses Tasks, Clock, Granted
+public fn with_timeout[Output](limit: Duration, work: (fn() -> Output uses generic Granted)) -> Option[Output]
+  uses Tasks, Clock, generic Granted
 {
   concurrent {
     return Some(work())
@@ -268,8 +268,8 @@ public fn Limiter.new(permits: UInt64) -> Limiter
   Limiter(permits: Channel[Permit].new(capacity: permits))
 }
 
-public fn Limiter.hold[Output, capability Granted](self, work: (fn() -> Output uses Granted)) -> Option[Output]
-  uses Tasks, Granted
+public fn Limiter.hold[Output](self, work: (fn() -> Output uses generic Granted)) -> Option[Output]
+  uses Tasks, generic Granted
 {
   if self.permits.send(Permit()) is Err(_) {
     return None
@@ -792,12 +792,12 @@ fn is_fresh(returned: Instant, now: Instant, seconds: Int64) -> Bool {
   }
 }
 
-public fn Pool[Resource: Storable].using[Output, Failure, capability Granted](
+public fn Pool[Resource: Storable].using[Output, Failure](
   self,
-  open: (fn() -> Result[Resource, Failure] uses Granted),
-  work: (fn(mut Resource) -> Result[Output, Failure] uses Granted),
+  open: (fn() -> Result[Resource, Failure] uses generic Granted),
+  work: (fn(mut Resource) -> Result[Output, Failure] uses generic Granted),
 ) -> Option[Result[Output, Failure]]
-  uses Tasks, Clock, Granted
+  uses Tasks, Clock, generic Granted
 {
   let idle = self.idle.copy()
   let options = self.options

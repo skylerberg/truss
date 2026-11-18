@@ -37,42 +37,42 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       UnknownOption(name) => {
-        mut output.write("unknown option `")
-        mut output.write(name.slice())
-        mut output.write("`")
+        mut output.push("unknown option `")
+        mut output.push(name.slice())
+        mut output.push("`")
       }
       MissingValue(name) => {
-        mut output.write("`")
-        mut output.write(name.slice())
-        mut output.write("` needs a value")
+        mut output.push("`")
+        mut output.push(name.slice())
+        mut output.push("` needs a value")
       }
       MissingRequired(name) => {
-        mut output.write("`")
-        mut output.write(name.slice())
-        mut output.write("` is required")
+        mut output.push("`")
+        mut output.push(name.slice())
+        mut output.push("` is required")
       }
       UnexpectedArgument(value) => {
-        mut output.write("unexpected argument `")
-        mut output.write(value.slice())
-        mut output.write("`")
+        mut output.push("unexpected argument `")
+        mut output.push(value.slice())
+        mut output.push("`")
       }
       InvalidValue(name, value) => {
-        mut output.write("`")
-        mut output.write(value.slice())
-        mut output.write("` is not a value `")
-        mut output.write(name.slice())
-        mut output.write("` takes")
+        mut output.push("`")
+        mut output.push(value.slice())
+        mut output.push("` is not a value `")
+        mut output.push(name.slice())
+        mut output.push("` takes")
       }
       UnknownCommand(name) => {
-        mut output.write("unknown command `")
-        mut output.write(name.slice())
-        mut output.write("`")
+        mut output.push("unknown command `")
+        mut output.push(name.slice())
+        mut output.push("`")
       }
-      HelpRequested => mut output.write("help was requested")
+      HelpRequested => mut output.push("help was requested")
     }
   }
 }
@@ -161,7 +161,7 @@ fn Parser.find_long(self, name: StringSlice) -> UInt64
     decreases self.parameters.length() - index
   {
     let kind = self.parameters[index].kind
-    if (kind == Kind.Flag || kind == Kind.Option) && self.parameters[index].name.slice() == name {
+    if (kind == Kind.Flag || kind == Kind.Option) && self.parameters[index].name == name {
       return index
     }
     index += 1
@@ -223,7 +223,7 @@ fn Parser.find_command(self, name: StringSlice) -> UInt64
     invariant index <= self.commands.length()
     decreases self.commands.length() - index
   {
-    if self.commands[index].name.slice() == name {
+    if self.commands[index].name == name {
       return index
     }
     index += 1
@@ -240,7 +240,7 @@ fn Parsed.index_of(self, name: StringSlice) -> UInt64
     invariant index <= self.options.length()
     decreases self.options.length() - index
   {
-    if self.options[index].name.slice() == name {
+    if self.options[index].name == name {
       return index
     }
     index += 1
@@ -650,7 +650,7 @@ public fn Parsed.flag(self, name: StringSlice) -> Bool
     invariant index <= self.switches.length()
     decreases self.switches.length() - index
   {
-    if self.switches[index].slice() == name {
+    if self.switches[index] == name {
       return true
     }
     index += 1

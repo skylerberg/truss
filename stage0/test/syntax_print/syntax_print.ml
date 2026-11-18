@@ -98,7 +98,6 @@ and show_generic (parameter : Syntax.generic_parameter) =
   | Type_parameter (name, bounds) ->
       name.text ^ ": " ^ String.concat " + " (list show_path_type bounds)
   | Value_parameter (name, type_) -> name.text ^ ": " ^ show_type_expression type_
-  | Capability_parameter name -> "capability " ^ name.text
   | Generic_error -> "error"
 
 and show_generics = function
@@ -110,6 +109,7 @@ and show_capability_reference (reference : Syntax.capability_reference) =
   | Capability_path path_type -> show_path_type path_type
   | Self_capabilities name -> "Self." ^ name.text
   | Associated_capabilities (parameter, name) -> parameter.text ^ "." ^ name.text
+  | Generic_capability name -> "generic " ^ name.text
 
 and show_clause (clause : Syntax.clause) =
   match clause.kind with
@@ -123,9 +123,7 @@ and show_clause (clause : Syntax.clause) =
 and show_cost { amortized; resource; bound } =
   let resource =
     match resource with
-    | Time -> "time"
-    | Allocations -> "allocations"
-    | Allocated_bytes -> "allocated_bytes"
+    | Metric metric -> Metric.show metric
     | Calls (Call_parameter name) -> make_form "calls" [ name.text ]
     | Calls (Call_capability capability) -> make_form "calls" [ show_path_type capability ]
     | Calls (Call_method (capability, name)) ->

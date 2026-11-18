@@ -1,7 +1,7 @@
 use standard::collections
 
 fn numbered(count: Int64) -> collections::Deque[Int64] {
-  var queue: collections::Deque[Int64] = collections::Deque.new()
+  var queue: collections::Deque[Int64] = []
   for value in 0..count {
     mut queue.push_back(value)
   }
@@ -17,14 +17,14 @@ fn listed(queue: collections::Deque[Int64]) -> List[Int64] {
 }
 
 test "a deque pops from both ends in order" {
-  var queue: collections::Deque[Int64] = collections::Deque.new()
+  var queue: collections::Deque[Int64] = []
   assert queue.is_empty() && queue.length() == 0
   mut queue.push_back(2)
   mut queue.push_back(3)
   mut queue.push_front(1)
   assert queue.length() == 3 && !queue.is_empty()
-  assert queue.front() is Some(item) && item == 1
-  assert queue.back() is Some(item) && item == 3
+  assert queue.front() == Some(1)
+  assert queue.back() == Some(3)
   assert mut queue.pop_front() == Some(1)
   assert mut queue.pop_back() == Some(3)
   assert mut queue.pop_back() == Some(2)
@@ -48,7 +48,7 @@ test "a deque filled at one end empties from the other" {
 }
 
 test "a deque keeps its order when both ends are used in turn" {
-  var queue: collections::Deque[Int64] = collections::Deque.new()
+  var queue: collections::Deque[Int64] = []
   for value in 0..50 {
     mut queue.push_back(value)
     mut queue.push_front(-1 - value)
@@ -63,7 +63,7 @@ test "a deque keeps its order when both ends are used in turn" {
 }
 
 test "a deque is indexed from its front" {
-  var queue: collections::Deque[Int64] = collections::Deque.new()
+  var queue: collections::Deque[Int64] = []
   mut queue.push_front(2)
   mut queue.push_front(1)
   mut queue.push_back(3)
@@ -71,8 +71,8 @@ test "a deque is indexed from its front" {
   assert queue[0] == 1 && queue[1] == 2 && queue[2] == 3 && queue[3] == 4
   queue[1] = 20
   queue[3] = 40
-  assert queue.get(1) is Some(item) && item == 20
-  assert queue.get(3) is Some(item) && item == 40
+  assert queue.get(1) == Some(20)
+  assert queue.get(3) == Some(40)
   assert queue.get(4) is None
   assert listed(queue) == [1, 20, 3, 40]
 }
@@ -120,14 +120,20 @@ test "a deque's items can be changed and consumed in order" {
 
 test "deques with the same items are equal however they were built" {
   var pushed_back = numbered(4)
-  var pushed_front: collections::Deque[Int64] = collections::Deque.new()
+  var pushed_front: collections::Deque[Int64] = []
   for value in 0..4 {
     mut pushed_front.push_front(3 - value)
   }
-  let from_list: collections::Deque[Int64] = collections::Deque.from([0, 1, 2, 3])
+  let from_list: collections::Deque[Int64] = [0, 1, 2, 3]
   assert pushed_back == pushed_front && pushed_front == from_list
   mut pushed_back.push_back(4)
   assert !(pushed_back == pushed_front)
   let empty: collections::Deque[Int64] = collections::Deque.default()
   assert empty == collections::Deque.with_capacity(8)
+}
+
+test "a deque literal holds its elements from front to back" {
+  var queue: collections::Deque[Int64] = [1, 2, 3]
+  assert queue.length() == 3 && listed(queue) == [1, 2, 3]
+  assert mut queue.pop_front() == Some(1) && mut queue.pop_back() == Some(3)
 }

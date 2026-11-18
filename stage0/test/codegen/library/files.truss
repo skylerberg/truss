@@ -2,70 +2,56 @@ use standard::files
 use standard::random
 use standard::streams
 
-fn shows(path: Path, expected: StringSlice) -> Bool {
-  match path.text() {
-    Some(text) => text == expected
-    None => false
-  }
-}
-
-fn holds(actual: Option[StringSlice], expected: StringSlice) -> Bool {
-  match actual {
-    Some(text) => text == expected
-    None => false
-  }
-}
-
 test "joining puts one separator between two paths, and an absolute part replaces" {
-  assert shows(Path.new("a").join("b"), expected: "a/b")
-  assert shows(Path.new("a/").join("b"), expected: "a/b")
-  assert shows(Path.new("/").join("b"), expected: "/b")
-  assert shows(Path.new("").join("b"), expected: "b")
-  assert shows(Path.new("a").join("/b"), expected: "/b")
-  assert shows(Path.new("a").join(""), expected: "a/")
-  assert shows(Path.new("a/b").join_path(Path.new("c/d")), expected: "a/b/c/d")
+  assert Path.new("a").join("b").text() == Some("a/b")
+  assert Path.new("a/").join("b").text() == Some("a/b")
+  assert Path.new("/").join("b").text() == Some("/b")
+  assert Path.new("").join("b").text() == Some("b")
+  assert Path.new("a").join("/b").text() == Some("/b")
+  assert Path.new("a").join("").text() == Some("a/")
+  assert Path.new("a/b").join_path(Path.new("c/d")).text() == Some("a/b/c/d")
   assert Path.new("/usr").is_absolute()
   assert !Path.new("usr").is_absolute()
   assert !Path.new("").is_absolute()
 }
 
 test "a path's parent is the path without its last component" {
-  assert Path.new("a/b/c").parent() is Some(parent) && shows(parent, expected: "a/b")
-  assert Path.new("a/b/").parent() is Some(parent) && shows(parent, expected: "a")
-  assert Path.new("a//b").parent() is Some(parent) && shows(parent, expected: "a")
-  assert Path.new("/a").parent() is Some(parent) && shows(parent, expected: "/")
-  assert Path.new("a").parent() is Some(parent) && shows(parent, expected: "")
+  assert Path.new("a/b/c").parent() == Some(Path.new("a/b"))
+  assert Path.new("a/b/").parent() == Some(Path.new("a"))
+  assert Path.new("a//b").parent() == Some(Path.new("a"))
+  assert Path.new("/a").parent() == Some(Path.new("/"))
+  assert Path.new("a").parent() == Some(Path.new(""))
   assert Path.new("/").parent() is None
   assert Path.new("").parent() is None
 }
 
 test "a path's file name, stem, and extension come from its last component" {
   let archive = Path.new("backups/archive.tar.gz")
-  assert holds(archive.file_name(), expected: "archive.tar.gz")
-  assert holds(archive.stem(), expected: "archive.tar")
-  assert holds(archive.extension(), expected: "gz")
+  assert archive.file_name() == Some("archive.tar.gz")
+  assert archive.stem() == Some("archive.tar")
+  assert archive.extension() == Some("gz")
   let hidden = Path.new("/home/user/.profile")
-  assert holds(hidden.file_name(), expected: ".profile")
-  assert holds(hidden.stem(), expected: ".profile")
+  assert hidden.file_name() == Some(".profile")
+  assert hidden.stem() == Some(".profile")
   assert hidden.extension() is None
   let plain = Path.new("notes/")
-  assert holds(plain.file_name(), expected: "notes")
+  assert plain.file_name() == Some("notes")
   assert plain.extension() is None
   let dotted = Path.new("name.")
-  assert holds(dotted.stem(), expected: "name")
-  assert holds(dotted.extension(), expected: "")
+  assert dotted.stem() == Some("name")
+  assert dotted.extension() == Some("")
   assert Path.new("/").file_name() is None
   assert Path.new("a/..").file_name() is None
   assert Path.new("").file_name() is None
 }
 
 test "the file name and the extension can be replaced" {
-  assert shows(Path.new("a/b.txt").with_extension("md"), expected: "a/b.md")
-  assert shows(Path.new("a/b").with_extension("md"), expected: "a/b.md")
-  assert shows(Path.new("a/b.tar.gz").with_extension(""), expected: "a/b.tar")
-  assert shows(Path.new("a/b.txt").with_file_name("c.md"), expected: "a/c.md")
-  assert shows(Path.new("b.txt").with_file_name("c"), expected: "c")
-  assert shows(Path.new("/").with_file_name("c"), expected: "/c")
+  assert Path.new("a/b.txt").with_extension("md").text() == Some("a/b.md")
+  assert Path.new("a/b").with_extension("md").text() == Some("a/b.md")
+  assert Path.new("a/b.tar.gz").with_extension("").text() == Some("a/b.tar")
+  assert Path.new("a/b.txt").with_file_name("c.md").text() == Some("a/c.md")
+  assert Path.new("b.txt").with_file_name("c").text() == Some("c")
+  assert Path.new("/").with_file_name("c").text() == Some("/c")
 }
 
 test "components are the names between separators" {
@@ -92,55 +78,52 @@ test "a path starts with another when its first components are the other's" {
   assert !Path.new("/usr").starts_with(Path.new("/usr/local"))
   assert !Path.new("usr/local").starts_with(Path.new("/usr"))
   assert Path.new("a/b").starts_with(Path.new(""))
-  assert Path.new("/usr/local/bin").relative_to(Path.new("/usr")) is Some(rest) && shows(rest, expected: "local/bin")
-  assert Path.new("/usr").relative_to(Path.new("/usr")) is Some(rest) && shows(rest, expected: "")
+  assert Path.new("/usr/local/bin").relative_to(Path.new("/usr")) == Some(Path.new("local/bin"))
+  assert Path.new("/usr").relative_to(Path.new("/usr")) == Some(Path.new(""))
   assert Path.new("/usr/locale").relative_to(Path.new("/usr/local")) is None
-  assert Path.new("a/b/c").relative_to(Path.new("a")) is Some(rest) && shows(rest, expected: "b/c")
+  assert Path.new("a/b/c").relative_to(Path.new("a")) == Some(Path.new("b/c"))
 }
 
 test "a path is made from bytes only when they are UTF-8" {
   let valid: List[UInt8] = [47, 116, 109, 112]
-  assert Path.from_bytes(own valid) is Some(path) && shows(path, expected: "/tmp")
+  assert Path.from_bytes(own valid) == Some(Path.new("/tmp"))
   let invalid: List[UInt8] = [47, 255]
   assert Path.from_bytes(own invalid) is None
 }
 
 test "normalizing drops empty and single-dot components and resolves double dots" {
-  assert shows(Path.new("a/b/../c").normalized(), expected: "a/c")
-  assert shows(Path.new("a/./b").normalized(), expected: "a/b")
-  assert shows(Path.new("a//b/").normalized(), expected: "a/b")
-  assert shows(Path.new("./a").normalized(), expected: "a")
-  assert shows(Path.new("a/b/c/../../d").normalized(), expected: "a/d")
-  assert shows(Path.new("a/..").normalized(), expected: ".")
-  assert shows(Path.new("").normalized(), expected: ".")
-  assert shows(Path.new(".").normalized(), expected: ".")
-  assert shows(Path.new("a/../b").normalized(), expected: "b")
-  assert shows(Path.new("abc/def").normalized(), expected: "abc/def")
+  assert Path.new("a/b/../c").normalized().text() == Some("a/c")
+  assert Path.new("a/./b").normalized().text() == Some("a/b")
+  assert Path.new("a//b/").normalized().text() == Some("a/b")
+  assert Path.new("./a").normalized().text() == Some("a")
+  assert Path.new("a/b/c/../../d").normalized().text() == Some("a/d")
+  assert Path.new("a/..").normalized().text() == Some(".")
+  assert Path.new("").normalized().text() == Some(".")
+  assert Path.new(".").normalized().text() == Some(".")
+  assert Path.new("a/../b").normalized().text() == Some("b")
+  assert Path.new("abc/def").normalized().text() == Some("abc/def")
 }
 
 test "normalizing keeps the double dots that lead out of a relative path, and none above the root" {
-  assert shows(Path.new("../a").normalized(), expected: "../a")
-  assert shows(Path.new("a/../..").normalized(), expected: "..")
-  assert shows(Path.new("../../a/../b").normalized(), expected: "../../b")
-  assert shows(Path.new("a/../../b/../c").normalized(), expected: "../c")
-  assert shows(Path.new("/").normalized(), expected: "/")
-  assert shows(Path.new("//").normalized(), expected: "/")
-  assert shows(Path.new("/..").normalized(), expected: "/")
-  assert shows(Path.new("/a/../..").normalized(), expected: "/")
-  assert shows(Path.new("/a/b/../../../c").normalized(), expected: "/c")
-  assert shows(Path.new("/a/b/..").normalized(), expected: "/a")
-  assert shows(Path.new("/usr//local/./bin/").normalized(), expected: "/usr/local/bin")
+  assert Path.new("../a").normalized().text() == Some("../a")
+  assert Path.new("a/../..").normalized().text() == Some("..")
+  assert Path.new("../../a/../b").normalized().text() == Some("../../b")
+  assert Path.new("a/../../b/../c").normalized().text() == Some("../c")
+  assert Path.new("/").normalized().text() == Some("/")
+  assert Path.new("//").normalized().text() == Some("/")
+  assert Path.new("/..").normalized().text() == Some("/")
+  assert Path.new("/a/../..").normalized().text() == Some("/")
+  assert Path.new("/a/b/../../../c").normalized().text() == Some("/c")
+  assert Path.new("/a/b/..").normalized().text() == Some("/a")
+  assert Path.new("/usr//local/./bin/").normalized().text() == Some("/usr/local/bin")
 }
 
 fn joins_to(base: StringSlice, part: StringSlice, expected: StringSlice) -> Bool {
-  match Path.new(base).join_confined(Path.new(part)) {
-    Ok(joined) => shows(joined, expected: expected)
-    Err(_) => false
-  }
+  Path.new(base).join_confined(Path.new(part)) == Ok(Path.new(expected))
 }
 
 fn refused(base: StringSlice, part: StringSlice) -> Bool {
-  Path.new(base).join_confined(Path.new(part)) is Err(error) && error == SystemError.PermissionDenied
+  Path.new(base).join_confined(Path.new(part)) == Err(SystemError.PermissionDenied)
 }
 
 test "joining within a directory refuses a part that would leave it" {

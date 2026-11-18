@@ -1,0 +1,8 @@
+fn run(work: (fn() -> Instant uses generic Mine)) -> Instant
+  uses generic Mine
+{
+  each_time(fn() {
+    let _ = work()
+    while true {}
+  })
+}

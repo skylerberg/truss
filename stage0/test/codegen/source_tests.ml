@@ -80,7 +80,7 @@ let () =
 
 let () =
   Codegen_support.test "a derived equal stops at the first field that differs" (fun () ->
-      let equal : Instance.key =
+      let equal : Lowered.Item.t =
         Code
           {
             path =
@@ -95,14 +95,14 @@ let () =
                   name = "equal";
                   receiver = Read;
                 };
-            type_arguments = [];
+            instantiation = Ground.no_instantiation;
           }
       in
-      let _, compile =
+      let _, backend =
         Codegen_support.load ~roots:[ equal ]
           "type Both(first: Int64, second: Int64)\n  derives Equal\n"
       in
-      let c = Emit_c.For_testing.render_c (Compile.For_testing.compile_fragment compile equal) in
+      let c = Emit_c.For_testing.render_c (Backend.For_testing.compile_fragment backend equal) in
       let branches =
         List.length
           (String.split_on_char '\n' c
@@ -128,10 +128,14 @@ let () =
           "list_bump";
         ]
       in
-      let function_ name : Instance.key =
-        Code { path = Top { module_ = Codegen_support.example; name }; type_arguments = [] }
+      let function_ name : Lowered.Item.t =
+        Code
+          {
+            path = Top { module_ = Codegen_support.example; name };
+            instantiation = Ground.no_instantiation;
+          }
       in
-      let _, compile =
+      let _, backend =
         Codegen_support.load ~roots:(List.map function_ names)
           "fn list_at(items: List[Int64]) -> Int64 {\n\
           \  items[2]\n\
@@ -172,7 +176,7 @@ let () =
         (fun name ->
           let c =
             Emit_c.For_testing.render_c
-              (Compile.For_testing.compile_fragment compile (function_ name))
+              (Backend.For_testing.compile_fragment backend (function_ name))
           in
           if String.includes ~affix:"t_lend" c then
             Codegen_support.fail "expected no lend record in `%s`:\n%s" name c)
@@ -181,10 +185,14 @@ let () =
 let () =
   Codegen_support.test "a C local is named after the Truss local it holds, and no other is named"
     (fun () ->
-      let sum : Instance.key =
-        Code { path = Top { module_ = Codegen_support.example; name = "sum" }; type_arguments = [] }
+      let sum : Lowered.Item.t =
+        Code
+          {
+            path = Top { module_ = Codegen_support.example; name = "sum" };
+            instantiation = Ground.no_instantiation;
+          }
       in
-      let _, compile =
+      let _, backend =
         Codegen_support.load ~roots:[ sum ]
           "fn sum(items: List[Int64]) -> Int64 {\n\
           \  var total: Int64 = 0\n\
@@ -194,7 +202,7 @@ let () =
           \  total\n\
            }\n"
       in
-      let c = Emit_c.For_testing.render_c (Compile.For_testing.compile_fragment compile sum) in
+      let c = Emit_c.For_testing.render_c (Backend.For_testing.compile_fragment backend sum) in
       List.iter
         (fun name ->
           if not (String.includes ~affix:name c) then Codegen_support.fail "no %s in:\n%s" name c)

@@ -80,7 +80,6 @@ type module_lookup =
   | No_module of string
 
 val resolve_used_module : lookups -> from:Path.module_ -> Syntax.path -> Path.module_
-val list_visible_packages : lookups -> Path.package -> Path.package list
 val list_transitive_dependencies : lookups -> Path.package -> Path.package list
 val is_visible_module : lookups -> from:Path.module_ -> Path.module_ -> bool
 
@@ -95,16 +94,30 @@ val lookup_module :
 val find_definition : lookups -> Path.t -> (key * Syntax.definition) option
 val find_law_parameters : lookups -> Path.t -> string -> string list option
 
-type generic_kind = Type_kind | Value_kind | Capability_kind
+type generic_kind = Type_kind | Value_kind
 
 val find_recovery_report : lookups -> key -> Parts.part -> Diagnostic.reported option
 val is_broken : lookups -> key -> Parts.part -> bool
 val find_generics : lookups -> Path.t -> (string * generic_kind) list option
 
-type name_lookup = Found_name of entry * Path.t | Hidden_name of entry | No_name
+type 'visible lookup = Visible of 'visible | Hidden of (Path.t * Syntax.visibility) | Absent
 
 val lookup_in :
-  lookups -> from:Path.module_ -> Path.module_ -> string -> is_kind:(named -> bool) -> name_lookup
+  lookups ->
+  from:Path.module_ ->
+  Path.module_ ->
+  string ->
+  is_kind:(named -> bool) ->
+  (entry * Path.t) lookup
+
+val lookup_member : lookups -> from:Path.module_ -> Path.t -> Path.t lookup
+val choose_visible : 'visible lookup list -> 'visible lookup
+val collect_visible : ('key * 'visible lookup) list -> ('key * 'visible) list lookup
+val describe_hidden : Path.t -> Syntax.visibility -> string
+val list_visible_traits_declaring : lookups -> from:Path.module_ -> string -> Path.t list
+
+val list_members_visible_to_package :
+  lookups -> package:Path.package -> Path.t -> string -> key list
 
 val find_bare_type : lookups -> from:Path.module_ -> string -> (entry * Path.t) option
 val find_kind : lookups -> Path.t -> named option

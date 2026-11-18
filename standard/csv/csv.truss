@@ -2,6 +2,7 @@ use standard::intrinsic
 use standard::streams
 
 public type Options(delimiter: Character = Character",", quote: Character = Character"\"", trim_fields: Bool = false)
+  derives Equal
 
 public type ParseErrorKind = UnterminatedQuote | UnexpectedQuote
   derives Equal
@@ -10,15 +11,15 @@ public type ParseError(kind: ParseErrorKind, line: UInt64, column: UInt64)
   derives Equal
 
 impl Display for ParseError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self.kind {
-      UnterminatedQuote => mut output.write("a quoted field that is never closed, opened")
-      UnexpectedQuote => mut output.write("a quote inside a field that is not quoted,")
+      UnterminatedQuote => mut output.push("a quoted field that is never closed, opened")
+      UnexpectedQuote => mut output.push("a quote inside a field that is not quoted,")
     }
-    mut output.write(" at line ")
+    mut output.push(" at line ")
     self.line.display(mut output)
-    mut output.write(", column ")
+    mut output.push(", column ")
     self.column.display(mut output)
   }
 }
@@ -29,7 +30,7 @@ public type ReadError =
   derives Equal
 
 impl Display for ReadError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       System(error) => error.display(mut output)
@@ -262,15 +263,16 @@ public fn format(rows: Slice[List[String]], options: Options = Options()) -> Str
   text
 }
 
-public fn format_row(fields: Slice[String], output: mut TextBuilder, options: Options = Options())
+public fn format_row(fields: Slice[String], output: mut String, options: Options = Options())
   cost time finite
 {
   var text = ""
   push_row(mut text, fields: fields, options: options)
-  mut output.write(text.slice())
+  mut output.push(text.slice())
 }
 
 public type Table(header: List[String], rows: List[List[String]])
+  derives Equal
 
 public fn parse_table(text: StringSlice, options: Options = Options()) -> Result[Table, ParseError]
   cost time finite

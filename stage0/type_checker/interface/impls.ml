@@ -41,7 +41,7 @@ let derive_interface lookups ~type_ ~trait =
             match generic.kind with
             | Type_generic bounds ->
                 { generic with kind = Type_generic (bounds @ [ trait_reference ]) }
-            | Value_generic | Capability_generic -> generic)
+            | Value_generic -> generic)
           type_interface.type_generics
       in
       let for_type =
@@ -74,7 +74,8 @@ let find_implementation_of lookups (impl : Types.impl_interface) =
       {
         impl;
         trait;
-        substitution = Properties.make_trait_substitution trait ~self:impl.for_type impl.implements;
+        substitution =
+          Types.make_trait_substitution trait.trait_generics ~self:impl.for_type impl.implements;
       })
     (Definition.find_trait_interface lookups impl.implements.trait)
 
@@ -113,11 +114,11 @@ let is_open_value = function
 let rec match_type ~variables (substitution : Types.substitution) pattern type_ =
   match (pattern, type_) with
   | Types.Parameter parameter, _ when List.mem parameter variables -> (
-      match List.assoc_opt parameter substitution with
+      match Types.find_argument parameter substitution with
       | Some (Types.Type bound) ->
           if Types.equal bound type_ || Types.is_open_type type_ then Some substitution else None
-      | Some (Types.Value _ | Types.Capabilities _) -> None
-      | None -> Some ((parameter, Types.Type type_) :: substitution))
+      | Some (Types.Value _) -> None
+      | None -> Some (Types.bind_argument parameter (Types.Type type_) substitution))
   | _, argument_type when Types.is_open_type argument_type -> Some substitution
   | Types.Named left, Types.Named right when Path.equal left.path right.path ->
       match_arguments ~variables substitution left.arguments right.arguments
@@ -136,9 +137,9 @@ and match_arguments ~variables substitution patterns arguments =
                 match_type ~variables substitution pattern argument
             | Types.Value (Types.Value_parameter parameter), Types.Value value
               when List.mem parameter variables -> (
-                match List.assoc_opt parameter substitution with
+                match Types.find_argument parameter substitution with
                 | Some (Types.Value bound) -> if bound = value then Some substitution else None
-                | _ -> Some ((parameter, Types.Value value) :: substitution))
+                | _ -> Some (Types.bind_argument parameter (Types.Value value) substitution))
             | Types.Value left, Types.Value right -> (
                 if left = right then Some substitution
                 else match right with Types.Value_variable _ -> Some substitution | _ -> None)
@@ -172,7 +173,7 @@ let classify_through_any lookups ~(trait : Path.t) (method_ : Types.trait_method
   in
   let signature = Definition.read_method_signature lookups ~owner:trait method_ in
   let result = Types.extract_result_type signature.output in
-  if signature.generics <> [] then Has_generics
+  if signature.generics <> [] || signature.capability_parameters <> [] then Has_generics
   else if
     List.exists (fun (info : Types.parameter_info) -> names_self info.type_) signature.parameters
     || names_self result
@@ -186,13 +187,59 @@ let list_no_bounds _ = []
 let list_required_bounds (generics : Types.generic list) (substitution : Types.substitution) =
   List.concat_map
     (fun (generic : Types.generic) ->
-      match (generic.kind, List.assoc_opt generic.generic substitution) with
+      match (generic.kind, Types.find_argument generic.generic substitution) with
       | Type_generic generic_bounds, Some (Types.Type argument) ->
           List.map
             (fun bound -> (argument, Types.substitute_trait substitution bound))
             generic_bounds
       | _ -> [])
     generics
+
+let list_impl_bounds (impl : Types.impl_interface) ~list_bounds parameter =
+  match
+    List.find_opt (fun (generic : Types.generic) -> generic.generic = parameter) impl.impl_generics
+  with
+  | Some { kind = Type_generic bounds; _ } -> bounds
+  | _ -> list_bounds parameter
+
+let read_trait_signature lookups (implemented : implemented_method) =
+  Definition.read_method_signature lookups ~owner:implemented.implementation.impl.implements.trait
+    implemented.declared
+
+let rename_as_written (declared : Types.signature) (written : Types.signature) =
+  let capability_renaming =
+    Types.make_capability_substitution declared.capability_parameters
+      (Types.list_capability_arguments written.capability_parameters)
+  in
+  let renaming =
+    if List.length declared.generics = List.length written.generics then
+      Types.combine_substitutions
+        (Types.make_substitution declared.generics (Types.list_generic_arguments written.generics))
+        capability_renaming
+    else capability_renaming
+  in
+  let renamed = Types.substitute_signature renaming declared in
+  {
+    renamed with
+    generics =
+      List.map
+        (fun (generic : Types.generic) ->
+          match (generic.kind, Types.find_argument generic.generic renaming) with
+          | Type_generic _, Some (Type (Parameter written_parameter))
+          | Value_generic, Some (Value (Value_parameter written_parameter)) ->
+              { generic with generic = written_parameter }
+          | (Type_generic _ | Value_generic), _ -> generic)
+        renamed.generics;
+    capability_parameters =
+      List.map
+        (fun (parameter : Types.parameter) ->
+          Option.value ~default:parameter
+            (List.find_opt
+               (fun (written_parameter : Types.parameter) ->
+                 written_parameter.name = parameter.name)
+               written.capability_parameters))
+        renamed.capability_parameters;
+  }
 
 let find_built_in_evidence : Properties.decision -> evidence option = function
   | Holds -> Some Built_in
@@ -263,7 +310,7 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
                 let variables =
                   List.map (fun (generic : Types.generic) -> generic.generic) impl.impl_generics
                 in
-                match match_type ~variables [] impl.for_type type_ with
+                match match_type ~variables Types.no_substitution impl.for_type type_ with
                 | None -> None
                 | Some substitution -> (
                     match
@@ -416,9 +463,66 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
     | Some From_bound | Some (Accepted (Types.Variable _)) | None -> projection
     | Some (From_any | Built_in | Accepted _) -> Types.no_capabilities
 
+and resolve_impl_method_divergence lookups ~list_bounds ?(depth = 0) self_type
+    (trait : Types.trait_reference) ~name ~receiver =
+  let conditional_divergence =
+    Types.make_capability_set
+      [ Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ]
+  in
+  let may_not_terminate = Types.make_capability_set [ Types.unconditional_divergence ] in
+  if depth > Properties.recursion_limit then
+    raise
+      (Properties.Recursion_limit
+         (Printf.sprintf
+            "Deciding whether `%s.%s` terminates needs more than %d nested impls. The compiler \
+             stops there: `time` clauses that follow each other through ever larger types never \
+             finish."
+            (Types.show self_type) name Properties.recursion_limit))
+  else
+    match find_evidence lookups ~list_bounds ~checks_conditions:false self_type trait with
+    | Some (From_impl { impl; substitution }) -> (
+        match read_signature lookups (Method { owner = impl; name; receiver }) with
+        | Some (implemented : Types.signature) ->
+            let method_generics =
+              List.filter_map
+                (fun (generic : Types.generic) ->
+                  if Option.is_some (Types.find_argument generic.generic substitution) then None
+                  else Some generic.generic)
+                implemented.generics
+            in
+            let names_method_generic =
+              Types.exists (function
+                | Types.Parameter parameter -> List.mem parameter method_generics
+                | _ -> false)
+            in
+            let follows_method_parameter : Types.capability -> bool = function
+              | Divergence (Of_parameter _) -> true
+              | Divergence (Of_impl_method { self_type; trait; _ }) ->
+                  names_method_generic self_type
+                  || List.exists
+                       (function
+                         | Types.Type argument -> names_method_generic argument
+                         | Types.Value _ -> false)
+                       trait.trait_arguments
+              | _ -> false
+            in
+            let divergence = Types.list_divergence implemented.uses in
+            if List.exists follows_method_parameter (divergence :> Types.capability list) then
+              may_not_terminate
+            else
+              normalize_capabilities lookups ~list_bounds ~depth:(depth + 1)
+                (Types.substitute_capabilities substitution divergence)
+        | None -> raise_bug "`%s` has no signature for `%s`" (Path.show impl) name)
+    | Some From_any -> may_not_terminate
+    | Some From_bound | Some (Accepted (Types.Variable _)) | None -> conditional_divergence
+    | Some (Built_in | Accepted _) -> Types.no_capabilities
+
 and normalize_capabilities lookups ~list_bounds ?depth (capabilities : Types.capability_set) =
-  let is_projection = function Types.Capability_projection _ -> true | _ -> false in
-  if not (List.exists is_projection (capabilities :> Types.capability list)) then capabilities
+  let reads_an_impl : Types.capability -> bool = function
+    | Capability_projection _ | Divergence (Of_impl_method _) -> true
+    | _ -> false
+  in
+  if not (List.exists reads_an_impl (capabilities :> Types.capability list)) then capabilities
   else
     Types.flat_map_capabilities
       (function
@@ -427,8 +531,27 @@ and normalize_capabilities lookups ~list_bounds ?depth (capabilities : Types.cap
                (normalize lookups ~list_bounds base)
                { trait with associated = [] } name
               :> Types.capability list)
+        | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
+            (resolve_impl_method_divergence lookups ~list_bounds ?depth
+               (normalize lookups ~list_bounds self_type)
+               (normalize_trait_arguments lookups ~list_bounds trait)
+               ~name ~receiver
+              :> Types.capability list)
         | capability -> [ capability ])
       capabilities
+
+and normalize_trait_arguments lookups ~list_bounds (trait : Types.trait_reference) :
+    Types.trait_reference =
+  {
+    trait = trait.trait;
+    trait_arguments =
+      List.map
+        (function
+          | Types.Type type_ -> Types.Type (normalize lookups ~list_bounds type_)
+          | Types.Value _ as argument -> argument)
+        trait.trait_arguments;
+    associated = [];
+  }
 
 and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
   let normalize = normalize lookups ~list_bounds ?defining in
@@ -454,34 +577,24 @@ and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
       | _ -> None)
     type_
 
-let list_impl_bounds (impl : Types.impl_interface) ~list_bounds parameter =
-  match
-    List.find_opt (fun (generic : Types.generic) -> generic.generic = parameter) impl.impl_generics
-  with
-  | Some { kind = Type_generic bounds; _ } -> bounds
-  | _ -> list_bounds parameter
-
-let normalize_in_impl lookups ~list_bounds ?(missing_associated = []) (impl : Types.impl_interface)
-    type_ =
+and normalize_in_impl lookups ~list_bounds (impl : Types.impl_interface) type_ =
   Types.map
+    ~map_capabilities:(normalize_capabilities_in_impl lookups ~list_bounds impl)
     (function
-      | Types.Projection { base; trait = projected; name } when Types.equal base impl.for_type -> (
+      | Types.Projection { base; trait = projected; name } when Types.equal base impl.for_type ->
           let projected = read_declaring_type_trait lookups ~base projected name in
-          let is_declared_by_impl = Path.equal projected.trait impl.implements.trait in
-          match
-            (List.assoc_opt name impl.implements.associated, List.assoc_opt name missing_associated)
-          with
-          | Some fixed, _ when is_declared_by_impl -> Some fixed
-          | None, Some missing when is_declared_by_impl ->
-              Some (Types.Error (Diagnostic.make_reported missing))
-          | _ ->
-              project_associated_type lookups
-                ~list_bounds:(list_impl_bounds impl ~list_bounds)
-                impl.for_type projected name)
+          if Path.equal projected.trait impl.implements.trait then
+            match List.assoc_opt name impl.implements.associated with
+            | Some chosen -> Some chosen
+            | None -> Some (Types.Error (Diagnostic.make_recovered name))
+          else
+            project_associated_type lookups
+              ~list_bounds:(list_impl_bounds impl ~list_bounds)
+              impl.for_type projected name
       | _ -> None)
     type_
 
-let normalize_capabilities_in_impl lookups ~list_bounds (impl : Types.impl_interface) capabilities =
+and normalize_capabilities_in_impl lookups ~list_bounds (impl : Types.impl_interface) capabilities =
   Types.flat_map_capabilities
     (fun capability ->
       let set =
@@ -491,90 +604,105 @@ let normalize_capabilities_in_impl lookups ~list_bounds (impl : Types.impl_inter
                && Path.equal (read_declaring_capability_trait lookups ~base projected name).trait
                     impl.implements.trait ->
             Option.value ~default:Types.no_capabilities (List.assoc_opt name impl.capability_sets)
-        | capability ->
-            normalize_capabilities lookups
-              ~list_bounds:(list_impl_bounds impl ~list_bounds)
-              (Types.make_capability_set [ capability ])
+        | capability -> Types.make_capability_set [ capability ]
       in
-      (set :> Types.capability list))
+      (normalize_capabilities lookups ~list_bounds:(list_impl_bounds impl ~list_bounds) set
+        :> Types.capability list))
     capabilities
 
-let normalize_signature_in_impl lookups ~list_bounds ?missing_associated
-    (implementation : implementation) (signature : Types.signature) =
+and normalize_signature_in_impl lookups ~list_bounds (implementation : implementation)
+    (signature : Types.signature) =
   let signature = Types.substitute_signature implementation.substitution signature in
+  let normalized =
+    Types.map_signature (normalize_in_impl lookups ~list_bounds implementation.impl) signature
+  in
   {
-    (Types.map_signature
-       (normalize_in_impl lookups ~list_bounds ?missing_associated implementation.impl)
-       signature)
-    with
+    normalized with
     uses = normalize_capabilities_in_impl lookups ~list_bounds implementation.impl signature.uses;
+    specification_only =
+      signature.specification_only
+      || Types.mentions_specification_only_type normalized.parameters normalized.output;
+    capture_free_parameters = Types.list_capture_free_parameters normalized.parameters;
   }
 
-let read_trait_signature lookups (implemented : implemented_method) =
-  Definition.read_method_signature lookups ~owner:implemented.implementation.impl.implements.trait
-    implemented.declared
-
-let make_expected_signature lookups (implemented : implemented_method) =
+and make_expected_signature lookups ?written (implemented : implemented_method) =
+  let implementation = implemented.implementation in
   let declared = read_trait_signature lookups implemented in
-  normalize_signature_in_impl lookups
-    ~list_bounds:
-      (Types.list_bounds (implemented.implementation.impl.impl_generics @ declared.generics))
-    implemented.implementation declared
+  let declared = Option.fold ~none:declared ~some:(rename_as_written declared) written in
+  let expected =
+    normalize_signature_in_impl lookups
+      ~list_bounds:(Types.list_bounds (implementation.impl.impl_generics @ declared.generics))
+      implementation declared
+  in
+  match written with
+  | Some written when implementation.trait.is_capability ->
+      {
+        expected with
+        receiver = written.receiver;
+        parameters =
+          List.map
+            (fun (parameter : Types.parameter_info) -> { parameter with has_default = false })
+            expected.parameters;
+      }
+  | Some _ | None -> expected
 
-let read_signature lookups (path : Path.t) =
+and read_signature lookups (path : Path.t) =
   let ( let* ) = Option.bind in
   match path with
   | Method { owner = (Impl _ | Derived _) as owner; _ } ->
       let* impl = Definition.find_impl_interface lookups owner in
-      let implemented = find_implemented_method lookups path in
-      let* own =
-        match Definition.find_declared_signature lookups path with
-        | Some own -> Some own
-        | None -> Option.map (make_expected_signature lookups) implemented
+      let written = Definition.find_declared_signature lookups path in
+      let declared =
+        Option.map (make_expected_signature lookups ?written) (find_implemented_method lookups path)
       in
+      let* stated = if Option.is_some written then written else declared in
       let signature =
         Types.add_impl_generics_and_uses ~impl_generics:impl.impl_generics ~impl_uses:impl.impl_uses
-          own
+          { (Option.value declared ~default:stated) with uses = stated.uses; costs = stated.costs }
       in
-      let normalize_capabilities =
+      let uses =
         normalize_capabilities_in_impl lookups
           ~list_bounds:(Types.list_bounds signature.generics)
-          impl
-      in
-      let uses = normalize_capabilities signature.uses in
-      let declared_by_trait =
-        Option.map
-          (fun implemented ->
-            let declared = read_trait_signature lookups implemented in
-            let rename =
-              if List.length declared.generics = List.length own.generics then
-                Types.substitute_capabilities
-                  (Types.make_substitution declared.generics
-                     (Types.list_generic_arguments own.generics))
-              else Fun.id
-            in
-            (rename (Types.list_divergence declared.uses), declared.costs))
-          implemented
+          impl signature.uses
       in
       Some
         {
-          (Types.map_signature
-             (Types.map ~map_capabilities:normalize_capabilities (fun _ -> None))
-             signature)
-          with
+          signature with
           uses =
-            (match declared_by_trait with
-            | Some (divergence, _) when not (Types.terminates uses) ->
-                Types.union_capabilities (Types.remove_divergence uses) divergence
+            (match declared with
+            | Some declared when not (Types.terminates uses) ->
+                Types.union_capabilities (Types.remove_divergence uses)
+                  (Types.list_divergence declared.uses)
             | Some _ | None -> uses);
           costs =
-            (match declared_by_trait with
-            | Some (_, costs) -> List.sort_uniq compare (signature.costs @ costs)
+            (match declared with
+            | Some declared -> List.sort_uniq compare (signature.costs @ declared.costs)
             | None -> signature.costs);
         }
   | Top _ | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _
     ->
       Definition.find_declared_signature lookups path
+
+let read_scope (lookups : Lookups.t) (key : Resolve.Names.key) : Environment.scope =
+  let scope = (lookups.read_elaborated_interface key).scope in
+  match read_signature lookups key.path with
+  | None -> scope
+  | Some signature ->
+      {
+        scope with
+        bounds =
+          List.map
+            (fun (parameter, written_bounds) ->
+              ( parameter,
+                match
+                  List.find_opt
+                    (fun (generic : Types.generic) -> generic.generic = parameter)
+                    signature.generics
+                with
+                | Some { kind = Type_generic bounds; _ } -> bounds
+                | Some { kind = Value_generic; _ } | None -> written_bounds ))
+            scope.bounds;
+      }
 
 type declaring_clause =
   | Own_uses

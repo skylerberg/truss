@@ -109,6 +109,7 @@ module Code = struct
     | Not_a_constant
     | Alternative_bindings
     | Not_a_generic_parameter
+    | Unconstrained_capability_parameter
     | Null
 
   type types =
@@ -140,6 +141,8 @@ module Code = struct
     | Negated_unsigned
     | Unused_value
     | Unbounded_time
+    | Upper_bound_in_exact_bound
+    | Cost_of_other_resource
     | Not_assignable
     | Wrong_try
     | Lambda_needs_type
@@ -155,7 +158,6 @@ module Code = struct
     | Not_a_type
     | Not_a_trait
     | Not_a_capability
-    | Misplaced_capability_parameter
     | Arity
     | Argument_kind
     | Unsatisfied_bound
@@ -368,6 +370,7 @@ module Code = struct
     | Not_a_constant -> "not_a_constant"
     | Alternative_bindings -> "alternative_bindings"
     | Not_a_generic_parameter -> "not_a_generic_parameter"
+    | Unconstrained_capability_parameter -> "unconstrained_capability_parameter"
     | Null -> "null"
 
   let name_types_code code =
@@ -400,6 +403,8 @@ module Code = struct
     | Negated_unsigned -> "negated_unsigned"
     | Unused_value -> "unused_value"
     | Unbounded_time -> "unbounded_time"
+    | Upper_bound_in_exact_bound -> "upper_bound_in_exact_bound"
+    | Cost_of_other_resource -> "cost_of_other_resource"
     | Not_assignable -> "not_assignable"
     | Wrong_try -> "wrong_try"
     | Lambda_needs_type -> "lambda_needs_type"
@@ -415,7 +420,6 @@ module Code = struct
     | Not_a_type -> "not_a_type"
     | Not_a_trait -> "not_a_trait"
     | Not_a_capability -> "not_a_capability"
-    | Misplaced_capability_parameter -> "misplaced_capability_parameter"
     | Arity -> "arity"
     | Argument_kind -> "argument_kind"
     | Unsatisfied_bound -> "unsatisfied_bound"

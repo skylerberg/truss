@@ -1,0 +1,7 @@
+fn f(value: Int64) -> Int64
+  cost time finite
+{
+  apply(value, change: fn(outer) {
+    apply(outer, change: fn(inner) { slow(inner) })
+  })
+}

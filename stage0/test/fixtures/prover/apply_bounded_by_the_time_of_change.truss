@@ -8,8 +8,8 @@ fn quick(value: Int64) -> Int64
   value
 }
 
-fn apply[capability Granted](value: Int64, change: (fn(Int64) -> Int64 uses Granted)) -> Int64
-  uses Granted
+fn apply(value: Int64, change: (fn(Int64) -> Int64 uses generic Granted)) -> Int64
+  uses generic Granted
   cost time O(time(change))
 {
   change(value)

@@ -15,11 +15,10 @@ type context = {
   implements_capability : bool;
   mutable mutable_locals : Core.local list;
   mutable diagnostics : Diagnostic.in_definition list;
-  mutable must_be_disjoint : (Core.origin * Core.origin) list;
+  mutable must_be_disjoint : (Core.origin list * Core.origin list) list;
 }
 
 val is_plain : context -> Types.ty -> bool
-val is_copyable : context -> Types.ty -> bool
 val is_view : context -> Types.ty -> bool
 val holds_function : context -> Types.ty -> bool
 val lends_nothing : context -> Types.ty -> bool

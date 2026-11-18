@@ -4,12 +4,10 @@ module Locals = Set.Make (Int)
 module Blocks = Set.Make (Int)
 
 type local_info = { ty : Lowered.ty; name : string option; is_zeroed : bool }
-type instance = C_instance.t
-
-let instance_key (instance : instance) = instance.key
+type item_code = Item_code.t
 
 type code = {
-  key : Instance.key;
+  key : Lowered.Item.t;
   context : C_types.context;
   mutable nested : (int * (string * string)) list;
 }
@@ -37,13 +35,13 @@ type function_ = {
 }
 
 type facts = {
-  mutable instances : Instance.key list;
-  mutable called : Instance.key list;
+  mutable referenced_items : Lowered.Item.t list;
+  mutable called : Lowered.Item.t list;
   mutable calls : (Path.t * int) list;
   mutable failures : (C_runtime.failure * Lowered.site) list;
 }
 
-let make_empty_facts () = { instances = []; called = []; calls = []; failures = [] }
+let make_empty_facts () = { referenced_items = []; called = []; calls = []; failures = [] }
 
 type t = {
   env : Memory_layout.env;
@@ -101,7 +99,7 @@ let start_function builder ~code =
   builder
 
 let create env ~key =
-  let code = { key; context = C_types.make_context env (Instance.make_symbol key); nested = [] } in
+  let code = { key; context = C_types.make_context env (Mangling.make_symbol key); nested = [] } in
   start_function (make_builder env) ~code
 
 let allocate_local builder ?name ?(is_zeroed = false) ty =
@@ -114,7 +112,7 @@ let render_token local = Printf.sprintf "\001%d\002" local
 
 let make_function_context builder (function_ : function_) ~note_mention =
   {
-    C_values.symbol = Instance.make_symbol function_.code.key;
+    C_values.symbol = Mangling.make_symbol function_.code.key;
     render_local =
       (fun local ->
         note_mention local;
@@ -139,20 +137,20 @@ let start builder block =
 
 let with_block_facts builder (context : C_types.context) print =
   let facts = Dynarray.get builder.facts builder.current in
-  let instances = context.instances
+  let referenced_items = context.referenced_items
   and called = context.called
   and calls = context.calls
   and failures = context.failures in
-  context.instances <- facts.instances;
+  context.referenced_items <- facts.referenced_items;
   context.called <- facts.called;
   context.calls <- facts.calls;
   context.failures <- facts.failures;
   print ();
-  facts.instances <- context.instances;
+  facts.referenced_items <- context.referenced_items;
   facts.called <- context.called;
   facts.calls <- context.calls;
   facts.failures <- context.failures;
-  context.instances <- instances;
+  context.referenced_items <- referenced_items;
   context.called <- called;
   context.calls <- calls;
   context.failures <- failures
@@ -279,7 +277,7 @@ let resolve text name =
   Buffer.contents buffer
 
 let render_nested_symbol (code : code) index =
-  Printf.sprintf "%s_Nested_%d" (Instance.make_symbol code.key) index
+  Printf.sprintf "%s_Nested_%d" (Mangling.make_symbol code.key) index
 
 let write_function_texts builder ~enclosing_symbol { parameters; result; returns } =
   let functions = Dynarray.to_array builder.functions in
@@ -301,7 +299,7 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
       in
       reach function_.entry)
     functions;
-  let add key keys = if List.exists (Instance.equal key) keys then keys else key :: keys in
+  let add key keys = if List.exists (Lowered.Item.equal key) keys then keys else key :: keys in
   Array.iteri
     (fun block is_reached ->
       match owners.(block) with
@@ -310,7 +308,8 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
           function_.mentioned <-
             Locals.union (Dynarray.get builder.mentions block) function_.mentioned;
           let facts = Dynarray.get builder.facts block and context = function_.code.context in
-          context.instances <- List.fold_right add facts.instances context.instances;
+          context.referenced_items <-
+            List.fold_right add facts.referenced_items context.referenced_items;
           context.called <- List.fold_right add facts.called context.called;
           context.calls <- facts.calls @ context.calls;
           context.failures <- facts.failures @ context.failures
@@ -385,7 +384,7 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
           let context = function_.code.context in
           context.environments <-
             C_types.Keys.add
-              (Environment (Instance.make_symbol function_.code.key, index))
+              (Environment (Mangling.make_symbol function_.code.key, index))
               (List.map
                  (fun (local, field) ->
                    ( field,
@@ -438,7 +437,7 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
       in
       let body = Buffer.create 1024 in
       Buffer.add_string body " {\n";
-      let symbol = Instance.make_symbol function_.code.key in
+      let symbol = Mangling.make_symbol function_.code.key in
       List.iter
         (fun local ->
           let ty = lookup_local_type builder local in
@@ -486,7 +485,7 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
       let parameters = list_parameters number in
       let header =
         C_values.render_prototype context
-          (Instance.make_symbol function_.code.key)
+          (Mangling.make_symbol function_.code.key)
           symbol ~names:(List.map name parameters) ~linkage:External
           {
             parameters = List.map (lookup_local_type builder) parameters;
@@ -509,10 +508,10 @@ let write_functions builder ~enclosing_symbol prototype =
     functions;
   texts.(0)
 
-let build builder prototype : instance =
+let build builder prototype : item_code =
   let enclosing = Dynarray.get builder.functions 0 in
   let enclosing_text =
-    write_functions builder ~enclosing_symbol:(Instance.make_symbol enclosing.code.key) prototype
+    write_functions builder ~enclosing_symbol:(Mangling.make_symbol enclosing.code.key) prototype
   in
   {
     key = enclosing.code.key;
@@ -526,7 +525,7 @@ let build_nested parent ~index ~environment build_body =
   let code = (lookup_current_function parent).code in
   code.context.environments <-
     C_types.Keys.add
-      (Environment (Instance.make_symbol code.key, index))
+      (Environment (Mangling.make_symbol code.key, index))
       environment code.context.environments;
   let builder = start_function (make_builder parent.env) ~code in
   let prototype = build_body builder in

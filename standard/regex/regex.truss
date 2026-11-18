@@ -18,17 +18,17 @@ public type ParseError(kind: PatternErrorKind, offset: UInt64)
   derives Equal
 
 impl Display for ParseError {
-  fn display(self, output: mut TextBuilder) {
+  fn display(self, output: mut String) {
     match self.kind {
-      UnbalancedParenthesis => mut output.write("a parenthesis has no partner")
-      UnbalancedBracket => mut output.write("a character class is not closed")
-      InvalidEscape => mut output.write("the escape is not one a pattern has")
-      InvalidRepetition => mut output.write("the repetition has nothing to repeat, or its counts are wrong")
-      InvalidRange => mut output.write("the range in a character class is not from a lower to a higher character")
-      UnsupportedSyntax => mut output.write("the pattern uses syntax that is not supported")
-      TooLarge => mut output.write("the pattern is too large")
+      UnbalancedParenthesis => mut output.push("a parenthesis has no partner")
+      UnbalancedBracket => mut output.push("a character class is not closed")
+      InvalidEscape => mut output.push("the escape is not one a pattern has")
+      InvalidRepetition => mut output.push("the repetition has nothing to repeat, or its counts are wrong")
+      InvalidRange => mut output.push("the range in a character class is not from a lower to a higher character")
+      UnsupportedSyntax => mut output.push("the pattern uses syntax that is not supported")
+      TooLarge => mut output.push("the pattern is too large")
     }
-    mut output.write(" at offset ")
+    mut output.push(" at offset ")
     self.offset.display(mut output)
   }
 }
@@ -86,7 +86,7 @@ public fn Captures.named(self, name: StringSlice) -> Option[Match]
     invariant index <= self.names.length()
     decreases self.names.length() - index
   {
-    if self.names[index].slice() == name && name.length() > 0 {
+    if self.names[index] == name && name.length() > 0 {
       return self.get(index + 1)
     }
     index += 1
@@ -1588,14 +1588,15 @@ public fn Regex.split(self, text: StringSlice) -> List[StringSlice]
 impl Equal for Regex {
   fn equal(self, other: Regex) -> Bool
     ensures result == (self.pattern == other.pattern)
+    cost allocations == 0
   {
     self.pattern == other.pattern
   }
 }
 
 impl Display for Regex {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write(self.pattern.slice())
+  fn display(self, output: mut String) {
+    mut output.push(self.pattern.slice())
   }
 }
 

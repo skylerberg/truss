@@ -7,7 +7,7 @@ test "a form reads repeated names and plus signs, and encodes back" {
   match http::Form.parse("a=1&b=two+words&a=3%26") {
     Ok(form) => {
       assert form.get("a") == Some("1".slice())
-      assert form.all("a").length() == 2 && form.all("a")[1] == "3&".slice()
+      assert form.all("a").length() == 2 && form.all("a")[1] == "3&"
       assert form.get("b") == Some("two words".slice())
       assert form.get("c") is None
       let encoded = form.encode()

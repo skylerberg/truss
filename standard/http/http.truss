@@ -33,28 +33,28 @@ public type Method =
   | Connect
   | Trace
   | Other(name: String)
-  derives Equal
+  derives Equal, Hash, Ordered
 
 public fn Method.from_name(name: StringSlice) -> Method
   cost time finite
 {
-  if name == "GET".slice() {
+  if name == "GET" {
     Method.Get
-  } else if name == "HEAD".slice() {
+  } else if name == "HEAD" {
     Method.Head
-  } else if name == "POST".slice() {
+  } else if name == "POST" {
     Method.Post
-  } else if name == "PUT".slice() {
+  } else if name == "PUT" {
     Method.Put
-  } else if name == "PATCH".slice() {
+  } else if name == "PATCH" {
     Method.Patch
-  } else if name == "DELETE".slice() {
+  } else if name == "DELETE" {
     Method.Delete
-  } else if name == "OPTIONS".slice() {
+  } else if name == "OPTIONS" {
     Method.Options
-  } else if name == "CONNECT".slice() {
+  } else if name == "CONNECT" {
     Method.Connect
-  } else if name == "TRACE".slice() {
+  } else if name == "TRACE" {
     Method.Trace
   } else {
     Method.Other(name: name.to_string())
@@ -62,19 +62,19 @@ public fn Method.from_name(name: StringSlice) -> Method
 }
 
 impl Display for Method {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Get => mut output.write("GET")
-      Head => mut output.write("HEAD")
-      Post => mut output.write("POST")
-      Put => mut output.write("PUT")
-      Patch => mut output.write("PATCH")
-      Delete => mut output.write("DELETE")
-      Options => mut output.write("OPTIONS")
-      Connect => mut output.write("CONNECT")
-      Trace => mut output.write("TRACE")
-      Other(name) => mut output.write(name.slice())
+      Get => mut output.push("GET")
+      Head => mut output.push("HEAD")
+      Post => mut output.push("POST")
+      Put => mut output.push("PUT")
+      Patch => mut output.push("PATCH")
+      Delete => mut output.push("DELETE")
+      Options => mut output.push("OPTIONS")
+      Connect => mut output.push("CONNECT")
+      Trace => mut output.push("TRACE")
+      Other(name) => mut output.push(name.slice())
     }
   }
 }
@@ -162,24 +162,6 @@ public type Header(name: String, value: String)
 public opaque type Headers(entries: List[Header])
   derives Equal, Copyable
 
-fn same_name(first: StringSlice, second: StringSlice) -> Bool
-  cost time finite
-{
-  if first.length() != second.length() {
-    return false
-  }
-  for index in 0..first.length() {
-    let a = first.byte(index)
-    let b = second.byte(index)
-    let lower_a = if 65 <= a && a <= 90 { a + 32 } else { a }
-    let lower_b = if 65 <= b && b <= 90 { b + 32 } else { b }
-    if lower_a != lower_b {
-      return false
-    }
-  }
-  true
-}
-
 public fn Headers.new() -> Headers {
   Headers(entries: [])
 }
@@ -194,7 +176,7 @@ public fn Headers.entries(self) -> Slice[Header] {
 
 public fn Headers.get(self, name: StringSlice) -> Option[StringSlice] {
   for entry in self.entries {
-    if same_name(entry.name.slice(), second: name) {
+    if entry.name.equal_ignoring_ascii_case(name) {
       return Some(entry.value.slice())
     }
   }
@@ -210,7 +192,7 @@ public fn Headers.add(mut self, name: StringSlice, value: StringSlice) {
 }
 
 public fn Headers.remove(mut self, name: StringSlice) {
-  mut self.entries.retain(fn(entry) { !same_name(entry.name.slice(), second: name) })
+  mut self.entries.retain(fn(entry) { !entry.name.equal_ignoring_ascii_case(name) })
 }
 
 public fn Headers.set(mut self, name: StringSlice, value: StringSlice) {
@@ -222,7 +204,7 @@ fn has_token(header: Option[StringSlice], token: StringSlice) -> Bool {
   match header {
     Some(value) => {
       for part in value.split(",") {
-        if same_name(part.trim(), second: token) {
+        if part.trim().equal_ignoring_ascii_case(token) {
           return true
         }
       }
@@ -261,7 +243,7 @@ public fn Request.query_parameter(self, name: StringSlice) -> Option[String] {
     Some(query) => match url::decode_query(query) {
       Ok(parameters) => {
         for parameter in parameters {
-          if parameter.name.slice() == name {
+          if parameter.name == name {
             return Some(parameter.value.copy())
           }
         }
@@ -496,7 +478,7 @@ fn new_responder(outbound: tasks::Channel[flow::Outbound], stream: UInt32, is_he
 fn fields_of(headers: Headers, has_length: Bool) -> List[hpack::Field] {
   var fields: List[hpack::Field] = []
   for entry in headers.entries() {
-    if !is_connection_specific(entry.name.slice()) && !(has_length && same_name(entry.name.slice(), second: "content-length")) {
+    if !is_connection_specific(entry.name.slice()) && !(has_length && entry.name.equal_ignoring_ascii_case("content-length")) {
       mut fields.push(hpack::Field(name: entry.name.copy(), value: entry.value.copy()))
     }
   }
@@ -656,6 +638,7 @@ public fn Responder.stream[Input: streams::Reader](
 }
 
 public type Response(status: Status, headers: Headers = Headers(entries: []), body: List[UInt8] = [])
+  derives Equal
 
 public fn Response.new(status: Status = Status.ok) -> Response {
   Response(status: status)
@@ -690,7 +673,7 @@ fn is_compressible(content_type: Option[StringSlice]) -> Bool {
 }
 
 internal fn encoded_body(bytes: Slice[UInt8], coding: StringSlice) -> List[UInt8] {
-  if coding == "zstd".slice() {
+  if coding == "zstd" {
     zstd::compress(bytes)
   } else {
     compression::compress(bytes, format: compression::Format.Gzip, level: compression::Level.Fastest)
@@ -744,21 +727,21 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       Malformed(message) => {
-        mut output.write("malformed HTTP: ")
-        mut output.write(message.slice())
+        mut output.push("malformed HTTP: ")
+        mut output.push(message.slice())
       }
-      HeadTooLarge => mut output.write("the request line and headers are too large")
-      BodyTooLarge => mut output.write("the body is too large")
-      Closed => mut output.write("the connection closed before the message ended")
+      HeadTooLarge => mut output.push("the request line and headers are too large")
+      BodyTooLarge => mut output.push("the body is too large")
+      Closed => mut output.push("the connection closed before the message ended")
       System(error) => error.display(mut output)
       Tls(error) => error.display(mut output)
       Json(error) => error.display(mut output)
-      Unsupported(message) => mut output.write(message.slice())
-      TooManyRedirects => mut output.write("the server redirected more times than the client follows")
+      Unsupported(message) => mut output.push(message.slice())
+      TooManyRedirects => mut output.push("the server redirected more times than the client follows")
     }
   }
 }
@@ -922,14 +905,14 @@ fn read_head[Stream: streams::Duplex](
     return Err(malformed("a request line that is not a method, a target, and a version"))
   }
   let version = parts[2]
-  if version != "HTTP/1.1".slice() && version != "HTTP/1.0".slice() {
+  if version != "HTTP/1.1" && version != "HTTP/1.0" {
     return Err(Error.Unsupported(message: "an HTTP version other than 1.0 and 1.1"))
   }
   let headers = read_headers(connection, inbox: mut inbox, budget: mut budget)?
   Ok(Some(Head(
     method: Method.from_name(parts[0]),
     target: parts[1].to_string(),
-    version_one_zero: version == "HTTP/1.0".slice(),
+    version_one_zero: version == "HTTP/1.0",
     headers: own headers,
   )))
 }
@@ -937,7 +920,7 @@ fn read_head[Stream: streams::Duplex](
 fn content_length(headers: Headers) -> Result[Option[UInt64], Error] {
   var declared: Option[UInt64] = None
   for entry in headers.entries() {
-    if same_name(entry.name.slice(), second: "Content-Length") {
+    if entry.name.equal_ignoring_ascii_case("Content-Length") {
       let digits = entry.value.slice()
       var digits_only = !digits.is_empty()
       for byte in digits.bytes() {
@@ -978,7 +961,7 @@ fn framing_of(headers: Headers, is_response: Bool) -> Result[Framing, Error] {
       let codings: List[StringSlice] = coding.split(",")
       match codings.last() {
         Some(last) => {
-          if !same_name(last.trim(), second: "chunked") {
+          if !last.trim().equal_ignoring_ascii_case("chunked") {
             return Err(Error.Unsupported(message: "a transfer coding other than chunked"))
           }
         }
@@ -1141,10 +1124,10 @@ fn head_bytes(status: UInt16, fields: Slice[hpack::Field], is_end: Bool, version
   var has_date = false
   var has_length = false
   for field in fields {
-    if same_name(field.name.slice(), second: "Date") {
+    if field.name.equal_ignoring_ascii_case("Date") {
       has_date = true
     }
-    if same_name(field.name.slice(), second: "Content-Length") {
+    if field.name.equal_ignoring_ascii_case("Content-Length") {
       has_length = true
     }
     push_text(mut head, text: field.name.slice())
@@ -1197,11 +1180,11 @@ fn collect_response(outbound: tasks::Channel[flow::Outbound]) -> Response
   Response(status: received, headers: own headers, body: own body)
 }
 
-public fn respond[capability Granted](
-  handler: (fn(own Request, mut Responder) uses Granted),
+public fn respond(
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   request: own Request,
 ) -> Response
-  uses Tasks, Granted
+  uses Tasks, generic Granted
 {
   let outbound = tasks::Channel[flow::Outbound].new(capacity: 2)
   let is_head = request.method == Method.Head
@@ -1235,7 +1218,7 @@ fn write_one[Stream: streams::Duplex](
       Head(status, fields, is_end, ack, ..) => {
         var has_length = false
         for field in fields {
-          if same_name(field.name.slice(), second: "Content-Length") {
+          if field.name.equal_ignoring_ascii_case("Content-Length") {
             has_length = true
           }
         }
@@ -1336,7 +1319,7 @@ fn forwarded_hops(headers: Headers) -> List[StringSlice] {
         var hop: Option[StringSlice] = None
         for pair in element.split(";") {
           let trimmed = pair.trim()
-          if trimmed.length() > 4 && same_name(trimmed.part(0, to: 4), second: "for=") {
+          if trimmed.length() > 4 && trimmed.part(0, to: 4).equal_ignoring_ascii_case("for=") {
             hop = Some(trimmed.part(4, to: trimmed.length()))
           }
         }
@@ -1399,14 +1382,14 @@ fn read_head_within[Stream: streams::Duplex](connection: Stream, inbox: mut two:
 type Handled = Completed | Disconnected | TimedOut
   derives Equal
 
-fn run_handler[capability Granted](
-  handler: (fn(own Request, mut Responder) uses Granted),
+fn run_handler(
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   request: own Request,
   responder: mut Responder,
   gone: tasks::Channel[Unit],
   seconds: Int64,
 ) -> Handled
-  uses Tasks, Clock, Granted
+  uses Tasks, Clock, generic Granted
 {
   concurrent {
     {
@@ -1529,16 +1512,16 @@ fn await_request[Stream: streams::Duplex](connection: Stream, inbox: mut two::In
   }
 }
 
-fn serve_one[Stream: streams::Duplex, capability Granted](
+fn serve_one[Stream: streams::Duplex](
   connection: Stream,
   inbox: own two::Inbox,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   stopping: tasks::Channel[Unit],
   peer: Option[network::SocketAddress],
   certificates: Slice[x509::Certificate],
 )
-  uses Tasks, Handles, Clock, Granted
+  uses Tasks, Handles, Clock, generic Granted
 {
   var unread = own inbox
   while true {
@@ -1628,8 +1611,8 @@ fn serve_one[Stream: streams::Duplex, capability Granted](
 }
 
 fn is_connection_specific(name: StringSlice) -> Bool {
-  same_name(name, second: "connection") || same_name(name, second: "keep-alive") || same_name(name, second: "proxy-connection")
-    || same_name(name, second: "transfer-encoding") || same_name(name, second: "upgrade")
+  name.equal_ignoring_ascii_case("connection") || name.equal_ignoring_ascii_case("keep-alive") || name.equal_ignoring_ascii_case("proxy-connection")
+    || name.equal_ignoring_ascii_case("transfer-encoding") || name.equal_ignoring_ascii_case("upgrade")
 }
 
 fn has_uppercase(name: StringSlice) -> Bool {
@@ -1657,23 +1640,23 @@ fn arrived_of(fields: Slice[hpack::Field]) -> Result[Arrived, Status] {
       if is_regular {
         return Err(Status.bad_request)
       }
-      if name == ":method".slice() && method is None {
+      if name == ":method" && method is None {
         method = Some(field.value.copy())
-      } else if name == ":path".slice() && path is None && !field.value.is_empty() {
+      } else if name == ":path" && path is None && !field.value.is_empty() {
         path = Some(field.value.copy())
-      } else if name == ":authority".slice() && authority is None {
+      } else if name == ":authority" && authority is None {
         authority = Some(field.value.copy())
-      } else if name == ":scheme".slice() && !has_scheme {
+      } else if name == ":scheme" && !has_scheme {
         has_scheme = true
       } else {
         return Err(Status.bad_request)
       }
     } else {
       is_regular = true
-      if has_uppercase(name) || is_connection_specific(name) || (name == "te".slice() && field.value != "trailers") {
+      if has_uppercase(name) || is_connection_specific(name) || (name == "te" && field.value != "trailers") {
         return Err(Status.bad_request)
       }
-      if name == "cookie".slice() {
+      if name == "cookie" {
         mut cookies.push(field.value.copy())
       } else {
         mut headers.add(name, value: field.value.slice())
@@ -1712,14 +1695,14 @@ fn arrived_of(fields: Slice[hpack::Field]) -> Result[Arrived, Status] {
   Ok(Arrived(method: Method.from_name(method_name.slice()), target: own target, headers: own headers))
 }
 
-fn answer_arrival[capability Granted](
+fn answer_arrival(
   arrival: own two::Arrival,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   peer: Option[network::SocketAddress],
   certificates: Slice[x509::Certificate],
 )
-  uses Tasks, Clock, Granted
+  uses Tasks, Clock, generic Granted
 {
   let limits = options.limits
   let stream = arrival.stream
@@ -1755,13 +1738,13 @@ fn answer_arrival[capability Granted](
   arrival.chunks.close()
 }
 
-fn serve_connection[capability Granted](
+fn serve_connection(
   connection: own network::Connection,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   stopping: tasks::Channel[Unit],
 )
-  uses Tasks, Handles, Clock, Granted
+  uses Tasks, Handles, Clock, generic Granted
 {
   var opened = own connection
   prepare(mut opened, options: options)
@@ -1800,14 +1783,14 @@ fn accept_within(connection: own network::Connection, config: tls::ServerConfig,
   }
 }
 
-fn serve_secured[capability Granted](
+fn serve_secured(
   connection: own network::Connection,
   config: tls::ServerConfig,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   stopping: tasks::Channel[Unit],
 )
-  uses Tasks, Handles, Clock, Random, Panic, Granted
+  uses Tasks, Handles, Clock, Random, Panic, generic Granted
 {
   var opened = own connection
   prepare(mut opened, options: options)
@@ -1861,13 +1844,13 @@ fn accept_until(
   }
 }
 
-fn drain_until[capability Work](
+fn drain_until(
   connections: tasks::Channel[network::Connection],
   stopping: tasks::Channel[Unit],
   grace_seconds: Int64,
-  serve_each: (fn(own network::Connection) uses Work),
+  serve_each: (fn(own network::Connection) uses generic Work),
 )
-  uses Tasks, Clock, Work
+  uses Tasks, Clock, generic Work
 {
   concurrent {
     {
@@ -1886,13 +1869,13 @@ fn drain_until[capability Work](
   }
 }
 
-fn run[capability Work](
+fn run(
   listener: mut network::Listener,
   stopping: tasks::Channel[Unit],
   options: ServerOptions,
-  serve_each: (fn(own network::Connection) uses Work),
+  serve_each: (fn(own network::Connection) uses generic Work),
 )
-  uses Tasks, Handles, Clock, Work
+  uses Tasks, Handles, Clock, generic Work
 {
   let connections = tasks::Channel[network::Connection].new()
   let slots = tasks::Channel[Unit].new(capacity: if options.connection_limit == 0 { 1 } else { options.connection_limit })
@@ -1908,13 +1891,13 @@ fn run[capability Work](
   }
 }
 
-public fn serve[capability Granted](
+public fn serve(
   listener: mut network::Listener,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions = ServerOptions(),
   shutdown: Option[Shutdown] = None,
 )
-  uses Tasks, Handles, Clock, Granted
+  uses Tasks, Handles, Clock, generic Granted
 {
   let stopping = stopping_of(shutdown)
   run(mut listener, stopping: stopping, options: options, serve_each: fn(connection) {
@@ -1922,14 +1905,14 @@ public fn serve[capability Granted](
   })
 }
 
-public fn serve_tls[capability Granted](
+public fn serve_tls(
   listener: mut network::Listener,
   config: tls::ServerConfig,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions = ServerOptions(),
   shutdown: Option[Shutdown] = None,
 )
-  uses Tasks, Handles, Clock, Random, Panic, Granted
+  uses Tasks, Handles, Clock, Random, Panic, generic Granted
 {
   var configured = config.copy()
   if configured.protocols.is_empty() {
@@ -1955,7 +1938,7 @@ public opaque type Parameters(names: List[String], values: List[String])
 
 public fn Parameters.get(self, name: StringSlice) -> Option[StringSlice] {
   for index in 0..self.names.length() {
-    if self.names[index].slice() == name && index < self.values.length() {
+    if self.names[index] == name && index < self.values.length() {
       return Some(self.values[index].slice())
     }
   }
@@ -2033,7 +2016,7 @@ fn parse_route(text: StringSlice) -> Option[Route]
         return None
       }
       for known in names {
-        if known.slice() == name {
+        if known == name {
           return None
         }
       }
@@ -2099,7 +2082,7 @@ public fn Request.matches(self, route: Route) -> Option[Parameters] {
   for segment in route.segments {
     match segment {
       Fixed(text) => {
-        if index >= pieces.length() || pieces[index] != text.slice() {
+        if index >= pieces.length() || pieces[index] != text {
           return None
         }
         index += 1
@@ -2217,7 +2200,7 @@ fn is_excluded(excluded: Slice[String], host: StringSlice) -> Bool {
   let bare = name.strip_suffix("]").unwrap_or(name).to_ascii_lowercase()
   for entry in excluded {
     let listed = entry.slice()
-    if listed == "*".slice() {
+    if listed == "*" {
       return true
     }
     match network_of(listed) {
@@ -2235,7 +2218,7 @@ fn is_excluded(excluded: Slice[String], host: StringSlice) -> Bool {
       None => {}
     }
     let suffix = listed.strip_prefix(".").unwrap_or(listed)
-    if bare.slice() == suffix || (bare.slice().ends_with(suffix) && bare.slice().ends_with(".${suffix}".slice())) {
+    if bare == suffix || (bare.slice().ends_with(suffix) && bare.slice().ends_with(".${suffix}".slice())) {
       return true
     }
   }
@@ -2295,7 +2278,7 @@ fn content_codings(header: Option[StringSlice]) -> List[String] {
     Some(value) => {
       for part in value.split(",") {
         let coding = part.trim().to_ascii_lowercase()
-        if !coding.is_empty() && coding.slice() != "identity".slice() {
+        if !coding.is_empty() && coding != "identity" {
           mut codings.push(own coding)
         }
       }
@@ -2306,18 +2289,18 @@ fn content_codings(header: Option[StringSlice]) -> List[String] {
 }
 
 fn is_decodable(coding: StringSlice) -> Bool {
-  coding == "gzip".slice() || coding == "x-gzip".slice() || coding == "br".slice() || coding == "zstd".slice()
+  coding == "gzip" || coding == "x-gzip" || coding == "br" || coding == "zstd"
 }
 
 fn decoded_body(bytes: Slice[UInt8], coding: StringSlice, limit: UInt64) -> Result[List[UInt8], Error] {
-  if coding == "br".slice() {
+  if coding == "br" {
     return match brotli::decompress(bytes, limit: limit) {
       Ok(plain) => Ok(own plain)
       Err(TooLarge(_)) => Err(Error.BodyTooLarge)
       Err(_) => Err(malformed("a Brotli body that does not decompress"))
     }
   }
-  if coding == "zstd".slice() {
+  if coding == "zstd" {
     return match zstd::decompress(bytes, limit: limit) {
       Ok(plain) => Ok(own plain)
       Err(TooLarge(_)) => Err(Error.BodyTooLarge)
@@ -2374,7 +2357,7 @@ fn request_target(url: url::Url) -> String {
 fn authority_of(url: url::Url) -> String {
   var authority = ""
   match url.host() {
-    Some(host) => mut authority.push("${host}".slice())
+    Some(host) => host.display(mut authority)
     None => {}
   }
   match url.port() {
@@ -2416,7 +2399,7 @@ fn request_head(method: Method, url: url::Url, headers: Headers, body_length: UI
     push_text(mut head, text: "\r\n")
   }
   for entry in headers.entries() {
-    if !same_name(entry.name.slice(), second: "Content-Length") && !same_name(entry.name.slice(), second: "Connection") {
+    if !entry.name.equal_ignoring_ascii_case("Content-Length") && !entry.name.equal_ignoring_ascii_case("Connection") {
       push_text(mut head, text: entry.name.slice())
       push_text(mut head, text: ": ")
       push_text(mut head, text: entry.value.slice())
@@ -2625,7 +2608,7 @@ fn open_link(
   let route = proxy_for(options, host: host, is_secure: is_secure)
   var connection = match route {
     Some(proxy) => {
-      if proxy.scheme() != "http".slice() {
+      if proxy.scheme() != "http" {
         return Err(Error.Unsupported(message: "a proxy whose scheme is not http"))
       }
       let proxy_host = match proxy.host() {
@@ -2673,7 +2656,7 @@ fn is_idempotent(method: Method) -> Bool {
 
 fn take_pooled(pool: mut List[Pooled], origin: StringSlice) -> Option[Link] {
   for index in 0..pool.length() {
-    if index < pool.length() && pool[index].origin.slice() == origin {
+    if index < pool.length() && pool[index].origin == origin {
       let pooled = mut pool.remove_at(index)
       return Some(own pooled.link)
     }
@@ -2699,8 +2682,8 @@ fn keep(pool: mut List[Pooled], origin: own String, link: own Option[Link], limi
 type Target(is_secure: Bool, host: String, port: UInt16, origin: String)
 
 fn target_of(address: url::Url) -> Result[Target, Error] {
-  let is_secure = address.scheme() == "https".slice()
-  if !is_secure && address.scheme() != "http".slice() {
+  let is_secure = address.scheme() == "https"
+  if !is_secure && address.scheme() != "http" {
     return Err(Error.Unsupported(message: "a URL whose scheme is not http or https"))
   }
   let host = match address.host() {
@@ -2819,12 +2802,12 @@ fn retry_after_milliseconds(headers: Headers, now: Instant) -> Option[Int64] {
 }
 
 fn is_body_header(name: StringSlice) -> Bool {
-  same_name(name, second: "Content-Type") || same_name(name, second: "Content-Encoding")
-    || same_name(name, second: "Content-Language") || same_name(name, second: "Content-Location")
+  name.equal_ignoring_ascii_case("Content-Type") || name.equal_ignoring_ascii_case("Content-Encoding")
+    || name.equal_ignoring_ascii_case("Content-Language") || name.equal_ignoring_ascii_case("Content-Location")
 }
 
 fn is_credential_header(name: StringSlice) -> Bool {
-  same_name(name, second: "Authorization") || same_name(name, second: "Cookie") || same_name(name, second: "Proxy-Authorization")
+  name.equal_ignoring_ascii_case("Authorization") || name.equal_ignoring_ascii_case("Cookie") || name.equal_ignoring_ascii_case("Proxy-Authorization")
 }
 
 fn without_headers(headers: Headers, drops: fn(StringSlice) -> Bool) -> Headers {
@@ -2837,15 +2820,15 @@ fn without_headers(headers: Headers, drops: fn(StringSlice) -> Bool) -> Headers 
   kept
 }
 
-public fn Client.stream[Output, capability Granted](
+public fn Client.stream[Output](
   mut self,
   method: Method,
   url: url::Url,
-  receive: (fn(Status, Headers, mut Body) -> Output uses Granted),
+  receive: (fn(Status, Headers, mut Body) -> Output uses generic Granted),
   headers: Headers = Headers(entries: []),
   body: List[UInt8] = [],
 ) -> Result[Output, Error]
-  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, Granted
+  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, generic Granted
 {
   var current_method = method.copy()
   var address = url.copy()
@@ -2882,7 +2865,7 @@ public fn Client.stream[Output, capability Granted](
     if self.options.stores_cookies {
       let now = Clock.now().unix_seconds()
       for entry in opened.headers.entries() {
-        if same_name(entry.name.slice(), second: "Set-Cookie") {
+        if entry.name.equal_ignoring_ascii_case("Set-Cookie") {
           mut self.jar.store(address, set_cookie: entry.value.slice(), now: now)
         }
       }
@@ -3275,7 +3258,7 @@ fn offered_protocol(header: Option[StringSlice], protocols: Slice[String]) -> Op
       for part in value.split(",") {
         let name = part.trim()
         for protocol in protocols {
-          if protocol.slice() == name {
+          if protocol == name {
             return Some(protocol.copy())
           }
         }
@@ -3302,7 +3285,7 @@ public fn websocket(
     let _ = mut responder.send(Response.text("a WebSocket upgrade is expected here", status: Status.bad_request))
     return Err(malformed("a request that is not a WebSocket upgrade"))
   }
-  if request.headers.get("Sec-WebSocket-Version").unwrap_or("".slice()).trim() != "13".slice() {
+  if request.headers.get("Sec-WebSocket-Version").unwrap_or("".slice()).trim() != "13" {
     let refused = Response.text("only WebSocket version 13 is supported", status: Status(code: 426)).with_header("Sec-WebSocket-Version", value: "13")
     let _ = mut responder.send(own refused)
     return Err(Error.Unsupported(message: "a WebSocket version other than 13"))
@@ -3436,19 +3419,19 @@ fn parse_field(parser: mut EventParser, line: StringSlice) {
   if value.starts_with(" ") {
     value = value.part(1, to: value.length())
   }
-  if field == "data".slice() {
+  if field == "data" {
     if parser.has_data {
       mut parser.data.push("\n")
     }
     mut parser.data.push(value)
     parser.has_data = true
-  } else if field == "event".slice() {
+  } else if field == "event" {
     parser.name = Some(value.to_string())
-  } else if field == "id".slice() {
+  } else if field == "id" {
     if !value.contains("\u{0}") {
       parser.id = Some(value.to_string())
     }
-  } else if field == "retry".slice() {
+  } else if field == "retry" {
     match UInt64.parse(value) {
       Ok(milliseconds) => parser.retry = Some(milliseconds)
       Err(_) => {}
@@ -3518,7 +3501,7 @@ fn write_raw[Stream: streams::Duplex](connection: Stream, outbound: tasks::Chann
   let _ = connection.close_sending()
 }
 
-fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
+fn run_websocket[Stream: streams::Duplex, Output](
   connection: Stream,
   inbox: own two::Inbox,
   request: Slice[UInt8],
@@ -3528,9 +3511,9 @@ fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
   message_limit: UInt64,
   is_deflate_offered: Bool,
   seed: UInt64,
-  session: (fn(mut WebSocket) -> Output uses Granted),
+  session: (fn(mut WebSocket) -> Output uses generic Granted),
 ) -> Result[Output, Error]
-  uses Handles, Tasks, Granted
+  uses Handles, Tasks, generic Granted
 {
   var unread = own inbox
   system(connection.send_all(request))?
@@ -3579,19 +3562,19 @@ fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
   }
 }
 
-public fn Client.websocket[Output, capability Granted](
+public fn Client.websocket[Output](
   mut self,
   url: url::Url,
-  session: (fn(mut WebSocket) -> Output uses Granted),
+  session: (fn(mut WebSocket) -> Output uses generic Granted),
   headers: Headers = Headers(entries: []),
   protocols: List[String] = [],
   message_limit: UInt64 = 16777216,
   compresses: Bool = true,
 ) -> Result[Output, Error]
-  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, Granted
+  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, generic Granted
 {
-  let is_secure = url.scheme() == "wss".slice()
-  if !is_secure && url.scheme() != "ws".slice() {
+  let is_secure = url.scheme() == "wss"
+  if !is_secure && url.scheme() != "ws" {
     return Err(Error.Unsupported(message: "a WebSocket URL whose scheme is not ws or wss"))
   }
   let host = match url.host() {

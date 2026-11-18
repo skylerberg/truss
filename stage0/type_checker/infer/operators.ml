@@ -243,7 +243,7 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
               name = method_;
               receiver = Read;
               self_type = left;
-              type_arguments = [];
+              instantiation = Types.no_instantiation;
               evidence = Built_in;
             };
         arguments = operands;
@@ -282,7 +282,7 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
                         name = method_;
                         receiver = Read;
                         self_type = left;
-                        type_arguments = [];
+                        instantiation = Types.no_instantiation;
                         evidence = State.convert_evidence evidence;
                       };
                   arguments = operands;
@@ -401,8 +401,24 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
       else begin
         State.register_expression state value (fun () ->
             Form.build_comparison state value comparison left right);
-        if not (State.unify state left_type right_type) then
-          ignore (add_operand_mismatch state value left right ~left_type ~right_type);
+        let compared_type =
+          match
+            ( State.find_view_as state ~owned:right_type ~view:left_type,
+              State.find_view_as state ~owned:left_type ~view:right_type )
+          with
+          | Some _, _ ->
+              Name_lookup.coerce state env ~argument:Types.Read right ~actual:right_type
+                ~expected:left_type;
+              left_type
+          | None, Some _ ->
+              Name_lookup.coerce state env ~argument:Types.Read left ~actual:left_type
+                ~expected:right_type;
+              right_type
+          | None, None ->
+              if not (State.unify state left_type right_type) then
+                ignore (add_operand_mismatch state value left right ~left_type ~right_type);
+              left_type
+        in
         let trait, method_, result =
           match comparison with
           | Equal | Not_equal -> (Well_known.make_path Equal, "equal", Types.bool)
@@ -420,8 +436,8 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                     trait = State.make_trait_reference ~arguments:[] trait;
                     name = method_;
                     receiver = Read;
-                    self_type = left_type;
-                    type_arguments = [];
+                    self_type = compared_type;
+                    instantiation = Types.no_instantiation;
                     evidence = Built_in;
                   };
               arguments =
@@ -432,7 +448,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
               omitted_defaults = [];
               callee_result = result;
             };
-        Name_lookup.resolve_evidence state value left_type
+        Name_lookup.resolve_evidence state value compared_type
           (State.make_trait_reference ~arguments:[] trait);
         Types.bool
       end

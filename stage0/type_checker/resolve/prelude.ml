@@ -41,10 +41,10 @@ let types =
             "Range";
             "ExitCode";
           ] );
-        ([ "text" ], [ "String"; "StringSlice"; "TextBuilder"; "FromTemplate"; "Template" ]);
-        ([ "list" ], [ "List"; "Slice" ]);
+        ([ "text" ], [ "String"; "StringSlice"; "FromTemplate"; "Template" ]);
+        ([ "list" ], [ "List"; "Slice"; "FromElements" ]);
         ([ "specification" ], [ "Sequence"; "FiniteSet"; "FiniteMap"; "Multiset" ]);
-        ([ "map" ], [ "Map" ]);
+        ([ "map" ], [ "Map"; "FromEntries" ]);
         ([ "set" ], [ "Set" ]);
         ( [ "capabilities" ],
           [

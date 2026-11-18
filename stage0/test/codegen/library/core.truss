@@ -79,10 +79,10 @@ test "take empties an option and replace fills it, each giving the old value" {
 
 test "find lends the first element that matches" {
   let items: List[Int64] = [1, 2, 3, 4]
-  assert items.find(fn(item) { item > 2 }) is Some(item) && item == 3
+  assert items.find(fn(item) { item > 2 }) == Some(3)
   assert items.find(fn(item) { item > 9 }) is None
   let words: List[String] = ["a${1}", "bb${2}", "cc${3}"]
-  assert words.find(fn(word) { word.length() == 3 }) is Some(word) && word == "bb2"
+  assert words.find(fn(word) { word.length() == 3 }) == Some("bb2")
   let none: List[String] = []
   assert none.find(fn(word) { word.is_empty() }) is None
 }
@@ -112,4 +112,14 @@ type Retry(attempts: UInt32 = 3, label: String)
 test "a derived Default builds each field from its default, or from its type's default" {
   let made = Retry.default()
   assert made.attempts == 3 && made.label == ""
+}
+
+test "a pair is ordered by its first value, then its second, and keys a map" {
+  assert core::Pair(first: 1, second: 9) < core::Pair(first: 2, second: 0)
+  assert core::Pair(first: 1, second: 2) < core::Pair(first: 1, second: 3)
+  var cells: Map[core::Pair[Int64, Int64], String] = [:]
+  mut cells.insert(core::Pair(first: 0, second: 1), value: "a")
+  mut cells.insert(core::Pair(first: 1, second: 0), value: "b")
+  assert cells.get(core::Pair(first: 1, second: 0)) == Some("b")
+  assert cells.get(core::Pair(first: 1, second: 1)) is None
 }

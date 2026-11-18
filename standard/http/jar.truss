@@ -4,10 +4,6 @@ fn trimmed(text: StringSlice) -> StringSlice {
   text.trim()
 }
 
-fn attribute_named(name: StringSlice, expected: StringSlice) -> Bool {
-  same_name(name, second: expected)
-}
-
 type Attribute(key: StringSlice, argument: StringSlice)
 
 fn split_attribute(text: StringSlice) -> Attribute {
@@ -48,30 +44,30 @@ public fn Cookie.parse(set_cookie: StringSlice) -> Result[Cookie, Error] {
     let attribute = split_attribute(parts[index])
     let key = attribute.key
     let argument = attribute.argument
-    if attribute_named(key, expected: "Expires") {
+    if key.equal_ignoring_ascii_case("Expires") {
       cookie.expires = parse_date(argument)
-    } else if attribute_named(key, expected: "Max-Age") {
+    } else if key.equal_ignoring_ascii_case("Max-Age") {
       match Int64.parse(argument) {
         Ok(seconds) => cookie.max_age_seconds = Some(seconds)
         Err(_) => {}
       }
-    } else if attribute_named(key, expected: "Domain") {
+    } else if key.equal_ignoring_ascii_case("Domain") {
       let domain = argument.strip_prefix(".").unwrap_or(argument)
       if !domain.is_empty() {
         cookie.domain = Some(domain.to_ascii_lowercase())
       }
-    } else if attribute_named(key, expected: "Path") {
+    } else if key.equal_ignoring_ascii_case("Path") {
       if argument.starts_with("/") {
         cookie.path = Some(argument.to_string())
       }
-    } else if attribute_named(key, expected: "Secure") {
+    } else if key.equal_ignoring_ascii_case("Secure") {
       cookie.is_secure = true
-    } else if attribute_named(key, expected: "HttpOnly") {
+    } else if key.equal_ignoring_ascii_case("HttpOnly") {
       cookie.is_http_only = true
-    } else if attribute_named(key, expected: "SameSite") {
-      if attribute_named(argument, expected: "Strict") {
+    } else if key.equal_ignoring_ascii_case("SameSite") {
+      if argument.equal_ignoring_ascii_case("Strict") {
         cookie.same_site = SameSite.Strict
-      } else if attribute_named(argument, expected: "None") {
+      } else if argument.equal_ignoring_ascii_case("None") {
         cookie.same_site = SameSite.Cross
       }
     }
@@ -154,7 +150,7 @@ internal fn CookieJar.store(mut self, address: url::Url, set_cookie: StringSlice
     Err(_) => return
   }
   let host = host_of(address)
-  let is_https = address.scheme() == "https".slice()
+  let is_https = address.scheme() == "https"
   if cookie.is_secure && !is_https {
     return
   }
@@ -221,7 +217,7 @@ internal fn CookieJar.header_for(mut self, address: url::Url, now: Int64) -> Opt
   }
   let host = host_of(address)
   let path = request_path(address)
-  let is_https = address.scheme() == "https".slice()
+  let is_https = address.scheme() == "https"
   var matching: List[Stored] = []
   for stored in self.cookies {
     let is_domain_match = if stored.is_host_only { stored.domain == host } else { domain_matches(host.slice(), domain: stored.domain.slice()) }

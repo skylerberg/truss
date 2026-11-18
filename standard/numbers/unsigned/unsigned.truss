@@ -4,6 +4,7 @@ use standard::intrinsic
 impl Equal for UInt8 {
   fn equal(self, other: UInt8) -> Bool
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic::equal(self, right: other)
   }
@@ -13,6 +14,7 @@ impl Ordered for UInt8 {
   fn compare(self, other: UInt8) -> Ordering
     ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -33,8 +35,8 @@ impl Default for UInt8 {
 }
 
 impl Display for UInt8 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_unsigned(intrinsic::convert(self))
+  fn display(self, output: mut String) {
+    mut output.push_unsigned(intrinsic::convert(self))
   }
 }
 
@@ -134,7 +136,9 @@ impl Remainder[UInt8] for UInt8 {
 }
 
 impl Hash for UInt8 {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(intrinsic::convert(self))
   }
 }
@@ -230,6 +234,7 @@ impl TryFrom[UInt64] for UInt8 {
 impl Equal for UInt16 {
   fn equal(self, other: UInt16) -> Bool
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic::equal(self, right: other)
   }
@@ -239,6 +244,7 @@ impl Ordered for UInt16 {
   fn compare(self, other: UInt16) -> Ordering
     ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -259,8 +265,8 @@ impl Default for UInt16 {
 }
 
 impl Display for UInt16 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_unsigned(intrinsic::convert(self))
+  fn display(self, output: mut String) {
+    mut output.push_unsigned(intrinsic::convert(self))
   }
 }
 
@@ -360,7 +366,9 @@ impl Remainder[UInt16] for UInt16 {
 }
 
 impl Hash for UInt16 {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(intrinsic::convert(self))
   }
 }
@@ -453,6 +461,7 @@ impl TryFrom[UInt64] for UInt16 {
 impl Equal for UInt32 {
   fn equal(self, other: UInt32) -> Bool
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic::equal(self, right: other)
   }
@@ -462,6 +471,7 @@ impl Ordered for UInt32 {
   fn compare(self, other: UInt32) -> Ordering
     ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -482,8 +492,8 @@ impl Default for UInt32 {
 }
 
 impl Display for UInt32 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_unsigned(intrinsic::convert(self))
+  fn display(self, output: mut String) {
+    mut output.push_unsigned(intrinsic::convert(self))
   }
 }
 
@@ -583,7 +593,9 @@ impl Remainder[UInt32] for UInt32 {
 }
 
 impl Hash for UInt32 {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(intrinsic::convert(self))
   }
 }
@@ -673,6 +685,7 @@ impl TryFrom[UInt64] for UInt32 {
 impl Equal for UInt64 {
   fn equal(self, other: UInt64) -> Bool
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic::equal(self, right: other)
   }
@@ -682,6 +695,7 @@ impl Ordered for UInt64 {
   fn compare(self, other: UInt64) -> Ordering
     ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -702,8 +716,8 @@ impl Default for UInt64 {
 }
 
 impl Display for UInt64 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_unsigned(self)
+  fn display(self, output: mut String) {
+    mut output.push_unsigned(self)
   }
 }
 
@@ -803,7 +817,9 @@ impl Remainder[UInt64] for UInt64 {
 }
 
 impl Hash for UInt64 {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(self)
   }
 }

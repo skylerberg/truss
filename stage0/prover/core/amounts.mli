@@ -13,13 +13,16 @@ val make_may_be_target :
 val lambda_captures_target : State.context -> Logic.term -> Logic.term -> bool
 val make_conditional_amount : Logic.term -> Logic.term -> Logic.term
 
+val compute_amount_within :
+  State.context -> State.frame -> Costs.counter -> Logic.term -> Logic.term
+
 val compute_callee_amount :
-  ?ends_in:Logic.term ->
+  ?method_cost:(Metric.t -> Logic.term) ->
   State.context ->
   State.frame ->
   path:Path.t ->
-  parts:State.part list ->
-  bind_frame:(State.part -> State.frame) ->
+  clauses:State.clauses list ->
+  bind_frame:(State.clauses -> State.frame) ->
   uses:Types.capability list ->
   values:State.passed list ->
   change:(unit -> Logic.term) option ->
@@ -34,12 +37,16 @@ val has_potential : State.context -> ?seen:Types.ty list -> Types.ty -> bool
 val compute_potential :
   State.context -> State.frame -> ?seen:Types.ty list -> Types.ty -> Logic.term -> Logic.term
 
-val declare_trait_method_time :
+val compute_elements_potential : State.context -> Types.ty -> Logic.term -> Logic.term
+
+val declare_method_cost :
   State.context ->
   State.frame ->
+  Metric.t ->
   Path.t ->
   trait_arguments:Types.argument list ->
   Types.ty ->
   Logic.term
 
-val compute_method_time : State.context -> State.frame -> Invocation.callee -> Logic.term
+val compute_method_cost :
+  State.context -> State.frame -> Metric.t -> Invocation.callee -> Logic.term

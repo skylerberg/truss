@@ -3,7 +3,7 @@ val list_diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val fail : ('a, unit, string, unit) format4 -> 'a
 val expect_string : expected:String.t -> String.t -> unit
 val expect_int : expected:int -> int -> unit
-val render_records : Compile.record list -> string
+val render_records : Backend.Test_report.record list -> string
 val definition : string -> Path.t
 val named : ?arguments:Ground.argument list -> string -> Ground.ty
 val int64 : Ground.ty
@@ -32,7 +32,7 @@ val uint64 : Ground.ty
 type local_info
 type block
 type function_
-type instance = Memory_layout.env -> Emit_c.Builder.instance
+type item = Memory_layout.env -> Emit_c.Builder.item_code
 
 val local : ?name:string -> Lowered.ty -> local_info
 val value : Ground.ty -> Lowered.ty
@@ -50,10 +50,10 @@ val function_ :
   block list ->
   function_
 
-val key : string -> Instance.key
-val instance : ?nested:function_ list -> string -> function_ -> instance
-val entry : ?nested:function_ list -> local_info list -> block list -> instance
-val make_constant_instance : Emit_c.Builder.instance -> instance
+val key : string -> Lowered.Item.t
+val item : ?nested:function_ list -> string -> function_ -> item
+val entry : ?nested:function_ list -> local_info list -> block list -> item
+val make_constant_item : Emit_c.Builder.item_code -> item
 
 val call :
   string ->
@@ -65,40 +65,39 @@ val call :
 
 val make_shape_env : ?extra:(string * Memory_layout.shape) list -> unit -> Memory_layout.env
 val scratch : string lazy_t
-val compiler : Toolchain.t lazy_t
-val strict : string list lazy_t
+val c_compiler : C_compiler.t lazy_t
 val counter : int ref
-val cache : Build.cache lazy_t
-val settings : Build.settings lazy_t
-val worker_counts : int list
+val list_worker_counts : unit -> int list
 
 val run_program :
   ?extra:(string * Memory_layout.shape) list ->
   ?env:Memory_layout.env ->
   ?input:string ->
-  instance list ->
+  item list ->
   int * string * string
 
-val expect_status : ?extra:(string * Memory_layout.shape) list -> int -> instance list -> unit
+val expect_status : ?extra:(string * Memory_layout.shape) list -> int -> item list -> unit
 val example : Path.module_
 val example_file : Path.file
 val make_database : ?checks:bool -> Project.package list -> Database.t
 val make_example_package : (Path.file * string) list -> Project.package list
-val compile : ?results:Compile.results -> ?evaluation_time_limit_ms:int -> Database.t -> Compile.t
+
+val make_backend :
+  ?results:Backend.results -> ?evaluation_time_limit_ms:int -> Database.t -> Backend.t
 
 val load_files :
-  ?results:Compile.results ->
-  ?roots:Instance.key list ->
+  ?results:Backend.results ->
+  ?roots:Lowered.Item.t list ->
   ?checks:bool ->
   (Path.file * string) list ->
-  Database.t * Compile.t
+  Database.t * Backend.t
 
 val load :
-  ?results:Compile.results ->
-  ?roots:Instance.key list ->
+  ?results:Backend.results ->
+  ?roots:Lowered.Item.t list ->
   ?checks:bool ->
   string ->
-  Database.t * Compile.t
+  Database.t * Backend.t
 
 val list_tests_in : Database.t -> Path.module_ -> Path.t list
 val list_tests : Database.t -> Path.t list

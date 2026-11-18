@@ -470,6 +470,7 @@ public fn Path.relative_to(self, base: Path) -> Option[Path]
 impl Equal for Path {
   fn equal(self, other: Path) -> Bool
     ensures result == (self.text == other.text)
+    cost allocations == 0
   {
     self.text == other.text
   }
@@ -478,28 +479,31 @@ impl Equal for Path {
 impl Ordered for Path {
   fn compare(self, other: Path) -> Ordering
     ensures result == (self.text.compare(other.text))
+    cost allocations == 0
   {
     self.text.compare(other.text)
   }
 }
 
 impl Hash for Path {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     self.text.hash(mut hasher)
   }
 }
 
 impl Display for Path {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write(self.text.slice())
+  fn display(self, output: mut String) {
+    mut output.push(self.text.slice())
   }
 }
 
 public type FileKind = File | Directory | SymbolicLink | Other
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 public opaque type Permissions(mode: UInt32)
-  derives Plain, Equal, Hash
+  derives Plain, Equal, Hash, Ordered
   invariant mode <= 0o7777
 
 public fn Permissions.from_mode(mode: UInt32) -> Permissions
@@ -714,12 +718,12 @@ public fn is_present(path: Path) -> Bool
   FileRead.metadata(path, follow_links: true).is_ok()
 }
 
-public fn write_with[Output, capability Granted](
+public fn write_with[Output](
   file: Path,
-  write: (fn(mut FileWriter) -> Result[Output, SystemError] uses Granted),
+  write: (fn(mut FileWriter) -> Result[Output, SystemError] uses generic Granted),
   mode: WriteMode = WriteMode.Replace,
 ) -> Result[Output, SystemError]
-  uses FileWrite, Handles, Granted
+  uses FileWrite, Handles, generic Granted
 {
   let opened = FileWrite.open(file, mode: mode)?
   var writer = FileWriter(file: own opened)
@@ -867,8 +871,8 @@ public fn temporary_root() -> Path
   }
 }
 
-public fn with_temporary_directory[Output, capability Granted](work: (fn(Path) -> Output uses Granted)) -> Result[Output, SystemError]
-  uses FileRead, FileWrite, Random, Environment, Granted
+public fn with_temporary_directory[Output](work: (fn(Path) -> Output uses generic Granted)) -> Result[Output, SystemError]
+  uses FileRead, FileWrite, Random, Environment, generic Granted
 {
   let directory = create_temporary_directory(temporary_root(), prefix: "truss-")?
   let output = work(directory)
@@ -876,8 +880,8 @@ public fn with_temporary_directory[Output, capability Granted](work: (fn(Path) -
   Ok(own output)
 }
 
-public fn with_temporary_file[Output, capability Granted](work: (fn(Path) -> Output uses Granted)) -> Result[Output, SystemError]
-  uses FileRead, FileWrite, Random, Environment, Granted
+public fn with_temporary_file[Output](work: (fn(Path) -> Output uses generic Granted)) -> Result[Output, SystemError]
+  uses FileRead, FileWrite, Random, Environment, generic Granted
 {
   let directory = create_temporary_directory(temporary_root(), prefix: "truss-")?
   let file = directory.join("file")
@@ -927,21 +931,24 @@ public fn walk(root: Path, follow_links: Bool = false) -> Result[List[WalkEntry]
 }
 
 type CharacterRange(first: Character, last: Character)
+  derives Equal
 
 type GlobToken =
   | AnyCharacters
   | AnyCharacter
   | Literal(character: Character)
   | OneOf(ranges: List[CharacterRange], negated: Bool)
+  derives Equal
 
 type GlobComponent =
   | AnyDirectories
   | Name(tokens: List[GlobToken])
+  derives Equal
 
 type ParsedClass(token: GlobToken, end: UInt64)
 
 public opaque type Glob(components: List[GlobComponent], absolute: Bool)
-  derives Copyable
+  derives Copyable, Equal
 
 fn wildcard_matches(
   pattern_length: UInt64,
@@ -1197,8 +1204,8 @@ public type GlobError(offset: UInt64)
   derives Equal
 
 impl Display for GlobError {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write("the glob is not valid at byte ")
+  fn display(self, output: mut String) {
+    mut output.push("the glob is not valid at byte ")
     self.offset.display(mut output)
   }
 }

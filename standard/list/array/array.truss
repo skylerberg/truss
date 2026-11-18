@@ -149,11 +149,11 @@ public fn Array[Element, count: UInt64].element(mut self, position: UInt64) lend
   mut self[position]
 }
 
-public fn Array[Element, count: UInt64].map_each[Output, capability Granted](
+public fn Array[Element, count: UInt64].map_each[Output](
   own self,
-  transform: (fn(own Element) -> Output uses Granted),
+  transform: (fn(own Element) -> Output uses generic Granted),
 ) -> Array[Output, count]
-  uses Granted
+  uses generic Granted
   cost calls(transform) == count
   cost time O(count * time(transform))
 {
@@ -174,6 +174,7 @@ public fn Array[Element, count: UInt64].map_each[Output, capability Granted](
 impl Equal for Array[Element: Equal, count: UInt64] {
   fn equal(self, other: Array[Element, count]) -> Bool
     ensures result == (forall i in 0..count => self.model()[i] == other.model()[i])
+    cost allocations <= count * allocations(Element.equal)
   {
     self.slice() == other.slice()
   }
@@ -182,6 +183,7 @@ impl Equal for Array[Element: Equal, count: UInt64] {
 impl Ordered for Array[Element: Ordered, count: UInt64] {
   fn compare(self, other: Array[Element, count]) -> Ordering
     ensures result == slice::lexicographic(self.model(), second: other.model(), from: 0)
+    cost allocations <= count * allocations(Element.compare)
   {
     self.slice().compare(other.slice())
   }
@@ -201,13 +203,14 @@ proof Ordered.transitive for Array[Element: Ordered, count: UInt64] {
 
 impl Hash for Array[Element: Hash, count: UInt64] {
   fn hash(self, hasher: mut Hasher)
+    cost allocations <= count * allocations(Element.hash)
   {
     self.slice().hash(mut hasher)
   }
 }
 
 impl Display for Array[Element: Display, count: UInt64] {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     self.slice().display(mut output)
   }

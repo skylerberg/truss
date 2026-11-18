@@ -23,6 +23,7 @@ type subset_constraint = {
 type frame = {
   first_variable : int;
   mutable recorded_expressions : int list;
+  mutable recorded_loops : (Syntax.id * Syntax.id) list;
   mutable bindings : int list;
   mutable declared : int list;
   mutable deferred_checks : (unit -> bool) list;
@@ -294,6 +295,12 @@ let record state (value : Syntax.expression) type_ =
   | Some frame -> frame.recorded_expressions <- value.id :: frame.recorded_expressions
   | None -> ()
 
+let record_loop state ~loop ~(iterable : Syntax.expression) record =
+  state.tables.loops.(loop) <- Some record;
+  match find_current_frame state with
+  | Some frame -> frame.recorded_loops <- (loop, iterable.id) :: frame.recorded_loops
+  | None -> ()
+
 let note_compiled_expression state env (value : Syntax.expression) =
   match find_current_frame state with
   | Some frame when is_compiled env ->
@@ -432,16 +439,40 @@ and finalize_capabilities state capabilities =
           (function
             | Types.Capability_projection { base; trait; name } ->
                 [ Types.Capability_projection { base = finalize_type state base; trait; name } ]
+            | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
+                [
+                  Types.Divergence
+                    (Of_impl_method
+                       {
+                         self_type = finalize_type state self_type;
+                         trait =
+                           {
+                             trait with
+                             trait_arguments =
+                               List.map (finalize_argument state) trait.trait_arguments;
+                           };
+                         name;
+                         receiver;
+                       });
+                ]
             | capability -> [ capability ])
           capabilities))
 
-let finalize_argument state = function
+and finalize_argument state = function
   | Types.Type type_ -> Types.Type (finalize_type state type_)
   | Types.Value value -> (
       match Unify.resolve_value state.unifier value with
       | Types.Value_variable _ -> Types.Type (make_unsolved_type state)
       | value -> Types.Value value)
-  | Types.Capabilities capabilities -> Types.Capabilities (finalize_capabilities state capabilities)
+
+let finalize_instantiation state (instantiation : Types.instantiation) : Types.instantiation =
+  {
+    type_arguments = List.map (finalize_argument state) instantiation.type_arguments;
+    capability_arguments =
+      List.map
+        (fun (name, argument) -> (name, finalize_capabilities state argument))
+        instantiation.capability_arguments;
+  }
 
 let unify state left right =
   let normalize type_ =
@@ -503,17 +534,21 @@ let is_view state type_ =
   Interface.Impls.is_view state.lookups.interface ~list_bounds:(lookup_bounds state)
     (zonk state type_)
 
+let decide_binding_mode state (mode : Types.mode) type_ : Types.mode =
+  match mode with Read when is_plain state type_ -> Own | Read | Mut | Own -> mode
+
 let rec copy_plain_bindings state (pattern : Core.pattern) : Core.pattern =
   let copy_fields = List.map (fun (field, inner) -> (field, copy_plain_bindings state inner)) in
   match pattern.kind with
-  | Bind ({ mode = Read; _ } as bound) when is_plain state pattern.type_ ->
-      { pattern with kind = Bind { bound with mode = Own } }
+  | Bind bound ->
+      let mode = decide_binding_mode state bound.mode pattern.type_ in
+      { pattern with kind = Bind { bound with mode } }
   | Variant { variant; fields } ->
       { pattern with kind = Variant { variant; fields = copy_fields fields } }
   | Record fields -> { pattern with kind = Record (copy_fields fields) }
   | Alternatives alternatives ->
       { pattern with kind = Alternatives (List.map (copy_plain_bindings state) alternatives) }
-  | Bind _ | Wildcard | Literal _ | Range _ | Equal_to _ -> pattern
+  | Wildcard | Literal _ | Range _ | Equal_to _ -> pattern
 
 let build_scrutinee_pattern state written = copy_plain_bindings state (build_pattern state written)
 
@@ -538,8 +573,7 @@ let make_call state ~callee ~arguments ~lends =
     ~arguments ~lends
 
 let convert_evidence = function
-  | Interface.Impls.From_impl { impl; substitution } ->
-      Tables.Impl { impl; arguments = substitution }
+  | Interface.Impls.From_impl { impl; substitution } -> Tables.Impl { impl; substitution }
   | Interface.Impls.From_bound -> Tables.Bound
   | Interface.Impls.From_any -> Tables.Dynamic
   | Interface.Impls.Built_in | Interface.Impls.Accepted _ -> Tables.Built_in
@@ -578,8 +612,8 @@ let settle state frame =
           (Printf.sprintf
              "Two function types here must use the same capabilities, and one uses `%s` where the \
               other uses `%s`."
-             (Types.show_argument (Types.Capabilities (resolve_capabilities state left)))
-             (Types.show_argument (Types.Capabilities (resolve_capabilities state right))))
+             (Types.show_capabilities (resolve_capabilities state left))
+             (Types.show_capabilities (resolve_capabilities state right)))
       in
       state.capability_constraints <-
         { subset = left; restriction = None; superset = right; report_missing }
@@ -606,12 +640,12 @@ let settle state frame =
     List.concat_map
       (fun id ->
         match state.tables.calls.(id) with
-        | Some { callee = Trait_method { trait; type_arguments; _ }; _ } ->
-            trait.trait_arguments @ type_arguments
+        | Some { callee = Trait_method { trait; instantiation; _ }; _ } ->
+            trait.trait_arguments @ instantiation.type_arguments
         | Some
             {
               callee =
-                ( Function { type_arguments; _ }
+                ( Function { instantiation = { type_arguments; _ }; _ }
                 | Constructor { type_arguments; _ }
                 | Intrinsic { type_arguments; _ } );
               _;
@@ -677,34 +711,57 @@ let settle state frame =
     let list_trait_unknowns (trait : Types.trait_reference) =
       List.concat_map (Unify.list_argument_unknowns state.unifier) trait.trait_arguments
     in
-    let undetermined_traits =
+    let find_undetermined_trait : Tables.callee -> Types.trait_reference option = function
+      | Trait_method { trait; self_type; _ }
+        when (not (Types.contains_unsolved (zonk state self_type)))
+             && List.exists (fun unknown -> List.mem unknown unsolved) (list_trait_unknowns trait)
+        ->
+          Some trait
+      | _ -> None
+    in
+    let list_loop_calls : Tables.loop -> Tables.call list = function
+      | Elements { count; element; _ } -> [ count; element ]
+      | Pulled { cursor_call; remaining; _ } -> List.filter_map Fun.id [ cursor_call; remaining ]
+      | Integer_range _ -> []
+    in
+    let undetermined =
       List.filter_map
         (fun id ->
-          match state.tables.calls.(id) with
-          | Some { callee = Trait_method { trait; self_type; _ }; _ }
-            when (not (Types.contains_unsolved (zonk state self_type)))
-                 && List.exists
-                      (fun unknown -> List.mem unknown unsolved)
-                      (list_trait_unknowns trait) ->
-              Some (id, trait)
-          | _ -> None)
+          Option.bind state.tables.calls.(id) (fun (call : Tables.call) ->
+              Option.map
+                (fun trait ->
+                  ( id,
+                    trait,
+                    Printf.sprintf
+                      "This call does not determine the arguments of `%s`. Write the call in full \
+                       with them." ))
+                (find_undetermined_trait call.callee)))
         frame.recorded_expressions
+      @ List.filter_map
+          (fun (loop, iterable) ->
+            Option.bind state.tables.loops.(loop) (fun record ->
+                Option.map
+                  (fun trait ->
+                    ( iterable,
+                      trait,
+                      Printf.sprintf
+                        "This loop does not determine the arguments of `%s`, whose methods give \
+                         its elements." ))
+                  (List.find_map
+                     (fun (call : Tables.call) -> find_undetermined_trait call.callee)
+                     (list_loop_calls record))))
+          frame.recorded_loops
     in
-    let call_reports =
+    let trait_reports =
       List.map
-        (fun (id, (trait : Types.trait_reference)) ->
+        (fun (id, (trait : Types.trait_reference), describe) ->
           add_diagnostic state Cannot_infer (read_span state id)
-            (Printf.sprintf
-               "This call does not determine the arguments of `%s`. Write the call in full with \
-                them."
-               (match trait.trait with Top { name; _ } -> name | path -> Path.show path)))
-        undetermined_traits
+            (describe (match trait.trait with Top { name; _ } -> name | path -> Path.show path)))
+        undetermined
     in
-    let explained =
-      List.concat_map (fun (_, trait) -> list_trait_unknowns trait) undetermined_traits
-    in
+    let explained = List.concat_map (fun (_, trait, _) -> list_trait_unknowns trait) undetermined in
     let report =
-      match call_reports with
+      match trait_reports with
       | first :: _ when List.for_all (fun unknown -> List.mem unknown explained) unsolved -> first
       | _ ->
           add_diagnostic state Cannot_infer frame.span
@@ -771,6 +828,7 @@ let run_in_statement state env (span : Source.Definition_span.t) body =
     {
       first_variable = state.unifier.next + 1;
       recorded_expressions = [];
+      recorded_loops = [];
       bindings = [];
       declared = [];
       deferred_checks = [];
@@ -927,9 +985,27 @@ let add_mismatch state (span : Source.Definition_span.t) ~expected ~actual =
   | Types.Function found, Types.Function wanted
     when Types.subtract_capabilities (Types.list_divergence found.uses) wanted.uses
          <> Types.no_capabilities ->
+      let missing =
+        (Types.subtract_capabilities (Types.list_divergence found.uses) wanted.uses
+          :> Types.capability list)
+      in
+      let followed_methods =
+        List.filter_map
+          (function
+            | Types.Divergence (Of_impl_method { self_type; trait; name; _ }) ->
+                Some (Types.show_impl_method self_type trait name)
+            | _ -> None)
+          missing
+      in
       add_mismatch_diagnostic state Mismatch span ~sides
-        (Printf.sprintf "Expected %s, found %s, which may not terminate." (Types.describe expected)
-           (Types.describe actual))
+        (Printf.sprintf "Expected %s, found %s, which %s." (Types.describe expected)
+           (Types.describe actual)
+           (match followed_methods with
+           | [ followed ] when List.compare_length_with missing 1 = 0 ->
+               Printf.sprintf "terminates only if %s does" followed
+           | _ :: _ :: _ when List.compare_lengths followed_methods missing = 0 ->
+               Printf.sprintf "terminates only if %s do" (String.concat " and " followed_methods)
+           | _ -> "may not terminate"))
   | _ ->
       add_mismatch_diagnostic state Mismatch span ~sides
         (Printf.sprintf "Expected %s, found %s." (Types.describe expected) (Types.describe actual))
@@ -986,14 +1062,24 @@ let note_mode_keyword state (written : Syntax.expression) (mode : Syntax.mode)
     }
     :: state.mode_keywords
 
+let find_local_type state (name : Syntax.name) =
+  match find_target state name with
+  | Some (Local id) ->
+      Option.map
+        (fun (local : local) -> resolve state local.type_)
+        (Hashtbl.find_opt state.locals id)
+  | _ -> None
+
 let check_resource state (resource : Syntax.resource) =
   let check_capability (path : Syntax.path_type) (method_ : Syntax.name option) =
     let shown = Interface.Elaborator.show_path path.path in
     match find_target state path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with
-        | Some method_ when state.lookups.interface.names.list_members capability method_.text = []
-          ->
+        | Some method_
+          when Option.is_none
+                 (state.lookups.interface.names.find_key
+                    (Path.make_capability_method capability method_.text)) ->
             report state Unknown_member (read_span state method_.id)
               (Printf.sprintf "`%s` has no method `%s`." shown method_.text)
         | _ -> ())
@@ -1003,29 +1089,73 @@ let check_resource state (resource : Syntax.resource) =
           (Printf.sprintf "`calls` counts the calls of a capability, and `%s` is not one." shown)
   in
   match resource with
-  | Time | Allocations | Allocated_bytes -> ()
+  | Metric _ -> ()
   | Calls (Call_capability path) -> check_capability path None
   | Calls (Call_method (path, method_)) -> check_capability path (Some method_)
   | Calls (Call_parameter name) -> (
-      match find_target state name with
-      | Some (Local id) -> (
-          match
-            Option.map
-              (fun (local : local) -> resolve state local.type_)
-              (Hashtbl.find_opt state.locals id)
-          with
-          | Some (Types.Function _ | Types.Error _ | Types.Hole) | None -> ()
-          | Some other ->
-              report state Not_callable (read_span state name.id)
-                (Printf.sprintf "`calls` counts the calls through a function, and `%s` is a `%s`."
-                   name.text (Types.show other)))
-      | Some (Unknown _) -> ()
+      match (find_target state name, find_local_type state name) with
+      | Some (Local _), (Some (Types.Function _ | Types.Error _ | Types.Hole) | None) -> ()
+      | Some (Local _), Some other ->
+          report state Not_callable (read_span state name.id)
+            (Printf.sprintf "`calls` counts the calls through a function, and `%s` is a `%s`."
+               name.text (Types.show other))
+      | Some (Unknown _), _ -> ()
       | _ ->
           report state Not_callable (read_span state name.id)
             (Printf.sprintf
                "`calls` counts the calls through a parameter that is a function, or of a \
                 capability, and `%s` is neither."
                name.text))
+
+let check_operand_clause state (cost : Syntax.cost) (operand : Interface.Elaborator.cost_operand) =
+  let span = read_span state operand.written.id in
+  let cost_function = operand.cost_function.text in
+  let callee =
+    match operand.callee with
+    | Function_parameter name -> name.text
+    | Bound_method { type_; method_ } -> (
+        match Interface.Elaborator.find_bounded_type state.context type_ with
+        | Some self_type -> Printf.sprintf "%s.%s" (Types.show self_type) method_.text
+        | None -> "...")
+    | Not_a_callee -> "..."
+  in
+  let shown = Printf.sprintf "%s(%s)" cost_function callee in
+  (match cost.resource with
+  | Metric bounded when bounded = operand.metric -> ()
+  | Metric bounded ->
+      let bounded = Metric.show bounded in
+      report state Cost_of_other_resource span
+        ~fixes:
+          [
+            fix
+              (Printf.sprintf "Write `%s`." bounded)
+              [ replace (read_span state operand.cost_function.id) bounded ];
+          ]
+        (Printf.sprintf
+           "`%s` bounds the `%s` of one call, not its `%s`, which this clause bounds. Write \
+            `%s(%s)`."
+           shown cost_function bounded bounded callee)
+  | Calls _ ->
+      report state Cost_of_other_resource span
+        (Printf.sprintf
+           "`%s` bounds the `%s` of one call, not the calls it makes, which this clause counts."
+           shown cost_function));
+  match cost.bound with
+  | Exactly _ ->
+      report state Upper_bound_in_exact_bound span
+        (Printf.sprintf
+           "`%s` is an upper bound on one call, and a call may spend less, so an exact amount that \
+            names it would be false for that call. State this bound with `<=` or `O(...)`."
+           shown)
+  | Big_o _ | At_most _ | Finite -> ()
+
+let check_cost state (cost : Syntax.cost) =
+  check_resource state cost.resource;
+  match cost.bound with
+  | Big_o value | At_most value | Exactly value ->
+      List.iter (check_operand_clause state cost)
+        (Interface.Elaborator.list_cost_operands state.context value)
+  | Finite -> ()
 
 let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let make = make_synthetic_expression state ~origin in
@@ -1036,7 +1166,11 @@ let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
     | type_ -> raise_bug "a slice of `%s`" (Types.show type_)
   in
   let make_callee name : Core.callee =
-    Function { path = Method { owner = path; name; receiver = Read }; type_arguments }
+    Function
+      {
+        path = Method { owner = path; name; receiver = Read };
+        instantiation = { Types.no_instantiation with type_arguments };
+      }
   in
   let build_read_argument = Operands.build_argument Read in
   let start = match start with Some start -> start | None -> make uint64 (Integer Z.zero) in
@@ -1106,7 +1240,8 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                                 (Function
                                    {
                                      path = Method { owner = path; name = "slice"; receiver = Read };
-                                     type_arguments = arguments;
+                                     instantiation =
+                                       { Types.no_instantiation with type_arguments = arguments };
                                    })
                               ~arguments:[ Operands.build_argument Read inner ]
                               ~lends:None))

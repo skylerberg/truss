@@ -1,0 +1,6 @@
+fn f[Source: Probe](source: Source) -> Bool
+  cost allocations <= allocations(Source.probe)
+{
+  let _ = source.probe()
+  source.probe()
+}

@@ -37,8 +37,8 @@ let copy_call drop_and_copy ty ~destination ~source =
       target =
         Direct
           {
-            function_ = Instance (Copy ty);
-            signature = Compile.For_testing.copy_signature drop_and_copy ty;
+            function_ = Item (Copy ty);
+            signature = Backend.For_testing.copy_signature drop_and_copy ty;
           };
       arguments =
         [
@@ -49,14 +49,14 @@ let copy_call drop_and_copy ty ~destination ~source =
     }
 
 let () =
-  let drop_and_copy = Compile.For_testing.drop_and_copy (Codegen_support.make_shape_env ()) in
+  let drop_and_copy = Backend.For_testing.drop_and_copy (Codegen_support.make_shape_env ()) in
   Codegen_support.test "plain data is trivial and storage is not" (fun () ->
       if
         not
-          (Compile.For_testing.is_trivial drop_and_copy
+          (Backend.For_testing.is_trivial drop_and_copy
              (Codegen_support.option Codegen_support.int32))
       then Codegen_support.fail "Option[Int32] is not trivial";
-      if Compile.For_testing.is_trivial drop_and_copy (make_storage_type Codegen_support.int32) then
+      if Backend.For_testing.is_trivial drop_and_copy (make_storage_type Codegen_support.int32) then
         Codegen_support.fail "Storage[Int32] is trivial");
   Codegen_support.test "a record's drop drops only the fields that own something" (fun () ->
       let extra =
@@ -74,8 +74,8 @@ let () =
         Emit_c.For_testing.render_c
           (Emit_c.make_fragment env
              (Code
-                (Compile.For_testing.drop
-                   (Compile.For_testing.drop_and_copy env)
+                (Backend.For_testing.drop
+                   (Backend.For_testing.drop_and_copy env)
                    (Codegen_support.named "Holder"))))
       in
       if not (String.includes ~affix:"f_items" c) then
@@ -89,7 +89,7 @@ let () =
           (Emit_c.make_fragment
              (Codegen_support.make_shape_env ())
              (Code
-                (Compile.For_testing.copy drop_and_copy (make_storage_type Codegen_support.int32))))
+                (Backend.For_testing.copy drop_and_copy (make_storage_type Codegen_support.int32))))
       in
       let count sub = String.find_all ~sub (fun _ matches -> matches + 1) c 0 in
       if count "t_runtime_allocate(" <> 1 || count "__builtin_memcpy(" <> 1 then
@@ -98,8 +98,8 @@ let () =
       let ty = make_storage_type Codegen_support.int32 in
       Codegen_support.expect_status 20
         [
-          Codegen_support.make_constant_instance (Compile.For_testing.copy drop_and_copy ty);
-          Codegen_support.make_constant_instance (Compile.For_testing.drop drop_and_copy ty);
+          Codegen_support.make_constant_item (Backend.For_testing.copy drop_and_copy ty);
+          Codegen_support.make_constant_item (Backend.For_testing.drop drop_and_copy ty);
           Codegen_support.entry
             [
               Codegen_support.local (Codegen_support.value ty);
@@ -133,7 +133,7 @@ let () =
       let ty = make_storage_type Codegen_support.uint8 in
       Codegen_support.expect_status 0
         [
-          Codegen_support.make_constant_instance (Compile.For_testing.drop drop_and_copy ty);
+          Codegen_support.make_constant_item (Backend.For_testing.drop drop_and_copy ty);
           Codegen_support.entry
             [ Codegen_support.local (Codegen_support.value ty) ]
             [
@@ -164,10 +164,10 @@ let () =
       let uint64_constant number = Lowered.Constant (Integer (UInt64, Z.of_int number)) in
       Codegen_support.expect_status 4
         [
-          Codegen_support.make_constant_instance (Compile.For_testing.copy drop_and_copy outer);
-          Codegen_support.make_constant_instance (Compile.For_testing.copy drop_and_copy inner);
-          Codegen_support.make_constant_instance (Compile.For_testing.drop drop_and_copy outer);
-          Codegen_support.make_constant_instance (Compile.For_testing.drop drop_and_copy inner);
+          Codegen_support.make_constant_item (Backend.For_testing.copy drop_and_copy outer);
+          Codegen_support.make_constant_item (Backend.For_testing.copy drop_and_copy inner);
+          Codegen_support.make_constant_item (Backend.For_testing.drop drop_and_copy outer);
+          Codegen_support.make_constant_item (Backend.For_testing.drop drop_and_copy inner);
           Codegen_support.entry
             [
               Codegen_support.local (Codegen_support.value inner);

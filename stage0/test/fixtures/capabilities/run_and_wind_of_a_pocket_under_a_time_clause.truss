@@ -1,0 +1,6 @@
+fn f(watch: Pocket, movement: mut Countdown) -> UInt64
+  cost time finite
+{
+  let _ = run[Pocket](mut movement)
+  watch.wind(mut movement)
+}

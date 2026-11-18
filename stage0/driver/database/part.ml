@@ -47,14 +47,14 @@ type _ stored =
   | Mir_call_edges : Path.t -> Path.t list stored
   | Patterns : Resolve.Names.key -> unit stored
   | Usage : Resolve.Names.key -> unit stored
-  | Ownership : Resolve.Names.key -> (Core.origin * Core.origin) list stored
+  | Ownership : Resolve.Names.key -> (Core.origin list * Core.origin list) list stored
   | Import_check : Path.file -> Diagnostic.t list stored
   | Package_check : Path.package * Package_checks.check -> Package_checks.outcome stored
   | Call_edges : Path.t * Path.package -> Path.t list stored
   | Recursion_group : Path.t -> Path.t list stored
   | Proof : Resolve.Names.key -> Prover.proof stored
-  | Lowered : Instance.key -> (Compile.lowered, Compile.unsupported) result stored
-  | Test_key : Instance.key -> (string, Compile.unsupported) result stored
+  | Lowered : Lowered.Item.t -> (Backend.lowered, Backend.unsupported) result stored
+  | Test_key : Lowered.Item.t -> (string, Backend.unsupported) result stored
 
 type any = Any : 'a stored -> any [@@unboxed]
 type t = Input of input | Name of name | Stored of any
@@ -96,7 +96,7 @@ let locate_type_package : Ground.ty -> Path.package = function
   | Any { trait; _ } -> Path.locate_package trait
   | Function _ | Never -> Path.standard_package
 
-let locate_instance_package : Instance.key -> Path.package = function
+let locate_item_package : Lowered.Item.t -> Path.package = function
   | Code { path; _ }
   | Constant path
   | Evaluator path
@@ -108,7 +108,7 @@ let locate_instance_package : Instance.key -> Path.package = function
       Path.locate_package path
   | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> locate_type_package ty
   | Generated (Entry impl_method | Any_entry impl_method) ->
-      Path.locate_package (Instance.make_method_path impl_method)
+      Path.locate_package (Lowered.Item.make_method_path impl_method)
 
 let locate_stored_package : type a. a stored -> Path.package = function
   | Parsed file | Import_check file -> file.module_.package
@@ -135,7 +135,7 @@ let locate_stored_package : type a. a stored -> Path.package = function
   | Recursion_group path
   | Derived_interface { type_ = path; _ } ->
       Path.locate_package path
-  | Lowered key | Test_key key -> locate_instance_package key
+  | Lowered key | Test_key key -> locate_item_package key
 
 let locate_package (Any part) = locate_stored_package part
 
@@ -234,8 +234,8 @@ let show_stored : type a. a stored -> string =
       Printf.sprintf "call edges %s %s" (Path.show_package package) (Path.show path)
   | Recursion_group path -> "recursion group " ^ Path.show path
   | Proof declared -> "proof " ^ show_key declared
-  | Lowered instance -> "lowered " ^ Instance.to_string instance
-  | Test_key instance -> "test key " ^ Instance.to_string instance
+  | Lowered item -> "lowered " ^ Lowered.Item.to_string item
+  | Test_key item -> "test key " ^ Lowered.Item.to_string item
 
 let show = function
   | Input part -> show_input part
@@ -247,7 +247,7 @@ let find_type_definition : Ground.ty -> Path.t option = function
   | Any { trait; _ } -> Some trait
   | Function _ | Never -> None
 
-let find_instance_definition : Instance.key -> Path.t option = function
+let find_item_definition : Lowered.Item.t -> Path.t option = function
   | Code { path; _ }
   | Constant path
   | Evaluator path
@@ -259,7 +259,7 @@ let find_instance_definition : Instance.key -> Path.t option = function
       Some path
   | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> find_type_definition ty
   | Generated (Entry impl_method | Any_entry impl_method) ->
-      Some (Instance.make_method_path impl_method)
+      Some (Lowered.Item.make_method_path impl_method)
 
 let find_name_definition = function
   | Entries _ | Module_declarations _ | File_declarations _ | Package_declarations _
@@ -302,7 +302,7 @@ let find_stored_definition : type a. a stored -> Path.t option = function
   | Recursion_group path ->
       Some path
   | Derived_interface { type_; trait } -> Some (Derived { type_; trait })
-  | Lowered key | Test_key key -> find_instance_definition key
+  | Lowered key | Test_key key -> find_item_definition key
 
 let find_definition = function
   | Input _ -> None

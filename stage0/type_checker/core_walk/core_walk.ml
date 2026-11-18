@@ -54,7 +54,7 @@ let walk_loop_clause visit = function
 let walk_expression_children visit (node : Core.expression) =
   match node.kind with
   | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _ | Break
-  | Continue | Todo | Unreachable | Result | Current_target | Yielded | Method_time _ ->
+  | Continue | Todo | Unreachable | Result | Current_target | Yielded | Method_cost _ ->
       ()
   | Template { call; _ } -> visit.expression call
   | Use core_place -> walk_place visit core_place
@@ -157,7 +157,7 @@ let walk_statement_children visit (node : Core.statement) =
           visit.expression count;
           visit.pattern position;
           walk_place visit element
-      | Cursor { cursor; next } ->
+      | Cursor { cursor; next; uses = _ } ->
           walk_place visit cursor;
           visit.callee next);
       visit.pattern pattern;
@@ -326,9 +326,9 @@ let can_use_tasks (body : Core.block) : bool = compute_tasks_use body <> No_task
 
 let traverse_indirect (change : 'a -> 'b option) : 'a Core.target -> 'b Core.target option =
   function
-  | Function { path; type_arguments } -> Some (Function { path; type_arguments })
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } ->
-      Some (Trait_method { trait; name; receiver; self_type; type_arguments; evidence })
+  | Function { path; instantiation } -> Some (Function { path; instantiation })
+  | Trait_method { trait; name; receiver; self_type; instantiation; evidence } ->
+      Some (Trait_method { trait; name; receiver; self_type; instantiation; evidence })
   | Capability_method { capability; name } -> Some (Capability_method { capability; name })
   | Intrinsic { operation; type_arguments } -> Some (Intrinsic { operation; type_arguments })
   | Indirect value -> Option.map (fun value -> Core.Indirect value) (change value)
@@ -337,14 +337,3 @@ let find_local_name : Core.local -> string option = function
   | Declared { name; _ } | Trait_parameter { name; _ } -> Some name
   | Self -> Some "self"
   | Synthetic _ -> None
-
-module For_testing = struct
-  exception Found
-
-  let expression_exists is_wanted node =
-    let visit =
-      make_deep_visitor
-        { ignore_all with expression = (fun node -> if is_wanted node then raise Found) }
-    in
-    match visit.expression node with () -> false | exception Found -> true
-end

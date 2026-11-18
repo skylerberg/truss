@@ -23,8 +23,8 @@
   mir
   ownership
   package_checks
-  compile
-  instance
+  backend
+  lowered
   ground
   libc
   prover

@@ -1,0 +1,9 @@
+trait Walk {
+  fn each(self, visit: (fn(Int64) cost time O(1) cost allocations == 0))
+}
+
+type Pair(first: Int64, second: Int64)
+
+impl Walk for Pair {
+  fn each(self, visit: (fn(Int64) cost allocations == 0 cost time O(1))) {}
+}

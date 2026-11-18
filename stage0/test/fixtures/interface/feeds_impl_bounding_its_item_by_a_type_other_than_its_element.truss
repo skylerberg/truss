@@ -1,0 +1,17 @@
+trait Convert[Target] {
+  fn convert(self) -> Target
+}
+
+trait Feeds {
+  type Element
+
+  fn feed[Item: Convert[Self.Element]](self, item: Item) -> Self.Element
+}
+
+type Reader()
+
+impl Feeds for Reader {
+  type Element = Int64
+
+  fn feed[Item: Convert[String]](self, item: Item) -> Int64 { todo }
+}

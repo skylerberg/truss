@@ -18,7 +18,7 @@ fn allowed_origin(policy: CorsPolicy, origin: StringSlice) -> Option[String] {
     if allowed == "*" {
       return Some(if policy.allow_credentials { origin.to_string() } else { "*" })
     }
-    if allowed.slice() == origin {
+    if allowed == origin {
       return Some(origin.to_string())
     }
   }
@@ -36,13 +36,13 @@ fn joined(parts: Slice[String]) -> String {
   text
 }
 
-public fn cors[capability Granted](
+public fn cors(
   request: own Request,
   responder: mut Responder,
   policy: CorsPolicy,
-  next: (fn(own Request, mut Responder) uses Granted),
+  next: (fn(own Request, mut Responder) uses generic Granted),
 )
-  uses Tasks, Granted
+  uses Tasks, generic Granted
 {
   let origin = match request.header("Origin") {
     Some(origin) => origin.to_string()
@@ -94,13 +94,13 @@ public type SecurityPolicy(
 )
   derives Equal
 
-public fn secure_headers[capability Granted](
+public fn secure_headers(
   request: own Request,
   responder: mut Responder,
-  next: (fn(own Request, mut Responder) uses Granted),
+  next: (fn(own Request, mut Responder) uses generic Granted),
   policy: SecurityPolicy = SecurityPolicy(),
 )
-  uses Granted
+  uses generic Granted
 {
   mut responder.set_header("X-Content-Type-Options", value: "nosniff")
   match policy.content_security_policy {
@@ -139,12 +139,12 @@ fn is_request_id(text: StringSlice) -> Bool {
   true
 }
 
-public fn request_id[capability Granted](
+public fn request_id(
   request: own Request,
   responder: mut Responder,
-  next: (fn(own Request, mut Responder) uses Granted),
+  next: (fn(own Request, mut Responder) uses generic Granted),
 )
-  uses Random, Granted
+  uses Random, generic Granted
 {
   var incoming = own request
   let id = match incoming.header("X-Request-ID") {
@@ -156,12 +156,12 @@ public fn request_id[capability Granted](
   next(own incoming, mut responder)
 }
 
-public fn log_requests[capability Granted](
+public fn log_requests(
   request: own Request,
   responder: mut Responder,
-  next: (fn(own Request, mut Responder) uses Granted),
+  next: (fn(own Request, mut Responder) uses generic Granted),
 )
-  uses Clock, Log, Granted
+  uses Clock, Log, generic Granted
 {
   let started = Clock.monotonic()
   let method = "${request.method}"
@@ -291,14 +291,14 @@ public fn peer_key(request: Request) -> String {
   }
 }
 
-public fn rate_limit[capability Granted](
+public fn rate_limit(
   request: own Request,
   responder: mut Responder,
   limiter: RateLimiter,
   key: fn(Request) -> String,
-  next: (fn(own Request, mut Responder) uses Granted),
+  next: (fn(own Request, mut Responder) uses generic Granted),
 )
-  uses Tasks, Clock, Granted
+  uses Tasks, Clock, generic Granted
 {
   match limiter.take(key(request).slice()) {
     Allowed(_) => next(own request, mut responder)
@@ -319,7 +319,7 @@ fn is_safe_method(method: Method) -> Bool {
 
 fn is_trusted_origin(policy: CsrfPolicy, origin: StringSlice) -> Bool {
   for trusted in policy.trusted_origins {
-    if same_name(trusted.slice(), second: origin) {
+    if trusted.equal_ignoring_ascii_case(origin) {
       return true
     }
   }
@@ -340,7 +340,7 @@ fn is_cross_origin(request: Request, policy: CsrfPolicy) -> Bool {
   }
   match request.header("Sec-Fetch-Site") {
     Some(site) => {
-      if same_name(site, second: "same-origin") || same_name(site, second: "none") {
+      if site.equal_ignoring_ascii_case("same-origin") || site.equal_ignoring_ascii_case("none") {
         return false
       }
       return match request.header("Origin") {
@@ -358,18 +358,18 @@ fn is_cross_origin(request: Request, policy: CsrfPolicy) -> Bool {
     return false
   }
   match host_of_origin(origin), request.header("Host") {
-    Some(origin_host), Some(host) => !same_name(origin_host, second: host)
+    Some(origin_host), Some(host) => !origin_host.equal_ignoring_ascii_case(host)
     _, _ => true
   }
 }
 
-public fn csrf[capability Granted](
+public fn csrf(
   request: own Request,
   responder: mut Responder,
   policy: CsrfPolicy,
-  next: (fn(own Request, mut Responder) uses Granted),
+  next: (fn(own Request, mut Responder) uses generic Granted),
 )
-  uses Tasks, Granted
+  uses Tasks, generic Granted
 {
   if is_cross_origin(request, policy: policy) {
     let _ = mut responder.send(Response.text("cross-origin request refused", status: Status.forbidden))

@@ -26,13 +26,13 @@ val check_written_arguments :
 type instance = {
   signature : Types.signature;
   substitution : Types.substitution;
-  type_arguments : Types.argument list;
+  instantiation : Types.instantiation;
 }
 
 val instantiate :
   State.state ->
   Source.Definition_span.t ->
-  ?extra:(Types.parameter * Types.argument) list ->
+  ?extra:Types.substitution ->
   Types.signature ->
   instance
 

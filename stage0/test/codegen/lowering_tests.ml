@@ -51,6 +51,10 @@ let () =
     (fun () ->
       Codegen_support.expect_output Fixtures.Lowering.grid_cell_index_out_of_bounds
         "test 0 panicked\nmessage 47\nindex out of bounds\n  at example/main.truss:4:3\n");
+  Codegen_support.test "a test checks the requires of an index's `at` where the index is written"
+    (fun () ->
+      Codegen_support.expect_output Fixtures.Lowering.test_indexing_outside_the_requires_of_at
+        "test 0 panicked\nmessage 49\nindex out of bounds\n  at example/main.truss:30:11\n");
   Codegen_support.test
     "a check in a called lending method of the standard library reports the program's call site"
     (fun () ->
@@ -160,6 +164,10 @@ let () =
     Fixtures.Lowering.quantifiers_over_a_list_a_slice_and_a_shelf
 
 let () =
+  Codegen_support.expect_pass "quantifiers whose pattern leaves out the elements it does not match"
+    Fixtures.Lowering.quantifiers_with_a_refutable_pattern
+
+let () =
   Codegen_support.expect_pass
     "constants that are infinite or not a number, which C has no literal for"
     Fixtures.Lowering.infinite_and_not_a_number_constants
@@ -189,16 +197,16 @@ let () =
 
 let expect_fold name ~folded ~run source =
   Codegen_support.test name (fun () ->
-      let _, compile =
+      let _, backend =
         Codegen_support.load
           ~roots:
             (List.map
-               (fun name -> Instance.Constant (Top { module_ = Codegen_support.example; name }))
+               (fun name -> Lowered.Item.Constant (Top { module_ = Codegen_support.example; name }))
                (folded @ run))
           source
       in
       let is_folded name =
-        Compile.For_testing.is_folded compile (Top { module_ = Codegen_support.example; name })
+        Backend.For_testing.is_folded backend (Top { module_ = Codegen_support.example; name })
       in
       List.iter
         (fun name ->

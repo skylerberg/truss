@@ -1,0 +1,12 @@
+fn f(members: own Set[Int64]) -> List[Int64]
+  ensures forall i in 0..result.length() => members.model().contains(result.model()[i])
+{
+  var listed: List[Int64] = []
+  for member in own members
+    invariant listed.length() == visited.length()
+    invariant forall i in 0..visited.length() => identical(listed.model()[i], visited[i])
+  {
+    mut listed.push(member)
+  }
+  listed
+}

@@ -15,9 +15,9 @@ type run = {
 }
 
 let make_unit_callee : _ Core.target -> Invocation.callee = function
-  | Function { path; type_arguments } -> Function { path; type_arguments }
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } ->
-      Trait_method { trait; name; receiver; self_type; type_arguments; evidence }
+  | Function { path; instantiation } -> Function { path; instantiation }
+  | Trait_method { trait; name; receiver; self_type; instantiation; evidence } ->
+      Trait_method { trait; name; receiver; self_type; instantiation; evidence }
   | Capability_method { capability; name } -> Capability_method { capability; name }
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
   | Indirect _ -> Indirect ()
@@ -728,8 +728,10 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Convert { conversion = To_integer; value; _ } -> (frame, translate_operand value)
   | Convert { conversion = From_integer; value; _ } ->
       (frame, Operations.convert_from_integer context frame site (translate_operand value))
-  | Function_value { path; type_arguments; is_argument } ->
-      (frame, Values.translate_global_value context frame site path type_arguments ~is_argument)
+  | Function_value { path; instantiation; is_argument } ->
+      ( frame,
+        Values.translate_global_value context frame site path instantiation.type_arguments
+          ~is_argument )
   | To_any _ -> Operations.convert_to_any context frame site
   | Operation { operation; operands; type_arguments } ->
       let types =
@@ -788,8 +790,8 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       Values.apply_specification_function context frame ~location function_ values
         ~unconverted:(List.map (Facts.substitute_type context frame) unconverted)
         ~types:(List.map (compute_operand_type context frame) arguments)
-  | Specification (Method_time callee) ->
-      (frame, Amounts.compute_method_time context frame (make_unit_callee callee))
+  | Specification (Method_cost { metric; method_ }) ->
+      (frame, Amounts.compute_method_cost context frame metric (make_unit_callee method_))
   | Specification (Map entries) ->
       Values.apply_map_literal context frame ~ty ~location
         (List.map
@@ -1147,12 +1149,12 @@ and read_statement context frame run (statement : Mir.statement) =
         | Range { start; stop; inclusive } ->
             Loops.Over_range
               { low = translate_operand start; high = translate_operand stop; inclusive }
-        | Pull { cursor; next } ->
+        | Pull { cursor; next; uses } ->
             Over_cursor
               {
                 cursor = make_passed_place context run cursor;
                 cursor_type = compute_place_type context frame run cursor;
-                next = make_unit_callee next;
+                next = { callee = make_unit_callee next; lends = None; uses };
               }
       in
       let for_loop =
@@ -1354,7 +1356,8 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       let collection = read_place context frame run base in
       let is_checked =
         match call.callee with
-        | Function { path; _ } -> Mir.list_checked_requires context.lookups.mir path <> []
+        | Function { path; _ } ->
+            Option.is_some (Mir.find_checked_requires context.lookups.mir path)
         | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
       in
       let frame, viewed, low, high =

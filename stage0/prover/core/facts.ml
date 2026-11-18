@@ -527,13 +527,31 @@ let substitute_type (context : State.context) (frame : State.frame) ty =
 let find_local_type context frame local =
   Option.map (substitute_type context frame) (Locals.find_opt local frame.types)
 
+let is_potential = function
+  | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _) -> true
+  | Logic.Apply (_, arguments) ->
+      List.exists
+        (function Logic.Symbol (Logic.Symbol.Potential_measure _) -> true | _ -> false)
+        arguments
+  | _ -> false
+
 let mentions_potential term =
-  let rec walk = function
-    | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _) -> true
+  let rec walk term =
+    is_potential term
+    ||
+    match term with
     | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> walk body
     | term -> List.exists walk (Logic.list_arguments term)
   in
   walk term
+
+let rec list_potentials term =
+  if is_potential term then [ term ]
+  else List.concat_map list_potentials (Logic.list_arguments term)
+
+let rec take_potential_as_zero term =
+  if is_potential term then Logic.Integer Z.zero
+  else Logic.map_arguments take_potential_as_zero term
 
 let restrict (frame : State.frame) condition =
   { frame with State.condition = Logic.( &&& ) frame.condition condition }
@@ -694,13 +712,14 @@ let merge context ?value_type ~condition
       Locals.fold
         (fun id joined renamed ->
           match Locals.find_opt id frame.locals with
-          | Some own when own != joined && own <> joined -> (own, joined) :: renamed
+          | Some incoming when incoming != joined && incoming <> joined ->
+              (incoming, joined) :: renamed
           | _ -> renamed)
         locals []
     in
     let renamed =
       match (frame.self, self) with
-      | Some own, Some joined when own <> joined -> (own, joined) :: renamed
+      | Some incoming, Some joined when incoming <> joined -> (incoming, joined) :: renamed
       | _ -> renamed
     in
     List.fold_left (fun amount (from, into) -> Logic.replace ~from ~into amount) amount renamed

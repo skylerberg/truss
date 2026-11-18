@@ -32,7 +32,7 @@ type obligation = {
 type outcome = { obligations : obligation list; holes : (Resolve.Names.key * location) list }
 type source = { key : Resolve.Names.key option; name : string }
 
-type part = {
+type clauses = {
   callee : source;
   parameters : Mir.parameter list;
   requires : Mir.requirement list;
@@ -43,7 +43,12 @@ type part = {
   inherited : bool;
 }
 
-type contract = { parts : part list; is_logic_function : bool; result_kind : [ `Returns | `Lends ] }
+type contract = {
+  callee_clauses : clauses;
+  trait_clauses : clauses option;
+  is_logic_function : bool;
+  result_kind : [ `Returns | `Lends ];
+}
 
 type slice = {
   made_at : Invocation.site;
@@ -142,7 +147,7 @@ type context = {
   axiom_clauses : unit Tables.Axiom_clause_table.t;
   mutable open_axioms : open_axiom list;
   axioms_of : open_axiom Tables.Symbol_table.t;
-  disjoint : (int * int) list;
+  disjoint : (int list * int list) list;
   mutable indexes : (int * place_value) list;
   mutable yielded_part : Types.ty option;
   mutable yield_ensures : (Mir.formula list * Mir.formula list) option;
@@ -153,7 +158,7 @@ type context = {
   fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
-  mutable lambda_times : (Logic.term * (Logic.term * obligation list)) list;
+  mutable lambda_costs : ((Logic.term * Metric.t) * (Logic.term * obligation list)) list;
   mutable lambda_captures : (Logic.term * Core.local list) list;
   lambda_definitions : Logic.term Tables.Symbol_table.t;
   mutable potentials : Logic.term list;

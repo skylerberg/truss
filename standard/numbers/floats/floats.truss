@@ -4,6 +4,7 @@ impl Equal for Float32 {
   fn equal(self, other: Float32) -> Bool
     cost time O(1)
     ensures result == (intrinsic::equal(self, right: other))
+    cost allocations == 0
   {
     intrinsic::equal(self, right: other)
   }
@@ -14,6 +15,7 @@ impl Ordered for Float32 {
     cost time O(1)
     ensures (result == Ordering.Less) == intrinsic::less(self, right: other)
     ensures (result == Ordering.Equal) == intrinsic::equal(self, right: other)
+    cost allocations == 0
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -32,8 +34,8 @@ impl Default for Float32 {
 }
 
 impl Display for Float32 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_float32(self)
+  fn display(self, output: mut String) {
+    mut output.push_float32(self)
   }
 }
 
@@ -139,7 +141,9 @@ impl Negate for Float32 {
 }
 
 impl Hash for Float32 {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(intrinsic::convert(intrinsic::to_bits[Float32, UInt32](self)))
   }
 }
@@ -180,6 +184,7 @@ impl Equal for Float64 {
   fn equal(self, other: Float64) -> Bool
     cost time O(1)
     ensures result == (intrinsic::equal(self, right: other))
+    cost allocations == 0
   {
     intrinsic::equal(self, right: other)
   }
@@ -190,6 +195,7 @@ impl Ordered for Float64 {
     cost time O(1)
     ensures (result == Ordering.Less) == intrinsic::less(self, right: other)
     ensures (result == Ordering.Equal) == intrinsic::equal(self, right: other)
+    cost allocations == 0
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -256,8 +262,8 @@ impl Default for Float64 {
 }
 
 impl Display for Float64 {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_float64(self)
+  fn display(self, output: mut String) {
+    mut output.push_float64(self)
   }
 }
 
@@ -363,7 +369,9 @@ impl Negate for Float64 {
 }
 
 impl Hash for Float64 {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(intrinsic::to_bits[Float64, UInt64](self))
   }
 }

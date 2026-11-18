@@ -1,9 +1,6 @@
-let render_c_file env instances =
+let render_c_file env items =
   Emit_c.render_file env Development
-    (List.map
-       (fun (make_instance, linkage) ->
-         (Emit_c.make_fragment env (Code (make_instance env)), linkage))
-       instances)
+    (List.map (fun (item, linkage) -> (Emit_c.make_fragment env (Code (item env)), linkage)) items)
 
 let () =
   Codegen_support.test "a function that returns a constant runs and exits with it" (fun () ->
@@ -245,7 +242,7 @@ let () =
             ];
         ]);
   let bump =
-    Codegen_support.instance "bump"
+    Codegen_support.item "bump"
       (Codegen_support.function_ ~parameters:[ 0 ]
          [
            Codegen_support.local ~name:"count"
@@ -474,7 +471,7 @@ let () =
   Codegen_support.test "a copy of a callee is a static inline function, declared before its caller"
     (fun () ->
       let callee =
-        Codegen_support.instance "callee"
+        Codegen_support.item "callee"
           (Codegen_support.function_ ~parameters:[ 0 ]
              ~result:(Codegen_support.value Codegen_support.int32)
              [ Codegen_support.local (Codegen_support.value Codegen_support.int32) ]
@@ -512,7 +509,7 @@ let () =
             ] )
       in
       let holder =
-        Codegen_support.instance "holder"
+        Codegen_support.item "holder"
           (Codegen_support.function_
              [ Codegen_support.local (Codegen_support.value Codegen_support.pair) ]
              [
@@ -544,15 +541,15 @@ let () =
       in
       if not (String.includes ~affix:expected c_file) then
         Codegen_support.fail "no %S in:\n%s" expected c_file);
-  Codegen_support.test "emitting the same instances twice gives the same C" (fun () ->
-      let instances = [ (bump, Emit_c.External) ] in
+  Codegen_support.test "emitting the same items twice gives the same C" (fun () ->
+      let items = [ (bump, Emit_c.External) ] in
       Codegen_support.expect_string
-        ~expected:(render_c_file (Codegen_support.make_shape_env ()) instances)
-        (render_c_file (Codegen_support.make_shape_env ()) instances));
+        ~expected:(render_c_file (Codegen_support.make_shape_env ()) items)
+        (render_c_file (Codegen_support.make_shape_env ()) items));
   Codegen_support.test "the C has the blocks the entry reaches and the locals their code names"
     (fun () ->
       let entry =
-        Codegen_support.instance "entry"
+        Codegen_support.item "entry"
           (Codegen_support.function_
              ~result:(Codegen_support.value Codegen_support.int32)
              [
@@ -589,18 +586,22 @@ let () =
 let () =
   Codegen_support.test "a symbol names the path and the type arguments" (fun () ->
       let key =
-        Instance.Code
+        Lowered.Item.Code
           {
             path = Method { owner = Well_known.make_path List; name = "each"; receiver = Read };
-            type_arguments = [ Type Codegen_support.int64 ];
+            instantiation =
+              { Ground.no_instantiation with type_arguments = [ Type Codegen_support.int64 ] };
           }
       in
       Codegen_support.expect_string ~expected:"t_standard__list__List_each_Of_test__Int64_End_"
-        (Instance.make_symbol key));
+        (Emit_c.make_symbol key));
   let render_function_symbol package modules =
-    Instance.make_symbol
-      (Instance.Code
-         { path = Top { module_ = { package; modules }; name = "length" }; type_arguments = [] })
+    Emit_c.make_symbol
+      (Lowered.Item.Code
+         {
+           path = Top { module_ = { package; modules }; name = "length" };
+           instantiation = Ground.no_instantiation;
+         })
   in
   Codegen_support.test "a symbol marks a package's owner apart from its modules" (fun () ->
       Codegen_support.expect_string ~expected:"t_acme_Owns_geometry__vector__length"
@@ -612,17 +613,15 @@ let () =
         Codegen_support.fail
           "a package with an owner and a module of the same names have one symbol");
   Codegen_support.test "a long symbol keeps its start and ends with a hash" (fun () ->
-      let make_long_symbol name =
-        Instance.make_symbol (Codegen_support.key (String.make 300 name))
-      in
+      let make_long_symbol name = Emit_c.make_symbol (Codegen_support.key (String.make 300 name)) in
       let left = make_long_symbol 'a' and right = make_long_symbol 'b' in
       Codegen_support.expect_int ~expected:(180 + 6 + 32) (String.length left);
       if left = right then Codegen_support.fail "two long names give one symbol")
 
-let intrinsic_types : Compile.For_testing.Intrinsics.types =
+let intrinsic_types : Backend.For_testing.Intrinsics.types =
   { uint64 = Codegen_support.uint64; string_slice = Codegen_support.named "StringSlice" }
 
-let build_entry build_body : Codegen_support.instance =
+let build_entry build_body : Codegen_support.item =
  fun env ->
   let builder = Emit_c.Builder.create env ~key:(Codegen_support.key "entry") in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
@@ -633,7 +632,7 @@ let build_entry build_body : Codegen_support.instance =
 
 let operate builder ?destination ?(type_arguments = [ Codegen_support.int32 ]) ?value_arguments
     operation arguments =
-  Compile.For_testing.Intrinsics.lower ?value_arguments
+  Backend.For_testing.Intrinsics.lower ?value_arguments
     (Codegen_support.make_shape_env ())
     builder intrinsic_types operation ~type_arguments arguments ~destination
     ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
@@ -887,7 +886,7 @@ let () =
         ]
       in
       let operate builder ?destination operation arguments =
-        Compile.For_testing.Intrinsics.lower
+        Backend.For_testing.Intrinsics.lower
           ~value_arguments:[ Z.of_int 3 ]
           (Codegen_support.make_shape_env ~extra ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
@@ -972,7 +971,7 @@ let () =
           }
       in
       let operate builder ?destination operation arguments =
-        Compile.For_testing.Intrinsics.lower ~checks:true
+        Backend.For_testing.Intrinsics.lower ~checks:true
           ~value_arguments:[ Z.of_int 3 ]
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
@@ -1105,7 +1104,7 @@ let () =
   Codegen_support.test "a storage is shortened in place and keeps its room" (fun () ->
       let storage_ty = Storage.make_storage_type Codegen_support.uint8 in
       let operate_checked builder ?destination operation arguments =
-        Compile.For_testing.Intrinsics.lower ~checks:true
+        Backend.For_testing.Intrinsics.lower ~checks:true
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
           ~destination
@@ -1187,7 +1186,7 @@ let () =
       in
       let operate_checked builder ?destination operation arguments =
         ignore
-          (Compile.For_testing.Intrinsics.lower ~checks:true
+          (Backend.For_testing.Intrinsics.lower ~checks:true
              (Codegen_support.make_shape_env ~extra ())
              builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
              ~destination

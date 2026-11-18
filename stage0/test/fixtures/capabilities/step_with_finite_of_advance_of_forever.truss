@@ -1,0 +1,3 @@
+fn f(ticker: mut Forever) -> UInt64 {
+  step_with_finite(mut ticker, step: advance)
+}

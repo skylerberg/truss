@@ -78,7 +78,6 @@ let rec zonk unifier (type_ : Types.ty) : Types.ty =
 and zonk_argument unifier = function
   | Types.Type type_ -> Types.Type (zonk unifier type_)
   | Types.Value value -> Types.Value (resolve_value unifier value)
-  | Types.Capabilities capabilities -> Types.Capabilities (zonk_capabilities unifier capabilities)
 
 and zonk_capabilities unifier capabilities =
   Types.flat_map_capabilities
@@ -87,6 +86,17 @@ and zonk_capabilities unifier capabilities =
           [
             Types.Capability_projection
               { base = zonk unifier base; trait = zonk_trait unifier trait; name };
+          ]
+      | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
+          [
+            Types.Divergence
+              (Of_impl_method
+                 {
+                   self_type = zonk unifier self_type;
+                   trait = zonk_trait unifier trait;
+                   name;
+                   receiver;
+                 });
           ]
       | capability -> [ capability ])
     capabilities
@@ -150,7 +160,6 @@ let list_unknowns unifier (type_ : Types.ty) =
         match resolve_value unifier value with
         | Value_variable index -> unknowns := Unknown_value index :: !unknowns
         | _ -> ())
-    | Types.Capabilities _ -> ()
   and collect_trait (reference : Types.trait_reference) =
     List.iter collect_argument reference.trait_arguments;
     List.iter (fun (_, type_) -> collect type_) reference.associated
@@ -164,7 +173,6 @@ let list_argument_unknowns unifier = function
       match resolve_value unifier value with
       | Value_variable index -> [ Unknown_value index ]
       | _ -> [])
-  | Types.Capabilities _ -> []
 
 let rec unify unifier (left : Types.ty) (right : Types.ty) =
   let left = resolve unifier left and right = resolve unifier right in
@@ -224,8 +232,6 @@ and unify_arguments unifier left right =
          | Types.Type left, Types.Type right -> unify unifier left right
          | Types.Value left, Types.Value right -> unify_value unifier left right
          | Types.Type (Types.Error _), _ | _, Types.Type (Types.Error _) -> true
-         | Types.Capabilities left, Types.Capabilities right ->
-             unify_capabilities unifier left right
          | _ -> false)
        left right
 

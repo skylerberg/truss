@@ -9,7 +9,7 @@ type local =
   | Synthetic of int
 
 type quantifier = Forall | Exists
-type evidence = Impl of { impl : Path.t; arguments : Types.substitution } | Bound | Dynamic
+type evidence = Impl of { impl : Path.t; substitution : Types.substitution } | Bound | Dynamic
 
 type pattern_constant =
   | Boolean_constant of bool
@@ -20,13 +20,13 @@ type pattern_constant =
 type range_bound = Integer_bound of Z.t | Constant_bound of Path.t
 
 type 'indirect target =
-  | Function of { path : Path.t; type_arguments : Types.argument list }
+  | Function of { path : Path.t; instantiation : Types.instantiation }
   | Trait_method of {
       trait : Types.trait_reference;
       name : string;
       receiver : Path.receiver;
       self_type : Types.ty;
-      type_arguments : Types.argument list;
+      instantiation : Types.instantiation;
       evidence : evidence;
     }
   | Capability_method of { capability : Path.t; name : string }
@@ -62,7 +62,7 @@ and kind =
   | Template of { literals : string list; call : expression }
   | Use of place
   | Copy of operand
-  | Function_value of { path : Path.t; type_arguments : Types.argument list }
+  | Function_value of { path : Path.t; instantiation : Types.instantiation }
   | Value_parameter of Types.parameter
   | Lambda of {
       parameters : pattern list;
@@ -102,10 +102,10 @@ and kind =
   | Yielded
   | Identical of expression * expression
   | Specification_function of { function_ : specification_function; arguments : expression list }
-  | Method_time of callee
+  | Method_cost of { metric : Metric.t; method_ : callee }
 
 and capture = { local : local; type_ : Types.ty }
-and specification_function = Log | Power | Time | Calls
+and specification_function = Log | Power | Callback_cost of Metric.t | Calls
 and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
 and construction = Array | Specification_only
 and conversion = Widen | To_integer | From_integer
@@ -156,12 +156,12 @@ and loop_mode = Sequential | Parallel_loop | Concurrent_loop
 and iteration =
   | Integer_range of { start : expression; stop : expression; inclusive : bool }
   | Elements of elements
-  | Cursor of { cursor : place; next : callee }
+  | Cursor of { cursor : place; next : callee; uses : Types.capability_set }
 
 and elements = { count : expression; position : pattern; element : place }
 and loop_clause = Invariant of expression | Decreases of expression list | Cost of cost
 and cost = { origin : origin; amortized : bool; resource : resource; bound : bound }
-and resource = Time | Allocations | Allocated_bytes | Calls of calls_target
+and resource = Metric of Metric.t | Calls of calls_target
 
 and calls_target =
   | Function_parameter of local

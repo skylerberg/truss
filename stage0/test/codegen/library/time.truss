@@ -368,18 +368,14 @@ fn zone_of(name: StringSlice, rules: List[UInt8]) -> time::TimeZone {
   }
 }
 
-fn named(zone: time::TimeZone, expected: StringSlice) -> Bool {
-  zone.name() == expected
-}
-
 fn shows_local(zone: time::TimeZone, seconds: Int64, expected: StringSlice, offset: Int64) -> Bool {
-  "${zone.to_local(at(seconds))}" == expected.to_string() && zone.offset(at(seconds)) == time::Duration.seconds(offset)
+  "${zone.to_local(at(seconds))}" == expected && zone.offset(at(seconds)) == time::Duration.seconds(offset)
 }
 
 test "a zone with daylight time gives the local time, and the instants of a local time" {
   let rules: List[UInt8] = [84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 3, 0, 0, 0, 12, 255, 255, 255, 255, 94, 3, 240, 144, 0, 0, 0, 0, 92, 132, 181, 240, 0, 0, 0, 0, 93, 190, 108, 224, 0, 0, 0, 0, 94, 100, 151, 240, 0, 0, 0, 0, 95, 158, 78, 224, 0, 0, 0, 0, 96, 77, 180, 112, 0, 0, 0, 0, 97, 135, 107, 96, 1, 2, 1, 2, 1, 2, 1, 255, 255, 186, 158, 0, 0, 255, 255, 185, 176, 0, 4, 255, 255, 199, 192, 1, 8, 76, 77, 84, 0, 69, 83, 84, 0, 69, 68, 84, 0, 10, 69, 83, 84, 53, 69, 68, 84, 44, 77, 51, 46, 50, 46, 48, 44, 77, 49, 49, 46, 49, 46, 48, 10]
   let zone = zone_of("America/New_York", rules: rules)
-  assert named(zone, expected: "America/New_York")
+  assert zone.name() == "America/New_York"
   assert shows_local(zone, seconds: -3773736000, expected: "1850-06-01T07:03:58", offset: -17762)
   assert shows_local(zone, seconds: -2717650801, expected: "1883-11-18T12:03:57", offset: -17762)
   assert shows_local(zone, seconds: -2717650800, expected: "1883-11-18T12:00:00", offset: -18000)
@@ -482,12 +478,12 @@ test "a zone of the first version of the format, UTC, and a fixed offset" {
   assert shows_local(zone, seconds: 978307200, expected: "2001-01-01T01:00:00", offset: 3600)
   assert shows_local(zone, seconds: 1893456000, expected: "2030-01-01T01:00:00", offset: 3600)
   assert shows_local(time::TimeZone.utc(), seconds: 86399, expected: "1970-01-01T23:59:59", offset: 0)
-  assert named(time::TimeZone.utc(), expected: "UTC") && time::TimeZone.utc().format(at(0)) == "1970-01-01T00:00:00Z"
-  assert time::TimeZone.fixed(time::Duration.seconds(19800)) is Some(fixed) && named(fixed, expected: "+05:30")
+  assert time::TimeZone.utc().name() == "UTC" && time::TimeZone.utc().format(at(0)) == "1970-01-01T00:00:00Z"
+  assert time::TimeZone.fixed(time::Duration.seconds(19800)) is Some(fixed) && fixed.name() == "+05:30"
     && shows_local(fixed, seconds: 0, expected: "1970-01-01T05:30:00", offset: 19800)
     && fixed.to_instant(local("1970-01-01T05:30:00")) == Some(time::LocalInstant.Unique(instant: at(0)))
     && fixed.format(at(0)) == "1970-01-01T05:30:00+05:30"
-  assert time::TimeZone.fixed(time::Duration.seconds(-3600)) is Some(west) && named(west, expected: "-01:00")
+  assert time::TimeZone.fixed(time::Duration.seconds(-3600)) is Some(west) && west.name() == "-01:00"
   assert time::TimeZone.fixed(time::Duration.seconds(86400)) is None
   assert time::TimeZone.fixed(time::Duration.milliseconds(1500)) is None
   assert time::TimeZone.utc().to_instant(local("9999-01-01T00:00:00")) is None
@@ -530,10 +526,10 @@ test "a zone is found by name, and the local zone is the environment's" {
   provide known {
     assert time::zone("America/New_York") is Ok(zone) && shows_local(zone, seconds: 1593604800, expected: "2020-07-01T08:00:00", offset: -14400)
     assert time::zone("Mars/Olympus") is Err(UnknownZone)
-    assert named(time::local_zone(), expected: "America/New_York")
+    assert time::local_zone().name() == "America/New_York"
   }
   provide environment::FixedEnvironment.new(zone_platform(), current_directory: Path.new("/")) {
-    assert named(time::local_zone(), expected: "UTC")
+    assert time::local_zone().name() == "UTC"
   }
 }
 
