@@ -2029,7 +2029,8 @@ fn profile(id: UserId) -> Result[Profile, DatabaseError]
   `Result`, `None` where it returns an `Option`, and early where it returns
   nothing. `Tasks.cancelled()` tells whether the task is cancelled. A task
   blocked on the mutex of a `mut` implementation waits until it acquires it.
-- A function that waits for another task has no `time` clause.
+- A function that waits for another task has no `time` clause, and the end
+  of a `concurrent` block or a `concurrent for` waits for its tasks.
 
 The iterations of a `parallel for` and of a `concurrent for` run at the same
 time, and a `concurrent for` iteration keeps running after the loop

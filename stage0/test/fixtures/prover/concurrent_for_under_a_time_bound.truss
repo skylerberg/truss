@@ -1,0 +1,9 @@
+fn waits(values: List[Int64]) -> Int64
+  uses Tasks
+  cost time O(values.length())
+{
+  concurrent for value in values {
+    let _ = value
+  }
+  0
+}

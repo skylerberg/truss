@@ -1676,7 +1676,12 @@ let () =
   Harness.test "a concurrent for may return early, with a value known by its type" (fun () ->
       expect_proven Fixtures.Prover.any_negative_through_a_concurrent_for);
   Harness.test "a value returned from a concurrent for is not known to be any one iteration's"
-    (fun () -> expect_not_proven Fixtures.Prover.claimed_through_a_concurrent_for "prover.ensures")
+    (fun () -> expect_not_proven Fixtures.Prover.claimed_through_a_concurrent_for "prover.ensures");
+  Harness.test "a function that waits for its tasks has no time bound" (fun () ->
+      expect_not_proven Fixtures.Prover.concurrent_block_under_a_time_bound "prover.cost";
+      expect_not_proven Fixtures.Prover.concurrent_for_under_a_time_bound "prover.cost");
+  Harness.test "waiting for tasks allocates nothing" (fun () ->
+      expect_proven Fixtures.Prover.concurrent_block_under_an_allocation_bound)
 
 let () =
   let fix_titles text =

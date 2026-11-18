@@ -1020,17 +1020,20 @@ and read_statement context frame run (statement : Mir.statement) =
       | Written_unreachable -> oblige_unreachable context frame location
       | Todo -> record_todo context frame location);
       None
-  | Fork { fork; branches; _ } ->
-      List.fold_left
-        (fun frame (index, (branch : Mir.block)) ->
-          let* frame = frame in
-          let cancelled = ref [] in
-          run.cancelled <- (Mir.Branch { block = fork; index }, cancelled) :: run.cancelled;
-          let ended = read_statements context frame run branch.statements in
-          run.cancelled <- List.tl run.cancelled;
-          Facts.join_frames context (Option.to_list ended @ List.rev !cancelled))
-        (Some frame)
-        (List.mapi (fun index branch -> (index, branch)) branches)
+  | Fork { fork; concurrent; branches } ->
+      let ended =
+        List.fold_left
+          (fun frame (index, (branch : Mir.block)) ->
+            let* frame = frame in
+            let cancelled = ref [] in
+            run.cancelled <- (Mir.Branch { block = fork; index }, cancelled) :: run.cancelled;
+            let ended = read_statements context frame run branch.statements in
+            run.cancelled <- List.tl run.cancelled;
+            Facts.join_frames context (Option.to_list ended @ List.rev !cancelled))
+          (Some frame)
+          (List.mapi (fun index branch -> (index, branch)) branches)
+      in
+      if concurrent then Option.map (wait_for_tasks context) ended else ended
   | Resume { winner; exits } ->
       let won =
         read_operand context frame run
@@ -1215,7 +1218,14 @@ and read_statement context frame run (statement : Mir.statement) =
           bind_parts = (fun frame -> bind_parts context frame run);
         }
       in
-      Loops.run_for_loop context frame for_loop
+      let ended = Loops.run_for_loop context frame for_loop in
+      if loop.schedule = Concurrent_loop then Option.map (wait_for_tasks context) ended else ended
+
+and wait_for_tasks context frame =
+  Operations.spend context frame (fun (counter : Costs.counter) ->
+      match counter.resource with
+      | Metric Time -> Operations.declare_unknown_amount context frame counter
+      | Metric (Allocations | Allocated_bytes) | Calls _ -> Costs.zero)
 
 and read_basic context frame run (statement : Mir.statement) ~location (basic : Mir.basic) =
   match basic with
