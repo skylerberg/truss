@@ -70,14 +70,6 @@ it:
 | LLM habits | LLMs write the syntax of other languages by habit. A habit that Truss would read differently is an error, never a different meaning. |
 | Parallel agents | Several agents edit one codebase at once. A routine edit touches few files, and two correct edits merge into a correct program. |
 
-The sections on the language use the headings of SPECIFICATION.md and follow
-its order, except where one argument spans several of its sections. The
-standard library, packages, and incremental builds follow them. Each section
-opens with a link to the rules it explains. A section states a rule before
-its reason, argues in prose the decisions that cost something, and lists the
-rest in a table. [Omitted features](#omitted-features) lists the features
-that Truss leaves out and where each is explained.
-
 ## Source files
 
 Rules: [Source files](SPECIFICATION.md#source-files).
@@ -137,7 +129,6 @@ its own language. Strings and documentation take any language.
 
 | Rule | Reason |
 |---|---|
-| A name uses whole words. This is a convention, not a compiler rule. | Code is read more often than it is written, and an LLM types a long name at almost no cost. A compiler rule would reject the reasonable exceptions. |
 | A constant is `lower_snake_case`, as a value is. | A third case would give the lexer a third class of name, and an `UpperCamelCase` constant would be indistinguishable from a type. |
 
 ### Keywords
@@ -179,10 +170,8 @@ In `script`, `${HOME}` is text and `folder` is interpolated.
 |---|---|
 | A raw string has no escapes. | A regular expression or a Windows path keeps its backslashes, without the doubling that causes bugs. |
 | The closing `"""` sets the indentation, and every line starts with it. | A raw string is indented with the code around it. A line that mixes tabs and spaces is an error instead of a silent change to the text. |
-| Trailing whitespace is kept. | A raw string has no escape to write it with. |
 | An interpolation starts at `${`. | A single `{` or `$` as the marker would need escapes throughout JSON, regular expressions, and shell text. `${` is rare in ordinary text, as JavaScript's template literals show. |
 | Text that contains `${` opens the string with more `$`s. | A longer delimiter is already the remedy for text that contains `"""`. A fixed escape such as `$${` would make one sequence special in a string that has no escapes. |
-| A line break in a string is `\n`. | A string has the same value and the same hash whatever line endings its file uses. |
 
 ### Rejected sequences
 
@@ -227,11 +216,9 @@ let active_names = users
 | The token before the break decides. | Go | Rejects a variant that starts with `\|`, a clause on the line after a signature, a `{` after the clauses, and a method chain with `.` at the start of a line, which LLMs write by habit. |
 | A line continues whenever the next line can continue it. | JavaScript | Accepted, but a line that starts with `(` silently becomes a call of the line before. |
 
-The tokens that continue a line are exactly the tokens that cannot begin a
-statement, so the list is derived from the grammar, and a closing `}` needs
-no special case. Truss reads a line that starts with `-` as a new statement.
-If the author meant a subtraction, the statement leaves an unused value,
-which is an error, so the misreading never compiles.
+Truss reads a line that starts with `-` as a new statement. If the author
+meant a subtraction, the statement leaves an unused value, which is an error,
+so the misreading never compiles.
 
 ## Files and definitions
 
@@ -261,12 +248,10 @@ Rules: [Built-in types](SPECIFICATION.md#built-in-types).
 
 **A size, a length, and an index are `UInt64`, and an offset is `Int64`.**
 Truss has no integer type of the pointer's width. A proof about a size
-therefore holds on every target, a cached proof needs no target in its key,
-and every package runs on every target. Truss builds for x86-64 and ARM64,
-which have 64-bit pointers. A target with 32-bit pointers, such as 32-bit
-WebAssembly, would keep 64-bit sizes: a length never exceeds the address
-space, and the target's allocator would fail a size that does not fit in a
-pointer, as it fails any request it cannot meet.
+therefore holds on every target, and every package runs on every target. A
+target with 32-bit pointers, such as 32-bit WebAssembly, keeps 64-bit sizes:
+a length never exceeds the address space, and the target's allocator fails a
+size that does not fit in a pointer, as it fails any request it cannot meet.
 
 A size type of the pointer's width would need every proof to hold for both
 widths. Each package would then carry overflow obligations for 32-bit
@@ -276,9 +261,7 @@ would need a conversion wherever a length meets another count, such as a
 file offset, and would prevent no error: an element count, a byte count, and
 an index would all have that type. A newtype, such as
 `type ByteCount(number: UInt64)`, separates two counts where an author needs
-it. 64-bit sizes cost a 32-bit target 4 more bytes per length, and a 32-bit
-processor two instructions for an addition of sizes. WebAssembly's 32-bit
-targets have 64-bit integers natively.
+it. The cost on a 32-bit target is 4 more bytes per length.
 
 | Rule | Reason |
 |---|---|
@@ -324,9 +307,7 @@ unchanged.
 Rules: [Generic parameters](SPECIFICATION.md#generic-parameters).
 
 Generic code is monomorphized, so a generic function costs nothing at run
-time. Monomorphization rules out polymorphic recursion. Truss reports
-polymorphic recursion during type checking, as Go does. Rust reports it
-later, when instantiation fails.
+time. Monomorphization rules out polymorphic recursion.
 
 ### Invariants
 
@@ -408,7 +389,6 @@ push(mut names, item: name.copy())
 |---|---|
 | The call site repeats `mut` and `own`. | *Nothing hidden.* The call shows which arguments it mutates or moves, and a search for `mut scores` finds every call site that can mutate `scores`. |
 | A temporary takes no mode keyword. | A temporary has no other owner, so the keyword would tell the reader nothing. |
-| A mode keyword applies to the longest place expression at the start of its operand. | `mut config.servers.sort()` takes `mut` access to `config.servers` alone, so the same statement can use the other fields of `config`. |
 | `own` can move one field out of a record. | Without a partial move, taking one field means copying it or moving the whole record. |
 
 ### Copying
@@ -428,12 +408,10 @@ change to its API.
 
 | Rule | Reason |
 |---|---|
-| A name bound to a `Plain` value, or a compound assignment's `Plain` operand, is a copy, not a view. | A `Plain` value is copied wherever it is moved: into a `var`, an `own` parameter, or a field. If a `let` viewed it, `point.x = 7` would be an error while a `let` of `point` is live, where the same code on an integer is accepted. A built-in operator takes its operand by value before the index keys of the target run, and an operator that is a trait method reads the same value. |
+| A name bound to a `Plain` value is a copy, not a view. | A `Plain` value is copied wherever it is moved: into a `var`, an `own` parameter, or a field. If a `let` viewed it, `point.x = 7` would be an error while a `let` of `point` is live, where the same code on an integer is accepted. |
 | A handle is not `Copyable`. | Copying one would duplicate an operating-system handle, which can fail, and `copy()` cannot fail. |
 | Generic code copies only under a `Copyable` bound. | An unbounded type parameter then accepts every type, handles included. |
-| A copy is identical to its original. | A storage's capacity and its potential are functions of the value. A copy shrunk to its length would make `items.copy().capacity() == items.capacity()` false at run time, and give the copy a potential other than the one `copy()` paid for. |
-| A string literal is a `String` constant, copied where an owned `String` is needed. | Every `String` that code mutates or drops then owns its buffer. Copy-on-write needs a run-time test of whether the buffer is static before each write, drop, and copy, and gives a literal a capacity below its length, which the prover assumes cannot happen. |
-| A string literal where a `StringSlice` is expected is a `StringSlice`. | A `match` whose arms are literals then has the expected type. Converting its `String` value instead would make a view of a copy that is dropped at the end of the statement. |
+| A string literal is a `String` constant, copied where an owned `String` is needed. | Every `String` that code mutates or drops then owns its buffer. Copy-on-write needs a run-time test of whether the buffer is static before each write, drop, and copy. |
 
 ### Views
 
@@ -477,11 +455,10 @@ rule excludes `Plain` arguments, such as indexes, so that case is rare.
 | Rule | Reason |
 |---|---|
 | Whether a type is a view is derived from its fields, and a record that holds a view is a view. | Nothing is declared, and a view cannot escape inside a record. |
-| A `Plain` argument lends nothing to the result of a call, unless it holds an `Array`. | A `Slice` views storage, and an integer or a record of integers has none to view, so a variable passed as an index can be assigned while the result is live. An array is stored in place: `values.slice()` views `values` itself, and assigning `values` while that view is live would change what the view reads. |
 | Generic code that keeps a value requires `Storable`. | A type parameter may stand for a view, and the bound stops generic code from storing one. |
 | An `any Trait` is a view unless `Trait` requires `Storable`. | `any` hides the type, so the compiler cannot see whether the value holds a view. |
 | `mut` access is never stored. | It lasts for one call, one iteration, or one `provide mut` block, so the ownership check tracks no mutable reference from one statement to the next. |
-| A view is passed as its owning type to a read-only parameter whose declared type is a type parameter or an associated type. | Generic code cannot declare the view of its type parameter: `Map.get` takes `key: Key`, so a lookup in a `Map[String, Int64]` with a `StringSlice` allocated a `String` first. A callee cannot mutate, move, drop, or store a read-only parameter, so it cannot tell a `String` that owns its buffer from one that views another's, as it cannot tell a view from a copy. A `List` and a `String` hold their elements outside the value, so a view that the callee returns views storage that the argument already views. Rust needs the `Borrow` trait and a blanket `impl` for this lookup, and C++ a transparent comparator. |
+| A view is passed as its owning type to a read-only parameter whose declared type is a type parameter or an associated type. | Generic code cannot name the view of its type parameter, so `Map.get`, which takes `key: Key`, would make a lookup in a `Map[String, Int64]` allocate a `String`. A callee cannot mutate, move, drop, or store a read-only parameter, so it cannot tell a view from an owned value. Rust needs the `Borrow` trait and a blanket `impl` for this lookup. |
 | A parameter declared as `List` or `String` takes no view. | Its signature can declare `Slice` or `StringSlice`, which takes both. If it took a view too, the two declarations would accept the same arguments, and every signature would choose between them for no reason. |
 
 ### Lending methods
@@ -525,11 +502,7 @@ mutated. Such a type takes the new value in an ordinary method, as
 | Reading an element and mutating it in place are separate traits, `Index` and `IndexMut`. | A collection that packs its elements, such as a `BitSet`, has no place to lend `mut`. It implements `Index` to read an element and `IndexAssign` to replace one. Rust's `Index` returns a reference, so such a collection cannot be indexed there. |
 | A method may lend a value that it computes, and a mutation of that value is not written back. | Writing back would be code after the lend. |
 | A method lends a part of its first parameter, or a whole value that it made, and never a part inside a value it owns. | Nothing of the method then has to outlive its call except the part, which the caller holds. So the method can be compiled as a function, be called through `any`, and call itself. Rust has the same rule for a reference into a local. Swift's accessors lend such a part by keeping the accessor's frame alive. |
-| A lent constructor owns the arguments that the method made, and lends the places. | A result often pairs a computed value with a borrowed one, such as a search hit with a formatted label and the matching record. Rust allows a struct with an owned field and a reference. |
-| A lent part that is no view is a part of the first parameter, never of another. | A caller then knows from the signature alone which argument the part is in. It can lend `self.titles[key]` in turn where `key` is a local, which a part of any argument would forbid. Rust names the argument with a lifetime. |
 | A lending call lends its whole receiver. | The method was proven on the assumption that nothing else uses `self` while the part is lent. |
-| A receiver that is a view lends its original. | The lent part is in the original's storage. Mutating the original while a name aliases the part would leave a dangling view. |
-| `List`, `Slice`, and `Array` can lend two parts at once. | Their elements at different positions are disjoint places. |
 
 ### Loops
 
@@ -563,9 +536,6 @@ collection must have positions. Such a loop cannot advance two sequences
 together, so it cannot express `zip`, a merge, or `peek`. A tree has no
 positions. [Cursors](#cursors) cover both cases.
 
-A `while true` that no `break` leaves has type `Never`, so a server whose
-main loop runs forever can return `Never`.
-
 ### Cursors
 
 Rules: [Cursors](SPECIFICATION.md#cursors).
@@ -578,7 +548,6 @@ be stored, passed, and returned.
 | Rule | Reason |
 |---|---|
 | A cursor never holds `mut` access. | `mut` access is never stored. A `mut` loop mutates elements in place, by position. |
-| A cursor's `Sequence` model is the values that it has yet to give, so `visited` is a prefix of the model on entry to the loop. | A loop that moves the elements out of a list cannot name its cursor, so no invariant of the program's could relate `visited` to the list. A cursor without the model, such as the lines of a socket, states nothing about its values. |
 | A tree is visited by recursion, by `fold`, or by a cursor that holds an explicit stack. | *Nothing hidden.* The stack's allocations are written. C# and Python allocate the same stack behind a recursive generator. |
 
 ### Lambdas
@@ -716,9 +685,7 @@ Explicit type arguments use the brackets of indexing, as in
 `parse[Int64](text)`. Rust needs `parse::<i64>` because `<` is also the
 less-than operator. Brackets have no such conflict. The kind of the name
 before the brackets decides between the two readings, and the rules of
-[Scope](#scope) keep that kind easy to see. The cost is that a highlighter
-that works from the text alone can mistake `items[Color.Red]` for a type
-argument, so exact highlighting comes from the language server.
+[Scope](#scope) keep that kind easy to see.
 
 ### Termination
 
@@ -765,16 +732,13 @@ not.
 |---|---|
 | Structural recursion needs no annotation, and other recursion states `decreases`. | Lean accepts structural recursion in the same way. Dafny infers a measure. A structural check with an explicit clause is more predictable than an inference that may fail. |
 | A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` has the distance between them as its default measure, and a `for` loop over a cursor has the cursor's `remaining()`. | Most loops count toward a bound that their condition names, so `decreases high - low` would only repeat the condition. The default is one measure read from the loop's own code, never chosen by a search among candidates, so a reader knows the measure that the proof uses. Dafny takes the same default for a loop. A cursor's `remaining()` states its measure once, in its type, for every loop over it. |
-| A loop that runs until a capability says to stop has no termination proof. | An implementation could supply data forever. |
 | A written measure holds in every function, including one that uses `RunForever`. | A reader takes a written `decreases` as a fact. If `RunForever` switched measures off, a function that declares it for one loop would leave the measures of its other loops unchecked. A cursor's `remaining()` is written too, in the cursor's type, and no loop body can change the cursor. |
 | A `while` loop's default measure and structural recursion are checked only in a function without `RunForever`. | Both are inferred from code that may not be meant to end. A loop that draws samples until it has accepted enough, as `sample_ntt` does, compares toward a bound that an iteration may not approach. |
 | A loop without a measure uses `RunForever`. | The capability check then covers the loop in every body, as it covers a call. A lambda's loop needs no rule of its own: the lambda's capabilities are inferred from its body. |
 | Nothing implements `RunForever`. | A `provide` of it would let a function that does not declare `RunForever` run forever. |
 | A function that uses `RunForever` has no `time` clause. | A written clause holds, and the time of a function that may run forever has no bound. |
-| A `time` clause has no `finite` bound. | A function without `RunForever` terminates, so the bound would repeat what the omitted capability already says. |
 | A manifest grants `RunForever` to a dependency as it grants any other capability. | A dependency that is granted nothing then terminates, as well as reaching nothing outside its arguments. |
 | A capability method that waits for the world terminates unless it declares `RunForever`. | A capability method returns to its caller once the world answers. If waiting counted as running forever, nearly every function that reads input would declare `RunForever`, and the capability would no longer separate a loop that has no measure from one that has. |
-| A trait's method declares `RunForever`, or names an associated capability set, for an `impl` to run forever. | A call through a bound is checked against the trait's method, as it is for every other capability. `Deserialize.deserialize` declares `RunForever`, since an implementation of `Deserializer` can report a next element forever. |
 
 ### Cost clauses
 
@@ -808,14 +772,8 @@ worst case instead.
 | A countable resource takes an exact bound, and time takes only `O(...)`. | An exact bound can state that each item is processed exactly once. A concrete time cannot be proven across machines. |
 | `O(f)` bounds the cost for every input, not only for large inputs. | The textbook definition is a limit, which a prover handles poorly, and it gives wrong answers for bounds in several variables. |
 | A bound can mention `result`. | An output-sensitive bound, such as the bound of a function that returns its matches, cannot be stated otherwise. |
-| `log(n)` is log₂(n + 1) rounded up. | It is defined at 0 and is an integer. Inside `O`, the base makes no difference. |
 | The `time` of a generic function counts the methods of its bounds. | `O(self.length())` would be false for `contains` on a list of strings, where one comparison is not one step. `String` could not keep a promise of `O(1)` on `Equal.equal`, and a second trait for constant-time comparison would give every generic method two overloads. |
 | A function that calls a callback bounds its allocations with `allocations(visit)`, and its allocated bytes with `allocated_bytes(visit)`. | `Option.map` allocates what its callback allocates. Without the term it states no allocation bound, and a function with `cost allocations <= 0` then calls no combinator, even with a lambda that allocates nothing. The alternative is an allocation clause on the type of every callback, which rejects each function that states none. |
-| A cost of a callee, such as `allocations(visit)`, is a bound on any one call, and an `==` bound cannot name it. | A callback's allocations vary with its arguments, so the one number that a signature states for them is an upper bound. An exact count that names an upper bound is false for a call that allocates less. A function that needs an exact count takes a callback whose type states `==`. |
-| A callback whose allocations have no bound makes `allocations(visit)` unbounded, and a bound that names the term holds. | A written clause is true for every argument, as a `time` bound is where `time(visit)` is unbounded. No rule ignores the clause for some argument. A caller that passes such a callback proves no allocation bound through the call. |
-| A cost of a callee is named only in a clause on its own resource. | A bound on one resource of a call does not bound another. |
-| A loop's `cost` holds before the condition is evaluated, and the evaluation that ends the loop is added to it. | A clause that had to hold after the last evaluation could not be exact: `calls(Random.next) == heads` holds before each evaluation of `Random.next() % 2 == 0 && heads < limit`, and one more call has been made after the evaluation that fails. An `O(...)` clause would need a `+ 1` for that evaluation in every loop. |
-| A loop's cost is never `amortized`. | Potential belongs to the values that the loop mutates. |
 
 ### Function types
 
@@ -838,7 +796,6 @@ Rules: [Methods](SPECIFICATION.md#methods).
 |---|---|
 | A method is defined in the package of its type. | A method is easy to find, and two packages can never add conflicting methods to one type. |
 | Every call uses parentheses. | *Nothing hidden.* A reviewer can tell that `names.length()` runs code and that `point.x` reads a field. |
-| `Type.new(...)` is the main constructor, and other constructors have descriptive names. | `new` cannot be overloaded. |
 
 ### Overloads by receiver mode
 
@@ -854,11 +811,7 @@ the type's own methods, from the methods of its view, from the methods that
 an `impl` in the type's package writes, and from a trait together with the
 traits it requires. A type and its view are defined in one package. If
 overloads were collected from every visible `impl`, a package added to a
-build could capture an existing call. A temporary receiver takes the `own`
-overload when one exists, so a package that gave a type's `label(self)` an
-`own self` overload would change the meaning of `Counter(3).label()`. A
-provided method that an `impl` does not write is excluded for the same
-reason: a later release of the trait can add one.
+build could capture an existing call.
 
 **There is no overloading by parameter type.** It would cost three things:
 
@@ -969,9 +922,6 @@ Rules: [Ranges](SPECIFICATION.md#ranges),
 | A range with no start or no end appears only in brackets. | `0..` anywhere else would allow a `for` loop with no end. |
 | Each collection has one literal form, `[a, b, c]` or `[key: value]`, which takes its type from its context. | *One spelling:* a collection that takes a literal has no `new()` and no `of(...)`. A map uses brackets because `{` starts a block. |
 | A type takes a literal by implementing `FromElements` or `FromEntries`. | Indexing, `for`, the operators, and tagged templates each belong to a prelude trait, so a package's collection is written as a standard one is. A literal for the compiler's types alone leaves every other collection to name a constructor of its own. |
-| `from_elements` and `from_entries` take a `List`. | The compiler builds one collection, and a collection that stores a list keeps the literal's storage. A trait of `with_capacity` and `insert` would give a `Deque` a second name for `push_back`. A cursor has no model, so nothing could be proven of the literal's elements. |
-| A non-empty list literal counts as one allocation. | A `cost` clause does not depend on whether an optimization keeps the list in static memory. |
-| A literal of another collection costs its list and its call of `from_elements` or `from_entries`. | A `cost` clause is checked against the code that runs. |
 | Distinct keys are the `requires` of `from_entries`. | A duplicate key is a failed proof for every map type. Letting the last key win would hide a mistake. A repeated element of a set drops nothing, so `from_elements` requires nothing. |
 | A string cannot be indexed. | In UTF-8, byte `i` and character `i` differ, so code says which one it means. |
 
@@ -997,19 +947,14 @@ cannot be trusted to remember one table (*LLM habits*).
 
 | Rule | Reason |
 |---|---|
-| `echo` takes everything after it. | Putting `echo` in front of an expression shows the whole expression. |
 | A range binds more loosely than arithmetic. | `0..count - 1` means `0..(count - 1)`. |
 | `+=` exists, and `++` and `--` do not. | `a += b` evaluates the place `a` once, so a long place expression is not mistyped the second time, and an index is proven in bounds once. As expressions, `++` and `--` are confusing and rarely clearer than `+= 1`. |
 | A compound assignment passes the old value to the operator as owned. | `matrix += other` can update in place, with no separate trait such as Rust's `AddAssign`. |
-| An assignment evaluates its right side before its target. | The target of a compound assignment holds no value from the move of its old value until the store of the result. Evaluating the operand first keeps all other code out of that interval, so a `?` in the operand cannot return with the target moved out. |
 
 **An arithmetic operator calls a trait with a type parameter for its right
 operand,** because times, geometry, and money need mixed types, as in
 `instant + duration`. A comparison takes one type on both sides, because the
-laws of `Equal` and `Ordered` relate a type to itself. A `List`, an `Array`,
-or a `String` compared with its view is viewed first. The view allocates
-nothing and compares the same elements. Without this conversion, tests wrote
-helpers with `Slice` parameters to get the one that a call makes.
+laws of `Equal` and `Ordered` relate a type to itself.
 
 **An operator trait states the domain of its operation.** If `add` promised
 a result for every pair of values, the `impl` for a fixed-width integer
@@ -1026,19 +971,15 @@ Code for every integer width is written once, against the integer traits, as
 Swift's extensions of `FixedWidthInteger` are. The traits are sealed, so
 generic code over one is proven once for each built-in type, with that
 type's range and bit width. For the same reason, a literal under such a
-bound must fit every type that implements the trait. The prover rejects an
-intrinsic at any other type parameter: the obligations that prevent an
-overflow or an out-of-range conversion need a range and a width that the
-parameter lacks.
+bound must fit every type that implements the trait.
 
 **A conversion between built-in scalars is a method of the target type,
 not an `impl` of `From` or `TryFrom`.** `Int64.from_integer(count)` requires
 that `count` fits, and `Int64.try_from_integer(count)` returns a `Result`.
 Each is one method of `FixedWidthInteger`, generic over the source and proven
 for every pair of integer types, with one contract. Impls would need one per
-pair. A float converts with `try_from_float64` and `to_float64`, and a
-`Character` with `from_code` and `code`. `From` and `TryFrom` are for
-conversions that involve a library type, as in `BigInteger.from(count)`.
+pair. `From` and `TryFrom` are for conversions that involve a library type,
+as in `BigInteger.from(count)`.
 
 ### Floats
 
@@ -1059,9 +1000,7 @@ such as `sin` and `exp`, and the conversions between floats and text, are
 implemented in the standard library, as Java's `StrictMath` is. The
 platform's C library gives results that differ between systems. A cached
 test result therefore holds on every machine, and a value computed at
-compile time equals the value in the compiled program. `to_bits()` returns
-one bit pattern for every NaN, because processors disagree about which NaN
-an operation produces.
+compile time equals the value in the compiled program.
 
 ## Failure
 
@@ -1090,10 +1029,6 @@ whose invariant was broken partway through an update. A program that must
 keep running proves that it cannot panic instead: a server requires a
 handler type without `Panic`, so no request can end the process. If the
 process fails anyway, a supervisor restarts it.
-
-| Rule | Reason |
-|---|---|
-| A panic prints the site of each call that led to it. | `expect` and the other functions of the standard library crash in their own bodies, so the site of the crash alone names a line of the library, not the caller's mistake. |
 
 `unreachable` must be proven. Code that claims a point is unreachable must
 not panic when the point is reached. Code that panics on purpose calls
@@ -1159,9 +1094,6 @@ narrowing limits the reach of one capability.
 | Rule | Reason |
 |---|---|
 | A callback uses capabilities only through a capability parameter. | One rule stays true: no `uses` means pure. A callback is pure by default, which is the safe default for a comparator and for code that runs in parallel. |
-| A capability parameter is written `generic Name` at each use and declared nowhere else. | No call writes a set of capabilities, so a position among written type arguments would hold only a placeholder. The marker at each use shows that the name is a variable. |
-| A capability parameter named only in a function's own `uses` is an error. | No argument can give it capabilities, so the name is a misspelling. |
-| An `impl`'s method names its capability parameters as its trait's method does. | Capability parameters have no declared order to rename them by. |
 | Providing a type provides every capability that the type implements. | A type that narrows both reading and writing cannot leave one of them unnarrowed by mistake. |
 | An `impl` of a capability can declare `uses`, and a `provide` of it requires those capabilities. | Capabilities layer instead of inheriting. `ReadDatabase` is implemented with `NetworkClient`, which is required where the implementation is provided. A dependency that is granted `ReadDatabase` alone never reaches the network. |
 
@@ -1243,7 +1175,6 @@ left.saturating_add(right)
 | A place that one branch mutates is used by no other branch. | This is the rule for calls, where a place passed `mut` is used by nothing else during the call: `swap(mut first, second: mut first)` is rejected. Applied across branches, it prevents every data race. |
 | A branch uses no capability except `Panic` and `RunForever`, and uses each only where the enclosing function has it. | Two branches that called one stateful implementation would race, and the order of their calls would vary from run to run. No code can `provide` `Panic` or `RunForever`, so no branch calls a stateful implementation of either. A branch that panicked in a function without `Panic` would end a program that relies on the function's signature, such as a server whose handler type has no `Panic` ([Failure](#failure)). A function that contains `parallel` is therefore still pure, and a test that runs it is cached. Code whose branches use capabilities is [concurrent](#concurrency). |
 | The input decides where a computation is split, never the number of cores. | The result does not depend on the machine: a parallel float sum gives the same bits everywhere (*determinism*). |
-| A test runs the branches in order. | The test runner already runs one test on each core, and a failed check is the same on every run. |
 | A branch cannot exit the block early. | A branch uses no capability except `Panic`, so it cannot be asked to stop. An early exit would have to abandon the other branches, or wait for work whose result is discarded. |
 
 ## Concurrency
@@ -1359,7 +1290,7 @@ values, which makes an injection attack impossible by construction:
 
 | Rule | Reason |
 |---|---|
-| The tag is a type. | The tag names the type of the result, and a plain string is the case where the tag is `String`. A tag function would have a lowercase name, and the prelude holds only `UpperCamelCase` names ([The prelude](#the-prelude)). |
+| The tag is a type. | The tag names the type of the result, and a plain string is the case where the tag is `String`. |
 | Malformed literal text is a compile error. | A tag states the rules for its literal text as the `requires` of `from_template`. A function in a specification is pure and terminates, so the compiler can run the check at compile time, and constructing the value cannot fail. The feature reuses `requires`, purity, and termination. |
 | `from_template` is the one method whose `requires` may be stronger than its trait's. | A tag exists to constrain the literal text of a template, and a template always names its tag. |
 | A check cannot read anything outside the code, such as a live database schema. | A build has no capabilities. |
@@ -1391,9 +1322,7 @@ override keeps it.** `Equal.not_equal` ensures `result == !self.equal(other)`,
 so `a != b` always means `!(a == b)`, the prover reasons from the trait
 alone, and generic code knows the result through a bound. A type can still
 override a provided method with a faster one. This covers most uses of
-specialization, with no overlapping `impl`s. A fast path that depends only on
-the representation of a type, such as copying a list of `Plain` values at
-once, needs no language feature: the compiler knows which types are `Plain`.
+specialization, with no overlapping `impl`s.
 
 **An `impl` can promise more than its trait:** a weaker precondition and a
 stronger postcondition, which is behavioral subtyping. `Index` can then say
@@ -1404,7 +1333,7 @@ it is.
 |---|---|
 | A trait can require other traits. | A law can then span traits. `Hash` requires `Equal`, so its law, that equal values hash equally, is stated and proven. In Rust, `Hash` does not require `Eq`, and that law is only a comment. |
 | A type has one `impl` of each trait. | Two traits that both require `Equal` share that `impl`, so there is no diamond problem. |
-| An `impl`'s method has its trait's signature, which the `impl` restates. | The body of the method and every call of it are checked against the same types. A method with a signature of its own would have a body checked against types that no call is checked against: with a bound of its own, the body calls a method of a trait that the type argument does not implement, and with a callback type that adds a `time` clause, the body counts on a callback that terminates while a caller passes one that does not. The written signature must equal the trait's so that the source states the types that are checked. If that comparison missed a difference, the body would still be checked against the trait's types: the outcome would be a confusing error in the body, never an accepted wrong program. |
+| An `impl`'s method has its trait's signature, which the `impl` restates. | The body of the method and every call of it are checked against the same types. A method with a signature of its own would have a body checked against types that no call is checked against. |
 
 ### Implementations
 
@@ -1474,8 +1403,6 @@ Rules: [Method lookup](SPECIFICATION.md#method-lookup).
 | Two candidates for one name are an error, never a silent choice. | In Rust a type's own method wins over a trait's, so adding a method can silently change an existing call. In Truss an upgrade can break a call only with an error that names both candidates. A release that only adds names is still compatible, because otherwise no type could ever gain a method. |
 | A `String` has the methods of `StringSlice`, and a `List` and an `Array` those of `Slice`. | `self` is a parameter, and an argument of the owned type converts to its view. Without the rule, every method of a view needs a forwarding method on the owned type, whose contract is stated and proven a second time, and a view's method that has none cannot be called on the owned value. Rust reaches the methods of `str` from a `String` through `Deref`. |
 | A type's own method hides its view's method of the same name and mode. | The owned type can do better where it owns the storage: `String.to_bytes(own self)` hands over its buffer, and `StringSlice.to_bytes(self)` copies. Both are written in one package, so no other package can change which one a call reaches. |
-| An `impl` gives a type no method that its view has in that mode, and an `impl` in another package gives it none of that name. | Such a method would be found before the view's. A package added to a build could then capture a call that reached the view's method. |
-| The checks of an `impl`'s method names count a method of the type or its view only where the `impl`'s package can see it: every method for an `impl` in the type's package, and the public ones for an `impl` in another package. | A method that the `impl`'s package cannot see is called only in the type's package, and no code there can reach the `impl`: an `impl` in another package lives with its trait or with a type its trait names, so its package depends on the type's. No call can be captured, and an `internal` helper takes no name from other packages: a package may give `String` a trait method `part`, which `StringSlice` has only as `internal`. In the type's own package, the module that declares a private method can see the `impl` too, and a call there would have two methods of one name and mode. |
 
 ### Dynamic dispatch
 
@@ -1530,7 +1457,6 @@ in a test build takes constant time.
 | Rule | Reason |
 |---|---|
 | A test with `uses` is external: it gets the real implementations, and its result is never cached. | Its result depends on the world. It gets no hidden isolation: a test that wants a scratch directory narrows file access where a reader can see it. |
-| A test's standard input is empty. | Workers run tests at once, so input from the terminal would go to whichever test read first, and a test waiting for a person would run into its time limit. A test that needs input gets it from a `Console` it provides, or gives it to a program it runs through `Processes`. |
 | A test declares `Panic` as a function does, and a test that declares only `Panic` is deterministic. | A test's signature states its effects like any other. A panic does not depend on the world, so the suite caches the result of such a test. |
 | A test has `RunForever` whether or not it declares it. | A test has a time limit, so a test that runs forever fails at the limit instead of stopping the suite. No code calls a test, so its termination proves nothing that a caller relies on. |
 | A failed test is never retried. | A retry hides exactly the failures that an external test exists to catch. |
@@ -1605,8 +1531,7 @@ only, to state the definition.
 | A method of a trait or of an `impl` is known by its contract too. | An `impl` states what it adds to the trait's contract in its own `ensures`: `Int64.compare` ensures the order of the integers. An edit to a provided body then changes no fact that callers know. An edit to an `impl`'s body re-proves that method and the `impl`'s laws alone. |
 | A clause applies only where every name it mentions is visible. | An `ensures` that reads the fields of an opaque type is a fact inside the type's package and no fact elsewhere, so `opaque` hides the representation from proofs too. |
 | A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The proofs of callers in other packages read a `requires` and a `cost`, and a clause applies only where every name it mentions is visible. The `ensures` lets callers inside the package know a result in terms of private helpers. |
-| A bit-level fact is requested with `assert ... by bit_vector`. | The assertion is proven alone by bit-blasting, universally over the integers and booleans it names, as Verus's `by (bit_vector)` is. Elsewhere the prover knows a bitwise operation by a few facts, and it never retries a query with bit-blasting. |
-| The prover converts a float to an integer through a bit vector, and checks that the float fits by comparing floats. | Through real numbers, Z3 answered unknown when a caller bounded the integer by bounds on the float, so a caller could not use a conversion's contract. |
+| A bit-level fact is requested with `assert ... by bit_vector`. | Bit-blasting is slow on most queries, so only the assertion that asks for it is proven that way, as with Verus's `by (bit_vector)`. Every other query knows a bitwise operation by a few facts, and no query falls back to bit-blasting. |
 | A quantifier over a range or a collection is also an expression in code. | The binder carries its range, so the body may rely on it. A lambda passed to a method would know nothing about its argument. The standard library therefore has no `all` or `any` methods, and a test of every element has *one spelling*. |
 
 ### Writing specifications
@@ -1621,7 +1546,7 @@ Rules: [Writing specifications](SPECIFICATION.md#writing-specifications).
 | Integer arithmetic in a specification is exact. | A specification cannot have an overflow bug, and `decreases high - low` can be negative, which is the case that the prover must rule out. |
 | An `Integer` converts implicitly where a built-in integer is expected. | The obligation that the value fits is proven either way. |
 | A function for specifications has no keyword. | Its signature already mentions a type that exists only in specifications. |
-| Float arithmetic in a specification follows IEEE 754. | Exact real arithmetic would describe results that the hardware does not produce, so such a contract could never be proven. A float contract is checked bit for bit, which is slow, so float contracts are best kept rare. |
+| Float arithmetic in a specification follows IEEE 754. | Exact real arithmetic would describe results that the hardware does not produce, so such a contract could never be proven. |
 
 **A type gives its value to specifications as a mathematical model.** A
 contract about a whole collection needs a value to state it in. Stated with
@@ -1662,7 +1587,6 @@ in place of an expression, a body, or a type definition.
 | Code with a `todo` is type-checked and proven. | A caller's contracts are proven before its callees exist. |
 | A release build refuses a program that can reach a `todo`. | A `todo` that panicked when reached would be a failure that the signature does not show. |
 | A test that reaches a `todo` is incomplete, not failed. | Tests can be written first. |
-| The tools list every `todo` with its expected type, the names in scope, and the work it blocks. | Each `todo` is a self-contained task, so several agents can fill them in at once (*parallel agents*). |
 
 ## Debug output
 
@@ -1674,8 +1598,6 @@ Rules: [Debug output](SPECIFICATION.md#debug-output).
 |---|---|
 | Proofs and cost clauses read `echo expr` as `expr`. | Adding an `echo` never changes whether code compiles or verifies. |
 | A release build refuses a program that can reach an `echo`. | `echo` cannot ship, which makes it safe to allow without `uses`. |
-| An `echo` changes the cache keys of the tests that reach it. | Those tests re-run and show the output. Tests are deterministic, so the rerun takes the same path as the run under investigation. |
-| The keyword is `echo`. | It is a whole word, and `debug` and `trace` are common names for variables and functions. |
 
 ## Modules and visibility
 
@@ -1703,10 +1625,6 @@ splitting a module into files is a choice of layout and costs no prefixes.
 Where each file is a module and an import brings in only a module, a program
 of several files writes a prefix at every use of its own code. Each file
 keeps its own `use` lines, so a file shows the modules that it depends on.
-
-Name lookup stays cheap. The names of a module are one index, built from the
-names that its files define. An edit inside a body changes no file's names,
-so it invalidates no lookup.
 
 | Rule | Reason |
 |---|---|
@@ -1813,8 +1731,6 @@ take from a package:
 A client for a product, such as `truss::postgres`, is an approved package
 instead, owned by `truss` on the registry. A client follows the releases of
 a product, not a published standard, and few programs need any one client.
-An approved package is plain Truss, is granted capabilities as any
-dependency is, and is held to the toolchain's review and release rules.
 
 The standard library is part of the toolchain: it has no version of its own,
 and it appears in no manifest and no lock file. A package instead names the
@@ -1848,10 +1764,6 @@ as every source of randomness is a capability.
 |---|---|
 | Each module is one subject, one level below `standard`. | Code writes a name with its module, so the name of a type does not repeat the module: `json::Value`. A category above the module, as in Go's `encoding/json`, is not written at the use site, so it only adds something to remember. |
 | A method that needs no ownership of the storage is declared once, on the view type. | A `String`, a `List`, and an `Array` have the methods of their views ([Method lookup](#method-lookup)), so `mut names.sort()` works without `names[..]`, and a second declaration on the owning type would only forward. The owning type declares a method of that name where it uses its storage: `List.reverse` keeps the list's capacity. |
-| A method that works on any collection is a provided method of `Iterable`. | A user's collection gets the method by implementing `count` and `element`. |
-| A collection that is made from its elements alone takes a literal and has no `new()`. | *One spelling.* A constructor is for a collection that needs more than its elements: a `Heap` needs an order, and an `LruCache` a capacity. |
-| A lookup that can miss lends an `Option`. | Nothing is copied, whatever the element type. |
-| A comparison, a hash, and a lookup state an allocation bound, in terms of `allocations(Element.equal)` for a generic collection. | A function with an allocation bound otherwise cannot compare two strings or look up a key. |
 | A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write, and every helper works with every implementation. |
 | Every failure of the operating system is a `SystemError`. | Code that reads a file and sends it over a connection handles one error type. |
 | Text in an embedded language is a tagged template, and a `processes::Command` is a program and a list of arguments. | Neither is a string that is passed to an interpreter, so neither allows an injection. |
@@ -1908,8 +1820,6 @@ Rules: [The registry](PACKAGES.md#the-registry).
 | A package is published as its source. | The code that a reviewer reads in the registry is the code that compiles. |
 | The registry keeps an append-only public log of the hash of every version, as Go's checksum database does. | The registry cannot give two users different code under one version. |
 | The registry signs the proofs and test results that it computed for a release. | Proving a whole dependency tree on a machine that starts with nothing, such as an agent's new container, is the cost that GOALS.md sets out to remove. Each signed result is a function of its key, so a registry that signed a false result is caught by anyone who recomputes it. |
-| A new toolchain re-proves the registry, as far as the toolchain changed the proofs. | A toolchain that fails a proof of an approved package that the previous toolchain passed is not released. |
-| A registry package whose definitions have errors, outside its tests, is a problem on the lock file, which names the package. | Code that reads a failed definition is blocked and reports no error ([Failing code](#failing-code)), so code that uses a broken dependency would stop checking with nothing to say why. A user never builds a dependency's tests, so their errors are the author's alone. |
 | A yanked release, one that is marked as not to use, still builds. | If yanking broke builds, one compromised account could stop every project that depends on the package. |
 
 ## Incremental builds
@@ -1937,18 +1847,11 @@ changes no definition.
 | Reorder the fields of a record | Nothing, unless the type derives `Ordered` | The compiler chooses the layout, and a record with more than one field is constructed with labeled arguments. |
 | Add a `derives` | Nothing that exists | Each derived implementation is a definition of its own, generated from the trait and the fields of the type. |
 | Add, remove, or rename a definition | The parts that refer to its name, whether or not a definition held the name before | Each reference names one fully qualified name, so no lookup searches (see [References to names](#references-to-names)). |
-| Rename a definition, or move it to another module | The type checks and the code of its users. Their proofs and test results are cache hits. | A user names the definition, and an object file holds the names of the functions it calls. A solver query numbers its symbols, and a test's key numbers the references of the code it reaches, so neither holds a name. |
+| Rename a definition, or move it to another module | The type checks and the code of its users. Their proofs and test results are cache hits. | A user names the definition. A solver query and a test's key hold no names. |
 | Rename a local variable | One body | Local names are part of identity, because diagnostics and `echo` output show them, and a cached result would show the old name. |
 | Change the spelling of a literal, such as `0xFF` to `255` | Nothing | Identity holds the value of the literal. |
 | Reorder clauses | Nothing between kinds of clause. The definition, within one kind. | Each `requires` may rely on the `requires` before it. |
 | Upgrade a dependency | The dependents of the dependency's diff | A path holds no version, so a new version of a package is an edit to code that the project does not own, and is tracked as any edit is. |
-| Install a new compiler | The database, from the files. Solver answers, object files, and test results whose inputs are unchanged are cache hits. | The database records the compiler that built it. Each cache is keyed by its whole input, so a release that changes code generation leaves every solver answer valid. |
-
-A development build inlines only from the standard library and from registry
-packages. Inlining makes the code of a caller depend on the body of its
-callee. The bodies of the standard library and of registry packages change
-only with a new toolchain or a new lock file, so inlining them never widens
-a rebuild during editing. A release build inlines across everything.
 
 ### The code database
 
@@ -1963,40 +1866,16 @@ identifies a definition by a hash of its content and of its dependencies'
 hashes, so an edit gives every transitive dependent a new identity, and every
 result keyed by that identity is computed again. Here an edit rewrites the
 parts of one definition, and a rename rewrites the references of its users.
-Content keys are kept for the results that are expensive to compute (see
-[Caches](#caches)).
 
 **Propagation stops where a part comes out unchanged.** Most changes stop
 one hop from the edit, because a caller reads the callee's signature and
-contract, which are written in the source. Three facts are derived from facts
-of other definitions, so a change to one can travel further:
-
-| Fact | Derived from | Read by |
-|---|---|---|
-| `Plain` and `Copyable` | The same facts of the types of its fields | The type checks of the functions that use the type |
-| A value computed at compile time, by a constant or a template check | The initializers of the constants that the computation names, and the bodies of the functions that it runs | The code that embeds the value, and the template check's verdict |
-| A recursion group | The call edges of the functions on a cycle, as one package sees them: a trait method's edges go to every implementation the package can see, including those in its dependencies | The termination proofs of its members |
-
-Adding a field of type `Text` to `Point` makes `Point` not `Plain`.
-Propagation then computes again every type that holds a `Point` in place,
-and re-checks the functions that copy those types, where a copy has become
-a move. Adding a field of type `Float64` leaves `Point` `Plain`, and
-propagation stops at `Point`.
+contract, which are written in the source.
 
 ### References to names
 
 **A reference is to a fully qualified name, whether or not a definition
 holds the name.** A name that is not local and not in the prelude belongs to
-the body's module, so an unqualified name resolves without a search. A
-method call names one entry of the type's methods that its module can see,
-or of its view's methods where the type has none of that name and mode:
-[Method lookup](SPECIFICATION.md#method-lookup) lets no module see both a
-trait method and a method of the type or of its view with one name and mode,
-and makes two traits that give one name an error at the call. An
-`impl` is named by its trait and its type, since `impl`s do not overlap and
-have one home. A law proof is named by its trait, its law, and its type, as
-`proof Ordered.transitive for Box[Item]` writes them, so a proof that
-assumes a law for a type refers to one name and scans no package.
+the body's module, so an unqualified name resolves without a search.
 
 ### Failing code
 
@@ -2012,41 +1891,21 @@ contract, so a typo in a body blocks no caller.
 
 | Rule | Reason |
 |---|---|
-| A body that fails, or that reads a failing part, has no call edges. | A recursion group follows the call edges of its members' bodies, and the proof of a function that terminates reads its group. If a failing body blocked the groups that reach it, a typo in a body would block every caller's proof. The body cannot run, so it calls nothing, and fixing it computes its edges and the groups that change. |
 | The database keeps no earlier version of a failing part. | An earlier version would make the database depend on the order of the edits. A caller checked against an earlier signature would also report errors that the files do not hold. |
 | A build, a test run, or a template check requires that no definition it reaches has errors. | No run executes code that the files do not hold, and a test whose code is correct runs while unrelated code is broken. |
 
 ### Caches
 
-The user's cache holds these results and no others, each keyed by its whole
-input:
-
-| Result | Key |
-|---|---|
-| A solver answer | The solver's version and options, and the query |
-| An object file | The C text, the C compiler, and its flags |
-| A test result | The code generator's version, the target system, the flags, and a hash of the code the test reaches |
-| The database of the standard library or of a registry package | The package's content hash, the content hashes of the versions selected for its dependencies, and the compiler |
-| A fetched registry package | Its content hash |
+The user's cache holds the results that are expensive to compute: solver
+answers, object files, test results, the databases of the standard library
+and of registry packages, and fetched packages. Each is keyed by its whole
+input.
 
 A cache never makes a result wrong: deleting it only makes the next build
 slower. Every worktree and CI share the caches. The database itself caches
 nothing, so a revert or a branch switch is a change to the files like any
 other. The database computes the cheap stages again, and the solver, the C
 compiler, and the tests are cache hits.
-
-The compiler trusts what the cache holds: it links the cached object files
-and takes the cached solver answers as proofs. A user who could write
-another user's cache could run code as that user, or make a false contract
-pass, so only the cache's user can write its directory.
-
-### Where the database lives
-
-| State | Place | Reason |
-|---|---|---|
-| A project's database | `.truss/` in the project's root, which git ignores | It is deleted with its worktree. `cp -r` gives a new worktree its start, and the first propagation brings it up to date with the files that differ. |
-| The user's cache | `$TRUSS_CACHE`, else `$XDG_CACHE_HOME/truss`, else `~/.cache/truss` | Its results are keyed by content, so every worktree and CI share them. |
-| The database of the standard library and of each registry package | The user's cache | A package's facts are a function of its sources and its dependencies' sources. Nothing downstream adds to them: an `impl` lives with its trait or its type, and a call sees only the traits its own package can see. |
 
 ## Omitted features
 

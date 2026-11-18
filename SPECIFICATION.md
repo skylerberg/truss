@@ -622,9 +622,8 @@ it.
   associated type takes a `Slice` where the call instantiates that type to
   a `List`, and a `StringSlice` where it instantiates it to `String`. So
   `counts.get(word)` and `counts[word]` look up a `Map[String, Int64]` with
-  a `StringSlice`. The call allocates nothing: the callee reads a `List` or
-  a `String` that holds the view's elements and owns no storage, and a view
-  that the call returns views what the argument views. `self` is no such
+  a `StringSlice`. The call allocates nothing, and a view that the call
+  returns views what the argument views. `self` is no such
   parameter, and neither is a parameter declared as `List` or `String`,
   which takes no view. The receiver and the other arguments instantiate the
   type parameter first, in whatever order the arguments are written.
@@ -1818,11 +1817,6 @@ and location to standard error and ends the process with a nonzero exit
 code, and no Truss code runs afterward. No code can `provide` `Panic`, so a
 panic cannot be caught.
 
-A panic also prints its call chain: the site of each call that led to it,
-back to `main` or the test, through calls of function values, `parallel`
-branches, and tasks. The chain of a panic in an `impl`'s method continues
-from the `provide` of the implementation, where the `impl` gets its `Panic`.
-
 ## Capabilities
 
 ```ebnf
@@ -2565,9 +2559,7 @@ and the prelude changes only with a language version.
 - A function, method, or constant declared `internal` that no definition of
   its package uses is an error. A use counts when the user is not `internal`
   or is itself used, so `internal` definitions that use only each other are
-  an error together. A definition the compiler calls is exempt, such as the
-  static `new` of a `system` module's type, which builds the implementation
-  of a capability. A method written in an `internal` trait is not declared
+  an error together. A method written in an `internal` trait is not declared
   `internal`, so the rule does not apply to it.
 
 ## No foreign code
