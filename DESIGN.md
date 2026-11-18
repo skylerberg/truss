@@ -579,6 +579,7 @@ be stored, passed, and returned.
 | Rule | Reason |
 |---|---|
 | A cursor never holds `mut` access. | `mut` access is never stored. A `mut` loop mutates elements in place, by position. |
+| A cursor's `Sequence` model is the values that it has yet to give, so `visited` is a prefix of the model on entry to the loop. | A loop that moves the elements out of a list cannot name its cursor, so no invariant of the program's could relate `visited` to the list. A cursor without the model, such as the lines of a socket, states nothing about its values. |
 | A tree is visited by recursion, by `fold`, or by a cursor that holds an explicit stack. | *Nothing hidden.* The stack's allocations are written. C# and Python allocate the same stack behind a recursive generator. |
 
 ### Lambdas

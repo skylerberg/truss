@@ -1,0 +1,25 @@
+fn f(items: own List[Int64]) -> List[Int64]
+  requires items.length() >= 2
+  ensures result.length() == items.length()
+  ensures forall i in 0..items.length() => identical(result.model()[i], items.model()[i])
+{
+  var cursor = own items.cursor()
+  var moved: List[Int64] = []
+  for item in cursor
+    invariant visited.length() == 0
+    invariant moved.length() == 0
+  {
+    mut moved.push(item)
+    if moved.length() == 1 {
+      break
+    }
+  }
+  for item in cursor
+    invariant moved.length() == 1 + visited.length()
+    invariant forall i in 0..visited.length() => identical(moved.model()[1 + i], visited[i])
+    invariant identical(moved.model()[0], items.model()[0])
+  {
+    mut moved.push(item)
+  }
+  moved
+}

@@ -804,20 +804,13 @@ impl FromEntries for collections::SortedMap[Key: Ordered, Value] {
     cost time O(entries.length() * (entries.length() + time(Key.compare)))
   {
     let count = entries.length()
-    var pending = own entries
     var map: collections::SortedMap[Key, Value] = collections::SortedMap(entries: [])
-    while pending.length() > 0
+    for entry in own entries
       invariant strictly_ascending(map.entries.model())
-      invariant map.length() + pending.length() <= count
-      decreases pending.length()
-      cost time O((count - pending.length()) * (count + time(Key.compare)))
+      invariant map.length() <= visited.length()
+      cost time O(visited.length() * (count + time(Key.compare)))
     {
-      match mut pending.pop() {
-        Some(entry) => {
-          mut map.insert(own entry.key, value: own entry.value)
-        }
-        None => {}
-      }
+      mut map.insert(own entry.key, value: own entry.value)
     }
     map
   }

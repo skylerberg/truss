@@ -742,21 +742,13 @@ impl FromElements for collections::SortedSet[Element: Ordered] {
     cost time O(elements.length() * (elements.length() + time(Element.compare)))
   {
     let count = elements.length()
-    var pending = own elements
-    mut pending.reverse()
     var set: collections::SortedSet[Element] = collections::SortedSet(elements: [])
-    while pending.length() > 0
+    for element in own elements
       invariant strictly_ascending(set.elements.model())
-      invariant set.length() + pending.length() <= count
-      decreases pending.length()
-      cost time O((count - pending.length()) * (count + time(Element.compare)))
+      invariant set.length() <= visited.length()
+      cost time O(visited.length() * (count + time(Element.compare)))
     {
-      match mut pending.pop() {
-        Some(element) => {
-          mut set.insert(own element)
-        }
-        None => {}
-      }
+      mut set.insert(own element)
     }
     set
   }

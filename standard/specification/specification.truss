@@ -35,6 +35,14 @@ public fn Sequence[Element].concatenate(self, other: Sequence[Element]) -> Seque
   todo
 }
 
+public fn Sequence[Element].reversed(self) -> Sequence[Element]
+  ensures result.length() == self.length()
+  ensures forall i in 0..self.length() => identical(result[i], self[self.length() - 1 - i])
+  cost time finite
+{
+  todo
+}
+
 public fn Sequence[Element].update(self, index: Integer, value: Element) -> Sequence[Element]
   requires 0 <= index && index < self.length()
   ensures result.length() == self.length()
