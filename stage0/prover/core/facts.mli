@@ -12,7 +12,6 @@ val raise_unsupported : State.location -> ('a, unit, string, 'b) format4 -> 'a
 val run_in_source : State.context -> State.source -> (unit -> 'a) -> 'a
 val raise_bug : ('a, unit, string, 'b) format4 -> 'a
 val read_parameter_name : Mir.parameter -> string
-val is_in_recursion_group : State.context -> Path.t -> bool
 val list_clauses : Mir.requirement list -> Mir.formula list
 val declare : State.context -> Logic.declaration -> unit
 val add_fact : State.context -> Logic.term -> unit
@@ -39,12 +38,7 @@ val oblige :
   unit
 
 val reject_recursion_through_supplied_code :
-  State.context ->
-  State.frame ->
-  State.location ->
-  describe:(string -> string) ->
-  Path.t list Lazy.t ->
-  unit
+  State.context -> State.frame -> State.location -> Mir.statement -> unit
 
 val find_recursive_callee :
   State.context ->

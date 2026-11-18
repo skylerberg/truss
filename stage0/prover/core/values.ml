@@ -412,30 +412,6 @@ let assume_contract_for_every_argument context (frame : State.frame) (contract :
 
 let translate_named_function (context : State.context) (frame : State.frame)
     (site : Invocation.site) path type_arguments (contract : State.contract) ~is_argument =
-  if context.terminates && frame.makes_obligations && Facts.is_in_recursion_group context path then
-    Facts.oblige context frame Termination
-      (Facts.locate context frame.source site.origin)
-      [
-        Text
-          (Printf.sprintf
-             "Naming `%s` as a value reaches back here, and such a use passes no arguments the \
-              prover can compare, so the recursion cannot be shown to end: write it as a direct \
-              call on a part."
-             (Path.show path));
-      ]
-      (Logic.Boolean false);
-  Facts.reject_recursion_through_supplied_code context frame
-    (Facts.locate context frame.source site.origin)
-    (lazy
-      (Mir.Call_edges.list_code_supplied_by_function_value context.lookups.interface
-         frame.substitution path
-         { type_arguments; capability_arguments = [] }))
-    ~describe:(fun supplier ->
-      Printf.sprintf
-        "Naming `%s` as a value uses `%s` where a bound needs it, and its methods reach back here. \
-         Such a use passes no arguments the prover can compare, so the recursion cannot be shown \
-         to end."
-        (Path.show path) supplier);
   let ty = Facts.substitute_type context frame site.type_ in
   let callee_clauses = contract.callee_clauses in
   (match ty with

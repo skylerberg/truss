@@ -115,9 +115,6 @@ let list_code_supplied_by_function_value interface instance path
   list_code_supplied_to_callee interface instance path ~bound_by_owner:Types.no_substitution
     instantiation.type_arguments
 
-let list_code_supplied_by_conversion interface instance type_ trait =
-  list_code_supplied_to_bound interface instance (type_, trait)
-
 let resolve_callee (interface : Interface.Lookups.t) instance (callee : _ Core.target) =
   match callee with
   | Function { path; instantiation } ->
@@ -201,14 +198,51 @@ let resolve_node (lookups : lookups) (declaration : Path.t) instance =
       Option.value (find_inheriting_method owner name receiver) ~default:declaration
   | _ -> declaration
 
+type supplier = Call | Named_function of Path.t | Conversion_to_any | Provide
+type edge = Calls of Path.t | Supplies of { supplier : supplier; code : Path.t list }
+
+let list_statement_edges interface instance (statement : Tree.statement) =
+  let supply supplier code = if code = [] then [] else [ Supplies { supplier; code } ] in
+  (match Walk.find_callee statement with
+    | Some callee ->
+        let resolution = resolve_callee interface instance callee.target in
+        List.map (fun target -> Calls target) (Option.to_list resolution.target)
+        @ supply Call (Lazy.force resolution.supplied)
+    | None -> [])
+  @
+  match statement.kind with
+  | Basic (Assign { value = Function_value { path; instantiation; _ }; _ }) ->
+      supply (Named_function path)
+        (path :: list_code_supplied_by_function_value interface instance path instantiation)
+  | Basic (Assign { value = To_any { value; trait; _ }; _ }) ->
+      supply Conversion_to_any
+        (list_code_supplied_to_bound interface instance (Walk.extract_operand_type value, trait))
+  | Basic (Provide { provided; _ }) ->
+      supply Provide
+        (List.concat_map
+           (fun (implementation : Tree.provided) ->
+             List.concat_map
+               (fun (provided : Core.provided) -> list_impl_methods interface provided.impl)
+               implementation.provides)
+           provided)
+  | Basic
+      ( Assign
+          {
+            value =
+              ( Operand _ | Operation _ | Compare _ | Not _ | Construct _ | Array _ | Is_variant _
+              | Convert _ | Copy _ | Lambda _ | Value_parameter _ | Specification _ );
+            _;
+          }
+      | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Provide_end
+      | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ )
+  | For _
+  | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
+  | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Resume _ | Yield _ ->
+      []
+
 let list_edges (lookups : lookups) instance ~may_panic (code : Tree.t) =
   let callees = ref [] in
   let add paths = callees := List.rev_append paths !callees in
-  let add_callee (callee : Tree.callee) =
-    let resolution = resolve_callee lookups.interface instance callee.target in
-    add (Option.to_list resolution.target);
-    add (Lazy.force resolution.supplied)
-  in
   let entered = Entered_table.create 4 in
   let enters code =
     if Entered_table.mem entered code then false
@@ -217,7 +251,9 @@ let list_edges (lookups : lookups) instance ~may_panic (code : Tree.t) =
       true)
   in
   let rec visit_statement (statement : Tree.statement) =
-    Option.iter add_callee (Walk.find_callee statement);
+    List.iter
+      (function Calls target -> add [ target ] | Supplies { code; _ } -> add code)
+      (list_statement_edges lookups.interface instance statement);
     match statement.kind with
     | Basic (Call { call; _ } | Lend { call; _ }) ->
         add_invariant_check call;
@@ -226,13 +262,6 @@ let list_edges (lookups : lookups) instance ~may_panic (code : Tree.t) =
     | Basic (Slice { call; _ }) -> (
         add_invariant_check call;
         match call.callee.target with Function { path; _ } -> add_requires_check path | _ -> ())
-    | Basic (Assign { value = Function_value { path; instantiation; _ }; _ }) ->
-        add [ path ];
-        add (list_code_supplied_by_function_value lookups.interface instance path instantiation)
-    | Basic (Assign { value = To_any { value; trait; _ }; _ }) ->
-        add
-          (list_code_supplied_by_conversion lookups.interface instance
-             (Walk.extract_operand_type value) trait)
     | Basic (Assign { value = Construct { variant; fields; type_ }; _ }) -> (
         match find_head type_ with
         | Some head ->
@@ -243,23 +272,16 @@ let list_edges (lookups : lookups) instance ~may_panic (code : Tree.t) =
             in
             if omitted <> [] then visit_field_defaults head variant omitted
         | None -> ())
-    | Basic (Provide { provided; _ }) ->
-        List.iter
-          (fun (implementation : Tree.provided) ->
-            List.iter
-              (fun (provided : Core.provided) ->
-                add (list_impl_methods lookups.interface provided.impl))
-              implementation.provides)
-          provided
     | Basic
         ( Assign
             {
               value =
                 ( Operand _ | Operation _ | Compare _ | Not _ | Array _ | Is_variant _ | Convert _
-                | Copy _ | Lambda _ | Value_parameter _ | Specification _ );
+                | To_any _ | Copy _ | Function_value _ | Lambda _ | Value_parameter _
+                | Specification _ );
               _;
             }
-        | Live _ | Dead _ | Assert _ | Echo _ | Provide_end | Loan_start _ | Loan_end _
+        | Provide _ | Live _ | Dead _ | Assert _ | Echo _ | Provide_end | Loan_start _ | Loan_end _
         | Ghost_assert _ | Matched _ | Proof _ )
     | For _
     | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)

@@ -1300,7 +1300,7 @@ let () =
           (list_termination_failures Fixtures.Prover.check_calling_itself_through_any)
       with
       | [ call; conversion ]
-        when String.starts_with ~prefix:"This call to `app::main::Check.check` may not end" call
+        when String.starts_with ~prefix:"This call to `Check.check` may not end" call
              && String.starts_with
                   ~prefix:
                     "This conversion to `any` gives `app::main::impl app::main::Check for \
@@ -1313,8 +1313,8 @@ let () =
   Harness.test "an impl's method that calls itself through its type is recursion" (fun () ->
       Support.expect_one_diagnostic ~check
         ~says:
-          "This call to `app::main::impl standard::core::From[standard::intrinsic::Int64] for \
-           app::main::Celsius.from` may not end: it calls back here"
+          "This recursive call may not end: give the function a `decreases` clause for the prover \
+           to show that the recursion ends."
         Fixtures.Prover.from_calling_itself_through_its_type "prover.termination");
   Harness.test "an impl's method that calls itself through its receiver is recursion" (fun () ->
       expect_not_proven Fixtures.Prover.grow_calling_itself_through_its_receiver
