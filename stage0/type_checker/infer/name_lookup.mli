@@ -5,8 +5,6 @@ type overload =
 
 val classify_receiver : Syntax.expression -> Path.receiver
 val describe_missing_method : State.state -> Types.ty -> string -> string
-val find_hidden_visibility : State.state -> Path.t -> Syntax.visibility option
-val report_hidden_member : State.state -> Syntax.name -> Path.t -> Types.ty option
 
 val coerce :
   State.state ->
@@ -44,7 +42,7 @@ val finish_call :
 val list_trait_static_methods :
   State.state ->
   Path.t ->
-  Resolve.Names.String_map.key ->
+  string ->
   Path.receiver ->
   (Types.trait_reference * Types.trait_method) list
 
@@ -53,17 +51,20 @@ val resolve_evidence : State.state -> Syntax.expression -> Types.ty -> Types.tra
 val resolve_overloads :
   State.state ->
   Types.ty ->
-  Resolve.Names.String_map.key ->
-  ((Path.receiver * overload) list, Types.trait_reference list) Result.t
+  string ->
+  ((Path.receiver * overload) list Resolve.Names.lookup, Types.trait_reference list) Result.t
 
 val find_elements_calls :
   State.state ->
   Source.Definition_span.t ->
   Types.ty ->
   Types.mode ->
-  (Tables.loop * Types.ty * Types.mode) option
+  (Tables.loop * Types.ty * Types.mode) Resolve.Names.lookup
 
 val find_consuming_cursor :
-  State.state -> Source.Definition_span.t -> Types.ty -> (Tables.loop * Types.ty) option
+  State.state ->
+  Source.Definition_span.t ->
+  Types.ty ->
+  (Tables.loop * Types.ty) Resolve.Names.lookup
 
 val find_remaining_call : State.state -> Source.Definition_span.t -> Types.ty -> Tables.call option

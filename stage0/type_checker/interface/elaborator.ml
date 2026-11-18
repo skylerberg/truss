@@ -482,7 +482,10 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
     match find_target context path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with
-        | Some method_ when context.lookups.names.list_members capability method_.text = [] ->
+        | Some method_
+          when Option.is_none
+                 (context.lookups.names.find_key
+                    (Path.make_capability_method capability method_.text)) ->
             report_error Unknown_member context.spans.(method_.id)
               (Printf.sprintf "`%s` has no method `%s`." shown method_.text)
         | _ ->

@@ -999,8 +999,10 @@ let check_resource state (resource : Syntax.resource) =
     match find_target state path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with
-        | Some method_ when state.lookups.interface.names.list_members capability method_.text = []
-          ->
+        | Some method_
+          when Option.is_none
+                 (state.lookups.interface.names.find_key
+                    (Path.make_capability_method capability method_.text)) ->
             report state Unknown_member (read_span state method_.id)
               (Printf.sprintf "`%s` has no method `%s`." shown method_.text)
         | _ -> ())
