@@ -558,10 +558,10 @@ let () =
 
 let () =
   Harness.test "a function that may run forever is not bound as one that terminates" (fun () ->
-      expect_one_diagnostic Fixtures.Capabilities.forever_bound_as_finite "types.mismatch"
-        ~says:"Expected `fn() -> Int64`, found `(fn() -> Int64 uses RunForever)`.");
+      expect_one_diagnostic Fixtures.Capabilities.forever_bound_as_a_function_that_terminates
+        "types.mismatch" ~says:"Expected `fn() -> Int64`, found `(fn() -> Int64 uses RunForever)`.");
   Harness.test "a function with a time clause is bound as a function type with the clause"
-    (fun () -> expect_fine Fixtures.Capabilities.quick_bound_as_finite);
+    (fun () -> expect_fine Fixtures.Capabilities.quick_bound_with_its_time_clause);
   Harness.test "function types inside a type must promise the same costs" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.list_of_actions_gaining_a_cost "types.mismatch"
         ~says:"Expected `List[(fn() -> Int64 cost time O(...))]`, found `List[fn() -> Int64]`.")

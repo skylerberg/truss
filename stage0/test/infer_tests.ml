@@ -1505,8 +1505,10 @@ let () =
       expect_one_diagnostic Fixtures.Infer.bit_vector_assertion_naming_a_list "types.not_bit_vector")
 
 let () =
-  let text = Fixtures.Infer.lambda_and_function_value_that_follow_a_ticker in
-  Harness.test "a function type that follows a method of a bound shows no time clause" (fun () ->
+  let text = Fixtures.Infer.lambda_and_function_value_that_tick_through_a_bound in
+  Harness.test
+    "a lambda and a function value that tick through a bound have no time clause in their type"
+    (fun () ->
       expect_fine text;
       expect_type text "fn(source) { mut source.tick() }" "fn(mut Inner) -> UInt64";
       expect_type text "advance" ~occurrence:2 "fn(mut Inner) -> UInt64");
