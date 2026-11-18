@@ -1,3 +1,11 @@
+let report_unmatched_receiver_mode state env arguments (member : Syntax.name) =
+  Calls.check_arguments_alone state env arguments
+    (State.make_error_type state Wrong_receiver (State.read_span state member.id)
+       (Printf.sprintf
+          "`%s` has no overload for this receiver's mode; pass the receiver `mut` or `own` as its \
+           overloads take."
+          member.text))
+
 let rec check_call state env ?expected (value : Syntax.expression) (callee : Syntax.expression)
     (arguments : Syntax.argument list) : Types.ty =
   match callee.kind with
@@ -253,14 +261,6 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
             (State.show state type_) member.text
             (String.concat ", " (List.map (fun trait -> "`" ^ Types.show_trait trait ^ "`") traits))))
   in
-  let report_wrong_receiver () =
-    Calls.check_arguments_alone state env arguments
-      (State.make_error_type state Wrong_receiver (State.read_span state member.id)
-         (Printf.sprintf
-            "`%s` has no overload for this receiver's mode; pass the receiver `mut` or `own` as \
-             its overloads take."
-            member.text))
-  in
   let wanted : Path.receiver =
     match arguments with
     | receiver :: _ -> Name_lookup.classify_receiver receiver.value
@@ -353,7 +353,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                   | _ :: _, Some (Trait_overload (trait, method_)) ->
                       check_trait_method_through_type state env ?expected value type_ trait method_
                         arguments
-                  | _ :: _, None -> report_wrong_receiver ()
+                  | _ :: _, None -> report_unmatched_receiver_mode state env arguments member
                   | [], _ ->
                       State.make_error_type state Missing_argument (State.read_span state value.id)
                         "A method written in full takes its receiver as its first argument."))))
@@ -389,7 +389,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                 arguments
           | Some (Type_overload _ | View_overload _) ->
               State.raise_bug "a generic parameter has a method of its own"
-          | None -> report_wrong_receiver ())
+          | None -> report_unmatched_receiver_mode state env arguments member)
       | [], Ok (Hidden _) -> State.raise_bug "a generic parameter has a method of its own"
       | [], Ok Absent ->
           State.make_error_type state Unknown_member (State.read_span state member.id)
@@ -481,12 +481,7 @@ and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_
         (Instantiation.make_fresh_trait_reference state trait)
         method_ arguments
   | None when Members.list_trait_methods state.lookups trait member.text <> [] ->
-      Calls.check_arguments_alone state env arguments
-        (State.make_error_type state Wrong_receiver (State.read_span state member.id)
-           (Printf.sprintf
-              "`%s` has no overload for this receiver's mode; pass the receiver `mut` or `own` as \
-               its overloads take."
-              member.text))
+      report_unmatched_receiver_mode state env arguments member
   | None ->
       State.make_error_type state Unknown_member (State.read_span state member.id)
         (Printf.sprintf "`%s` has no method `%s`." (Path.show trait) member.text)
@@ -530,10 +525,10 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
     State.decide_default_literal state ~at:(State.read_span state value.id)
       (State.normalize state (Hooks.check_expression state env base))
   in
-  let has_mode_keyword = List.mem_assoc value.id state.receiver_modes in
+  let has_mode_keyword = List.mem_assoc value.id state.keyword_modes in
   let lent_mode = if has_mode_keyword then None else Modes.find_lent_mode state base in
   let wanted : Path.receiver =
-    match (List.assoc_opt value.id state.receiver_modes, lent_mode) with
+    match (List.assoc_opt value.id state.keyword_modes, lent_mode) with
     | Some Mut, _ | None, Some Mut -> Mut
     | Some Own, _ -> Own
     | _ -> Read
@@ -612,14 +607,8 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
           Calls.check_arguments_alone state env arguments
             (State.make_error_type state Unknown_member (State.read_span state member.id)
                ~fixes:
-                 (match Diagnostic.find_closest member.text candidates with
-                 | Some candidate ->
-                     [
-                       State.fix
-                         (Printf.sprintf "Write `%s`." candidate)
-                         [ State.replace (State.read_span state member.id) candidate ];
-                     ]
-                 | None -> [])
+                 (Diagnostic.list_spelling_fixes (State.read_span state member.id)
+                    ~written:member.text candidates)
                (Name_lookup.describe_missing_method state receiver_type member.text))
       | Ok (Visible overloads) -> (
           match choose_temporary overloads with

@@ -6,7 +6,6 @@ use standard::map
 
 fn strictly_ascending[Element: Ordered](elements: Sequence[Element]) -> Bool
   ensures result == (forall first in 0..elements.length() => forall second in 0..elements.length() => first < second ==> elements[first] < elements[second])
-  cost time finite
 {
   forall i in 0..elements.length() => forall j in 0..elements.length() => i < j ==> elements[i] < elements[j]
 }
@@ -24,7 +23,6 @@ theorem ascending_below[Element: Ordered](
   requires elements[last] <= element
   ensures forall i in 0..bound => elements[i] < element
   decreases bound
-  cost time finite
 {
   if bound > 0 {
     ascending_below(elements, element: element, last: last, bound: bound - 1)
@@ -45,7 +43,6 @@ theorem ascending_above[Element: Ordered](
   requires element <= elements[first]
   ensures forall i in bound..elements.length() => element < elements[i]
   decreases elements.length() - bound
-  cost time finite
 {
   if bound < elements.length() {
     ascending_above(elements, element: element, first: first, bound: bound + 1)
@@ -108,7 +105,6 @@ theorem present_where_equal[Element: Ordered](set: collections::SortedSet[Elemen
   requires position < set.elements.length()
   requires set.elements.model()[position] == element
   ensures set.search(element) is Ok(_)
-  cost time finite
 {
   match set.search(element) {
     Ok(_) => {}
@@ -127,7 +123,6 @@ theorem absent_where_split[Element: Ordered](set: collections::SortedSet[Element
   requires forall i in 0..split => set.elements.model()[i] < element
   requires forall i in split..set.elements.length() => element < set.elements.model()[i]
   ensures set.search(element) is Err(_)
-  cost time finite
 {
   match set.search(element) {
     Ok(index) => {
@@ -180,7 +175,6 @@ fn collections::SortedSet[Element: Ordered].index_after(self, element: Element) 
 type Numbered[Element](element: Element, ordinal: UInt64)
 
 fn set_of[Element: Ordered](elements: own List[Element]) -> collections::SortedSet[Element]
-  cost time finite
 {
   var numbered: List[Numbered[Element]] = List.with_capacity(elements.length())
   for element in own elements {
@@ -204,7 +198,6 @@ fn merged[Element: Ordered](first: own List[Element], second: own List[Element])
   requires strictly_ascending(first.model())
   requires strictly_ascending(second.model())
   ensures strictly_ascending(result.model())
-  cost time finite
 {
   var left = own first
   var right = own second
@@ -347,14 +340,14 @@ fn combined[Element: Ordered + Copyable](
       }
       List(storage: own output)
     }
-    None => intrinsic::crash("two sorted sets cannot hold that many elements".slice())
+    None => intrinsic::crash("two sorted sets cannot hold that many elements")
   }
 }
 
 public fn collections::SortedSet[Element: Ordered].collect[Source: Cursor[Element = Element]](
   source: own Source,
 ) -> collections::SortedSet[Element]
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   set_of(List.collect(own source))
 }
@@ -522,7 +515,7 @@ public fn collections::SortedSet[Element: Ordered].in_range(self, range: Range[E
   if first < end { self.elements[first..end] } else { self.elements[first..first] }
 }
 
-public fn collections::SortedSet[Element: Ordered].retain(mut self, keep: (fn(Element) -> Bool cost time finite))
+public fn collections::SortedSet[Element: Ordered].retain(mut self, keep: fn(Element) -> Bool)
   ensures self.length() <= old(self.length())
   ensures forall element: Element => self.model().contains(element) ==> keep(element)
   cost time O(old(self.length()) * time(keep))
@@ -555,7 +548,7 @@ public fn collections::SortedSet[Element: Ordered].extend[Source: Cursor[Element
   mut self,
   elements: own Source,
 )
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   let added = set_of(List.collect(own elements))
   if self.elements.is_empty() {
@@ -684,7 +677,6 @@ impl Model for collections::SortedSet[Element: Ordered] {
 
   fn model(self) -> FiniteSet[Element]
     ensures identical(result, self.elements.model().elements())
-    cost time finite
   {
     self.elements.model().elements()
   }

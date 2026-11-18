@@ -9,7 +9,7 @@ fn counted(count: Int64) -> List[Int64] {
 }
 
 fn produce(numbers: tasks::Channel[Int64], count: Int64)
-  uses Tasks
+  uses Tasks, RunForever
 {
   for number in 0..count {
     let _ = numbers.send(number)
@@ -18,7 +18,7 @@ fn produce(numbers: tasks::Channel[Int64], count: Int64)
 }
 
 fn collect[Message: Storable](messages: tasks::Channel[Message]) -> List[Message]
-  uses Tasks
+  uses Tasks, RunForever
 {
   var received: List[Message] = []
   for message in messages.messages() {
@@ -27,7 +27,7 @@ fn collect[Message: Storable](messages: tasks::Channel[Message]) -> List[Message
   received
 }
 
-test "a channel delivers messages in the order they were sent" {
+test "a channel delivers messages in the order they were sent" uses Panic, RunForever {
   provide tasks::SeededTasks.new(1) {
     let numbers = tasks::Channel[Int64].new(capacity: 3)
     assert numbers.send(1) is Ok(_)
@@ -40,7 +40,7 @@ test "a channel delivers messages in the order they were sent" {
   }
 }
 
-test "a copy of a channel refers to the same queue" {
+test "a copy of a channel refers to the same queue" uses Panic, RunForever {
   provide tasks::SeededTasks.new(2) {
     let texts = tasks::Channel[String].new(capacity: 2)
     let other = texts.copy()
@@ -51,7 +51,7 @@ test "a copy of a channel refers to the same queue" {
   }
 }
 
-test "a closed channel refuses messages and delivers the messages it holds" {
+test "a closed channel refuses messages and delivers the messages it holds" uses Panic, RunForever {
   provide tasks::SeededTasks.new(3) {
     let numbers = tasks::Channel[Int64].new(capacity: 2)
     assert numbers.send(1) is Ok(_)
@@ -65,7 +65,7 @@ test "a closed channel refuses messages and delivers the messages it holds" {
 }
 
 fn produce_from(numbers: tasks::Channel[Int64], first: Int64, count: Int64)
-  uses Tasks
+  uses Tasks, RunForever
 {
   for index in 0..count {
     let _ = numbers.send(first + 2 * index)
@@ -90,7 +90,7 @@ fn stepping(first: Int64, count: Int64) -> List[Int64] {
   numbers
 }
 
-test "the messages of each sender arrive in the order it sent them" {
+test "the messages of each sender arrive in the order it sent them" uses Panic, RunForever {
   let seeds: UInt64 = 24
   for seed in 0..seeds {
     provide tasks::SeededTasks.new(seed) {
@@ -112,7 +112,7 @@ test "the messages of each sender arrive in the order it sent them" {
   }
 }
 
-test "send waits while the channel is full and receive waits while it is empty" {
+test "send waits while the channel is full and receive waits while it is empty" uses Panic, RunForever {
   let capacities: List[UInt64] = [0, 1, 2, 64]
   let seeds: UInt64 = 24
   for seed in 0..seeds {
@@ -129,7 +129,7 @@ test "send waits while the channel is full and receive waits while it is empty" 
   }
 }
 
-test "a send to a channel of capacity 0 returns after a task has received the message" {
+test "a send to a channel of capacity 0 returns after a task has received the message" uses Panic, RunForever {
   let seeds: UInt64 = 24
   for seed in 0..seeds {
     provide tasks::SeededTasks.new(seed) {
@@ -149,7 +149,7 @@ test "a send to a channel of capacity 0 returns after a task has received the me
   }
 }
 
-test "every message of several senders arrives once, in each sender's order" {
+test "every message of several senders arrives once, in each sender's order" uses Panic, RunForever {
   let senders: UInt64 = 4
   let steps: UInt64 = 5
   let seeds: UInt64 = 24
@@ -178,7 +178,7 @@ test "every message of several senders arrives once, in each sender's order" {
   }
 }
 
-test "the order in which tasks run depends on the seed" {
+test "the order in which tasks run depends on the seed" uses Panic, RunForever {
   var orders: List[List[Int64]] = []
   let seeds: UInt64 = 64
   for seed in 0..seeds {
@@ -197,7 +197,7 @@ test "the order in which tasks run depends on the seed" {
   assert orders.length() == 6
 }
 
-test "one seed gives one order" {
+test "one seed gives one order" uses Panic, RunForever {
   var first: List[Int64] = []
   for attempt in 0..3 {
     provide tasks::SeededTasks.new(7) {
@@ -217,7 +217,7 @@ test "one seed gives one order" {
 }
 
 fn receive_or_leave(numbers: tasks::Channel[Int64]) -> Int64
-  uses Tasks
+  uses Tasks, RunForever
 {
   concurrent {
     {
@@ -228,7 +228,7 @@ fn receive_or_leave(numbers: tasks::Channel[Int64]) -> Int64
   }
 }
 
-test "leaving a concurrent block cancels a task that waits to receive" {
+test "leaving a concurrent block cancels a task that waits to receive" uses Panic, RunForever {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide tasks::SeededTasks.new(seed) {
@@ -238,7 +238,7 @@ test "leaving a concurrent block cancels a task that waits to receive" {
 }
 
 fn send_or_leave(numbers: tasks::Channel[Int64], outcomes: tasks::Channel[Bool])
-  uses Tasks
+  uses Tasks, RunForever
 {
   concurrent {
     {
@@ -249,7 +249,7 @@ fn send_or_leave(numbers: tasks::Channel[Int64], outcomes: tasks::Channel[Bool])
   }
 }
 
-test "a cancelled send fails with Cancelled and leaves no message in the channel" {
+test "a cancelled send fails with Cancelled and leaves no message in the channel" uses Panic, RunForever {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide tasks::SeededTasks.new(seed) {
@@ -275,7 +275,7 @@ test "a cancelled send fails with Cancelled and leaves no message in the channel
 }
 
 fn count_until_cancelled() -> Int64
-  uses Tasks
+  uses Tasks, RunForever
 {
   var polls = 0
   concurrent {
@@ -289,7 +289,7 @@ fn count_until_cancelled() -> Int64
   }
 }
 
-test "a task that polls Tasks.cancelled lets the other tasks run" {
+test "a task that polls Tasks.cancelled lets the other tasks run" uses Panic, RunForever {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide tasks::SeededTasks.new(seed) {
@@ -301,7 +301,7 @@ test "a task that polls Tasks.cancelled lets the other tasks run" {
 type StoppedClock(never: tasks::Channel[Int64])
 
 impl Clock for StoppedClock
-  uses Tasks
+  uses Tasks, RunForever
 {
   fn now(self) -> Instant {
     Instant.from_unix_nanoseconds(0)
@@ -330,7 +330,7 @@ impl Clock for InstantClock {
   fn sleep(self, duration: Duration) {}
 }
 
-test "with_timeout returns the output of work that ends before the limit" {
+test "with_timeout returns the output of work that ends before the limit" uses Panic, RunForever {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide tasks::SeededTasks.new(seed) {
@@ -341,7 +341,7 @@ test "with_timeout returns the output of work that ends before the limit" {
   }
 }
 
-test "with_timeout cancels work that is still waiting at the limit" {
+test "with_timeout cancels work that is still waiting at the limit" uses Panic, RunForever {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide tasks::SeededTasks.new(seed), InstantClock() {
@@ -352,7 +352,7 @@ test "with_timeout cancels work that is still waiting at the limit" {
 }
 
 fn hold_each(limiter: tasks::Limiter, events: tasks::Channel[Int64])
-  uses Tasks
+  uses Tasks, RunForever
 {
   concurrent for _ in 0..6 {
     let _ = limiter.hold(fn() {
@@ -364,7 +364,7 @@ fn hold_each(limiter: tasks::Limiter, events: tasks::Channel[Int64])
   events.close()
 }
 
-test "a limiter runs at most as many tasks at once as it has permits" {
+test "a limiter runs at most as many tasks at once as it has permits" uses Panic, RunForever {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide tasks::SeededTasks.new(seed) {
@@ -404,7 +404,7 @@ impl Accounts for Bank {
   }
 }
 
-test "tasks change the state of one capability implementation" {
+test "tasks change the state of one capability implementation" uses Panic, RunForever {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     var bank = Bank(balance: 0)
@@ -438,7 +438,7 @@ impl Accounts for SlowBank
   }
 }
 
-test "calls of a `mut` capability implementation are mutually exclusive" {
+test "calls of a `mut` capability implementation are mutually exclusive" uses Panic, RunForever {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide tasks::SeededTasks.new(seed) {
@@ -453,7 +453,7 @@ test "calls of a `mut` capability implementation are mutually exclusive" {
   }
 }
 
-test "tasks spawn tasks of their own" {
+test "tasks spawn tasks of their own" uses Panic, RunForever {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide tasks::SeededTasks.new(seed) {
@@ -478,7 +478,7 @@ test "tasks spawn tasks of their own" {
   }
 }
 
-test "a cell's updates from many tasks each see the value the one before left" {
+test "a cell's updates from many tasks each see the value the one before left" uses Panic, RunForever {
   provide tasks::SeededTasks.new(5) {
     let totals: tasks::Cell[List[Int64]] = tasks::Cell.new([0])
     concurrent for number in 0..20 {
@@ -494,7 +494,7 @@ test "a cell's updates from many tasks each see the value the one before left" {
   }
 }
 
-test "a counter adds each task's increments, and gives the total" {
+test "a counter adds each task's increments, and gives the total" uses Panic, RunForever {
   provide tasks::SeededTasks.new(3) {
     let requests = tasks::Counter.new()
     concurrent for _ in 0..50 {

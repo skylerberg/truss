@@ -117,6 +117,9 @@ let list_signatures snapshot trial =
         | None -> false)
       (Database.list_changes database upgraded)
   in
+  ignore
+    (Database.prove database
+       (List.concat_map (Workspace.list_package_files snapshot) project_packages));
   let dependents = Path_table.create 16 in
   List.iter
     (fun ({ dependent; dependency } : Database.read) ->
@@ -128,9 +131,7 @@ let list_signatures snapshot trial =
     (Database.list_dependents database
        (List.sort_uniq Path.compare (List.filter_map Database.Part.find_definition changed)));
   let find_text database path =
-    Signatures.find_signature
-      (Database.make_name_lookups database [ Path.locate_package path ])
-      path
+    Signatures.find_signature (Database.make_name_lookups database) path
   in
   List.sort
     (fun left right -> Path.compare left.path right.path)
@@ -149,7 +150,6 @@ let list_new_errors snapshot trial =
   let project_packages = List.map snd (Workspace.list_packages snapshot) in
   let list_diagnostics (snapshot : Workspace.snapshot) =
     let database = Workspace.open_database snapshot in
-    Database.check database project_packages;
     List.map Project.show_problem (Workspace.problems snapshot)
     @ List.concat_map
         (fun file ->

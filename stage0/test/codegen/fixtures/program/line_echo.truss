@@ -1,5 +1,5 @@
 fn main(arguments: List[String]) -> ExitCode
-  uses Console
+  uses Console, RunForever
 {
   while Console.read_line() is Some(line) {
     Console.print_line("${line.length()}")

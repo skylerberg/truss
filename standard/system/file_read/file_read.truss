@@ -6,7 +6,9 @@ use standard::system::handles
 
 internal type SystemFileRead()
 
-impl FileRead for SystemFileRead {
+impl FileRead for SystemFileRead
+  uses RunForever
+{
   fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
     var handle = handles::open_to_read(file)?
     let bytes = handles::read_all(mut handle)?

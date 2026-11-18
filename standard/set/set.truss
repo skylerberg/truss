@@ -10,7 +10,6 @@ impl Model for Set[Element: Hash + Ordered] {
 
   fn model(self) -> FiniteSet[Element]
     ensures identical(result, self.elements.model().elements())
-    cost time finite
   {
     self.elements.model().elements()
   }
@@ -18,7 +17,6 @@ impl Model for Set[Element: Hash + Ordered] {
 
 public fn contains_equal[Element: Equal](set: FiniteSet[Element], value: Element) -> Bool
   ensures result == (exists other: Element => set.contains(other) && other == value)
-  cost time finite
 {
   exists other: Element => set.contains(other) && other == value
 }
@@ -135,7 +133,7 @@ public fn Set[Element: Hash + Ordered].seeded() -> Set[Element]
 }
 
 public fn Set[Element: Hash + Ordered].collect[Source: Cursor[Element = Element]](source: own Source) -> Set[Element]
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var set: Set[Element] = []
   mut set.extend(own source)
@@ -207,7 +205,7 @@ public fn Set[Element: Hash + Ordered].reserve(mut self, additional: UInt64)
   mut self.elements.reserve(additional)
 }
 
-public fn Set[Element: Hash + Ordered].retain(mut self, keep: (fn(Element) -> Bool cost time finite))
+public fn Set[Element: Hash + Ordered].retain(mut self, keep: fn(Element) -> Bool)
   ensures self.length() <= old(self.length())
   ensures forall element: Element => self.model().contains(element) ==> keep(element)
   cost time O(old(self.length()) * time(keep))
@@ -230,7 +228,7 @@ public fn Set[Element: Hash + Ordered].retain(mut self, keep: (fn(Element) -> Bo
 }
 
 public fn Set[Element: Hash + Ordered].extend[Source: Cursor[Element = Element]](mut self, elements: own Source)
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var cursor = own elements
   while mut cursor.next() is Some(element)
@@ -444,14 +442,12 @@ internal fn Set[Element: Hash + Ordered].missing_from(self, other: Set[Element])
 theorem contained_elements_keep_membership[Element: Hash + Ordered](first: Set[Element], second: Set[Element])
   requires forall i in 0..first.elements.length() => second.contains(first.elements.model()[i])
   ensures forall element: Element => first.contains(element) ==> second.contains(element)
-  cost time finite
 {
 }
 
 theorem missing_element_is_a_member[Element: Hash + Ordered](first: Set[Element], index: UInt64)
   requires index < first.elements.length()
   ensures first.contains(first.elements.model()[index])
-  cost time finite
 {
 }
 

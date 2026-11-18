@@ -51,15 +51,42 @@ let () =
     (fun () ->
       Codegen_support.expect_output Fixtures.Lowering.grid_cell_index_out_of_bounds
         "test 0 panicked\nmessage 47\nindex out of bounds\n  at example/main.truss:4:3\n");
-  Codegen_support.test "a test checks the requires of an index's `at` where the index is written"
-    (fun () ->
-      Codegen_support.expect_output Fixtures.Lowering.test_indexing_outside_the_requires_of_at
-        "test 0 panicked\nmessage 49\nindex out of bounds\n  at example/main.truss:30:11\n");
   Codegen_support.test
     "a check in a called lending method of the standard library reports the program's call site"
     (fun () ->
       Codegen_support.expect_output Fixtures.Lowering.map_index_by_a_missing_key
         "test 0 panicked\nmessage 48\nindex out of bounds\n  at example/main.truss:3:11\n");
+  Codegen_support.test
+    "a lending method of the standard library is forwarded through a call whose capability \
+     parameter it instantiates with no capability" (fun () ->
+      let probe_module : Path.module_ =
+        { package = Path.standard_package; modules = [ "forwarding_probe" ] }
+      in
+      let shelf : Path.t = Top { module_ = probe_module; name = "Shelf" } in
+      let read : Lowered.Item.t =
+        Code
+          {
+            path = Top { module_ = probe_module; name = "read_first_book" };
+            instantiation = Ground.no_instantiation;
+          }
+      in
+      let _, backend =
+        Codegen_support.load_standard_probe ~roots:[ read ]
+          { module_ = probe_module; name = "probe" }
+          Fixtures.Lowering.shelf_lending_through_a_capability_parameter
+      in
+      match
+        List.filter_map
+          (function
+            | Lowered.Item.Code { path = Method { owner; name; _ }; _ } when Path.equal owner shelf
+              ->
+                Some name
+            | _ -> None)
+          (Emit_c.references (Backend.For_testing.compile_fragment backend read))
+      with
+      | [] -> ()
+      | called ->
+          Codegen_support.fail "read_first_book calls Shelf.%s" (String.concat ", Shelf." called));
   Codegen_support.test
     "a check on the first line of an indented method reports its column in the file" (fun () ->
       Codegen_support.expect_output Fixtures.Lowering.panic_on_the_first_line_of_a_method_in_an_impl

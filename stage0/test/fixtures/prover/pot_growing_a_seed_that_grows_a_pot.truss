@@ -1,0 +1,19 @@
+trait Grow {
+  fn grow(self, steps: UInt32) -> Int64
+}
+
+type Pot[Item](item: Item)
+
+type Seed()
+
+impl Grow for Pot[Item: Grow] {
+  fn grow(self, steps: UInt32) -> Int64 {
+    self.item.grow(steps)
+  }
+}
+
+impl Grow for Seed {
+  fn grow(self, steps: UInt32) -> Int64 {
+    Pot(item: Seed()).grow(steps)
+  }
+}

@@ -1,4 +1,4 @@
-test "pop" {
+test "pop" uses RunForever {
   var items: List[String] = ["${1}", "${2}"]
   var count = 0
   while mut items.pop() is Some(item) {

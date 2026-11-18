@@ -4,7 +4,7 @@ use standard::simulation
 use standard::url
 
 fn chat(request: own http::Request, responder: mut http::Responder)
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if request.matches(http::Route"GET /events") is Some(_) {
     let _ = mut responder.start_events()
@@ -33,7 +33,7 @@ fn chat(request: own http::Request, responder: mut http::Responder)
 }
 
 fn raw_exchange(raw: StringSlice) -> String
-  uses NetworkClient, Handles, Tasks, Panic
+  uses NetworkClient, Handles, Tasks, Panic, RunForever
 {
   let connection = network::connect("localhost", port: 8090).expect("the server accepts")
   let _ = connection.send_all(raw.bytes())
@@ -43,7 +43,7 @@ fn raw_exchange(raw: StringSlice) -> String
 }
 
 fn raw_session(raw: Slice[UInt8], expected: StringSlice) -> String
-  uses NetworkClient, Handles, Tasks, Panic
+  uses NetworkClient, Handles, Tasks, Panic, RunForever
 {
   let connection = network::connect("localhost", port: 8090).expect("the server accepts")
   let _ = connection.send_all(raw)
@@ -56,7 +56,7 @@ fn raw_session(raw: Slice[UInt8], expected: StringSlice) -> String
 }
 
 fn conversation() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
   var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8090)).expect("the port is free")
   concurrent {
@@ -141,7 +141,7 @@ fn conversation() -> List[String]
   }
 }
 
-test "a WebSocket client and server exchange text, binary, and long messages, compressed or not, then close" {
+test "a WebSocket client and server exchange text, binary, and long messages, compressed or not, then close" uses Panic, RunForever {
   provide simulation::World.new() {
     let seen = conversation()
     assert seen.length() == 14

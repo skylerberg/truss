@@ -443,21 +443,10 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                 report "%s contains `%s.%s`, which is not normalized" subject (Types.show base) name);
             check_type subject base;
             check_trait subject reference
-        | Types.Capability_variable _ | Types.Divergence (Of_variable _) ->
+        | Types.Capability_variable _ ->
             report "%s contains a capability inference variable" subject
-        | Types.Capability_error _ -> report "%s contains a capability with an error" subject
-        | Types.Divergence Always -> ()
-        | Types.Divergence (Of_parameter mentioned) -> check_capability_parameter subject mentioned
-        | Types.Divergence (Of_impl_method { self_type; trait = reference; name; _ }) ->
-            (match self_type with
-            | Parameter _ | Projection _ -> ()
-            | _ ->
-                report
-                  "%s holds the divergence of `%s.%s`, which is not resolved through the `impl`"
-                  subject (Types.show self_type) name);
-            check_type subject self_type;
-            check_trait subject reference)
-      (set :> Types.capability list)
+        | Types.Capability_error _ -> report "%s contains a capability with an error" subject)
+      (Types.list_capabilities set)
   and check_type subject (ty : Types.ty) =
     match ty with
     | Named { arguments; _ } -> List.iter (check_argument subject) arguments

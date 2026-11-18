@@ -238,7 +238,7 @@ fn is_safe_url_value(bytes: Slice[UInt8]) -> Bool {
           mut compact.push(byte)
         }
       }
-      is_safe_url(String.from_utf8_lossy(compact.slice()).slice())
+      is_safe_url(String.from_utf8_lossy(compact.slice()))
     }
     None => false
   }
@@ -290,7 +290,7 @@ fn read_tag(bytes: Slice[UInt8], at: UInt64) -> Option[Tag]
     }
     let attribute_name = String.from_utf8_lossy(bytes[attribute_start..index]).slice().to_ascii_lowercase()
     while index < bytes.length() && is_whitespace(bytes[index])
-      invariant index <= bytes.length()
+      invariant index <= bytes.length() && index > attribute_start
       decreases bytes.length() - index
     {
       index += 1
@@ -299,7 +299,7 @@ fn read_tag(bytes: Slice[UInt8], at: UInt64) -> Option[Tag]
     if index < bytes.length() && bytes[index] == 61 {
       index += 1
       while index < bytes.length() && is_whitespace(bytes[index])
-        invariant index <= bytes.length()
+        invariant index <= bytes.length() && index > attribute_start
         decreases bytes.length() - index
       {
         index += 1
@@ -339,7 +339,7 @@ fn read_tag(bytes: Slice[UInt8], at: UInt64) -> Option[Tag]
 
 fn find_from(bytes: Slice[UInt8], start: UInt64, pattern: Slice[UInt8]) -> Option[UInt64]
   ensures match result {
-    Some(found) => found <= bytes.length() && bytes.length() - found >= pattern.length()
+    Some(found) => found >= start && found <= bytes.length() && bytes.length() - found >= pattern.length()
     None => true
   }
 {
@@ -348,6 +348,7 @@ fn find_from(bytes: Slice[UInt8], start: UInt64, pattern: Slice[UInt8]) -> Optio
   }
   var index = start
   while index < bytes.length() && bytes.length() - index >= pattern.length()
+    invariant index >= start
     decreases bytes.length() - index
   {
     var is_match = true
@@ -387,7 +388,7 @@ fn push_tag(output: mut List[UInt8], tag: Tag, policy: SanitizePolicy) {
   mut output.append_slice(tag.name.slice().bytes())
   for attribute in tag.attributes {
     let name = attribute.name.slice()
-    if !is_attribute_allowed(policy, element: tag.name.slice(), name: name) {
+    if !is_attribute_allowed(policy, element: tag.name, name: name) {
       continue
     }
     if is_url_name(name) && !is_safe_url_value(attribute.value.slice()) {
@@ -444,6 +445,7 @@ public fn sanitize(input: StringSlice, policy: SanitizePolicy = SanitizePolicy()
     if index + 1 < bytes.length() && (bytes[index + 1] == 33 || bytes[index + 1] == 63) {
       var end = index + 1
       while end < bytes.length() && bytes[end] != 62
+        invariant end > index
         decreases bytes.length() - end
       {
         end += 1
@@ -472,7 +474,7 @@ public fn sanitize(input: StringSlice, policy: SanitizePolicy = SanitizePolicy()
                 decreases open.length()
               {
                 match mut open.pop() {
-                  Some(name) => push_end_tag(mut output, name: name.slice())
+                  Some(name) => push_end_tag(mut output, name: name)
                   None => {}
                 }
               }
@@ -480,15 +482,15 @@ public fn sanitize(input: StringSlice, policy: SanitizePolicy = SanitizePolicy()
             None => {}
           }
           index = next
-        } else if listed_in(dropped_with_content[..], name: tag.name.slice()) {
-          index = if next <= bytes.length() { skip_dropped(bytes, start: next, name: tag.name.slice()) } else { bytes.length() }
+        } else if listed_in(dropped_with_content[..], name: tag.name) {
+          index = if next <= bytes.length() { skip_dropped(bytes, start: next, name: tag.name) } else { bytes.length() }
           if index < next {
             index = next
           }
         } else {
-          if listed_in(policy.elements.slice(), name: tag.name.slice()) {
+          if listed_in(policy.elements.slice(), name: tag.name) {
             push_tag(mut output, tag: tag, policy: policy)
-            if !listed_in(void_elements[..], name: tag.name.slice()) && open.length() < 256 {
+            if !listed_in(void_elements[..], name: tag.name) && open.length() < 256 {
               mut open.push(tag.name.copy())
             }
           }
@@ -507,7 +509,7 @@ public fn sanitize(input: StringSlice, policy: SanitizePolicy = SanitizePolicy()
     decreases open.length()
   {
     match mut open.pop() {
-      Some(name) => push_end_tag(mut output, name: name.slice())
+      Some(name) => push_end_tag(mut output, name: name)
       None => {}
     }
   }

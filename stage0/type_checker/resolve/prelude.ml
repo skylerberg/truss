@@ -62,6 +62,7 @@ let types =
             "Tasks";
             "Log";
             "Panic";
+            "RunForever";
             "SystemError";
           ] );
         ([ "time" ], [ "Instant"; "Duration" ]);

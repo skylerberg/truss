@@ -52,7 +52,7 @@ test "SHA-3 and SHAKE give the digests of FIPS 202" {
   assert shake256.length() == 200 && digest_of(shake256) == "0afce65607381104e0f97c2c25159cee64dc63543cacd75165a3a10dd4635bc1"
 }
 
-test "ML-KEM-768 keys, ciphertexts, and shared secrets match OpenSSL's for a seed" {
+test "ML-KEM-768 keys, ciphertexts, and shared secrets match OpenSSL's for a seed" uses RunForever {
   let key = cryptography::DecapsulationKey.from_seed(seed_of(0, step: 1))
   let public_key = key.encapsulation_key()
   assert public_key.bytes().length() == 1184 && key.bytes().length() == 2400
@@ -76,7 +76,7 @@ test "ML-KEM-768 keys, ciphertexts, and shared secrets match OpenSSL's for a see
   assert key.decapsulate(tampered[0..100]) is None
 }
 
-test "ML-KEM-768 matches a second seed, and keys are checked when read" {
+test "ML-KEM-768 matches a second seed, and keys are checked when read" uses RunForever {
   let key = cryptography::DecapsulationKey.from_seed(seed_of(7, step: 0))
   let public_key = key.encapsulation_key()
   assert digest_of(public_key.bytes()) == "c12e9e39db6758fc2ba63a638785b04f8efe3d7df23ba09803b4e39ba2fbc707"
@@ -95,7 +95,7 @@ test "ML-KEM-768 matches a second seed, and keys are checked when read" {
   assert cryptography::DecapsulationKey.from_bytes(wrong_hash) is None
 }
 
-test "a generated key decapsulates what its encapsulation key encapsulates" {
+test "a generated key decapsulates what its encapsulation key encapsulates" uses RunForever {
   provide random::SeededRandom.new(5) {
     let key = cryptography::DecapsulationKey.generate()
     let sealed = key.encapsulation_key().encapsulate()

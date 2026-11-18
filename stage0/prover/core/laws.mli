@@ -6,7 +6,6 @@ val check_callback_requires :
   State.passed list ->
   unit
 
-val calls_updating_helper : State.context -> Invocation.t -> bool
 val list_laws : State.context -> Path.t -> (State.source * Mir.law) list
 val list_law_parameter_types : substitution:Types.substitution -> Mir.law -> Types.ty list
 

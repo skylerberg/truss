@@ -1,0 +1,5 @@
+type Settings(name: String, retries: Int64)
+
+fn renamed(settings: own Settings) -> Settings {
+  mut settings with (name: "renamed")
+}

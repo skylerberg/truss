@@ -4,7 +4,7 @@ let make_signature env ty = Writing.make_signature env [ Writing.make_value_para
 
 let encode_call env builder ~output ty (place : Lowered.place) =
   if not (Memory_layout.has_zero_size env ty) then
-    Emit_c.Builder.emit builder
+    Emit_c.Ir_builder.emit builder
       (Call
          {
            target = Direct { function_ = Item (Encode ty); signature = make_signature env ty };
@@ -13,17 +13,19 @@ let encode_call env builder ~output ty (place : Lowered.place) =
          })
 
 let encode env ty =
-  let builder = Emit_c.Builder.create env ~item:(Encode ty) in
-  let parameter = Emit_c.Builder.allocate_local builder (Writing.make_value_parameter ty) in
+  let builder = Emit_c.Ir_builder.create env ~item:(Encode ty) in
+  let parameter = Emit_c.Ir_builder.allocate_local builder (Writing.make_value_parameter ty) in
   let value : Lowered.place = { root = Local parameter; projections = [ Deref ] } in
-  let output_pointer = Emit_c.Builder.allocate_local builder (Writing.make_output_parameter env) in
+  let output_pointer =
+    Emit_c.Ir_builder.allocate_local builder (Writing.make_output_parameter env)
+  in
   let output = Lowered.Copy (Lowered.make_local_place output_pointer) in
   let encode_call = encode_call env builder ~output in
-  Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
+  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let append_bytes (place : Lowered.place) size =
     let byte = Ground.make_builtin UInt8 in
-    let first = Emit_c.Builder.allocate_local builder (Raw (Pointer (Data byte))) in
-    Emit_c.Builder.emit builder
+    let first = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer (Data byte))) in
+    Emit_c.Ir_builder.emit builder
       (Assign
          ( Lowered.make_local_place first,
            Convert (Address { place; writable = false }, Pointer (Data byte)) ));
@@ -49,27 +51,27 @@ let encode env ty =
   | Any -> raise_bug "an any value cannot be computed while compiling"
   | Storage element ->
       append_bytes (Storage.project_length value) (Memory_layout.compute_integer_size UInt64);
-      Emit_c.Builder.emit_loop builder
+      Emit_c.Ir_builder.emit_loop builder
         ~count:(Copy (Storage.project_length value))
         (fun index ->
           encode_call element (Storage.index_element value (Copy (Lowered.make_local_place index))))
   | Shape (Scalar _) -> append_bytes value (Memory_layout.of_type env ty).size
   | Shape (Record members) -> encode_fields value None members
   | Shape (Array (element, count)) ->
-      Emit_c.Builder.emit_loop builder ~count:(Lowered.make_uint64_constant count) (fun index ->
+      Emit_c.Ir_builder.emit_loop builder ~count:(Lowered.make_uint64_constant count) (fun index ->
           encode_call element
             (Lowered.project value (Index (Copy (Lowered.make_local_place index)))))
   | Shape (Sum variants) ->
-      let after = Emit_c.Builder.allocate_block builder in
+      let after = Emit_c.Ir_builder.allocate_block builder in
       let cases =
         List.mapi
           (fun index (variant_shape : Memory_layout.variant_shape) ->
-            let case = Emit_c.Builder.allocate_block builder in
-            Emit_c.Builder.run_in_block builder case (fun () ->
+            let case = Emit_c.Ir_builder.allocate_block builder in
+            Emit_c.Ir_builder.run_in_block builder case (fun () ->
                 let encoded_index =
-                  Emit_c.Builder.allocate_local builder (Raw (Integer variant_index))
+                  Emit_c.Ir_builder.allocate_local builder (Raw (Integer variant_index))
                 in
-                Emit_c.Builder.emit builder
+                Emit_c.Ir_builder.emit builder
                   (Assign
                      ( Lowered.make_local_place encoded_index,
                        Use (Constant (Integer (variant_index, Z.of_int index))) ));
@@ -77,14 +79,14 @@ let encode env ty =
                   (Lowered.make_local_place encoded_index)
                   (Memory_layout.compute_integer_size variant_index);
                 encode_fields value (Some variant_shape.name) variant_shape.fields;
-                Emit_c.Builder.finish builder (Goto after));
+                Emit_c.Ir_builder.finish builder (Goto after));
             (variant_shape.name, case))
           variants
       in
-      Emit_c.Builder.finish builder (Switch_variant { place = value; cases; default = None });
-      Emit_c.Builder.start builder after);
-  Emit_c.Builder.finish builder (Return None);
-  Emit_c.Builder.build builder
+      Emit_c.Ir_builder.finish builder (Switch_variant { place = value; cases; default = None });
+      Emit_c.Ir_builder.start builder after);
+  Emit_c.Ir_builder.finish builder (Return None);
+  Emit_c.Ir_builder.build builder
     { parameters = [ parameter; output_pointer ]; result = None; returns = true }
 
 type reader = { encoded : string; mutable offset : int }

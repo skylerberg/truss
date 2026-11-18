@@ -76,7 +76,7 @@ impl Display for Failure {
         mut output.push("HTTP/2 error ")
         code.display(mut output)
         mut output.push(": ")
-        mut output.push(message.slice())
+        mut output.push(message)
       }
       System(error) => error.display(mut output)
     }
@@ -121,7 +121,7 @@ type Frame(kind: UInt8, flags: UInt8, stream: UInt32, payload: List[UInt8])
 internal type Inbox(bytes: List[UInt8])
 
 fn fill[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Result[Unit, Failure]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   match stream.receive(mut inbox.bytes, limit: 65536) {
     Ok(0) => Err(Failure.Closed)
@@ -131,7 +131,7 @@ fn fill[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Result[Uni
 }
 
 fn take_bytes[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, count: UInt64) -> Result[List[UInt8], Failure]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while inbox.bytes.length() < count {
     fill(stream, inbox: mut inbox)?
@@ -141,7 +141,7 @@ fn take_bytes[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, count: 
 }
 
 fn read_frame[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Result[Frame, Failure]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while inbox.bytes.length() < 9 {
     fill(stream, inbox: mut inbox)?
@@ -174,7 +174,7 @@ fn frame_bytes(output: mut List[UInt8], kind: UInt8, flags: UInt8, stream: UInt3
 }
 
 fn send_frame[Stream: streams::Duplex](stream: Stream, kind: UInt8, flags: UInt8, id: UInt32, payload: Slice[UInt8]) -> Result[Unit, Failure]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var bytes: List[UInt8] = List.with_capacity(9 + payload.length())
   frame_bytes(mut bytes, kind: kind, flags: flags, stream: id, payload: payload)
@@ -194,7 +194,7 @@ fn window_increment(amount: UInt64) -> List[UInt8] {
 }
 
 fn open_connection[Stream: streams::Duplex](stream: Stream, is_server: Bool, header_limit: UInt64) -> Result[Unit, Failure]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var bytes: List[UInt8] = []
   if !is_server {
@@ -237,7 +237,9 @@ fn strip_padding(payload: Slice[UInt8], flags: UInt8, skip: UInt64) -> Result[Li
 
 type PeerSettings(initial_window: Option[Int64], frame_size: Option[UInt64], table_size: Option[UInt64])
 
-fn parse_settings(frame: Frame) -> Result[Option[PeerSettings], Failure] {
+fn parse_settings(frame: Frame) -> Result[Option[PeerSettings], Failure]
+  uses RunForever
+{
   if frame.stream != 0 {
     return Err(violation(protocol_error, message: "SETTINGS on a stream"))
   }
@@ -335,7 +337,7 @@ fn watch_stream(reading: mut Reading, stream: UInt32, cancelled: tasks::Channel[
 }
 
 internal fn abort_stream(outbound: tasks::Channel[flow::Outbound], stream: UInt32)
-  uses Tasks
+  uses Tasks, RunForever
 {
   var frame: List[UInt8] = []
   let code = window_increment(intrinsic::convert(internal_error))
@@ -369,7 +371,7 @@ fn inflow_index(inflows: Slice[Inflow], stream: UInt32) -> Option[UInt64] {
 }
 
 fn close_inflow(reading: mut Reading, index: UInt64, chunk: own flow::Chunk)
-  uses Tasks
+  uses Tasks, RunForever
 {
   if index < reading.inflows.length() {
     let inflow = mut reading.inflows.remove_at(index)
@@ -379,7 +381,7 @@ fn close_inflow(reading: mut Reading, index: UInt64, chunk: own flow::Chunk)
 }
 
 fn complete_headers(reading: mut Reading, index: UInt64, arrivals: tasks::Channel[Arrival], outbound: tasks::Channel[flow::Outbound]) -> Result[Unit, Failure]
-  uses Tasks
+  uses Tasks, RunForever
 {
   if index >= reading.inflows.length() {
     return Ok(Unit)
@@ -387,7 +389,7 @@ fn complete_headers(reading: mut Reading, index: UInt64, arrivals: tasks::Channe
   let block = map::exchange(mut reading.inflows[index].block, value: [])
   let fields = match mut reading.decoder.decode(block.slice(), list_limit: reading.header_limit) {
     Ok(fields) => own fields
-    Err(error) => return Err(violation(compression_error, message: error.message.slice()))
+    Err(error) => return Err(violation(compression_error, message: error.message))
   }
   if index >= reading.inflows.length() {
     return Ok(Unit)
@@ -417,7 +419,7 @@ fn complete_headers(reading: mut Reading, index: UInt64, arrivals: tasks::Channe
 }
 
 fn serve_headers(reading: mut Reading, frame: own Frame, arrivals: tasks::Channel[Arrival], outbound: tasks::Channel[flow::Outbound]) -> Result[Unit, Failure]
-  uses Tasks
+  uses Tasks, RunForever
 {
   if frame.stream == 0 {
     return Err(violation(protocol_error, message: "HEADERS on stream zero"))
@@ -468,7 +470,7 @@ fn serve_headers(reading: mut Reading, frame: own Frame, arrivals: tasks::Channe
 }
 
 fn serve_continuation(reading: mut Reading, frame: own Frame, arrivals: tasks::Channel[Arrival], outbound: tasks::Channel[flow::Outbound]) -> Result[Unit, Failure]
-  uses Tasks
+  uses Tasks, RunForever
 {
   let index = match inflow_index(reading.inflows.slice(), stream: frame.stream) {
     Some(index) => index
@@ -489,7 +491,7 @@ fn serve_continuation(reading: mut Reading, frame: own Frame, arrivals: tasks::C
 }
 
 fn serve_data(reading: mut Reading, frame: own Frame, outbound: tasks::Channel[flow::Outbound]) -> Result[Unit, Failure]
-  uses Tasks
+  uses Tasks, RunForever
 {
   if frame.stream == 0 {
     return Err(violation(protocol_error, message: "DATA on stream zero"))
@@ -528,7 +530,7 @@ fn serve_data(reading: mut Reading, frame: own Frame, outbound: tasks::Channel[f
 }
 
 fn serve_frame(reading: mut Reading, frame: own Frame, arrivals: tasks::Channel[Arrival], outbound: tasks::Channel[flow::Outbound]) -> Result[Unit, Failure]
-  uses Tasks
+  uses Tasks, RunForever
 {
   match reading.continuation {
     Some(stream) => {
@@ -603,7 +605,7 @@ fn read_requests[Stream: streams::Duplex](
   arrivals: tasks::Channel[Arrival],
   outbound: tasks::Channel[flow::Outbound],
 ) -> Failure
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var has_settings = false
   while true {
@@ -655,7 +657,7 @@ fn smaller(first: Int64, second: Int64) -> Int64 {
 }
 
 fn flush_outflow[Stream: streams::Duplex](stream: Stream, writing: mut Writing, index: UInt64) -> Result[Unit, Failure]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while index < writing.outflows.length() && !writing.outflows[index].queue.is_empty() {
     let id = writing.outflows[index].stream
@@ -697,7 +699,7 @@ fn flush_outflow[Stream: streams::Duplex](stream: Stream, writing: mut Writing, 
 }
 
 fn flush_all[Stream: streams::Duplex](stream: Stream, writing: mut Writing) -> Result[Unit, Failure]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var index: UInt64 = 0
   while index < writing.outflows.length() {
@@ -711,7 +713,7 @@ fn flush_all[Stream: streams::Duplex](stream: Stream, writing: mut Writing) -> R
 }
 
 fn abandon(outflow: own Outflow)
-  uses Tasks
+  uses Tasks, RunForever
 {
   for pending in outflow.queue {
     let _ = pending.ack.send(false)
@@ -719,7 +721,7 @@ fn abandon(outflow: own Outflow)
 }
 
 fn write_message[Stream: streams::Duplex](connection: Stream, writing: mut Writing, message: own flow::Outbound) -> Result[Unit, Failure]
-  uses Handles, Tasks, Clock
+  uses Handles, Tasks, Clock, RunForever
 {
   match own message {
     Head(stream, status, fields, is_end, ack) => {
@@ -867,7 +869,7 @@ fn write_message[Stream: streams::Duplex](connection: Stream, writing: mut Writi
 }
 
 fn write_responses[Stream: streams::Duplex](stream: Stream, outbound: tasks::Channel[flow::Outbound])
-  uses Handles, Tasks, Clock
+  uses Handles, Tasks, Clock, RunForever
 {
   var writing = Writing(
     encoder: hpack::Encoder.new(),
@@ -891,7 +893,7 @@ fn write_responses[Stream: streams::Duplex](stream: Stream, outbound: tasks::Cha
 }
 
 fn drain(admission: tasks::Cell[Admission], drained: tasks::Channel[Unit], outbound: tasks::Channel[flow::Outbound])
-  uses Tasks
+  uses Tasks, RunForever
 {
   let active = admission.update(fn(state) {
     state.is_draining = true
@@ -914,7 +916,7 @@ internal fn serve[Stream: streams::Duplex](
   stopping: tasks::Channel[Unit],
   respond: (fn(own Arrival) uses generic Granted),
 )
-  uses Tasks, Handles, Clock, generic Granted
+  uses Tasks, Handles, Clock, generic Granted, RunForever
 {
   var opened = own inbox
   let opening = match take_bytes(stream, inbox: mut opened, count: 24) {
@@ -1005,7 +1007,7 @@ internal type Session[Stream: streams::Duplex](
 )
 
 internal fn connect[Stream: streams::Duplex](stream: own Stream, header_limit: UInt64) -> Result[Session[Stream], Failure]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   open_connection(stream, is_server: false, header_limit: header_limit)?
   Ok(Session(
@@ -1033,14 +1035,16 @@ fn outstream_index(outstreams: Slice[Outstream], stream: UInt32) -> Option[UInt6
   None
 }
 
-fn decode_response[Stream: streams::Duplex](session: mut Session[Stream], index: UInt64) -> Result[Unit, Failure] {
+fn decode_response[Stream: streams::Duplex](session: mut Session[Stream], index: UInt64) -> Result[Unit, Failure]
+  uses RunForever
+{
   if index >= session.outstreams.length() {
     return Ok(Unit)
   }
   let block = map::exchange(mut session.outstreams[index].block, value: [])
   let fields = match mut session.decoder.decode(block.slice(), list_limit: session.header_limit) {
     Ok(fields) => own fields
-    Err(error) => return Err(violation(compression_error, message: error.message.slice()))
+    Err(error) => return Err(violation(compression_error, message: error.message))
   }
   if index >= session.outstreams.length() {
     return Ok(Unit)
@@ -1060,7 +1064,7 @@ fn decode_response[Stream: streams::Duplex](session: mut Session[Stream], index:
 }
 
 fn client_frame[Stream: streams::Duplex](session: mut Session[Stream], frame: own Frame) -> Result[Unit, Failure]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   match session.continuation {
     Some(stream) => {
@@ -1183,7 +1187,7 @@ fn client_frame[Stream: streams::Duplex](session: mut Session[Stream], frame: ow
 }
 
 fn pump[Stream: streams::Duplex](session: mut Session[Stream]) -> Result[Unit, Failure]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let frame = read_frame(session.stream, inbox: mut session.inbox)?
   client_frame(mut session, frame: own frame)
@@ -1194,7 +1198,7 @@ internal fn begin[Stream: streams::Duplex](
   fields: Slice[hpack::Field],
   body: Slice[UInt8],
 ) -> Result[UInt32, Failure]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if session.is_going_away || session.next_stream > 2147483645 {
     return Err(Failure.Closed)
@@ -1261,7 +1265,7 @@ internal fn begin[Stream: streams::Duplex](
 }
 
 internal fn head[Stream: streams::Duplex](session: mut Session[Stream], stream: UInt32) -> Result[List[hpack::Field], Failure]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while true {
     let index = match outstream_index(session.outstreams.slice(), stream: stream) {
@@ -1286,7 +1290,7 @@ internal fn head[Stream: streams::Duplex](session: mut Session[Stream], stream: 
 }
 
 internal fn next_data[Stream: streams::Duplex](session: mut Session[Stream], stream: UInt32) -> Result[Option[List[UInt8]], Failure]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while true {
     let index = match outstream_index(session.outstreams.slice(), stream: stream) {
@@ -1321,7 +1325,7 @@ internal fn next_data[Stream: streams::Duplex](session: mut Session[Stream], str
 }
 
 internal fn release[Stream: streams::Duplex](session: mut Session[Stream], stream: UInt32)
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   match outstream_index(session.outstreams.slice(), stream: stream) {
     Some(index) => {

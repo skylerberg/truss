@@ -28,7 +28,7 @@ let emit_debug_call env builder ~output ty (place : Lowered.place) =
     if Memory_layout.has_zero_size env ty then []
     else [ Lowered.Address { place; writable = false } ]
   in
-  Emit_c.Builder.emit builder
+  Emit_c.Ir_builder.emit builder
     (Call
        {
          target = Direct { function_ = Item (Debug ty); signature = make_signature env ty };
@@ -39,8 +39,8 @@ let emit_debug_call env builder ~output ty (place : Lowered.place) =
 let write_scalar_debug env builder ~output (scalar : Memory_layout.scalar) (place : Lowered.place) =
   let write writer ty place = Writing.emit_write_call env builder ~output writer ty place in
   let write_widened writer wide (integer : Memory_layout.integer) =
-    let value = Emit_c.Builder.allocate_local builder (Value wide) in
-    Emit_c.Builder.emit builder
+    let value = Emit_c.Ir_builder.allocate_local builder (Value wide) in
+    Emit_c.Ir_builder.emit builder
       (Assign (Lowered.make_local_place value, Convert (Copy place, Integer integer)));
     write writer wide (Lowered.make_local_place value)
   in
@@ -54,32 +54,34 @@ let write_scalar_debug env builder ~output (scalar : Memory_layout.scalar) (plac
   | Pointer _ | Nullable_pointer _ -> write_text env builder ~output "pointer"
 
 let build_debug env ty =
-  let builder = Emit_c.Builder.create env ~item:(Debug ty) in
+  let builder = Emit_c.Ir_builder.create env ~item:(Debug ty) in
   let parameter =
     if Memory_layout.has_zero_size env ty then None
-    else Some (Emit_c.Builder.allocate_local builder (Writing.make_value_parameter ty))
+    else Some (Emit_c.Ir_builder.allocate_local builder (Writing.make_value_parameter ty))
   in
   let value : Lowered.place =
     match parameter with
     | Some parameter_local -> { root = Local parameter_local; projections = [ Deref ] }
     | None -> Lowered.make_local_place 0
   in
-  let output_pointer = Emit_c.Builder.allocate_local builder (Writing.make_output_parameter env) in
+  let output_pointer =
+    Emit_c.Ir_builder.allocate_local builder (Writing.make_output_parameter env)
+  in
   let output = Lowered.Copy (Lowered.make_local_place output_pointer) in
   let write_output_text = write_text env builder ~output in
   let emit_output_call = emit_debug_call env builder ~output in
-  Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
+  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let rec write_list element ~index_element ~count =
     write_output_text "[";
-    Emit_c.Builder.emit_loop builder ~count (fun index ->
-        let is_after_first = Emit_c.Builder.allocate_local builder (Raw Bool) in
-        Emit_c.Builder.emit builder
+    Emit_c.Ir_builder.emit_loop builder ~count (fun index ->
+        let is_after_first = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place is_after_first,
                Binary
                  (Not_equal, Copy (Lowered.make_local_place index), Lowered.make_uint64_constant 0)
              ));
-        Emit_c.Builder.emit_when builder
+        Emit_c.Ir_builder.emit_when builder
           (Copy (Lowered.make_local_place is_after_first))
           (fun () -> write_output_text ", ");
         emit_output_call element (index_element (Lowered.Copy (Lowered.make_local_place index))));
@@ -147,21 +149,21 @@ let build_debug env ty =
             ~index_element:(fun index -> Lowered.project value (Index index))
             ~count:(Lowered.make_uint64_constant count)
       | _, Sum variants ->
-          let after = Emit_c.Builder.allocate_block builder in
+          let after = Emit_c.Ir_builder.allocate_block builder in
           let cases =
             List.map
               (fun (variant_shape : Memory_layout.variant_shape) ->
-                let case = Emit_c.Builder.allocate_block builder in
-                Emit_c.Builder.run_in_block builder case (fun () ->
+                let case = Emit_c.Ir_builder.allocate_block builder in
+                Emit_c.Ir_builder.run_in_block builder case (fun () ->
                     write_fields variant_shape.name variant_shape.fields (fun field ->
                         Lowered.project value
                           (Variant_field { variant = variant_shape.name; field }));
-                    Emit_c.Builder.finish builder (Goto after));
+                    Emit_c.Ir_builder.finish builder (Goto after));
                 (variant_shape.name, case))
               variants
           in
-          Emit_c.Builder.finish builder (Switch_variant { place = value; cases; default = None });
-          Emit_c.Builder.start builder after));
-  Emit_c.Builder.finish builder (Return None);
-  Emit_c.Builder.build builder
+          Emit_c.Ir_builder.finish builder (Switch_variant { place = value; cases; default = None });
+          Emit_c.Ir_builder.start builder after));
+  Emit_c.Ir_builder.finish builder (Return None);
+  Emit_c.Ir_builder.build builder
     { parameters = Option.to_list parameter @ [ output_pointer ]; result = None; returns = true }

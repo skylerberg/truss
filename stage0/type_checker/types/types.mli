@@ -39,18 +39,6 @@ and capability =
   | Capability_projection of { base : ty; trait : trait_reference; name : string }
   | Capability_variable of int
   | Capability_error of Diagnostic.reported
-  | Divergence of divergence
-
-and divergence =
-  | Always
-  | Of_parameter of parameter
-  | Of_impl_method of {
-      self_type : ty;
-      trait : trait_reference;
-      name : string;
-      receiver : Path.receiver;
-    }
-  | Of_variable of int
 
 and capability_set = private capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
@@ -77,20 +65,21 @@ val is_float_type : ty -> bool
 val make_capability_set : capability list -> capability_set
 val no_capabilities : capability_set
 val union_capabilities : capability_set -> capability_set -> capability_set
-val unconditional_divergence : capability
-val panic : capability
-val list_divergence : capability_set -> capability_set
-val remove_divergence : capability_set -> capability_set
+val run_forever : capability
+val has_capability : capability -> capability_set -> bool
+val exists_capability : (capability -> bool) -> capability_set -> bool
+val list_capabilities : capability_set -> capability list
+val built_in_capabilities : capability_set
+val is_built_in_capability : capability -> bool
 val terminates : capability_set -> bool
-val leave_divergence_to_parameters : capability_set -> capability_set
 val intersect_capabilities : capability_set list -> capability_set
-val is_capability_subset : capability_set -> capability_set -> bool
 val subtract_capabilities : capability_set -> capability_set -> capability_set
+val is_capability_subset : capability_set -> capability_set -> bool
 
 val compute_missing_capabilities :
   required:capability_set -> available:capability_set -> capability_set
 
-val flat_map_capabilities : (capability -> capability list) -> capability_set -> capability_set
+val replace_capabilities : (capability -> capability_set option) -> capability_set -> capability_set
 
 type substitution
 
@@ -118,8 +107,7 @@ val show_mode : mode -> string
 val map : ?map_capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
 val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
 val find_specification_only_type : ty -> ty option
-val has_capability_variable : capability_set -> bool
-val may_panic : capability_set -> bool
+val contains_capability_variable : capability_set -> bool
 val has_unsolved_capabilities : capability_set -> bool
 val equal : ty -> ty -> bool
 val is_error : ty -> bool
@@ -131,7 +119,6 @@ val costs_imply : provided:cost list -> required:cost list -> bool
 val show : ty -> string
 val describe : ty -> string
 val show_capability : capability -> string
-val show_impl_method : ty -> trait_reference -> string -> string
 val show_trait : trait_reference -> string
 val show_argument : argument -> string
 val show_capabilities : capability_set -> string
@@ -160,6 +147,7 @@ type signature = {
   uses : capability_set;
   costs : cost list;
   specification_only : bool;
+  is_update_step : bool;
   capture_free_parameters : string list;
 }
 

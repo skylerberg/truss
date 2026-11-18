@@ -55,7 +55,6 @@ module Code = struct
     | Lends_own
     | Repeated_clause
     | Cost_word
-    | Finite_not_time
     | Loop_cost_bound
     | Function_type_names
     | Misplaced_requires
@@ -178,14 +177,20 @@ module Code = struct
     | Extra_member
     | Signature_mismatch
     | Missing_required_impl
-    | Implements_panic
+    | Implements_built_in_capability
     | Impl_uses
     | Unknown_associated_type
     | Unknown_associated_capability
     | Associated_type_not_fixed
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
-  type usage = Unused_variable | Unused_function | Unused_constant | Unreachable_code
+
+  type usage =
+    | Unused_variable
+    | Unused_function
+    | Unused_constant
+    | Unreachable_code
+    | Self_comparison
 
   type ownership =
     | Views_temporary
@@ -208,7 +213,6 @@ module Code = struct
 
   type capabilities =
     | Not_available
-    | May_not_terminate
     | Lambda_uses
     | Not_granted
     | Provide_mode
@@ -315,7 +319,6 @@ module Code = struct
     | Lends_own -> "lends_own"
     | Repeated_clause -> "repeated_clause"
     | Cost_word -> "cost_word"
-    | Finite_not_time -> "finite_not_time"
     | Loop_cost_bound -> "loop_cost_bound"
     | Function_type_names -> "function_type_names"
     | Misplaced_requires -> "misplaced_requires"
@@ -440,7 +443,7 @@ module Code = struct
     | Extra_member -> "extra_member"
     | Signature_mismatch -> "signature_mismatch"
     | Missing_required_impl -> "missing_required_impl"
-    | Implements_panic -> "implements_panic"
+    | Implements_built_in_capability -> "implements_built_in_capability"
     | Impl_uses -> "impl_uses"
     | Unknown_associated_type -> "unknown_associated_type"
     | Unknown_associated_capability -> "unknown_associated_capability"
@@ -459,6 +462,7 @@ module Code = struct
     | Unused_function -> "unused_function"
     | Unused_constant -> "unused_constant"
     | Unreachable_code -> "unreachable_code"
+    | Self_comparison -> "self_comparison"
 
   let name_ownership_code code =
     match code with
@@ -483,7 +487,6 @@ module Code = struct
   let name_capabilities_code code =
     match code with
     | Not_available -> "not_available"
-    | May_not_terminate -> "may_not_terminate"
     | Lambda_uses -> "lambda_uses"
     | Not_granted -> "not_granted"
     | Provide_mode -> "provide_mode"
@@ -554,7 +557,7 @@ let make ?(notes = []) ?(fixes = []) ~code span message = { code; message; span;
 type reported = Reported
 
 let make_reported (_ : _ diagnostic) = Reported
-let make_recovered _ = Reported
+let reported_elsewhere = Reported
 let fix title edits = { title; edits }
 let replace span replacement = { span; replacement }
 let insert at replacement = { span = at; replacement }
@@ -570,6 +573,11 @@ let find_closest text candidates =
   match String.spellcheck ~max_dist:(fun _ -> limit) enumerate_candidates text with
   | closest :: _ -> Some closest
   | [] -> None
+
+let list_spelling_fixes span ~written candidates =
+  match find_closest written candidates with
+  | Some candidate -> [ fix (Printf.sprintf "Write `%s`." candidate) [ replace span candidate ] ]
+  | None -> []
 
 let show_count count singular plural =
   Printf.sprintf "%d %s" count (if count = 1 then singular else plural)
@@ -834,4 +842,7 @@ let to_json source diagnostics =
 
 module For_testing = struct
   let limit = limit
+
+  let is_unused_definition (code : Code.t) =
+    match code with Usage (Unused_function | Unused_constant) -> true | _ -> false
 end

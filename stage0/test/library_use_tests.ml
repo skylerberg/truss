@@ -1,6 +1,6 @@
 let check packages file =
   let database = Support.make_database packages in
-  match Support.list_diagnostics database file with
+  match Support.list_fragment_diagnostics database file with
   | [] -> Support.list_proof_diagnostics database file
   | errors -> errors
 
@@ -33,11 +33,12 @@ let () =
     (fun () -> expect_proven Fixtures.Library_use.lookups_by_views_of_keys)
 
 let () =
-  Harness.test "a display that ends is proven, and a function with a time clause calls it"
-    (fun () -> expect_proven Fixtures.Library_use.point_display_called_by_a_timed_function);
-  Harness.test "a display that may not end is rejected" (fun () ->
+  Harness.test "a display that ends is proven, and a function that terminates calls it" (fun () ->
+      expect_proven Fixtures.Library_use.point_display_called_by_a_function_that_terminates);
+  Harness.test "a display that may run forever is rejected" (fun () ->
       Support.expect_one_diagnostic ~check Fixtures.Library_use.display_with_an_endless_loop
-        "capabilities.may_not_terminate")
+        "capabilities.not_available"
+        ~says:"`display` can use only the capabilities `Display` declares for it.")
 
 let () =
   Harness.test "two strings with the same text are equal" (fun () ->

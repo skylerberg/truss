@@ -1,0 +1,14 @@
+trait Grow {
+  fn grow(self) -> Int64
+    uses RunForever
+}
+
+type Seed(height: Int64)
+
+impl Grow for Seed {
+  fn grow(self) -> Int64
+    uses RunForever
+  {
+    self.grow()
+  }
+}

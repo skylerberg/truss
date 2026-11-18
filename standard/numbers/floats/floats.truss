@@ -144,7 +144,7 @@ impl Hash for Float32 {
   fn hash(self, hasher: mut Hasher)
     cost allocations == 0
   {
-    mut hasher.write(intrinsic::convert(intrinsic::to_bits[Float32, UInt32](self)))
+    mut hasher.write(if self == 0.0 { 0 } else { intrinsic::convert(intrinsic::to_bits[Float32, UInt32](self)) })
   }
 }
 
@@ -211,7 +211,6 @@ theorem float64_less_then_less(first: Float64, second: Float64, third: Float64)
   requires intrinsic::less(first, right: second)
   requires intrinsic::less(second, right: third)
   ensures first <= third
-  cost time finite
 {
 }
 
@@ -219,7 +218,6 @@ theorem float64_less_then_equal(first: Float64, second: Float64, third: Float64)
   requires intrinsic::less(first, right: second)
   requires intrinsic::equal(second, right: third)
   ensures first <= third
-  cost time finite
 {
 }
 
@@ -227,7 +225,6 @@ theorem float64_equal_then_less(first: Float64, second: Float64, third: Float64)
   requires intrinsic::equal(first, right: second)
   requires intrinsic::less(second, right: third)
   ensures first <= third
-  cost time finite
 {
 }
 
@@ -235,7 +232,6 @@ theorem float64_equal_then_equal(first: Float64, second: Float64, third: Float64
   requires intrinsic::equal(first, right: second)
   requires intrinsic::equal(second, right: third)
   ensures first <= third
-  cost time finite
 {
 }
 
@@ -372,7 +368,7 @@ impl Hash for Float64 {
   fn hash(self, hasher: mut Hasher)
     cost allocations == 0
   {
-    mut hasher.write(intrinsic::to_bits[Float64, UInt64](self))
+    mut hasher.write(if self == 0.0 { 0 } else { intrinsic::to_bits[Float64, UInt64](self) })
   }
 }
 

@@ -88,7 +88,7 @@ test "a deque rotates in both directions" {
   assert listed(queue) == [1, 2, 3, 4, 0]
 }
 
-test "a deque is collected, extended, searched, cleared, and turned into a list" {
+test "a deque is collected, extended, searched, cleared, and turned into a list" uses RunForever {
   var queue: collections::Deque[Int64] = collections::Deque.collect([1, 2, 3].cursor())
   mut queue.push_front(0)
   mut queue.extend([4, 5].cursor())

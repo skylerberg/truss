@@ -1,5 +1,5 @@
 fn run(work: (fn() -> Instant uses generic Mine)) -> Instant
-  uses generic Mine
+  uses generic Mine, RunForever
 {
   let again = later(fn() {
     let _ = work()

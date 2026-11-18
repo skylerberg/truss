@@ -5,7 +5,7 @@ val make_signature : Memory_layout.env -> Lowered.ty list -> Lowered.signature
 
 val emit_write_call :
   Memory_layout.env ->
-  Emit_c.Builder.t ->
+  Emit_c.Ir_builder.t ->
   output:Lowered.operand ->
   Well_known.t ->
   Ground.ty ->
@@ -14,7 +14,7 @@ val emit_write_call :
 
 val emit_write_bytes_call :
   Memory_layout.env ->
-  Emit_c.Builder.t ->
+  Emit_c.Ir_builder.t ->
   output:Lowered.operand ->
   Well_known.t ->
   buffer:Lowered.operand ->

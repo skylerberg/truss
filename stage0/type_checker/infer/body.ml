@@ -85,7 +85,7 @@ let list_clause_expressions (clauses : Syntax.clause list) =
       | Decreases measures -> List.map (fun measure -> (measure, `Cost_function)) measures
       | Cost { bound = Big_o value | At_most value | Exactly value; _ } ->
           [ (value, `Cost_function) ]
-      | Cost { bound = Finite; _ } | Uses _ | Clause_error -> [])
+      | Uses _ | Clause_error -> [])
     clauses
 
 let check_clauses state env (clauses : Syntax.clause list) =
@@ -749,7 +749,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       law_parameters = [];
       frames = [];
       locals_read = [];
-      receiver_modes = [];
+      keyword_modes = [];
       places_without_keyword = [];
       mode_keywords = [];
       yielded = Hashtbl.create 4;

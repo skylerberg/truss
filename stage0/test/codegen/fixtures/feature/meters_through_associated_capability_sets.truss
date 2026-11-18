@@ -69,7 +69,7 @@ impl Feed for Twice[Source: Feed] {
 }
 
 fn drain[Source: Feed](source: mut Source) -> Int64
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var total = 0
   while mut source.pull() is Some(value) {
@@ -152,7 +152,7 @@ fn doubled[Source: Cursor[Element = Int64]](source: own Source) -> Doubled[Sourc
 }
 
 fn added[Source: Cursor[Element = Int64]](source: own Source) -> Int64
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var total = 0
   for value in own source {
@@ -167,7 +167,7 @@ fn first[Source: Cursor](source: mut Source) -> Option[Source.Element]
   mut source.next()
 }
 
-test "a generic function takes the evidence that its instance's type needs" {
+test "a generic function takes the evidence that its instance's type needs" uses RunForever {
   var counter = Counter(next: 0)
   assert drain(mut counter) == 6
   provide Table(values: [3, 4]) {
@@ -188,7 +188,7 @@ test "a method that a trait gives a body takes the evidence of its impl's set" {
   }
 }
 
-test "a set that an impl defines from a parameter's set" {
+test "a set that an impl defines from a parameter's set" uses RunForever {
   var pure = Twice(source: Twice(source: Counter(next: 0)))
   assert drain(mut pure) == 0
   provide Table(values: [7]) {
@@ -209,7 +209,7 @@ test "a function value whose type uses a set" {
   }
 }
 
-test "a call through any passes no evidence for a set" {
+test "a call through any passes no evidence for a set" uses RunForever {
   var boxed: any Feed = any Counter(next: 0)
   assert through(mut boxed) == Some(2)
   var cursor: any Cursor[Element = Int64] = any plain(3)
@@ -217,7 +217,7 @@ test "a call through any passes no evidence for a set" {
   assert own cursor.last() == Some(2)
 }
 
-test "the methods of Cursor on a cursor that uses a capability" {
+test "the methods of Cursor on a cursor that uses a capability" uses RunForever {
   provide Table(values: [10]) {
     assert readings(3).count() == 3
     assert readings(3).to_list() == [10, 11, 12]
@@ -230,7 +230,7 @@ test "the methods of Cursor on a cursor that uses a capability" {
   assert plain(3).count() == 3
 }
 
-test "a generic function over a cursor passes the evidence where it calls next" {
+test "a generic function over a cursor passes the evidence where it calls next" uses RunForever {
   assert added(plain(4)) == 6
   provide Table(values: [1, 1]) {
     assert added(readings(3)) == 9
@@ -243,7 +243,7 @@ test "a generic function over a cursor passes the evidence where it calls next" 
   }
 }
 
-test "a cursor whose set is its source's set" {
+test "a cursor whose set is its source's set" uses RunForever {
   assert doubled(plain(3)).to_list() == [0, 2, 4]
   assert added(doubled(doubled(plain(3)))) == 12
   provide Table(values: [10]) {

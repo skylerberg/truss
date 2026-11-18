@@ -55,7 +55,6 @@ module Code : sig
     | Lends_own
     | Repeated_clause
     | Cost_word
-    | Finite_not_time
     | Loop_cost_bound
     | Function_type_names
     | Misplaced_requires
@@ -178,14 +177,20 @@ module Code : sig
     | Extra_member
     | Signature_mismatch
     | Missing_required_impl
-    | Implements_panic
+    | Implements_built_in_capability
     | Impl_uses
     | Unknown_associated_type
     | Unknown_associated_capability
     | Associated_type_not_fixed
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
-  type usage = Unused_variable | Unused_function | Unused_constant | Unreachable_code
+
+  type usage =
+    | Unused_variable
+    | Unused_function
+    | Unused_constant
+    | Unreachable_code
+    | Self_comparison
 
   type ownership =
     | Views_temporary
@@ -208,7 +213,6 @@ module Code : sig
 
   type capabilities =
     | Not_available
-    | May_not_terminate
     | Lambda_uses
     | Not_granted
     | Provide_mode
@@ -286,13 +290,13 @@ val fix : string -> 'span edit list -> 'span fix
 val replace : 'span -> string -> 'span edit
 val insert : 'span -> string -> 'span edit
 val delete : 'span -> 'span edit
-val find_closest : string -> string list -> string option
+val list_spelling_fixes : 'span -> written:string -> string list -> 'span fix list
 val show_count : int -> string -> string -> string
 
 type reported
 
 val make_reported : _ diagnostic -> reported
-val make_recovered : _ -> reported
+val reported_elsewhere : reported
 val map_spans : ('a -> 'b) -> 'a diagnostic -> 'b diagnostic
 val apply_fix : string -> Source.span fix -> string
 val apply_edits : string -> Source.span edit list -> string
@@ -316,4 +320,5 @@ val quote : string -> string
 
 module For_testing : sig
   val limit : int
+  val is_unused_definition : Code.t -> bool
 end

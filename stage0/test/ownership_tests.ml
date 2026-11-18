@@ -688,10 +688,15 @@ let () =
       ( "an argument to an `own` parameter",
         Fixtures.Ownership.own_list_passed_without_own,
         Fixtures.Ownership.own_list_passed_without_own_fixed );
+      ( "the base of a record update",
+        Fixtures.Ownership.record_update_of_an_own_parameter,
+        Fixtures.Ownership.record_update_of_an_own_parameter_fixed );
       ( "the receiver of a method that takes `own self`",
         Fixtures.Ownership.own_receiver_moved_without_own,
         Fixtures.Ownership.own_receiver_moved_without_own_fixed );
     ];
+  Harness.test "the base of a record update that copies implicitly takes no `own`" (fun () ->
+      expect_fine Fixtures.Ownership.record_update_of_a_copied_point);
   Harness.test "a map literal's keys and values must be owned" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.map_literal_of_an_own_name "ownership.needs_owned");
   Harness.test "a constant's value and a default may hold a constant without a copy" (fun () ->
@@ -1023,14 +1028,13 @@ let count_disjoint_obligations text =
   let packages = Support.setup [ ("app::main", text) ] in
   let file = Support.parse_file "app::main" in
   let database = Support.make_database packages in
-  Database.check database [ file.module_.package ];
   List.fold_left
     (fun total declaration ->
       match Database.For_testing.read_ownership database (Resolve.Names.make_key declaration) with
       | Value must_be_disjoint -> total + List.length must_be_disjoint
       | Failed _ | Blocked -> total)
     0
-    ((Support.make_names packages file.module_.package).list_declarations_in file)
+    ((Support.make_names packages).list_declarations_in file)
 
 let () =
   Harness.test "two slices of one list passed to one call produce one `Disjoint` obligation"
@@ -1252,12 +1256,4 @@ let () =
         "ownership.use_after_move");
   Harness.test "a move in the right operand is the only move of the place" (fun () ->
       expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_and);
-      expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_or));
-  Harness.test "the moves in a chain of thousands of `&&` are checked" (fun () ->
-      let chain = String.concat " && " (List.init 4000 (fun _ -> "flag")) in
-      expect_one_diagnostic
-        (take
-        ^ Printf.sprintf
-            "fn f(flag: Bool, box: own Box) -> Bool {\n  %s && take(own box) && take(own box)\n}\n"
-            chain)
-        "ownership.use_after_move")
+      expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_or))

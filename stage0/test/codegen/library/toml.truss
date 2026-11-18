@@ -1,18 +1,22 @@
 use standard::serialization
 use standard::toml
 
-fn parsed(text: StringSlice) -> Map[String, toml::Value] {
+fn parsed(text: StringSlice) -> Map[String, toml::Value]
+  uses RunForever
+{
   match toml::parse(text) {
     Ok(table) => own table
     Err(_) => [:]
   }
 }
 
-fn rejects(text: StringSlice) -> Bool {
+fn rejects(text: StringSlice) -> Bool
+  uses RunForever
+{
   toml::parse(text) is Err(_)
 }
 
-test "keys, strings, numbers, and booleans are read as TOML 1.0 writes them" {
+test "keys, strings, numbers, and booleans are read as TOML 1.0 writes them" uses RunForever {
   let table = parsed(
     "# a comment\ntitle = \"TOML \\\"example\\\" \\u00e9\"\nliteral = 'C:\\path'\nbare-key_1 = 1_000\n\"quoted key\" = -17\nhex = 0xDEAD_beef\noctal = 0o755\nbinary = 0b1101\npi = 3.14_15\nexponent = -2e-2\npositive = +inf\nmissing = nan\non = true\noff = false\n",
   )
@@ -30,14 +34,14 @@ test "keys, strings, numbers, and booleans are read as TOML 1.0 writes them" {
   assert table["on"] == toml::Value.Boolean(value: true) && table["off"] == toml::Value.Boolean(value: false)
 }
 
-test "multi-line strings trim their first newline and the whitespace after a line-ending backslash" {
+test "multi-line strings trim their first newline and the whitespace after a line-ending backslash" uses RunForever {
   let table = parsed("basic = \"\"\"\nRoses \\\n    are red\"\"\"\nliteral = '''\nfirst\nsecond'''\nquotes = \"\"\"two \"\" quotes\"\"\"\"\n")
   assert table["basic"] == toml::Value.String(value: "Roses are red")
   assert table["literal"] == toml::Value.String(value: "first\nsecond")
   assert table["quotes"] == toml::Value.String(value: "two \"\" quotes\"")
 }
 
-test "dates and times are read in each of TOML's four forms" {
+test "dates and times are read in each of TOML's four forms" uses RunForever {
   let table = parsed(
     "offset = 1979-05-27T07:32:00-07:00\nutc = 1979-05-27 07:32:00Z\nlocal = 1979-05-27T07:32:00.5\nday = 1979-05-27\nclock = 07:32:00\n",
   )
@@ -48,7 +52,7 @@ test "dates and times are read in each of TOML's four forms" {
   assert table["clock"] is LocalTime(clock) && "${clock}" == "07:32:00"
 }
 
-test "tables, dotted keys, inline tables, and arrays of tables nest" {
+test "tables, dotted keys, inline tables, and arrays of tables nest" uses RunForever {
   let table = parsed(
     "name.first = \"Ada\"\nname.last = \"Lovelace\"\npoint = { x = 1, y.z = 2 }\nlist = [\n  1, # one\n  2,\n]\n[server.alpha]\nip = \"10.0.0.1\"\n[[fruit]]\nname = \"apple\"\n[fruit.physical]\ncolor = \"red\"\n[[fruit]]\nname = \"banana\"\n",
   )
@@ -62,7 +66,7 @@ test "tables, dotted keys, inline tables, and arrays of tables nest" {
     && fruits[1] is Table(banana) && banana["name"] == toml::Value.String(value: "banana")
 }
 
-test "a key or a table defined twice, or a table extended after it is inline, is rejected" {
+test "a key or a table defined twice, or a table extended after it is inline, is rejected" uses RunForever {
   assert rejects("a = 1\na = 2\n")
   assert rejects("[a]\n[a]\n")
   assert rejects("[a]\nb.c = 1\n[a.b]\n")
@@ -83,7 +87,7 @@ type Server(host: String, port: UInt16 = 8080, tags: List[String] = [])
 type Settings(name: String, debug: Bool, servers: List[Server], limit: Option[Int64])
   derives Equal, serialization::Serialize, serialization::Deserialize
 
-test "a type that derives Deserialize is read from TOML, and Serialize writes it back" {
+test "a type that derives Deserialize is read from TOML, and Serialize writes it back" uses RunForever {
   let text = "name = \"site\"\ndebug = false\n\n[[servers]]\nhost = \"a\"\n\n[[servers]]\nhost = \"b\"\nport = 9000\ntags = [\"x\"]\n"
   let read: Result[Settings, toml::Error] = toml::decode(text)
   let expected = Settings(
@@ -99,7 +103,7 @@ test "a type that derives Deserialize is read from TOML, and Serialize writes it
   assert wrong is Err(Deserialize(error)) && error.path == "/name"
 }
 
-test "to_text writes keys that need quotes, and floats with a point" {
+test "to_text writes keys that need quotes, and floats with a point" uses RunForever {
   var table: Map[String, toml::Value] = [:]
   table["a b"] = toml::Value.Float(value: 1.0)
   table["plain"] = toml::Value.String(value: "line\nnext")

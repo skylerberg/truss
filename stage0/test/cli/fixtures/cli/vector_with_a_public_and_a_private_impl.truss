@@ -1,0 +1,17 @@
+public type Vector(x: Int64, y: Int64)
+
+trait Measured {
+  fn measure(self) -> Int64
+}
+
+impl Measured for Vector {
+  fn measure(self) -> Int64 {
+    self.x
+  }
+}
+
+impl Display for Vector {
+  fn display(self, output: mut String) {
+    mut output.push("a vector")
+  }
+}

@@ -27,7 +27,7 @@ impl Display for Error {
       }
       Protocol(message) => {
         mut output.push("TLS: ")
-        mut output.push(message.slice())
+        mut output.push(message)
       }
       Certificate(error) => error.display(mut output)
       System(error) => error.display(mut output)
@@ -115,7 +115,9 @@ fn expand(function: cryptography::HashFunction, secret: Slice[UInt8], informatio
   var output: List[UInt8] = []
   var previous: List[UInt8] = []
   var counter: UInt8 = 1
-  while output.length() < length && counter < 255 {
+  while output.length() < length && counter < 255
+    decreases 255 - counter
+  {
     var input = previous.copy()
     mut input.append_slice(information)
     mut input.push(counter)
@@ -263,7 +265,9 @@ fn open_record(keys: mut Keys, header: Slice[UInt8], sealed: Slice[UInt8]) -> Re
     Ok(inner) => own inner
     Err(_) => return Err(Error.Alert(description: 20))
   }
-  while inner.length() > 0 && inner[inner.length() - 1] == 0 {
+  while inner.length() > 0 && inner[inner.length() - 1] == 0
+    decreases inner.length()
+  {
     let _ = mut inner.pop()
   }
   match mut inner.pop() {
@@ -304,7 +308,7 @@ type Wire[Stream: streams::Duplex](
 )
 
 fn read_exactly[Stream: streams::Duplex](wire: mut Wire[Stream], count: UInt64) -> Result[List[UInt8], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
   ensures !(result is Ok(bytes) && bytes.length() != count)
 {
   while wire.raw.length() < count {
@@ -325,7 +329,7 @@ fn read_exactly[Stream: streams::Duplex](wire: mut Wire[Stream], count: UInt64) 
 type Record(content_type: UInt8, content: List[UInt8])
 
 fn read_record[Stream: streams::Duplex](wire: mut Wire[Stream]) -> Result[Record, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let header = read_exactly(mut wire, count: 5)?
   let length = intrinsic::convert[UInt8, UInt64](header[3]) * 256 + intrinsic::convert[UInt8, UInt64](header[4])
@@ -366,7 +370,7 @@ fn alert_of(content: Slice[UInt8]) -> Error {
 }
 
 fn write_record[Stream: streams::Duplex](wire: mut Wire[Stream], content_type: UInt8, content: Slice[UInt8]) -> Result[Unit, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var bytes: List[UInt8] = []
   match mut wire.sending {
@@ -390,7 +394,7 @@ fn write_record[Stream: streams::Duplex](wire: mut Wire[Stream], content_type: U
 }
 
 fn read_message[Stream: streams::Duplex](wire: mut Wire[Stream]) -> Result[Message, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while true {
     if wire.buffered.length() >= 4 {
@@ -417,7 +421,7 @@ fn read_message[Stream: streams::Duplex](wire: mut Wire[Stream]) -> Result[Messa
 }
 
 fn write_message[Stream: streams::Duplex](wire: mut Wire[Stream], kind: UInt8, body: Slice[UInt8]) -> Result[Unit, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var message: List[UInt8] = [kind]
   push_vector24(mut message, content: body)
@@ -426,7 +430,7 @@ fn write_message[Stream: streams::Duplex](wire: mut Wire[Stream], kind: UInt8, b
 }
 
 fn random_bytes(count: UInt64) -> List[UInt8]
-  uses Random
+  uses Random, RunForever
 {
   var bytes: List[UInt8] = []
   while bytes.length() < count {
@@ -465,7 +469,7 @@ fn x25519_public(key: cryptography::AgreementKey) -> List[UInt8] {
 }
 
 fn new_share(group: UInt64) -> Share
-  uses Random, Panic
+  uses Random, Panic, RunForever
 {
   if group == p256_group {
     let key = cryptography::EcdhKey.generate(cryptography::Curve.P256)
@@ -498,7 +502,7 @@ fn x25519_secret(key: own cryptography::AgreementKey, peer: Slice[UInt8]) -> Res
 }
 
 fn agree(share: own Share, peer: Slice[UInt8]) -> Result[List[UInt8], Error]
-  uses Panic
+  uses Panic, RunForever
 {
   if share.group == p256_group {
     return match own share.private_p256 {
@@ -535,7 +539,7 @@ fn agree(share: own Share, peer: Slice[UInt8]) -> Result[List[UInt8], Error]
 type Response(public_key: List[UInt8], shared: List[UInt8])
 
 fn respond(group: UInt64, peer: Slice[UInt8]) -> Result[Response, Error]
-  uses Random, Panic
+  uses Random, Panic, RunForever
 {
   if group != hybrid_group {
     let share = new_share(group)
@@ -641,7 +645,9 @@ fn client_hello(random: Slice[UInt8], session: Slice[UInt8], server_name: String
 
 type Extension(kind: UInt64, content: List[UInt8])
 
-fn read_extensions(decoder: mut binary::Decoder) -> Result[List[Extension], Error] {
+fn read_extensions(decoder: mut binary::Decoder) -> Result[List[Extension], Error]
+  uses RunForever
+{
   var extensions: List[Extension] = []
   if decoder.is_at_end() {
     return Ok(own extensions)
@@ -674,7 +680,9 @@ fn find_extension(extensions: Slice[Extension], kind: UInt64) -> Option[List[UIn
 
 type ServerHello(random: List[UInt8], suite: Suite, extensions: List[Extension])
 
-fn parse_server_hello(body: Slice[UInt8], session: Slice[UInt8]) -> Result[ServerHello, Error] {
+fn parse_server_hello(body: Slice[UInt8], session: Slice[UInt8]) -> Result[ServerHello, Error]
+  uses RunForever
+{
   var decoder = binary::Decoder.new(body)
   if decoded(mut decoder.uint16())? != 771 {
     return Err(protocol_error("a ServerHello with the wrong legacy version"))
@@ -836,7 +844,7 @@ fn read_u24(decoder: mut binary::Decoder) -> Result[UInt64, Error] {
 }
 
 fn parse_certificates(body: Slice[UInt8]) -> Result[List[x509::Certificate], Error]
-  uses Panic
+  uses Panic, RunForever
 {
   var decoder = binary::Decoder.new(body)
   let context_length: UInt64 = intrinsic::convert(decoded(mut decoder.uint8())?)
@@ -857,7 +865,7 @@ fn parse_certificates(body: Slice[UInt8]) -> Result[List[x509::Certificate], Err
 }
 
 fn expect_message[Stream: streams::Duplex](wire: mut Wire[Stream], kind: UInt8) -> Result[Message, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let message = read_message(mut wire)?
   if message.kind != kind {
@@ -901,7 +909,7 @@ fn require_record_boundary[Stream: streams::Duplex](wire: Wire[Stream]) -> Resul
 }
 
 public fn connect[Stream: streams::Duplex](stream: own Stream, host: StringSlice, config: ClientConfig) -> Result[Connection[Stream], Error]
-  uses Handles, Tasks, Random, Clock, Panic
+  uses Handles, Tasks, Random, Clock, Panic, RunForever
 {
   var wire = Wire(stream: own stream, raw: [], receiving: None, sending: None, buffered: [], transcript: [])
   let random = random_bytes(32)
@@ -1093,7 +1101,9 @@ type ClientHello(
   extensions: List[Extension],
 )
 
-fn parse_client_hello(body: Slice[UInt8]) -> Result[ClientHello, Error] {
+fn parse_client_hello(body: Slice[UInt8]) -> Result[ClientHello, Error]
+  uses RunForever
+{
   var decoder = binary::Decoder.new(body)
   let _ = decoded(mut decoder.uint16())?
   let random = decoded(mut decoder.bytes(32))?.to_list()
@@ -1110,7 +1120,9 @@ fn parse_client_hello(body: Slice[UInt8]) -> Result[ClientHello, Error] {
   }
   var speaks_tls13 = false
   var at: UInt64 = 1
-  while at < versions.length() && versions.length() - at >= 2 {
+  while at < versions.length() && versions.length() - at >= 2
+    decreases versions.length() - at
+  {
     if u16_at(versions.slice(), at: at) == Some(772) {
       speaks_tls13 = true
     }
@@ -1124,7 +1136,9 @@ fn parse_client_hello(body: Slice[UInt8]) -> Result[ClientHello, Error] {
 
 fn choose_suite(suites: Slice[UInt8]) -> Option[Suite] {
   var at: UInt64 = 0
-  while at < suites.length() && suites.length() - at >= 2 {
+  while at < suites.length() && suites.length() - at >= 2
+    decreases suites.length() - at
+  {
     match u16_at(suites, at: at) {
       Some(code) => match Suite.from_code(intrinsic::convert(code)) {
         Some(suite) => return Some(suite)
@@ -1142,7 +1156,9 @@ fn offered_share(extensions: Slice[Extension]) -> Option[Extension] {
   var at: UInt64 = 2
   var best: Option[Extension] = None
   var best_rank: UInt64 = 0
-  while at < content.length() && content.length() - at >= 4 {
+  while at < content.length() && content.length() - at >= 4
+    decreases content.length() - at
+  {
     let group = u16_at(content.slice(), at: at)?
     let length = u16_at(content.slice(), at: at + 2)?
     if content.length() - at - 4 < length {
@@ -1160,7 +1176,9 @@ fn offered_share(extensions: Slice[Extension]) -> Option[Extension] {
 
 fn lists_u16(content: Slice[UInt8], value: UInt64) -> Bool {
   var at: UInt64 = 2
-  while at < content.length() && content.length() - at >= 2 {
+  while at < content.length() && content.length() - at >= 2
+    decreases content.length() - at
+  {
     if u16_at(content, at: at) == Some(value) {
       return true
     }
@@ -1253,7 +1271,7 @@ fn signing_scheme(key: x509::PrivateKey, extensions: Slice[Extension]) -> Option
 }
 
 fn sign(key: x509::PrivateKey, content: Slice[UInt8]) -> List[UInt8]
-  uses Random, Panic
+  uses Random, Panic, RunForever
 {
   match key {
     Ecdsa(signing) => {
@@ -1311,7 +1329,7 @@ fn server_hello(random: Slice[UInt8], session: Slice[UInt8], suite: Suite, share
 }
 
 public fn accept[Stream: streams::Duplex](stream: own Stream, config: ServerConfig) -> Result[Connection[Stream], Error]
-  uses Handles, Tasks, Random, Clock, Panic
+  uses Handles, Tasks, Random, Clock, Panic, RunForever
 {
   var wire = Wire(stream: own stream, raw: [], receiving: None, sending: None, buffered: [], transcript: [])
   var message = expect_message(mut wire, kind: 1)?
@@ -1453,7 +1471,9 @@ fn update_secret(function: cryptography::HashFunction, secret: Slice[UInt8]) -> 
 
 fn absorb(incoming: mut Incoming, suite: Suite) -> Result[Bool, Error] {
   var wants_update = false
-  while incoming.raw.length() >= 5 && !incoming.is_closed {
+  while incoming.raw.length() >= 5 && !incoming.is_closed
+    decreases incoming.raw.length()
+  {
     let length = intrinsic::convert[UInt8, UInt64](incoming.raw[3]) * 256 + intrinsic::convert[UInt8, UInt64](incoming.raw[4])
     if length > 16640 {
       return Err(protocol_error("a record longer than TLS allows"))
@@ -1483,7 +1503,11 @@ fn absorb(incoming: mut Incoming, suite: Suite) -> Result[Bool, Error] {
       }
     } else if opened.content_type == 22 {
       mut incoming.handshake.append(own opened.content)
-      while incoming.handshake.length() >= 4 {
+      let raw_length = incoming.raw.length()
+      while incoming.handshake.length() >= 4
+        invariant incoming.raw.length() == raw_length
+        decreases incoming.handshake.length()
+      {
         let size = intrinsic::convert[UInt8, UInt64](incoming.handshake[1]) * 65536
           + intrinsic::convert[UInt8, UInt64](incoming.handshake[2]) * 256
           + intrinsic::convert[UInt8, UInt64](incoming.handshake[3])
@@ -1571,7 +1595,7 @@ fn absorb_and_take(incoming: mut Incoming, suite: Suite, chunk: Slice[UInt8], li
 }
 
 fn receive_locked[Stream: streams::Duplex](connection: Connection[Stream], limit: UInt64) -> Result[List[UInt8], SystemError]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let suite = connection.suite
   var chunk: List[UInt8] = []
@@ -1596,7 +1620,7 @@ fn receive_locked[Stream: streams::Duplex](connection: Connection[Stream], limit
 }
 
 fn send_sealed[Stream: streams::Duplex](connection: Connection[Stream], content_type: UInt8, content: Slice[UInt8]) -> Result[Unit, SystemError]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let suite = connection.suite
   let sealed = connection.outgoing.update(fn(outgoing) { seal(mut outgoing, suite: suite, content_type: content_type, content: content) })
@@ -1608,7 +1632,7 @@ fn send_sealed[Stream: streams::Duplex](connection: Connection[Stream], content_
 
 impl streams::Duplex for Connection[Stream: streams::Duplex] {
   fn receive(self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
-    uses Handles, Tasks
+    uses Handles, Tasks, RunForever
   {
     if limit == 0 {
       return Ok(0)
@@ -1629,7 +1653,7 @@ impl streams::Duplex for Connection[Stream: streams::Duplex] {
   }
 
   fn send(self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
-    uses Handles, Tasks
+    uses Handles, Tasks, RunForever
   {
     if bytes.is_empty() {
       return Ok(0)
@@ -1643,7 +1667,7 @@ impl streams::Duplex for Connection[Stream: streams::Duplex] {
   }
 
   fn close_sending(self) -> Result[Unit, SystemError]
-    uses Handles, Tasks
+    uses Handles, Tasks, RunForever
   {
     let outcome = self.writing.hold(fn() { send_sealed(self, content_type: 21, content: [1, 0]) })
     let _ = self.stream.close_sending()

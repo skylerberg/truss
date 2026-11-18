@@ -1,5 +1,4 @@
 fn power(base: Int64, exponent: Int64) -> Int64
-  cost time finite
 {
   base
 }

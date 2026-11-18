@@ -30,11 +30,7 @@ let find_clauses (lookups : Lookups.t) path callee =
         requires = contract.requires;
         ensures = contract.ensures;
         decreases = contract.decreases;
-        costs =
-          List.filter
-            (fun (cost : Mir.cost) ->
-              match cost with { resource = Metric Time; bound = Finite; _ } -> false | _ -> true)
-            contract.costs;
+        costs = contract.costs;
         callbacks = contract.callbacks;
         inherited = false;
       })
@@ -105,15 +101,14 @@ let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
   let is_logic_function =
     match signature with
     | Some (signature : Types.signature) -> (
-        List.for_all
-          (function
-            | Types.Capability_parameter _ | Types.Divergence (Of_parameter _ | Of_impl_method _) ->
-                true
-            | Types.Capability _ | Types.Capability_projection _ | Types.Capability_variable _
-            | Types.Capability_error _
-            | Types.Divergence (Always | Of_variable _) ->
-                false)
-          (signature.uses :> Types.capability list)
+        (not
+           (Types.exists_capability
+              (function
+                | Types.Capability_parameter _ -> false
+                | Types.Capability _ | Types.Capability_projection _ | Types.Capability_variable _
+                | Types.Capability_error _ ->
+                    true)
+              signature.uses))
         && List.for_all
              (fun (info : Types.parameter_info) -> info.mode <> Types.Mut)
              signature.parameters
@@ -188,22 +183,6 @@ let find_resource (cost : Mir.cost) ~locals : Costs.resource option =
         (Locals.find_opt (Core_local local) locals)
   | Calls (Capability path) -> Some (Calls (Capability path))
   | Calls (Capability_method (path, name)) -> Some (Calls (Capability_method (path, name)))
-
-let is_updating_helper (lookups : Lookups.t) (path : Path.t) =
-  match path with
-  | Method { receiver = Mut; _ } -> (
-      match
-        Option.map lookups.interface.names.read_definition (lookups.interface.names.find_key path)
-      with
-      | Some
-          {
-            visibility = Private;
-            kind = Function { signature = { name = Member_name _; _ }; _ };
-            _;
-          } ->
-          true
-      | _ -> false)
-  | _ -> false
 
 let find_comparison_operator (comparison : Core.comparison) =
   match comparison with

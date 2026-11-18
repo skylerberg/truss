@@ -1,13 +1,13 @@
-let render_intrinsic context (intrinsic : Lowered.intrinsic)
+let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
     (arguments : (string * Lowered.ty) list) =
   let render_argument position = fst (List.nth arguments position) in
   let classify_scalar position =
-    C_values.classify_scalar context (snd (List.nth arguments position))
+    C_values.classify_scalar emission (snd (List.nth arguments position))
   in
   let compute_width position = C_values.compute_bit_width (classify_scalar position) in
   let render_unsigned position =
     Printf.sprintf "((%s)%s)"
-      (C_values.render_unsigned_type context (classify_scalar position))
+      (C_values.render_unsigned_type emission (classify_scalar position))
       (render_argument position)
   in
   let all = String.concat ", " (List.map fst arguments) in
@@ -18,7 +18,7 @@ let render_intrinsic context (intrinsic : Lowered.intrinsic)
   | Free -> "t_runtime_free(" ^ all ^ ")"
   | Copy_bytes -> "__builtin_memcpy(" ^ all ^ ")"
   | Move_bytes -> "__builtin_memmove(" ^ all ^ ")"
-  | Compare_bytes -> C_types.use_helper context "t_compare_bytes" ^ "(" ^ all ^ ")"
+  | Compare_bytes -> Emission.use_helper emission "t_compare_bytes" ^ "(" ^ all ^ ")"
   | Add_overflow -> "((uint8_t)__builtin_add_overflow(" ^ all ^ "))"
   | Subtract_overflow -> "((uint8_t)__builtin_sub_overflow(" ^ all ^ "))"
   | Multiply_overflow -> "((uint8_t)__builtin_mul_overflow(" ^ all ^ "))"
@@ -31,18 +31,18 @@ let render_intrinsic context (intrinsic : Lowered.intrinsic)
         (compute_width 0) (render_unsigned 0)
   | Count_ones -> Printf.sprintf "__builtin_popcountll((unsigned long long)%s)" (render_unsigned 0)
   | Swap_bytes -> (
-      let c_type = C_types.render_scalar_type context (classify_scalar 0) in
+      let c_type = C_types.render_scalar_type emission.types (classify_scalar 0) in
       match compute_width 0 with
       | 8 -> render_argument 0
       | width -> Printf.sprintf "((%s)__builtin_bswap%d(%s))" c_type width (render_unsigned 0))
   | Rotate_left | Rotate_right ->
-      let c_type = C_types.render_scalar_type context (classify_scalar 0) in
+      let c_type = C_types.render_scalar_type emission.types (classify_scalar 0) in
       let mask = compute_width 0 - 1 in
       let first, second = if intrinsic = Rotate_left then ("<<", ">>") else (">>", "<<") in
       Printf.sprintf "((%s)((%s %s (%s & %d)) | (%s %s ((-%s) & %d))))" c_type (render_unsigned 0)
         first (render_argument 1) mask (render_unsigned 0) second (render_argument 1) mask
   | Multiply_high ->
-      let c_type = C_types.render_scalar_type context (classify_scalar 0) in
+      let c_type = C_types.render_scalar_type emission.types (classify_scalar 0) in
       let width = compute_width 0 in
       let signed =
         match classify_scalar 0 with Integer integer -> C_runtime.is_signed integer | _ -> false
@@ -62,25 +62,25 @@ let render_intrinsic context (intrinsic : Lowered.intrinsic)
   | Round_even -> Printf.sprintf "%s(%s)" (render_float_builtin "__builtin_roundeven") all
   | Float_bits ->
       Printf.sprintf "%s(%s)"
-        (C_types.use_helper context
+        (Emission.use_helper emission
            (if classify_scalar 0 = Float32 then "t_float32_bits" else "t_float64_bits"))
         all
   | Float_from_bits ->
       Printf.sprintf "%s(%s)"
-        (C_types.use_helper context
+        (Emission.use_helper emission
            (if compute_width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
   | Run_test -> "t_runtime_run_test(" ^ all ^ ")"
   | Coroutine_start ->
       Printf.sprintf
-        "t_runtime_coroutine_start((void (*)(void *, uint64_t))%s.f_code, (void \
+        "t_runtime_coroutine_start((void (*)(void *, uint64_t, void *))%s.f_code, (void \
          *)%s.f_environment, %s)"
         (render_argument 0) (render_argument 0) (render_argument 1)
   | Coroutine_resume -> "t_runtime_coroutine_resume(" ^ all ^ ")"
   | Coroutine_suspend -> "t_runtime_coroutine_suspend()"
   | Tasks_spawn ->
       Printf.sprintf
-        "t_runtime_tasks_spawn(%s, (void (*)(void *, uint64_t))%s.f_code, (void \
+        "t_runtime_tasks_spawn(%s, (void (*)(void *, uint64_t, void *))%s.f_code, (void \
          *)%s.f_environment, %s)"
         (render_argument 0) (render_argument 1) (render_argument 1) (render_argument 2)
   | (Shared_allocate | Shared_retain | Shared_release | Shared_free | Shared_lock | Shared_unlock)
@@ -95,14 +95,14 @@ let render_intrinsic context (intrinsic : Lowered.intrinsic)
         | Shared_lock -> ("t_runtime_shared_lock", "void ", "void *value")
         | _ -> ("t_runtime_shared_unlock", "void ", "void *value")
       in
-      C_values.declare_prototype context symbol
+      Emission.declare_prototype emission symbol
         (Printf.sprintf "%s%s(%s);\n" result symbol parameters);
       symbol ^ "(" ^ all ^ ")"
   | (Blocking_begin | Blocking_end) as blocking ->
       let symbol =
         if blocking = Blocking_begin then "t_runtime_blocking_begin" else "t_runtime_blocking_end"
       in
-      C_values.declare_prototype context symbol (Printf.sprintf "void %s(void);\n" symbol);
+      Emission.declare_prototype emission symbol (Printf.sprintf "void %s(void);\n" symbol);
       symbol ^ "()"
   | Report_tests_to -> "t_runtime_report_tests_to(" ^ all ^ ")"
   | ( Lend_begin | Lend_called | Lend_release | Lend_transfer | Lend_allocate | Lend_defer_drop
@@ -117,10 +117,10 @@ let render_intrinsic context (intrinsic : Lowered.intrinsic)
         | Lend_defer_drop -> "_defer_drop"
         | _ -> "_defer_write_back"
       in
-      C_types.use_helper context "t_lend" ^ name ^ "(" ^ all ^ ")"
+      Emission.use_helper emission "t_lend" ^ name ^ "(" ^ all ^ ")"
   | Live_blocks -> "t_runtime_live_blocks()"
   | Environment ->
-      C_values.declare_prototype context "environ" "extern char **environ;\n";
+      Emission.declare_prototype emission "environ" "extern char **environ;\n";
       "((void *)environ)"
   | Terminated_length ->
       Printf.sprintf "((uint64_t)__builtin_strlen((const char *)%s))" (render_argument 0)
@@ -136,6 +136,23 @@ let render_intrinsic context (intrinsic : Lowered.intrinsic)
         "(%s->evidence.implementation = (void *)%s, %s->evidence.table = (const void *const *)%s, \
          %s%s->evidence.outer = %s->outer)"
         slot (render_argument 1) slot (render_argument 2) (String.concat "" outer) slot slot
+  | Capabilities_fill ->
+      let table = render_argument 0 in
+      let rec fill index = function
+        | name :: length :: evidence :: rest ->
+            Printf.sprintf
+              "%s->entries[%d].name = (const uint8_t *)%s, %s->entries[%d].length = %s, \
+               %s->entries[%d].evidence = (void *)%s, %s"
+              table index (fst name) table index (fst length) table index (fst evidence)
+              (fill (index + 1) rest)
+        | [] -> Printf.sprintf "%s->entries[%d].name = 0" table index
+        | _ -> C_runtime.raise_bug "a table of capabilities with an incomplete entry"
+      in
+      "(" ^ fill 0 (List.drop 1 arguments) ^ ")"
+  | Capability_find ->
+      Printf.sprintf
+        "t_runtime_find_capability((const struct t_capability *)%s, (const uint8_t *)%s, %s)"
+        (render_argument 0) (render_argument 1) (render_argument 2)
   | Trace_link ->
       Printf.sprintf "(%s->site = %s, %s->caller = (const struct t_trace *)%s)" (render_argument 0)
         (render_argument 1) (render_argument 0) (render_argument 2)
@@ -147,8 +164,8 @@ let render_intrinsic context (intrinsic : Lowered.intrinsic)
       Printf.sprintf "((void *)((const struct t_evidence *)%s)->outer[%s])" (render_argument 0)
         (render_argument 1)
 
-let render_call context fc (target : Lowered.target) arguments =
-  let arguments = List.filter_map (C_values.render_operand context fc) arguments in
+let render_call (emission : Emission.t) fc (target : Lowered.target) arguments =
+  let arguments = List.filter_map (C_values.render_operand emission fc) arguments in
   let texts = String.concat ", " (List.map fst arguments) in
   (match target with
   | Direct { signature; _ }
@@ -164,28 +181,23 @@ let render_call context fc (target : Lowered.target) arguments =
   | Intrinsic _ | Foreign _ -> ());
   match target with
   | Direct { function_; signature } ->
-      (match function_ with
-      | Item item ->
-          C_types.refer context item;
-          if not (List.exists (Lowered.Item.equal item) context.called) then
-            context.called <- item :: context.called
-      | Nested _ -> ());
+      (match function_ with Item item -> Emission.record_call emission item | Nested _ -> ());
       let symbol = C_values.render_function_ref_symbol fc function_ in
       let linkage = match function_ with Nested _ -> C_runtime.Internal | Item _ -> External in
-      C_values.declare_prototype context symbol
-        (C_values.render_prototype context fc.symbol symbol ~linkage signature ^ ";\n");
+      Emission.declare_prototype emission symbol
+        (C_values.render_prototype emission fc.symbol symbol ~linkage signature ^ ";\n");
       Printf.sprintf "%s(%s)" symbol texts
   | Indirect { value; _ } ->
       let value =
-        match C_values.render_operand context fc value with
+        match C_values.render_operand emission fc value with
         | Some (text, _) -> text
         | None -> C_runtime.raise_bug "a function value of zero size"
       in
       Printf.sprintf "%s.f_code(%s)" value
         (String.concat ", " ((value ^ ".f_environment") :: List.map fst arguments))
-  | Intrinsic intrinsic -> render_intrinsic context intrinsic arguments
+  | Intrinsic intrinsic -> render_intrinsic emission intrinsic arguments
   | Foreign declaration -> (
-      C_values.declare_prototype context declaration.symbol (Libc.render_prototype declaration);
+      Emission.declare_prototype emission declaration.symbol (Libc.render_prototype declaration);
       let cast_arguments =
         try
           List.map2
@@ -198,37 +210,37 @@ let render_call context fc (target : Lowered.target) arguments =
       match declaration.returns with Pointer _ -> "((void *)" ^ called ^ ")" | _ -> called)
   | Table_call { table; value; slot; signature } ->
       let table =
-        match C_values.render_operand context fc table with
+        match C_values.render_operand emission fc table with
         | Some (text, _) -> text
         | None -> C_runtime.raise_bug "a table of zero size"
       in
       let texts =
-        match C_values.render_operand context fc value with
+        match C_values.render_operand emission fc value with
         | Some (value, _) -> String.concat ", " (value :: List.map fst arguments)
         | None -> C_runtime.raise_bug "an any value of zero size"
       in
       let result =
         match signature.result with
         | None -> "void"
-        | Some ty -> C_types.render_type context fc.symbol ty
+        | Some ty -> C_types.render_type emission.types fc.symbol ty
       in
       Printf.sprintf "((%s (*)(%s))((const void *const *)%s)[%d])(%s)" result
-        (C_types.render_signature_parameters context fc.symbol signature.parameters None)
+        (C_types.render_signature_parameters emission.types fc.symbol signature.parameters None)
         table slot texts
   | Evidence_call { evidence; capability; slot; signature } ->
-      context.calls <- (capability, slot) :: context.calls;
+      Emission.record_capability_call emission ~capability ~slot;
       let evidence =
-        match C_values.render_operand context fc evidence with
+        match C_values.render_operand emission fc evidence with
         | Some (text, _) -> text
         | None -> C_runtime.raise_bug "evidence of zero size"
       in
       let result =
         match signature.result with
         | None -> "void"
-        | Some ty -> C_types.render_type context fc.symbol ty
+        | Some ty -> C_types.render_type emission.types fc.symbol ty
       in
       Printf.sprintf "((%s (*)(%s))((const struct t_evidence *)%s)->table[%d])(%s)" result
-        (C_types.render_signature_parameters context fc.symbol signature.parameters None)
+        (C_types.render_signature_parameters emission.types fc.symbol signature.parameters None)
         evidence slot
         (String.concat ", " (evidence :: List.map fst arguments))
 
@@ -245,16 +257,16 @@ let may_alias (first : Lowered.place) (second : Lowered.place) =
   in
   first.root = second.root && overlaps first.projections second.projections
 
-let write_statement context fc buffer (statement : Lowered.statement) =
+let write_statement (emission : Emission.t) fc buffer (statement : Lowered.statement) =
   let write_line format =
     Printf.ksprintf (fun text -> Buffer.add_string buffer ("  " ^ text ^ "\n")) format
   in
   match statement with
   | Assign (place, rvalue) -> (
-      match C_values.render_place context fc place with
+      match C_values.render_place emission fc place with
       | None -> ()
       | Some (target, target_ty) -> (
-          match C_values.render_rvalue context fc target_ty rvalue with
+          match C_values.render_rvalue emission fc target_ty rvalue with
           | None -> ()
           | Some (Expression text) -> write_line "%s = %s;" target text
           | Some (Allocating { block; fill; value = render_value }) ->
@@ -274,52 +286,52 @@ let write_statement context fc buffer (statement : Lowered.statement) =
           | _ -> ())
         arguments;
       write_line "%s;"
-        (render_call context fc target (Address { place; writable = true } :: arguments))
+        (render_call emission fc target (Address { place; writable = true } :: arguments))
   | Call { target; arguments; result } -> (
-      let call = render_call context fc target arguments in
+      let call = render_call emission fc target arguments in
       match result with
       | Returned place -> (
-          match C_values.render_place context fc place with
+          match C_values.render_place emission fc place with
           | Some (place, _) -> write_line "%s = %s;" place call
           | None -> write_line "%s;" call)
       | Discarded | Written _ -> write_line "%s;" call)
   | Drop place -> (
-      match C_values.render_place context fc place with
+      match C_values.render_place emission fc place with
       | None -> ()
       | Some (text, Value ty) ->
-          C_types.refer context (Drop ty);
+          Emission.refer emission (Drop ty);
           let symbol = Mangling.make_symbol (Drop ty) in
-          C_values.declare_prototype context symbol
-            (C_values.render_prototype context fc.symbol symbol ~linkage:External
+          Emission.declare_prototype emission symbol
+            (C_values.render_prototype emission fc.symbol symbol ~linkage:External
                (Convention.drop_signature ty)
             ^ ";\n");
           write_line "%s(&%s);" symbol text
       | Some _ -> C_runtime.raise_bug "a drop of a place that is not a value")
   | Echo { text; length; site } ->
-      context.failures <- (Echo, site) :: context.failures;
+      Emission.record_failure emission Echo site;
       let render_operand argument =
-        match C_values.render_operand context fc argument with
+        match C_values.render_operand emission fc argument with
         | Some (text, _) -> text
         | None -> C_runtime.raise_bug "an echo of nothing"
       in
       write_line "t_runtime_echo(%s, %s, %s);" (render_operand text) (render_operand length)
-        (C_values.render_site context site)
+        (Emission.render_site emission site)
   | Free_block { place; variant } -> (
-      match C_values.render_place context fc place with
+      match C_values.render_place emission fc place with
       | Some (text, Value sum) ->
-          write_line "t_runtime_free(%s);" (C_values.render_block_pointer context text sum variant)
+          write_line "t_runtime_free(%s);" (C_values.render_block_pointer emission text sum variant)
       | _ -> C_runtime.raise_bug "a block of a place that is not a sum type")
   | Defer_free_block { lend; place; variant } -> (
-      match (C_values.render_operand context fc lend, C_values.render_place context fc place) with
+      match (C_values.render_operand emission fc lend, C_values.render_place emission fc place) with
       | Some (lend, _), Some (text, Value sum) ->
           write_line "%s_defer_free(%s, %s);"
-            (C_types.use_helper context "t_lend")
+            (Emission.use_helper emission "t_lend")
             lend
-            (C_values.render_block_pointer context text sum variant)
+            (C_values.render_block_pointer emission text sum variant)
       | _ -> C_runtime.raise_bug "a block of a place that is not a sum type")
   | Fork { branches } ->
       let render_operand argument =
-        match C_values.render_operand context fc argument with
+        match C_values.render_operand emission fc argument with
         | Some (text, _) -> text
         | None -> C_runtime.raise_bug "an environment of zero size"
       in
@@ -336,7 +348,7 @@ let write_statement context fc buffer (statement : Lowered.statement) =
       write_line "}"
   | Fork_range { body; environment; first; last } ->
       let render_operand argument =
-        match C_values.render_operand context fc argument with
+        match C_values.render_operand emission fc argument with
         | Some (text, _) -> text
         | None -> C_runtime.raise_bug "an operand of zero size"
       in
@@ -346,24 +358,26 @@ let write_statement context fc buffer (statement : Lowered.statement) =
 
 let render_unreachable _ = "T_UNREACHABLE();"
 
-let write_terminator context fc buffer (terminator : Lowered.terminator) =
+let write_terminator (emission : Emission.t) fc buffer (terminator : Lowered.terminator) =
   let write_line format =
     Printf.ksprintf (fun text -> Buffer.add_string buffer ("  " ^ text ^ "\n")) format
   in
   let render_operand argument =
-    match C_values.render_operand context fc argument with
+    match C_values.render_operand emission fc argument with
     | Some expression -> expression
     | None -> C_runtime.raise_bug "an operand of zero size"
   in
   let render_default = function
     | Some block -> Printf.sprintf "goto b%d;" block
-    | None -> render_unreachable context
+    | None -> render_unreachable emission
   in
   match terminator with
   | Goto block -> write_line "goto b%d;" block
   | Switch { value; cases; default } ->
       let text, ty = render_operand value in
-      let c_type = C_types.render_scalar_type context (C_values.classify_scalar context ty) in
+      let c_type =
+        C_types.render_scalar_type emission.types (C_values.classify_scalar emission ty)
+      in
       write_line "switch (%s) {" text;
       List.iter
         (fun (value, block) ->
@@ -372,13 +386,13 @@ let write_terminator context fc buffer (terminator : Lowered.terminator) =
       write_line "default: goto b%d;" default;
       write_line "}"
   | Switch_variant { place; cases; default = otherwise } -> (
-      match C_values.render_place context fc place with
+      match C_values.render_place emission fc place with
       | None -> (
           match cases with
           | (_, block) :: _ -> write_line "goto b%d;" block
           | [] -> write_line "%s" (render_default otherwise))
       | Some (text, Value sum) -> (
-          match Memory_layout.dispatch (C_types.compute_layout context sum) cases with
+          match Memory_layout.dispatch (C_types.compute_layout emission.types sum) cases with
           | Switch { tag; cases } ->
               write_line "switch (%s) {" (C_values.render_path text tag.at);
               List.iter
@@ -390,20 +404,20 @@ let write_terminator context fc buffer (terminator : Lowered.terminator) =
               List.iter
                 (fun (discriminant, block) ->
                   write_line "if (%s) goto b%d;"
-                    (C_values.render_discriminant_test context text discriminant)
+                    (C_values.render_discriminant_test emission text discriminant)
                     block)
                 tests;
               write_line "%s" (render_default otherwise))
       | Some _ -> C_runtime.raise_bug "a variant switch on a place that is not a value")
   | Return None -> write_line "return;"
   | Return (Some value) -> (
-      match C_values.render_operand context fc value with
+      match C_values.render_operand emission fc value with
       | None -> write_line "return;"
       | Some (text, _) -> write_line "return %s;" text)
-  | Unreachable -> write_line "%s" (render_unreachable context)
+  | Unreachable -> write_line "%s" (render_unreachable emission)
   | Fail { failure; message; length; site; reported; trace } ->
       if match failure with Lowered.Todo -> true | Panic | Obligation | Assertion -> false then
-        context.failures <- (Todo, site) :: context.failures;
+        Emission.record_failure emission Todo site;
       let runtime =
         match failure with
         | Panic -> "t_runtime_panic"
@@ -414,7 +428,7 @@ let write_terminator context fc buffer (terminator : Lowered.terminator) =
       let site =
         match reported with
         | Some reported -> fst (render_operand reported)
-        | None -> C_values.render_site context site
+        | None -> Emission.render_site emission site
       in
       let chain =
         match (failure, trace) with

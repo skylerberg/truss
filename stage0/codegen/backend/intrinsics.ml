@@ -22,11 +22,11 @@ let list_consumed_places : Intrinsic.operation -> int list = function
   | Buffer Array_from_storage -> [ 0 ]
   | _ -> []
 
-let lower ~may_panic ?(value_arguments = []) ?reported env builder types operation ~type_arguments
-    arguments ~destination ~site ~trace =
+let lower ?(value_arguments = []) ?reported env builder types operation ~type_arguments arguments
+    ~destination ~site ~trace =
   let set rvalue =
     Option.iter
-      (fun destination_place -> Emit_c.Builder.emit builder (Assign (destination_place, rvalue)))
+      (fun destination_place -> Emit_c.Ir_builder.emit builder (Assign (destination_place, rvalue)))
       destination
   in
   let read_argument position = List.nth arguments position in
@@ -38,13 +38,13 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
   in
   let call ?result intrinsic arguments =
     let result = match result with Some place -> Lowered.Returned place | None -> Discarded in
-    Emit_c.Builder.emit builder (Call { target = Intrinsic intrinsic; arguments; result })
+    Emit_c.Ir_builder.emit builder (Call { target = Intrinsic intrinsic; arguments; result })
   in
-  let allocate_uint64_local () = Emit_c.Builder.allocate_local builder (Value types.uint64) in
+  let allocate_uint64_local () = Emit_c.Ir_builder.allocate_local builder (Value types.uint64) in
   let copy_length sequence = Lowered.Copy (Storage.project_length sequence) in
   let index_element = Storage.index_element in
   let fail failure message =
-    Emit_c.Builder.finish builder
+    Emit_c.Ir_builder.finish builder
       (Fail
          {
            failure;
@@ -56,15 +56,14 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
          })
   in
   let fail_when failure condition message =
-    let failed = Emit_c.Builder.allocate_block builder
-    and after = Emit_c.Builder.allocate_block builder in
-    Emit_c.Builder.branch builder condition ~yes:failed ~no:after;
-    Emit_c.Builder.start builder failed;
+    let failed = Emit_c.Ir_builder.allocate_block builder
+    and after = Emit_c.Ir_builder.allocate_block builder in
+    Emit_c.Ir_builder.branch builder condition ~yes:failed ~no:after;
+    Emit_c.Ir_builder.start builder failed;
     fail failure message;
-    Emit_c.Builder.start builder after
+    Emit_c.Ir_builder.start builder after
   in
-  let check_failure : Lowered.failure = if may_panic then Panic else Obligation in
-  let check_when condition message = fail_when check_failure condition message in
+  let check_when condition message = fail_when Obligation condition message in
   let check_if (condition : Lowered.rvalue) message =
     let decided =
       let is_unsigned_zero : Lowered.operand -> bool = function
@@ -90,19 +89,19 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
     match decided with
     | Some false -> ()
     | Some true ->
-        fail check_failure message;
-        Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder)
+        fail Obligation message;
+        Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder)
     | None ->
-        let is_failed = Emit_c.Builder.allocate_local builder (Raw Bool) in
-        Emit_c.Builder.emit builder (Assign (Lowered.make_local_place is_failed, condition));
+        let is_failed = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+        Emit_c.Ir_builder.emit builder (Assign (Lowered.make_local_place is_failed, condition));
         check_when (Copy (Lowered.make_local_place is_failed)) message
   in
   let check_index index count =
     check_if (Binary (Greater_equal, index, count)) "index out of bounds"
   in
   let compute_room storage : Lowered.operand =
-    let room = Emit_c.Builder.allocate_local builder (Value types.uint64) in
-    Emit_c.Builder.emit builder
+    let room = Emit_c.Ir_builder.allocate_local builder (Value types.uint64) in
+    Emit_c.Ir_builder.emit builder
       (Assign
          ( Lowered.make_local_place room,
            Binary (Subtract, Copy (Storage.project_capacity storage), copy_length storage) ));
@@ -136,8 +135,8 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
     let lower_checked_arithmetic op overflow =
       match find_integer_argument () with
       | Some _ ->
-          let result = Emit_c.Builder.allocate_local builder (Value (read_type_argument 0)) in
-          let over = Emit_c.Builder.allocate_local builder (Raw Bool) in
+          let result = Emit_c.Ir_builder.allocate_local builder (Value (read_type_argument 0)) in
+          let over = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
           call ~result:(Lowered.make_local_place over) overflow
             [
               read_operand 0;
@@ -151,8 +150,8 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
     let lower_checked_division op =
       match find_integer_argument () with
       | Some integer ->
-          let zero = Emit_c.Builder.allocate_local builder (Raw Bool) in
-          Emit_c.Builder.emit builder
+          let zero = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+          Emit_c.Ir_builder.emit builder
             (Assign
                ( Lowered.make_local_place zero,
                  Binary (Equal, read_operand 1, Constant (Integer (integer, Z.zero))) ));
@@ -161,18 +160,18 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
           | Int8 | Int16 | Int32 | Int64 ->
               let bits = 8 * Memory_layout.compute_integer_size integer in
               let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
-              let by_minus_one = Emit_c.Builder.allocate_local builder (Raw Bool)
-              and of_least = Emit_c.Builder.allocate_local builder (Raw Bool) in
-              let both = Emit_c.Builder.allocate_local builder (Raw Bool) in
-              Emit_c.Builder.emit builder
+              let by_minus_one = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
+              and of_least = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+              let both = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place by_minus_one,
                      Binary (Equal, read_operand 1, Constant (Integer (integer, Z.minus_one))) ));
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place of_least,
                      Binary (Equal, read_operand 0, Constant (Integer (integer, least))) ));
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place both,
                      Binary
@@ -185,7 +184,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
       | _ -> set_binary op
     in
     let lower_overflow_test overflow =
-      let ignored = Emit_c.Builder.allocate_local builder (Value (read_type_argument 0)) in
+      let ignored = Emit_c.Ir_builder.allocate_local builder (Value (read_type_argument 0)) in
       call ?result:destination overflow
         [
           read_operand 0;
@@ -225,8 +224,8 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
           let results =
             List.map
               (fun (op, bound) ->
-                let result = Emit_c.Builder.allocate_local builder (Raw Bool) in
-                Emit_c.Builder.emit builder
+                let result = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+                Emit_c.Ir_builder.emit builder
                   (Assign
                      ( Lowered.make_local_place result,
                        Binary (op, read_operand 0, make_constant bound) ));
@@ -252,15 +251,15 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
             | Float32 -> Constant (Float32 (Int32.bits_of_float (Z.to_float bound)))
             | _ -> Constant (Float64 (Int64.bits_of_float (Z.to_float bound)))
           in
-          let above = Emit_c.Builder.allocate_local builder (Raw Bool)
-          and below = Emit_c.Builder.allocate_local builder (Raw Bool) in
+          let above = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
+          and below = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
           let under = Z.pred low in
-          Emit_c.Builder.emit builder
+          Emit_c.Ir_builder.emit builder
             (Assign
                ( Lowered.make_local_place above,
                  if is_held under then Binary (Ieee_less, make_constant under, read_operand 0)
                  else Binary (Ieee_less_equal, make_constant low, read_operand 0) ));
-          Emit_c.Builder.emit builder
+          Emit_c.Ir_builder.emit builder
             (Assign
                ( Lowered.make_local_place below,
                  Binary (Ieee_less, read_operand 0, make_constant (Z.succ high)) ));
@@ -279,8 +278,8 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
         | Some ((Int8 | Int16 | Int32 | Int64) as integer) ->
             let bits = 8 * Memory_layout.compute_integer_size integer in
             let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
-            let of_least = Emit_c.Builder.allocate_local builder (Raw Bool) in
-            Emit_c.Builder.emit builder
+            let of_least = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+            Emit_c.Ir_builder.emit builder
               (Assign
                  ( Lowered.make_local_place of_least,
                    Binary (Equal, read_operand 0, Constant (Integer (integer, least))) ));
@@ -316,8 +315,8 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
            (classify_scalar env (read_type_argument 0), classify_scalar env (read_type_argument 1))
          with
         | (Float32 | Float64), Integer _ ->
-            let in_range = Emit_c.Builder.allocate_local builder (Raw Bool) in
-            Emit_c.Builder.emit builder
+            let in_range = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+            Emit_c.Ir_builder.emit builder
               (Assign (Lowered.make_local_place in_range, make_fits_test ()));
             check_if
               (Unary (Not, Copy (Lowered.make_local_place in_range)))
@@ -333,8 +332,8 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
     | To_bits -> call_into Float_bits
     | From_bits -> call_into Float_from_bits
     | Is_nan ->
-        let same = Emit_c.Builder.allocate_local builder (Raw Bool) in
-        Emit_c.Builder.emit builder
+        let same = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+        Emit_c.Ir_builder.emit builder
           (Assign
              (Lowered.make_local_place same, Binary (Ieee_equal, read_operand 0, read_operand 0)));
         set (Unary (Not, Copy (Lowered.make_local_place same)))
@@ -348,7 +347,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
     let resize_buffer storage capacity =
       let layout = compute_element_layout () in
       let bytes = allocate_uint64_local ()
-      and too_many = Emit_c.Builder.allocate_local builder (Raw Bool) in
+      and too_many = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
       call
         ~result:(Lowered.make_local_place too_many)
         Multiply_overflow
@@ -358,20 +357,20 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
           Address { place = Lowered.make_local_place bytes; writable = true };
         ];
       fail_when Panic (Copy (Lowered.make_local_place too_many)) "out of memory";
-      let buffer = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
-      let is_allocated = Emit_c.Builder.allocate_local builder (Raw Bool)
-      and is_unallocated = Emit_c.Builder.allocate_local builder (Raw Bool) in
-      Emit_c.Builder.emit builder
+      let buffer = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
+      let is_allocated = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
+      and is_unallocated = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+      Emit_c.Ir_builder.emit builder
         (Assign (Lowered.make_local_place is_allocated, Storage.build_is_allocated storage));
-      Emit_c.Builder.emit builder
+      Emit_c.Ir_builder.emit builder
         (Assign
            ( Lowered.make_local_place is_unallocated,
              Unary (Not, Copy (Lowered.make_local_place is_allocated)) ));
-      Emit_c.Builder.emit_when builder
+      Emit_c.Ir_builder.emit_when builder
         (Copy (Lowered.make_local_place is_allocated))
         (fun () ->
           let held = allocate_uint64_local () in
-          Emit_c.Builder.emit builder
+          Emit_c.Ir_builder.emit builder
             (Assign
                ( Lowered.make_local_place held,
                  Binary
@@ -385,72 +384,72 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
               Copy (Lowered.make_local_place bytes);
               Lowered.make_uint64_constant layout.alignment;
             ]);
-      Emit_c.Builder.emit_when builder
+      Emit_c.Ir_builder.emit_when builder
         (Copy (Lowered.make_local_place is_unallocated))
         (fun () ->
           call ~result:(Lowered.make_local_place buffer) Allocate
             [ Copy (Lowered.make_local_place bytes); Lowered.make_uint64_constant layout.alignment ]);
-      Emit_c.Builder.emit builder
+      Emit_c.Ir_builder.emit builder
         (Assign (Storage.project_buffer storage, Use (Copy (Lowered.make_local_place buffer))));
-      Emit_c.Builder.emit builder (Assign (Storage.project_capacity storage, Use capacity))
+      Emit_c.Ir_builder.emit builder (Assign (Storage.project_capacity storage, Use capacity))
     in
     let add_to_length storage amount =
-      Emit_c.Builder.emit builder
+      Emit_c.Ir_builder.emit builder
         (Assign (Storage.project_length storage, Binary (Add, copy_length storage, amount)))
     in
     match buffer with
     | Compare_bytes ->
         let left = extract_place (read_argument 0) and right = extract_place (read_argument 1) in
-        let shorter = Emit_c.Builder.allocate_local builder (Raw Bool) in
+        let shorter = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
         let count = allocate_uint64_local () in
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign
              (Lowered.make_local_place shorter, Binary (Less, copy_length left, copy_length right)));
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place count, Use (copy_length right)));
-        Emit_c.Builder.emit_when builder
+        Emit_c.Ir_builder.emit_when builder
           (Copy (Lowered.make_local_place shorter))
           (fun () ->
-            Emit_c.Builder.emit builder
+            Emit_c.Ir_builder.emit builder
               (Assign (Lowered.make_local_place count, Use (copy_length left))));
-        let order = Emit_c.Builder.allocate_local builder (Raw (Integer Int32)) in
+        let order = Emit_c.Ir_builder.allocate_local builder (Raw (Integer Int32)) in
         call ~result:(Lowered.make_local_place order) Compare_bytes
           [
             Copy (Storage.project_buffer left);
             Copy (Storage.project_buffer right);
             Copy (Lowered.make_local_place count);
           ];
-        let same = Emit_c.Builder.allocate_local builder (Raw Bool) in
-        Emit_c.Builder.emit builder
+        let same = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place same,
                Binary
                  (Equal, Copy (Lowered.make_local_place order), Constant (Integer (Int32, Z.zero)))
              ));
-        Emit_c.Builder.emit_when builder
+        Emit_c.Ir_builder.emit_when builder
           (Copy (Lowered.make_local_place same))
           (fun () ->
-            let longer = Emit_c.Builder.allocate_local builder (Raw Bool)
-            and shorter = Emit_c.Builder.allocate_local builder (Raw Bool) in
-            Emit_c.Builder.emit builder
+            let longer = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
+            and shorter = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+            Emit_c.Ir_builder.emit builder
               (Assign
                  ( Lowered.make_local_place longer,
                    Binary (Greater, copy_length left, copy_length right) ));
-            Emit_c.Builder.emit builder
+            Emit_c.Ir_builder.emit builder
               (Assign
                  ( Lowered.make_local_place shorter,
                    Binary (Less, copy_length left, copy_length right) ));
-            let first = Emit_c.Builder.allocate_local builder (Raw (Integer Int32))
-            and second = Emit_c.Builder.allocate_local builder (Raw (Integer Int32)) in
-            Emit_c.Builder.emit builder
+            let first = Emit_c.Ir_builder.allocate_local builder (Raw (Integer Int32))
+            and second = Emit_c.Ir_builder.allocate_local builder (Raw (Integer Int32)) in
+            Emit_c.Ir_builder.emit builder
               (Assign
                  ( Lowered.make_local_place first,
                    Convert (Copy (Lowered.make_local_place longer), Integer Int32) ));
-            Emit_c.Builder.emit builder
+            Emit_c.Ir_builder.emit builder
               (Assign
                  ( Lowered.make_local_place second,
                    Convert (Copy (Lowered.make_local_place shorter), Integer Int32) ));
-            Emit_c.Builder.emit builder
+            Emit_c.Ir_builder.emit builder
               (Assign
                  ( Lowered.make_local_place order,
                    Binary
@@ -461,15 +460,15 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
     | Storage_empty -> set (Storage.build_empty (Storage.make_storage_type (read_element_type ())))
     | Storage_with_capacity ->
         let ty = Storage.make_storage_type (read_element_type ()) in
-        let result = Emit_c.Builder.allocate_local builder (Value ty) in
-        Emit_c.Builder.emit builder
+        let result = Emit_c.Ir_builder.allocate_local builder (Value ty) in
+        Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place result, Storage.build_empty ty));
-        let has_capacity = Emit_c.Builder.allocate_local builder (Raw Bool) in
-        Emit_c.Builder.emit builder
+        let has_capacity = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place has_capacity,
                Binary (Greater, read_operand 0, Lowered.make_uint64_constant 0) ));
-        Emit_c.Builder.emit_when builder
+        Emit_c.Ir_builder.emit_when builder
           (Copy (Lowered.make_local_place has_capacity))
           (fun () -> resize_buffer (Lowered.make_local_place result) (read_operand 0));
         set (Use (Move (Lowered.make_local_place result)))
@@ -481,24 +480,24 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
         check_if
           (Binary (Less, read_operand 1, copy_length storage))
           "a storage's capacity set to less than its length";
-        let has_capacity = Emit_c.Builder.allocate_local builder (Raw Bool)
-        and has_no_capacity = Emit_c.Builder.allocate_local builder (Raw Bool) in
-        Emit_c.Builder.emit builder
+        let has_capacity = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
+        and has_no_capacity = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place has_capacity,
                Binary (Greater, read_operand 1, Lowered.make_uint64_constant 0) ));
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place has_no_capacity,
                Unary (Not, Copy (Lowered.make_local_place has_capacity)) ));
-        Emit_c.Builder.emit_when builder
+        Emit_c.Ir_builder.emit_when builder
           (Copy (Lowered.make_local_place has_capacity))
           (fun () -> resize_buffer storage (read_operand 1));
-        Emit_c.Builder.emit_when builder
+        Emit_c.Ir_builder.emit_when builder
           (Copy (Lowered.make_local_place has_no_capacity))
           (fun () ->
-            Emit_c.Builder.emit builder (Drop storage);
-            Emit_c.Builder.emit builder
+            Emit_c.Ir_builder.emit builder (Drop storage);
+            Emit_c.Ir_builder.emit builder
               (Assign
                  (storage, Storage.build_empty (Storage.make_storage_type (read_element_type ())))))
     | Storage_lengthen ->
@@ -512,13 +511,14 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
         check_if
           (Binary (Greater, read_operand 1, copy_length storage))
           "a storage shortened to more than its length";
-        Emit_c.Builder.emit builder (Assign (Storage.project_length storage, Use (read_operand 1)))
+        Emit_c.Ir_builder.emit builder
+          (Assign (Storage.project_length storage, Use (read_operand 1)))
     | Storage_push ->
         let storage = extract_place (read_argument 0) in
         check_if
           (Binary (Greater_equal, copy_length storage, Copy (Storage.project_capacity storage)))
           "an element pushed to a storage that has no room";
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign (index_element storage (copy_length storage), Use (read_operand 1)));
         add_to_length storage (Lowered.make_uint64_constant 1)
     | Storage_pop ->
@@ -526,7 +526,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
         check_if
           (Binary (Equal, copy_length storage, Lowered.make_uint64_constant 0))
           "an element popped from an empty storage";
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Storage.project_length storage,
                Binary (Subtract, copy_length storage, Lowered.make_uint64_constant 1) ));
@@ -540,12 +540,12 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
           "an element inserted into a storage that has no room";
         let after = allocate_uint64_local () in
         let bytes = allocate_uint64_local () in
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign
              (Lowered.make_local_place after, Binary (Add, index, Lowered.make_uint64_constant 1)));
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place bytes, Binary (Subtract, copy_length storage, index)));
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place bytes,
                Binary
@@ -562,7 +562,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
             Address { place = index_element storage index; writable = true };
             Copy (Lowered.make_local_place bytes);
           ];
-        Emit_c.Builder.emit builder (Assign (index_element storage index, Use (read_operand 2)));
+        Emit_c.Ir_builder.emit builder (Assign (index_element storage index, Use (read_operand 2)));
         add_to_length storage (Lowered.make_uint64_constant 1)
     | Storage_remove ->
         check_index (read_operand 1) (copy_length (extract_place (read_argument 0)));
@@ -571,14 +571,14 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
         set (Use (Move (index_element storage index)));
         let after = allocate_uint64_local () in
         let bytes = allocate_uint64_local () in
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign
              (Lowered.make_local_place after, Binary (Add, index, Lowered.make_uint64_constant 1)));
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place bytes,
                Binary (Subtract, copy_length storage, Copy (Lowered.make_local_place after)) ));
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place bytes,
                Binary
@@ -595,7 +595,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
               };
             Copy (Lowered.make_local_place bytes);
           ];
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Storage.project_length storage,
                Binary (Subtract, copy_length storage, Lowered.make_uint64_constant 1) ))
@@ -603,24 +603,24 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
         let count = read_array_length () in
         let array_ty = make_array_type count in
         let ty = Storage.make_storage_type (read_element_type ()) in
-        let result = Emit_c.Builder.allocate_local builder (Value ty) in
-        Emit_c.Builder.emit builder
+        let result = Emit_c.Ir_builder.allocate_local builder (Value ty) in
+        Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place result, Storage.build_empty ty));
         if Z.sign count > 0 then
           resize_buffer (Lowered.make_local_place result) (Constant (Integer (UInt64, count)));
         if Z.sign count > 0 && (Memory_layout.of_type env array_ty).size > 0 then begin
-          let untyped = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
-          Emit_c.Builder.emit builder
+          let untyped = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
+          Emit_c.Ir_builder.emit builder
             (Assign
                ( Lowered.make_local_place untyped,
                  Use (Copy (Storage.project_buffer (Lowered.make_local_place result))) ));
           let typed =
-            Emit_c.Builder.allocate_local builder
+            Emit_c.Ir_builder.allocate_local builder
               (Pointer { target = Value array_ty; writable = true })
           in
-          Emit_c.Builder.emit builder
+          Emit_c.Ir_builder.emit builder
             (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place untyped))));
-          Emit_c.Builder.emit builder
+          Emit_c.Ir_builder.emit builder
             (Assign ({ root = Local typed; projections = [ Deref ] }, Use (read_operand 0)))
         end;
         add_to_length (Lowered.make_local_place result) (Constant (Integer (UInt64, count)));
@@ -630,31 +630,31 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
         let array_ty = make_array_type count in
         let moved_storage =
           Lowered.make_local_place
-            (Emit_c.Builder.allocate_local builder
+            (Emit_c.Ir_builder.allocate_local builder
                (Value (Storage.make_storage_type (read_element_type ()))))
         in
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign (moved_storage, Use (Move (extract_place (read_argument 0)))));
         check_if
           (Binary (Not_equal, copy_length moved_storage, Constant (Integer (UInt64, count))))
           "a storage made into an array of another length";
         if Z.sign count > 0 && (Memory_layout.of_type env array_ty).size > 0 then begin
-          let untyped = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
-          Emit_c.Builder.emit builder
+          let untyped = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
+          Emit_c.Ir_builder.emit builder
             (Assign
                (Lowered.make_local_place untyped, Use (Copy (Storage.project_buffer moved_storage))));
           let typed =
-            Emit_c.Builder.allocate_local builder
+            Emit_c.Ir_builder.allocate_local builder
               (Pointer { target = Value array_ty; writable = true })
           in
-          Emit_c.Builder.emit builder
+          Emit_c.Ir_builder.emit builder
             (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place untyped))));
           set (Use (Move { root = Local typed; projections = [ Deref ] }))
         end;
-        let is_allocated = Emit_c.Builder.allocate_local builder (Raw Bool) in
-        Emit_c.Builder.emit builder
+        let is_allocated = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+        Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place is_allocated, Storage.build_is_allocated moved_storage));
-        Emit_c.Builder.emit_when builder
+        Emit_c.Ir_builder.emit_when builder
           (Copy (Lowered.make_local_place is_allocated))
           (fun () -> call Free [ Copy (Storage.project_buffer moved_storage) ])
     | Array_view ->
@@ -679,12 +679,12 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
         check_index (read_operand 1) (copy_length (extract_place (read_argument 0)));
         check_index (read_operand 2) (copy_length (extract_place (read_argument 0)));
         let index_element index = Storage.index_element (extract_place (read_argument 0)) index in
-        let held = Emit_c.Builder.allocate_local builder (Value (read_element_type ())) in
-        Emit_c.Builder.emit builder
+        let held = Emit_c.Ir_builder.allocate_local builder (Value (read_element_type ())) in
+        Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place held, Use (Move (index_element (read_operand 1)))));
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign (index_element (read_operand 1), Use (Move (index_element (read_operand 2)))));
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign (index_element (read_operand 2), Use (Move (Lowered.make_local_place held))))
     | Storage_view ->
         let storage = extract_place (read_argument 0) in
@@ -701,7 +701,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
         check_if (Binary (Greater, read_operand 1, read_operand 2)) "slice out of bounds";
         check_if (Binary (Greater, read_operand 2, copy_length view)) "slice out of bounds";
         let count = allocate_uint64_local () in
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place count, Binary (Subtract, read_operand 2, read_operand 1)));
         set
           (Storage.build_view
@@ -727,17 +727,17 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
         (Integer (integer, Z.of_int (Libc.evaluate_number (Memory_layout.system env) number)))
     in
     let load_text_at address ~is_present =
-      Emit_c.Builder.emit builder
+      Emit_c.Ir_builder.emit builder
         (Assign
            (is_present, Binary (Not_equal, Copy (Lowered.make_local_place address), Constant Null)));
-      let elements = Emit_c.Builder.allocate_local builder (Raw (Pointer (Data byte))) in
+      let elements = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer (Data byte))) in
       let count = allocate_uint64_local () in
-      Emit_c.Builder.emit builder
+      Emit_c.Ir_builder.emit builder
         (Assign (Lowered.make_local_place elements, Use (Constant Storage.empty_buffer)));
-      Emit_c.Builder.emit builder
+      Emit_c.Ir_builder.emit builder
         (Assign (Lowered.make_local_place count, Use (Lowered.make_uint64_constant 0)));
-      Emit_c.Builder.emit_when builder (Copy is_present) (fun () ->
-          Emit_c.Builder.emit builder
+      Emit_c.Ir_builder.emit_when builder (Copy is_present) (fun () ->
+          Emit_c.Ir_builder.emit builder
             (Assign
                (Lowered.make_local_place elements, Use (Copy (Lowered.make_local_place address))));
           call ~result:(Lowered.make_local_place count) Terminated_length
@@ -755,7 +755,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
           | Struct [ only ] -> Lowered.project message (Field only.name)
           | _ -> raise_bug "a StringSlice that is not a record of one field"
         in
-        Emit_c.Builder.finish builder
+        Emit_c.Ir_builder.finish builder
           (Fail
              {
                failure = Panic;
@@ -765,7 +765,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
                reported;
                trace;
              });
-        Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder)
+        Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder)
     | Handle_from ->
         set
           (Build
@@ -778,16 +778,17 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
         set (Use (Copy (Lowered.project (read (read_argument 0)) (Field "descriptor"))))
     | Shared_new ->
         let ty = read_type_argument 0 in
-        let block = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
+        let block = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
         call ~result:(Lowered.make_local_place block) Shared_allocate
           [ Constant (Size_of ty); Constant (Alignment_of ty) ];
         if (Memory_layout.of_type env ty).size > 0 then begin
           let typed =
-            Emit_c.Builder.allocate_local builder (Pointer { target = Value ty; writable = true })
+            Emit_c.Ir_builder.allocate_local builder
+              (Pointer { target = Value ty; writable = true })
           in
-          Emit_c.Builder.emit builder
+          Emit_c.Ir_builder.emit builder
             (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place block))));
-          Emit_c.Builder.emit builder
+          Emit_c.Ir_builder.emit builder
             (Assign ({ root = Local typed; projections = [ Deref ] }, Use (read_operand 0)))
         end;
         set
@@ -803,8 +804,10 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
     | Shared_update -> raise_bug "shared_update is lowered with the call of its function value"
     | Holds_invariant -> raise_bug "holds_invariant is lowered with its type's invariant"
     | Handle_release ->
-        let released = Emit_c.Builder.allocate_local builder (Value (Ground.make_builtin Handle)) in
-        Emit_c.Builder.emit builder
+        let released =
+          Emit_c.Ir_builder.allocate_local builder (Value (Ground.make_builtin Handle))
+        in
+        Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place released, Use (read_operand 0)));
         set (Use (Copy (Lowered.project (Lowered.make_local_place released) (Field "descriptor"))))
     | Run_test -> call Run_test [ read_operand 0 ]
@@ -821,51 +824,51 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
     | System_is_architecture architecture ->
         set (Use (Constant (Bool ((Memory_layout.system env).architecture = architecture))))
     | Environment_entry ->
-        let environment = Emit_c.Builder.allocate_local builder (Raw (Pointer Opaque)) in
+        let environment = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
         call ~result:(Lowered.make_local_place environment) Environment [];
         let position = allocate_uint64_local () in
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place position, Use (Lowered.make_uint64_constant 0)));
-        let entry = Emit_c.Builder.allocate_local builder (Raw (Nullable_pointer (Data byte))) in
-        let test = Emit_c.Builder.allocate_block builder
-        and next = Emit_c.Builder.allocate_block builder
-        and after = Emit_c.Builder.allocate_block builder in
-        Emit_c.Builder.finish builder (Goto test);
-        Emit_c.Builder.start builder test;
+        let entry = Emit_c.Ir_builder.allocate_local builder (Raw (Nullable_pointer (Data byte))) in
+        let test = Emit_c.Ir_builder.allocate_block builder
+        and next = Emit_c.Ir_builder.allocate_block builder
+        and after = Emit_c.Ir_builder.allocate_block builder in
+        Emit_c.Ir_builder.finish builder (Goto test);
+        Emit_c.Ir_builder.start builder test;
         call ~result:(Lowered.make_local_place entry) Program_argument
           [ Copy (Lowered.make_local_place environment); Copy (Lowered.make_local_place position) ];
-        let last = Emit_c.Builder.allocate_local builder (Raw Bool)
-        and reached = Emit_c.Builder.allocate_local builder (Raw Bool) in
-        let stop = Emit_c.Builder.allocate_local builder (Raw Bool) in
-        Emit_c.Builder.emit builder
+        let last = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
+        and reached = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+        let stop = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place last,
                Binary (Equal, Copy (Lowered.make_local_place entry), Constant Null) ));
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place reached,
                Binary (Equal, Copy (Lowered.make_local_place position), read_operand 0) ));
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place stop,
                Binary
                  ( Bit_or,
                    Copy (Lowered.make_local_place last),
                    Copy (Lowered.make_local_place reached) ) ));
-        Emit_c.Builder.branch builder (Copy (Lowered.make_local_place stop)) ~yes:after ~no:next;
-        Emit_c.Builder.start builder next;
-        Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.branch builder (Copy (Lowered.make_local_place stop)) ~yes:after ~no:next;
+        Emit_c.Ir_builder.start builder next;
+        Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place position,
                Binary (Add, Copy (Lowered.make_local_place position), Lowered.make_uint64_constant 1)
              ));
-        Emit_c.Builder.finish builder (Goto test);
-        Emit_c.Builder.start builder after;
+        Emit_c.Ir_builder.finish builder (Goto test);
+        Emit_c.Ir_builder.start builder after;
         load_text_at entry ~is_present:(extract_place (read_argument 1))
     | Libc function_ when not (Libc.is_available (Memory_layout.system env) function_) ->
         fail Panic
           (Printf.sprintf "this system's C library has no %s" (Libc.show_function function_));
-        Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder)
+        Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder)
     | Libc function_ -> (
         let ground scalar = Ground.make_builtin (Intrinsic.convert_libc_scalar scalar) in
         let { Libc.parameters; result; _ } = Libc.make_signature function_ in
@@ -894,7 +897,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
                        (extract_place (read_argument (take_argument_index ()))))
               | Written (scalar, names) ->
                   let structure =
-                    Emit_c.Builder.allocate_local builder
+                    Emit_c.Ir_builder.allocate_local builder
                       (Value
                          (Ground.make_builtin Array
                             ~arguments:
@@ -903,7 +906,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
                   List.iteri
                     (fun index _ ->
                       let written = extract_place (read_argument (take_argument_index ())) in
-                      Emit_c.Builder.emit builder
+                      Emit_c.Ir_builder.emit builder
                         (Assign
                            ( Lowered.project
                                (Lowered.make_local_place structure)
@@ -911,7 +914,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
                              Use (Copy written) ));
                       after :=
                         (fun () ->
-                          Emit_c.Builder.emit builder
+                          Emit_c.Ir_builder.emit builder
                             (Assign
                                ( written,
                                  Use
@@ -947,7 +950,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
         in
         let cast_to_uint64 operand : Lowered.operand =
           let count = allocate_uint64_local () in
-          Emit_c.Builder.emit builder
+          Emit_c.Ir_builder.emit builder
             (Assign (Lowered.make_local_place count, Convert (operand, Integer UInt64)));
           Copy (Lowered.make_local_place count)
         in
@@ -960,7 +963,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
                   if each = 1 then Some count
                   else begin
                     let scaled = allocate_uint64_local () in
-                    Emit_c.Builder.emit builder
+                    Emit_c.Ir_builder.emit builder
                       (Assign
                          ( Lowered.make_local_place scaled,
                            Binary (Multiply, count, Lowered.make_uint64_constant each) ));
@@ -1008,7 +1011,7 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
                       (Binary (Equal, copy_length view, Lowered.make_uint64_constant 0))
                       message;
                     let last = allocate_uint64_local () in
-                    Emit_c.Builder.emit builder
+                    Emit_c.Ir_builder.emit builder
                       (Assign
                          ( Lowered.make_local_place last,
                            Binary (Subtract, copy_length view, Lowered.make_uint64_constant 1) ));
@@ -1023,12 +1026,12 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
         let target = Lowered.Foreign (Libc.make_declaration (Memory_layout.system env) function_) in
         let emit_bracket intrinsic =
           if Libc.is_blocking function_ then
-            Emit_c.Builder.emit builder
+            Emit_c.Ir_builder.emit builder
               (Call { target = Intrinsic intrinsic; arguments = []; result = Discarded })
         in
         let call result =
           emit_bracket Blocking_begin;
-          Emit_c.Builder.emit builder (Call { target; arguments = call_arguments; result });
+          Emit_c.Ir_builder.emit builder (Call { target; arguments = call_arguments; result });
           emit_bracket Blocking_end;
           List.iter (fun write -> write ()) (List.rev !after)
         in
@@ -1037,17 +1040,17 @@ let lower ~may_panic ?(value_arguments = []) ?reported env builder types operati
             call (match destination with Some place -> Returned place | None -> Discarded)
         | Never ->
             call Discarded;
-            Emit_c.Builder.finish builder Unreachable;
-            Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder)
+            Emit_c.Ir_builder.finish builder Unreachable;
+            Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder)
         | Points_at scalar ->
             let address =
-              Emit_c.Builder.allocate_local builder (Raw (Pointer (Data (ground scalar))))
+              Emit_c.Ir_builder.allocate_local builder (Raw (Pointer (Data (ground scalar))))
             in
             call (Returned (Lowered.make_local_place address));
             set (Use (Copy (Lowered.project (Lowered.make_local_place address) Deref)))
         | Text ->
             let address =
-              Emit_c.Builder.allocate_local builder (Raw (Nullable_pointer (Data byte)))
+              Emit_c.Ir_builder.allocate_local builder (Raw (Nullable_pointer (Data byte)))
             in
             call (Returned (Lowered.make_local_place address));
             load_text_at address

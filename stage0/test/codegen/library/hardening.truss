@@ -8,7 +8,7 @@ fn loopback(port: UInt16) -> network::SocketAddress {
 }
 
 fn exchange(port: UInt16, raw: StringSlice) -> String
-  uses NetworkClient, Handles, Panic
+  uses NetworkClient, Handles, Panic, RunForever
 {
   var connection = network::connect("localhost", port: port).expect("the server accepts")
   let _ = mut connection.write_all(raw.bytes())
@@ -20,7 +20,7 @@ fn exchange(port: UInt16, raw: StringSlice) -> String
 type Stalled(reply: String, waited: Duration)
 
 fn stalled_head() -> Stalled
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic, RunForever
 {
   var listener = NetworkServer.listen(loopback(8099)).expect("the port is free")
   let started = Clock.monotonic()
@@ -35,7 +35,7 @@ fn stalled_head() -> Stalled
   }
 }
 
-test "a client that stalls inside its headers is closed after the head deadline" {
+test "a client that stalls inside its headers is closed after the head deadline" uses Panic, RunForever {
   provide simulation::World.new() {
     let stalled = stalled_head()
     assert stalled.reply == ""
@@ -44,7 +44,7 @@ test "a client that stalls inside its headers is closed after the head deadline"
 }
 
 fn second_waits_for_first() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic, RunForever
 {
   var listener = NetworkServer.listen(loopback(8100)).expect("the port is free")
   let started = Clock.monotonic()
@@ -64,14 +64,14 @@ fn second_waits_for_first() -> List[String]
   }
 }
 
-test "a server at its connection limit accepts the next connection only once one closes" {
+test "a server at its connection limit accepts the next connection only once one closes" uses Panic, RunForever {
   provide simulation::World.new() {
     assert second_waits_for_first() == ["true true"]
   }
 }
 
 fn slow(request: own http::Request, responder: mut http::Responder, finished: tasks::Counter)
-  uses Tasks, Clock
+  uses Tasks, Clock, RunForever
 {
   if request.target == "/streaming" {
     let _ = mut responder.start(http::Status.ok)
@@ -86,7 +86,7 @@ fn slow(request: own http::Request, responder: mut http::Responder, finished: ta
 }
 
 fn deadlines() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic, RunForever
 {
   var listener = NetworkServer.listen(loopback(8101)).expect("the port is free")
   let finished = tasks::Counter.new()
@@ -107,7 +107,7 @@ fn deadlines() -> List[String]
   }
 }
 
-test "a handler past its deadline gets a 503 if it sent nothing, and a cut connection if it had begun" {
+test "a handler past its deadline gets a 503 if it sent nothing, and a cut connection if it had begun" uses Panic, RunForever {
   provide simulation::World.new() {
     let seen = deadlines()
     assert seen.length() == 3
@@ -118,7 +118,7 @@ test "a handler past its deadline gets a 503 if it sent nothing, and a cut conne
 }
 
 fn abandoned() -> Int64
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic, RunForever
 {
   var listener = NetworkServer.listen(loopback(8102)).expect("the port is free")
   let finished = tasks::Counter.new()
@@ -137,7 +137,7 @@ fn abandoned() -> Int64
   }
 }
 
-test "a handler whose HTTP/1.1 client disconnects is cancelled" {
+test "a handler whose HTTP/1.1 client disconnects is cancelled" uses Panic, RunForever {
   provide simulation::World.new() {
     let finished = abandoned()
     let _ = echo "${finished}"
@@ -152,7 +152,7 @@ fn frame(kind: UInt8, flags: UInt8, stream: UInt8, payload: Slice[UInt8]) -> Lis
 }
 
 fn reset_over_http_two() -> Int64
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic, RunForever
 {
   var listener = NetworkServer.listen(loopback(8103)).expect("the port is free")
   let finished = tasks::Counter.new()
@@ -176,7 +176,7 @@ fn reset_over_http_two() -> Int64
   }
 }
 
-test "a handler whose HTTP/2 stream the client resets is cancelled" {
+test "a handler whose HTTP/2 stream the client resets is cancelled" uses Panic, RunForever {
   provide simulation::World.new() {
     let finished = reset_over_http_two()
     let _ = echo "${finished}"
@@ -185,7 +185,7 @@ test "a handler whose HTTP/2 stream the client resets is cancelled" {
 }
 
 fn clients_seen() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Panic, RunForever
 {
   let local = network::IpNetwork.new(network::IpAddress.loopback, prefix_length: 8).expect("a network")
   let private = network::IpNetwork.new(network::IpAddress.Version4([10, 0, 0, 0]), prefix_length: 8).expect("a network")
@@ -215,7 +215,7 @@ fn clients_seen() -> List[String]
   }
 }
 
-test "a client address comes from forwarding headers only when a trusted proxy sent them" {
+test "a client address comes from forwarding headers only when a trusted proxy sent them" uses Panic, RunForever {
   provide simulation::World.new() {
     assert clients_seen() == ["203.0.113.7", "2001:db8::1", "10.1.2.3", "127.0.0.1", "127.0.0.1"]
   }

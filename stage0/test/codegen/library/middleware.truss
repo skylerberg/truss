@@ -3,7 +3,7 @@ use standard::network
 use standard::simulation
 
 fn routes(request: own http::Request, responder: mut http::Responder)
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if request.matches(http::Route"POST /small") is Some(_) {
     let limited = own request.with_body_limit(10)
@@ -28,7 +28,7 @@ fn policy() -> http::CorsPolicy {
 }
 
 fn application(request: own http::Request, responder: mut http::Responder)
-  uses Handles, Tasks, Clock, Log, Random
+  uses Handles, Tasks, Clock, Log, Random, RunForever
 {
   http::request_id(own request, responder: mut responder, next: fn(identified, identified_responder) {
     http::log_requests(own identified, responder: mut identified_responder, next: fn(logged, logged_responder) {
@@ -40,7 +40,7 @@ fn application(request: own http::Request, responder: mut http::Responder)
 }
 
 fn exchange(raw: StringSlice) -> String
-  uses NetworkClient, Handles, Tasks, Panic
+  uses NetworkClient, Handles, Tasks, Panic, RunForever
 {
   let connection = network::connect("localhost", port: 8093).expect("the server accepts")
   let _ = connection.send_all(raw.bytes())
@@ -59,7 +59,7 @@ fn header_of(reply: StringSlice, name: StringSlice) -> String {
 }
 
 fn visit() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Log, Random, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Log, Random, Panic, RunForever
 {
   var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8093)).expect("the port is free")
   concurrent {
@@ -83,7 +83,7 @@ fn visit() -> List[String]
   }
 }
 
-test "middleware adds CORS, security headers, request IDs, logs, and body limits" {
+test "middleware adds CORS, security headers, request IDs, logs, and body limits" uses Panic, RunForever {
   let world = simulation::World.new()
   provide world {
     let seen = visit()

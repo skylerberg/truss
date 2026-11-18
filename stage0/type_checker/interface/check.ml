@@ -108,22 +108,21 @@ let list_signature_types (signature : Types.signature) =
       signature.generics
 
 let check_real_implementations (state : Checking.state) (resolved : Resolve.resolved) ~recipient
-    ~report_panic (uses : Syntax.capability_reference list) =
+    (uses : Syntax.capability_reference list) =
   List.iter
     (fun (capability : Syntax.capability_reference) ->
       match capability.kind with
       | Capability_path written -> (
           match resolved.names.(written.path.last.id) with
           | Some (Definition (Capability, path))
-            when Option.is_none (Definition.find_real_implementation state.lookups path) ->
-              if Well_known.is Panic path then report_panic capability
-              else
-                Checking.report state No_real_implementation state.spans.(capability.id)
-                  (Printf.sprintf
-                     "`%s` has no real implementation, so the runtime cannot provide it to %s. \
-                      Provide an implementation in the body with `provide`."
-                     (Elaborator.show_path written.path)
-                     recipient)
+            when (not (Types.is_built_in_capability (Capability path)))
+                 && Option.is_none (Definition.find_real_implementation state.lookups path) ->
+              Checking.report state No_real_implementation state.spans.(capability.id)
+                (Printf.sprintf
+                   "`%s` has no real implementation, so the runtime cannot provide it to %s. \
+                    Provide an implementation in the body with `provide`."
+                   (Elaborator.show_path written.path)
+                   recipient)
           | _ -> ())
       | Self_capabilities _ | Associated_capabilities _ | Generic_capability _ -> ())
     uses
@@ -152,7 +151,7 @@ let check_main state resolved (clauses : Syntax.clause list) (signature : Types.
   in
   if not (list_of_string && exit_code && signature.generics = [] && signature.receiver = None) then
     Checking.report state Main_signature span main_message;
-  check_real_implementations state resolved ~recipient:"`main`" ~report_panic:ignore
+  check_real_implementations state resolved ~recipient:"`main`"
     (List.concat_map
        (fun (clause : Syntax.clause) -> match clause.kind with Uses written -> written | _ -> [])
        clauses)
@@ -170,29 +169,6 @@ let make_element_removal (spans : Source.Definition_span.t array)
   | _, Some next -> delete spans.(removed).start spans.(next).start
   | Some previous, None -> delete spans.(previous).stop spans.(removed).stop
   | None, None -> delete clause.start clause.stop
-
-let check_test_uses (state : Checking.state) (resolved : Resolve.resolved)
-    (name : Syntax.string_literal) (uses : Syntax.capability_reference list) =
-  match List.rev uses with
-  | [] -> ()
-  | (last : Syntax.capability_reference) :: _ ->
-      let clause =
-        Source.Definition_span.make state.spans.(name.id).stop state.spans.(last.id).stop
-      in
-      let elements =
-        List.map (fun (capability : Syntax.capability_reference) -> capability.id) uses
-      in
-      let report_panic (panic : Syntax.capability_reference) =
-        Checking.report state No_real_implementation state.spans.(panic.id)
-          ~fixes:
-            [
-              Diagnostic.fix "Remove `Panic`"
-                [ make_element_removal state.spans ~clause elements panic.id ];
-            ]
-          "`Panic` has no real implementation. Every test has it without declaring it. Declaring \
-           it would make this test external, so the test's result would never be cached."
-      in
-      check_real_implementations state resolved ~recipient:"a test" ~report_panic uses
 
 let check_duplicates state member_kind (names : Syntax.name list) =
   ignore
@@ -402,6 +378,7 @@ let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
 let check (state : Checking.state) =
   let lookups = state.lookups in
   let definition = state.definition in
+  let visibility = (lookups.names.read_declaration state.key).visibility in
   let is_broken part = Resolve.Names.is_broken lookups.names state.key part in
   check_bounds state;
   let resolved = lookups.read_resolved Interface state.key in
@@ -415,7 +392,7 @@ let check (state : Checking.state) =
           ( lookups.names.read_definition container,
             (lookups.read_elaborated_interface container).interface )
         with
-        | { kind = Trait _; visibility; _ }, Trait_interface trait ->
+        | { kind = Trait _; _ }, Trait_interface trait ->
             check_redeclared state name
               (Resolve.Names.classify_receiver signature.parameters)
               ~trait_path:container.path trait;
@@ -439,8 +416,7 @@ let check (state : Checking.state) =
           match signature.name with
           | Plain_name name | Member_name (_, name) -> state.spans.(name.id)
         in
-        check_private_in_public state ~visibility:definition.visibility
-          (list_signature_types elaborated) span
+        check_private_in_public state ~visibility (list_signature_types elaborated) span
     | None, Law_proof { law; type_; _ }, Law_proof_interface { generics; trait; for_type; _ } -> (
         (match lookups.find_trait_header trait.trait with
         | Some header when not (List.mem law.text header.laws) ->
@@ -480,22 +456,22 @@ let check (state : Checking.state) =
               variants
         | Type_todo -> ());
         check_derives state interface clauses resolved;
-        if definition.visibility = Public then
-          check_private_in_public state ~visibility:definition.visibility
+        if visibility = Public then
+          check_private_in_public state ~visibility
             (Types.list_field_types interface)
             state.spans.(name.id)
     | None, Trait { name; requires; _ }, Trait_interface trait ->
         check_trait_cycle state requires;
-        check_private_in_public state ~visibility:definition.visibility
+        check_private_in_public state ~visibility
           (List.map (fun (bound : Types.trait_reference) -> Types.Any bound) trait.requires)
           state.spans.(name.id)
     | None, Constant { name = Plain_name name; _ }, Constant_interface constant ->
-        check_private_in_public state ~visibility:definition.visibility [ constant.constant_type ]
-          state.spans.(name.id)
+        check_private_in_public state ~visibility [ constant.constant_type ] state.spans.(name.id)
     | None, Impl { trait_; members; _ }, Impl_interface impl ->
         Impl_checks.check_impl state members impl trait_
     | None, Constant { name = Member_name (head, _); _ }, _ -> check_method_location state head
-    | None, Test { name; uses; _ }, Test_interface _ -> check_test_uses state resolved name uses
+    | None, Test { uses; _ }, Test_interface _ ->
+        check_real_implementations state resolved ~recipient:"a test" uses
     | None, _, _ -> ()
 
 let list_diagnostics (lookups : Lookups.t) key =

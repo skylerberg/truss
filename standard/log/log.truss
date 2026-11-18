@@ -129,16 +129,16 @@ fn needs_quotes(text: StringSlice) -> Bool {
 fn write_value(output: mut String, value: Value, as_json: Bool) {
   match value {
     String(text) => {
-      if as_json || needs_quotes(text.slice()) {
-        mut output.push(json::quote(text.slice()).slice())
+      if as_json || needs_quotes(text) {
+        mut output.push(json::quote(text))
       } else {
-        mut output.push(text.slice())
+        mut output.push(text)
       }
     }
     Integer(number) => number.display(mut output)
     Float(number) => {
       if as_json && !number.is_finite() {
-        mut output.push(json::quote("${number}").slice())
+        mut output.push(json::quote("${number}"))
       } else {
         number.display(mut output)
       }
@@ -146,14 +146,14 @@ fn write_value(output: mut String, value: Value, as_json: Bool) {
     Bool(flag) => flag.display(mut output)
     Duration(duration) => {
       if as_json {
-        mut output.push(json::quote("${duration}").slice())
+        mut output.push(json::quote("${duration}"))
       } else {
         duration.display(mut output)
       }
     }
     Instant(instant) => {
       if as_json {
-        mut output.push(json::quote("${instant}").slice())
+        mut output.push(json::quote("${instant}"))
       } else {
         instant.display(mut output)
       }
@@ -166,10 +166,10 @@ fn write_line(output: mut String, time: Instant, record: Record) {
   mut output.push(" ")
   record.level.display(mut output)
   mut output.push(" ")
-  mut output.push(record.message.slice())
+  mut output.push(record.message)
   for index in 0..record.fields.length() {
     mut output.push(" ")
-    mut output.push(record.fields[index].name.slice())
+    mut output.push(record.fields[index].name)
     mut output.push("=")
     write_value(mut output, value: record.fields[index].value, as_json: false)
   }
@@ -177,14 +177,14 @@ fn write_line(output: mut String, time: Instant, record: Record) {
 
 fn write_json(output: mut String, time: Instant, record: Record) {
   mut output.push("{\"time\":")
-  mut output.push(json::quote("${time}").slice())
+  mut output.push(json::quote("${time}"))
   mut output.push(",\"level\":")
-  mut output.push(json::quote("${record.level}").slice())
+  mut output.push(json::quote("${record.level}"))
   mut output.push(",\"message\":")
-  mut output.push(json::quote(record.message.slice()).slice())
+  mut output.push(json::quote(record.message))
   for index in 0..record.fields.length() {
     mut output.push(",")
-    mut output.push(json::quote(record.fields[index].name.slice()).slice())
+    mut output.push(json::quote(record.fields[index].name))
     mut output.push(":")
     write_value(mut output, value: record.fields[index].value, as_json: true)
   }
@@ -200,7 +200,7 @@ impl Log for ConsoleLog
       Lines => write_line(mut line, time: Clock.now(), record: record)
       Json => write_json(mut line, time: Clock.now(), record: record)
     }
-    Console.print_error(line.slice())
+    Console.print_error(line)
   }
 
   fn enabled(self, level: Level) -> Bool {

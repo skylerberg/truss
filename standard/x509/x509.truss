@@ -12,7 +12,7 @@ public type Error(message: String)
 impl Display for Error {
   fn display(self, output: mut String)
   {
-    mut output.push(self.message.slice())
+    mut output.push(self.message)
   }
 }
 
@@ -219,6 +219,16 @@ fn algorithm_of(value: der::Value) -> Option[SignatureAlgorithm] {
   }
 }
 
+fn find_named_curve(identifier: der::Value) -> Option[cryptography::Curve] {
+  if is_oid(identifier, expected: "2a8648ce3d030107") {
+    Some(cryptography::Curve.P256)
+  } else if is_oid(identifier, expected: "2b81040022") {
+    Some(cryptography::Curve.P384)
+  } else {
+    None
+  }
+}
+
 public fn public_key_of(info: der::Value) -> Option[PublicKey]
   uses Panic
 {
@@ -235,13 +245,7 @@ public fn public_key_of(info: der::Value) -> Option[PublicKey]
     return None
   }
   if is_oid(algorithm[0], expected: "2a8648ce3d0201") && algorithm.length() == 2 {
-    let curve = if is_oid(algorithm[1], expected: "2a8648ce3d030107") {
-      cryptography::Curve.P256
-    } else if is_oid(algorithm[1], expected: "2b81040022") {
-      cryptography::Curve.P384
-    } else {
-      return None
-    }
+    let curve = find_named_curve(algorithm[1])?
     return match cryptography::EcdsaVerifyingKey.from_sec1(curve, bytes: key.slice()) {
       Some(verifying) => Some(PublicKey.Ecdsa(key: own verifying))
       None => None
@@ -508,7 +512,7 @@ public fn pem_blocks(text: StringSlice, label: StringSlice) -> List[List[UInt8]]
       body = ""
     } else if trimmed == end {
       if inside {
-        match base64::decode(body.slice()) {
+        match base64::decode(body) {
           Ok(bytes) => mut blocks.push(own bytes)
           Err(_) => {}
         }
@@ -614,7 +618,7 @@ public fn Certificate.matches_host(self, host: StringSlice) -> Bool {
   let wanted_text = wanted.slice()
   let trimmed = if wanted_text.ends_with(".") { wanted_text.part(0, to: wanted_text.length() - 1) } else { wanted_text }
   for name in self.dns_names {
-    let pattern = lowered(name.slice())
+    let pattern = lowered(name)
     let pattern_text = pattern.slice()
     if pattern_text == trimmed {
       return true
@@ -773,10 +777,10 @@ public fn system_roots() -> Result[List[Certificate], SystemError]
   uses FileRead, Panic
 {
   for path in root_bundles {
-    match FileRead.read_text(Path.new(path.slice())) {
+    match FileRead.read_text(Path.new(path)) {
       Ok(text) => {
         var roots: List[Certificate] = []
-        for block in pem_blocks(text.slice(), label: "CERTIFICATE") {
+        for block in pem_blocks(text, label: "CERTIFICATE") {
           match Certificate.parse(block.slice()) {
             Ok(root) => mut roots.push(own root)
             Err(_) => {}
@@ -818,13 +822,7 @@ public fn parse_private_key(encoded: Slice[UInt8]) -> Option[PrivateKey]
     return None
   }
   if is_oid(algorithm[0], expected: "2a8648ce3d0201") && algorithm.length() == 2 {
-    let curve = if is_oid(algorithm[1], expected: "2a8648ce3d030107") {
-      cryptography::Curve.P256
-    } else if is_oid(algorithm[1], expected: "2b81040022") {
-      cryptography::Curve.P384
-    } else {
-      return None
-    }
+    let curve = find_named_curve(algorithm[1])?
     let fields = items_of(der::parse(inner.slice()).ok()?)
     if fields.length() < 2 {
       return None

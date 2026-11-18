@@ -25,6 +25,17 @@ let standard_package_database = lazy (Workspace.For_testing.load_standard_packag
 let make_database packages =
   Database.create ~loaded:[ Lazy.force standard_package_database ] packages
 
+let extend_standard_library (packages : Project.package list) =
+  Database.For_testing.extend_package
+    ~loaded:[ Lazy.force standard_package_database ]
+    ~package:Path.standard_package
+    (List.concat_map
+       (fun (package : Project.package) ->
+         if package.name <> Path.standard_package then
+           failwith (Path.show_package package.name ^ " is not the standard package");
+         package.files)
+       packages)
+
 let setup ?(dependencies = []) files : Project.package list =
   let files = List.map (fun (name, text) -> (parse_file name, text)) files in
   let package_of ((file : Path.file), _) = file.module_.package in
@@ -64,9 +75,11 @@ let parse_errors packages file =
     (let tokens, lexer_diagnostics = Lexer.lex (read_source packages file) in
      lexer_diagnostics @ snd (Parser.parse tokens ~lexer_diagnostics))
 
-let list_diagnostics database (file : Path.file) =
-  Database.check database [ file.module_.package ];
-  Database.list_file_diagnostics database file
+let list_fragment_diagnostics database file =
+  List.filter
+    (fun (diagnostic : Diagnostic.t) ->
+      not (Diagnostic.For_testing.is_unused_definition diagnostic.code))
+    (Database.list_file_diagnostics database file)
 
 let list_codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
@@ -103,11 +116,10 @@ let collect_core_nodes packages (key : Resolve.Names.key) : core_nodes =
         patterns = List.rev !patterns;
       }
 
-let make_names packages (package : Path.package) =
-  Database.make_name_lookups (make_database packages) [ package ]
+let make_names packages = Database.make_name_lookups (make_database packages)
 
 let list_declarations packages (module_ : Path.module_) =
-  (make_names packages module_.package).list_declarations module_
+  (make_names packages).list_declarations module_
 
 let collect_first_core_nodes text =
   let packages = setup [ ("app::main", text) ] in
@@ -130,7 +142,7 @@ let expect_no_diagnostics ~check files =
                   reported)));
       ignore
         (Core_lint.check_file
-           (Database.make_interface_lookups database [ (parse_file name).module_.package ])
+           (Database.make_interface_lookups database)
            ~find_core:(fun key ->
              Option.map
                (fun (checked : Infer.checked) -> checked.form)

@@ -28,7 +28,7 @@ test "a logger that adds fields puts them before the record's own" {
   assert captured.records[2].fields.length() == 0
 }
 
-test "a console log writes each record as a line with its time, level, message, and fields" {
+test "a console log writes each record as a line with its time, level, message, and fields" uses Panic, RunForever {
   let start = Instant.from_unix_nanoseconds(1700000000000000000)
   let world = simulation::World.from(simulation::Setup.new().with_time(start))
   provide world {
@@ -46,7 +46,7 @@ test "a console log writes each record as a line with its time, level, message, 
   }
 }
 
-test "a console log writes each record as a JSON object when asked to" {
+test "a console log writes each record as a JSON object when asked to" uses Panic, RunForever {
   let start = Instant.from_unix_nanoseconds(1700000000000000000)
   let world = simulation::World.from(simulation::Setup.new().with_time(start))
   provide world {

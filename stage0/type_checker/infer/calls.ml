@@ -103,7 +103,7 @@ and check_argument state env (value : Syntax.expression) (parameter : Types.para
     ~has_generic_type =
   let inner =
     match value.kind with
-    | Mode (mode, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
+    | Mode (mode, inner) when Option.is_none (State.find_keyword_operation state inner) ->
         State.note_mode_keyword state value mode inner;
         inner
     | _ -> value
@@ -157,14 +157,8 @@ and match_arguments state ?constructor (value : Syntax.expression)
               | None ->
                   reject Unknown_label (State.read_span state label.id)
                     ~fixes:
-                      (match Diagnostic.find_closest label.text (List.map fst named) with
-                      | Some candidate ->
-                          [
-                            State.fix
-                              (Printf.sprintf "Write `%s`." candidate)
-                              [ State.replace (State.read_span state label.id) candidate ];
-                          ]
-                      | None -> [])
+                      (Diagnostic.list_spelling_fixes (State.read_span state label.id)
+                         ~written:label.text (List.map fst named))
                     (Printf.sprintf "No parameter is named `%s`." label.text);
                   None)
           | None -> (

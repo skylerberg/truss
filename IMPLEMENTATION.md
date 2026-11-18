@@ -27,6 +27,13 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `brew install z3` on macOS, or from the release's archive, and put it on
   the path or name it in `TRUSS_Z3`. CI downloads that release and checks
   its hash.
+- **`stage0/tools/prover_queries`** prints the solver's input for each
+  obligation that starts at a position, written as a diagnostic writes it:
+  `dune exec ./stage0/tools/prover_queries/prover_queries.exe --
+  standard/numbers/floats/floats.truss:6:13`. A file of a package is named
+  by its path. The output is one script for `z3 -in`, which prints each
+  obligation's answer, Z3's reason for an unknown answer, and the steps Z3
+  used.
 - **The Unicode tables are generated** from the Unicode character database
   files that `stage0/tools/unicode/sources.txt` lists with their hashes:
   the compiler's into `stage0/support/unicode/unicode_tables.ml`, and the standard
@@ -130,7 +137,7 @@ unchecked.
 ### Module names
 
 Code names each module by its path, such as `Resolve.Names` or
-`Emit_c.Builder`, so a reader finds a definition without searching for the
+`Emit_c.Ir_builder`, so a reader finds a definition without searching for the
 module a short name stands for. Code has no `open`: a name from another
 module is qualified, as in `Facts.find_visible_type`, and no `open` can
 shadow a name in scope. Code has no module alias either. Many modules share a name,
@@ -169,7 +176,9 @@ Every stage of stage0 is tested the same way:
   package database, which a test executable loads once from the user's cache.
   A test must not give a new database the library's sources: that parses
   and checks the whole library again, so every such test gets slower each
-  time the library grows.
+  time the library grows. A test whose probe module must be in the standard
+  package, such as one that calls an intrinsic, extends the stored package
+  with `Database.For_testing.extend_package`, which checks only the probe.
 - **The standard library's own tests are written in Truss.** Each file of
   `stage0/test/codegen/library/` is a module of tests for one module of the
   library, named after it. `library_tests` builds every file's tests into

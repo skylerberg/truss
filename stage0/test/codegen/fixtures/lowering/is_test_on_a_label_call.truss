@@ -5,7 +5,9 @@ fn label(count: Int64) -> Option[String] {
   None
 }
 
-fn total_length(count: Int64) -> UInt64 {
+fn total_length(count: Int64) -> UInt64
+  uses RunForever
+{
   var total: UInt64 = 0
   var left = count
   while label(left) is Some(text) {
@@ -24,7 +26,7 @@ fn first_length(count: Int64) -> UInt64 {
   0
 }
 
-test "keeps" {
+test "keeps" uses RunForever {
   assert total_length(3) == 21
   assert first_length(12) == 8
   assert first_length(0) == 0

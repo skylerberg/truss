@@ -36,7 +36,7 @@ fn readings(count: Int64) -> Readings {
 }
 
 fn total(count: Int64) -> Int64
-  uses Meter
+  uses Meter, RunForever
 {
   var cursor = readings(count)
   var sum = 0
@@ -46,7 +46,7 @@ fn total(count: Int64) -> Int64
   sum
 }
 
-test "a cursor that outlives the block it was made in" {
+test "a cursor that outlives the block it was made in" uses RunForever {
   var cursor = provide Table(values: [1, 2, 4]) {
     var built = readings(4)
     assert mut built.next() == Some(7)

@@ -2,13 +2,11 @@ public type Version(major: Int64)
   derives Equal, Ordered
 
 fn same[Item: Ordered](left: Item, right: Item) -> Bool
-  cost time finite
 {
   left.compare(right) == Ordering.Equal
 }
 
 public fn same_versions(left: Version, right: Version) -> Bool
-  cost time finite
 {
   same(left, right: right)
 }

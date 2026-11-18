@@ -20,10 +20,10 @@ val compute_callee_amount :
   ?method_cost:(Metric.t -> Logic.term) ->
   State.context ->
   State.frame ->
-  path:Path.t ->
+  is_recursive:bool ->
   clauses:State.clauses list ->
   bind_frame:(State.clauses -> State.frame) ->
-  uses:Types.capability list ->
+  uses:Types.capability_set ->
   values:State.passed list ->
   change:(unit -> Logic.term) option ->
   Costs.counter ->

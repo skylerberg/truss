@@ -1,5 +1,5 @@
 val test : string -> (unit -> unit) -> unit
-val list_diagnostics : Database.t -> Path.file -> Diagnostic.t list
+val list_fragment_diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val fail : ('a, unit, string, unit) format4 -> 'a
 val expect_string : expected:String.t -> String.t -> unit
 val expect_int : expected:int -> int -> unit
@@ -90,6 +90,11 @@ val make_backend :
   ?profile:Backend.profile ->
   Database.t ->
   Backend.t
+
+val extend_standard_library : (Path.file * string) list -> Database.t
+
+val load_standard_probe :
+  ?roots:Lowered.Item.t list -> Path.file -> string -> Database.t * Backend.t
 
 val load_files :
   ?results:Backend.results ->

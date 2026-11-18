@@ -12,7 +12,9 @@ impl Cursor for Countdown {
   }
 }
 
-fn sum(items: mut any Cursor[Element = Int64]) -> Int64 {
+fn sum(items: mut any Cursor[Element = Int64]) -> Int64
+  uses RunForever
+{
   var total: Int64 = 0
   while mut items.next() is Some(item) {
     total = total.wrapping_add(item)
@@ -20,7 +22,7 @@ fn sum(items: mut any Cursor[Element = Int64]) -> Int64 {
   total
 }
 
-test "any Cursor, of a cursor written here and of a list's" {
+test "any Cursor, of a cursor written here and of a list's" uses RunForever {
   var written: any Cursor[Element = Int64] = any Countdown(left: 4)
   assert sum(mut written) == 6
   let items: List[Int64] = [3, 1, 4]

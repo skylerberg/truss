@@ -1,4 +1,6 @@
-fn length() -> UInt64 {
+fn length() -> UInt64
+  uses RunForever
+{
   var cursor = readings(3)
   own cursor.count()
 }

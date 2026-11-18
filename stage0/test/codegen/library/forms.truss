@@ -18,7 +18,7 @@ test "a form reads repeated names and plus signs, and encodes back" {
 }
 
 fn receive(request: own http::Request, responder: mut http::Responder)
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if request.matches(http::Route"POST /form") is Some(_) {
     let reply = match own request.form() {
@@ -54,7 +54,7 @@ fn receive(request: own http::Request, responder: mut http::Responder)
 }
 
 fn submit() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
   var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8091)).expect("the port is free")
   concurrent {
@@ -92,7 +92,7 @@ fn submit() -> List[String]
   }
 }
 
-test "a server reads an urlencoded form and a multipart upload with a large file" {
+test "a server reads an urlencoded form and a multipart upload with a large file" uses Panic, RunForever {
   provide simulation::World.new() {
     let seen = submit()
     assert seen.length() == 2

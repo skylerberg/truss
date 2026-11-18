@@ -13,5 +13,5 @@ impl Walk for Pair {
     self.first
   }
 
-  fn each(self, visit: (fn(Int64) cost time finite)) {}
+  fn each(self, visit: (fn(Int64) cost time O(1))) {}
 }

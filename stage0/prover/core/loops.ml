@@ -102,7 +102,6 @@ let loop_clause_holds context (at : State.frame) (counter : Costs.counter) (cost
     match cost.bound with
     | Order_of amount | At_most amount | Exactly amount ->
         snd (Validity.read_specification context { at with makes_obligations = false } amount)
-    | Finite -> Costs.zero
   in
   match counter.counting with
   | Units -> Costs.at_most since (Costs.bound amount)
@@ -154,8 +153,7 @@ let check_loop_entry context frame costs =
       | Clause_bound { written; _ } ->
           (match written.bound with
           | Order_of amount | At_most amount | Exactly amount ->
-              ignore (Validity.read_specification context frame amount)
-          | Finite -> ());
+              ignore (Validity.read_specification context frame amount));
           Facts.oblige context frame Cost
             (Facts.locate context frame.source written.origin)
             [
@@ -281,7 +279,6 @@ let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) costs ~it
                     (Validity.read_specification context
                        { clause_at with makes_obligations = false }
                        amount)
-              | Finite -> Costs.zero
             in
             let counted =
               match cost.counter.counting with
@@ -614,8 +611,7 @@ let names_visited (clauses : Mir.loop_clause list) =
       | Mir.Invariant invariant -> Amounts.mentions_history invariant
       | Decreases measures -> List.exists Amounts.mentions_history measures
       | Cost { bound = Order_of bound | At_most bound | Exactly bound; _ } ->
-          Amounts.mentions_history bound
-      | Cost { bound = Finite; _ } -> false)
+          Amounts.mentions_history bound)
     clauses
 
 let assume_visited_is_a_prefix context (head : State.frame) ~element ~visited ~entry_model ~model =
@@ -719,11 +715,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
            snd (Validity.read_specification context { at with makes_obligations = false } measure)))
       measures
   in
-  let entry_measure =
-    if context.terminates then
-      match find_measured frame with Some [ entry ] -> Some entry | _ -> None
-    else None
-  in
+  let entry_measure = match find_measured frame with Some [ entry ] -> Some entry | _ -> None in
   let is_amortized =
     List.exists
       (fun (next_clauses : State.clauses) ->
@@ -738,19 +730,18 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     ~changed:(for_loop.compute_changed_in frame)
     ~holds ~most:(Option.to_list entry_measure)
     ~prove_iteration:(fun ~head ~ends ->
-      if context.terminates then
-        match find_measured head with
-        | Some before ->
-            List.iter
-              (fun (end_ : State.frame) ->
-                match find_measured end_ with
-                | Some after ->
-                    Facts.oblige context end_ Termination location
-                      [ Text "This loop's measure may not decrease." ]
-                      (Amounts.compare_lexicographically before after)
-                | None -> ())
-              ends
-        | None -> ())
+      match find_measured head with
+      | Some before ->
+          List.iter
+            (fun (end_ : State.frame) ->
+              match find_measured end_ with
+              | Some after ->
+                  Facts.oblige context end_ Termination location
+                    [ Text "This loop's measure may not decrease." ]
+                    (Amounts.compare_lexicographically before after)
+              | None -> ())
+            ends
+      | None -> ())
     ~start:(fun head ->
       let before = declare_some_parts context head element_type in
       (match (entry_measure, find_measured head) with
@@ -776,8 +767,10 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       let havoc_mut (frame : State.frame) =
         cursor_access.write frame (Facts.arrive context frame "changed" cursor_type)
       in
+      let _, recursive_callee = Facts.find_recursive_callee context head location next.callee in
       let after, pulled =
-        Calls.call_contract ~lent_final:None context head pulling next path contract
+        Calls.call_contract ~recursive_callee ~lent_final:None context head pulling next path
+          contract
           [
             {
               position = 0;
@@ -970,7 +963,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
     let read measure = snd (Validity.read_specification context at measure) in
     match (find_measures clauses, loop.measure_operands) with
     | Some measures, _ -> Some (List.map read measures)
-    | None, Some (comparison, read_operands) -> (
+    | None, Some (comparison, read_operands) when context.terminates -> (
         let left, right = Validity.run_without_costs context (fun () -> read_operands at) in
         let distance from into = Logic.Operation ("-", [ into; from ]) in
         let through distance = Logic.Operation ("+", [ distance; Logic.int 1 ]) in
@@ -980,9 +973,9 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
         | Greater -> Some [ distance right left ]
         | Greater_equal -> Some [ through (distance right left) ]
         | Equal | Not_equal -> Facts.raise_bug "an equality gives a loop its measure")
-    | None, None -> None
+    | None, _ -> None
   in
-  let start_measures = if context.terminates then measure_terms inside else None in
+  let start_measures = measure_terms inside in
   if context.terminates && start_measures = None then
     Facts.raise_bug "a `while` loop has no measure in a body that terminates";
   let most =

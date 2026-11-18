@@ -3,7 +3,7 @@ module Package_table = Hashtbl.Make (Structural_key.Make (struct
 end))
 
 let list_unfinished snapshot database packages =
-  let names = Database.make_name_lookups database packages in
+  let names = Database.make_name_lookups database in
   List.concat_map
     (fun file ->
       let source = Command_packages.read_source snapshot database packages file in
@@ -93,7 +93,7 @@ let record database snapshot registry (package : Path.package) =
   (entries, List.sort_uniq compare !problems)
 
 let list_failed_tests database snapshot packages =
-  let interface = Database.make_interface_lookups database packages in
+  let interface = Database.make_interface_lookups database in
   let tests =
     List.filter
       (fun (test : Test_command.test) ->

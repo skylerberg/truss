@@ -91,12 +91,12 @@ let find_type_equality : type a b. a stored -> b stored -> (a, b) Type.eq option
   | Test_key _, Test_key _ -> Some Equal
   | _ -> None
 
-let locate_type_package : Ground.ty -> Path.package = function
-  | Named { path; _ } -> Path.locate_package path
-  | Any { trait; _ } -> Path.locate_package trait
-  | Function _ | Never -> Path.standard_package
+let find_type_definition : Ground.ty -> Path.t option = function
+  | Named { path; _ } -> Some path
+  | Any { trait; _ } -> Some trait
+  | Function _ | Never -> None
 
-let locate_item_package : Lowered.Item.t -> Path.package = function
+let find_item_definition : Lowered.Item.t -> Path.t option = function
   | Code { path; _ }
   | Constant path
   | Evaluator path
@@ -108,10 +108,10 @@ let locate_item_package : Lowered.Item.t -> Path.package = function
       | Program_main path
       | Test_main path )
   | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
-      Path.locate_package path
-  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> locate_type_package ty
+      Some path
+  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> find_type_definition ty
   | Generated (Entry impl_method | Any_entry impl_method) ->
-      Path.locate_package (Lowered.Item.make_method_path impl_method)
+      Some (Lowered.Item.make_method_path impl_method)
 
 let locate_stored_package : type a. a stored -> Path.package = function
   | Parsed file | Import_check file -> file.module_.package
@@ -138,7 +138,8 @@ let locate_stored_package : type a. a stored -> Path.package = function
   | Recursion_group path
   | Derived_interface { type_ = path; _ } ->
       Path.locate_package path
-  | Lowered key | Test_key key -> locate_item_package key
+  | Lowered key | Test_key key ->
+      Option.fold ~none:Path.standard_package ~some:Path.locate_package (find_item_definition key)
 
 let locate_package (Any part) = locate_stored_package part
 
@@ -232,7 +233,7 @@ let show_stored : type a. a stored -> string =
         | Constant declared -> "constant " ^ show_key declared
         | Instantiations -> "instantiations"
         | Tests -> "tests"
-        | Internals -> "internals"
+        | Unexported -> "unexported"
         | Dependencies -> "dependencies")
   | Call_edges (path, package) ->
       Printf.sprintf "call edges %s %s" (Path.show_package package) (Path.show path)
@@ -245,28 +246,6 @@ let show = function
   | Input part -> show_input part
   | Name part -> show_name part
   | Stored (Any part) -> show_stored part
-
-let find_type_definition : Ground.ty -> Path.t option = function
-  | Named { path; _ } -> Some path
-  | Any { trait; _ } -> Some trait
-  | Function _ | Never -> None
-
-let find_item_definition : Lowered.Item.t -> Path.t option = function
-  | Code { path; _ }
-  | Constant path
-  | Evaluator path
-  | Template_check { from_template = path; _ }
-  | Call_evaluation { function_ = path; _ }
-  | Generated
-      ( Locked_entry { capability = path; _ }
-      | Adapter { function_ = path; _ }
-      | Program_main path
-      | Test_main path )
-  | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
-      Some path
-  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> find_type_definition ty
-  | Generated (Entry impl_method | Any_entry impl_method) ->
-      Some (Lowered.Item.make_method_path impl_method)
 
 let find_name_definition = function
   | Entries _ | Module_declarations _ | File_declarations _ | Package_declarations _
@@ -284,7 +263,7 @@ let find_name_definition = function
 
 let find_stored_definition : type a. a stored -> Path.t option = function
   | Parsed _ | Namespace _ | Grant _ | Import_check _
-  | Package_check (_, (Instantiations | Tests | Internals | Dependencies)) ->
+  | Package_check (_, (Instantiations | Tests | Unexported | Dependencies)) ->
       None
   | Resolved (key, _)
   | Trait_header key

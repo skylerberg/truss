@@ -4,7 +4,7 @@ val list_method_lookups : State.state -> Path.t -> string -> Path.t Resolve.Name
 val has_visible_method : State.state -> Path.t -> string -> bool
 
 val make_hidden_error :
-  State.state -> Source.Definition_span.t -> Path.t * Syntax.visibility -> Types.ty
+  State.state -> Source.Definition_span.t -> Path.t * Resolve.Names.visibility -> Types.ty
 
 val list_trait_methods : Lookups.t -> Path.t -> string -> Types.trait_method list
 val list_trait_generics : Lookups.t -> Path.t -> Types.generic list

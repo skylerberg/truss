@@ -1,3 +1,0 @@
-fn next(count: UInt8) -> UInt8 {
-  count + 1
-}

@@ -160,7 +160,7 @@ internal fn CookieJar.store(mut self, address: url::Url, set_cookie: StringSlice
       if !domain.slice().contains(".") && domain != host {
         return
       }
-      if !domain_matches(host.slice(), domain: domain.slice()) {
+      if !domain_matches(host, domain: domain) {
         return
       }
       domain.copy()
@@ -220,8 +220,8 @@ internal fn CookieJar.header_for(mut self, address: url::Url, now: Int64) -> Opt
   let is_https = address.scheme() == "https"
   var matching: List[Stored] = []
   for stored in self.cookies {
-    let is_domain_match = if stored.is_host_only { stored.domain == host } else { domain_matches(host.slice(), domain: stored.domain.slice()) }
-    if is_domain_match && path_matches(path, cookie_path: stored.path.slice()) && (is_https || !stored.is_secure) {
+    let is_domain_match = if stored.is_host_only { stored.domain == host } else { domain_matches(host, domain: stored.domain) }
+    if is_domain_match && path_matches(path, cookie_path: stored.path) && (is_https || !stored.is_secure) {
       mut matching.push(stored.copy())
     }
   }
@@ -240,9 +240,9 @@ internal fn CookieJar.header_for(mut self, address: url::Url, now: Int64) -> Opt
     if !header.is_empty() {
       mut header.push("; ")
     }
-    mut header.push(stored.name.slice())
+    mut header.push(stored.name)
     mut header.push("=")
-    mut header.push(stored.value.slice())
+    mut header.push(stored.value)
   }
   Some(own header)
 }

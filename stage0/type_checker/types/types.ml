@@ -39,84 +39,52 @@ and capability =
   | Capability_projection of { base : ty; trait : trait_reference; name : string }
   | Capability_variable of int
   | Capability_error of Diagnostic.reported
-  | Divergence of divergence
-
-and divergence =
-  | Always
-  | Of_parameter of parameter
-  | Of_impl_method of {
-      self_type : ty;
-      trait : trait_reference;
-      name : string;
-      receiver : Path.receiver;
-    }
-  | Of_variable of int
 
 and capability_set = capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
 and resource = Metric of Metric.t | Calls of { capability : Path.t; method_ : string option }
 and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
-let is_divergence = function Divergence _ -> true | _ -> false
-let unconditional_divergence : capability = Divergence Always
 let panic : capability = Capability (Well_known.make_path Panic)
-
-let make_capability_set capabilities : capability_set =
-  List.sort_uniq compare
-    (if List.mem unconditional_divergence capabilities then
-       unconditional_divergence
-       :: List.filter (fun capability -> not (is_divergence capability)) capabilities
-     else capabilities)
-
+let make_capability_set capabilities : capability_set = List.sort_uniq compare capabilities
 let no_capabilities : capability_set = []
 
 let union_capabilities (left : capability_set) (right : capability_set) =
   make_capability_set (left @ right)
 
-let list_divergence (set : capability_set) : capability_set = List.filter is_divergence set
+let run_forever : capability = Capability (Well_known.make_path Run_forever)
+let has_capability capability (set : capability_set) = List.mem capability set
+let exists_capability predicate (set : capability_set) = List.exists predicate set
+let list_capabilities (set : capability_set) : capability list = set
+let built_in_capabilities = make_capability_set [ panic; run_forever ]
+let is_built_in_capability capability = has_capability capability built_in_capabilities
+let terminates set = not (has_capability run_forever set)
 
-let remove_divergence (set : capability_set) : capability_set =
-  List.filter (fun capability -> not (is_divergence capability)) set
-
-let terminates (set : capability_set) = not (List.mem unconditional_divergence set)
-
-let has_capability_error (capabilities : capability_set) =
+let contains_capability_error (capabilities : capability_set) =
   List.exists (function Capability_error _ -> true | _ -> false) capabilities
 
 let subtract_capabilities (left : capability_set) (right : capability_set) =
-  let allows capability =
-    List.mem capability right
-    || (is_divergence capability && List.mem unconditional_divergence right)
-  in
-  List.filter (fun capability -> not (allows capability)) left
+  List.filter (fun capability -> not (List.mem capability right)) left
 
 let is_capability_subset (smaller : capability_set) (larger : capability_set) =
-  has_capability_error smaller || has_capability_error larger
+  contains_capability_error smaller || contains_capability_error larger
   || subtract_capabilities smaller larger = []
-
-let leave_divergence_to_parameters (uses : capability_set) : capability_set =
-  let parameters =
-    List.filter_map (function Capability_parameter parameter -> Some parameter | _ -> None) uses
-  in
-  make_capability_set
-    (uses
-    @
-    match parameters with
-    | [] -> [ unconditional_divergence ]
-    | parameters -> List.map (fun parameter -> Divergence (Of_parameter parameter)) parameters)
 
 let intersect_capabilities (sets : capability_set list) : capability_set =
   make_capability_set
     (List.filter
-       (fun capability ->
-         List.for_all (fun set -> subtract_capabilities [ capability ] set = []) sets)
+       (fun capability -> List.for_all (fun set -> List.mem capability set) sets)
        (List.concat sets))
 
 let compute_missing_capabilities ~(required : capability_set) ~(available : capability_set) =
-  if has_capability_error required || has_capability_error available then no_capabilities
+  if contains_capability_error required || contains_capability_error available then no_capabilities
   else subtract_capabilities required available
 
-let flat_map_capabilities f (set : capability_set) = make_capability_set (List.concat_map f set)
+let replace_capabilities find_replacement (set : capability_set) =
+  make_capability_set
+    (List.concat_map
+       (fun capability -> Option.value ~default:[ capability ] (find_replacement capability))
+       set)
 
 let make_builtin ?(arguments = []) builtin =
   Named { path = Intrinsic.make_builtin_path builtin; arguments }
@@ -250,39 +218,20 @@ and substitute_argument substitution = function
   | Value _ as value -> value
 
 and substitute_capabilities substitution capabilities =
-  flat_map_capabilities
+  replace_capabilities
     (function
-      | Capability_parameter parameter as capability -> (
-          match List.assoc_opt parameter substitution.capability_arguments with
-          | Some replacement -> remove_divergence replacement
-          | None -> [ capability ])
-      | Divergence (Of_parameter parameter) as capability -> (
-          match List.assoc_opt parameter substitution.capability_arguments with
-          | Some replacement -> list_divergence replacement
-          | None -> [ capability ])
+      | Capability_parameter parameter -> List.assoc_opt parameter substitution.capability_arguments
       | Capability_projection { base; trait; name } ->
-          [
-            Capability_projection
-              {
-                base = substitute substitution base;
-                trait = substitute_trait substitution trait;
-                name;
-              };
-          ]
-      | Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
-          [
-            Divergence
-              (Of_impl_method
-                 {
-                   self_type = substitute substitution self_type;
-                   trait = substitute_trait substitution trait;
-                   name;
-                   receiver;
-                 });
-          ]
-      | ( Capability _ | Capability_variable _ | Capability_error _
-        | Divergence (Always | Of_variable _) ) as capability ->
-          [ capability ])
+          Some
+            [
+              Capability_projection
+                {
+                  base = substitute substitution base;
+                  trait = substitute_trait substitution trait;
+                  name;
+                };
+            ]
+      | Capability _ | Capability_variable _ | Capability_error _ -> None)
     capabilities
 
 and substitute_trait substitution (trait : trait_reference) =
@@ -380,13 +329,8 @@ let find_specification_only_type type_ =
        type_);
   !specification_type
 
-let has_capability_variable capabilities =
-  List.exists
-    (function Capability_variable _ | Divergence (Of_variable _) -> true | _ -> false)
-    capabilities
-
-let may_panic capabilities =
-  List.exists (function Capability path -> Well_known.is Panic path | _ -> false) capabilities
+let contains_capability_variable capabilities =
+  List.exists (function Capability_variable _ -> true | _ -> false) capabilities
 
 let equal left right = left = right
 let is_error = function Error _ -> true | _ -> false
@@ -413,13 +357,9 @@ and is_unsolved_trait trait =
 let has_unsolved_capabilities capabilities =
   List.exists
     (function
-      | Capability_variable _ | Divergence (Of_variable _) -> true
+      | Capability_variable _ -> true
       | Capability_projection { base; _ } -> contains_unsolved base
-      | Divergence (Of_impl_method { self_type; trait; _ }) ->
-          contains_unsolved self_type || is_unsolved_trait trait
-      | Capability _ | Capability_parameter _ | Capability_error _
-      | Divergence (Always | Of_parameter _) ->
-          false)
+      | Capability _ | Capability_parameter _ | Capability_error _ -> false)
     capabilities
 
 let has_same_clauses (left : function_type) (right : function_type) =
@@ -452,17 +392,11 @@ let show_resource = function
       Printf.sprintf "calls(%s%s)" (show_path_name capability)
         (match method_ with Some method_ -> "." ^ method_ | None -> "")
 
-let rec show_impl_method self_type (trait : trait_reference) name =
-  Printf.sprintf "`%s`'s `impl` of `%s.%s`" (show self_type) (show_path_name trait.trait) name
-
-and show_capability = function
+let rec show_capability = function
   | Capability path -> show_path_name path
-  | Capability_parameter { name; _ } | Divergence (Of_parameter { name; _ }) -> "generic " ^ name
+  | Capability_parameter { name; _ } -> "generic " ^ name
   | Capability_projection { base; name; _ } -> show base ^ "." ^ name
-  | Capability_variable _ | Capability_error _ | Divergence (Of_variable _) -> "_"
-  | Divergence Always -> "may not terminate"
-  | Divergence (Of_impl_method { self_type; name; _ }) ->
-      Printf.sprintf "may not terminate where %s.%s may not" (show self_type) name
+  | Capability_variable _ | Capability_error _ -> "_"
 
 and show = function
   | Named { path; arguments = [] } -> show_path_name path
@@ -510,27 +444,22 @@ and show_function (function_type : function_type) =
       (List.map (fun (written, type_) -> show_mode written ^ show type_) function_type.inputs)
   in
   let base = Printf.sprintf "fn(%s)%s" inputs (show_output (Returns function_type.output)) in
-  let uses = List.map show_capability (remove_divergence function_type.uses) in
-  let is_finite =
-    list_divergence function_type.uses = []
-    && not (List.exists (fun (cost : cost) -> cost.resource = Metric Time) function_type.costs)
-  in
+  let uses = List.map show_capability function_type.uses in
   let costs =
-    (if is_finite then [ "cost time finite" ] else [])
-    @ List.map
-        (fun (cost : cost) ->
-          let bound =
-            match cost.bound with
-            | Order_of -> "O(...)"
-            | No_more_than (Some value) -> "<= " ^ Z.to_string value
-            | No_more_than None -> "<= ..."
-            | Exactly_cost (Some value) -> "== " ^ Z.to_string value
-            | Exactly_cost None -> "== ..."
-          in
-          Printf.sprintf "cost %s%s %s"
-            (if cost.amortized then "amortized " else "")
-            (show_resource cost.resource) bound)
-        function_type.costs
+    List.map
+      (fun (cost : cost) ->
+        let bound =
+          match cost.bound with
+          | Order_of -> "O(...)"
+          | No_more_than (Some value) -> "<= " ^ Z.to_string value
+          | No_more_than None -> "<= ..."
+          | Exactly_cost (Some value) -> "== " ^ Z.to_string value
+          | Exactly_cost None -> "== ..."
+        in
+        Printf.sprintf "cost %s%s %s"
+          (if cost.amortized then "amortized " else "")
+          (show_resource cost.resource) bound)
+      function_type.costs
   in
   match (uses, costs) with
   | [], [] -> base
@@ -557,10 +486,7 @@ let list_generic_arguments generics =
 
 let list_capability_arguments parameters =
   List.map
-    (fun parameter ->
-      ( parameter.name,
-        make_capability_set [ Capability_parameter parameter; Divergence (Of_parameter parameter) ]
-      ))
+    (fun parameter -> (parameter.name, make_capability_set [ Capability_parameter parameter ]))
     parameters
 
 let list_bounds generics parameter =
@@ -617,6 +543,7 @@ type signature = {
   uses : capability_set;
   costs : cost list;
   specification_only : bool;
+  is_update_step : bool;
   capture_free_parameters : string list;
 }
 

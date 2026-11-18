@@ -32,3 +32,7 @@ val decide :
 
 val list_states : verdicts -> Path.file -> Source.span state list
 val list_diagnostics : verdicts -> Path.file -> Diagnostic.t list
+
+type query = { code : Diagnostic.Code.prover; span : Source.span; shows : string; input : string }
+
+val list_queries : Lookups.t -> (Resolve.Names.key * proof) list -> Path.file -> query list

@@ -11,7 +11,7 @@ fn redirect(status: UInt16, location: StringSlice) -> http::Response {
 }
 
 fn described(request: own http::Request) -> String
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let method = "${request.method}"
   let cookie = request.headers.get("Cookie").unwrap_or("-").to_string()
@@ -22,7 +22,7 @@ fn described(request: own http::Request) -> String
 }
 
 fn exercised() -> List[String]
-  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
   var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8097)).expect("the port is free")
   let flaky_hits = tasks::Counter.new()
@@ -118,7 +118,7 @@ fn exercised() -> List[String]
   }
 }
 
-test "the client follows redirects, keeps cookies when asked, strips credentials across origins, and retries" {
+test "the client follows redirects, keeps cookies when asked, strips credentials across origins, and retries" uses Panic, RunForever {
   provide simulation::World.new() {
     let seen = exercised()
     assert seen == [

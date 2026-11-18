@@ -218,7 +218,7 @@ let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right 
                let selector = Facts.make_selector_symbol ty variant field in
                let left = Logic.Apply (selector, [ left ])
                and right = Logic.Apply (selector, [ right ]) in
-               if Facts.is_structural context field_type then Logic.equal left right
+               if Facts.is_equality_identity context field_type then Logic.equal left right
                else if Facts.find_float_format field_type <> None then make_float_equal left right
                else
                  match find_written_equal context field_type left right with
@@ -254,7 +254,7 @@ let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right 
   equal
 
 let make_equality context frame (ty : Types.ty) left right =
-  if Facts.is_structural context ty then Logic.equal left right
+  if Facts.is_equality_identity context ty then Logic.equal left right
   else if Facts.find_float_format ty <> None then make_float_equal left right
   else
     match find_written_equal context ty left right with
@@ -352,7 +352,7 @@ let translate_arithmetic context (frame : State.frame) (site : Invocation.site) 
     | _ -> Facts.raise_bug "`%s` is not arithmetic" (Intrinsic.show_operation (Scalar operation))
   in
   if is_division then
-    Facts.oblige_safe_operation context frame Division location
+    Facts.oblige context frame Division location
       ~fixes:
         (match find_parameter_spelling context frame right with
         | Some text -> Facts.add_requires context frame [ Text (text ^ " != 0") ]
@@ -362,7 +362,7 @@ let translate_arithmetic context (frame : State.frame) (site : Invocation.site) 
   (match Facts.find_bounds ty with
   | Some (low, _) when is_division ->
       if Z.sign low < 0 then
-        Facts.oblige_safe_operation context frame Overflow location
+        Facts.oblige context frame Overflow location
           ~fixes:(make_division_overflow_fix context frame ty left right)
           [
             Text "`";
@@ -372,7 +372,7 @@ let translate_arithmetic context (frame : State.frame) (site : Invocation.site) 
           (Logic.not_ Logic.(equal left (Integer low) &&& equal right (int (-1))))
   | Some (low, high) ->
       let unsigned = Z.sign low = 0 && not (Types.is_builtin Character ty) in
-      Facts.oblige_safe_operation context frame Overflow location
+      Facts.oblige context frame Overflow location
         ~fixes:(make_overflow_fix context frame ty operation left right exact)
         [
           Text "`";
@@ -509,7 +509,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
   | Negate, ty :: _, [ inner ] when not is_float ->
       let negated = Logic.Operation ("-", [ inner ]) in
       if Facts.find_bounds ty <> None then
-        Facts.oblige_safe_operation context frame Overflow location
+        Facts.oblige context frame Overflow location
           ~fixes:(make_negation_fix context frame ty inner)
           [
             Text "`";
@@ -538,7 +538,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
                   [ Text "The shift amount in `"; Facts.quote source site.origin; Text "`" ],
                   [] )
           in
-          Facts.oblige_safe_operation context frame Shift at_amount ~fixes
+          Facts.oblige context frame Shift at_amount ~fixes
             (text @ [ Text (Printf.sprintf " may not be less than %d." bits) ])
             Logic.(Operation ("<", [ right; int bits ]))
       | None -> Facts.raise_unsupported location "a shift of `%s`" (Types.show ty));

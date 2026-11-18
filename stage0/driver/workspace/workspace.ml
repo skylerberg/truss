@@ -86,11 +86,9 @@ let load_package_database (package : Project.package) ~hash ~visible =
                 | Some package_database -> package_database
                 | None ->
                     let package_database =
-                      Database.read_package_database
-                        (Database.create
-                           ~loaded:(List.map (fun visible -> visible.package_database) visible)
-                           [ package ])
-                        package.name
+                      Database.build_package_database
+                        ~loaded:(List.map (fun visible -> visible.package_database) visible)
+                        package
                     in
                     Cache.add_result (open_cache ()) ~kind:Package_database ~key
                       (Marshal.to_string package_database []);
@@ -418,11 +416,11 @@ let restore_database segments snapshot =
         match Segments.read_entries segments with
         | None -> start_cold ()
         | Some entries -> (
-            match Database.restore ~loaded:saved ~find_text:(make_text_lookup snapshot) entries with
-            | database ->
-                Database.relayout database ~loaded:(extract_package_databases loaded) packages;
-                database
-            | exception (Failure _ | Invalid_argument _ | End_of_file) -> start_cold ()))
+            try
+              Database.restore ~saved ~find_text:(make_text_lookup snapshot)
+                ~loaded:(extract_package_databases loaded)
+                packages entries
+            with Failure _ | Invalid_argument _ | End_of_file -> start_cold ()))
   in
   (database, loaded)
 
@@ -487,13 +485,13 @@ let find_file_changes (before : snapshot) (after : snapshot) =
               if File_table.mem current file then changes else (file, None) :: changes)
             previous []))
 
-let apply_changes database (after : snapshot) = function
+let apply_changes ?on_bug database (after : snapshot) = function
   | Some changes ->
-      Database.update database changes;
+      Database.update ?on_bug database changes;
       None
   | None ->
       let loaded, packages = load_layout after in
-      Database.relayout database ~loaded:(extract_package_databases loaded) packages;
+      Database.relayout ?on_bug database ~loaded:(extract_package_databases loaded) packages;
       Some loaded
 
 let copy_database root (trial : snapshot) =
@@ -547,7 +545,7 @@ let list_changed_files root files paths =
     files
   @ List.concat_map list_with_prefix prefixes
 
-let refresh ~(read : Watcher.t -> Watcher.changes) worktree =
+let refresh ?on_bug ~(read : Watcher.t -> Watcher.changes) worktree =
   let root = worktree.root in
   let update files =
     let before = worktree.snapshot in
@@ -558,12 +556,12 @@ let refresh ~(read : Watcher.t -> Watcher.changes) worktree =
     | changes ->
         Option.iter
           (fun loaded -> worktree.loaded <- loaded)
-          (apply_changes worktree.database after changes);
+          (apply_changes ?on_bug worktree.database after changes);
         `Changed
   in
   match Option.map read worktree.watcher with
   | Some Removed -> `Removed
-  | Some Overflow | None -> update (Registry.Content.list_input_files root)
+  | Some Rescan | None -> update (Registry.Content.list_input_files root)
   | Some (Changed []) -> `Unchanged
   | Some (Changed paths) -> update (list_changed_files root worktree.snapshot.files paths)
 
@@ -631,15 +629,13 @@ let propagate_changes descriptor =
   Hashtbl.iter
     (fun _ worktree ->
       if Option.map Watcher.extract_descriptor worktree.watcher = Some descriptor then
-        match refresh ~read:Watcher.read_pending_changes worktree with
+        match refresh ~on_bug:log_bug ~read:Watcher.read_pending_changes worktree with
         | `Removed -> close worktree
         | `Unchanged -> ()
-        | `Changed -> (
-            match Database.propagate ~on_bug:log_bug worktree.database with
-            | () -> commit worktree
-            | exception Compiler_bug.Bug bug ->
-                log_bug bug;
-                close worktree))
+        | `Changed -> commit worktree
+        | exception Compiler_bug.Bug bug ->
+            log_bug bug;
+            close worktree)
     (Hashtbl.copy worktrees)
 
 let problems snapshot = snapshot.project.problems
@@ -774,6 +770,17 @@ let stop_servers ?key () = Server.stop_servers ?key ~wait:true ()
 
 module For_testing = struct
   let load_standard_package_database () = (load_standard_package ()).package_database
+
+  let copy_standard_package_database ~into =
+    let standard = load_standard_package () in
+    match Cache.open_ into with
+    | Error message -> raise (Unusable_cache message)
+    | Ok cache ->
+        Cache.add_result cache ~kind:Package_database ~key:standard.key
+          (Marshal.to_string standard.package_database []);
+        Cache.flush cache;
+        Cache.close cache
+
   let build_cold_database = build_cold_database
   let collect_cache = collect
   let listen = Server.listen

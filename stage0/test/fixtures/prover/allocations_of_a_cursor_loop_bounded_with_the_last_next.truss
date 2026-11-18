@@ -1,5 +1,6 @@
 fn f(start: Countdown) -> UInt8
   cost allocations <= start.left + 1
+  uses RunForever
 {
   var left = start
   var last: UInt8 = 0

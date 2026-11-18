@@ -70,7 +70,6 @@ let find_contract (definition : Core.definition) =
               (fun ({ origin; amortized; resource; bound } : Core.cost) ->
                 let bound : bound =
                   match bound with
-                  | Finite -> Finite
                   | Order_of amount -> Order_of (Builder.of_clause ~parameters amount)
                   | At_most amount -> At_most (Builder.of_clause ~parameters amount)
                   | Exactly amount -> Exactly (Builder.of_clause ~parameters amount)

@@ -15,7 +15,7 @@ fn hashed[Value: Hash](value: Value) -> UInt64 {
 
 fn lawful[Value: Ordered + Hash](values: List[Value]) -> Bool {
   for first in values {
-    if first != first {
+    if !first.equal(first) {
       return false
     }
     for second in values {

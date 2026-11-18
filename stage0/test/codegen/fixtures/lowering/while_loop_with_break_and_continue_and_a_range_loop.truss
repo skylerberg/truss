@@ -1,4 +1,6 @@
-fn sum_of_odds_below(limit: Int64) -> Int64 {
+fn sum_of_odds_below(limit: Int64) -> Int64
+  uses RunForever
+{
   var total = 0
   var next = 0
   while true {
@@ -22,7 +24,7 @@ fn triangle(rows: Int64) -> Int64 {
   total
 }
 
-test "loops" {
+test "loops" uses RunForever {
   assert sum_of_odds_below(8) == 16
   assert triangle(4) == 10
 }

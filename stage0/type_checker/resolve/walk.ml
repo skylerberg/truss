@@ -129,19 +129,12 @@ let set_target state (name : Syntax.name) target =
   (lookup_current_names state).names.(name.id) <- Some target
 
 let report_unknown state (name : Syntax.name) ~expected candidates =
-  let fixes =
-    match Diagnostic.find_closest name.text candidates with
-    | Some candidate ->
-        [
-          Diagnostic.fix
-            (Printf.sprintf "Write `%s`." candidate)
-            [ Diagnostic.replace (read_span state name.id) candidate ];
-        ]
-    | None -> []
-  in
+  let span = read_span state name.id in
   set_target state name
     (Unknown
-       (add_diagnostic state ~fixes Unknown_name (read_span state name.id)
+       (add_diagnostic state
+          ~fixes:(Diagnostic.list_spelling_fixes span ~written:name.text candidates)
+          Unknown_name span
           (Printf.sprintf "Nothing named `%s` is %s." name.text expected)))
 
 let find_module_item state text = state.lookups.find state.key.module_ text
@@ -360,8 +353,7 @@ and resolve_clause state scope (clause : Syntax.clause) =
         }
       in
       match cost.bound with
-      | Big_o value | At_most value | Exactly value -> resolve_expression state bound value
-      | Finite -> ())
+      | Big_o value | At_most value | Exactly value -> resolve_expression state bound value)
   | Clause_error -> ()
 
 and resolve_local_value state scope (name : Syntax.name) =
@@ -495,7 +487,8 @@ and check_place state (written : Syntax.expression) (inner : Syntax.expression) 
         | Some (Index | Method_bracket) -> classify_head base
         | _ -> `Not_a_place value)
     | Call ({ kind = Member (base, _); _ }, _)
-    | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) -> (
+    | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _)
+    | With (base, _) -> (
         match classify_head base with `Place _ -> `Place true | other -> other)
     | Try base -> (
         match classify_head base with `Place false -> `Not_a_place value | other -> other)

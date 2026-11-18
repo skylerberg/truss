@@ -15,7 +15,7 @@ fn header(name: StringSlice, value: StringSlice) -> http::Header {
 }
 
 fn status(method: http::Method, headers: List[http::Header], policy: http::CsrfPolicy) -> UInt16
-  uses Tasks
+  uses Tasks, RunForever
 {
   let response = http::respond(fn(incoming, responder) {
     http::csrf(own incoming, mut responder, policy: policy, next: fn(_, inner) {
@@ -25,7 +25,7 @@ fn status(method: http::Method, headers: List[http::Header], policy: http::CsrfP
   response.status.code
 }
 
-test "respond runs a handler without a socket and gives back its status, headers, and body" {
+test "respond runs a handler without a socket and gives back its status, headers, and body" uses Panic, RunForever {
   provide simulation::World.new() {
     let response = http::respond(fn(incoming, responder) {
       mut responder.set_header("X-Seen", value: incoming.target.slice())
@@ -41,7 +41,7 @@ test "respond runs a handler without a socket and gives back its status, headers
   }
 }
 
-test "csrf refuses a cross-site write and allows same-origin, safe, non-browser, and trusted requests" {
+test "csrf refuses a cross-site write and allows same-origin, safe, non-browser, and trusted requests" uses Panic, RunForever {
   provide simulation::World.new() {
     let open = http::CsrfPolicy()
     let trusting = http::CsrfPolicy(trusted_origins: ["https://admin.example.net"])

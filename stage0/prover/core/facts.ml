@@ -28,12 +28,29 @@ let read_parameter_name (parameter : Mir.parameter) =
   | Some name -> name
   | None -> raise_bug "a parameter that no definition names"
 
-let is_in_recursion_group (context : State.context) path =
-  List.exists (Path.equal path) (context.lookups.list_recursion_group context.current)
+let rec show_callee (path : Path.t) =
+  match path with
+  | Top { name; _ } -> name
+  | Method { owner = Impl { for_type; _ } | Derived { type_ = for_type; _ }; name; _ }
+  | Method { owner = for_type; name; _ }
+  | Member_constant { owner = for_type; name } ->
+      show_callee for_type ^ "." ^ name
+  | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> Path.show path
 
-let has_method_in_recursion_group (context : State.context) impl =
-  List.exists (is_in_recursion_group context)
-    (Mir.Call_edges.list_written_methods context.lookups.interface.names impl)
+let is_in_recursion_group (context : State.context) node =
+  let is_inherited_from declaration member =
+    match context.lookups.mir.find_form_origin member with
+    | Some (Inherited key, _) -> Path.equal key.path declaration
+    | Some ((Written _ | Derived _), _) | None -> false
+  in
+  List.exists (Path.equal node) (context.lookups.list_recursion_group context.node)
+  ||
+  match context.node with
+  | Method { owner; _ }
+    when Option.is_some (Interface.Definition.find_trait_interface context.lookups.interface owner)
+    ->
+      List.exists (is_inherited_from context.node) (context.lookups.list_recursion_group node)
+  | _ -> false
 
 let list_clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
@@ -325,11 +342,10 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
          | Some term when not (is_parameter term) -> [ (term, "result") ]
          | _ -> []));
     template_clause;
-    panic_clause = None;
   }
 
-let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (frame : State.frame)
-    code location message goal =
+let oblige ?template_clause ?cited ?(fixes = []) context (frame : State.frame) code location message
+    goal =
   match
     make_closed_obligation ?template_clause context frame code location message
       (add_quantifier_facts
@@ -345,24 +361,98 @@ let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (fram
             | None -> [])
         | fixes -> fixes
       in
-      context.obligations <- { obligation with cited; fixes; panic_clause } :: context.obligations;
+      context.obligations <- { obligation with cited; fixes } :: context.obligations;
       assume context frame goal
   | None -> ()
 
-let oblige ?template_clause ?cited ?(fixes = []) context frame code location message goal =
-  record_obligation ?template_clause ?cited ~fixes ~panic_clause:None context frame code location
-    message goal
-
-let oblige_safe_operation ?cited ?(fixes = []) (context : State.context) (frame : State.frame) code
-    location message goal =
-  let record panic_clause =
-    record_obligation ?cited ~fixes ~panic_clause context frame code location message goal
+let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
+    (statement : Mir.statement) =
+  let reject text = oblige context frame Termination location [ Text text ] (Logic.Boolean false) in
+  let reject_supply (supplier : Mir.Call_edges.supplier) code =
+    let recursive = List.filter (is_in_recursion_group context) code in
+    (match supplier with
+    | Named_function path when List.exists (Path.equal path) recursive ->
+        reject
+          (Printf.sprintf
+             "Naming `%s` as a value reaches back here, and such a use passes no arguments the \
+              prover can compare, so the recursion cannot be shown to end: write it as a direct \
+              call on a part."
+             (Path.show path))
+    | Named_function _ | Call | Conversion_to_any | Provide -> ());
+    List.iter
+      (fun owner ->
+        let owner = Path.show owner in
+        reject
+          (match supplier with
+          | Call ->
+              Printf.sprintf
+                "This call uses `%s` where a bound needs it, and its methods reach back here. Such \
+                 a use passes no arguments the prover can compare, so the recursion cannot be \
+                 shown to end: write it as a direct call on a part."
+                owner
+          | Named_function path ->
+              Printf.sprintf
+                "Naming `%s` as a value uses `%s` where a bound needs it, and its methods reach \
+                 back here. Such a use passes no arguments the prover can compare, so the \
+                 recursion cannot be shown to end."
+                (Path.show path) owner
+          | Conversion_to_any ->
+              Printf.sprintf
+                "This conversion to `any` gives `%s`, whose methods call back here, so the prover \
+                 cannot show that the recursion ends."
+                owner
+          | Provide ->
+              Printf.sprintf
+                "This `provide` gives `%s`, whose methods call back here, so the prover cannot \
+                 show that the recursion ends."
+                owner))
+      (List.sort_uniq Path.compare
+         (List.filter_map
+            (fun (node : Path.t) -> match node with Method { owner; _ } -> Some owner | _ -> None)
+            recursive))
   in
-  match frame.panic with
-  | Declared when frame.source.key = Some context.home ->
-      if frame.makes_obligations then assume context frame goal
-  | Undeclared clause -> record (Some clause)
-  | Declared | Undeclarable -> record None
+  if context.terminates && frame.makes_obligations then
+    List.iter
+      (fun (edge : Mir.Call_edges.edge) ->
+        match edge with Calls _ -> () | Supplies { supplier; code } -> reject_supply supplier code)
+      (Mir.Call_edges.list_statement_edges context.lookups.interface frame.substitution statement)
+
+let find_recursive_callee (context : State.context) (frame : State.frame) location callee =
+  let resolution =
+    Mir.Call_edges.resolve_callee context.lookups.interface frame.substitution callee
+  in
+  let reject target origin =
+    oblige context frame Termination location
+      [
+        Text
+          (Printf.sprintf
+             "This call to `%s` reaches back here through code that its `impl` %s. No measure can \
+              be stated for that code, so the recursion cannot be shown to end."
+             (show_callee target) origin);
+      ]
+      (Logic.Boolean false);
+    None
+  in
+  let recursive_callee =
+    match resolution.target with
+    | Some target when frame.makes_obligations && is_in_recursion_group context target -> (
+        match context.lookups.mir.find_form_origin target with
+        | Some (Derived _, _) when context.terminates -> reject target "derives"
+        | Some (Inherited _, _) when context.terminates -> reject target "inherits from its trait"
+        | Some ((Written _ | Derived _ | Inherited _), _) | None -> Some target)
+    | Some _ | None -> None
+  in
+  (resolution, recursive_callee)
+
+let reject_uncompared_recursion (context : State.context) frame location recursive_callee ~describe
+    =
+  if context.terminates then
+    Option.iter
+      (fun callee ->
+        oblige context frame Termination location
+          [ Text (describe (show_callee callee)) ]
+          (Logic.Boolean false))
+      recursive_callee
 
 let quote (source : State.source) origin =
   match source.key with Some key -> State.Quote (key, origin) | None -> Text "this expression"
@@ -470,7 +560,7 @@ let rec declare_sort (context : State.context) (ty : Types.ty) : Logic.sort =
         Type_sort ty
       end
 
-let rec is_structural context ?(seen = []) (ty : Types.ty) =
+let rec is_equality_identity context ?(seen = []) (ty : Types.ty) =
   is_numeric ty || is_bool ty || Types.is_builtin Character ty || Types.equal ty Types.unit
   || List.exists (Types.equal ty) seen
   ||
@@ -480,7 +570,7 @@ let rec is_structural context ?(seen = []) (ty : Types.ty) =
       && List.for_all
            (fun (_, fields) ->
              List.for_all
-               (fun (_, field_type) -> is_structural context ~seen:(ty :: seen) field_type)
+               (fun (_, field_type) -> is_equality_identity context ~seen:(ty :: seen) field_type)
                fields)
            shape
   | _ -> false

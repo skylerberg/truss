@@ -1,5 +1,5 @@
 let check_file database file =
-  match Support.list_diagnostics database file with
+  match Support.list_fragment_diagnostics database file with
   | [] -> Support.list_proof_diagnostics database file
   | errors -> errors
 
@@ -17,6 +17,21 @@ let expect_only_code text code =
   | actual ->
       if List.exists (fun other -> other <> code) actual then
         Harness.fail "%s" (String.concat ", " actual)
+
+let list_termination_failures text =
+  let packages = Support.setup [ ("app::main", text) ] in
+  List.filter_map
+    (fun (diagnostic : Diagnostic.t) ->
+      if Diagnostic.Code.name diagnostic.code = "prover.termination" then Some diagnostic.message
+      else None)
+    (check packages (Support.parse_file "app::main"))
+
+let expect_one_termination_failure ~says text =
+  match list_termination_failures text with
+  | [ message ] ->
+      if not (String.includes ~affix:says message) then
+        Harness.fail "expected a message that says %S, got: %s" says message
+  | messages -> Harness.fail "%d termination failures" (List.length messages)
 
 let read_message text =
   let packages = Support.setup [ ("app::main", text) ] in
@@ -55,9 +70,9 @@ let () =
         String.includes ~affix:"`name` is" actual
         || not (String.includes ~affix:"`count` is 255" actual)
       then Harness.fail "message %S" actual);
-  Harness.test "an obligation with neither a proof nor a counterexample says so" (fun () ->
+  Harness.test "an obligation that the solver runs out of steps on says so" (fun () ->
       let actual = read_message Fixtures.Prover.sum_of_two_cubes in
-      if not (String.includes ~affix:"found neither a proof nor a counterexample" actual) then
+      if not (String.includes ~affix:"reached its step limit" actual) then
         Harness.fail "message %S" actual);
   Harness.test "code generic over an integer trait is proven for each type that implements it"
     (fun () ->
@@ -93,51 +108,43 @@ let () =
       expect_not_proven Fixtures.Prover.unreachable_that_can_be_reached "prover.unreachable");
   Harness.test "an unreachable after a check" (fun () ->
       expect_proven Fixtures.Prover.unreachable_after_a_check);
-  Harness.test "an overflow names `uses Panic` as a way to stop the program" (fun () ->
-      let actual = read_message Fixtures.Prover.addition_that_can_overflow in
-      if not (String.includes ~affix:"allowed to stop the program with `uses Panic`" actual) then
-        Harness.fail "message %S" actual);
-  Harness.test "an index that may be out of bounds names `uses Panic` as a way to stop the program"
+  Harness.test "an overflow's message offers a guard or the checked operation, not `Panic`"
     (fun () ->
-      let actual = read_message Fixtures.Prover.index_that_may_be_out_of_bounds in
-      if not (String.includes ~affix:"allowed to stop the program with `uses Panic`" actual) then
-        Harness.fail "message %S" actual);
-  Harness.test "a function that declares `uses Panic` stops at an operation that fails" (fun () ->
-      expect_proven Fixtures.Prover.failing_operations_of_a_function_that_may_panic);
+      let actual = read_message Fixtures.Prover.addition_that_can_overflow in
+      if
+        (not
+           (String.includes
+              ~affix:
+                "It can also be checked first with an `if`, or done with the checked operation."
+              actual))
+        || String.includes ~affix:"Panic" actual
+      then Harness.fail "message %S" actual);
+  Harness.test "a function that declares `uses Panic` proves each operation that could fail"
+    (fun () ->
+      let codes = list_codes Fixtures.Prover.failing_operations_of_a_function_that_may_panic in
+      List.iter
+        (fun code ->
+          if not (List.mem code codes) then
+            Harness.fail "%s is not reported, only %s" code (String.concat ", " codes))
+        [ "prover.overflow"; "prover.division"; "prover.shift"; "prover.requires" ]);
   Harness.test "expect returns the payload of an Option or a Result" (fun () ->
       expect_proven Fixtures.Prover.payloads_through_expect);
   Harness.test "expect lends the payload of an Option it is lent" (fun () ->
       expect_proven Fixtures.Prover.elements_lent_through_expect);
-  Harness.test "a test has `Panic`, so an operation it cannot prove is checked when it runs"
-    (fun () -> expect_proven Fixtures.Prover.test_indexing_by_a_sum_from_a_loop);
-  Harness.test "a lambda proves its operations, since it has no `uses` of its own" (fun () ->
+  Harness.test "a test that declares `Panic` proves its operations, as a function does" (fun () ->
+      let codes = list_codes Fixtures.Prover.test_indexing_by_a_sum_from_a_loop in
+      if not (List.mem "prover.overflow" codes) then
+        Harness.fail "the overflow is not reported, only %s" (String.concat ", " codes));
+  Harness.test "a lambda in a function that declares `uses Panic` proves its operations" (fun () ->
       let actual = read_message Fixtures.Prover.overflow_in_a_lambda_of_a_function_that_may_panic in
       if
         (not (String.includes ~affix:"may overflow `UInt8`" actual))
         || String.includes ~affix:"uses Panic" actual
       then Harness.fail "message %S" actual);
-  Harness.test "a lambda in a test proves its operations, as one in a function with `Panic` does"
-    (fun () -> expect_not_proven Fixtures.Prover.overflow_in_a_lambda_of_a_test "prover.overflow");
-  Harness.test "an overflow in an impl names where the impl can declare `Panic`" (fun () ->
-      List.iter
-        (fun (text, declaration) ->
-          let actual = read_message text in
-          if not (String.includes ~affix:("allowed to stop the program with " ^ declaration) actual)
-          then Harness.fail "message %S" actual)
-        [
-          (Fixtures.Prover.increment_in_a_greeter_impl, "`uses Panic` on the `impl`.");
-          (Fixtures.Prover.increment_in_a_describe_impl_whose_trait_allows_panic, "`uses Panic`.");
-          ( Fixtures.Prover.decrement_in_a_countdown_cursor,
-            "`capability Uses = Panic` in the `impl`." );
-        ]);
-  Harness.test "an overflow in an impl of a trait that fixes its method's capabilities omits Panic"
+  Harness.test "a lambda in a test proves its operations" (fun () ->
+      expect_not_proven Fixtures.Prover.overflow_in_a_lambda_of_a_test "prover.overflow");
+  Harness.test "an index through a bound is proven in a function that declares `uses Panic`"
     (fun () ->
-      let actual = read_message Fixtures.Prover.increment_in_a_describe_impl in
-      if
-        (not (String.includes ~affix:"may overflow `Int64`" actual))
-        || String.includes ~affix:"Panic" actual
-      then Harness.fail "message %S" actual);
-  Harness.test "an index through a bound is proven, since its precondition cannot run" (fun () ->
       expect_not_proven Fixtures.Prover.index_through_a_bound_of_a_function_that_may_panic
         "prover.requires");
   Harness.test "an unreachable is proven in a function that declares `uses Panic`" (fun () ->
@@ -164,8 +171,21 @@ let () =
       expect_proven Fixtures.Prover.loop_with_an_invariant);
   Harness.test "a loop invariant that an iteration breaks" (fun () ->
       expect_not_proven Fixtures.Prover.while_loop_breaking_its_invariant "prover.invariant");
-  Harness.test "a loop in a function with a time clause must end" (fun () ->
-      expect_not_proven Fixtures.Prover.while_loop_under_a_finite_time_clause "prover.termination");
+  Harness.test "a while loop's default measure holds in a function that terminates" (fun () ->
+      expect_not_proven Fixtures.Prover.while_loop_toward_a_bound_it_does_not_approach
+        "prover.termination");
+  Harness.test "a while loop's default measure is not checked where the function may run forever"
+    (fun () ->
+      expect_proven
+        Fixtures.Prover.while_loop_toward_a_bound_it_does_not_approach_where_it_may_run_forever);
+  Harness.test "a loop's written measure holds where the function may run forever" (fun () ->
+      expect_not_proven
+        Fixtures.Prover.while_loop_whose_measure_does_not_decrease_where_it_may_run_forever
+        "prover.termination");
+  Harness.test "a cursor's remaining holds where the function may run forever" (fun () ->
+      expect_not_proven
+        Fixtures.Prover.cursor_whose_remaining_does_not_decrease_where_it_may_run_forever
+        "prover.termination");
   Harness.test "a loop that counts up to its bound ends" (fun () ->
       expect_proven Fixtures.Prover.while_loop_counting_up);
   Harness.test "a for loop over a range knows its index is in range" (fun () ->
@@ -174,6 +194,11 @@ let () =
       expect_proven Fixtures.Prover.recursion_that_decreases);
   Harness.test "recursion that does not decrease" (fun () ->
       expect_not_proven Fixtures.Prover.recursion_that_does_not_decrease "prover.termination");
+  Harness.test "a function's written measure holds where it may run forever" (fun () ->
+      expect_not_proven Fixtures.Prover.recursion_that_does_not_decrease_where_it_may_run_forever
+        "prover.termination");
+  Harness.test "recursion without a measure is not checked where the function may run forever"
+    (fun () -> expect_proven Fixtures.Prover.recursion_without_a_measure_where_it_may_run_forever);
   Harness.test "a contract that calls its own function applies the function's limited copy"
     (fun () ->
       let packages =
@@ -225,7 +250,8 @@ let () =
       in
       let main = Support.parse_file "app::main" in
       (match
-         Support.list_codes (Support.list_diagnostics (Support.make_database packages) main)
+         Support.list_codes
+           (Support.list_fragment_diagnostics (Support.make_database packages) main)
        with
       | [] -> ()
       | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
@@ -262,7 +288,8 @@ let () =
       in
       let main = Support.parse_file "app::main" in
       (match
-         Support.list_codes (Support.list_diagnostics (Support.make_database packages) main)
+         Support.list_codes
+           (Support.list_fragment_diagnostics (Support.make_database packages) main)
        with
       | [] -> ()
       | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
@@ -364,11 +391,11 @@ let () =
       let main = Support.parse_file "app::main" in
       (match
          Support.list_codes
-           (Support.list_diagnostics database (Support.parse_file "app::main/measured"))
+           (Support.list_fragment_diagnostics database (Support.parse_file "app::main/measured"))
        with
       | [ "resolve.unknown_name" ] -> ()
       | codes -> Harness.fail "the trait reports %s" (String.concat ", " codes));
-      (match Support.list_codes (Support.list_diagnostics database main) with
+      (match Support.list_codes (Support.list_fragment_diagnostics database main) with
       | [] -> ()
       | codes -> Harness.fail "a caller does not check: %s" (String.concat ", " codes));
       (match Support.list_codes (Support.list_proof_diagnostics database main) with
@@ -384,7 +411,7 @@ let () =
           | Some (Failed _ | Blocked) ->
               Harness.fail "the proof of %s is blocked" (Path.show declaration.path)
           | None -> Harness.fail "%s has no proof" (Path.show declaration.path))
-        ((Support.make_names packages main.module_.package).list_declarations_in main))
+        ((Support.make_names packages).list_declarations_in main))
 
 let tree = Fixtures.Prover.tree
 
@@ -586,13 +613,11 @@ let make_flag_impl_source empty =
     "impl Monoid for Flag {\n\
     \  fn empty() -> Flag\n\
     \    ensures result == Flag(on: %s)\n\
-    \    cost time finite\n\
     \  {\n\
     \    Flag(on: %s)\n\
     \  }\n\n\
     \  fn combine(self, other: Flag) -> Flag\n\
     \    ensures result == Flag(on: self.on || other.on)\n\
-    \    cost time finite\n\
     \  {\n\
     \    Flag(on: self.on || other.on)\n\
     \  }\n\
@@ -665,7 +690,14 @@ let () =
         (span ^ Fixtures.Prover.span_passed_after_breaking_its_invariant)
         "prover.invariant");
   Harness.test "a private method that takes mut self is a step of an update" (fun () ->
-      expect_proven (span ^ Fixtures.Prover.span_restore))
+      expect_proven (span ^ Fixtures.Prover.span_restore));
+  Harness.test "a public method that takes mut self is not a step of an update" (fun () ->
+      expect_not_proven (span ^ Fixtures.Prover.span_restored_by_a_public_method) "prover.invariant");
+  Harness.test "a method of a private trait that takes mut self is not a step of an update"
+    (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_restored_by_a_method_of_a_private_trait)
+        "prover.invariant")
 
 let run = Fixtures.Prover.run
 
@@ -963,7 +995,7 @@ let () =
   Harness.test "calls to O(1) functions are O(1)" (fun () ->
       expect_proven (constant_step ^ Fixtures.Prover.step_of_a_step));
   Harness.test "a call to a function with no bound on its time" (fun () ->
-      expect_not_proven Fixtures.Prover.call_of_a_finite_time_callee "prover.cost");
+      expect_not_proven Fixtures.Prover.call_of_a_callee_without_a_time_clause "prover.cost");
   Harness.test "a loop over a range is linear" (fun () ->
       expect_proven (constant_step ^ Fixtures.Prover.range_loop_of_linear_time));
   Harness.test "a loop over a range is not constant" (fun () ->
@@ -1015,7 +1047,7 @@ let () =
   Harness.test "functions in a cycle that branch are not linear" (fun () ->
       expect_not_proven Fixtures.Prover.branching_ping_and_pong "prover.cost");
   Harness.test "a callback's time is not free" (fun () ->
-      expect_not_proven Fixtures.Prover.each_visiting_a_finite_callback "prover.cost");
+      expect_not_proven Fixtures.Prover.each_visiting_a_callback_without_a_time_clause "prover.cost");
   Harness.test "calls through a lambda that captures the function value are not known" (fun () ->
       expect_not_proven Fixtures.Prover.each_visiting_through_a_capturing_lambda "prover.cost");
   Harness.test "a quantifier over a costly body is not linear" (fun () ->
@@ -1192,6 +1224,9 @@ let () =
 let () =
   Harness.test "a lambda's result is in range only for arguments in range" (fun () ->
       expect_not_proven Fixtures.Prover.same_lambda_in_range "prover.ensures");
+  Harness.test "a lambda's result is in range only for arguments whose fields are in range"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.lambda_reading_a_field_passed_to_a_function "prover.ensures");
   Harness.test "an uncalled lambda's calls show nothing of the path" (fun () ->
       expect_not_proven Fixtures.Prover.lambda_calling_a_hang_uncalled "prover.ensures");
   Harness.test "a lambda whose arguments cannot meet its requires shows nothing of the path"
@@ -1277,8 +1312,164 @@ let () =
       expect_only_code Fixtures.Prover.looper_provided_by_its_own_caller "prover.termination");
   Harness.test "a call through any that reaches back is recursion" (fun () ->
       expect_only_code Fixtures.Prover.step_reaching_back_through_any "prover.termination");
-  Harness.test "a method that calls itself through any is recursion" (fun () ->
-      expect_not_proven Fixtures.Prover.check_calling_itself_through_any "prover.termination")
+  Harness.test
+    "a method that calls itself through any is recursion at the conversion and at the call"
+    (fun () ->
+      match
+        List.sort compare
+          (list_termination_failures Fixtures.Prover.check_calling_itself_through_any)
+      with
+      | [ call; conversion ]
+        when String.starts_with ~prefix:"This call to `Check.check` may not end" call
+             && String.starts_with
+                  ~prefix:
+                    "This conversion to `any` gives `app::main::impl app::main::Check for \
+                     app::main::Loop`, whose methods call back here"
+                  conversion ->
+          ()
+      | messages -> Harness.fail "%s" (String.concat "; " messages))
+
+let () =
+  Harness.test "an impl's method that calls itself through its type is recursion" (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:
+          "This recursive call may not end: give the function a `decreases` clause for the prover \
+           to show that the recursion ends."
+        Fixtures.Prover.from_calling_itself_through_its_type "prover.termination");
+  Harness.test "an impl's method that calls itself through its receiver is recursion" (fun () ->
+      expect_not_proven Fixtures.Prover.grow_calling_itself_through_its_receiver
+        "prover.termination");
+  Harness.test "an impl's method that calls itself through its trait is recursion" (fun () ->
+      expect_not_proven Fixtures.Prover.grow_calling_itself_through_its_trait "prover.termination");
+  Harness.test "methods of two impls that call each other without measures cannot be shown to end"
+    (fun () ->
+      match list_codes Fixtures.Prover.grow_of_two_impls_calling_each_other with
+      | [ "prover.termination"; "prover.termination" ] -> ()
+      | codes -> Harness.fail "codes %s" (String.concat ", " codes));
+  Harness.test "methods of two impls that call each other with measures that decrease" (fun () ->
+      expect_proven Fixtures.Prover.grow_of_two_impls_with_measures);
+  Harness.test "a function that calls an impl's method that calls it back is recursion" (fun () ->
+      Support.expect_one_diagnostic ~check ~at:("seed.grow(steps + 1)", 1)
+        Fixtures.Prover.tend_calling_a_grow_that_calls_it_back "prover.termination");
+  Harness.test "an impl's method whose measure decreases" (fun () ->
+      expect_proven Fixtures.Prover.grow_with_a_measure_that_decreases);
+  Harness.test "an impl's method whose measure does not decrease" (fun () ->
+      expect_not_proven Fixtures.Prover.grow_with_a_measure_that_does_not_decrease
+        "prover.termination");
+  Harness.test "an impl's method that recurses on a part of its receiver ends" (fun () ->
+      expect_proven (tree ^ Fixtures.Prover.depth_of_a_tree_in_an_impl));
+  Harness.test "an impl's method that recurses on an element of a field's list ends" (fun () ->
+      expect_proven Fixtures.Prover.tree_visit_of_its_children_in_an_impl);
+  Harness.test "an impl's method that recurses on its receiver itself does not end" (fun () ->
+      expect_not_proven
+        (tree ^ Fixtures.Prover.depth_of_the_tree_itself_in_an_impl)
+        "prover.termination");
+  Harness.test "an override that calls another type's provided method is not recursion" (fun () ->
+      expect_proven Fixtures.Prover.describe_overridden_by_calling_a_provided_describe);
+  Harness.test "a written method that calls a derived method of its trait is not recursion"
+    (fun () -> expect_proven Fixtures.Prover.default_written_over_a_derived_default);
+  Harness.test
+    "a written method that calls a written method that calls a derived method of their trait is \
+     not recursion" (fun () ->
+      expect_proven Fixtures.Prover.default_written_over_a_written_default_over_a_derived_default);
+  Harness.test "a written method that calls an integer's inherited max is not recursion" (fun () ->
+      expect_proven Fixtures.Prover.rank_compare_calling_the_max_of_an_integer);
+  Harness.test "a written equal that gives a derived Equal to a generic function is not recursion"
+    (fun () ->
+      expect_proven Fixtures.Prover.outer_equal_through_a_generic_function_given_a_derived_equal);
+  Harness.test "an override that calls provided methods that its impl inherits is not recursion"
+    (fun () -> expect_proven Fixtures.Prover.clamp_overridden_by_calling_inherited_max_and_min);
+  Harness.test "provided methods that call each other with measures that decrease" (fun () ->
+      expect_proven Fixtures.Prover.ping_and_pong_provided_with_measures);
+  Harness.test "an impl's method that may run forever calls itself without a measure" (fun () ->
+      expect_proven Fixtures.Prover.grow_that_may_run_forever_calling_itself_through_its_receiver);
+  Harness.test "an impl's method's written measure holds where the method may run forever"
+    (fun () ->
+      Support.expect_one_diagnostic ~check ~says:"This call may not decrease `steps`."
+        Fixtures.Prover.grow_that_may_run_forever_with_a_measure_that_does_not_decrease
+        "prover.termination");
+  Harness.test
+    "a recursion through an impl given to a bound is not rejected where its methods may run forever"
+    (fun () ->
+      expect_proven Fixtures.Prover.pot_that_may_run_forever_growing_a_seed_that_grows_a_pot);
+  Harness.test
+    "a recursion through an inherited method is not rejected where the methods may run forever"
+    (fun () ->
+      expect_proven
+        Fixtures.Prover.pong_that_may_run_forever_calling_an_inherited_ping_that_calls_it_back)
+
+let () =
+  Harness.test "a call of an inherited method that calls back is recursion through inherited code"
+    (fun () ->
+      Support.expect_one_diagnostic ~check ~says:"through code that its `impl` inherits"
+        ~at:("Foo().ping(steps)", 1) Fixtures.Prover.poke_calling_a_provided_ping_that_calls_it_back
+        "prover.termination");
+  Harness.test
+    "a written method and a method its impl inherits that call each other are recursion through \
+     inherited code" (fun () ->
+      Support.expect_one_diagnostic ~check ~says:"through code that its `impl` inherits"
+        ~at:("self.ping(steps - 1)", 1)
+        Fixtures.Prover.pong_calling_an_inherited_ping_that_calls_it_back "prover.termination");
+  Harness.test "a provided body that calls itself on a type is recursion through inherited code"
+    (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:
+          "This call to `Hop.step` reaches back here through code that its `impl` inherits from \
+           its trait. No measure can be stated for that code, so the recursion cannot be shown to \
+           end."
+        Fixtures.Prover.step_provided_by_calling_itself_on_a_type "prover.termination");
+  Harness.test
+    "a provided body that gives its receiver to a generic function that calls it back is recursion"
+    (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:"This call uses `app::main::Step` where a bound needs it, and its methods reach back"
+        ~at:("run(self)", 1)
+        Fixtures.Prover.step_provided_by_giving_its_receiver_to_a_generic_function
+        "prover.termination");
+  Harness.test "a call of a derived method that calls back is recursion through derived code"
+    (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:
+          "This call to `Holder.default` reaches back here through code that its `impl` derives. \
+           No measure can be stated for that code, so the recursion cannot be shown to end."
+        Fixtures.Prover.default_calling_a_derived_default_that_calls_it_back "prover.termination");
+  Harness.test "an equal that compares its receiver with the operator is recursion" (fun () ->
+      expect_one_termination_failure ~says:"give the function a `decreases` clause"
+        Fixtures.Prover.equal_comparing_its_receiver_with_the_operator);
+  Harness.test "an equal that compares its receiver in a derived wrapper is recursion" (fun () ->
+      expect_one_termination_failure ~says:"through code that its `impl` derives"
+        Fixtures.Prover.equal_comparing_its_receiver_through_a_derived_wrapper);
+  Harness.test "an equal that compares lists of its own type gives its impl to the list's equal"
+    (fun () ->
+      expect_one_termination_failure
+        ~says:
+          "This call uses `app::main::impl standard::core::Equal for app::main::Tree` where a \
+           bound needs it, and its methods reach back here."
+        Fixtures.Prover.tree_equal_comparing_its_lists_of_children);
+  Harness.test "an equal that compares each child in a loop recurses on parts" (fun () ->
+      match list_termination_failures Fixtures.Prover.tree_equal_comparing_each_child with
+      | [] -> ()
+      | messages -> Harness.fail "%s" (String.concat "; " messages));
+  Harness.test "a method of a generic impl is given the impl of its type argument" (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:"uses `app::main::impl app::main::Grow for app::main::Seed` where a bound needs it"
+        Fixtures.Prover.pot_growing_a_seed_that_grows_a_pot "prover.termination");
+  Harness.test "a derived method of a generic type is given the impl of its type argument"
+    (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:
+          "uses `app::main::impl standard::core::Default for app::main::Seed` where a bound needs \
+           it"
+        Fixtures.Prover.default_of_a_seed_through_a_derived_default_of_its_pot "prover.termination");
+  Harness.test "a trait's method is given the impls of its own type arguments" (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:"uses `app::main::impl app::main::Grow for app::main::Seed` where a bound needs it"
+        Fixtures.Prover.visit_given_a_seed_that_calls_it_back "prover.termination");
+  Harness.test "a call through any in a function that an impl's method calls is recursion"
+    (fun () ->
+      match list_codes Fixtures.Prover.step_of_a_node_reaching_back_through_any with
+      | [ "prover.termination"; "prover.termination" ] -> ()
+      | codes -> Harness.fail "codes %s" (String.concat ", " codes))
 
 let () =
   Harness.test "a constant's value is well defined" (fun () ->
@@ -1922,10 +2113,109 @@ let () =
       | _, Error message -> Harness.fail "%s" message
       | Some query, Ok solver ->
           let request = Solver.make_request query in
-          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown then
-            Harness.fail "expected an unknown answer";
+          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown Out_of_steps then
+            Harness.fail "expected an unknown answer from the step limit";
           if Solver.count_queries_run solver <> 1 then
             Harness.fail "ran %d queries" (Solver.count_queries_run solver));
+  let power_of_itself_is_three =
+    let symbol = Logic.Symbol.Variable { label = "base"; numbers = [] } in
+    {
+      Logic.declarations = [ Logic.Constant (symbol, Logic.Int) ];
+      facts = [];
+      goal =
+        Logic.Operation
+          ( "not",
+            [
+              Logic.Operation
+                ( "=",
+                  [
+                    Logic.Operation ("^", [ Logic.Symbol symbol; Logic.Symbol symbol ]); Logic.int 3;
+                  ] );
+            ] );
+    }
+  in
+  Harness.test "an unknown answer before the step limit carries Z3's reason" (fun () ->
+      let query = power_of_itself_is_three in
+      match Solver.find () with
+      | Error message -> Harness.fail "%s" message
+      | Ok solver -> (
+          match Solver.solve_all solver [ (Solver.make_request query, query) ] with
+          | [ Unknown (Incomplete reason) ] ->
+              if not (String.includes ~affix:"incomplete (theory arithmetic)" reason) then
+                Harness.fail "reason %S" reason
+          | _ -> Harness.fail "expected an unknown answer with Z3's reason"));
+  Harness.test "an unknown answer's reason is read back from the cache" (fun () ->
+      let query = power_of_itself_is_three in
+      let request = Solver.make_request query in
+      let cached_answers = Hashtbl.create 1 in
+      let cache =
+        { Solver.find = Hashtbl.find_opt cached_answers; add = Hashtbl.replace cached_answers }
+      in
+      match (Solver.find ~cache (), Solver.find ~cache ()) with
+      | Ok first, Ok second ->
+          let solved = Solver.solve_all first [ (request, query) ] in
+          if Solver.solve_all second [ (request, query) ] <> solved then
+            Harness.fail "the cache gave another answer";
+          if Solver.count_queries_run second <> 0 then Harness.fail "ran the solver again"
+      | Error message, _ | _, Error message -> Harness.fail "%s" message);
+  Harness.test "an obligation that the solver stops on before the step limit names Z3's reason"
+    (fun () ->
+      let cache =
+        {
+          Solver.find = (fun _ -> Some "incomplete \"(incomplete quantifiers)\"\n");
+          add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
+        }
+      in
+      match Solver.find ~cache () with
+      | Error message -> Harness.fail "%s" message
+      | Ok solver -> (
+          let database =
+            Support.make_database
+              (Support.setup [ ("app::main", Fixtures.Prover.addition_that_can_overflow) ])
+          in
+          let file = Support.parse_file "app::main" in
+          match
+            Prover.list_diagnostics
+              (Prover.decide ~runs:[]
+                 (Database.make_proof_lookups database)
+                 solver
+                 (Database.list_proofs (Support.prove database file)))
+              file
+          with
+          | [ diagnostic ] ->
+              if
+                not
+                  (String.includes ~affix:"Z3 gives the reason `(incomplete quantifiers)`"
+                     diagnostic.message)
+              then Harness.fail "message %S" diagnostic.message
+          | diagnostics -> Harness.fail "%d diagnostics" (List.length diagnostics)));
+  Harness.test "a listed query has the span and the code of the diagnostic its obligation gives"
+    (fun () ->
+      let database =
+        Support.make_database
+          (Support.setup [ ("app::main", Fixtures.Prover.addition_that_can_overflow) ])
+      in
+      let file = Support.parse_file "app::main" in
+      match
+        ( Prover.list_queries
+            (Database.make_proof_lookups database)
+            (Database.list_proofs (Support.prove database file))
+            file,
+          Support.list_proof_diagnostics database file )
+      with
+      | [ query ], [ diagnostic ] ->
+          if query.span <> diagnostic.span then Harness.fail "the query has another span";
+          if Diagnostic.Code.Prover query.code <> diagnostic.code then
+            Harness.fail "the query has another code";
+          if
+            not
+              (String.includes ~affix:"(check-sat)\n" query.input
+              && String.ends_with ~suffix:"(get-info :reason-unknown)\n(get-info :rlimit)\n"
+                   query.input)
+          then Harness.fail "input %S" query.input
+      | queries, diagnostics ->
+          Harness.fail "%d queries and %d diagnostics" (List.length queries)
+            (List.length diagnostics));
   Harness.test "a second request for a query solved in a small model runs one query" (fun () ->
       match
         ( find_obligation_query Fixtures.Prover.addition_under_an_exists_in_a_forall Overflow,
@@ -1937,7 +2227,7 @@ let () =
           let first = Solver.make_request query
           and second = Solver.make_request ~terms:[ (Logic.Symbol.Reached 0, Logic.int 1) ] query in
           match List.hd (Solver.solve_all solver [ (first, query) ]) with
-          | Proven | Unknown -> Harness.fail "expected a counterexample"
+          | Proven | Unknown _ -> Harness.fail "expected a counterexample"
           | Counterexample _ ->
               let queries_before = Solver.count_queries_run solver in
               ignore (Solver.solve_all solver [ (second, query) ]);
@@ -2174,11 +2464,12 @@ let apply_function = Fixtures.Prover.apply_function
 
 let () =
   Harness.test "a pure function value gives the same result for the same argument" (fun () ->
-      expect_proven Fixtures.Prover.finite_measure_compared_with_itself);
+      expect_proven Fixtures.Prover.terminating_measure_compared_with_itself);
   Harness.test "a function value that uses a capability may give different results" (fun () ->
       expect_not_proven Fixtures.Prover.clock_reading_compared_with_itself "prover.ensures");
-  Harness.test "a function value without a time clause is a fresh result" (fun () ->
-      expect_not_proven Fixtures.Prover.measure_compared_with_itself "prover.ensures");
+  Harness.test "a function value that may run forever is a fresh result" (fun () ->
+      expect_not_proven Fixtures.Prover.measure_that_may_run_forever_compared_with_itself
+        "prover.ensures");
   Harness.test "a lambda applied is its body" (fun () ->
       expect_proven (apply_function ^ Fixtures.Prover.apply_of_a_halving_lambda));
   Harness.test "a lambda whose body is not its definition gives its body's facts" (fun () ->
@@ -2304,10 +2595,10 @@ let () =
   Harness.test
     "a call that uses nothing is in the logic, whatever its callee's capability parameter"
     (fun () -> expect_proven (apply ^ Fixtures.Prover.apply_in_an_ensures));
-  Harness.test "a function without a time clause passes a lambda with a loop without a measure"
+  Harness.test "a function that uses RunForever passes a lambda with a loop without a measure"
     (fun () -> expect_proven (apply ^ Fixtures.Prover.apply_of_a_lambda_looping_without_a_measure));
   Harness.test "an operator on a bound type terminates" (fun () ->
-      expect_proven Fixtures.Prover.sum_of_a_bound_type_under_a_time_clause)
+      expect_proven Fixtures.Prover.sum_of_a_bound_type_in_a_function_that_terminates)
 
 let () =
   let callbacks = Fixtures.Prover.apply_and_each_bounded_by_the_allocations_of_a_callback in
@@ -2446,5 +2737,5 @@ let () =
   Harness.test "a call of a method of an associated type's bound spends the method's time"
     (fun () ->
       expect_proven (ticker ^ Fixtures.Prover.movement_ticked_twice_bounded_by_the_time_of_its_tick));
-  Harness.test "the time of a followed method is the time that the type argument's impl states"
+  Harness.test "the time of a bound's method is the time that the type argument's impl states"
     (fun () -> expect_proven (ticker ^ Fixtures.Prover.tick_twice_of_a_countdown_in_constant_time))

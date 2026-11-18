@@ -50,13 +50,12 @@ impl Feed for Twice[Source: Feed] {
   }
 }
 
-fn drain[Source: Feed](source: mut Source) -> Int64
+fn pull_once[Source: Feed](source: mut Source) -> Int64
   uses Source.Uses
 {
-  var total = 0
-  while mut source.pull() is Some(value) {
-    total += value
+  match mut source.pull() {
+    Some(value) => value
+    None => 0
   }
-  total
 }
 

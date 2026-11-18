@@ -45,7 +45,7 @@ let iter_identifiers text ~on_identifier ~on_other =
   in
   scan 0
 
-let name_bytes context ~texts =
+let name_bytes (emission : Emission.t) ~texts =
   let named = Hashtbl.create 64 in
   List.iter
     (fun text ->
@@ -53,34 +53,36 @@ let name_bytes context ~texts =
         ~on_identifier:(fun identifier -> Hashtbl.replace named identifier ())
         ~on_other:ignore)
     texts;
-  Hashtbl.fold (fun text index entries -> (index, text) :: entries) context.bytes []
+  Hashtbl.fold (fun text index entries -> (index, text) :: entries) emission.bytes []
   |> List.sort compare
   |> List.filter_map (fun (index, text) ->
-      let name = C_values.render_bytes_symbol context index in
+      let name = Emission.render_bytes_symbol emission index in
       if Hashtbl.mem named name then Some (C_values.render_bytes_definition (text, name)) else None)
 
-let make (context : C_types.context) ~item ~kind ~functions ~definition ~references =
-  let types = List.rev context.order in
+let make (emission : Emission.t) ~item ~kind ~functions ~definition ~references =
+  let type_keys = List.rev emission.types.order in
   let environments =
     List.filter_map
       (fun key ->
-        match key with C_types.Environment _ -> Some (key, C_types.define context key) | _ -> None)
-      types
+        match key with
+        | C_types.Environment _ -> Some (key, C_types.define emission.types key)
+        | _ -> None)
+      type_keys
   in
   {
     item;
     kind;
     functions;
     definition;
-    types = List.filter (function C_types.Environment _ -> false | _ -> true) types;
+    types = List.filter (function C_types.Environment _ -> false | _ -> true) type_keys;
     environments;
-    prototypes = List.rev context.prototypes;
+    prototypes = List.rev emission.prototypes;
     statics =
-      name_bytes context ~texts:(definition :: List.map snd functions) @ List.rev context.statics;
-    sites = List.sort_uniq compare context.sites;
-    helpers = context.helpers_used;
+      name_bytes emission ~texts:(definition :: List.map snd functions) @ List.rev emission.statics;
+    sites = List.sort_uniq compare emission.sites;
+    helpers = emission.helpers_used;
     references;
-    calls = List.rev context.calls;
-    called = List.rev context.called;
-    failures = List.rev context.failures;
+    calls = List.rev emission.calls;
+    called = List.rev emission.called;
+    failures = List.rev emission.failures;
   }

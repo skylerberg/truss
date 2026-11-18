@@ -5,31 +5,9 @@ let source = Fixtures.Shared.shared_probe
 
 let loaded =
   lazy
-    (let database =
-       Database.create
-         [
-           {
-             name = Path.standard_package;
-             dependencies = [];
-             files = Standard_library.files @ [ (probe, source) ];
-           };
-         ]
-     in
-     Database.For_testing.add_root database
-       (Generated (Program_main (Top { module_ = probe.module_; name = "main" })));
-     let text = Source.create ~path:(Path.show_file probe) source in
-     (match Codegen_support.list_diagnostics database probe with
-     | [] -> ()
-     | diagnostics ->
-         Codegen_support.fail "the source has diagnostics:\n%s"
-           (String.concat "" (List.map (Diagnostic.render text) diagnostics)));
-     ( database,
-       Backend.create
-         (match Database.find_lowered_lookups database [ Path.standard_package ] with
-         | Ok lookups -> lookups
-         | Error message -> failwith message)
-         (Lazy.force Codegen_support.c_compiler)
-         Development ))
+    (Codegen_support.load_standard_probe
+       ~roots:[ Generated (Program_main (Top { module_ = probe.module_; name = "main" })) ]
+       probe source)
 
 let () =
   Codegen_support.test "shared values are updated, copied, and dropped without a leak" (fun () ->
@@ -70,16 +48,7 @@ let () =
   Codegen_support.test
     "Shared's operations need Tasks except directly in a method of a capability's impl, and its \
      value must be Storable" (fun () ->
-      let database =
-        Database.create
-          [
-            {
-              name = Path.standard_package;
-              dependencies = [];
-              files = Standard_library.files @ [ (checks, checks_source) ];
-            };
-          ]
-      in
+      let database = Codegen_support.extend_standard_library [ (checks, checks_source) ] in
       let text = checks_source in
       let actual =
         List.map
@@ -87,7 +56,7 @@ let () =
             ( Diagnostic.Code.name diagnostic.code,
               String.sub text diagnostic.span.start (diagnostic.span.stop - diagnostic.span.start)
             ))
-          (Codegen_support.list_diagnostics database checks)
+          (Codegen_support.list_fragment_diagnostics database checks)
       in
       let expected =
         [

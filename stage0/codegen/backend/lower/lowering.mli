@@ -67,7 +67,7 @@ type result_slot = Through of Lowered.local | Returned_in of Lowered.local | No_
 type state = {
   context : Definitions.context;
   mutable frame : frame;
-  builder : Emit_c.Builder.t;
+  builder : Emit_c.Ir_builder.t;
   mutable scopes : scope list;
   mutable loops : loop list;
   mutable result : result_slot;
@@ -79,9 +79,8 @@ type state = {
 }
 
 val make_frame : Definitions.code -> frame
-val enter : Definitions.context -> ?nested:int ref -> builder:Emit_c.Builder.t -> frame -> state
+val enter : Definitions.context -> ?nested:int ref -> builder:Emit_c.Ir_builder.t -> frame -> state
 val may_fork : state -> bool
-val may_panic : state -> bool
 val allocate_local : state -> ?name:string -> Lowered.ty -> Lowered.place
 val outline : state -> parts:Lowered.local list -> (unit -> unit) -> int * Lowered.operand
 val ground : state -> Types.ty -> Ground.ty
@@ -111,7 +110,7 @@ val allocate_parameter :
   Lowered.local option * Lowered.place
 
 val list_evidence_parameters : state -> Path.t list -> Lowered.local list
-val start_trace : state -> unit
+val look_up_capabilities : state -> table:Lowered.operand -> Path.t list -> unit
 val find_panic_trace : state -> Lowered.operand option
 val set_result_slot : state -> Convention.result -> unit
 val find_result_place : state -> Lowered.place option
@@ -128,7 +127,7 @@ val finish_function :
   first:Lowered.local list ->
   rest:Lowered.local list ->
   unit ->
-  Emit_c.Builder.prototype
+  Emit_c.Ir_builder.prototype
 
 val finish_item : state -> ?returns:bool -> rest:Lowered.local list -> unit -> Emit_c.fragment
 val emit_unreachable_block : state -> unit

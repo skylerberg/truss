@@ -30,7 +30,9 @@ internal fn without_blocking(descriptor: Int32) -> Result[Unit, Int32] {
   done(intrinsic::libc_fcntl_setfl(descriptor, flags: flags | intrinsic::libc_o_nonblock()))
 }
 
-internal fn write_fully(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
+internal fn write_fully(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[Unit, Int32]
+  uses RunForever
+{
   let length = intrinsic::view_length(bytes)
   var written: UInt64 = 0
   var error: Int32 = 0
@@ -64,6 +66,7 @@ internal fn read_onto_end(
   ensures !(result is Err(_) && intrinsic::storage_length(buffer) != old(intrinsic::storage_length(buffer)))
   ensures forall index in 0..old(intrinsic::storage_length(buffer)) =>
     intrinsic::storage_model(buffer)[index] == old(intrinsic::storage_model(buffer))[index]
+  uses RunForever
 {
   growth::reserve(mut buffer, additional: count)
   let length = intrinsic::storage_length(buffer)
@@ -105,6 +108,7 @@ internal fn read_at_onto_end(
   ensures !(result is Err(_) && intrinsic::storage_length(buffer) != old(intrinsic::storage_length(buffer)))
   ensures forall index in 0..old(intrinsic::storage_length(buffer)) =>
     intrinsic::storage_model(buffer)[index] == old(intrinsic::storage_model(buffer))[index]
+  uses RunForever
 {
   growth::reserve(mut buffer, additional: count)
   let length = intrinsic::storage_length(buffer)
@@ -127,6 +131,7 @@ internal fn read_at_onto_end(
 
 internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[UInt64, Int32]
   ensures !(result is Ok(count) && count > intrinsic::view_length(bytes))
+  uses RunForever
 {
   let length = intrinsic::view_length(bytes)
   var ticket = watch(descriptor, writing: true)
@@ -147,6 +152,7 @@ internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Resu
 
 internal fn write_some_at(descriptor: Int32, bytes: intrinsic::View[UInt8], offset: Int64) -> Result[UInt64, Int32]
   ensures !(result is Ok(count) && count > intrinsic::view_length(bytes))
+  uses RunForever
 {
   let length = intrinsic::view_length(bytes)
   var wrote = intrinsic::libc_pwrite(descriptor, bytes: bytes, count: length, offset: offset)
@@ -168,7 +174,9 @@ internal fn seek(descriptor: Int32, offset: Int64, whence: Int32) -> Result[Int6
   if position < 0 { Err(intrinsic::libc_errno()) } else { Ok(position) }
 }
 
-internal fn set_length(descriptor: Int32, length: Int64) -> Result[Unit, Int32] {
+internal fn set_length(descriptor: Int32, length: Int64) -> Result[Unit, Int32]
+  uses RunForever
+{
   var outcome = intrinsic::libc_ftruncate(descriptor, length: length)
   while outcome < 0 && retry_after_signal() {
     outcome = intrinsic::libc_ftruncate(descriptor, length: length)
@@ -176,7 +184,9 @@ internal fn set_length(descriptor: Int32, length: Int64) -> Result[Unit, Int32] 
   if outcome < 0 { Err(intrinsic::libc_errno()) } else { Ok(Unit) }
 }
 
-internal fn synchronize(descriptor: Int32) -> Result[Unit, Int32] {
+internal fn synchronize(descriptor: Int32) -> Result[Unit, Int32]
+  uses RunForever
+{
   var outcome = intrinsic::libc_fsync(descriptor)
   while outcome < 0 && retry_after_signal() {
     outcome = intrinsic::libc_fsync(descriptor)
@@ -193,7 +203,9 @@ internal fn close(handle: own intrinsic::Handle) -> Result[Unit, Int32] {
   }
 }
 
-internal fn status_of_descriptor(descriptor: Int32) -> Result[intrinsic::Storage[UInt8], Int32] {
+internal fn status_of_descriptor(descriptor: Int32) -> Result[intrinsic::Storage[UInt8], Int32]
+  uses RunForever
+{
   let size = intrinsic::libc_stat_size()
   var status: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(size)
   var outcome = intrinsic::libc_fstat(descriptor, status: mut status)
@@ -226,7 +238,9 @@ fn status_into(name: intrinsic::View[UInt8], follow_links: Bool, status: mut int
 internal fn status_of_path(
   path: intrinsic::View[UInt8],
   follow_links: Bool,
-) -> Result[intrinsic::Storage[UInt8], Int32] {
+) -> Result[intrinsic::Storage[UInt8], Int32]
+  uses RunForever
+{
   let name = ended_with_zero_byte(path)?
   let size = intrinsic::libc_stat_size()
   var status: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(size)
@@ -373,7 +387,9 @@ internal fn ended_with_zero_byte(bytes: intrinsic::View[UInt8]) -> Result[intrin
   Ok(own copy)
 }
 
-internal fn open_file(path: intrinsic::View[UInt8], flags: Int32) -> Result[intrinsic::Handle, Int32] {
+internal fn open_file(path: intrinsic::View[UInt8], flags: Int32) -> Result[intrinsic::Handle, Int32]
+  uses RunForever
+{
   let name = ended_with_zero_byte(path)?
   let closed_in_programs_it_runs = flags | intrinsic::libc_o_cloexec()
   var descriptor = intrinsic::libc_open(intrinsic::storage_view(name), flags: closed_in_programs_it_runs, mode: 438)
@@ -393,7 +409,9 @@ internal fn close_descriptor(descriptor: Int32) {
   }
 }
 
-internal fn wait_for(process: Int32) -> Result[Int32, Int32] {
+internal fn wait_for(process: Int32) -> Result[Int32, Int32]
+  uses RunForever
+{
   var status: Int32 = 0
   var waited = intrinsic::libc_waitpid(process, status: mut status, options: 0)
   while waited < 0 && retry_after_signal() {
@@ -410,7 +428,9 @@ internal fn current_directory() -> Result[intrinsic::Storage[UInt8], Int32] {
   if is_present { Ok(copy_of(path)) } else { Err(intrinsic::libc_errno()) }
 }
 
-internal fn host_name() -> intrinsic::Storage[UInt8] {
+internal fn host_name() -> intrinsic::Storage[UInt8]
+  uses RunForever
+{
   let room: UInt64 = 256
   var name: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
   for index in 0..room
@@ -439,7 +459,9 @@ internal fn executable() -> Result[intrinsic::Storage[UInt8], Int32] {
   }
 }
 
-internal fn before_zero_byte(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
+internal fn before_zero_byte(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8]
+  uses RunForever
+{
   let length = intrinsic::view_length(bytes)
   var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
   var index: UInt64 = 0

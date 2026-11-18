@@ -42,6 +42,7 @@ type t =
   | Finite_set
   | Finite_map
   | Panic
+  | Run_forever
   | Tasks
   | Serialize
   | Deserialize

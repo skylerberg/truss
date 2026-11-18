@@ -49,7 +49,7 @@ let show_target = function
   | Module module_ -> Path.show_module module_
 
 let resolve_target database packages from_ =
-  let names = Database.make_name_lookups database packages in
+  let names = Database.make_name_lookups database in
   match
     List.filter_map (find_renamed names packages)
       (Path_argument.resolve names packages (Path_argument.parse from_))
@@ -86,7 +86,7 @@ let parse_module_path package text =
   | { member = Some _; _ } | (exception Outcome.Cannot_run _) -> None
 
 let list_occurrences database snapshot packages =
-  let names = Database.make_name_lookups database packages in
+  let names = Database.make_name_lookups database in
   List.concat_map
     (fun file ->
       List.concat_map
@@ -158,7 +158,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
             (Inspect.References.list_uses
                ~resolve_module:
                  (Resolve.Names.resolve_used_module
-                    (Database.make_name_lookups database packages)
+                    (Database.make_name_lookups database)
                     ~from:file.module_)
                (Database.read_parsed database file).uses))
         (Command_packages.list_files snapshot packages)
@@ -230,7 +230,6 @@ let run ~from_ ~to_ =
   in
   let after = apply_plan database snapshot packages plan in
   let database = Workspace.open_database (make_trial_snapshot snapshot after) in
-  Database.check database packages;
   let caused =
     List.filter_map
       (fun (_, file, text) ->

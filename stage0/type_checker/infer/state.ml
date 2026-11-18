@@ -76,7 +76,7 @@ type state = {
   mutable law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
   mutable locals_read : Syntax.id list;
-  mutable receiver_modes : (Syntax.id * Types.mode) list;
+  mutable keyword_modes : (Syntax.id * Types.mode) list;
   mutable places_without_keyword : (Syntax.id * Types.mode) list;
   mutable mode_keywords : Core.mode_keyword list;
   yielded : (Syntax.id, Types.mode) Hashtbl.t;
@@ -409,17 +409,13 @@ let make_unsolved_type state =
 
 let resolve_capabilities state (capabilities : Types.capability_set) =
   match state.capability_solution with
-  | Some solution when Types.has_capability_variable capabilities ->
-      let read_solved variable =
-        Option.value ~default:Types.no_capabilities (Hashtbl.find_opt solution variable)
-      in
-      Types.flat_map_capabilities
+  | Some solution when Types.contains_capability_variable capabilities ->
+      Types.replace_capabilities
         (function
           | Types.Capability_variable variable ->
-              (Types.remove_divergence (read_solved variable) :> Types.capability list)
-          | Types.Divergence (Of_variable variable) ->
-              (Types.list_divergence (read_solved variable) :> Types.capability list)
-          | capability -> [ capability ])
+              Some
+                (Option.value ~default:Types.no_capabilities (Hashtbl.find_opt solution variable))
+          | _ -> None)
         capabilities
   | _ -> capabilities
 
@@ -435,27 +431,15 @@ and finalize_capabilities state capabilities =
   resolve_capabilities state
     (Interface.Impls.normalize_capabilities state.lookups.interface
        ~list_bounds:(lookup_bounds state)
-       (Types.flat_map_capabilities
+       (Types.replace_capabilities
           (function
             | Types.Capability_projection { base; trait; name } ->
-                [ Types.Capability_projection { base = finalize_type state base; trait; name } ]
-            | Types.Divergence (Of_impl_method { self_type; trait; name; receiver }) ->
-                [
-                  Types.Divergence
-                    (Of_impl_method
-                       {
-                         self_type = finalize_type state self_type;
-                         trait =
-                           {
-                             trait with
-                             trait_arguments =
-                               List.map (finalize_argument state) trait.trait_arguments;
-                           };
-                         name;
-                         receiver;
-                       });
-                ]
-            | capability -> [ capability ])
+                Some
+                  (Types.make_capability_set
+                     [
+                       Types.Capability_projection { base = finalize_type state base; trait; name };
+                     ])
+            | _ -> None)
           capabilities))
 
 and finalize_argument state = function
@@ -564,9 +548,6 @@ let resolve_associated_type state type_ (trait : Types.trait_reference) name
       make_error_type state Unknown_associated_type at
         (Printf.sprintf "`%s` gives no `%s` as a `%s`." (Types.show type_) name
            (Types.show_trait trait))
-
-let compute_callee_uses state (target : Core.operand Core.target) =
-  Callee_uses.compute state.lookups.interface ~list_bounds:(lookup_bounds state) target
 
 let make_callee state (target : Core.operand Core.target) =
   Callee_uses.make_callee state.lookups.interface ~list_bounds:(lookup_bounds state) target
@@ -985,30 +966,6 @@ let add_mismatch state (span : Source.Definition_span.t) ~expected ~actual =
         ~fixes:[ fix "Write it as a float." [ insert span.stop ".0" ] ]
         (Printf.sprintf "An integer literal is never a float, and `%s` is expected here."
            (Types.show expected))
-  | Types.Function found, Types.Function wanted
-    when Types.subtract_capabilities (Types.list_divergence found.uses) wanted.uses
-         <> Types.no_capabilities ->
-      let missing =
-        (Types.subtract_capabilities (Types.list_divergence found.uses) wanted.uses
-          :> Types.capability list)
-      in
-      let followed_methods =
-        List.filter_map
-          (function
-            | Types.Divergence (Of_impl_method { self_type; trait; name; _ }) ->
-                Some (Types.show_impl_method self_type trait name)
-            | _ -> None)
-          missing
-      in
-      add_mismatch_diagnostic state Mismatch span ~sides
-        (Printf.sprintf "Expected %s, found %s, which %s." (Types.describe expected)
-           (Types.describe actual)
-           (match followed_methods with
-           | [ followed ] when List.compare_length_with missing 1 = 0 ->
-               Printf.sprintf "terminates only if %s does" followed
-           | _ :: _ :: _ when List.compare_lengths followed_methods missing = 0 ->
-               Printf.sprintf "terminates only if %s do" (String.concat " and " followed_methods)
-           | _ -> "may not terminate"))
   | _ ->
       add_mismatch_diagnostic state Mismatch span ~sides
         (Printf.sprintf "Expected %s, found %s." (Types.describe expected) (Types.describe actual))
@@ -1038,12 +995,13 @@ let rec is_place state (value : Syntax.expression) =
   | Parenthesized inner -> is_place state inner
   | _ -> false
 
-let rec find_call_with_mode_keyword state (value : Syntax.expression) =
+let rec find_keyword_operation state (value : Syntax.expression) =
   match value.kind with
   | Call ({ kind = Member (base, _); _ }, _)
-  | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) ->
-      if is_place state base then Some (value.id, base) else find_call_with_mode_keyword state base
-  | Member (base, _) | Bracket (base, _) | Try base -> find_call_with_mode_keyword state base
+  | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _)
+  | With (base, _) ->
+      if is_place state base then Some (value.id, base) else find_keyword_operation state base
+  | Member (base, _) | Bracket (base, _) | Try base -> find_keyword_operation state base
   | _ -> None
 
 let note_mode_keyword state (written : Syntax.expression) (mode : Syntax.mode)
@@ -1052,7 +1010,7 @@ let note_mode_keyword state (written : Syntax.expression) (mode : Syntax.mode)
     match value.kind with Parenthesized inner -> strip_parentheses inner | _ -> value
   in
   let place =
-    match find_call_with_mode_keyword state operand with
+    match find_keyword_operation state operand with
     | Some (_, receiver) -> receiver
     | None -> operand
   in
@@ -1150,7 +1108,7 @@ let check_operand_clause state (cost : Syntax.cost) (operand : Interface.Elabora
            "`%s` is an upper bound on one call, and a call may spend less, so an exact amount that \
             names it would be false for that call. State this bound with `<=` or `O(...)`."
            shown)
-  | Big_o _ | At_most _ | Finite -> ()
+  | Big_o _ | At_most _ -> ()
 
 let check_cost state (cost : Syntax.cost) =
   check_resource state cost.resource;
@@ -1158,7 +1116,6 @@ let check_cost state (cost : Syntax.cost) =
   | Big_o value | At_most value | Exactly value ->
       List.iter (check_operand_clause state cost)
         (Interface.Elaborator.list_cost_operands state.context value)
-  | Finite -> ()
 
 let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let make = make_synthetic_expression state ~origin in

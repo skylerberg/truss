@@ -1021,7 +1021,6 @@ let build_cost state ~origin ({ amortized; resource = written; bound } : Syntax.
     resource = convert_resource state written;
     bound =
       (match bound with
-      | Finite -> Finite
       | Big_o value -> Order_of (State.build_expression state value)
       | At_most value -> At_most (State.build_expression state value)
       | Exactly value -> Exactly (State.build_expression state value));

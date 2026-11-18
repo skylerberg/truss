@@ -42,6 +42,7 @@ type t =
   | Finite_set
   | Finite_map
   | Panic
+  | Run_forever
   | Tasks
   | Serialize
   | Deserialize
@@ -107,6 +108,7 @@ let all =
     Finite_set;
     Finite_map;
     Panic;
+    Run_forever;
     Tasks;
     Serialize;
     Deserialize;
@@ -172,6 +174,7 @@ let locate_known = function
   | Finite_set -> ([ "specification" ], "FiniteSet")
   | Finite_map -> ([ "specification" ], "FiniteMap")
   | Panic -> ([ "capabilities" ], "Panic")
+  | Run_forever -> ([ "capabilities" ], "RunForever")
   | Tasks -> ([ "capabilities" ], "Tasks")
   | Serialize -> ([ "serialization" ], "Serialize")
   | Deserialize -> ([ "serialization" ], "Deserialize")
