@@ -236,7 +236,7 @@ let list_mut_provided_places (provided : Mir.provided list) =
     (fun (implementation : Mir.provided) ->
       match (implementation.mode, implementation.value) with
       | Types.Mut, Borrow { place; _ } -> Some place
-      | Mut, (Use _ | Take _ | Constant _) | (Read | Own), _ -> None)
+      | Mut, (Use _ | Take _ | Immediate _) | (Read | Own), _ -> None)
     provided
 
 let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block list) : State.changed
@@ -332,7 +332,7 @@ let make_float_literal (exponent, significand) value =
 let read_operand context frame run (operand : Mir.operand) =
   match operand with
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read_place context frame run place
-  | Constant { value; type_ } -> (
+  | Immediate { value; type_ } -> (
       let ty = Facts.substitute_type context frame type_ in
       match value with
       | Unit ->
@@ -350,13 +350,13 @@ let compute_operand_type context frame operand =
 
 let find_operand_origin : Mir.operand -> Core.origin option = function
   | Use { origin; _ } | Borrow { origin; _ } | Take { origin; _ } -> Some origin
-  | Constant _ -> None
+  | Immediate _ -> None
 
 let find_whole_local : Mir.operand -> Mir.local option = function
   | Use { place = { root = Local local; projections = [] }; _ }
   | Borrow { place = { root = Local local; projections = [] }; _ } ->
       Some local
-  | Use _ | Borrow _ | Take _ | Constant _ -> None
+  | Use _ | Borrow _ | Take _ | Immediate _ -> None
 
 let make_passed_place context run place =
   {
@@ -559,7 +559,7 @@ let compute_target_type context frame run (target : Mir.place) =
   | _ -> compute_place_type context frame run target
 
 let lends_places (part : Mir.yielded) =
-  match part with Built _ | Part (Borrow _) -> true | Part (Use _ | Take _ | Constant _) -> false
+  match part with Built _ | Part (Borrow _) -> true | Part (Use _ | Take _ | Immediate _) -> false
 
 let rec read_yielded_value context frame run ~origin (part : Mir.yielded) =
   match part with
@@ -605,7 +605,7 @@ let rec write_back_part context run ty (part : Mir.yielded) frame after =
               | _ -> frame)
             frame fields
       | None -> Facts.raise_unsupported Whole_definition "the fields of `%s`" (Types.show ty))
-  | Part (Use _ | Take _ | Constant _) -> frame
+  | Part (Use _ | Take _ | Immediate _) -> frame
 
 let bind_parts context (frame : State.frame) run =
   Locals.fold
@@ -1114,7 +1114,7 @@ and read_statement context frame run (statement : Mir.statement) =
           ~matches:
             {
               statements = [];
-              value = Some (Constant { value = Boolean true; type_ = Types.bool });
+              value = Some (Immediate { value = Boolean true; type_ = Types.bool });
             }
           ~body:{ body with value = Some decision }
       in

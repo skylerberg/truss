@@ -96,7 +96,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
   let moved_types = Hashtbl.create 8 in
   let record_moved_type (use : Moves.use) =
     match use.operand with
-    | Some (Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Constant { type_; _ })
+    | Some (Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Immediate { type_; _ })
       when use.moves ->
         Hashtbl.replace moved_types use.origin type_
     | Some _ | None -> ()

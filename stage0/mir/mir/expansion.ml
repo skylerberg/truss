@@ -38,15 +38,15 @@ let expand_body (body : Tree.body) : Graph.body =
   in
   let find_whole_local : Tree.operand -> Tree.local option = function
     | Use { place; _ } -> find_place_local place
-    | Borrow _ | Take _ | Constant _ -> None
+    | Borrow _ | Take _ | Immediate _ -> None
   in
   let is_use_of target (value : Tree.operand) =
     Option.is_some (find_whole_local value) && find_place_local target = find_whole_local value
   in
   let branch_on current (value : Tree.operand) ~yes ~no origin =
     match value with
-    | Constant { value = Boolean true; _ } -> close current (Goto yes) origin
-    | Constant { value = Boolean false; _ } -> close current (Goto no) origin
+    | Immediate { value = Boolean true; _ } -> close current (Goto yes) origin
+    | Immediate { value = Boolean false; _ } -> close current (Goto no) origin
     | _ -> close current (Branch { condition = value; yes; no; is_if_condition = false }) origin
   in
   let rec emit targets current (undecided : undecided list) (statements : Tree.statement list) =
@@ -321,7 +321,7 @@ let expand_body (body : Tree.body) : Graph.body =
           ( decided,
             [
               make_assignment target
-                (Constant { value = Boolean (connective <> And); type_ = Types.bool })
+                (Immediate { value = Boolean (connective <> And); type_ = Types.bool })
                 origin;
             ] )
           (Goto joined) origin;

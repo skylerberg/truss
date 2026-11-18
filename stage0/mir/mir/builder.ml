@@ -44,7 +44,7 @@ module In_order = struct
           if count > 1 then begin
             let value = Emitter.hold_operand builder value type_ origin in
             (match value with
-            | Constant _ | Take _ -> ()
+            | Immediate _ | Take _ -> ()
             | _ ->
                 if index < count - 1 then
                   loans := Emitter.start_loan builder value Read Operand_evaluation origin :: !loans);
@@ -149,8 +149,8 @@ let read_literal text type_ origin =
 let lower_pattern_constant (pattern : Core.pattern) (value : Core.pattern_constant) : Tree.operand =
   let type_ = pattern.type_ in
   match value with
-  | Boolean_constant value -> Constant { value = Boolean value; type_ }
-  | Integer_constant value -> Constant { value = Integer value; type_ }
+  | Boolean_constant value -> Immediate { value = Boolean value; type_ }
+  | Integer_constant value -> Immediate { value = Integer value; type_ }
   | String_constant text -> read_literal text type_ pattern.origin
   | Named_constant path ->
       Use { place = { root = Constant path; projections = [] }; type_; origin = pattern.origin }
@@ -167,9 +167,9 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
   if not (Emitter.reaches builder) then None
   else
     match node.kind with
-    | Integer value -> Some (Constant { value = Integer value; type_ = node.type_ })
-    | Float value -> Some (Constant { value = Float value; type_ = node.type_ })
-    | Boolean value -> Some (Constant { value = Boolean value; type_ = node.type_ })
+    | Integer value -> Some (Immediate { value = Integer value; type_ = node.type_ })
+    | Float value -> Some (Immediate { value = Float value; type_ = node.type_ })
+    | Boolean value -> Some (Immediate { value = Boolean value; type_ = node.type_ })
     | String text -> hold (Copy (read_literal text node.type_ origin))
     | Template { literals; call = { kind = Call called; _ } } ->
         let* call = lower_call builder called ~node:node.id ~origin:node.origin in
@@ -665,7 +665,7 @@ and lower_call_value builder (node : Core.expression) (called : Core.call) =
       end
       else if is_unit node.type_ then begin
         Emitter.emit builder (Basic (Call { destination = None; call })) origin;
-        Some (Tree.Constant { value = Unit; type_ = Types.unit })
+        Some Emitter.unit_value
       end
       else
         let local = Emitter.allocate_temporary builder node.type_ origin in
@@ -718,11 +718,11 @@ and lower_pattern_tests ~bind_matched builder (patterns : Core.pattern list) pla
       let statements = Emitter.resume_block builder enclosing in
       match (holds, statements) with
       | None, _ -> None
-      | Some (Tree.Constant { value = Boolean true; _ }), [] -> Some left
+      | Some (Tree.Immediate { value = Boolean true; _ }), [] -> Some left
       | Some _, _ ->
           Emitter.hold_choice builder Types.bool origin
             (Connective { connective = And; left; right = { statements; value = holds } }))
-    (Some (Constant { value = Boolean true; type_ = Types.bool }))
+    (Some (Immediate { value = Boolean true; type_ = Types.bool }))
     !tested
 
 and match_patterns ?(covers = false) ?owned builder (patterns : Core.pattern list) scrutinees origin
@@ -737,7 +737,7 @@ and match_patterns ?(covers = false) ?owned builder (patterns : Core.pattern lis
     | [] -> raise_bug "a pattern with no alternative"
     | [ patterns ] when covers ->
         bind_matched patterns ();
-        Some (Tree.Constant { value = Boolean true; type_ = Types.bool })
+        Some (Tree.Immediate { value = Boolean true; type_ = Types.bool })
     | [ patterns ] ->
         lower_pattern_tests builder patterns places ~bind_matched:(bind_matched patterns)
     | patterns :: later ->
@@ -787,7 +787,7 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
                 List.filter_map
                   (fun value ->
                     match value with
-                    | Tree.Constant _ -> None
+                    | Tree.Immediate _ -> None
                     | _ ->
                         Some (Emitter.start_loan builder value Read Operand_evaluation arm.origin))
                   evaluated
@@ -868,7 +868,7 @@ and lower_scrutinee_place builder (value : Tree.operand) type_ origin : Tree.pla
   | Use { place = { root = Local local; projections = [] } as place; _ }
     when (Emitter.lookup_local_info builder local).kind = Temporary ->
       place
-  | Use _ | Take _ | Constant _ ->
+  | Use _ | Take _ | Immediate _ ->
       let local = Emitter.allocate_temporary builder type_ origin in
       Emitter.assign builder (Emitter.make_local_place local) (Operand value) origin;
       Emitter.make_local_place local
@@ -1063,7 +1063,7 @@ and lower_statement builder (node : Core.statement) =
               in
               let loans =
                 match value with
-                | Constant _ -> []
+                | Immediate _ -> []
                 | _ -> [ Emitter.start_loan builder value Read Operand_evaluation origin ]
               in
               let target = lower_place builder target in
@@ -1204,7 +1204,7 @@ and lower_statement builder (node : Core.statement) =
                 (While { loop; condition; body; failed = failed.statements; compared })
                 origin;
               match condition.value with
-              | Some (Constant { value = Boolean true; _ }) when not (holds_break body) ->
+              | Some (Immediate { value = Boolean true; _ }) when not (holds_break body) ->
                   Emitter.jump builder Unreachable origin
               | _ -> ())
           | _ ->
@@ -1327,7 +1327,7 @@ and lower_elements_loop ?matched builder ~origin ~(pattern : Core.pattern)
   in
   match (counted.value, element) with
   | Some stop, Lent lending ->
-      let start = Tree.Constant { value = Integer Z.zero; type_ = count.type_ } in
+      let start = Tree.Immediate { value = Integer Z.zero; type_ = count.type_ } in
       let lent_part = ref None in
       lower_for_loop ~lent:lent_part builder ~origin ~pattern:position
         ~iteration:(Range { start; stop; inclusive = false })
@@ -1388,7 +1388,7 @@ and lower_quantifier_loop builder (node : Core.expression) (quantifier : Core.qu
   let quantified = ref None in
   Emitter.assign builder
     (Emitter.make_local_place decides)
-    (Operand (Constant { value = Boolean (quantifier = Forall); type_ = Types.bool }))
+    (Operand (Immediate { value = Boolean (quantifier = Forall); type_ = Types.bool }))
     origin;
   let make_loop () =
     { Tree.clauses = []; schedule = Sequential; origin; quantified = !quantified }
@@ -1396,7 +1396,7 @@ and lower_quantifier_loop builder (node : Core.expression) (quantifier : Core.qu
   let matched = ref None in
   let lower_element_decision () =
     match !matched with
-    | Some (Tree.Constant { value = Boolean true; _ }) -> lower_expression builder body
+    | Some (Tree.Immediate { value = Boolean true; _ }) -> lower_expression builder body
     | Some left ->
         let right = Emitter.build_block builder (fun () -> lower_expression builder body) in
         let connective : Tree.connective =
@@ -1431,7 +1431,7 @@ and lower_quantified builder (node : Core.expression) (quantifier : Core.quantif
             (fun stop ->
               Tree.Over_range
                 {
-                  start = Constant { value = Integer Z.zero; type_ = elements.count.type_ };
+                  start = Immediate { value = Integer Z.zero; type_ = elements.count.type_ };
                   stop;
                   inclusive = false;
                 })
@@ -1445,7 +1445,7 @@ and lower_quantified builder (node : Core.expression) (quantifier : Core.quantif
         ( Emitter.bind_source builder local Own type_ origin,
           {
             Tree.statements = [];
-            value = Some (Constant { value = Boolean true; type_ = Types.bool });
+            value = Some (Immediate { value = Boolean true; type_ = Types.bool });
           } )
     | Over_range { pattern; _ } ->
         let parameter = Emitter.allocate_local builder Temporary value_type origin in

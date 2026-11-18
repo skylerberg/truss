@@ -35,7 +35,7 @@ let list_operand_uses ?passed ~is_moving ~by_value (operand : Mir.operand) =
   | Borrow { place; type_; origin; _ } ->
       let moves = by_value && Option.is_some passed && is_moving type_ in
       [ { place; origin; moves; operand = Some operand; passed } ]
-  | Constant _ -> []
+  | Immediate _ -> []
 
 let read ~origin place = { place; origin; moves = false; operand = None; passed = None }
 

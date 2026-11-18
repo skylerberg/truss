@@ -251,14 +251,14 @@ let hold_past_scopes builder origin (value : Tree.operand) =
       let local = allocate_local builder Temporary type_ origin in
       assign builder (make_local_place local) (Operand value) origin;
       Tree.Use { place = make_local_place local; type_; origin }
-  | Constant _ | Borrow _ | Take _ -> value
+  | Immediate _ | Borrow _ | Take _ -> value
 
 let return_from_scopes builder value origin =
   let value = Option.map (hold_past_scopes builder origin) value in
   leave_scopes builder ~depth:0 origin;
   jump builder (Return value) origin
 
-let unit_value = Tree.Constant { value = Unit; type_ = Types.unit }
+let unit_value = Tree.Immediate { value = Unit; type_ = Types.unit }
 
 let group_key : Tree.task -> Core.origin = function
   | Branch { block; _ } -> block
@@ -266,7 +266,7 @@ let group_key : Tree.task -> Core.origin = function
 
 let hold_operand builder (value : Tree.operand) type_ origin =
   match value with
-  | Constant _ | Borrow { mode = Mut; _ } | Take _ -> value
+  | Immediate _ | Borrow { mode = Mut; _ } | Take _ -> value
   | Use { place = { root = Local local; projections = [] }; _ }
     when (Hashtbl.find builder.infos local).kind = Temporary ->
       value
@@ -457,7 +457,7 @@ let start_group builder key origin =
   | Some { winner; exits = _ :: _ } ->
       add_temporary builder winner;
       assign builder (make_local_place winner)
-        (Operand (Constant { value = Integer Z.zero; type_ = Types.make_builtin UInt32 }))
+        (Operand (Immediate { value = Integer Z.zero; type_ = Types.make_builtin UInt32 }))
         origin
   | _ -> ()
 

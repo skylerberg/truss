@@ -187,7 +187,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
   in
   let fold_operand : Mir.operand -> Lowered.static_value option = function
     | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read place
-    | Constant { value; type_ } -> fold_literal st (Lowering.ground st type_) value
+    | Immediate { value; type_ } -> fold_literal st (Lowering.ground st type_) value
   in
   let fold_rvalue target : Mir.rvalue -> Lowered.static_value option = function
     | Operand value | Copy value -> fold_operand value
