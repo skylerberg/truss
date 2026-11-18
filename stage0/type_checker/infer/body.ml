@@ -583,18 +583,14 @@ let finalize (state : State.state) =
     }
   in
   let finalize_evidence : Tables.evidence -> Tables.evidence = function
-    | Impl { impl; arguments } ->
+    | Impl { impl; substitution } ->
         Impl
           {
             impl;
-            arguments =
-              {
-                arguments with
-                arguments =
-                  List.map
-                    (fun (parameter, value) -> (parameter, finalize_argument value))
-                    arguments.arguments;
-              };
+            substitution =
+              Types.map_substitution ~argument:finalize_argument
+                ~capabilities:(State.finalize_capabilities state)
+                substitution;
           }
     | other -> other
   in

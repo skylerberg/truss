@@ -130,18 +130,10 @@ let make_code context (path : Path.t) (instantiation : Ground.instantiation) : c
           let trait = impl_interface.implements.trait in
           let trait_signature = read_signature context provided.path in
           let count = List.length impl_interface.impl_generics in
-          let of_impl =
-            { Types.no_substitution with arguments = List.take count substitution.arguments }
-          in
           let of_trait =
-            {
-              trait_substitution with
-              arguments =
-                List.map
-                  (fun (parameter, argument) ->
-                    (parameter, Types.substitute_argument of_impl argument))
-                  trait_substitution.arguments;
-            }
+            Types.substitute_substitution
+              (bind impl_interface.impl_generics (List.take count instantiation.type_arguments))
+              trait_substitution
           in
           let own_generics =
             List.filter
