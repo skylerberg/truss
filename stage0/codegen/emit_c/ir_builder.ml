@@ -28,8 +28,6 @@ type function_ = {
   role : role;
   entry : Lowered.block;
   prologue : Lowered.statement list;
-  mutable mentioned : Locals.t;
-  mutable returns : bool list;
   mutable size : int;
 }
 
@@ -48,8 +46,7 @@ type t = {
   mutable function_ : int;
 }
 
-let make_function ~code ~role ~entry ~prologue =
-  { code; role; entry; prologue; mentioned = Locals.empty; returns = []; size = 0 }
+let make_function ~code ~role ~entry ~prologue = { code; role; entry; prologue; size = 0 }
 
 let make_builder env =
   {
@@ -85,16 +82,6 @@ let allocate_local builder ?name ?(is_zeroed = false) ty =
 
 let lookup_local_type builder local = (Dynarray.get builder.locals local).ty
 let lookup_current_function builder = Dynarray.get builder.functions builder.function_
-let render_token local = Printf.sprintf "\001%d\002" local
-
-let make_function_context builder (function_ : function_) =
-  {
-    C_values.symbol = Mangling.make_symbol function_.code.item;
-    render_local =
-      (fun local ->
-        function_.mentioned <- Locals.add local function_.mentioned;
-        (render_token local, lookup_local_type builder local));
-  }
 
 let start builder block =
   Dynarray.set builder.owners block (Some builder.function_);
@@ -185,7 +172,18 @@ let outline builder ~index ~parts body =
       body ());
   holder
 
-let resolve text name =
+let render_local_placeholder local = Printf.sprintf "\001%d\002" local
+
+let make_placeholder_context builder (function_ : function_) ~note_mention =
+  {
+    C_values.symbol = Mangling.make_symbol function_.code.item;
+    render_local =
+      (fun local ->
+        note_mention local;
+        (render_local_placeholder local, lookup_local_type builder local));
+  }
+
+let replace_local_placeholders text ~name =
   let buffer = Buffer.create (String.length text) in
   let length = String.length text in
   let rec scan position =
@@ -207,73 +205,73 @@ let resolve text name =
 let render_nested_symbol (code : code) index =
   Printf.sprintf "%s_Nested_%d" (Mangling.make_symbol code.item) index
 
-let write_function_texts builder ~enclosing_symbol { parameters; result; returns } =
-  let functions = Dynarray.to_array builder.functions in
-  let count = Array.length functions in
-  let bodies = Dynarray.to_array builder.bodies and owners = Dynarray.to_array builder.owners in
-  let list_successors block =
-    match bodies.(block).terminator with
-    | Some terminator -> Lowered.list_successors terminator
-    | None -> []
-  in
-  let reached = Array.make (Array.length bodies) false and targets = ref Blocks.empty in
-  Array.iter
-    (fun (function_ : function_) ->
-      let rec reach block =
-        if not reached.(block) then begin
-          reached.(block) <- true;
+let mark_reached_blocks builder functions =
+  let reached = Array.make (Dynarray.length builder.bodies) false in
+  let jump_targets = ref Blocks.empty in
+  let rec reach block =
+    if not reached.(block) then begin
+      reached.(block) <- true;
+      match (Dynarray.get builder.bodies block).terminator with
+      | Some terminator ->
           List.iter
             (fun target ->
-              targets := Blocks.add target !targets;
+              jump_targets := Blocks.add target !jump_targets;
               reach target)
-            (list_successors block)
-        end
-      in
-      reach function_.entry)
-    functions;
-  let print_block (function_ : function_) block =
-    let emission = function_.code.emission and fc = make_function_context builder function_ in
-    let buffer = Buffer.create 256 in
-    List.iter (C_code.write_statement emission fc buffer) (List.rev bodies.(block).statements);
-    (match bodies.(block).terminator with
-    | Some (Return value as terminator) ->
-        let gives =
-          match value with
-          | Some operand -> C_values.render_operand emission fc operand <> None
-          | None -> false
-        in
-        function_.returns <- gives :: function_.returns;
-        C_code.write_terminator emission fc buffer terminator
-    | Some terminator -> C_code.write_terminator emission fc buffer terminator
-    | None -> raise_bug "block %d is never finished" block);
-    Buffer.contents buffer
+            (Lowered.list_successors terminator)
+      | None -> ()
+    end
   in
-  let texts =
-    Array.mapi
-      (fun block is_reached ->
-        match owners.(block) with
-        | Some owner when is_reached -> print_block functions.(owner) block
-        | Some _ | None -> "")
-      reached
-  in
-  let prologues =
-    Array.map
-      (fun (function_ : function_) ->
-        let buffer = Buffer.create 64 in
-        List.iter
-          (C_code.write_statement function_.code.emission
-             (make_function_context builder function_)
-             buffer)
-          function_.prologue;
-        buffer)
-      functions
-  in
-  let enclosing = functions.(0) in
-  enclosing.mentioned <-
-    List.fold_left (fun set local -> Locals.add local set) enclosing.mentioned parameters;
-  let list_parameters number =
-    match functions.(number).role with Enclosing -> parameters | Outlined { parts; _ } -> parts
-  in
+  Array.iter (fun (function_ : function_) -> reach function_.entry) functions;
+  (reached, !jump_targets)
+
+let check_return ~result ~gives =
+  match (gives, result) with
+  | false, Some _ -> raise_bug "a return of nothing from a function with a result"
+  | true, None -> raise_bug "a return of a value from a function with no result"
+  | _ -> ()
+
+let note_mention mentioned number local = mentioned.(number) <- Locals.add local mentioned.(number)
+
+let print_reached_blocks builder functions ~reached ~result_types ~mentioned =
+  Array.mapi
+    (fun block is_reached ->
+      match Dynarray.get builder.owners block with
+      | Some number when is_reached ->
+          let function_ = functions.(number) and body = Dynarray.get builder.bodies block in
+          let emission = function_.code.emission
+          and fc =
+            make_placeholder_context builder functions.(number)
+              ~note_mention:(note_mention mentioned number)
+          in
+          let buffer = Buffer.create 256 in
+          List.iter (C_code.write_statement emission fc buffer) (List.rev body.statements);
+          (match body.terminator with
+          | Some (Return value as terminator) ->
+              check_return ~result:result_types.(number)
+                ~gives:
+                  (match value with
+                  | Some operand -> C_values.render_operand emission fc operand <> None
+                  | None -> false);
+              C_code.write_terminator emission fc buffer terminator
+          | Some terminator -> C_code.write_terminator emission fc buffer terminator
+          | None -> raise_bug "block %d is never finished" block);
+          Buffer.contents buffer
+      | Some _ | None -> "")
+    reached
+
+let print_prologues builder functions ~mentioned =
+  Array.mapi
+    (fun number (function_ : function_) ->
+      let buffer = Buffer.create 64 in
+      List.iter
+        (C_code.write_statement function_.code.emission
+           (make_placeholder_context builder function_ ~note_mention:(note_mention mentioned number))
+           buffer)
+        function_.prologue;
+      Buffer.contents buffer)
+    functions
+
+let find_homes functions ~mentioned =
   let read_parent number =
     match functions.(number).role with Enclosing -> number | Outlined { parent; _ } -> parent
   in
@@ -300,16 +298,14 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
                 (match Hashtbl.find_opt home local with
                 | Some other -> compute_enclosing number other
                 | None -> number))
-        function_.mentioned)
+        mentioned.(number))
     functions;
-  let is_local_to number local =
-    List.mem local (list_parameters number)
-    || Hashtbl.find_opt home local = Some number
-    || Lowered.is_erased builder.env (lookup_local_type builder local)
-  in
-  let captured = Array.make count Locals.empty in
+  home
+
+let list_captures functions ~home ~mentioned ~is_local_to =
+  let captured = Array.make (Array.length functions) Locals.empty in
   Array.iteri
-    (fun number (function_ : function_) ->
+    (fun number locals ->
       Locals.iter
         (fun local ->
           if not (is_local_to number local) then
@@ -323,13 +319,16 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
               end
             in
             reach number)
-        function_.mentioned)
-    functions;
-  let list_captures number =
-    List.mapi
-      (fun position local -> (local, Printf.sprintf "capture%d" position))
-      (Locals.elements captured.(number))
-  in
+        locals)
+    mentioned;
+  Array.map
+    (fun locals ->
+      List.mapi
+        (fun position local -> (local, Printf.sprintf "capture%d" position))
+        (Locals.elements locals))
+    captured
+
+let register_environments builder functions ~captures =
   Array.iteri
     (fun number (function_ : function_) ->
       match function_.role with
@@ -340,109 +339,141 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
                (fun (local, field) ->
                  ( field,
                    Lowered.Pointer { target = lookup_local_type builder local; writable = true } ))
-               (list_captures number))
+               captures.(number))
       | Enclosing -> ())
-    functions;
-  let fills = Array.init count (fun _ -> Buffer.create 64) in
+    functions
+
+let print_fills builder functions ~captures =
+  let fills = Array.map (fun _ -> Buffer.create 64) functions in
   Array.iteri
     (fun number (function_ : function_) ->
       match function_.role with
-      | Outlined { holder; parent = parent_number; _ } ->
-          let parent = functions.(parent_number) in
+      | Outlined { holder; parent; _ } ->
+          let parent_function = functions.(parent) in
           List.iter
             (fun (local, field) ->
-              C_code.write_statement parent.code.emission
-                (make_function_context builder parent)
-                fills.(parent_number)
+              C_code.write_statement parent_function.code.emission
+                (make_placeholder_context builder parent_function ~note_mention:ignore)
+                fills.(parent)
                 (Assign
                    ( { root = Local holder; projections = [ Field field ] },
                      Use (Address { place = Lowered.make_local_place local; writable = true }) )))
-            (list_captures number)
+            captures.(number)
       | Enclosing -> ())
     functions;
+  Array.map Buffer.contents fills
+
+let name_local builder (function_ : function_) ~is_local ~captures local =
+  if is_local local then C_values.render_local_name local (Dynarray.get builder.locals local).name
+  else
+    match (function_.role, List.assoc_opt local captures) with
+    | Outlined { environment; _ }, Some field ->
+        Printf.sprintf "(*(*%s).f_%s)"
+          (C_values.render_local_name environment (Dynarray.get builder.locals environment).name)
+          field
+    | _ -> raise_bug "local %d is neither local to the function nor in its environment" local
+
+let render_local_declarations builder (function_ : function_) ~locals ~parameters ~name =
+  let emission = function_.code.emission in
+  let symbol = Mangling.make_symbol function_.code.item in
+  String.concat ""
+    (List.filter_map
+       (fun local ->
+         let ty = lookup_local_type builder local in
+         if List.mem local parameters || C_values.is_erased emission ty then None
+         else
+           let initializer_ =
+             if not (Dynarray.get builder.locals local).is_zeroed then ""
+             else
+               match ty with
+               | Value ty when C_types.is_struct emission.types ty -> " = {0}"
+               | Value _ | Pointer _ | Raw _ -> " = 0"
+               | Lend | Lend_mark -> " = {0}"
+               | Environment _ | Evidence _ | Capabilities _ | Trace ->
+                   raise_bug "a zeroed environment, evidence slot, table, or link of the call chain"
+           in
+           Some
+             (Printf.sprintf "  %s %s%s;\n"
+                (C_types.render_type emission.types symbol ty)
+                (name local) initializer_))
+       locals)
+
+let render_blocks builder number (function_ : function_) ~reached ~jump_targets ~texts =
+  String.concat ""
+    (List.map
+       (fun block ->
+         (if Blocks.mem block jump_targets then Printf.sprintf "b%d:;\n" block else "")
+         ^ texts.(block))
+       (function_.entry
+       :: List.filter
+            (fun block ->
+              block <> function_.entry
+              && Dynarray.get builder.owners block = Some number
+              && reached.(block))
+            (List.init (Dynarray.length builder.bodies) Fun.id)))
+
+let write_function_texts builder ~enclosing_symbol { parameters; result; returns } =
+  let functions = Dynarray.to_array builder.functions in
+  let list_parameters number =
+    match functions.(number).role with Enclosing -> parameters | Outlined { parts; _ } -> parts
+  in
+  let result_types =
+    Array.map
+      (fun (function_ : function_) ->
+        match function_.role with Enclosing -> result | Outlined _ -> None)
+      functions
+  in
+  let reached, jump_targets = mark_reached_blocks builder functions in
+  let mentioned = Array.map (fun _ -> Locals.empty) functions in
+  mentioned.(0) <- Locals.of_list parameters;
+  let texts = print_reached_blocks builder functions ~reached ~result_types ~mentioned in
+  let prologues = print_prologues builder functions ~mentioned in
+  let home = find_homes functions ~mentioned in
+  let is_local_to number local =
+    List.mem local (list_parameters number)
+    || Hashtbl.find_opt home local = Some number
+    || Lowered.is_erased builder.env (lookup_local_type builder local)
+  in
+  let captures = list_captures functions ~home ~mentioned ~is_local_to in
+  register_environments builder functions ~captures;
+  let fills = print_fills builder functions ~captures in
   Array.mapi
     (fun number (function_ : function_) ->
-      let result = match function_.role with Enclosing -> result | Outlined _ -> None in
-      List.iter
-        (fun gives ->
-          match (gives, result) with
-          | false, Some _ -> raise_bug "a return of nothing from a function with a result"
-          | true, None -> raise_bug "a return of a value from a function with no result"
-          | _ -> ())
-        function_.returns;
-      let emission = function_.code.emission in
-      let captures = list_captures number in
-      let name local =
-        if is_local_to number local then
-          C_values.render_local_name local (Dynarray.get builder.locals local).name
-        else
-          match (function_.role, List.assoc_opt local captures) with
-          | Outlined { environment; _ }, Some field ->
-              Printf.sprintf "(*(*%s).f_%s)"
-                (C_values.render_local_name environment
-                   (Dynarray.get builder.locals environment).name)
-                field
-          | _ -> raise_bug "local %d is neither local to the function nor in its environment" local
+      let name =
+        name_local builder function_ ~is_local:(is_local_to number) ~captures:captures.(number)
       in
-      let body = Buffer.create 1024 in
-      Buffer.add_string body " {\n";
-      let symbol = Mangling.make_symbol function_.code.item in
-      List.iter
-        (fun local ->
-          let ty = lookup_local_type builder local in
-          if (not (List.mem local (list_parameters number))) && not (C_values.is_erased emission ty)
-          then
-            let initializer_ =
-              if not (Dynarray.get builder.locals local).is_zeroed then ""
-              else
-                match ty with
-                | Value ty when C_types.is_struct emission.types ty -> " = {0}"
-                | Value _ | Pointer _ | Raw _ -> " = 0"
-                | Lend | Lend_mark -> " = {0}"
-                | Environment _ | Evidence _ | Capabilities _ | Trace ->
-                    raise_bug
-                      "a zeroed environment, evidence slot, table, or link of the call chain"
-            in
-            Buffer.add_string body
-              (Printf.sprintf "  %s %s%s;\n"
-                 (C_types.render_type emission.types symbol ty)
-                 (name local) initializer_))
-        (List.sort compare
-           (Hashtbl.fold
-              (fun local owner locals -> if owner = number then local :: locals else locals)
-              home []));
-      Buffer.add_buffer body prologues.(number);
-      Buffer.add_buffer body fills.(number);
-      let blocks =
-        function_.entry
-        :: List.filter
-             (fun block ->
-               block <> function_.entry && owners.(block) = Some number && reached.(block))
-             (List.init (Array.length bodies) Fun.id)
+      let locals =
+        List.sort compare
+          (Hashtbl.fold
+             (fun local owner locals -> if owner = number then local :: locals else locals)
+             home [])
       in
-      List.iter
-        (fun block ->
-          if Blocks.mem block !targets then Buffer.add_string body (Printf.sprintf "b%d:;\n" block);
-          Buffer.add_string body texts.(block))
-        blocks;
-      Buffer.add_string body "}\n";
+      let body =
+        " {\n"
+        ^ render_local_declarations builder function_ ~locals ~parameters:(list_parameters number)
+            ~name
+        ^ prologues.(number) ^ fills.(number)
+        ^ render_blocks builder number function_ ~reached ~jump_targets ~texts
+        ^ "}\n"
+      in
       let symbol =
         match function_.role with
         | Outlined { index; _ } -> render_nested_symbol function_.code index
         | Enclosing -> enclosing_symbol
       in
-      let parameters = list_parameters number in
       let header =
-        C_values.render_prototype emission
+        C_values.render_prototype function_.code.emission
           (Mangling.make_symbol function_.code.item)
-          symbol ~names:(List.map name parameters) ~linkage:External
+          symbol
+          ~names:(List.map name (list_parameters number))
+          ~linkage:External
           {
-            parameters = List.map (lookup_local_type builder) parameters;
-            result;
+            parameters = List.map (lookup_local_type builder) (list_parameters number);
+            result = result_types.(number);
             returns = (match function_.role with Enclosing -> returns | Outlined _ -> true);
           }
       in
-      (header, resolve (Buffer.contents body) name))
+      (header, replace_local_placeholders body ~name))
     functions
 
 let write_functions builder ~enclosing_symbol prototype =

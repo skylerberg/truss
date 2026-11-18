@@ -5,6 +5,7 @@ type t = {
   mutable prototypes : (string * string) list;
   mutable sites : Lowered.site list;
   mutable statics : string list;
+  mutable helpers_used : string list;
   mutable referenced_items : Lowered.Item.t list;
   mutable called : Lowered.Item.t list;
   mutable calls : (Path.t * int) list;
@@ -19,6 +20,7 @@ let create env ~prefix =
     prototypes = [];
     sites = [];
     statics = [];
+    helpers_used = [];
     referenced_items = [];
     called = [];
     calls = [];
@@ -61,6 +63,11 @@ let render_bytes_name emission text =
       let index = Hashtbl.length emission.bytes in
       Hashtbl.replace emission.bytes text index;
       render_bytes_symbol emission index
+
+let use_helper emission name =
+  if not (List.mem name emission.helpers_used) then
+    emission.helpers_used <- name :: emission.helpers_used;
+  name
 
 let add_static emission render =
   let name = Printf.sprintf "%s_static_%d" emission.prefix (List.length emission.statics) in

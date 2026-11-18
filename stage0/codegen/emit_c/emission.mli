@@ -5,6 +5,7 @@ type t = {
   mutable prototypes : (string * string) list;
   mutable sites : Lowered.site list;
   mutable statics : string list;
+  mutable helpers_used : string list;
   mutable referenced_items : Lowered.Item.t list;
   mutable called : Lowered.Item.t list;
   mutable calls : (Path.t * int) list;
@@ -21,4 +22,5 @@ val declare_prototype : t -> string -> string -> unit
 val render_site : t -> Lowered.site -> string
 val render_bytes_symbol : t -> int -> string
 val render_bytes_name : t -> string -> string
+val use_helper : t -> string -> string
 val add_static : t -> (string -> string) -> string
