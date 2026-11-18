@@ -157,14 +157,8 @@ and match_arguments state ?constructor (value : Syntax.expression)
               | None ->
                   reject Unknown_label (State.read_span state label.id)
                     ~fixes:
-                      (match Diagnostic.find_closest label.text (List.map fst named) with
-                      | Some candidate ->
-                          [
-                            State.fix
-                              (Printf.sprintf "Write `%s`." candidate)
-                              [ State.replace (State.read_span state label.id) candidate ];
-                          ]
-                      | None -> [])
+                      (Diagnostic.list_spelling_fixes (State.read_span state label.id)
+                         ~written:label.text (List.map fst named))
                     (Printf.sprintf "No parameter is named `%s`." label.text);
                   None)
           | None -> (
