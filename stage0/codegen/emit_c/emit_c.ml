@@ -216,9 +216,7 @@ let render_file env profile (fragments : (fragment * linkage) list) =
          #define T_OBLIGATION_FAILED(message, length, site, trace) ((void)(message), \
          (void)(length), (void)(site), (void)(trace), __builtin_unreachable())\n");
   let helpers_used =
-    List.sort_uniq String.compare
-      (types.helpers_used
-      @ List.concat_map (fun ((fragment : fragment), _) -> fragment.helpers) fragments)
+    List.concat_map (fun ((fragment : fragment), _) -> fragment.helpers) fragments
   in
   List.iter
     (fun (name, text) -> if List.mem name helpers_used then Buffer.add_string buffer text)

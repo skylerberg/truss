@@ -1544,3 +1544,23 @@ let () =
           | _ -> ())
         built;
       if !provides <> [ true ] then Harness.fail "the `provide` cannot use tasks")
+
+let () =
+  let count_edges operator length =
+    let chain = String.concat operator (List.init length (fun _ -> "flag")) in
+    let graph = lower_graph (Printf.sprintf "fn g(flag: Bool) -> Bool {\n  %s\n}\n" chain) in
+    Array.fold_left
+      (fun count (block : Mir.Graph.basic_block) ->
+        count + List.length (Mir.Graph.For_testing.list_successors block.terminator))
+      0 graph.body.blocks
+  in
+  List.iter
+    (fun operator ->
+      Harness.test
+        (Printf.sprintf "a chain of `%s` has a graph whose edges grow linearly with its length"
+           (String.trim operator))
+        (fun () ->
+          let short = count_edges operator 40 and long = count_edges operator 80 in
+          if long > (2 * short) + 8 then
+            Harness.fail "40 operands make %d edges, and 80 make %d" short long))
+    [ " && "; " || " ]

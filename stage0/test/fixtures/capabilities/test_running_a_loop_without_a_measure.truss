@@ -1,0 +1,6 @@
+test "counts down" {
+  var count: UInt64 = 10
+  while count != 0 {
+    count -= 1
+  }
+}

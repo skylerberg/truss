@@ -770,6 +770,17 @@ let stop_servers ?key () = Server.stop_servers ?key ~wait:true ()
 
 module For_testing = struct
   let load_standard_package_database () = (load_standard_package ()).package_database
+
+  let copy_standard_package_database ~into =
+    let standard = load_standard_package () in
+    match Cache.open_ into with
+    | Error message -> raise (Unusable_cache message)
+    | Ok cache ->
+        Cache.add_result cache ~kind:Package_database ~key:standard.key
+          (Marshal.to_string standard.package_database []);
+        Cache.flush cache;
+        Cache.close cache
+
   let build_cold_database = build_cold_database
   let collect_cache = collect
   let listen = Server.listen

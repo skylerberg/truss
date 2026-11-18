@@ -18,7 +18,7 @@ let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
   | Free -> "t_runtime_free(" ^ all ^ ")"
   | Copy_bytes -> "__builtin_memcpy(" ^ all ^ ")"
   | Move_bytes -> "__builtin_memmove(" ^ all ^ ")"
-  | Compare_bytes -> C_types.use_helper emission.types "t_compare_bytes" ^ "(" ^ all ^ ")"
+  | Compare_bytes -> Emission.use_helper emission "t_compare_bytes" ^ "(" ^ all ^ ")"
   | Add_overflow -> "((uint8_t)__builtin_add_overflow(" ^ all ^ "))"
   | Subtract_overflow -> "((uint8_t)__builtin_sub_overflow(" ^ all ^ "))"
   | Multiply_overflow -> "((uint8_t)__builtin_mul_overflow(" ^ all ^ "))"
@@ -62,12 +62,12 @@ let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
   | Round_even -> Printf.sprintf "%s(%s)" (render_float_builtin "__builtin_roundeven") all
   | Float_bits ->
       Printf.sprintf "%s(%s)"
-        (C_types.use_helper emission.types
+        (Emission.use_helper emission
            (if classify_scalar 0 = Float32 then "t_float32_bits" else "t_float64_bits"))
         all
   | Float_from_bits ->
       Printf.sprintf "%s(%s)"
-        (C_types.use_helper emission.types
+        (Emission.use_helper emission
            (if compute_width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
   | Run_test -> "t_runtime_run_test(" ^ all ^ ")"
@@ -117,7 +117,7 @@ let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
         | Lend_defer_drop -> "_defer_drop"
         | _ -> "_defer_write_back"
       in
-      C_types.use_helper emission.types "t_lend" ^ name ^ "(" ^ all ^ ")"
+      Emission.use_helper emission "t_lend" ^ name ^ "(" ^ all ^ ")"
   | Live_blocks -> "t_runtime_live_blocks()"
   | Environment ->
       Emission.declare_prototype emission "environ" "extern char **environ;\n";
@@ -325,7 +325,7 @@ let write_statement (emission : Emission.t) fc buffer (statement : Lowered.state
       match (C_values.render_operand emission fc lend, C_values.render_place emission fc place) with
       | Some (lend, _), Some (text, Value sum) ->
           write_line "%s_defer_free(%s, %s);"
-            (C_types.use_helper emission.types "t_lend")
+            (Emission.use_helper emission "t_lend")
             lend
             (C_values.render_block_pointer emission text sum variant)
       | _ -> C_runtime.raise_bug "a block of a place that is not a sum type")

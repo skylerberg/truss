@@ -120,7 +120,7 @@ type Shape =
 type Settings(user_name: String, retry_count: UInt32 = 3, shapes: List[Shape] = [])
   derives Equal, serialization::Serialize, serialization::Deserialize
 
-test "a type that derives Serialize and Deserialize goes to JSON and back" {
+test "a type that derives Serialize and Deserialize goes to JSON and back" uses RunForever {
   let player = Player(name: "Ada", score: 12, tags: ["a", "b"], rank: Some(3))
   let text = json::encode(player)
   assert text == "{\"name\":\"Ada\",\"score\":12,\"tags\":[\"a\",\"b\"],\"rank\":3}"
@@ -132,7 +132,7 @@ test "a type that derives Serialize and Deserialize goes to JSON and back" {
   assert json::encode_pretty([1, 2]) == "[\n  1,\n  2\n]"
 }
 
-test "a sum type's variant is its name, or an object that holds its fields under its name" {
+test "a sum type's variant is its name, or an object that holds its fields under its name" uses RunForever {
   let shapes: List[Shape] = [
     Shape.Point,
     Shape.Circle(radius: 1.5),
@@ -149,7 +149,7 @@ test "a sum type's variant is its name, or an object that holds its fields under
   assert inside is Err(Deserialize(wrong)) && wrong.path == "/Circle/radius"
 }
 
-test "a field with a default may be missing, and names may be written in camel case" {
+test "a field with a default may be missing, and names may be written in camel case" uses RunForever {
   let read: Result[Settings, json::Error] = json::decode("{\"user_name\":\"ada\"}")
   assert read == Ok(Settings(user_name: "ada"))
   let settings = Settings(user_name: "bo", retry_count: 5, shapes: [Shape.Point])
@@ -164,7 +164,7 @@ test "a field with a default may be missing, and names may be written in camel c
 type Event(at: Instant, id: uuid::Uuid, source: network::IpAddress, link: url::Url)
   derives Equal, serialization::Serialize, serialization::Deserialize
 
-test "instants, UUIDs, addresses, and URLs are written as their text" {
+test "instants, UUIDs, addresses, and URLs are written as their text" uses RunForever {
   let text = "{\"at\":\"2024-01-02T03:04:05Z\",\"id\":\"0b8f5e3c-1d2a-4f6b-9c7e-2a4d6f8b0c1e\",\"source\":\"10.0.0.1\",\"link\":\"https://example.com/a\"}"
   let read: Result[Event, json::Error] = json::decode(text)
   assert read is Ok(event) && json::encode(event) == text
@@ -172,7 +172,7 @@ test "instants, UUIDs, addresses, and URLs are written as their text" {
   assert wrong is Err(Deserialize(error)) && error.path == "/at" && "${error}".contains("instant")
 }
 
-test "deserialize says which member has the wrong type or is missing" {
+test "deserialize says which member has the wrong type or is missing" uses RunForever {
   let wrong: Result[Player, json::Error] = json::decode("{\"name\":\"Ada\",\"score\":\"high\",\"tags\":[]}")
   assert wrong is Err(Deserialize(mismatch)) && mismatch.path == "/score"
   let missing: Result[Player, json::Error] = json::decode("{\"name\":\"Ada\",\"score\":1}")
@@ -206,7 +206,7 @@ type Reading =
   invariant !(self is Kelvin(degrees) && degrees < 0)
   derives serialization::Deserialize
 
-test "deserialize rejects a value that breaks its type's invariant, at the value's path" {
+test "deserialize rejects a value that breaks its type's invariant, at the value's path" uses RunForever {
   let young: Result[Signup, json::Error] = json::decode("{\"name\":\"Ada\",\"age\":7}")
   assert young is Err(Deserialize(error)) && error.path == "" && error.message == "breaks the invariant `age >= 13 && age <= 150`"
   let unnamed: Result[Signup, json::Error] = json::decode("{\"name\":\"\",\"age\":30}")
@@ -226,7 +226,7 @@ type Grades(scores: List[UInt32])
   invariant forall score in scores => score >= 50
   derives serialization::Deserialize
 
-test "deserialize rejects a value that breaks an invariant over a range or a list" {
+test "deserialize rejects a value that breaks an invariant over a range or a list" uses RunForever {
   let high: Result[Grades, json::Error] = json::decode("{\"scores\":[90,101]}")
   assert high is Err(Deserialize(error)) && error.message == "breaks the invariant `forall index in 0..scores.length() => scores[index] <= 100`"
   let low: Result[Grades, json::Error] = json::decode("{\"scores\":[90,40]}")
@@ -235,7 +235,7 @@ test "deserialize rejects a value that breaks an invariant over a range or a lis
   assert passing is Ok(grades) && grades.scores.length() == 2
 }
 
-test "a value is read from a reader and written to a writer" {
+test "a value is read from a reader and written to a writer" uses RunForever {
   provide streams::NoHandles() {
     var source = streams::ByteReader.new("{\"items\": [1, 2, 3]}".bytes())
     assert json::read_from(mut source) is Ok(value)

@@ -152,6 +152,11 @@ let () =
   Harness.test "a test that crashes declares Panic, as a function does" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.test_calling_panic "capabilities.not_available";
       expect_fine Fixtures.Capabilities.test_declaring_panic);
+  Harness.test "a test that runs a loop without a measure declares RunForever, as a function does"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.test_running_a_loop_without_a_measure
+        "capabilities.not_available";
+      expect_fine Fixtures.Capabilities.test_declaring_run_forever);
   Harness.test "a place whose implementation mutates state is provided mut" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.counter_provided_as_tally
         "capabilities.provide_mode")
@@ -220,7 +225,11 @@ let () =
         List.filter_map
           (fun (node : Core.expression) ->
             match (node.kind, node.type_) with
-            | Lambda _, Function { uses; _ } -> Some (Types.may_panic uses)
+            | Lambda _, Function { uses; _ } ->
+                Some
+                  (List.mem
+                     (Types.Capability (Well_known.make_path Panic))
+                     (uses :> Types.capability list))
             | _ -> None)
           (list_core_expressions text ~of_function:"f")
       with
@@ -842,14 +851,13 @@ let () =
       {
         name = Path.standard_package;
         dependencies = [];
-        files =
-          Standard_library.files
-          @ List.map (fun (name, text) -> (Support.parse_file name, text)) files;
+        files = List.map (fun (name, text) -> (Support.parse_file name, text)) files;
       };
     ]
   in
   let check_in_standard packages =
-    Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ] (Database.create packages)
+    Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
+      (Support.extend_standard_library packages)
   in
   let expect_one_in_standard =
     Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard::probe"

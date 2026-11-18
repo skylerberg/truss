@@ -98,7 +98,7 @@ test "a table gives cells by the name of their column" {
   assert csv::parse_table("") is Ok(empty) && empty.header.length() == 0 && empty.rows.length() == 0
 }
 
-test "rows are read one at a time from a stream" {
+test "rows are read one at a time from a stream" uses RunForever {
   provide streams::NoHandles() {
     let bytes = "a,b\n\"multi\nline\",c\n\nlast".to_bytes()
     var reader = csv::RowReader.new(streams::ByteReader.new(bytes.slice()))

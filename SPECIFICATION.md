@@ -2049,8 +2049,8 @@ signatures it calls, including through a capability parameter, the
 implementation's calls are mutually exclusive: each holds the
 implementation's mutex from start to end. Such an implementation has no
 method with a parameter that can hold a function, or an `any` value, that
-uses a capability, so its mutexes cannot deadlock. An implementation
-provided without `mut` has no mutex.
+uses a capability other than `Panic` and `RunForever`, so its mutexes
+cannot deadlock. An implementation provided without `mut` has no mutex.
 
 ## Strings
 
@@ -2328,7 +2328,7 @@ test = "test" plain_string [ "uses" capability_list ] block ;
 ```
 
 ```truss
-test "config loads with defaults" {
+test "config loads with defaults" uses RunForever {
   let disk = files::MemoryFiles.new().with_text(Path.new("app.toml"), contents: "")
   let config = provide disk, log::DiscardLog() {
     load_config(Path.new("app.toml"))
@@ -2338,11 +2338,11 @@ test "config loads with defaults" {
 ```
 
 - `plain_string` is a `STRING` with no interpolation.
-- A test has `RunForever` whether or not it declares it. It provides every
-  other capability its code uses, unless it declares them with `uses`, as a
-  function does. A test whose `uses` names a capability other than `Panic`
-  or `RunForever` is *external*: it gets the real implementations of exactly
-  those capabilities. Any other test is deterministic.
+- A test declares the capabilities its code uses with `uses`, as a
+  function does, or provides them. A test whose `uses` names a capability
+  other than `Panic` or `RunForever` is *external*: it gets the real
+  implementations of exactly those capabilities. Any other test is
+  deterministic.
 - A test's `uses` names only capabilities with a [real
   implementation](#standard-capabilities).
 - A test's standard input is empty.
@@ -2578,7 +2578,8 @@ and the prelude changes only with a language version.
 
 - An `impl`, a test, and a law proof take no visibility. An `impl` is as
   visible as the least visible of its trait and the types it names, since
-  it applies only where all of them are visible.
+  it applies only where all of them are visible. A law proof is as visible
+  as the `impl` whose law it proves.
 - A method or constant written in a trait, a capability, or an `impl` takes
   no visibility, and is as visible as the definition it is written in.
 - A method or member constant defined on its own, such as `fn Shape.area`,

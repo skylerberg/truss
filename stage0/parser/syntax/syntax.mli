@@ -199,7 +199,7 @@ and range_end_kind = End_literal of literal | End_constant of constant
 and pattern_field = pattern_field_kind node
 and pattern_field_kind = Named_field of name * pattern | Field of pattern | Rest
 
-type visibility = Private | Internal | Public | Public_opaque
+type visibility = Internal | Public | Public_opaque
 type type_head = { path : path; generics : generic_parameter list; id : id }
 type definition_name = Plain_name of name | Member_name of type_head * name
 
@@ -300,7 +300,7 @@ type definition_kind =
   | Law_proof of { trait_ : path_type; law : name; type_ : type_head; body : block }
   | Definition_error of { intended : intended_kind option; name : definition_name option }
 
-type definition = { visibility : visibility; kind : definition_kind; id : id }
+type definition = { visibility : visibility option; kind : definition_kind; id : id }
 
 type positions = {
   spans : Source.Definition_span.t array;

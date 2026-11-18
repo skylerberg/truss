@@ -58,7 +58,7 @@ fn drip(text: StringSlice, step: UInt64) -> Drip {
   Drip(bytes: text.to_bytes(), position: 0, step: step)
 }
 
-test "a reader that gives a little at a time is read to an exact count, to its end, and past" {
+test "a reader that gives a little at a time is read to an exact count, to its end, and past" uses RunForever {
   provide streams::NoHandles() {
     var source = drip("hello world", step: 3)
     var buffer: List[UInt8] = []
@@ -99,7 +99,7 @@ test "a byte reader gives its bytes, and a byte writer keeps its input" {
   }
 }
 
-test "a buffered reader gives lines, with either line end or none at the end" {
+test "a buffered reader gives lines, with either line end or none at the end" uses RunForever {
   provide streams::NoHandles() {
     var reader = streams::BufferedReader.new(drip("one\ntwo\r\n\nlast", step: 4), capacity: 8)
     assert mut reader.read_line() is Ok(Some(line)) && line == "one"
@@ -121,7 +121,7 @@ test "a buffered reader gives lines, with either line end or none at the end" {
   }
 }
 
-test "a buffered reader reads up to a byte, peeks at the next bytes, and returns its source" {
+test "a buffered reader reads up to a byte, peeks at the next bytes, and returns its source" uses RunForever {
   provide streams::NoHandles() {
     var reader = streams::BufferedReader.new(drip("key=value;rest", step: 5), capacity: 4)
     var buffer: List[UInt8] = []
@@ -160,7 +160,7 @@ test "a buffered writer holds bytes until it has no more room, or is flushed" {
   }
 }
 
-test "copy moves every byte, and a limited reader stops at its limit" {
+test "copy moves every byte, and a limited reader stops at its limit" uses RunForever {
   provide streams::NoHandles() {
     var source = drip("0123456789", step: 3)
     var sink = streams::ByteWriter.new()

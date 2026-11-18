@@ -33,24 +33,12 @@ type t = {
   mutable registered : unit Keys.t;
   mutable environments : (string * Lowered.ty) list Keys.t;
   mutable references : key list option;
-  mutable helpers_used : string list;
 }
 
 let create env =
-  {
-    env;
-    order = [];
-    registered = Keys.empty;
-    environments = Keys.empty;
-    references = None;
-    helpers_used = [];
-  }
+  { env; order = []; registered = Keys.empty; environments = Keys.empty; references = None }
 
 let add_environment types key fields = types.environments <- Keys.add key fields types.environments
-
-let use_helper types name =
-  if not (List.mem name types.helpers_used) then types.helpers_used <- name :: types.helpers_used;
-  name
 
 let register types key =
   (match types.references with
@@ -112,8 +100,8 @@ let rec render_type types symbol : Lowered.ty -> string = function
       register types (Capabilities count);
       render_key_name (Capabilities count)
   | Trace -> "struct t_trace"
-  | Lend -> "struct " ^ use_helper types "t_lend"
-  | Lend_mark -> "struct " ^ use_helper types "t_lend" ^ "_mark"
+  | Lend -> "struct t_lend"
+  | Lend_mark -> "struct t_lend_mark"
 
 let render_member_type types : Memory_layout.member -> string = function
   | Typed ty -> render_value_type types ty

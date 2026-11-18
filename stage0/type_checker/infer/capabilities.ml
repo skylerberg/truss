@@ -18,8 +18,12 @@ type function_body = { path : Path.t; implementation : Interface.Impls.implement
 type scope_kind =
   | Function_body of function_body
   | Lambda_body of Core.origin
-  | Restricted of { description : string; enclosing : scope option }
-  | Parallel of { description : string; enclosing : scope }
+  | Restricted of {
+      description : string;
+      reason : string;
+      allowed : Types.capability_set;
+      enclosing : scope option;
+    }
 
 and scope = { available : Types.capability_set; kind : scope_kind }
 
@@ -27,30 +31,40 @@ let find_implemented_capability scope : Types.capability option =
   match scope.kind with
   | Function_body { implementation = Some { trait = { is_capability = true; _ }; impl; _ }; _ } ->
       Some (Capability impl.implements.trait)
-  | Function_body _ | Lambda_body _ | Restricted _ | Parallel _ -> None
+  | Function_body _ | Lambda_body _ | Restricted _ -> None
+
+let value_reason =
+  "Its meaning must be a value. A function that fails on some inputs says so with `requires` \
+   instead."
+
+let make_restricted_scope ?enclosing ~allowed ~reason description =
+  { available = allowed; kind = Restricted { description; reason; allowed; enclosing } }
 
 let make_parallel_scope ~enclosing description =
-  {
-    available = Types.make_capability_set [ Types.panic; Types.run_forever ];
-    kind = Parallel { description; enclosing };
-  }
+  make_restricted_scope ~enclosing ~allowed:Types.built_in_capabilities
+    ~reason:"Parallel calls of one implementation could race." description
 
 let make_no_capabilities_scope description =
-  { available = Types.no_capabilities; kind = Restricted { description; enclosing = None } }
+  make_restricted_scope ~allowed:Types.no_capabilities ~reason:value_reason description
 
 let make_quantifier_scope ~enclosing =
-  {
-    available = Types.make_capability_set [ Types.run_forever ];
-    kind = Restricted { description = "a quantifier's body"; enclosing = Some enclosing };
-  }
+  make_restricted_scope ~enclosing
+    ~allowed:(Types.make_capability_set [ Types.run_forever ])
+    ~reason:value_reason "a quantifier's body"
 
 let find_enclosing_restriction scope =
   match scope.kind with
-  | Parallel { enclosing; _ } ->
-      Some (enclosing, Types.make_capability_set [ Types.panic; Types.run_forever ])
-  | Restricted { enclosing = Some enclosing; _ } ->
-      Some (enclosing, Types.make_capability_set [ Types.run_forever ])
+  | Restricted { enclosing = Some enclosing; allowed; _ } -> Some (enclosing, allowed)
   | Function_body _ | Lambda_body _ | Restricted { enclosing = None; _ } -> None
+
+let show_exceptions (allowed : Types.capability_set) =
+  match
+    List.map
+      (fun capability -> Printf.sprintf "`%s`" (Types.show_capability capability))
+      (allowed :> Types.capability list)
+  with
+  | [] -> ""
+  | shown -> " except " ^ String.concat " and " shown
 
 let check_grant checking (origin : Core.origin) ~subject package (uses : Types.capability_set) =
   List.iter
@@ -129,28 +143,20 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
               (Printf.sprintf
                  "This lambda uses `%s`, which the function type it is passed as does not allow."
                  shown)
-        | Restricted { description; _ } when Types.is_run_forever capability ->
+        | Restricted { description; _ } when capability = Types.run_forever ->
             report checking Not_available origin
               (Printf.sprintf "%s uses `RunForever`, but %s must terminate.%s" subject description
                  (add_alternative ~sentence_start:true alternative))
-        | Restricted { description; _ } ->
+        | Restricted { description; reason; allowed; _ } ->
             report checking Not_available origin
               (Printf.sprintf
-                 "%s uses `%s`, but %s may use no capabilities, not even `Panic`: its meaning must \
-                  be a value. A function that fails on some inputs says so with `requires` \
-                  instead."
-                 subject shown description)
-        | Parallel { description; _ } ->
-            report checking Not_available origin
-              (Printf.sprintf
-                 "%s uses `%s`, but %s may use no capability except `Panic` and `RunForever`, even \
-                  one that is available outside it. Parallel calls of one implementation could \
-                  race."
-                 subject shown description)
+                 "%s uses `%s`, but %s may use no capability%s, even one that is available outside \
+                  it. %s"
+                 subject shown description (show_exceptions allowed) reason)
         | Function_body { path; _ } ->
             let can_provide =
               match capability with
-              | Types.Capability path -> not (Well_known.is_built_in_capability path)
+              | Types.Capability _ -> not (Types.is_built_in_capability capability)
               | Capability_parameter _ | Capability_projection _ | Capability_variable _ -> false
               | Capability_error _ -> State.raise_bug "a capability with an error is missing"
             in
@@ -423,7 +429,7 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
   let trait_uses (trait : Types.trait_reference) =
     let can_hold_a_capability : Types.capability -> bool = function
       | Capability_projection _ -> ( match type_ with Types.Any _ -> false | _ -> true)
-      | Capability _ as capability -> not (Types.is_run_forever capability)
+      | Capability _ as capability -> not (Types.is_built_in_capability capability)
       | Capability_parameter _ | Capability_variable _ -> true
       | Capability_error _ -> State.raise_bug "a trait's method uses a capability with an error"
     in
@@ -450,7 +456,7 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
   match type_ with
   | Types.Function { uses; inputs; output; _ } ->
       List.exists
-        (fun capability -> not (Types.is_run_forever capability))
+        (fun capability -> not (Types.is_built_in_capability capability))
         (uses :> Types.capability list)
       || List.exists (fun (_, input) -> can_call_inside input) inputs
       || can_call_inside output

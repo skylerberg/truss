@@ -70,7 +70,8 @@ let compiler_implements (impl : Types.impl_interface) =
 let find_conformance lookups ~list_bounds ~(trait_span : Source.Definition_span.t)
     (impl : Types.impl_interface) (trait_path : Syntax.path_type) =
   let shown_trait = Elaborator.show_path trait_path.path in
-  if Well_known.is_built_in_capability impl.implements.trait || compiler_implements impl then None
+  if Types.is_built_in_capability (Capability impl.implements.trait) || compiler_implements impl
+  then None
   else
     Option.map
       (fun (implementation : Impls.implementation) ->

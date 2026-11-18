@@ -80,7 +80,7 @@ let make (emission : Emission.t) ~item ~kind ~functions ~definition ~references 
     statics =
       name_bytes emission ~texts:(definition :: List.map snd functions) @ List.rev emission.statics;
     sites = List.sort_uniq compare emission.sites;
-    helpers = emission.types.helpers_used;
+    helpers = emission.helpers_used;
     references;
     calls = List.rev emission.calls;
     called = List.rev emission.called;

@@ -115,7 +115,7 @@ let check_real_implementations (state : Checking.state) (resolved : Resolve.reso
       | Capability_path written -> (
           match resolved.names.(written.path.last.id) with
           | Some (Definition (Capability, path))
-            when (not (Well_known.is_built_in_capability path))
+            when (not (Types.is_built_in_capability (Capability path)))
                  && Option.is_none (Definition.find_real_implementation state.lookups path) ->
               Checking.report state No_real_implementation state.spans.(capability.id)
                 (Printf.sprintf
@@ -378,6 +378,7 @@ let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
 let check (state : Checking.state) =
   let lookups = state.lookups in
   let definition = state.definition in
+  let visibility = (lookups.names.read_declaration state.key).visibility in
   let is_broken part = Resolve.Names.is_broken lookups.names state.key part in
   check_bounds state;
   let resolved = lookups.read_resolved Interface state.key in
@@ -391,7 +392,7 @@ let check (state : Checking.state) =
           ( lookups.names.read_definition container,
             (lookups.read_elaborated_interface container).interface )
         with
-        | { kind = Trait _; visibility; _ }, Trait_interface trait ->
+        | { kind = Trait _; _ }, Trait_interface trait ->
             check_redeclared state name
               (Resolve.Names.classify_receiver signature.parameters)
               ~trait_path:container.path trait;
@@ -415,8 +416,7 @@ let check (state : Checking.state) =
           match signature.name with
           | Plain_name name | Member_name (_, name) -> state.spans.(name.id)
         in
-        check_private_in_public state ~visibility:definition.visibility
-          (list_signature_types elaborated) span
+        check_private_in_public state ~visibility (list_signature_types elaborated) span
     | None, Law_proof { law; type_; _ }, Law_proof_interface { generics; trait; for_type; _ } -> (
         (match lookups.find_trait_header trait.trait with
         | Some header when not (List.mem law.text header.laws) ->
@@ -456,18 +456,17 @@ let check (state : Checking.state) =
               variants
         | Type_todo -> ());
         check_derives state interface clauses resolved;
-        if definition.visibility = Public then
-          check_private_in_public state ~visibility:definition.visibility
+        if visibility = Public then
+          check_private_in_public state ~visibility
             (Types.list_field_types interface)
             state.spans.(name.id)
     | None, Trait { name; requires; _ }, Trait_interface trait ->
         check_trait_cycle state requires;
-        check_private_in_public state ~visibility:definition.visibility
+        check_private_in_public state ~visibility
           (List.map (fun (bound : Types.trait_reference) -> Types.Any bound) trait.requires)
           state.spans.(name.id)
     | None, Constant { name = Plain_name name; _ }, Constant_interface constant ->
-        check_private_in_public state ~visibility:definition.visibility [ constant.constant_type ]
-          state.spans.(name.id)
+        check_private_in_public state ~visibility [ constant.constant_type ] state.spans.(name.id)
     | None, Impl { trait_; members; _ }, Impl_interface impl ->
         Impl_checks.check_impl state members impl trait_
     | None, Constant { name = Member_name (head, _); _ }, _ -> check_method_location state head

@@ -653,14 +653,12 @@ let () =
     (fun () ->
       let probe = Support.parse_file "standard::probe" in
       let database =
-        Database.create
+        Support.extend_standard_library
           [
             {
               name = Path.standard_package;
               dependencies = [];
-              files =
-                Standard_library.files
-                @ [ (probe, Fixtures.Capabilities.shared_count_updated_using_tasks) ];
+              files = [ (probe, Fixtures.Capabilities.shared_count_updated_using_tasks) ];
             };
           ]
       in

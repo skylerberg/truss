@@ -47,7 +47,7 @@ test "signed cookies verify, reject tampering and other keys, and survive key ro
   assert request.signed_cookie([old_key.copy()], name: "user") == Some("ada; admin=false")
 }
 
-test "sealed cookies hide their value and open only with the key and the name" uses Panic {
+test "sealed cookies hide their value and open only with the key and the name" uses Panic, RunForever {
   provide simulation::World.new() {
     let key = key_of(3)
     let sealed = key.seal(http::Cookie(name: "secret", value: "the plan"))
@@ -59,7 +59,7 @@ test "sealed cookies hide their value and open only with the key and the name" u
   }
 }
 
-test "a session keeps its values in a sealed cookie and expires after its age" uses Panic {
+test "a session keeps its values in a sealed cookie and expires after its age" uses Panic, RunForever {
   provide simulation::World.new() {
     let key = key_of(5)
     var session = http::Session.new()
