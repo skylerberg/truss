@@ -1,25 +1,23 @@
 let run_ghost_code (context : State.context) frame (code : Mir.t) =
-  let ghost_run = { State.unfinished = [] } in
-  ignore
-    (Lambdas.run_lambda_body
-       { context with proving = Running_ghost_code ghost_run }
-       frame ~lambdas:code.lambdas code.body ~type_:Types.unit);
-  Logic.disjunction ghost_run.unfinished
+  Logic.disjunction
+    (Scope.with_ghost_run context.scope (fun () ->
+         ignore
+           (Lambdas.run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_:Types.unit)))
 
 let finite_map_path : Path.t = Well_known.make_path Finite_map
 
-let assume_extensional (context : State.context) frame (ty : Types.ty) left right =
+let assume_extensional context frame (ty : Types.ty) left right =
   match ty with
   | Types.Named { path; arguments = [ Types.Type element ] }
     when Path.equal path Models.sequence_path -> (
-      let index = Facts.make_fresh_name context.vocabulary "index" in
+      let index = Facts.make_fresh_name context "index" in
       match
         ( Models.index_sequence context element left (Logic.Symbol index),
           Models.index_sequence context element right (Logic.Symbol index) )
       with
       | Some at_a, Some at_b ->
           let length = Models.make_sequence_length context element in
-          Facts.add_frame_fact context.assertions frame
+          Facts.add_frame_fact context frame
             Logic.(
               equal (length left) (length right)
               &&& forall
@@ -34,7 +32,7 @@ let assume_extensional (context : State.context) frame (ty : Types.ty) left righ
       let finite_map = Path.equal path finite_map_path in
       match arguments with
       | Types.Type key :: rest ->
-          let each = Facts.make_fresh_name context.vocabulary "key" in
+          let each = Facts.make_fresh_name context "key" in
           let apply_function name output inputs =
             Models.make_finite_function context ty name output inputs
           in
@@ -59,7 +57,7 @@ let assume_extensional (context : State.context) frame (ty : Types.ty) left righ
               | _ -> Logic.equal (has left) (has right)
             else Logic.equal (has left) (has right)
           in
-          Facts.add_frame_fact context.assertions frame
+          Facts.add_frame_fact context frame
             Logic.(
               forall ([ (each, key_sort) ], Facts.make_in_range key (Symbol each) ==> same)
               ==> equal left right)
@@ -78,22 +76,22 @@ let make_sequence context frame (ty : Types.ty) ~element values =
   Option.map
     (fun sequence ->
       Validity.assume_valid context frame ty literal;
-      Facts.assume context.assertions frame
+      Facts.assume context frame
         (Logic.equal
            (Models.make_sequence_length context element sequence)
            (Logic.int (List.length values)));
       List.iteri
         (fun index item ->
           match Models.index_sequence context element sequence (Logic.int index) with
-          | Some at -> Facts.assume context.assertions frame (Logic.equal at item)
+          | Some at -> Facts.assume context frame (Logic.equal at item)
           | None -> ())
         values;
       literal)
     sequence
 
-let assume_only_members (context : State.context) frame label sort contains members =
-  let each = Facts.make_fresh_name context.vocabulary label in
-  Facts.assume context.assertions frame
+let assume_only_members context frame label sort contains members =
+  let each = Facts.make_fresh_name context label in
+  Facts.assume context frame
     (Logic.forall
        ( [ (each, sort) ],
          Logic.( ==> ) (contains (Logic.Symbol each))
@@ -116,10 +114,10 @@ let make_set context frame (ty : Types.ty) ~element values =
           [ (value, element_sort) ]
           model
       in
-      List.iter (fun value -> Facts.assume context.assertions frame (contains value)) values;
+      List.iter (fun value -> Facts.assume context frame (contains value)) values;
       assume_only_members context frame "value" element_sort contains values;
       let size = Models.make_finite_function context finite "size" Logic.Int [] model in
-      Facts.assume context.assertions frame (Costs.at_most size (Logic.int (List.length values)));
+      Facts.assume context frame (Costs.at_most size (Logic.int (List.length values)));
       literal)
     model
 
@@ -212,7 +210,7 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
           Validity.assume_valid context frame tag_type result;
           List.iter
             (fun (clause : Mir.formula) ->
-              Facts.assume context.assertions frame
+              Facts.assume context frame
                 (snd
                    (Validity.read_specification context { entry with result = Some result } clause)))
             callee_clauses.ensures;
@@ -283,11 +281,10 @@ let apply_map_literal context frame ~(ty : Types.ty) ~location terms =
       model
   in
   List.iter
-    (fun (_, key, entry) ->
-      Facts.assume context.assertions frame Logic.(has key &&& equal (get key) entry))
+    (fun (_, key, entry) -> Facts.assume context frame Logic.(has key &&& equal (get key) entry))
     terms;
   assume_only_members context frame "key" key_sort has (List.map (fun (_, key, _) -> key) terms);
-  Facts.assume context.assertions frame
+  Facts.assume context frame
     (Logic.equal
        (Models.make_finite_function context finite "size" Logic.Int [] model)
        (Logic.int (List.length terms)));
@@ -295,17 +292,17 @@ let apply_map_literal context frame ~(ty : Types.ty) ~location terms =
 
 let literal_bytes_limit = 256
 
-let make_text_value (context : State.context) frame (ty : Types.ty) text =
+let make_text_value context frame (ty : Types.ty) text =
   let symbol = Logic.Symbol.Text_literal { type_ = ty; text } in
   let literal = Logic.Symbol symbol in
-  Facts.run_once context.assertions (Value_of symbol) (fun () ->
-      Facts.declare context.vocabulary (Logic.Constant (symbol, Facts.declare_sort context ty));
+  Facts.run_once context (Value_of symbol) (fun () ->
+      Facts.declare context (Logic.Constant (symbol, Facts.declare_sort context ty));
       Validity.assume_valid context
         { frame with condition = Logic.Boolean true; bound = []; binders = [] }
         ty literal;
       let byte = Types.make_builtin UInt8 in
       let assume_holds model =
-        Facts.add_fact context.assertions
+        Facts.add_fact context
           (Logic.equal
              (Models.make_sequence_length context byte model)
              (Logic.int (String.length text)));
@@ -313,9 +310,7 @@ let make_text_value (context : State.context) frame (ty : Types.ty) text =
           String.iteri
             (fun index character ->
               match Models.index_sequence context byte model (Logic.int index) with
-              | Some at ->
-                  Facts.add_fact context.assertions
-                    (Logic.equal at (Logic.int (Char.code character)))
+              | Some at -> Facts.add_fact context (Logic.equal at (Logic.int (Char.code character)))
               | None -> ())
             text
       in
@@ -332,7 +327,7 @@ let make_text_value (context : State.context) frame (ty : Types.ty) text =
 let make_owner_of_view (context : State.context) frame ~(view : Types.ty) ~(owner : Types.ty) viewed
     =
   let symbol = Logic.Symbol.Owner_of_view owner in
-  Facts.declare context.vocabulary
+  Facts.declare context
     (Logic.Function (symbol, [ Facts.declare_sort context view ], Facts.declare_sort context owner));
   let converted = Logic.Apply (symbol, [ viewed ]) in
   Validity.assume_valid context frame owner converted;
@@ -345,7 +340,7 @@ let make_owner_of_view (context : State.context) frame ~(view : Types.ty) ~(owne
      ( Models.find_model context owner converted ~element,
        Models.find_model context view viewed ~element )
    with
-  | Some owned, Some elements -> Facts.assume context.assertions frame (Logic.equal owned elements)
+  | Some owned, Some elements -> Facts.assume context frame (Logic.equal owned elements)
   | _ ->
       Facts.raise_bug "`%s` and its view `%s` have no model of one type" (Types.show owner)
         (Types.show view));
@@ -356,7 +351,7 @@ let project_field context frame ty variant field field_type term =
   Amounts.assume_typed context frame (Facts.make_in_range field_type part);
   if context.definition.ranking then begin
     let below = Models.rank context field_type part in
-    Facts.assume context.assertions frame
+    Facts.assume context frame
       Logic.(
         Operation ("<=", [ int 0; below ])
         &&& Operation ("<", [ below; Models.rank context ty term ]))
@@ -404,7 +399,7 @@ let assume_contract_for_every_argument context (frame : State.frame) (contract :
             match snd (Validity.read_specification context (read clauses) clause) with
             | ensured -> (
                 match Facts.close_over_binders over (Logic.( ==> ) required ensured) with
-                | Some closed -> Facts.add_fact context.assertions closed
+                | Some closed -> Facts.add_fact context closed
                 | None -> ())
             | exception Facts.Unsupported _ -> ())
           clauses.ensures)
@@ -444,7 +439,7 @@ let translate_named_function (context : State.context) (frame : State.frame)
   | _ -> ());
   let type_arguments = List.map (Types.substitute_argument frame.substitution) type_arguments in
   let symbol = Logic.Symbol.Function_value { callee = path; type_arguments } in
-  Facts.declare context.vocabulary (Logic.Constant (symbol, Facts.declare_sort context ty));
+  Facts.declare context (Logic.Constant (symbol, Facts.declare_sort context ty));
   let term = Logic.Symbol symbol in
   (match ty with
   | Types.Function function_type
@@ -452,7 +447,7 @@ let translate_named_function (context : State.context) (frame : State.frame)
       let parameters = Lambdas.make_parameter_symbols context frame function_type in
       let inputs = List.map (fun (name, _) -> Logic.Symbol name) parameters in
       let function_symbol = Logic.Symbol.Function { callee = path; type_arguments } in
-      Facts.declare context.vocabulary
+      Facts.declare context
         (Logic.Function
            ( function_symbol,
              List.map snd parameters,
@@ -460,7 +455,7 @@ let translate_named_function (context : State.context) (frame : State.frame)
       let value = Logic.Apply (function_symbol, inputs) in
       if type_arguments = [] then
         assume_contract_for_every_argument context frame contract parameters value;
-      Facts.add_frame_fact context.assertions frame
+      Facts.add_frame_fact context frame
         (Logic.forall
            (parameters, Logic.equal (Lambdas.apply_function context function_type term inputs) value))
   | _ -> ());
@@ -496,16 +491,16 @@ let evaluate_constant (context : State.context) frame path =
           binders = [];
         }
       in
-      Facts.run_once context.assertions (Value_of symbol) (fun () ->
+      Facts.run_once context (Value_of symbol) (fun () ->
           let ty =
             Interface.Definition.read_constant_type context.definition.lookups.interface path
           in
-          Facts.declare context.vocabulary (Logic.Constant (symbol, Facts.declare_sort context ty));
+          Facts.declare context (Logic.Constant (symbol, Facts.declare_sort context ty));
           let _, defined_value =
-            Validity.with_no_costs context (fun context ->
+            Scope.with_no_costs context.scope (fun () ->
                 Amounts.run_code context empty code ~type_:ty)
           in
-          Facts.add_fact context.assertions (Logic.equal (Logic.Symbol symbol) defined_value));
+          Facts.add_fact context (Logic.equal (Logic.Symbol symbol) defined_value));
       Logic.Symbol symbol
   | _ -> Facts.raise_bug "the constant %s has no initializer" (Path.show path)
 
@@ -553,8 +548,8 @@ let construct_amount context frame (ty : Types.ty) variant (counter : Costs.coun
   | Metric Allocated_bytes when counter.counting = Units -> Logic.int 1
   | Metric Allocated_bytes ->
       let symbol = Logic.Symbol.Block_bytes { type_ = ty; variant } in
-      Facts.declare context.vocabulary (Logic.Constant (symbol, Logic.Int));
-      Facts.add_frame_fact context.assertions frame
+      Facts.declare context (Logic.Constant (symbol, Logic.Int));
+      Facts.add_frame_fact context frame
         (Logic.Operation ("<=", [ Logic.int 1; Logic.Symbol symbol ]));
       Logic.Symbol symbol
   | Metric Time | Calls _ -> Costs.zero
@@ -634,9 +629,8 @@ let make_log_order left right =
     ==> Operation ("<=", [ log left; log right ])
     &&& (Operation ("<=", [ right; left ]) ==> Operation ("<=", [ log right; log left ])))
 
-let declare_log (context : State.context) frame log_argument =
-  Facts.declare context.vocabulary
-    (Logic.Function (Logic.Symbol.Cost_log, [ Logic.Int ], Logic.Int));
+let declare_log context frame log_argument =
+  Facts.declare context (Logic.Function (Logic.Symbol.Cost_log, [ Logic.Int ], Logic.Int));
   let rec add log_argument ~halving =
     match List.assoc_opt log_argument context.assertions.logs with
     | Some true -> ()
@@ -645,18 +639,18 @@ let declare_log (context : State.context) frame log_argument =
         if seen = None then
           List.iter
             (fun (other, _) ->
-              Facts.add_frame_fact context.assertions frame (make_log_order log_argument other))
+              Facts.add_frame_fact context frame (make_log_order log_argument other))
             context.assertions.logs;
         context.assertions.logs <-
           (log_argument, halving) :: List.remove_assoc log_argument context.assertions.logs;
         let facts, half = make_log_facts log_argument ~halving in
-        List.iter (Facts.add_frame_fact context.assertions frame) facts;
+        List.iter (Facts.add_frame_fact context frame) facts;
         Option.iter (fun half -> add half ~halving:false) half
   in
   if not (Logic.mentions frame.bound log_argument) then add log_argument ~halving:true;
   (match log_argument with
   | Logic.Integer limit ->
-      Facts.add_frame_fact context.assertions frame
+      Facts.add_frame_fact context frame
         (Logic.equal
            (Logic.Apply (Logic.Symbol.Cost_log, [ log_argument ]))
            (Logic.int (if Z.sign limit <= 0 then 0 else Z.numbits limit)))
@@ -670,7 +664,7 @@ let apply_specification_function context frame ~location (measure : Core.specifi
       let log = declare_log context frame log_argument in
       (match Facts.find_bounds unconverted with
       | Some (_, high) when not (Logic.mentions frame.bound log_argument) ->
-          Facts.add_frame_fact context.assertions frame
+          Facts.add_frame_fact context frame
             Logic.(
               Operation ("<=", [ log_argument; Integer high ])
               ==> Operation ("<=", [ log; int (Z.numbits high) ]))
@@ -683,7 +677,7 @@ let apply_specification_function context frame ~location (measure : Core.specifi
 
 let copy_value ?literal (context : State.context) frame ty term =
   if
-    context.counters = []
+    context.scope.counters = []
     || Interface.Impls.is_plain context.definition.lookups.interface
          ~list_bounds:(Operations.compute_current_bounds context)
          ty

@@ -3,7 +3,7 @@ let apply_function context (function_type : Types.function_type) callee argument
   let output = Facts.declare_sort context function_type.output in
   let value_sort = Facts.declare_sort context (Types.Function function_type) in
   let symbol = Logic.Symbol.Apply ((value_sort :: inputs) @ [ output ]) in
-  Facts.declare context.vocabulary (Logic.Function (symbol, value_sort :: inputs, output));
+  Facts.declare context (Logic.Function (symbol, value_sort :: inputs, output));
   Logic.Apply (symbol, callee :: arguments)
 
 let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_free
@@ -18,7 +18,7 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
     | Logic.Symbol.Lambda _ as name
       when not (Tables.Symbol_table.mem context.vocabulary.fresh_order name) -> (
         match Tables.Symbol_table.find_opt context.vocabulary.lambda_definitions name with
-        | Some defined -> Facts.mentions_fresh_after context.vocabulary start_fresh defined
+        | Some defined -> Facts.mentions_fresh_after context start_fresh defined
         | None -> false)
     | _ -> false
   in
@@ -52,15 +52,14 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
             in
             if is_fresh_in_body then begin
               let lifted = Logic.Symbol.Lifted name in
-              Facts.declare context.vocabulary
-                (Logic.Function (lifted, List.map snd parameters, sort));
+              Facts.declare context (Logic.Function (lifted, List.map snd parameters, sort));
               Tables.Symbol_table.replace renamed name (Logic.Apply (lifted, variables))
             end
         | Logic.Function (name, inputs, sort) when frame.binders <> [] -> (
             match Tables.Symbol_table.find_opt context.vocabulary.fresh_order name with
             | Some order when order > start_fresh && order <= end_fresh ->
                 let lifted = Logic.Symbol.Lifted name in
-                Facts.declare context.vocabulary
+                Facts.declare context
                   (Logic.Function (lifted, inputs @ List.map snd parameters, sort));
                 Tables.Symbol_table.replace functions name lifted
             | _ -> ())
@@ -94,10 +93,10 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
     List.iter
       (fun statement ->
         let stated = Logic.forall (parameters, Logic.( ==> ) premise statement) in
-        if frame.bound = [] || capture_free then Facts.add_fact context.assertions stated
+        if frame.bound = [] || capture_free then Facts.add_fact context stated
         else
           match Facts.close_over_binders frame stated with
-          | Some closed -> Facts.add_fact context.assertions closed
+          | Some closed -> Facts.add_fact context closed
           | None -> ())
       statements
   end
@@ -183,7 +182,7 @@ let find_lambda_definition context frame (function_type : Types.function_type)
       let bound = make_parameter_symbols context frame function_type in
       let defined =
         let mark = context.vocabulary.fresh in
-        let context = { context with counters = [] } in
+        Scope.with_no_costs context.scope @@ fun () ->
         try
           let enter inside =
             List.fold_left2
@@ -206,8 +205,7 @@ let find_lambda_definition context frame (function_type : Types.function_type)
               ~lambdas:written.lambdas written.code
               ~type_:(compute_returned_type context frame written.code)
           with
-          | Some (_, defined) when not (Facts.mentions_fresh_after context.vocabulary mark defined)
-            ->
+          | Some (_, defined) when not (Facts.mentions_fresh_after context mark defined) ->
               Some defined
           | Some _ | None -> None
         with Facts.Unsupported _ -> None
@@ -235,17 +233,15 @@ let find_lambda_definition context frame (function_type : Types.function_type)
           let sort = Facts.declare_sort context (Types.Function function_type) in
           let term =
             if Logic.mentions frame.bound defined then
-              Facts.declare_value_symbol context.vocabulary frame symbol sort
-            else
-              Facts.declare_value_symbol context.vocabulary { frame with binders = [] } symbol sort
+              Facts.declare_value_symbol context frame symbol sort
+            else Facts.declare_value_symbol context { frame with binders = [] } symbol sort
           in
           let application =
             apply_function context function_type term
               (List.map (fun (name, _) -> Logic.Symbol name) bound)
           in
           Tables.Symbol_table.replace context.vocabulary.lambda_definitions symbol defined;
-          Facts.add_frame_fact context.assertions frame
-            (Logic.forall (bound, Logic.equal application defined));
+          Facts.add_frame_fact context frame (Logic.forall (bound, Logic.equal application defined));
           (match written.code.value_type with
           | Some value_type -> (
               match
@@ -260,7 +256,7 @@ let find_lambda_definition context frame (function_type : Types.function_type)
                   in
                   match List.map2 find_argument_in_range bound function_type.inputs with
                   | arguments when List.for_all Option.is_some arguments ->
-                      Facts.add_frame_fact context.assertions frame
+                      Facts.add_frame_fact context frame
                         (Logic.forall
                            ( bound,
                              Logic.( ==> )
@@ -328,7 +324,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   in
   if List.length written.code.parameters <> List.length function_type.inputs then
     Facts.raise_bug "a lambda whose parameters do not match %s" (Types.show ty);
-  let called = Facts.declare_fresh context.vocabulary frame "called" Logic.Bool in
+  let called = Facts.declare_fresh context frame "called" Logic.Bool in
   let inside = { (Facts.restrict frame called) with result = None } in
   let start_fresh = context.vocabulary.fresh
   and start_facts = List.length context.assertions.facts
@@ -342,7 +338,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         argument)
       function_type.inputs
   in
-  List.iter (Facts.assume context.assertions inside) (list_facts arguments);
+  List.iter (Facts.assume context inside) (list_facts arguments);
   let promised =
     List.filter_map
       (fun (cost : Types.cost) ->
@@ -370,7 +366,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         let is_counted =
           List.exists
             (fun (enclosing : Costs.counter) -> enclosing.resource = counter.resource)
-            context.counters
+            context.scope.counters
         in
         if is_counted && Option.is_none (Costs.find_stated_operand function_type.costs metric) then
           Some (metric, counter)
@@ -393,9 +389,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   in
   let ended = ref [] in
   let pending =
-    let context =
-      { context with counters = lambda_counters; terminates = Types.terminates function_type.uses }
-    in
+    Scope.with_terminates context.scope (Types.terminates function_type.uses) @@ fun () ->
+    Scope.with_counters context.scope lambda_counters @@ fun () ->
     let inside =
       List.fold_left2
         (fun inside parameter argument ->
@@ -491,9 +486,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                       ]
                       (Costs.at_most spent bound))
                   (List.combine exits spent) ) ))
-          (Costs.find_cost_bound
-             ~varies:(Facts.mentions_fresh_after context.vocabulary mark)
-             ~facts most))
+          (Costs.find_cost_bound ~varies:(Facts.mentions_fresh_after context mark) ~facts most))
       operand_counters
   in
   let end_fresh = context.vocabulary.fresh in

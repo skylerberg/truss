@@ -117,7 +117,7 @@ let read_root context frame run (root : Mir.root) =
           | None -> Facts.raise_bug "`%s` reads `self` outside a method" frame.source.name)
       | key -> (
           (match key with
-          | Core_local core when frame.makes_obligations && not context.is_reading_callback ->
+          | Core_local core when frame.makes_obligations && not context.scope.is_reading_callback ->
               Validity.check_escaping_callback context frame core
           | Core_local _ | Mir_local _ -> ());
           match Locals.find_opt key frame.locals with
@@ -460,7 +460,7 @@ let evaluate_call_values context frame run (invocation : Invocation.t)
                           passed_place = find_argument_place context frame run mode value;
                           type_ = compute_operand_type context frame value;
                           term =
-                            Validity.with_reading_callback context (fun context ->
+                            Scope.with_reading_callback context.scope (fun () ->
                                 read_operand context frame run value);
                         };
                     ])
@@ -490,7 +490,7 @@ let read_call context frame run (call : Mir.call) ~result_type =
         | Indirect callee ->
             Some
               ( compute_operand_type context frame callee,
-                Validity.with_reading_callback context (fun context ->
+                Scope.with_reading_callback context.scope (fun () ->
                     read_operand context frame run callee),
                 classify_shape run callee )
         | _ -> None
@@ -506,7 +506,7 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
   let site : Invocation.site = { origin = call.origin; type_ = run.infos.(part).type_ } in
   let location = Facts.locate context frame.source call.origin in
   let values = evaluate_call_values context frame run invocation call.arguments in
-  let lend ?leave_lent context frame =
+  let lend ?leave_lent frame =
     Calls.apply_call ?leave_lent context frame site invocation ~through:None values
   in
   let receiver =
@@ -523,7 +523,7 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
     match (invocation.lends, invocation.callee, receiver) with
     | Some Types.Mut, Intrinsic { operation = Lend element_lend; type_arguments }, Some receiver ->
         let index = make_index_term () in
-        ( lend context frame,
+        ( lend frame,
           Some
             (fun frame final ->
               Intrinsics.write_element_back context frame ~lend:element_lend ~type_arguments
@@ -532,13 +532,13 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
                 index final) )
     | Some Types.Mut, Intrinsic _, _ -> Facts.raise_unsupported location "this lend"
     | Some Types.Mut, _, _ ->
-        ( Validity.with_no_costs context (fun context -> lend context frame),
+        ( Scope.with_no_costs context.scope (fun () -> lend frame),
           Some
             (fun frame final ->
-              match lend ~leave_lent:(fun _ -> final) context frame with
+              match lend ~leave_lent:(fun _ -> final) frame with
               | Some (after, _) -> after
               | None -> frame) )
-    | _ -> (lend context frame, None)
+    | _ -> (lend frame, None)
   in
   Option.map
     (fun (after, term) ->
@@ -646,7 +646,7 @@ let record_todo (context : State.context) (frame : State.frame) location =
   let record_hole () =
     context.report.holes <- (context.definition.home, location) :: context.report.holes
   in
-  match context.proving with
+  match context.scope.proving with
   | Not_proving -> ()
   | Proving_theorem -> record_hole ()
   | Running_ghost_code ghost_run ->
@@ -799,8 +799,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       (frame, Logic.equal first_value second_value)
   | Specification (Applied { function_; arguments; unconverted }) ->
       let values =
-        Validity.with_reading_callback context (fun context ->
-            List.map (read_operand context frame run) arguments)
+        Scope.with_reading_callback context.scope (fun () -> List.map translate_operand arguments)
       in
       Values.apply_specification_function context frame ~location function_ values
         ~unconverted:(List.map (Facts.substitute_type context frame) unconverted)
@@ -1085,7 +1084,7 @@ and read_statement context frame run (statement : Mir.statement) =
             Option.map
               (fun ({ comparison; left; right } : Mir.compared) ->
                 ( comparison,
-                  fun context at ->
+                  fun at ->
                     let after =
                       List.fold_left
                         (fun frame statement ->
@@ -1188,7 +1187,7 @@ and read_statement context frame run (statement : Mir.statement) =
                 | Lent Mut ->
                     Some
                       (fun at ->
-                        Validity.with_no_costs context (fun context ->
+                        Scope.with_no_costs context.scope (fun () ->
                             snd (read_value context at run lent.count)))
                 | _ -> None);
           collection =
@@ -1204,7 +1203,7 @@ and read_statement context frame run (statement : Mir.statement) =
                 | _ ->
                     Some
                       (fun at ->
-                        let rec lend context frame = function
+                        let rec lend frame = function
                           | [] -> Facts.raise_bug "a loop over elements that no statement lends"
                           | (statement : Mir.statement) :: rest -> (
                               let frame =
@@ -1214,10 +1213,10 @@ and read_statement context frame run (statement : Mir.statement) =
                               in
                               match statement.kind with
                               | Basic (Lend { part; _ }) when part = lent.element -> frame
-                              | _ -> lend context frame rest)
+                              | _ -> lend frame rest)
                         in
-                        Validity.with_no_costs context (fun context ->
-                            read_place context (lend context at after_bindings) run
+                        Scope.with_no_costs context.scope (fun () ->
+                            read_place context (lend at after_bindings) run
                               { root = Local lent.element; projections = [] })));
           bind_element;
           compute_changed_in = (fun frame -> compute_changes ~also:iterated run frame [ body ]);

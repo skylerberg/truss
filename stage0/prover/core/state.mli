@@ -71,7 +71,7 @@ type frame = {
   makes_obligations : bool;
   bound : Logic.symbol list;
   binders : (Logic.symbol * Logic.sort * Logic.term) list;
-  scoped_facts : (Logic.symbol * Logic.term list ref) list;
+  binder_facts : (Logic.symbol * Logic.term list ref) list;
   open_axioms : open_axiom list;
   substitution : Types.substitution;
   self_type : Types.ty option;
@@ -198,6 +198,16 @@ type entry = {
 type ghost_run = { mutable unfinished : Logic.term list }
 type proving = Not_proving | Proving_theorem | Running_ghost_code of ghost_run
 
+type scope = {
+  mutable terminates : bool;
+  mutable counters : Costs.counter list;
+  mutable proving : proving;
+  mutable is_reading_callback : bool;
+  mutable validating : Types.ty list;
+  mutable instantiating : Path.t list;
+  mutable axiomatizing : Logic.symbol list;
+}
+
 type context = {
   definition : definition;
   vocabulary : vocabulary;
@@ -206,13 +216,7 @@ type context = {
   report : report;
   costs : costs;
   entry : entry;
-  terminates : bool;
-  counters : Costs.counter list;
-  proving : proving;
-  is_reading_callback : bool;
-  validating : Types.ty list;
-  instantiating : Path.t list;
-  axiomatizing : Logic.symbol list;
+  scope : scope;
   reader : reader;
 }
 

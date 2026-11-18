@@ -116,7 +116,7 @@ let assume_laws (context : State.context) frame ~at (trait : Types.trait_referen
                   ->
                     context.report.holes <- (context.definition.home, at) :: context.report.holes
                 | _ -> ());
-                Facts.add_frame_fact context.assertions frame fact_
+                Facts.add_frame_fact context frame fact_
             | None -> ())
           (list_laws context required.trait))
       (Interface.Properties.list_bound_closure context.definition.lookups.interface ~self:ty trait)

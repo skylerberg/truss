@@ -58,7 +58,8 @@ let is_in_recursion_group (context : State.context) node =
 let list_clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
 
-let declare (vocabulary : State.vocabulary) (declaration : Logic.declaration) =
+let declare (context : State.context) (declaration : Logic.declaration) =
+  let vocabulary = context.vocabulary in
   match declaration with
   | Constant (name, _) | Function (name, _, _) ->
       if not (Tables.Symbol_table.mem vocabulary.declared name) then begin
@@ -85,30 +86,31 @@ let make_assertions () : State.assertions =
     indexes = [];
   }
 
-let add_fact (assertions : State.assertions) fact = assertions.facts <- fact :: assertions.facts
+let add_fact (context : State.context) fact =
+  context.assertions.facts <- fact :: context.assertions.facts
 
-let declare_value_symbol vocabulary (frame : State.frame) name sort =
+let declare_value_symbol context (frame : State.frame) name sort =
   match List.rev frame.binders with
   | [] ->
-      declare vocabulary (Logic.Constant (name, sort));
+      declare context (Logic.Constant (name, sort));
       Logic.Symbol name
   | outermost_first ->
-      declare vocabulary
+      declare context
         (Logic.Function (name, List.map (fun (_, sort, _) -> sort) outermost_first, sort));
       Logic.Apply (name, List.map (fun (bound, _, _) -> Logic.Symbol bound) outermost_first)
 
-let make_fresh_name (vocabulary : State.vocabulary) label =
-  vocabulary.fresh <- vocabulary.fresh + 1;
-  make_variable label ~numbers:[ vocabulary.fresh ]
+let make_fresh_name (context : State.context) label =
+  context.vocabulary.fresh <- context.vocabulary.fresh + 1;
+  make_variable label ~numbers:[ context.vocabulary.fresh ]
 
-let declare_fresh vocabulary frame label sort =
-  let name = make_fresh_name vocabulary label in
-  Tables.Symbol_table.replace vocabulary.fresh_order name vocabulary.fresh;
-  declare_value_symbol vocabulary frame name sort
+let declare_fresh context frame label sort =
+  let name = make_fresh_name context label in
+  Tables.Symbol_table.replace context.vocabulary.fresh_order name context.vocabulary.fresh;
+  declare_value_symbol context frame name sort
 
-let mentions_fresh_after (vocabulary : State.vocabulary) mark term =
+let mentions_fresh_after (context : State.context) mark term =
   let is_fresh_after name =
-    match Tables.Symbol_table.find_opt vocabulary.fresh_order name with
+    match Tables.Symbol_table.find_opt context.vocabulary.fresh_order name with
     | Some order -> order > mark
     | None -> false
   in
@@ -137,15 +139,15 @@ let close_over_binders (frame : State.frame) term =
 
 let add_scoped_fact (frame : State.frame) term =
   let named = List.filter (fun name -> Logic.mentions [ name ] term) frame.bound in
-  if List.for_all (fun name -> List.mem_assoc name frame.scoped_facts) named then
-    match List.find_opt (fun (name, _) -> List.mem name named) frame.scoped_facts with
+  if List.for_all (fun name -> List.mem_assoc name frame.binder_facts) named then
+    match List.find_opt (fun (name, _) -> List.mem name named) frame.binder_facts with
     | Some (_, facts) -> facts := term :: !facts
     | None -> ()
 
 let list_scope_facts (frame : State.frame) names =
   List.concat_map
     (fun (name, facts) -> if List.mem name names then List.rev !facts else [])
-    frame.scoped_facts
+    frame.binder_facts
 
 let add_quantifier_facts ~binders (context : State.context) term =
   let is_stated bound fact =
@@ -185,17 +187,17 @@ let add_quantifier_facts ~binders (context : State.context) term =
   in
   walk true binders term
 
-let add_frame_fact (assertions : State.assertions) (frame : State.frame) term =
-  if not (Logic.mentions frame.bound term) then add_fact assertions term
+let add_frame_fact context (frame : State.frame) term =
+  if not (Logic.mentions frame.bound term) then add_fact context term
   else add_scoped_fact frame term
 
-let assume (assertions : State.assertions) (frame : State.frame) term =
+let assume context (frame : State.frame) term =
   match term with
   | Logic.Boolean true -> ()
   | _ ->
       let guarded = Logic.( ==> ) frame.condition term in
       if not (Logic.mentions frame.bound term || Logic.mentions frame.bound frame.condition) then
-        add_fact assertions guarded
+        add_fact context guarded
       else add_scoped_fact frame guarded
 
 let locate (context : State.context) (source : State.source) origin =
@@ -385,7 +387,7 @@ let oblige ?template_clause ?cited ?(fixes = []) context (frame : State.frame) c
         | fixes -> fixes
       in
       context.report.obligations <- { obligation with cited; fixes } :: context.report.obligations;
-      assume context.assertions frame goal
+      assume context frame goal
   | None -> ()
 
 let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
@@ -434,7 +436,7 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
             (fun (node : Path.t) -> match node with Method { owner; _ } -> Some owner | _ -> None)
             recursive))
   in
-  if context.terminates && frame.makes_obligations then
+  if context.scope.terminates && frame.makes_obligations then
     List.iter
       (fun (edge : Mir.Call_edges.edge) ->
         match edge with Calls _ -> () | Supplies { supplier; code } -> reject_supply supplier code)
@@ -461,8 +463,9 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
     match resolution.target with
     | Some target when frame.makes_obligations && is_in_recursion_group context target -> (
         match context.definition.lookups.mir.find_form_origin target with
-        | Some (Derived _, _) when context.terminates -> reject target "derives"
-        | Some (Inherited _, _) when context.terminates -> reject target "inherits from its trait"
+        | Some (Derived _, _) when context.scope.terminates -> reject target "derives"
+        | Some (Inherited _, _) when context.scope.terminates ->
+            reject target "inherits from its trait"
         | Some ((Written _ | Derived _ | Inherited _), _) | None -> Some target)
     | Some _ | None -> None
   in
@@ -470,7 +473,7 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
 
 let reject_uncompared_recursion (context : State.context) frame location recursive_callee ~describe
     =
-  if context.terminates then
+  if context.scope.terminates then
     Option.iter
       (fun callee ->
         oblige context frame Termination location
@@ -614,15 +617,15 @@ let make_in_range ty term =
       else in_bounds
   | None -> Logic.Boolean true
 
-let run_once (assertions : State.assertions) stated make =
-  if not (Tables.Stated_table.mem assertions.stated stated) then begin
-    Tables.Stated_table.replace assertions.stated stated ();
+let run_once (context : State.context) stated make =
+  if not (Tables.Stated_table.mem context.assertions.stated stated) then begin
+    Tables.Stated_table.replace context.assertions.stated stated ();
     make ()
   end
 
-let arrive (context : State.context) frame prefix ty =
-  let value = declare_fresh context.vocabulary frame prefix (declare_sort context ty) in
-  assume context.assertions frame (make_in_range ty value);
+let arrive context frame prefix ty =
+  let value = declare_fresh context frame prefix (declare_sort context ty) in
+  assume context frame (make_in_range ty value);
   value
 
 let read_or_arrive context frame prefix ty read =
@@ -723,16 +726,16 @@ let merge_known_on_paths (paths : (Logic.term * State.frame) list) =
   let lends = merge_known (fun frame -> frame.lends) ~is_same:( == ) ~on_differing:guard_each in
   (aliases, slices, lends)
 
-let name_path_condition (context : State.context) (frame : State.frame) condition =
+let name_path_condition context (frame : State.frame) condition =
   match condition with
   | Logic.Boolean _ | Logic.Symbol _ -> condition
   | _ when (not frame.makes_obligations) || Logic.mentions frame.bound condition -> condition
   | _ ->
-      let path = declare_fresh context.vocabulary frame "path" Logic.Bool in
-      add_frame_fact context.assertions frame (Logic.equal path condition);
+      let path = declare_fresh context frame "path" Logic.Bool in
+      add_frame_fact context frame (Logic.equal path condition);
       path
 
-let merge (context : State.context) ?value_type ~condition
+let merge context ?value_type ~condition
     (paths : (Logic.term * State.frame * Logic.term option) list) =
   let first = match paths with (_, first, _) :: _ -> first | [] -> raise_bug "no paths meet" in
   let is_expression = not first.makes_obligations in
@@ -769,11 +772,10 @@ let merge (context : State.context) ?value_type ~condition
                 values ->
         choose values
     | _ ->
-        let symbol = declare_fresh context.vocabulary first prefix sort in
+        let symbol = declare_fresh context first prefix sort in
         List.iter
           (fun (_, (frame : State.frame), term) ->
-            add_frame_fact context.assertions first
-              (Logic.( ==> ) frame.condition (Logic.equal symbol term)))
+            add_frame_fact context first (Logic.( ==> ) frame.condition (Logic.equal symbol term)))
           values;
         symbol
   in
@@ -869,8 +871,8 @@ let merge (context : State.context) ?value_type ~condition
             in
             if Logic.mentions first.bound choice || mentions_potential choice then (key, choice)
             else
-              let symbol = declare_fresh context.vocabulary first "spent" Logic.Int in
-              add_frame_fact context.assertions first (Logic.equal symbol choice);
+              let symbol = declare_fresh context first "spent" Logic.Int in
+              add_frame_fact context first (Logic.equal symbol choice);
               (key, symbol))
       first.spent
   in

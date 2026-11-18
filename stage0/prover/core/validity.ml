@@ -63,11 +63,8 @@ let note_place (context : State.context) (frame : State.frame) origin place =
       context.definition.disjoint
   end
 
-let with_no_costs : 'a. State.context -> (State.context -> 'a) -> 'a =
- fun context read -> read { context with counters = [] }
-
-let read_specification context frame (formula : Mir.formula) =
-  with_no_costs context (fun context ->
+let read_specification (context : State.context) frame (formula : Mir.formula) =
+  Scope.with_no_costs context.scope (fun () ->
       context.reader.read_formula context frame formula ~arguments:[])
 
 let select_field context ty variant field term =
@@ -128,16 +125,16 @@ let find_invariants context (ty : Types.ty) =
 
 let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
     ?(includes_invariants = true) ?(seen = []) ty term =
-  if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) context.validating then
+  if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) context.scope.validating then
     Logic.Boolean true
   else
-    let context = { context with validating = ty :: context.validating } in
+    Scope.with_validating context.scope ty @@ fun () ->
     let invariants_hold =
       match find_invariants context ty with
       | _ when not includes_invariants -> Logic.Boolean true
       | Some _ when Facts.find_constructors context ty = None ->
           let symbol = Logic.Symbol.Valid ty in
-          Facts.declare context.vocabulary
+          Facts.declare context
             (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Bool));
           Logic.Apply (symbol, [ term ])
       | Some (source, written) -> (
@@ -209,8 +206,8 @@ let rec find_parts_in_range context ?(seen = []) ty term =
         then Some (Facts.make_in_range ty term)
         else None
 
-let assume_valid (context : State.context) frame ty term =
-  Facts.assume context.assertions frame (make_validity context frame ~assuming:true ty term)
+let assume_valid context frame ty term =
+  Facts.assume context frame (make_validity context frame ~assuming:true ty term)
 
 let declare_callback_arguments context frame inputs =
   List.map
@@ -260,9 +257,6 @@ let check_escaping_callback context frame local =
         ~name inputs requires arguments ~promised:(Logic.Boolean true)
         ~why:"is used as a value whose type promises nothing of its arguments"
   | _ -> ()
-
-let with_reading_callback : 'a. State.context -> (State.context -> 'a) -> 'a =
- fun context read -> read { context with is_reading_callback = true }
 
 let bind_arguments frame (clauses : State.clauses) ~arguments ~substitution =
   let locals, types, self =

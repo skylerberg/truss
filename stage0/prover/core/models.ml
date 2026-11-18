@@ -18,7 +18,7 @@ let run_under_binder :
       {
         frame with
         binders = (bound_symbol, sort, premise) :: frame.binders;
-        scoped_facts = (bound_symbol, facts) :: frame.scoped_facts;
+        binder_facts = (bound_symbol, facts) :: frame.binder_facts;
       }
       premise
   in
@@ -36,10 +36,10 @@ let sequence_path : Path.t = Well_known.make_path Sequence
 let make_sequence_type element =
   Types.Named { path = sequence_path; arguments = [ Types.Type element ] }
 
-let make_sequence_length (context : State.context) element term =
+let make_sequence_length context element term =
   let path = Path.Method { owner = sequence_path; name = "length"; receiver = Read } in
   let symbol = Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type element ] } in
-  Facts.declare context.vocabulary
+  Facts.declare context
     (Logic.Function (symbol, [ Facts.declare_sort context (make_sequence_type element) ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
@@ -55,14 +55,14 @@ let rec index_sequence (context : State.context) element term index =
       let symbol =
         Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type sequence ] }
       in
-      Facts.declare context.vocabulary
+      Facts.declare context
         (Logic.Function
            ( symbol,
              [ Facts.declare_sort context sequence; Logic.Int ],
              Facts.declare_sort context element ));
       let at sequence index = Logic.Apply (symbol, [ sequence; index ]) in
       if context.definition.ranking && Facts.find_constructors context element <> None then
-        Facts.run_once context.assertions (Ranked_elements sequence) (fun () ->
+        Facts.run_once context (Ranked_elements sequence) (fun () ->
             let each = Logic.Symbol.Variable { label = "ranked.sequence"; numbers = [] }
             and index = Logic.Symbol.Variable { label = "ranked.index"; numbers = [] } in
             let ranked = Logic.Symbol each and position = Logic.Symbol index in
@@ -76,14 +76,13 @@ let rec index_sequence (context : State.context) element term index =
                     ==> (Operation ("<=", [ int 0; below ])
                         &&& Operation ("<", [ below; rank context sequence ranked ]))) )
             in
-            Facts.add_fact context.assertions fact);
+            Facts.add_fact context fact);
       Some (at term index)
   | [] -> None
 
 and rank context ty term =
   let symbol = Logic.Symbol.Rank ty in
-  Facts.declare context.vocabulary
-    (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
+  Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
   (match ty with
   | Types.Named { path; arguments = [ Types.Type element ] }
     when context.definition.ranking && Path.equal path sequence_path ->
@@ -91,7 +90,7 @@ and rank context ty term =
   | _ -> ());
   Logic.Apply (symbol, [ term ])
 
-let make_finite_function (context : State.context) (ty : Types.ty) name output inputs =
+let make_finite_function context (ty : Types.ty) name output inputs =
   match ty with
   | Types.Named { path; arguments } ->
       let symbol =
@@ -101,28 +100,28 @@ let make_finite_function (context : State.context) (ty : Types.ty) name output i
             type_arguments = arguments;
           }
       in
-      Facts.declare context.vocabulary
+      Facts.declare context
         (Logic.Function (symbol, Facts.declare_sort context ty :: List.map snd inputs, output));
       fun term -> Logic.Apply (symbol, term :: List.map fst inputs)
   | _ -> fun term -> term
 
 let finite_set_path : Path.t = Well_known.make_path Finite_set
 
-let substitute_value_term (context : State.context) (value : Types.value) =
+let substitute_value_term context (value : Types.value) =
   match value with
   | Known number -> Logic.Integer number
   | Value_parameter parameter ->
       let symbol = Logic.Symbol.Generic_value { owner = parameter.owner; name = parameter.name } in
-      Facts.run_once context.assertions (In_range symbol) (fun () ->
-          Facts.declare context.vocabulary (Logic.Constant (symbol, Int));
-          Facts.add_fact context.assertions
+      Facts.run_once context (In_range symbol) (fun () ->
+          Facts.declare context (Logic.Constant (symbol, Int));
+          Facts.add_fact context
             (Facts.make_in_range (Types.make_builtin UInt64) (Logic.Symbol symbol)));
       Logic.Symbol symbol
   | Value_variable _ -> Facts.raise_unsupported Whole_definition "an unsolved size"
 
 let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) symbol =
   if context.definition.ranking then
-    Facts.run_once context.assertions (Ranked_model symbol) (fun () ->
+    Facts.run_once context (Ranked_model symbol) (fun () ->
         let each = Logic.Symbol.Variable { label = "ranked.value"; numbers = [] } in
         let fact =
           Logic.forall
@@ -134,7 +133,7 @@ let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) sym
                     rank context ty (Logic.Symbol each);
                   ] ) )
         in
-        Facts.add_fact context.assertions fact)
+        Facts.add_fact context fact)
 
 let find_model_impl (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   let interface = context.definition.lookups.interface
@@ -159,16 +158,16 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
   | Some impl ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
       let symbol = Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type ty ] } in
-      Facts.declare context.vocabulary
+      Facts.declare context
         (Logic.Function (symbol, [ Facts.declare_sort context ty ], Facts.declare_sort context model));
       rank_model context ty ~model symbol;
       (match ty with
       | Types.Named { path; arguments = [ Types.Type element; Types.Value count ] }
         when Intrinsic.find_builtin path = Some Array ->
-          Facts.run_once context.assertions (Array_length symbol) (fun () ->
+          Facts.run_once context (Array_length symbol) (fun () ->
               let each = Logic.Symbol.Variable { label = "array.value"; numbers = [] } in
               let elements = Logic.Apply (symbol, [ Logic.Symbol each ]) in
-              Facts.add_fact context.assertions
+              Facts.add_fact context
                 (Logic.forall
                    ( [ (each, Facts.declare_sort context ty) ],
                      Logic.equal
@@ -213,7 +212,7 @@ let quantify_over (context : State.context) (frame : State.frame) (quantifier : 
                 | _ -> Costs.zero
               in
               if
-                Facts.mentions_fresh_after context.vocabulary mark spent
+                Facts.mentions_fresh_after context mark spent
                 || Logic.mentions [ bound_symbol ] spent
               then Operations.declare_unknown_amount context frame counter
               else
@@ -234,7 +233,7 @@ let quantify_over (context : State.context) (frame : State.frame) (quantifier : 
     in
     (frame, with_facts term)
   in
-  let symbol = Facts.make_fresh_name context.vocabulary "bound" in
+  let symbol = Facts.make_fresh_name context "bound" in
   let inner = { frame with bound = symbol :: frame.bound } in
   let each = Logic.Symbol symbol in
   match range with
@@ -270,7 +269,7 @@ let make_array_model context frame (ty : Types.ty) term =
   | Types.Named { arguments = [ Types.Type element; Types.Value count ]; _ } -> (
       match find_model context ty term ~element with
       | Some sequence ->
-          Facts.assume context.assertions frame
+          Facts.assume context frame
             (Logic.equal
                (make_sequence_length context element sequence)
                (make_value_term context frame count));

@@ -61,13 +61,16 @@ let make_context (definition : State.definition) ~terminates ~proving : State.co
         lent_back = [];
       };
     entry = no_entry;
-    terminates;
-    counters = [];
-    proving;
-    is_reading_callback = false;
-    validating = [];
-    instantiating = [];
-    axiomatizing = [];
+    scope =
+      {
+        terminates;
+        counters = [];
+        proving;
+        is_reading_callback = false;
+        validating = [];
+        instantiating = [];
+        axiomatizing = [];
+      };
     reader = { run_body = Reader.read_body; read_formula = Reader.read_formula };
   }
 
@@ -87,7 +90,7 @@ let make_empty_frame source =
     makes_obligations = true;
     bound = [];
     binders = [];
-    scoped_facts = [];
+    binder_facts = [];
     open_axioms = [];
     substitution = Types.no_substitution;
     self_type = None;
@@ -134,28 +137,13 @@ let list_promises context (source : State.source) locals (costs : Mir.cost list)
             })
     costs
 
-let make_entry (parameters : Mir.parameter list) (start : State.frame) promised : State.entry =
-  let find_symbol (parameter : Mir.parameter) =
-    match
-      match parameter.local with
-      | Self -> start.self
-      | local -> Locals.find_opt (Core_local local) start.locals
-    with
-    | Some (Logic.Symbol symbol) -> Some symbol
-    | _ -> None
-  in
+let make_entry parameter_symbols promised : State.entry =
   {
-    parameters = List.filter_map find_symbol parameters;
+    parameters = List.map fst parameter_symbols;
     parameter_names =
       List.filter_map
-        (fun (parameter : Mir.parameter) ->
-          match parameter.local with
-          | Self -> None
-          | _ ->
-              Option.map
-                (fun symbol -> (symbol, Facts.read_parameter_name parameter))
-                (find_symbol parameter))
-        parameters;
+        (fun (symbol, name) -> Option.map (fun name -> (symbol, name)) name)
+        parameter_symbols;
     bounded_counters =
       Contracts.deduplicate_counters
         (List.filter_map
@@ -290,9 +278,14 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
       ~proving:(if proof then Proving_theorem else Not_proving)
   in
   let output = match signature with Some { output = Returns ty; _ } -> Some ty | _ -> None in
-  let start =
+  let add_symbol term name parameter_symbols =
+    match term with
+    | Logic.Symbol symbol -> parameter_symbols @ [ (symbol, name) ]
+    | _ -> parameter_symbols
+  in
+  let start, parameter_symbols =
     List.fold_left
-      (fun frame (parameter : Mir.parameter) ->
+      (fun (frame, parameter_symbols) (parameter : Mir.parameter) ->
         match parameter.local with
         | Self ->
             let self_type =
@@ -302,14 +295,16 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
             in
             let self = Facts.arrive context frame "self" self_type in
             if not is_update_step then Validity.assume_valid context frame self_type self;
-            { frame with self = Some self; self_type = Some self_type }
+            ( { frame with self = Some self; self_type = Some self_type },
+              add_symbol self None parameter_symbols )
         | local ->
             let ty = Facts.substitute_type context frame parameter.type_ in
             let name = Facts.read_parameter_name parameter in
             let term = Facts.arrive context frame ("parameter." ^ name) ty in
             Validity.assume_valid context frame ty term;
-            Facts.bind frame (Core_local local) ty term)
-      { (make_empty_frame source) with substitution }
+            ( Facts.bind frame (Core_local local) ty term,
+              add_symbol term (Some name) parameter_symbols ))
+      ({ (make_empty_frame source) with substitution }, [])
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
@@ -385,21 +380,16 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
         list_promises context clauses.callee inside.locals clauses.costs ~inherited:true
     | None -> []
   in
-  let context =
-    {
-      context with
-      counters =
-        Contracts.deduplicate_counters
-          (List.map (fun promise -> promise.counter) promised
-          @ Lambdas.list_loop_counters start.locals mir.body);
-      entry = make_entry parameters start promised;
-    }
+  let context = { context with entry = make_entry parameter_symbols promised } in
+  let counters =
+    Contracts.deduplicate_counters
+      (List.map (fun promise -> promise.counter) promised
+      @ Lambdas.list_loop_counters start.locals mir.body)
   in
-  let start =
-    { start with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
-  in
+  Scope.with_counters context.scope counters @@ fun () ->
+  let start = { start with spent = List.map (fun counter -> (counter, Costs.zero)) counters } in
   if context.definition.inherits_precondition then
-    if declared_requires = [] then Facts.assume context.assertions start trait_requires
+    if declared_requires = [] then Facts.assume context start trait_requires
     else
       ignore
         (List.fold_left
@@ -422,7 +412,7 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
     List.fold_left
       (fun frame requirement ->
         let frame, term = Validity.read_specification context frame requirement in
-        Facts.assume context.assertions frame term;
+        Facts.assume context frame term;
         frame)
       start declared_requires
   in
@@ -599,8 +589,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
         let inside = Laws.bind_law_parameters start law_source ~substitution law terms in
         List.iter
           (fun clause ->
-            Facts.assume context.assertions start
-              (snd (Validity.read_specification context inside clause)))
+            Facts.assume context start (snd (Validity.read_specification context inside clause)))
           law.requires;
         let start =
           List.fold_left
@@ -686,13 +675,13 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
             defaults
       | Some { form = Parameter_defaults _; _ } | None -> ());
       let value_ = Facts.arrive context start "value" ty in
-      Facts.assume context.assertions start
+      Facts.assume context start
         (Validity.make_validity context start ~assuming:true ~includes_invariants:false ty value_);
       let at_value = { start with self = Some value_; old_self = Some value_ } in
       List.iter
         (fun (invariant : Mir.requirement) ->
           let after, holds = Validity.read_specification context at_value invariant.clause in
-          Facts.assume context.assertions after holds)
+          Facts.assume context after holds)
         invariants;
       Option.iter
         (fun (written : Mir.formula) ->
