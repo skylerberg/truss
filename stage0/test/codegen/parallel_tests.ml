@@ -7,7 +7,7 @@ let run_with_workers ~workers text =
 let expect_same_with_any_workers text ~expected =
   List.iter
     (fun workers -> Codegen_support.expect_string ~expected (run_with_workers ~workers text))
-    Codegen_support.worker_counts
+    (Codegen_support.list_worker_counts ())
 
 let () =
   Codegen_support.test
