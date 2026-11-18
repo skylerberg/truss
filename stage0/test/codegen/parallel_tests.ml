@@ -80,7 +80,7 @@ let () =
         Lowered.Binary (Add, Codegen_support.copy left, Codegen_support.copy right)
       in
       let env = Codegen_support.make_shape_env () in
-      let builder = Emit_c.Builder.create env ~key:(Codegen_support.key "entry") in
+      let builder = Emit_c.Builder.create env ~item:(Codegen_support.code_item "entry") in
       let parameter = Emit_c.Builder.allocate_local builder int in
       let sum = Emit_c.Builder.allocate_local builder int in
       let other = Emit_c.Builder.allocate_local builder int in

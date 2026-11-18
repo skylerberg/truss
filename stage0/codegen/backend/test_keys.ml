@@ -7,11 +7,11 @@ let derive_cycle_member_key ~read_known_key members start =
   let visit_order = Item_table.create 8 in
   let rec visit visited = function
     | [] -> List.rev visited
-    | key :: queue ->
-        if Item_table.mem visit_order key then visit visited queue
+    | item :: queue ->
+        if Item_table.mem visit_order item then visit visited queue
         else begin
-          Item_table.replace visit_order key (Item_table.length visit_order);
-          let fragment_hash, references = Item_table.find members key in
+          Item_table.replace visit_order item (Item_table.length visit_order);
+          let fragment_hash, references = Item_table.find members item in
           visit
             ((fragment_hash, references) :: visited)
             (queue @ List.filter (Item_table.mem members) references)
@@ -39,10 +39,10 @@ let derive_cycle_member_key ~read_known_key members start =
 
 let derive ~read_hash_and_references ~read_known_key component =
   match component with
-  | [ key ] ->
-      let fragment_hash, references = read_hash_and_references key in
+  | [ item ] ->
+      let fragment_hash, references = read_hash_and_references item in
       [
-        ( key,
+        ( item,
           encode_test_key
             [
               Text "unit";

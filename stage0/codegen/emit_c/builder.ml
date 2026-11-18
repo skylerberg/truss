@@ -7,7 +7,7 @@ type local_info = { ty : Lowered.ty; name : string option; is_zeroed : bool }
 type item_code = Item_code.t
 
 type code = {
-  key : Lowered.Item.t;
+  item : Lowered.Item.t;
   context : C_types.context;
   mutable nested : (int * (string * string)) list;
 }
@@ -98,8 +98,10 @@ let start_function builder ~code =
   Dynarray.add_last builder.functions (make_function ~code ~role:Enclosing ~entry:0);
   builder
 
-let create env ~key =
-  let code = { key; context = C_types.make_context env (Mangling.make_symbol key); nested = [] } in
+let create env ~item =
+  let code =
+    { item; context = C_types.make_context env (Mangling.make_symbol item); nested = [] }
+  in
   start_function (make_builder env) ~code
 
 let allocate_local builder ?name ?(is_zeroed = false) ty =
@@ -112,7 +114,7 @@ let render_token local = Printf.sprintf "\001%d\002" local
 
 let make_function_context builder (function_ : function_) ~note_mention =
   {
-    C_values.symbol = Mangling.make_symbol function_.code.key;
+    C_values.symbol = Mangling.make_symbol function_.code.item;
     render_local =
       (fun local ->
         note_mention local;
@@ -277,7 +279,7 @@ let resolve text name =
   Buffer.contents buffer
 
 let render_nested_symbol (code : code) index =
-  Printf.sprintf "%s_Nested_%d" (Mangling.make_symbol code.key) index
+  Printf.sprintf "%s_Nested_%d" (Mangling.make_symbol code.item) index
 
 let write_function_texts builder ~enclosing_symbol { parameters; result; returns } =
   let functions = Dynarray.to_array builder.functions in
@@ -299,7 +301,9 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
       in
       reach function_.entry)
     functions;
-  let add key keys = if List.exists (Lowered.Item.equal key) keys then keys else key :: keys in
+  let add item items =
+    if List.exists (Lowered.Item.equal item) items then items else item :: items
+  in
   Array.iteri
     (fun block is_reached ->
       match owners.(block) with
@@ -384,7 +388,7 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
           let context = function_.code.context in
           context.environments <-
             C_types.Keys.add
-              (Environment (Mangling.make_symbol function_.code.key, index))
+              (Environment (Mangling.make_symbol function_.code.item, index))
               (List.map
                  (fun (local, field) ->
                    ( field,
@@ -437,7 +441,7 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
       in
       let body = Buffer.create 1024 in
       Buffer.add_string body " {\n";
-      let symbol = Mangling.make_symbol function_.code.key in
+      let symbol = Mangling.make_symbol function_.code.item in
       List.iter
         (fun local ->
           let ty = lookup_local_type builder local in
@@ -485,7 +489,7 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
       let parameters = list_parameters number in
       let header =
         C_values.render_prototype context
-          (Mangling.make_symbol function_.code.key)
+          (Mangling.make_symbol function_.code.item)
           symbol ~names:(List.map name parameters) ~linkage:External
           {
             parameters = List.map (lookup_local_type builder) parameters;
@@ -511,10 +515,10 @@ let write_functions builder ~enclosing_symbol prototype =
 let build builder prototype : item_code =
   let enclosing = Dynarray.get builder.functions 0 in
   let enclosing_text =
-    write_functions builder ~enclosing_symbol:(Mangling.make_symbol enclosing.code.key) prototype
+    write_functions builder ~enclosing_symbol:(Mangling.make_symbol enclosing.code.item) prototype
   in
   {
-    key = enclosing.code.key;
+    item = enclosing.code.item;
     context = enclosing.code.context;
     enclosing = enclosing_text;
     nested = enclosing.code.nested;
@@ -525,7 +529,7 @@ let build_nested parent ~index ~environment build_body =
   let code = (lookup_current_function parent).code in
   code.context.environments <-
     C_types.Keys.add
-      (Environment (Mangling.make_symbol code.key, index))
+      (Environment (Mangling.make_symbol code.item, index))
       environment code.context.environments;
   let builder = start_function (make_builder parent.env) ~code in
   let prototype = build_body builder in

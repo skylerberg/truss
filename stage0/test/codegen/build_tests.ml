@@ -19,13 +19,13 @@ let make_named_program ~entry_name ~helper_name returned =
   in
   [ main; helper ]
 
-let lookup items key =
+let lookup items wanted =
   let env = Codegen_support.make_shape_env () in
   List.find
-    (fun fragment -> Lowered.Item.equal (Emit_c.key fragment) key)
+    (fun fragment -> Lowered.Item.equal (Emit_c.item fragment) wanted)
     (List.map (fun item -> Emit_c.make_fragment env (Code (item env))) items)
 
-let list_references program key = Emit_c.references (lookup program key)
+let list_references program item = Emit_c.references (lookup program item)
 
 module Item_table = Hashtbl.Make (Lowered.Item)
 
@@ -36,7 +36,7 @@ let list_components program root =
 
 let derive_component_keys program ~read_known_key component =
   Backend.derive_test_keys
-    ~read_lowered:(fun key -> Backend.For_testing.make_lowered (lookup program key))
+    ~read_lowered:(fun item -> Backend.For_testing.make_lowered (lookup program item))
     ~read_known_key component
 
 let derive_test_key program root =
@@ -52,7 +52,7 @@ let derive_test_key program root =
 let show_components program root =
   List.map
     (fun members -> String.concat " " (List.map Lowered.Item.to_string members))
-    (list_components program (Codegen_support.key root))
+    (list_components program (Codegen_support.code_item root))
 
 let make_ping_pong ?(ping = "ping") ?(pong = "pong") returned =
   let make_caller name callees =
@@ -85,10 +85,12 @@ let make_ping_pong ?(ping = "ping") ?(pong = "pong") returned =
 let () =
   Codegen_support.test "a build reaches each called item once, in order" (fun () ->
       let program = make_named_program ~entry_name:"start" ~helper_name:"helper" 1 in
-      let linked = Emit_c.list_linked ~lookup:(lookup program) [ Codegen_support.key "start" ] in
+      let linked =
+        Emit_c.list_linked ~lookup:(lookup program) [ Codegen_support.code_item "start" ]
+      in
       Codegen_support.expect_string ~expected:"test::start test::helper"
         (String.concat " "
-           (List.map (fun fragment -> Lowered.Item.to_string (Emit_c.key fragment)) linked)));
+           (List.map (fun fragment -> Lowered.Item.to_string (Emit_c.item fragment)) linked)));
   Codegen_support.test "a drop reaches the type's drop function" (fun () ->
       let dropping_item =
         Codegen_support.item "f"
@@ -106,7 +108,7 @@ let () =
   let test_key ~entry_name ~helper_name returned =
     derive_test_key
       (make_named_program ~entry_name ~helper_name returned)
-      (Codegen_support.key entry_name)
+      (Codegen_support.code_item entry_name)
   in
   Codegen_support.test "renaming the definitions a test reaches keeps its key" (fun () ->
       if
@@ -120,7 +122,7 @@ let () =
       then Codegen_support.fail "the keys are equal");
   Codegen_support.test "a caller's key reads its callee's code only through the callee's key"
     (fun () ->
-      let start = Codegen_support.key "start" in
+      let start = Codegen_support.code_item "start" in
       let derive_start_key returned =
         List.assoc start
           (derive_component_keys
@@ -150,14 +152,14 @@ let () =
       Harness.expect_strings ~expected:[ "test::again" ] (show_components [ again ] "again"));
   Codegen_support.test "a test that reaches items that call each other has a key" (fun () ->
       if
-        derive_test_key (make_ping_pong 1) (Codegen_support.key "start")
-        = derive_test_key (make_ping_pong 2) (Codegen_support.key "start")
+        derive_test_key (make_ping_pong 1) (Codegen_support.code_item "start")
+        = derive_test_key (make_ping_pong 2) (Codegen_support.code_item "start")
       then Codegen_support.fail "a change inside the group left the key the same");
   Codegen_support.test "a group's key does not depend on its items' names" (fun () ->
       let renamed = make_ping_pong ~ping:"alpha" ~pong:"omega" 1 in
       if
-        derive_test_key (make_ping_pong 1) (Codegen_support.key "start")
-        <> derive_test_key renamed (Codegen_support.key "start")
+        derive_test_key (make_ping_pong 1) (Codegen_support.code_item "start")
+        <> derive_test_key renamed (Codegen_support.code_item "start")
       then Codegen_support.fail "the keys differ")
 
 let () =

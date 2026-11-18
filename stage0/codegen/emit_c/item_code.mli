@@ -1,5 +1,5 @@
 type t = {
-  key : Lowered.Item.t;
+  item : Lowered.Item.t;
   context : C_types.context;
   enclosing : string * string;
   nested : (int * (string * string)) list;

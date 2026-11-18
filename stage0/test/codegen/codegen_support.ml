@@ -112,7 +112,8 @@ let block statements terminator = { statements; terminator }
 let function_ ?(parameters = []) ?result ?(environment = []) locals blocks =
   { parameters; result; returns = true; environment; locals; blocks }
 
-let key name = Lowered.Item.Code { path = definition name; instantiation = Ground.no_instantiation }
+let code_item name =
+  Lowered.Item.Code { path = definition name; instantiation = Ground.no_instantiation }
 
 let write builder (function_ : function_) =
   List.iter
@@ -131,7 +132,7 @@ let write builder (function_ : function_) =
 
 let item ?(nested = []) name main : item =
  fun env ->
-  let builder = Emit_c.Builder.create env ~key:(key name) in
+  let builder = Emit_c.Builder.create env ~item:(code_item name) in
   List.iteri
     (fun index (function_ : function_) ->
       Emit_c.Builder.build_nested builder ~index ~environment:function_.environment (fun nested ->
@@ -149,7 +150,8 @@ let call name ?(result = Some (value int32)) ?(parameters = []) arguments place 
   Call
     {
       target =
-        Direct { function_ = Item (key name); signature = { parameters; result; returns = true } };
+        Direct
+          { function_ = Item (code_item name); signature = { parameters; result; returns = true } };
       arguments;
       result = (match place with Some place -> Returned place | None -> Discarded);
     }
@@ -184,7 +186,7 @@ let run_program ?(extra = []) ?env ?input (items : item list) =
           ( "the program",
             Emit_c.render_file env Development
               (List.map (fun fragment -> (fragment, Emit_c.External)) fragments) );
-          ("main", Startup.For_testing.render_main_start (Emit_c.make_symbol (key "entry")));
+          ("main", Startup.For_testing.render_main_start (Emit_c.make_symbol (code_item "entry")));
           ("sites", Emit_c.render_sites_file ~resolve_position:test_position fragments);
         ]
       ~output

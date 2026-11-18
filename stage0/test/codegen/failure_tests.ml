@@ -61,7 +61,7 @@ let () =
             target =
               Direct
                 {
-                  function_ = Item (Codegen_support.key "swapped");
+                  function_ = Item (Codegen_support.code_item "swapped");
                   signature =
                     { parameters = [ pointer true; pointer false ]; result = None; returns = true };
                 };
@@ -89,7 +89,7 @@ let () =
         {
           root =
             Static
-              { key = Constant (Codegen_support.definition "words"); ty = Codegen_support.text };
+              { item = Constant (Codegen_support.definition "words"); ty = Codegen_support.text };
           projections = [];
         }
       in

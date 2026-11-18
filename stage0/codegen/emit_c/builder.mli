@@ -2,7 +2,7 @@ type t
 type item_code = Item_code.t
 type prototype = { parameters : Lowered.local list; result : Lowered.ty option; returns : bool }
 
-val create : Memory_layout.env -> key:Lowered.Item.t -> t
+val create : Memory_layout.env -> item:Lowered.Item.t -> t
 
 val build_nested :
   t -> index:int -> environment:(string * Lowered.ty) list -> (t -> prototype) -> unit

@@ -62,9 +62,9 @@ let make_context env prefix =
     failures = [];
   }
 
-let refer context key =
-  if not (List.exists (Lowered.Item.equal key) context.referenced_items) then
-    context.referenced_items <- key :: context.referenced_items
+let refer context item =
+  if not (List.exists (Lowered.Item.equal item) context.referenced_items) then
+    context.referenced_items <- item :: context.referenced_items
 
 let use_helper context name =
   if not (List.mem name context.helpers_used) then

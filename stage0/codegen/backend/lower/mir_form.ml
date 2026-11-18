@@ -622,11 +622,11 @@ let resolve_callee st (callee : Mir.callee) : (Path.t * Ground.instantiation) op
   | Trait_method { evidence = Dynamic; _ } -> None
   | Trait_method { trait; name; receiver; self_type; instantiation; evidence } -> (
       match
-        Targets.make_trait_method_key st.context st.frame.code.substitution ~trait ~name ~receiver
+        Targets.make_trait_method_item st.context st.frame.code.substitution ~trait ~name ~receiver
           ~self_type ~instantiation ~evidence
       with
       | Code { path; instantiation } -> Some (path, instantiation)
-      | _ -> Definitions.raise_bug "a trait method's key")
+      | _ -> Definitions.raise_bug "a trait method whose item is not code")
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
 
 let read_callee_signature (st : Lowering.state) path instantiation =
@@ -647,7 +647,7 @@ let compute_result_type st (callee : Mir.callee) =
   | Lends _ -> Definitions.raise_bug "%s does not return a value" (Path.show path)
 
 let lower_call_with_places st (callee : Mir.callee) (places : Lowered.place list) ~destination =
-  let _, key, signature, substitution = resolve_call_signature st callee in
+  let _, item, signature, substitution = resolve_call_signature st callee in
   let arguments =
     List.map2
       (fun (mode, ty) place ->
@@ -655,7 +655,7 @@ let lower_call_with_places st (callee : Mir.callee) (places : Lowered.place list
       (Definitions.list_interface_parameters signature)
       places
   in
-  Targets.lower_item_call st key ~signature ~substitution ~arguments ~destination ()
+  Targets.lower_item_call st item ~signature ~substitution ~arguments ~destination ()
 
 let evaluate_arguments (st : Lowering.state) (signature : Types.signature) substitution
     (arguments : Mir.argument list) =

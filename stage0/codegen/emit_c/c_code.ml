@@ -162,10 +162,10 @@ let render_call context fc (target : Lowered.target) arguments =
   match target with
   | Direct { function_; signature } ->
       (match function_ with
-      | Item key ->
-          C_types.refer context key;
-          if not (List.exists (Lowered.Item.equal key) context.called) then
-            context.called <- key :: context.called
+      | Item item ->
+          C_types.refer context item;
+          if not (List.exists (Lowered.Item.equal item) context.called) then
+            context.called <- item :: context.called
       | Nested _ -> ());
       let symbol = C_values.render_function_ref_symbol fc function_ in
       let linkage = match function_ with Nested _ -> C_runtime.Internal | Item _ -> External in

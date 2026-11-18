@@ -50,7 +50,7 @@ val function_ :
   block list ->
   function_
 
-val key : string -> Lowered.Item.t
+val code_item : string -> Lowered.Item.t
 val item : ?nested:function_ list -> string -> function_ -> item
 val entry : ?nested:function_ list -> local_info list -> block list -> item
 val make_constant_item : Emit_c.Builder.item_code -> item

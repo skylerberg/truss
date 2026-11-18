@@ -585,7 +585,7 @@ let () =
 
 let () =
   Codegen_support.test "a symbol names the path and the type arguments" (fun () ->
-      let key =
+      let item =
         Lowered.Item.Code
           {
             path = Method { owner = Well_known.make_path List; name = "each"; receiver = Read };
@@ -594,7 +594,7 @@ let () =
           }
       in
       Codegen_support.expect_string ~expected:"t_standard__list__List_each_Of_test__Int64_End_"
-        (Emit_c.make_symbol key));
+        (Emit_c.make_symbol item));
   let render_function_symbol package modules =
     Emit_c.make_symbol
       (Lowered.Item.Code
@@ -613,7 +613,9 @@ let () =
         Codegen_support.fail
           "a package with an owner and a module of the same names have one symbol");
   Codegen_support.test "a long symbol keeps its start and ends with a hash" (fun () ->
-      let make_long_symbol name = Emit_c.make_symbol (Codegen_support.key (String.make 300 name)) in
+      let make_long_symbol name =
+        Emit_c.make_symbol (Codegen_support.code_item (String.make 300 name))
+      in
       let left = make_long_symbol 'a' and right = make_long_symbol 'b' in
       Codegen_support.expect_int ~expected:(180 + 6 + 32) (String.length left);
       if left = right then Codegen_support.fail "two long names give one symbol")
@@ -623,7 +625,7 @@ let intrinsic_types : Backend.For_testing.Intrinsics.types =
 
 let build_entry build_body : Codegen_support.item =
  fun env ->
-  let builder = Emit_c.Builder.create env ~key:(Codegen_support.key "entry") in
+  let builder = Emit_c.Builder.create env ~item:(Codegen_support.code_item "entry") in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
   let result = build_body builder in
   Emit_c.Builder.finish builder (Return (Some (Copy (Lowered.make_local_place result))));
