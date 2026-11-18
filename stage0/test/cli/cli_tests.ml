@@ -846,6 +846,22 @@ let () =
       expect_strings
         ~expected:[ "public type Vector(x: Int64, y: Int64)"; "impl Display for Vector {" ]
         (list_headers (run_show (Filename.concat root "app") "acme::geometry::vector::Vector")));
+  test "a dependency's module is shown with its law proofs and without its tests" (fun () ->
+      let root =
+        make_directory
+          [
+            ("truss.toml", "[project]\n");
+            ("geometry/truss.toml", make_manifest "acme::geometry");
+            ("geometry/pairs/pairs.truss", Fixtures.pair_with_a_law_proof_and_a_test);
+            ("app/truss.toml", make_manifest "app" ^ "[dependencies]\n\"acme::geometry\" = []\n");
+            ("app/main.truss", "fn main() {}\n");
+          ]
+      in
+      let headers = list_headers (run_show (Filename.concat root "app") "acme::geometry::pairs") in
+      if not (List.mem "proof Ordered.agrees_with_equal for Pair" headers) then
+        fail "the law proof is missing from %s" (String.concat "; " headers);
+      if List.exists (String.starts_with ~prefix:"test ") headers then
+        fail "a test is shown in %s" (String.concat "; " headers));
   test "a built-in type is shown with an impl that the project writes for it" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.doubled_for_int64) ] in
       expect_headers ~expected:[ "impl Doubled for Int64 {" ] (run_show root "Int64"));

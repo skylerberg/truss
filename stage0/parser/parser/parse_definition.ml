@@ -2,7 +2,7 @@ let make_definition_node cursor start visibility kind : Syntax.definition =
   { visibility; kind; id = Cursor.allocate_id_from cursor start }
 
 type written_visibility = {
-  visibility : Syntax.visibility;
+  visibility : Syntax.visibility option;
   tokens : Token.t list;
   opaque : (Token.t * Token.t) option;
 }
@@ -15,13 +15,14 @@ let parse_visibility cursor =
       | Keyword Opaque ->
           let opaque = Cursor.take cursor in
           {
-            visibility = Public_opaque;
+            visibility = Some Public_opaque;
             tokens = [ public; opaque ];
             opaque = Some (public, opaque);
           }
-      | _ -> { visibility = Public; tokens = [ public ]; opaque = None })
-  | Keyword Internal -> { visibility = Internal; tokens = [ Cursor.take cursor ]; opaque = None }
-  | _ -> { visibility = Private; tokens = []; opaque = None }
+      | _ -> { visibility = Some Public; tokens = [ public ]; opaque = None })
+  | Keyword Internal ->
+      { visibility = Some Internal; tokens = [ Cursor.take cursor ]; opaque = None }
+  | _ -> { visibility = None; tokens = []; opaque = None }
 
 let report_misplaced_visibility cursor code (tokens : Token.t list) message =
   match tokens with
@@ -297,7 +298,7 @@ let parse_method cursor ~container : Syntax.definition =
         | kind -> kind
         | exception Cursor.Failed -> Definition_error { intended; name = Some name })
   in
-  make_definition_node cursor start Private kind
+  make_definition_node cursor start None kind
 
 let parse_fields cursor : Syntax.field list =
   let parse_field cursor : Syntax.field =
@@ -462,7 +463,7 @@ let parse_top_level cursor ~parse_function =
   let finish_definition kind =
     (match (visibility, opaque, kind) with
     | _, None, _
-    | Public_opaque, Some _, Either.Left (Syntax.Type_definition _, _)
+    | Some Public_opaque, Some _, Either.Left (Syntax.Type_definition _, _)
     | _, Some _, Left ((Impl _ | Test _ | Law_proof _), _) ->
         ()
     | _, Some (public, opaque), _ ->
@@ -536,7 +537,7 @@ let parse_top_level cursor ~parse_function =
     | Keyword Proof ->
         reject_visibility "A law's proof";
         parse_unnamed (fun () -> Either.Left (parse_law_proof cursor, []))
-    | kind when visibility = Private && Atoms.begins_statement kind ->
+    | kind when visibility = None && Atoms.begins_statement kind ->
         parse_unnamed (fun () ->
             Cursor.report cursor Statement_at_top_level (Cursor.peek cursor).span
               "Statements must be inside a function, a test, or another definition with a body.";
@@ -563,7 +564,7 @@ let parse_definition cursor : Syntax.definition * Split.piece list =
 
 type example =
   | Whole of Syntax.definition * Split.piece list
-  | Signature_alone of Syntax.visibility * Syntax.signature
+  | Signature_alone of Syntax.visibility option * Syntax.signature
 
 let parse_example cursor =
   let parse_function cursor name =

@@ -2578,7 +2578,8 @@ and the prelude changes only with a language version.
 
 - An `impl`, a test, and a law proof take no visibility. An `impl` is as
   visible as the least visible of its trait and the types it names, since
-  it applies only where all of them are visible.
+  it applies only where all of them are visible. A law proof is as visible
+  as the `impl` whose law it proves.
 - A method or constant written in a trait, a capability, or an `impl` takes
   no visibility, and is as visible as the definition it is written in.
 - A method or member constant defined on its own, such as `fn Shape.area`,

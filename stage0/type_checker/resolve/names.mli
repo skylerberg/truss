@@ -16,12 +16,14 @@ type named = Function | Type | Trait | Capability | Constant | Theorem
 val convert_named : named -> kind
 val show_kind : kind -> string
 
+type visibility = Private | Internal | Public | Public_opaque
+
 type declaration = {
   module_ : Path.module_;
   path : Path.t;
   ordinal : int;
   kind : kind;
-  visibility : Syntax.visibility;
+  visibility : visibility;
   generic : bool;
 }
 
@@ -34,14 +36,14 @@ val extract_signature_name : Syntax.signature -> Syntax.name
 val classify_receiver : Syntax.parameter list -> Path.receiver
 val extract_last_name : Path.module_ -> string
 
-type entry = { name : string; kind : named; visibility : Syntax.visibility; generic : bool }
+type entry = { name : string; kind : named; visibility : visibility; generic : bool }
 
 module String_map : Map.S with type key = String.t
 
 val is_type_kind : named -> bool
 val is_value_kind : named -> bool
-val is_public : Syntax.visibility -> bool
-val is_visible : from:Path.module_ -> Path.module_ -> Syntax.visibility -> bool
+val is_public : visibility -> bool
+val is_visible : from:Path.module_ -> Path.module_ -> visibility -> bool
 
 type law_proof_name = { trait : Path.t; law : string; type_head : Path.t }
 
@@ -104,7 +106,7 @@ val find_syntax_error : lookups -> key -> Parts.part -> Diagnostic.reported opti
 val is_broken : lookups -> key -> Parts.part -> bool
 val find_generics : lookups -> Path.t -> (string * generic_kind) list option
 
-type 'visible lookup = Visible of 'visible | Hidden of (Path.t * Syntax.visibility) | Absent
+type 'visible lookup = Visible of 'visible | Hidden of (Path.t * visibility) | Absent
 
 val lookup_in :
   lookups ->
@@ -117,7 +119,7 @@ val lookup_in :
 val lookup_member : lookups -> from:Path.module_ -> Path.t -> Path.t lookup
 val choose_visible : 'visible lookup list -> 'visible lookup
 val collect_visible : ('key * 'visible lookup) list -> ('key * 'visible) list lookup
-val describe_hidden : Path.t -> Syntax.visibility -> string
+val describe_hidden : Path.t -> visibility -> string
 val list_visible_traits_declaring : lookups -> from:Path.module_ -> string -> Path.t list
 
 val list_members_visible_to_package :
