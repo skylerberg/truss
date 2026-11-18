@@ -1,7 +1,7 @@
 type test = { path : Path.t; module_ : Path.module_; name : string; file : string; line : int }
 
 let select snapshot database packages ~paths ~match_ =
-  let names = Database.make_name_lookups database packages in
+  let names = Database.make_name_lookups database in
   List.concat_map
     (fun (file : Path.file) ->
       let source = Command_packages.read_source snapshot packages file in

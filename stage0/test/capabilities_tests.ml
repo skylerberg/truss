@@ -344,7 +344,6 @@ let pays = ("app::main", Fixtures.Capabilities.pays)
 let list_problems packages =
   let app : Path.package = { owner = None; name = "app" } in
   let database = Support.make_database packages in
-  Database.check database [ app ];
   Database.list_manifest_problems database app
 
 let () =

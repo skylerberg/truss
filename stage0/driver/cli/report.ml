@@ -16,7 +16,6 @@ let make_shown_file snapshot packages file diagnostics =
 let gather ?(proofs = false) database snapshot packages =
   let program_packages = Command_packages.list_program_packages snapshot packages in
   let files = Command_packages.list_files snapshot program_packages in
-  Database.check database program_packages;
   let proofs =
     if proofs then Some (lazy (Proofs.check database snapshot packages files)) else None
   in

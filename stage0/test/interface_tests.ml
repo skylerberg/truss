@@ -4,11 +4,7 @@ let check packages =
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_no_diagnostics = Support.expect_no_diagnostics ~check
 let app name : Path.t = Top { module_ = Support.parse_module "app::main"; name }
-
-let make_interface packages =
-  Database.make_interface_lookups (Support.make_database packages)
-    [ (Support.parse_module "app::main").package ]
-
+let make_interface packages = Database.make_interface_lookups (Support.make_database packages)
 let make_standard_path = Path.make_standard_path
 let int64 = Types.make_builtin Int64
 
@@ -483,7 +479,6 @@ let () =
     let packages = Support.setup [ ("app::main", text) ] in
     let interface =
       Database.For_testing.make_unchecked_interface_lookups (Support.make_database packages)
-        [ (Support.parse_module "app::main").package ]
     in
     let feeds : Types.trait_reference =
       { trait = app "Feeds"; trait_arguments = []; associated = [] }
@@ -973,8 +968,7 @@ let () =
       let declared =
         List.map
           (fun (declaration : Resolve.Names.declaration) -> declaration.path)
-          ((Support.make_names packages Path.standard_package).list_package_declarations
-             Path.standard_package)
+          ((Support.make_names packages).list_package_declarations Path.standard_package)
       in
       List.iter
         (fun known ->

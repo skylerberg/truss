@@ -36,7 +36,7 @@ let list_holes snapshot packages database (names : Resolve.Names.lookups)
   | None -> []
 
 let gather snapshot packages database paths =
-  let names = Database.make_name_lookups database packages in
+  let names = Database.make_name_lookups database in
   List.concat_map
     (fun file ->
       List.concat_map

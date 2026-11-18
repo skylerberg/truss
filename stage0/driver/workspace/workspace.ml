@@ -424,11 +424,11 @@ let restore_database segments snapshot =
         match Segments.read_entries segments with
         | None -> start_cold ()
         | Some entries -> (
-            match Database.restore ~loaded:saved ~find_text:(make_text_lookup snapshot) entries with
-            | database ->
-                Database.relayout database ~loaded:(extract_package_databases loaded) packages;
-                database
-            | exception (Failure _ | Invalid_argument _ | End_of_file) -> start_cold ()))
+            try
+              Database.restore ~saved ~find_text:(make_text_lookup snapshot)
+                ~loaded:(extract_package_databases loaded)
+                packages entries
+            with Failure _ | Invalid_argument _ | End_of_file -> start_cold ()))
   in
   (database, loaded)
 
@@ -493,13 +493,13 @@ let find_file_changes (before : snapshot) (after : snapshot) =
               if File_table.mem current file then changes else (file, None) :: changes)
             previous []))
 
-let apply_changes database (after : snapshot) = function
+let apply_changes ?on_bug database (after : snapshot) = function
   | Some changes ->
-      Database.update database changes;
+      Database.update ?on_bug database changes;
       None
   | None ->
       let loaded, packages = load_layout after in
-      Database.relayout database ~loaded:(extract_package_databases loaded) packages;
+      Database.relayout ?on_bug database ~loaded:(extract_package_databases loaded) packages;
       Some loaded
 
 let copy_database root (trial : snapshot) =
@@ -554,7 +554,7 @@ let list_changed_files root files paths =
     files
   @ List.concat_map list_with_prefix prefixes
 
-let refresh ~(read : Watcher.t -> Watcher.changes) worktree =
+let refresh ?on_bug ~(read : Watcher.t -> Watcher.changes) worktree =
   let root = worktree.root in
   let update files =
     let before = worktree.snapshot in
@@ -565,7 +565,7 @@ let refresh ~(read : Watcher.t -> Watcher.changes) worktree =
     | changes ->
         Option.iter
           (fun loaded -> worktree.loaded <- loaded)
-          (apply_changes worktree.database after changes);
+          (apply_changes ?on_bug worktree.database after changes);
         `Changed
   in
   match Option.map read worktree.watcher with
@@ -638,15 +638,13 @@ let propagate_changes descriptor =
   Hashtbl.iter
     (fun _ worktree ->
       if Option.map Watcher.extract_descriptor worktree.watcher = Some descriptor then
-        match refresh ~read:Watcher.read_pending_changes worktree with
+        match refresh ~on_bug:log_bug ~read:Watcher.read_pending_changes worktree with
         | `Removed -> close worktree
         | `Unchanged -> ()
-        | `Changed -> (
-            match Database.propagate ~on_bug:log_bug worktree.database with
-            | () -> commit worktree
-            | exception Compiler_bug.Bug bug ->
-                log_bug bug;
-                close worktree))
+        | `Changed -> commit worktree
+        | exception Compiler_bug.Bug bug ->
+            log_bug bug;
+            close worktree)
     (Hashtbl.copy worktrees)
 
 let problems snapshot = snapshot.project.problems

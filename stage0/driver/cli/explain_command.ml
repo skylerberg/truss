@@ -25,7 +25,7 @@ let run ~position =
           (Workspace.read_source snapshot written)
           ~line:(line - 1) ~column:(column - 1)
       in
-      let names = Database.make_name_lookups database packages in
+      let names = Database.make_name_lookups database in
       let symbol_at =
         List.find_map
           (fun (declaration : Resolve.Names.declaration) ->

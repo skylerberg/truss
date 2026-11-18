@@ -88,13 +88,11 @@ let make_definition_form text (path : Path.t) =
         if Path.equal key.path path then
           Option.map (fun core -> (key, core)) (find_core packages key)
         else None)
-      ((Support.make_names packages file.module_.package).list_declarations_in file)
+      ((Support.make_names packages).list_declarations_in file)
   in
   match definition with
   | Some (key, core) ->
-      Core_lint.check
-        (Database.make_interface_lookups (Support.make_database packages) [ key.module_.package ])
-        key core;
+      Core_lint.check (Database.make_interface_lookups (Support.make_database packages)) key core;
       core
   | None -> failwith (Printf.sprintf "`%s` has no core form" (Path.show path))
 
@@ -289,8 +287,8 @@ let () =
           let key = Resolve.Names.make_key declaration in
           match
             ( find_core packages key,
-              (Support.make_names packages key.module_.package).read_spans key,
-              (Support.make_names packages key.module_.package).read_text key )
+              (Support.make_names packages).read_spans key,
+              (Support.make_names packages).read_text key )
           with
           | Some form, spans, written ->
               let actual = ref [] in
@@ -399,8 +397,8 @@ let () =
           let key = Resolve.Names.make_key declaration in
           match
             ( find_core packages key,
-              (Support.make_names packages key.module_.package).read_spans key,
-              (Support.make_names packages key.module_.package).read_text key )
+              (Support.make_names packages).read_spans key,
+              (Support.make_names packages).read_text key )
           with
           | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
               spans,
@@ -422,8 +420,7 @@ let () =
           forms :=
             !forms
             + Core_lint.check_file
-                (Database.make_interface_lookups (Support.make_database packages)
-                   [ file.module_.package ])
+                (Database.make_interface_lookups (Support.make_database packages))
                 ~find_core:(find_core packages) file))
     Standard_library.files;
   Harness.test "the standard library has core forms" (fun () ->
@@ -451,9 +448,7 @@ let () =
     "every method of a derived impl in the standard library has a core form that satisfies the \
      invariants" (fun () ->
       let packages = Support.setup [] in
-      let interface =
-        Database.make_interface_lookups (Support.make_database packages) [ Path.standard_package ]
-      in
+      let interface = Database.make_interface_lookups (Support.make_database packages) in
       let derived =
         List.filter_map
           (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
@@ -505,13 +500,12 @@ let () =
   in
   let read_method_core name =
     let packages = Support.setup [ ("app::main", text) ] in
-    let both_package = Path.locate_package both in
     let parameter : Types.parameter = { owner = both; name = "Value" } in
     let list_bounds (actual : Types.parameter) = if actual = parameter then [ described ] else [] in
     let owner =
       match
         Interface.Impls.find_evidence
-          (Database.make_interface_lookups (Support.make_database packages) [ both_package ])
+          (Database.make_interface_lookups (Support.make_database packages))
           ~list_bounds
           (Types.make_named both [ Types.Parameter parameter ])
           described

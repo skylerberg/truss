@@ -1,4 +1,4 @@
-let check packages = Support.list_diagnostics (Support.make_database packages)
+let check packages = Database.list_file_diagnostics (Support.make_database packages)
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
 

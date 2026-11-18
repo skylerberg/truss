@@ -10,7 +10,7 @@ let () =
 let check_text text =
   let database = Support.make_database (Support.setup [ ("app::main", text) ]) in
   (match
-     Support.list_codes (Support.list_diagnostics database (Support.parse_file "app::main"))
+     Support.list_codes (Database.list_file_diagnostics database (Support.parse_file "app::main"))
    with
   | [] -> ()
   | codes -> Harness.fail "the program has diagnostics: %s" (String.concat ", " codes));
@@ -39,7 +39,7 @@ let build ?(roots = []) files =
              instantiation = { type_arguments = []; capability_arguments = [] };
            }))
     roots;
-  Database.propagate database;
+  Database.For_testing.propagate database;
   database
 
 let list_changes ~before ~after =
@@ -55,10 +55,10 @@ let list_changes ~before ~after =
       before
 
 let propagate ?roots hot ~before ~after =
-  let observed =
+  let (), observed =
     Database.For_testing.observe (fun () ->
         Database.update hot (list_changes ~before ~after);
-        Database.propagate hot)
+        Database.For_testing.propagate hot)
   in
   (match Database.For_testing.list_differences hot (build ?roots after) with
   | [] -> ()
@@ -95,15 +95,15 @@ let standard = lazy (Workspace.For_testing.load_standard_package_database ())
 
 let settle loaded packages =
   let database = Database.create ~loaded:(Lazy.force standard :: loaded) packages in
-  Database.propagate database;
+  Database.For_testing.propagate database;
   database
 
 let lay_out_again ?(loaded = ([], [])) ~before ~after () =
   let hot = settle (fst loaded) before in
-  let observed =
+  let (), observed =
     Database.For_testing.observe (fun () ->
         Database.relayout hot ~loaded:(Lazy.force standard :: snd loaded) after;
-        Database.propagate hot)
+        Database.For_testing.propagate hot)
   in
   (match Database.For_testing.list_differences hot (settle (snd loaded) after) with
   | [] -> ()
@@ -130,8 +130,13 @@ let reopen log files =
   let find_text (file : Path.file) =
     List.find_map (fun (package : Project.package) -> List.assoc_opt file package.files) packages
   in
-  let database = Database.restore ~loaded:[ Lazy.force standard ] ~find_text (list_live log) in
-  Database.relayout database ~loaded:[ Lazy.force standard ] packages;
+  let database =
+    Database.restore
+      ~saved:[ Lazy.force standard ]
+      ~find_text
+      ~loaded:[ Lazy.force standard ]
+      packages (list_live log)
+  in
   database
 
 let expect_cold ?roots database files =
@@ -141,11 +146,24 @@ let expect_cold ?roots database files =
       Harness.fail "the reopened database differs from a cold build in %s"
         (String.concat ", " parts)
 
+let remove_rebuilt_on_reopen recomputed =
+  List.filter
+    (fun shown ->
+      not
+        (List.exists
+           (fun prefix -> String.starts_with ~prefix shown)
+           [ "namespace "; "recursion group " ]))
+    recomputed
+
 let observe_reopen ?roots log files =
-  let database = reopen log files in
-  let observed = Database.For_testing.observe (fun () -> Database.propagate database) in
+  let database, observed =
+    Database.For_testing.observe (fun () ->
+        let database = reopen log files in
+        Database.For_testing.propagate database;
+        database)
+  in
   expect_cold ?roots database files;
-  observed
+  { observed with recomputed = remove_rebuilt_on_reopen observed.recomputed }
 
 let tool_user =
   [
@@ -553,7 +571,7 @@ let () =
           | Some (Value _) -> ()
           | Some (Failed _ | Blocked) | None ->
               Harness.fail "%s has no proof" (Path.show declaration.path))
-        ((Database.make_name_lookups database [ file.module_.package ]).list_declarations_in file));
+        ((Database.make_name_lookups database).list_declarations_in file));
   Harness.test
     "a field's type whose impl calls back joins the recursion group of a function that passes the \
      derived impl where a bound needs one" (fun () ->
@@ -819,7 +837,7 @@ let () =
       in
       let log = commit [] (list_saved (build before)) in
       expect_recomputed (observe_reopen log after).recomputed
-        ~exactly:(list_propagated ~before ~after));
+        ~exactly:(remove_rebuilt_on_reopen (list_propagated ~before ~after)));
   Harness.test "a database reopened without a file it saved removes the file's definitions"
     (fun () ->
       let log = commit [] (list_saved (build with_helper)) in
@@ -838,19 +856,19 @@ let () =
       let hot = build before in
       let log = commit [] (list_saved hot) in
       Database.update hot (list_changes ~before ~after);
-      Database.check hot [ (Support.parse_module "app::main").package ];
       let log = commit log (list_saved hot) in
-      let propagated =
-        (Database.For_testing.observe (fun () -> Database.propagate hot)).recomputed
+      let (), propagated =
+        Database.For_testing.observe (fun () -> Database.For_testing.propagate hot)
       in
-      expect_recomputed (observe_reopen log after).recomputed ~exactly:propagated);
+      expect_recomputed (observe_reopen log after).recomputed
+        ~exactly:(remove_rebuilt_on_reopen propagated.recomputed));
   Harness.test "a database saved after a package is removed reopens without the package" (fun () ->
       let with_lib = Support.setup ~dependencies:[ ("app", "lib") ] tool_user in
       let alone = [ ("app::main", "fn caller() -> Int64 { 1 }\n") ] in
       let hot = settle [] with_lib in
       let log = commit [] (list_saved hot) in
       Database.relayout hot ~loaded:[ Lazy.force standard ] (Support.setup alone);
-      Database.propagate hot;
+      Database.For_testing.propagate hot;
       let log = commit log (list_saved hot) in
       expect_recomputed (observe_reopen log alone).recomputed ~exactly:[])
 
@@ -867,17 +885,21 @@ let open_workspace root =
   | Error message -> failwith message
 
 let settle_on_disk root =
-  let snapshot = open_workspace root in
-  let database = Workspace.open_database snapshot in
-  let observed = Database.For_testing.observe (fun () -> Database.propagate database) in
+  let (snapshot, database), observed =
+    Database.For_testing.observe (fun () ->
+        let snapshot = open_workspace root in
+        let database = Workspace.open_database snapshot in
+        Database.For_testing.propagate database;
+        (snapshot, database))
+  in
   let cold = Workspace.For_testing.build_cold_database snapshot in
-  Database.propagate cold;
+  Database.For_testing.propagate cold;
   (match Database.For_testing.list_differences database cold with
   | [] -> ()
   | parts ->
       Harness.fail "the database in .truss differs from a cold build in %s"
         (String.concat ", " parts));
-  observed.recomputed
+  remove_rebuilt_on_reopen observed.recomputed
 
 let edited_body = "fn callee(x: Int64) -> Int64 { x + 2 }\nfn caller() -> Int64 { callee(1) }\n"
 
@@ -927,13 +949,12 @@ let () =
                 if String.starts_with ~prefix:"header compiler " line then "header compiler other"
                 else line)
               (String.split_on_char '\n' (File_system.read list))));
-      expect_included (settle_on_disk root)
-        ~parts:[ "namespace app"; "checked body app::main::caller" ];
+      expect_included (settle_on_disk root) ~parts:[ "checked body app::main::caller" ];
       Workspace.flush ())
 
 let expect_cold database snapshot =
   let cold = Workspace.For_testing.build_cold_database snapshot in
-  Database.propagate cold;
+  Database.For_testing.propagate cold;
   match Database.For_testing.list_differences database cold with
   | [] -> ()
   | parts -> Harness.fail "the database differs from a cold build in %s" (String.concat ", " parts)
@@ -943,12 +964,15 @@ let () =
       let root = project [ ("main/main", callee_and_caller) ] in
       let snapshot = open_workspace root in
       let worktree = Workspace.open_database snapshot in
-      Database.propagate worktree;
+      Database.For_testing.propagate worktree;
       let trial = Workspace.make_trial snapshot [ ("main/main.truss", Some edited_body) ] in
-      let database = Workspace.open_database trial in
-      let recomputed =
-        (Database.For_testing.observe (fun () -> Database.propagate database)).recomputed
+      let database, observed =
+        Database.For_testing.observe (fun () ->
+            let database = Workspace.open_database trial in
+            Database.For_testing.propagate database;
+            database)
       in
+      let recomputed = observed.recomputed in
       expect_included recomputed ~parts:[ "checked body app::main::callee" ];
       expect_untouched recomputed ~names:[ "app::main::caller" ];
       expect_cold database trial;
@@ -959,13 +983,13 @@ let () =
       let root = project [ ("main/main", callee_and_caller) ] in
       let snapshot = open_workspace root in
       let worktree = Workspace.open_database snapshot in
-      Database.propagate worktree;
+      Database.For_testing.propagate worktree;
       let trial =
         Workspace.make_trial snapshot
           [ ("truss.toml", Some "[package]\nname = \"tool\"\ntruss = \"0.1\"\n") ]
       in
       let database = Workspace.open_database trial in
-      Database.propagate database;
+      Database.For_testing.propagate database;
       expect_cold database trial;
       expect_cold worktree snapshot;
       Workspace.flush ())
@@ -983,16 +1007,17 @@ let count_propagation hot ~before ~after =
   snd
     (Database.count (fun () ->
          Database.update hot (list_changes ~before ~after);
-         Database.propagate hot))
+         Database.For_testing.propagate hot))
 
 let count_cold_build files =
-  let database = Support.make_database (Support.setup files) in
-  snd (Database.count (fun () -> Database.propagate database))
+  snd
+    (Database.count (fun () ->
+         Database.For_testing.propagate (Support.make_database (Support.setup files))))
 
 let () =
   Harness.test "a propagation with no stale part counts no work" (fun () ->
       let database = build [ ("app::main", callee_and_caller) ] in
-      match snd (Database.count (fun () -> Database.propagate database)) with
+      match snd (Database.count (fun () -> Database.For_testing.propagate database)) with
       | [] -> ()
       | counts -> Harness.fail "counted %s" (String.concat "; " (List.map show_counts counts)));
   Harness.test
@@ -1044,7 +1069,7 @@ let () =
         Database.count (fun () ->
             let trial = Database.copy hot in
             Database.update trial (list_changes ~before ~after);
-            Database.propagate trial)
+            Database.For_testing.propagate trial)
       in
       let checked_bodies = extract_counts counts "checked body" in
       if checked_bodies.computed <> 1 then Harness.fail "counted %s" (show_counts checked_bodies))
@@ -1078,7 +1103,7 @@ let () =
       let _, counts =
         Database.count (fun () ->
             Database.relayout hot ~loaded:[ Lazy.force standard; newer ] app;
-            Database.propagate hot)
+            Database.For_testing.propagate hot)
       in
       let interfaces = extract_counts counts "interface" in
       if (interfaces.computed, interfaces.writes) <> (0, 1) then
@@ -1103,18 +1128,16 @@ let () =
          (List.find
             (fun (declaration : Resolve.Names.declaration) ->
               Path.show declaration.path = "app::main::callee")
-            ((Database.make_name_lookups database [ file.module_.package ]).list_declarations_in
-               file)))
+            ((Database.make_name_lookups database).list_declarations_in file)))
   in
   let propagate_with_failing_callee () =
     let database = build [ ("app::main", callee_and_caller) ] in
-    Database.update database
-      [
-        ( Support.parse_file "app::main",
-          Some "fn callee(x: Int64) -> Int64 { x + 2 }\nfn caller() -> Int64 { callee(1) }\n" );
-      ];
     Database.For_testing.with_failing_part "ownership app::main::callee" (fun () ->
-        Database.propagate ~on_bug:ignore database);
+        Database.update ~on_bug:ignore database
+          [
+            ( Support.parse_file "app::main",
+              Some "fn callee(x: Int64) -> Int64 { x + 2 }\nfn caller() -> Int64 { callee(1) }\n" );
+          ]);
     database
   in
   Harness.test "a read of a part whose computation raised a compiler bug raises that bug" (fun () ->
@@ -1123,21 +1146,13 @@ let () =
       | exception Compiler_bug.Bug bug when String.includes ~affix:"fails for a test" bug.message ->
           ()
       | exception Compiler_bug.Bug bug -> Harness.fail "raised %s" (Compiler_bug.to_string bug));
-  Harness.test "a part whose computation raised a compiler bug is computed at the next propagation"
+  Harness.test "a part whose computation raised a compiler bug is computed at the next input"
     (fun () ->
       let database = propagate_with_failing_callee () in
-      Database.propagate database;
+      Database.update database [];
       match read_callee_ownership database with
       | Value _ -> ()
       | Failed _ | Blocked -> Harness.fail "the part did not compute");
-  Harness.test "a request that reads a name whose namespace is stale is a compiler bug" (fun () ->
-      let database = build [ ("app::main", callee_and_caller) ] in
-      Database.update database
-        [ (Support.parse_file "app::main/extra", Some "fn extra() -> Int64 { 3 }\n") ];
-      let names = Database.make_name_lookups database [] in
-      match names.list_declarations (Support.parse_module "app::main") with
-      | _ -> Harness.fail "the stale namespace was read"
-      | exception Compiler_bug.Bug _ -> ());
   Harness.test "a request's reads are counted as untracked, and the request computes nothing"
     (fun () ->
       let database = build [ ("app::main", callee_and_caller) ] in

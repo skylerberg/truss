@@ -1,9 +1,4 @@
 let test = Harness.test
-
-let list_diagnostics database (file : Path.file) =
-  Database.check database [ file.module_.package ];
-  Database.list_file_diagnostics database file
-
 let fail = Harness.fail
 let expect_string = Harness.expect_string
 
@@ -222,11 +217,11 @@ let load_files ?results ?(roots = []) ?checks files =
   List.iter
     (fun ((file : Path.file), text) ->
       let source = Source.create ~path:(Path.show_file file) text in
-      match list_diagnostics database file with
+      match Database.list_file_diagnostics database file with
       | [] ->
           ignore
             (Core_lint.check_file
-               (Database.make_interface_lookups database [ file.module_.package ])
+               (Database.make_interface_lookups database)
                ~find_core:(fun key ->
                  Option.map
                    (fun (checked : Infer.checked) -> checked.form)
@@ -244,7 +239,7 @@ let list_tests_in database (module_ : Path.module_) =
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       match declaration.path with Test _ -> Some declaration.path | _ -> None)
-    ((Database.make_name_lookups database [ module_.package ]).list_declarations module_)
+    ((Database.make_name_lookups database).list_declarations module_)
 
 let list_tests database = list_tests_in database example
 
@@ -280,8 +275,7 @@ let drop_shapes =
     ("Counter", Record [ ("target", Raw (Pointer (Data int32))) ]);
   ]
 
-let standard_interface =
-  lazy (Database.make_interface_lookups (make_database []) [ Path.standard_package ])
+let standard_interface = lazy (Database.make_interface_lookups (make_database []))
 
 let standard_context : Monomorphic.context =
   {

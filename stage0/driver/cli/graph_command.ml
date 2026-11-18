@@ -24,7 +24,7 @@ let matches (argument : Path_argument.t) (path : Path.t) =
 
 let list_definitions snapshot database argument =
   let packages = List.map snd (Workspace.list_packages snapshot) in
-  let names = Database.make_name_lookups database packages in
+  let names = Database.make_name_lookups database in
   List.sort_uniq Path.compare
     (List.concat_map
        (fun package ->
@@ -111,6 +111,11 @@ let run ~direction ~name =
   match list_definitions snapshot database argument with
   | [] -> Outcome.raise_cannot_run "No definition named %s in this worktree." name
   | targets ->
+      ignore
+        (Database.prove database
+           (List.concat_map
+              (Workspace.list_package_files snapshot)
+              (List.map snd (Workspace.list_packages snapshot))));
       let lines =
         list_lines
           (match direction with

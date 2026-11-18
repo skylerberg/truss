@@ -1,5 +1,5 @@
 let check_file database file =
-  match Support.list_diagnostics database file with
+  match Database.list_file_diagnostics database file with
   | [] -> Support.list_proof_diagnostics database file
   | errors -> errors
 
@@ -225,7 +225,7 @@ let () =
       in
       let main = Support.parse_file "app::main" in
       (match
-         Support.list_codes (Support.list_diagnostics (Support.make_database packages) main)
+         Support.list_codes (Database.list_file_diagnostics (Support.make_database packages) main)
        with
       | [] -> ()
       | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
@@ -262,7 +262,7 @@ let () =
       in
       let main = Support.parse_file "app::main" in
       (match
-         Support.list_codes (Support.list_diagnostics (Support.make_database packages) main)
+         Support.list_codes (Database.list_file_diagnostics (Support.make_database packages) main)
        with
       | [] -> ()
       | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
@@ -364,11 +364,11 @@ let () =
       let main = Support.parse_file "app::main" in
       (match
          Support.list_codes
-           (Support.list_diagnostics database (Support.parse_file "app::main/measured"))
+           (Database.list_file_diagnostics database (Support.parse_file "app::main/measured"))
        with
       | [ "resolve.unknown_name" ] -> ()
       | codes -> Harness.fail "the trait reports %s" (String.concat ", " codes));
-      (match Support.list_codes (Support.list_diagnostics database main) with
+      (match Support.list_codes (Database.list_file_diagnostics database main) with
       | [] -> ()
       | codes -> Harness.fail "a caller does not check: %s" (String.concat ", " codes));
       (match Support.list_codes (Support.list_proof_diagnostics database main) with
@@ -384,7 +384,7 @@ let () =
           | Some (Failed _ | Blocked) ->
               Harness.fail "the proof of %s is blocked" (Path.show declaration.path)
           | None -> Harness.fail "%s has no proof" (Path.show declaration.path))
-        ((Support.make_names packages main.module_.package).list_declarations_in main))
+        ((Support.make_names packages).list_declarations_in main))
 
 let tree = Fixtures.Prover.tree
 

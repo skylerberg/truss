@@ -1012,14 +1012,13 @@ let count_disjoint_obligations text =
   let packages = Support.setup [ ("app::main", text) ] in
   let file = Support.parse_file "app::main" in
   let database = Support.make_database packages in
-  Database.check database [ file.module_.package ];
   List.fold_left
     (fun total declaration ->
       match Database.For_testing.read_ownership database (Resolve.Names.make_key declaration) with
       | Value must_be_disjoint -> total + List.length must_be_disjoint
       | Failed _ | Blocked -> total)
     0
-    ((Support.make_names packages file.module_.package).list_declarations_in file)
+    ((Support.make_names packages).list_declarations_in file)
 
 let () =
   Harness.test "two slices of one list passed to one call produce one `Disjoint` obligation"
