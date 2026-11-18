@@ -1,0 +1,11 @@
+(executable
+ (name prover_queries)
+ (libraries
+  unix
+  path
+  source
+  diagnostic
+  standard_library
+  database
+  workspace
+  prover))

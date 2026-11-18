@@ -418,6 +418,15 @@ type 'span state = {
 
 type verdict = (Source.Definition_span.t state * (Resolve.Names.key * Core.origin) option) list
 
+let explain_unknown = function
+  | Solver.Out_of_steps ->
+      " The solver reached its step limit before it found a proof or a counterexample."
+  | Incomplete reason ->
+      Printf.sprintf
+        " The solver's decision procedures are incomplete for this query, so it stopped without a \
+         proof or a counterexample. Z3 gives the reason `%s`."
+        reason
+
 let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof answers =
   let resolve location = resolve_location lookups.interface.names key location in
   match proof with
@@ -469,10 +478,11 @@ let list_definition_states (lookups : Lookups.t) (key : Resolve.Names.key) proof
                 | Solved (Counterexample values) ->
                     find_failure
                       (show_counterexample (Logic.list_members obligation.query) obligation values)
-                | Solved Unknown ->
+                | Solved (Unknown unknown) ->
                     find_failure
-                      (" The solver found neither a proof nor a counterexample. If the code is \
-                        correct, a `proof` block or a theorem can lead the solver to the proof."
+                      (explain_unknown unknown
+                     ^ " If the code is correct, a `proof` block or a theorem can lead the solver \
+                        to the proof."
                       ^
                       if Logic.has_untriggered_fact obligation.query then
                         " A quantified fact in the query has no trigger, so an `assert` of that \
@@ -614,3 +624,28 @@ let list_diagnostics verdicts file =
       |> snd)
     (list_file_states verdicts file)
   |> sort_diagnostics
+
+type query = { code : Diagnostic.Code.prover; span : Source.span; shows : string; input : string }
+
+let list_queries (lookups : Lookups.t) proofs file =
+  let proofs = Key_table.of_seq (List.to_seq proofs) in
+  List.concat_map
+    (fun declaration ->
+      let key = Resolve.Names.make_key declaration in
+      match Key_table.find_opt proofs key with
+      | Some (Obligations outcome) ->
+          let ({ base; _ } : Resolve.Names.place) = lookups.interface.names.read_place key in
+          List.map
+            (fun (obligation : State.obligation) ->
+              {
+                code = obligation.code;
+                span =
+                  Source.Definition_span.to_file ~base
+                    (resolve_location lookups.interface.names key obligation.location);
+                shows = render lookups obligation.message;
+                input = Solver.show_input (make_request obligation);
+              })
+            outcome.obligations
+      | Some (Unsupported _ | Not_proven_here) | None -> [])
+    (lookups.interface.names.list_declarations_in file)
+  |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
