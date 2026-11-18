@@ -752,8 +752,9 @@ let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
           else None)
         (list_named_constants lookups value)
 
-let must_be_used (declaration : Resolve.Names.declaration) =
+let must_be_used (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
   declaration.visibility = Internal && declaration.ordinal = 0
+  && Option.is_none (lookups.interface.names.find_container (Resolve.Names.make_key declaration))
   && Option.is_none (Well_known.of_path declaration.path)
   && (not (Well_known.is_runtime_constructor declaration.path))
   &&
@@ -839,7 +840,8 @@ let check_internals (lookups : Lookups.t) package =
   let named_by_another = Path_table.create 64 in
   List.iter
     (fun ((declaration : Resolve.Names.declaration), paths) ->
-      if must_be_used declaration then Path_table.replace uses_of_internal declaration.path paths;
+      if must_be_used lookups declaration then
+        Path_table.replace uses_of_internal declaration.path paths;
       List.iter
         (fun path ->
           if not (Path.equal path declaration.path) then Path_table.replace named_by_another path ())
@@ -855,10 +857,12 @@ let check_internals (lookups : Lookups.t) package =
         end)
       paths
   in
-  List.iter (fun (declaration, paths) -> if not (must_be_used declaration) then reach paths) uses;
+  List.iter
+    (fun (declaration, paths) -> if not (must_be_used lookups declaration) then reach paths)
+    uses;
   List.filter_map
     (fun ((declaration : Resolve.Names.declaration), _) ->
-      if must_be_used declaration && not (Path_table.mem reached declaration.path) then
+      if must_be_used lookups declaration && not (Path_table.mem reached declaration.path) then
         Some
           (report_unused lookups declaration
              ~is_named:(Path_table.mem named_by_another declaration.path))

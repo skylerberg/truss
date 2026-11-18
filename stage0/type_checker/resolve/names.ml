@@ -470,6 +470,32 @@ let resolve_header lookups ~file ~imports ~spell (trait_ : Syntax.path_type)
       ~self:for_type trait_,
     for_type )
 
+let restrict_visibility (left : Syntax.visibility) (right : Syntax.visibility) : Syntax.visibility =
+  match (left, right) with
+  | Private, _ | _, Private -> Private
+  | Internal, _ | _, Internal -> Internal
+  | (Public | Public_opaque), (Public | Public_opaque) -> Public
+
+let rec list_reference_paths (reference : Path.reference) =
+  reference.path :: List.concat_map list_argument_paths reference.arguments
+
+and list_argument_paths : Path.argument -> Path.t list = function
+  | Named reference | Any reference -> list_reference_paths reference
+  | Constant path -> [ path ]
+  | Parameter _ | Count _ -> []
+
+let derive_impl_visibility lookups (trait : Path.reference) for_type =
+  List.fold_left
+    (fun visibility (path : Path.t) ->
+      match path with
+      | Top { module_; name } -> (
+          match lookups.find module_ name with
+          | Some entry -> restrict_visibility visibility entry.visibility
+          | None -> visibility)
+      | _ -> visibility)
+    Public
+    (for_type :: list_reference_paths trait)
+
 type written = {
   declaration : declaration;
   file : Path.file;
@@ -492,11 +518,11 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
     in
     resolve_header lookups ~file ~imports ~spell
   in
-  let make_written index ?container (item : Syntax.definition Syntax.item) path kind generic =
+  let make_written index ?container ~visibility (item : Syntax.definition Syntax.item) path kind
+      generic =
     Some
       {
-        declaration =
-          { module_; path; ordinal = 0; kind; visibility = item.value.visibility; generic };
+        declaration = { module_; path; ordinal = 0; kind; visibility; generic };
         file;
         index;
         container;
@@ -504,9 +530,10 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
         text = String.sub text item.base (item.stop - item.base);
       }
   in
-  let declare_method index ~container ~owner:(owner, is_capability)
+  let declare_method index ~container ~(owner : declaration) ~is_capability
       (item : Syntax.definition Syntax.item) =
-    let declare = make_written index ~container item in
+    let declare = make_written index ~container ~visibility:owner.visibility item in
+    let owner = owner.path in
     match item.value.kind with
     | Function { signature; _ } | Method_declaration signature ->
         let name = (extract_signature_name signature).text in
@@ -519,7 +546,7 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
     | _ -> None
   in
   let declare_top_level index (item : Syntax.definition Syntax.item) =
-    let declare = make_written index item in
+    let declare = make_written index ~visibility:item.value.visibility item in
     match item.value.kind with
     | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
         declare (make_top_path module_ name.text) Function (generics <> [])
@@ -546,7 +573,11 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
         declare (make_top_path module_ name.text) Theorem (generics <> [])
     | Impl { trait_; type_; _ } ->
         let trait, for_type = resolve_local_header item trait_ type_ in
-        declare (Impl { module_; trait; for_type }) Impl (type_.generics <> [])
+        make_written index
+          ~visibility:(derive_impl_visibility lookups trait for_type)
+          item
+          (Impl { module_; trait; for_type })
+          Impl (type_.generics <> [])
     | Test { name; _ } ->
         let text =
           name.first.value
@@ -574,16 +605,18 @@ let list_file_declarations lookups (file : Path.file) ~imports ~text
         let container = declare_top_level index top_level.definition in
         let owner =
           match (top_level.definition.value.kind, container) with
-          | (Trait _ | Impl _), Some container -> Some (container.declaration.path, false)
-          | Capability _, Some container -> Some (container.declaration.path, true)
+          | (Trait _ | Impl _), Some container -> Some (container.declaration, false)
+          | Capability _, Some container -> Some (container.declaration, true)
           | _ -> None
         in
         let methods =
           match owner with
-          | Some owner ->
+          | Some (owner, is_capability) ->
               List.mapi
                 (fun offset method_item ->
-                  declare_method (index + 1 + offset) ~container:index ~owner method_item)
+                  declare_method
+                    (index + 1 + offset)
+                    ~container:index ~owner ~is_capability method_item)
                 top_level.methods
           | None -> []
         in
