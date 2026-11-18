@@ -10,10 +10,10 @@ let parse text =
     && List.exists
          (fun (top_level : Syntax.top_level) ->
            List.exists
-             (fun (item : Syntax.definition Syntax.item) -> item.positions.recovered <> [])
+             (fun (item : Syntax.definition Syntax.item) -> item.positions.syntax_errors <> [])
              (top_level.definition :: top_level.methods))
          file.definitions
-  then Harness.fail "the parser recovered in %S with no error" text;
+  then Harness.fail "a syntax error in %S has no diagnostic" text;
   (file, diagnostics)
 
 let list_items (file : Syntax.file) =

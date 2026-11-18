@@ -544,7 +544,7 @@ let add_recording (names : Resolve.Names.lookups) (note : Part.t -> unit) : Reso
     read_definition = (fun key -> note_name_read (Tree key) (names.read_definition key));
     read_text = (fun key -> note_name_read (Text key) (names.read_text key));
     read_spans = (fun key -> note_name_read (Tree key) (names.read_spans key));
-    list_recovered = (fun key -> note_name_read (Tree key) (names.list_recovered key));
+    list_syntax_errors = (fun key -> note_name_read (Tree key) (names.list_syntax_errors key));
     read_place = (fun key -> note_name_read (Place key) (names.read_place key));
     find_container = (fun key -> note_name_read (Container key) (names.find_container key));
     list_contained = (fun key -> note_name_read (Contained key) (names.list_contained key));

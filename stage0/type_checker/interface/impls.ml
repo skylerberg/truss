@@ -513,7 +513,7 @@ and normalize_in_impl lookups ~list_bounds (impl : Types.impl_interface) type_ =
           if Path.equal projected.trait impl.implements.trait then
             match List.assoc_opt name impl.implements.associated with
             | Some chosen -> Some chosen
-            | None -> Some (Types.Error (Diagnostic.make_recovered name))
+            | None -> Some (Types.Error Diagnostic.reported_elsewhere)
           else
             project_associated_type lookups
               ~list_bounds:(list_impl_bounds impl ~list_bounds)

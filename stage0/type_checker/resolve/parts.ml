@@ -36,19 +36,20 @@ let list_part_spans (spans : Source.Definition_span.t array) (definition : Synta
   | Impl { members; _ } -> with_members members (fun (_ : Syntax.impl_member) -> None)
   | Capability { members; _ } -> with_members members (fun (_ : Syntax.capability_member) -> None)
 
-let lies_in all (recovered : Source.Definition_span.t) (part_span : Source.Definition_span.t) =
-  if recovered.start < recovered.stop then
-    recovered.start < part_span.stop && part_span.start < recovered.stop
+let lies_in all (syntax_error : Source.Definition_span.t) (part_span : Source.Definition_span.t) =
+  if syntax_error.start < syntax_error.stop then
+    syntax_error.start < part_span.stop && part_span.start < syntax_error.stop
   else
-    let position = recovered.start in
+    let position = syntax_error.start in
     if List.exists (fun (_, (span : Source.Definition_span.t)) -> span.start = position) all then
       part_span.start = position
     else part_span.start <= position && position < part_span.stop
 
-let find_recovered_report ~spans ~recovered definition part =
+let find_syntax_error ~spans ~syntax_errors definition part =
   let all = list_part_spans spans definition in
   match List.assoc_opt part all with
   | None -> None
   | Some span ->
-      Option.map Diagnostic.make_recovered
-        (List.find_opt (fun recovered -> lies_in all recovered span) recovered)
+      if List.exists (fun syntax_error -> lies_in all syntax_error span) syntax_errors then
+        Some Diagnostic.reported_elsewhere
+      else None
