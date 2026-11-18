@@ -97,7 +97,7 @@ type builder = {
 
 let raise_bug message = Compiler_bug.raise_bug ~stage:"Ownership" message
 let emit builder action origin = builder.written <- { action; origin } :: builder.written
-let lookup_local_info builder local = builder.body.locals.(local)
+let lookup_local_info (builder : builder) local = builder.body.locals.(local)
 
 let find_core_local builder (local : Mir.local) =
   match (lookup_local_info builder local).kind with
