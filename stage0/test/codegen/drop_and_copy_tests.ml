@@ -18,17 +18,10 @@ let fill_storage ~target ~buffer values =
   @ [
       Assign
         ( Codegen_support.at target,
-          Build
-            {
-              ty = make_storage_type Codegen_support.int32;
-              variant = None;
-              fields =
-                [
-                  ("buffer", Codegen_support.copy buffer);
-                  ("length", uint64_constant count);
-                  ("capacity", uint64_constant count);
-                ];
-            } );
+          Storage.build_storage
+            (make_storage_type Codegen_support.int32)
+            ~buffer:(Codegen_support.copy buffer) ~length:(uint64_constant count)
+            ~capacity:(uint64_constant count) );
     ]
 
 let copy_call drop_and_copy ty ~destination ~source =
@@ -114,7 +107,7 @@ let () =
                         Use (Codegen_support.constant_int32 99) );
                     Assign
                       ( Codegen_support.at 3,
-                        Use (Codegen_support.copy ~projections:[ Field "buffer" ] 2) );
+                        Use (Codegen_support.copy ~projections:[ Field Storage.buffer_field ] 2) );
                     Drop (Codegen_support.at 0);
                   ])
                 (Return
@@ -134,20 +127,7 @@ let () =
             [
               Codegen_support.block
                 [
-                  Assign
-                    ( Codegen_support.at 0,
-                      Build
-                        {
-                          ty;
-                          variant = None;
-                          fields =
-                            [
-                              ("buffer", Constant (Bytes ""));
-                              ("length", Constant (Integer (UInt64, Z.zero)));
-                              ("capacity", Constant (Integer (UInt64, Z.zero)));
-                            ];
-                        } );
-                  Drop (Codegen_support.at 0);
+                  Assign (Codegen_support.at 0, Storage.build_empty ty); Drop (Codegen_support.at 0);
                 ]
                 (Return (Some (Codegen_support.constant_int32 0)));
             ];
@@ -195,27 +175,18 @@ let () =
                         Use (Move (Codegen_support.at 2)) );
                     Assign
                       ( Codegen_support.at 5,
-                        Build
-                          {
-                            ty = outer;
-                            variant = None;
-                            fields =
-                              [
-                                ("buffer", Codegen_support.copy 4);
-                                ("length", uint64_constant 2);
-                                ("capacity", uint64_constant 2);
-                              ];
-                          } );
+                        Storage.build_storage outer ~buffer:(Codegen_support.copy 4)
+                          ~length:(uint64_constant 2) ~capacity:(uint64_constant 2) );
                     copy_call drop_and_copy outer ~destination:6 ~source:5;
                     Drop (Codegen_support.at 5);
                     Assign
                       ( Codegen_support.at 7,
-                        Use (Codegen_support.copy ~projections:[ Field "buffer" ] 6) );
+                        Use (Codegen_support.copy ~projections:[ Field Storage.buffer_field ] 6) );
                     Assign
                       ( Codegen_support.at 8,
                         Use
                           (Codegen_support.copy
-                             ~projections:[ Index (uint64_constant 1); Field "buffer" ]
+                             ~projections:[ Index (uint64_constant 1); Field Storage.buffer_field ]
                              7) );
                     Assign
                       ( Codegen_support.at 9,

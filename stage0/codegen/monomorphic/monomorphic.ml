@@ -69,7 +69,6 @@ and ground_function context substitution (function_type : Types.function_type) :
     uses = list_capabilities context Types.no_substitution function_type.uses;
   }
 
-let uint64 = Ground.make_builtin UInt64
 let convert_mode : Ground.mode -> Types.mode = function Read -> Read | Mut -> Mut | Own -> Own
 
 let rec convert_ty : Ground.ty -> Types.ty = function
@@ -158,8 +157,8 @@ let compute_shape context (ty : Ground.ty) : Memory_layout.shape =
       | Some Unit, [] -> Record []
       | Some Never, [] -> Sum []
       | Some Array, [ Type element; Value count ] -> Array (element, Z.to_int count)
-      | Some Storage, [ Type element ] -> Storage.make_storage_shape ~uint64 element
-      | Some View, [ Type element ] -> Storage.make_view_shape ~uint64 element
+      | Some Storage, [ Type element ] -> Storage.make_storage_shape element
+      | Some View, [ Type element ] -> Storage.make_view_shape element
       | Some Handle, [] -> Record [ ("descriptor", Raw (Integer Int32)) ]
       | Some Shared, [ Type _ ] -> Record [ ("value", Raw (Pointer Opaque)) ]
       | Some Integer, _ -> raise_bug "Integer exists only in specifications"

@@ -536,16 +536,16 @@ let () =
     Interface.Impls.is_plain;
   expect_property "a List is Copyable" true "" (fun _ -> list int64) Interface.Impls.is_copyable;
   expect_property "a handle is not Copyable" false ""
-    (fun _ -> Types.make_named (Intrinsic.make_builtin_path Handle) [])
+    (fun _ -> Types.make_builtin Handle)
     Interface.Impls.is_copyable;
   expect_property "a handle is not Plain" false ""
-    (fun _ -> Types.make_named (Intrinsic.make_builtin_path Handle) [])
+    (fun _ -> Types.make_builtin Handle)
     Interface.Impls.is_plain;
   expect_property "an Option of a handle is not Copyable" false ""
-    (fun _ -> option (Types.make_named (Intrinsic.make_builtin_path Handle) []))
+    (fun _ -> option (Types.make_builtin Handle))
     Interface.Impls.is_copyable;
   expect_property "an Option of a handle is not Plain" false ""
-    (fun _ -> option (Types.make_named (Intrinsic.make_builtin_path Handle) []))
+    (fun _ -> option (Types.make_builtin Handle))
     Interface.Impls.is_plain;
   expect_property "a List is not Plain" false "" (fun _ -> list int64) Interface.Impls.is_plain;
   expect_property "an Option of a Slice is a view" true ""

@@ -126,17 +126,13 @@ let declare_libc_number context frame (number : Libc.number) =
   term
 
 let make_buffer_capacity context element term =
-  let ty =
-    Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
-  in
+  let ty = Types.make_builtin Storage ~arguments:[ Type element ] in
   let symbol = Logic.Symbol.Capacity ty in
   Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
 let make_buffer_model context (builtin : Intrinsic.builtin) element term =
-  let ty =
-    Types.Named { path = Intrinsic.make_builtin_path builtin; arguments = [ Types.Type element ] }
-  in
+  let ty = Types.make_builtin builtin ~arguments:[ Type element ] in
   let symbol = Logic.Symbol.Model ty in
   Facts.declare context
     (Logic.Function
@@ -796,9 +792,7 @@ let replace_element context frame element ~before ~after index part =
            ==> equal (at after (Symbol limit)) (at before (Symbol limit))) ))
 
 let update_storage context frame element storage index part =
-  let storage_type =
-    Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
-  in
+  let storage_type = Types.make_builtin Storage ~arguments:[ Type element ] in
   let updated = Facts.arrive context frame "changed" storage_type in
   replace_element context frame element
     ~before:(make_buffer_model context Storage element storage)

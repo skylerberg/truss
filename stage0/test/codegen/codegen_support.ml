@@ -59,23 +59,11 @@ let compute_shape extra (ty : Ground.ty) : Memory_layout.shape =
   | Never -> Sum []
   | Named { path = Top { name = "Option"; _ }; arguments = [ Type value ] } ->
       Sum [ variant "Some" [ field "value" value ]; variant "None" [] ]
-  | Named { path = Top { name = "List"; _ }; arguments = [ Type element ] } ->
-      Record
-        [
-          ("buffer", Raw (Pointer (Data element)));
-          field "length" (named "UInt64");
-          field "capacity" (named "UInt64");
-        ]
+  | Named { path = Top { name = "List" | "Storage"; _ }; arguments = [ Type element ] } ->
+      Storage.make_storage_shape element
   | Named { path = Top { name = "Array"; _ }; arguments = [ Type element; Value count ] } ->
       Array (element, Z.to_int count)
   | Named { path = Top { name = "Int32"; _ }; _ } -> Scalar (Integer Int32)
-  | Named { path = Top { name = "Storage"; _ }; arguments = [ Type element ] } ->
-      Record
-        [
-          ("buffer", Raw (Pointer (Data element)));
-          ("length", Typed (named "UInt64"));
-          ("capacity", Typed (named "UInt64"));
-        ]
   | Function function_type -> Convention.make_function_value_shape function_type
   | _ -> (
       match List.assoc_opt (Ground.to_string ty) extra with
