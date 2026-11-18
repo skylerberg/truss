@@ -70,11 +70,6 @@ let allocate_box context builder ty =
        });
   box
 
-let emit_condition builder rvalue =
-  let flag = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-  Emit_c.Ir_builder.emit builder (Assign (Lowered.make_local_place flag, rvalue));
-  Lowered.Copy (Lowered.make_local_place flag)
-
 let drop context ty =
   let builder = Emit_c.Ir_builder.create context.env ~item:(Drop ty) in
   let pointer =
@@ -124,7 +119,7 @@ let drop context ty =
              result = Returned (Lowered.make_local_place is_last);
            });
       Emit_c.Ir_builder.emit_when builder
-        (Copy (Lowered.make_local_place is_last))
+        (Use (Copy (Lowered.make_local_place is_last)))
         (fun () ->
           if not (is_trivial context inner) then begin
             let typed =
@@ -154,9 +149,7 @@ let drop context ty =
           (fun index ->
             Emit_c.Ir_builder.emit builder
               (Drop (Storage.index_element value (Copy (Lowered.make_local_place index)))));
-      Emit_c.Ir_builder.emit_when builder
-        (emit_condition builder (Storage.build_is_allocated value))
-        (fun () ->
+      Emit_c.Ir_builder.emit_when builder (Storage.build_is_allocated value) (fun () ->
           Emit_c.Ir_builder.emit builder
             (Call
                {
@@ -336,77 +329,52 @@ let copy context ty =
       Emit_c.Ir_builder.emit builder (Assign (result, Use (Copy self)))
   | Storage element ->
       let layout = Memory_layout.of_type context.env element in
-      let unallocated = Emit_c.Ir_builder.allocate_block builder
-      and allocate = Emit_c.Ir_builder.allocate_block builder
-      and after = Emit_c.Ir_builder.allocate_block builder in
-      Emit_c.Ir_builder.branch builder
-        (emit_condition builder (Storage.build_is_allocated self))
-        ~yes:allocate ~no:unallocated;
-      Emit_c.Ir_builder.start builder unallocated;
-      Emit_c.Ir_builder.emit builder (Assign (result, Storage.build_empty ty));
-      Emit_c.Ir_builder.finish builder (Goto after);
-      Emit_c.Ir_builder.start builder allocate;
-      let bytes = Emit_c.Ir_builder.allocate_local builder (Raw (Integer UInt64)) in
-      let buffer = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer (Data element))) in
-      Emit_c.Ir_builder.emit builder
-        (Assign
-           ( Lowered.make_local_place bytes,
-             Binary
-               ( Multiply,
-                 Copy (Storage.project_capacity self),
-                 Lowered.make_uint64_constant layout.size ) ));
-      Emit_c.Ir_builder.emit builder
-        (Call
-           {
-             target = Intrinsic Allocate;
-             arguments =
-               [
-                 Copy (Lowered.make_local_place bytes);
-                 Lowered.make_uint64_constant layout.alignment;
-               ];
-             result = Returned (Lowered.make_local_place buffer);
-           });
-      if is_trivial context element then begin
-        let used = Emit_c.Ir_builder.allocate_local builder (Raw (Integer UInt64)) in
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place used,
-               Binary
-                 ( Multiply,
-                   Copy (Storage.project_length self),
-                   Lowered.make_uint64_constant layout.size ) ));
-        Emit_c.Ir_builder.emit builder
-          (Call
-             {
-               target = Intrinsic Copy_bytes;
-               arguments =
-                 [
-                   Copy (Lowered.make_local_place buffer);
-                   Copy (Storage.project_buffer self);
-                   Copy (Lowered.make_local_place used);
-                 ];
-               result = Discarded;
-             })
-      end
-      else
-        Emit_c.Ir_builder.emit_loop builder
-          ~count:(Copy (Storage.project_length self))
-          (fun index ->
-            copy_into context builder
-              ~destination:
-                (Lowered.project (Lowered.make_local_place buffer)
-                   (Index (Copy (Lowered.make_local_place index))))
-              ~source:(Storage.index_element self (Copy (Lowered.make_local_place index)))
-              element);
-      Emit_c.Ir_builder.emit builder
-        (Assign
-           ( result,
-             Storage.build_storage ty
-               ~buffer:(Copy (Lowered.make_local_place buffer))
-               ~length:(Copy (Storage.project_length self))
-               ~capacity:(Copy (Storage.project_capacity self)) ));
-      Emit_c.Ir_builder.finish builder (Goto after);
-      Emit_c.Ir_builder.start builder after
+      let multiply_by_size count =
+        Emit_c.Ir_builder.emit_temporary builder (Raw (Integer UInt64))
+          (Binary (Multiply, count, Lowered.make_uint64_constant layout.size))
+      in
+      Emit_c.Ir_builder.emit_if builder (Storage.build_is_allocated self)
+        ~yes:(fun () ->
+          let bytes = multiply_by_size (Copy (Storage.project_capacity self)) in
+          let buffer = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer (Data element))) in
+          Emit_c.Ir_builder.emit builder
+            (Call
+               {
+                 target = Intrinsic Allocate;
+                 arguments = [ bytes; Lowered.make_uint64_constant layout.alignment ];
+                 result = Returned (Lowered.make_local_place buffer);
+               });
+          if is_trivial context element then
+            Emit_c.Ir_builder.emit builder
+              (Call
+                 {
+                   target = Intrinsic Copy_bytes;
+                   arguments =
+                     [
+                       Copy (Lowered.make_local_place buffer);
+                       Copy (Storage.project_buffer self);
+                       multiply_by_size (Copy (Storage.project_length self));
+                     ];
+                   result = Discarded;
+                 })
+          else
+            Emit_c.Ir_builder.emit_loop builder
+              ~count:(Copy (Storage.project_length self))
+              (fun index ->
+                copy_into context builder
+                  ~destination:
+                    (Lowered.project (Lowered.make_local_place buffer)
+                       (Index (Copy (Lowered.make_local_place index))))
+                  ~source:(Storage.index_element self (Copy (Lowered.make_local_place index)))
+                  element);
+          Emit_c.Ir_builder.emit builder
+            (Assign
+               ( result,
+                 Storage.build_storage ty
+                   ~buffer:(Copy (Lowered.make_local_place buffer))
+                   ~length:(Copy (Storage.project_length self))
+                   ~capacity:(Copy (Storage.project_capacity self)) )))
+        ~no:(fun () -> Emit_c.Ir_builder.emit builder (Assign (result, Storage.build_empty ty)))
   | Shape (Record fields) ->
       let fields =
         List.map

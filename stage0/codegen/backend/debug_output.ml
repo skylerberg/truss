@@ -74,15 +74,8 @@ let build_debug env ty =
   let rec write_list element ~index_element ~count =
     write_output_text "[";
     Emit_c.Ir_builder.emit_loop builder ~count (fun index ->
-        let is_after_first = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place is_after_first,
-               Binary
-                 (Not_equal, Copy (Lowered.make_local_place index), Lowered.make_uint64_constant 0)
-             ));
         Emit_c.Ir_builder.emit_when builder
-          (Copy (Lowered.make_local_place is_after_first))
+          (Binary (Not_equal, Copy (Lowered.make_local_place index), Lowered.make_uint64_constant 0))
           (fun () -> write_output_text ", ");
         emit_output_call element (index_element (Lowered.Copy (Lowered.make_local_place index))));
     write_output_text "]"
@@ -138,10 +131,9 @@ let build_debug env ty =
       | _, Scalar scalar -> write_scalar_debug env builder ~output scalar value
       | Named { path; _ }, Record [] ->
           write_output_text
-            (if Ground.show_path_name path = "Unit" then "Unit"
-             else Ground.show_path_name path ^ "()")
+            (if Path.show_name path = "Unit" then "Unit" else Path.show_name path ^ "()")
       | Named { path; _ }, Record fields ->
-          write_fields (Ground.show_path_name path) fields (fun field ->
+          write_fields (Path.show_name path) fields (fun field ->
               Lowered.project value (Field field))
       | _, Record _ -> raise_bug "%s has the shape of a record and no name" (Ground.to_string ty)
       | _, Array (element, count) ->

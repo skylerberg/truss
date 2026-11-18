@@ -105,8 +105,43 @@ let run_in_block builder block body =
   body ();
   builder.current <- current
 
-let branch builder value ~yes ~no =
-  finish builder (Switch { value; cases = [ (Z.one, yes) ]; default = no })
+let emit_temporary builder ty (rvalue : Lowered.rvalue) : Lowered.operand =
+  let temporary = allocate_local builder ty in
+  emit builder (Assign (Lowered.make_local_place temporary, rvalue));
+  Copy (Lowered.make_local_place temporary)
+
+let is_unsigned_zero : Lowered.operand -> bool = function
+  | Constant (Integer ((UInt8 | UInt16 | UInt32 | UInt64), zero)) -> Z.sign zero = 0
+  | _ -> false
+
+let find_constant_truth : Lowered.rvalue -> bool option = function
+  | Use (Constant (Bool truth)) -> Some truth
+  | Binary (op, Constant (Integer (_, left)), Constant (Integer (_, right))) -> (
+      match op with
+      | Greater -> Some (Z.gt left right)
+      | Greater_equal -> Some (Z.geq left right)
+      | Less -> Some (Z.lt left right)
+      | Less_equal -> Some (Z.leq left right)
+      | Equal -> Some (Z.equal left right)
+      | Not_equal -> Some (not (Z.equal left right))
+      | _ -> None)
+  | Binary (Greater, zero, _) when is_unsigned_zero zero -> Some false
+  | Binary (Less, _, zero) when is_unsigned_zero zero -> Some false
+  | Binary (Greater_equal, _, zero) when is_unsigned_zero zero -> Some true
+  | Binary (Less_equal, zero, _) when is_unsigned_zero zero -> Some true
+  | _ -> None
+
+let branch builder condition ~yes ~no =
+  match find_constant_truth condition with
+  | Some true -> finish builder (Goto yes)
+  | Some false -> finish builder (Goto no)
+  | None ->
+      let value =
+        match condition with
+        | Use operand -> operand
+        | _ -> emit_temporary builder (Raw Bool) condition
+      in
+      finish builder (Switch { value; cases = [ (Z.one, yes) ]; default = no })
 
 let emit_when builder condition then_ =
   let inside = allocate_block builder in
@@ -117,20 +152,29 @@ let emit_when builder condition then_ =
   finish builder (Goto after);
   start builder after
 
+let emit_if builder condition ~yes ~no =
+  let when_true = allocate_block builder
+  and when_false = allocate_block builder
+  and after = allocate_block builder in
+  branch builder condition ~yes:when_true ~no:when_false;
+  start builder when_true;
+  yes ();
+  finish builder (Goto after);
+  start builder when_false;
+  no ();
+  finish builder (Goto after);
+  start builder after
+
 let emit_loop builder ?(integer = Memory_layout.UInt64) ~count body =
   let make_constant number = Lowered.Constant (Integer (integer, Z.of_int number)) in
   let index = allocate_local builder (Raw (Integer integer)) in
-  let going = allocate_local builder (Raw Bool) in
   let test = allocate_block builder in
   let inside = allocate_block builder in
   let after = allocate_block builder in
   emit builder (Assign (Lowered.make_local_place index, Use (make_constant 0)));
   finish builder (Goto test);
   start builder test;
-  emit builder
-    (Assign
-       (Lowered.make_local_place going, Binary (Less, Copy (Lowered.make_local_place index), count)));
-  branch builder (Copy (Lowered.make_local_place going)) ~yes:inside ~no:after;
+  branch builder (Binary (Less, Copy (Lowered.make_local_place index), count)) ~yes:inside ~no:after;
   start builder inside;
   body index;
   emit builder

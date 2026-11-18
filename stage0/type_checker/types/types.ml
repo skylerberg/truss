@@ -384,24 +384,22 @@ let costs_imply ~(provided : cost list) ~(required : cost list) =
         provided)
     required
 
-let show_path_name = function Path.Top { name; _ } -> name | path -> Path.show path
-
 let show_resource = function
   | Metric metric -> Metric.show metric
   | Calls { capability; method_ } ->
-      Printf.sprintf "calls(%s%s)" (show_path_name capability)
+      Printf.sprintf "calls(%s%s)" (Path.show_name capability)
         (match method_ with Some method_ -> "." ^ method_ | None -> "")
 
 let rec show_capability = function
-  | Capability path -> show_path_name path
+  | Capability path -> Path.show_name path
   | Capability_parameter { name; _ } -> "generic " ^ name
   | Capability_projection { base; name; _ } -> show base ^ "." ^ name
   | Capability_variable _ | Capability_error _ -> "_"
 
 and show = function
-  | Named { path; arguments = [] } -> show_path_name path
+  | Named { path; arguments = [] } -> Path.show_name path
   | Named { path; arguments } ->
-      Printf.sprintf "%s[%s]" (show_path_name path)
+      Printf.sprintf "%s[%s]" (Path.show_name path)
         (String.concat ", " (List.map show_argument arguments))
   | Parameter { name; _ } -> name
   | Projection { base; name; _ } -> show base ^ "." ^ name
@@ -430,8 +428,8 @@ and show_trait trait =
   let arguments = List.map show_argument trait.trait_arguments in
   let associated = List.map (fun (name, type_) -> name ^ " = " ^ show type_) trait.associated in
   match arguments @ associated with
-  | [] -> show_path_name trait.trait
-  | all -> Printf.sprintf "%s[%s]" (show_path_name trait.trait) (String.concat ", " all)
+  | [] -> Path.show_name trait.trait
+  | all -> Printf.sprintf "%s[%s]" (Path.show_name trait.trait) (String.concat ", " all)
 
 and show_output = function
   | Returns type_ when type_ = unit -> ""

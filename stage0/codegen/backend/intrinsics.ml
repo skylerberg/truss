@@ -41,6 +41,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
     Emit_c.Ir_builder.emit builder (Call { target = Intrinsic intrinsic; arguments; result })
   in
   let allocate_uint64_local () = Emit_c.Ir_builder.allocate_local builder (Value types.uint64) in
+  let emit_uint64 rvalue = Emit_c.Ir_builder.emit_temporary builder (Value types.uint64) rvalue in
   let copy_length sequence = Lowered.Copy (Storage.project_length sequence) in
   let index_element = Storage.index_element in
   let fail failure message =
@@ -63,49 +64,13 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
     fail failure message;
     Emit_c.Ir_builder.start builder after
   in
-  let check_when condition message = fail_when Obligation condition message in
-  let check_if (condition : Lowered.rvalue) message =
-    let decided =
-      let is_unsigned_zero : Lowered.operand -> bool = function
-        | Constant (Integer ((UInt8 | UInt16 | UInt32 | UInt64), zero)) -> Z.sign zero = 0
-        | _ -> false
-      in
-      match condition with
-      | Binary (op, Constant (Integer (_, left)), Constant (Integer (_, right))) -> (
-          match op with
-          | Greater -> Some (Z.gt left right)
-          | Greater_equal -> Some (Z.geq left right)
-          | Less -> Some (Z.lt left right)
-          | Less_equal -> Some (Z.leq left right)
-          | Equal -> Some (Z.equal left right)
-          | Not_equal -> Some (not (Z.equal left right))
-          | _ -> None)
-      | Binary (Greater, zero, _) when is_unsigned_zero zero -> Some false
-      | Binary (Less, _, zero) when is_unsigned_zero zero -> Some false
-      | Binary (Greater_equal, _, zero) when is_unsigned_zero zero -> Some true
-      | Binary (Less_equal, zero, _) when is_unsigned_zero zero -> Some true
-      | _ -> None
-    in
-    match decided with
-    | Some false -> ()
-    | Some true ->
-        fail Obligation message;
-        Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder)
-    | None ->
-        let is_failed = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-        Emit_c.Ir_builder.emit builder (Assign (Lowered.make_local_place is_failed, condition));
-        check_when (Copy (Lowered.make_local_place is_failed)) message
-  in
+  let check_if condition message = fail_when Obligation condition message in
+  let emit_bool rvalue = Emit_c.Ir_builder.emit_temporary builder (Raw Bool) rvalue in
   let check_index index count =
     check_if (Binary (Greater_equal, index, count)) "index out of bounds"
   in
-  let compute_room storage : Lowered.operand =
-    let room = Emit_c.Ir_builder.allocate_local builder (Value types.uint64) in
-    Emit_c.Ir_builder.emit builder
-      (Assign
-         ( Lowered.make_local_place room,
-           Binary (Subtract, Copy (Storage.project_capacity storage), copy_length storage) ));
-    Copy (Lowered.make_local_place room)
+  let compute_room storage =
+    emit_uint64 (Binary (Subtract, Copy (Storage.project_capacity storage), copy_length storage))
   in
   let read_array_length () =
     match value_arguments with
@@ -143,42 +108,28 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
               read_operand 1;
               Address { place = Lowered.make_local_place result; writable = true };
             ];
-          check_when (Copy (Lowered.make_local_place over)) "arithmetic overflow";
+          check_if (Use (Copy (Lowered.make_local_place over))) "arithmetic overflow";
           set (Use (Copy (Lowered.make_local_place result)))
       | _ -> set_binary op
     in
     let lower_checked_division op =
       match find_integer_argument () with
       | Some integer ->
-          let zero = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-          Emit_c.Ir_builder.emit builder
-            (Assign
-               ( Lowered.make_local_place zero,
-                 Binary (Equal, read_operand 1, Constant (Integer (integer, Z.zero))) ));
-          check_when (Copy (Lowered.make_local_place zero)) "division by zero";
+          check_if
+            (Binary (Equal, read_operand 1, Constant (Integer (integer, Z.zero))))
+            "division by zero";
           (match integer with
           | Int8 | Int16 | Int32 | Int64 ->
               let bits = 8 * Memory_layout.compute_integer_size integer in
               let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
-              let by_minus_one = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
-              and of_least = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-              let both = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-              Emit_c.Ir_builder.emit builder
-                (Assign
-                   ( Lowered.make_local_place by_minus_one,
-                     Binary (Equal, read_operand 1, Constant (Integer (integer, Z.minus_one))) ));
-              Emit_c.Ir_builder.emit builder
-                (Assign
-                   ( Lowered.make_local_place of_least,
-                     Binary (Equal, read_operand 0, Constant (Integer (integer, least))) ));
-              Emit_c.Ir_builder.emit builder
-                (Assign
-                   ( Lowered.make_local_place both,
-                     Binary
-                       ( Bit_and,
-                         Copy (Lowered.make_local_place by_minus_one),
-                         Copy (Lowered.make_local_place of_least) ) ));
-              check_when (Copy (Lowered.make_local_place both)) "arithmetic overflow"
+              let by_minus_one =
+                emit_bool
+                  (Binary (Equal, read_operand 1, Constant (Integer (integer, Z.minus_one))))
+              in
+              let of_least =
+                emit_bool (Binary (Equal, read_operand 0, Constant (Integer (integer, least))))
+              in
+              check_if (Binary (Bit_and, by_minus_one, of_least)) "arithmetic overflow"
           | _ -> ());
           set_binary op
       | _ -> set_binary op
@@ -223,13 +174,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
           in
           let results =
             List.map
-              (fun (op, bound) ->
-                let result = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-                Emit_c.Ir_builder.emit builder
-                  (Assign
-                     ( Lowered.make_local_place result,
-                       Binary (op, read_operand 0, make_constant bound) ));
-                Lowered.Copy (Lowered.make_local_place result))
+              (fun (op, bound) -> emit_bool (Binary (op, read_operand 0, make_constant bound)))
               tests
           in
           match results with
@@ -251,20 +196,14 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
             | Float32 -> Constant (Float32 (Int32.bits_of_float (Z.to_float bound)))
             | _ -> Constant (Float64 (Int64.bits_of_float (Z.to_float bound)))
           in
-          let above = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
-          and below = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
           let under = Z.pred low in
-          Emit_c.Ir_builder.emit builder
-            (Assign
-               ( Lowered.make_local_place above,
-                 if is_held under then Binary (Ieee_less, make_constant under, read_operand 0)
-                 else Binary (Ieee_less_equal, make_constant low, read_operand 0) ));
-          Emit_c.Ir_builder.emit builder
-            (Assign
-               ( Lowered.make_local_place below,
-                 Binary (Ieee_less, read_operand 0, make_constant (Z.succ high)) ));
-          Binary
-            (Bit_and, Copy (Lowered.make_local_place above), Copy (Lowered.make_local_place below))
+          let above =
+            emit_bool
+              (if is_held under then Binary (Ieee_less, make_constant under, read_operand 0)
+               else Binary (Ieee_less_equal, make_constant low, read_operand 0))
+          in
+          let below = emit_bool (Binary (Ieee_less, read_operand 0, make_constant (Z.succ high))) in
+          Binary (Bit_and, above, below)
       | _ -> raise_bug "fits between these types"
     in
     match scalar with
@@ -278,12 +217,9 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
         | Some ((Int8 | Int16 | Int32 | Int64) as integer) ->
             let bits = 8 * Memory_layout.compute_integer_size integer in
             let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
-            let of_least = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-            Emit_c.Ir_builder.emit builder
-              (Assign
-                 ( Lowered.make_local_place of_least,
-                   Binary (Equal, read_operand 0, Constant (Integer (integer, least))) ));
-            check_when (Copy (Lowered.make_local_place of_least)) "arithmetic overflow";
+            check_if
+              (Binary (Equal, read_operand 0, Constant (Integer (integer, least))))
+              "arithmetic overflow";
             set_unary Negate
         | _ -> set_unary Negate)
     | Wrapping_add -> set_binary Add
@@ -315,12 +251,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
            (classify_scalar env (read_type_argument 0), classify_scalar env (read_type_argument 1))
          with
         | (Float32 | Float64), Integer _ ->
-            let in_range = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-            Emit_c.Ir_builder.emit builder
-              (Assign (Lowered.make_local_place in_range, make_fits_test ()));
-            check_if
-              (Unary (Not, Copy (Lowered.make_local_place in_range)))
-              "conversion out of range"
+            check_if (Unary (Not, emit_bool (make_fits_test ()))) "conversion out of range"
         | _ -> ());
         set (Convert (read_operand 0, classify_scalar env (read_type_argument 1)))
     | Square_root -> call_into Square_root
@@ -331,12 +262,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
     | Round_to_even -> call_into Round_even
     | To_bits -> call_into Float_bits
     | From_bits -> call_into Float_from_bits
-    | Is_nan ->
-        let same = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             (Lowered.make_local_place same, Binary (Ieee_equal, read_operand 0, read_operand 0)));
-        set (Unary (Not, Copy (Lowered.make_local_place same)))
+    | Is_nan -> set (Unary (Not, emit_bool (Binary (Ieee_equal, read_operand 0, read_operand 0))))
   in
   let lower_buffer (buffer : Intrinsic.buffer) =
     let read_element_type () = read_type_argument 0 in
@@ -344,6 +270,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
       Ground.make_builtin Array ~arguments:[ Type (read_element_type ()); Value count ]
     in
     let compute_element_layout () = Memory_layout.of_type env (read_element_type ()) in
+    let element_size () = Lowered.make_uint64_constant (compute_element_layout ()).size in
     let resize_buffer storage capacity =
       let layout = compute_element_layout () in
       let bytes = allocate_uint64_local ()
@@ -356,37 +283,26 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
           Lowered.make_uint64_constant layout.size;
           Address { place = Lowered.make_local_place bytes; writable = true };
         ];
-      fail_when Panic (Copy (Lowered.make_local_place too_many)) "out of memory";
+      fail_when Panic (Use (Copy (Lowered.make_local_place too_many))) "out of memory";
       let buffer = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
-      let is_allocated = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
-      and is_unallocated = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-      Emit_c.Ir_builder.emit builder
-        (Assign (Lowered.make_local_place is_allocated, Storage.build_is_allocated storage));
-      Emit_c.Ir_builder.emit builder
-        (Assign
-           ( Lowered.make_local_place is_unallocated,
-             Unary (Not, Copy (Lowered.make_local_place is_allocated)) ));
-      Emit_c.Ir_builder.emit_when builder
-        (Copy (Lowered.make_local_place is_allocated))
-        (fun () ->
-          let held = allocate_uint64_local () in
-          Emit_c.Ir_builder.emit builder
-            (Assign
-               ( Lowered.make_local_place held,
-                 Binary
-                   ( Multiply,
-                     Copy (Storage.project_capacity storage),
-                     Lowered.make_uint64_constant layout.size ) ));
+      Emit_c.Ir_builder.emit_if builder
+        (Storage.build_is_allocated storage)
+        ~yes:(fun () ->
+          let held =
+            emit_uint64
+              (Binary
+                 ( Multiply,
+                   Copy (Storage.project_capacity storage),
+                   Lowered.make_uint64_constant layout.size ))
+          in
           call ~result:(Lowered.make_local_place buffer) Reallocate
             [
               Copy (Storage.project_buffer storage);
-              Copy (Lowered.make_local_place held);
+              held;
               Copy (Lowered.make_local_place bytes);
               Lowered.make_uint64_constant layout.alignment;
-            ]);
-      Emit_c.Ir_builder.emit_when builder
-        (Copy (Lowered.make_local_place is_unallocated))
-        (fun () ->
+            ])
+        ~no:(fun () ->
           call ~result:(Lowered.make_local_place buffer) Allocate
             [ Copy (Lowered.make_local_place bytes); Lowered.make_uint64_constant layout.alignment ]);
       Emit_c.Ir_builder.emit builder
@@ -400,15 +316,11 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
     match buffer with
     | Compare_bytes ->
         let left = extract_place (read_argument 0) and right = extract_place (read_argument 1) in
-        let shorter = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
         let count = allocate_uint64_local () in
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             (Lowered.make_local_place shorter, Binary (Less, copy_length left, copy_length right)));
         Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place count, Use (copy_length right)));
         Emit_c.Ir_builder.emit_when builder
-          (Copy (Lowered.make_local_place shorter))
+          (Binary (Less, copy_length left, copy_length right))
           (fun () ->
             Emit_c.Ir_builder.emit builder
               (Assign (Lowered.make_local_place count, Use (copy_length left))));
@@ -419,43 +331,18 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
             Copy (Storage.project_buffer right);
             Copy (Lowered.make_local_place count);
           ];
-        let same = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place same,
-               Binary
-                 (Equal, Copy (Lowered.make_local_place order), Constant (Integer (Int32, Z.zero)))
-             ));
         Emit_c.Ir_builder.emit_when builder
-          (Copy (Lowered.make_local_place same))
+          (Binary (Equal, Copy (Lowered.make_local_place order), Constant (Integer (Int32, Z.zero))))
           (fun () ->
-            let longer = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
-            and shorter = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
+            let emit_int32 rvalue =
+              Emit_c.Ir_builder.emit_temporary builder (Raw (Integer Int32)) rvalue
+            in
+            let longer = emit_bool (Binary (Greater, copy_length left, copy_length right)) in
+            let shorter = emit_bool (Binary (Less, copy_length left, copy_length right)) in
+            let first = emit_int32 (Convert (longer, Integer Int32)) in
+            let second = emit_int32 (Convert (shorter, Integer Int32)) in
             Emit_c.Ir_builder.emit builder
-              (Assign
-                 ( Lowered.make_local_place longer,
-                   Binary (Greater, copy_length left, copy_length right) ));
-            Emit_c.Ir_builder.emit builder
-              (Assign
-                 ( Lowered.make_local_place shorter,
-                   Binary (Less, copy_length left, copy_length right) ));
-            let first = Emit_c.Ir_builder.allocate_local builder (Raw (Integer Int32))
-            and second = Emit_c.Ir_builder.allocate_local builder (Raw (Integer Int32)) in
-            Emit_c.Ir_builder.emit builder
-              (Assign
-                 ( Lowered.make_local_place first,
-                   Convert (Copy (Lowered.make_local_place longer), Integer Int32) ));
-            Emit_c.Ir_builder.emit builder
-              (Assign
-                 ( Lowered.make_local_place second,
-                   Convert (Copy (Lowered.make_local_place shorter), Integer Int32) ));
-            Emit_c.Ir_builder.emit builder
-              (Assign
-                 ( Lowered.make_local_place order,
-                   Binary
-                     ( Subtract,
-                       Copy (Lowered.make_local_place first),
-                       Copy (Lowered.make_local_place second) ) )));
+              (Assign (Lowered.make_local_place order, Binary (Subtract, first, second))));
         set (Convert (Copy (Lowered.make_local_place order), Integer Int8))
     | Storage_empty -> set (Storage.build_empty (Storage.make_storage_type (read_element_type ())))
     | Storage_with_capacity ->
@@ -463,13 +350,8 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
         let result = Emit_c.Ir_builder.allocate_local builder (Value ty) in
         Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place result, Storage.build_empty ty));
-        let has_capacity = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place has_capacity,
-               Binary (Greater, read_operand 0, Lowered.make_uint64_constant 0) ));
         Emit_c.Ir_builder.emit_when builder
-          (Copy (Lowered.make_local_place has_capacity))
+          (Binary (Greater, read_operand 0, Lowered.make_uint64_constant 0))
           (fun () -> resize_buffer (Lowered.make_local_place result) (read_operand 0));
         set (Use (Move (Lowered.make_local_place result)))
     | Storage_length | View_length -> set (Use (copy_length (extract_place (read_argument 0))))
@@ -480,22 +362,10 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
         check_if
           (Binary (Less, read_operand 1, copy_length storage))
           "a storage's capacity set to less than its length";
-        let has_capacity = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
-        and has_no_capacity = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place has_capacity,
-               Binary (Greater, read_operand 1, Lowered.make_uint64_constant 0) ));
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place has_no_capacity,
-               Unary (Not, Copy (Lowered.make_local_place has_capacity)) ));
-        Emit_c.Ir_builder.emit_when builder
-          (Copy (Lowered.make_local_place has_capacity))
-          (fun () -> resize_buffer storage (read_operand 1));
-        Emit_c.Ir_builder.emit_when builder
-          (Copy (Lowered.make_local_place has_no_capacity))
-          (fun () ->
+        Emit_c.Ir_builder.emit_if builder
+          (Binary (Greater, read_operand 1, Lowered.make_uint64_constant 0))
+          ~yes:(fun () -> resize_buffer storage (read_operand 1))
+          ~no:(fun () ->
             Emit_c.Ir_builder.emit builder (Drop storage);
             Emit_c.Ir_builder.emit builder
               (Assign
@@ -538,29 +408,14 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
         check_if
           (Binary (Greater_equal, copy_length storage, Copy (Storage.project_capacity storage)))
           "an element inserted into a storage that has no room";
-        let after = allocate_uint64_local () in
-        let bytes = allocate_uint64_local () in
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             (Lowered.make_local_place after, Binary (Add, index, Lowered.make_uint64_constant 1)));
-        Emit_c.Ir_builder.emit builder
-          (Assign (Lowered.make_local_place bytes, Binary (Subtract, copy_length storage, index)));
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place bytes,
-               Binary
-                 ( Multiply,
-                   Copy (Lowered.make_local_place bytes),
-                   Lowered.make_uint64_constant (compute_element_layout ()).size ) ));
+        let after = emit_uint64 (Binary (Add, index, Lowered.make_uint64_constant 1)) in
+        let tail_length = emit_uint64 (Binary (Subtract, copy_length storage, index)) in
+        let bytes = emit_uint64 (Binary (Multiply, tail_length, element_size ())) in
         call Move_bytes
           [
-            Address
-              {
-                place = index_element storage (Copy (Lowered.make_local_place after));
-                writable = true;
-              };
+            Address { place = index_element storage after; writable = true };
             Address { place = index_element storage index; writable = true };
-            Copy (Lowered.make_local_place bytes);
+            bytes;
           ];
         Emit_c.Ir_builder.emit builder (Assign (index_element storage index, Use (read_operand 2)));
         add_to_length storage (Lowered.make_uint64_constant 1)
@@ -569,31 +424,14 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
         let storage = extract_place (read_argument 0) in
         let index = read_operand 1 in
         set (Use (Move (index_element storage index)));
-        let after = allocate_uint64_local () in
-        let bytes = allocate_uint64_local () in
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             (Lowered.make_local_place after, Binary (Add, index, Lowered.make_uint64_constant 1)));
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place bytes,
-               Binary (Subtract, copy_length storage, Copy (Lowered.make_local_place after)) ));
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place bytes,
-               Binary
-                 ( Multiply,
-                   Copy (Lowered.make_local_place bytes),
-                   Lowered.make_uint64_constant (compute_element_layout ()).size ) ));
+        let after = emit_uint64 (Binary (Add, index, Lowered.make_uint64_constant 1)) in
+        let tail_length = emit_uint64 (Binary (Subtract, copy_length storage, after)) in
+        let bytes = emit_uint64 (Binary (Multiply, tail_length, element_size ())) in
         call Move_bytes
           [
             Address { place = index_element storage index; writable = true };
-            Address
-              {
-                place = index_element storage (Copy (Lowered.make_local_place after));
-                writable = true;
-              };
-            Copy (Lowered.make_local_place bytes);
+            Address { place = index_element storage after; writable = true };
+            bytes;
           ];
         Emit_c.Ir_builder.emit builder
           (Assign
@@ -651,12 +489,8 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
             (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place untyped))));
           set (Use (Move { root = Local typed; projections = [ Deref ] }))
         end;
-        let is_allocated = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-        Emit_c.Ir_builder.emit builder
-          (Assign (Lowered.make_local_place is_allocated, Storage.build_is_allocated moved_storage));
-        Emit_c.Ir_builder.emit_when builder
-          (Copy (Lowered.make_local_place is_allocated))
-          (fun () -> call Free [ Copy (Storage.project_buffer moved_storage) ])
+        Emit_c.Ir_builder.emit_when builder (Storage.build_is_allocated moved_storage) (fun () ->
+            call Free [ Copy (Storage.project_buffer moved_storage) ])
     | Array_view ->
         let count = read_array_length () in
         let array_ty = make_array_type count in
@@ -700,15 +534,13 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
         let view = extract_place (read_argument 0) in
         check_if (Binary (Greater, read_operand 1, read_operand 2)) "slice out of bounds";
         check_if (Binary (Greater, read_operand 2, copy_length view)) "slice out of bounds";
-        let count = allocate_uint64_local () in
-        Emit_c.Ir_builder.emit builder
-          (Assign (Lowered.make_local_place count, Binary (Subtract, read_operand 2, read_operand 1)));
+        let count = emit_uint64 (Binary (Subtract, read_operand 2, read_operand 1)) in
         set
           (Storage.build_view
              (Storage.make_view_type (read_element_type ()))
              ~buffer:
                (Address { place = Storage.index_element view (read_operand 1); writable = false })
-             ~length:(Copy (Lowered.make_local_place count)))
+             ~length:count)
     | Storage_model | View_model | Array_model ->
         raise_bug "a model, which exists only in specifications"
   in
@@ -736,7 +568,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
         (Assign (Lowered.make_local_place elements, Use (Constant Storage.empty_buffer)));
       Emit_c.Ir_builder.emit builder
         (Assign (Lowered.make_local_place count, Use (Lowered.make_uint64_constant 0)));
-      Emit_c.Ir_builder.emit_when builder (Copy is_present) (fun () ->
+      Emit_c.Ir_builder.emit_when builder (Use (Copy is_present)) (fun () ->
           Emit_c.Ir_builder.emit builder
             (Assign
                (Lowered.make_local_place elements, Use (Copy (Lowered.make_local_place address))));
@@ -837,25 +669,13 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
         Emit_c.Ir_builder.start builder test;
         call ~result:(Lowered.make_local_place entry) Program_argument
           [ Copy (Lowered.make_local_place environment); Copy (Lowered.make_local_place position) ];
-        let last = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
-        and reached = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-        let stop = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place last,
-               Binary (Equal, Copy (Lowered.make_local_place entry), Constant Null) ));
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place reached,
-               Binary (Equal, Copy (Lowered.make_local_place position), read_operand 0) ));
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place stop,
-               Binary
-                 ( Bit_or,
-                   Copy (Lowered.make_local_place last),
-                   Copy (Lowered.make_local_place reached) ) ));
-        Emit_c.Ir_builder.branch builder (Copy (Lowered.make_local_place stop)) ~yes:after ~no:next;
+        let is_last =
+          emit_bool (Binary (Equal, Copy (Lowered.make_local_place entry), Constant Null))
+        in
+        let is_reached =
+          emit_bool (Binary (Equal, Copy (Lowered.make_local_place position), read_operand 0))
+        in
+        Emit_c.Ir_builder.branch builder (Binary (Bit_or, is_last, is_reached)) ~yes:after ~no:next;
         Emit_c.Ir_builder.start builder next;
         Emit_c.Ir_builder.emit builder
           (Assign
@@ -948,12 +768,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
               | Always _ | Fixed _ -> [])
             parameters
         in
-        let cast_to_uint64 operand : Lowered.operand =
-          let count = allocate_uint64_local () in
-          Emit_c.Ir_builder.emit builder
-            (Assign (Lowered.make_local_place count, Convert (operand, Integer UInt64)));
-          Copy (Lowered.make_local_place count)
-        in
+        let cast_to_uint64 operand = emit_uint64 (Convert (operand, Integer UInt64)) in
         let find_count (extent : Libc.extent) : Lowered.operand option =
           match extent with
           | Counted { by; each } -> (
@@ -961,14 +776,8 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
               | Some (_, _, index) ->
                   let count = cast_to_uint64 (read_operand index) in
                   if each = 1 then Some count
-                  else begin
-                    let scaled = allocate_uint64_local () in
-                    Emit_c.Ir_builder.emit builder
-                      (Assign
-                         ( Lowered.make_local_place scaled,
-                           Binary (Multiply, count, Lowered.make_uint64_constant each) ));
-                    Some (Copy (Lowered.make_local_place scaled))
-                  end
+                  else
+                    Some (emit_uint64 (Binary (Multiply, count, Lowered.make_uint64_constant each)))
               | None -> raise_bug "a C library row counts by %s, which it does not take" by)
           | Exactly elements -> Some (Lowered.make_uint64_constant elements)
           | Number number -> Some (cast_to_uint64 (make_number_constant number))
@@ -1010,16 +819,12 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
                     check_if
                       (Binary (Equal, copy_length view, Lowered.make_uint64_constant 0))
                       message;
-                    let last = allocate_uint64_local () in
-                    Emit_c.Ir_builder.emit builder
-                      (Assign
-                         ( Lowered.make_local_place last,
-                           Binary (Subtract, copy_length view, Lowered.make_uint64_constant 1) ));
+                    let last =
+                      emit_uint64
+                        (Binary (Subtract, copy_length view, Lowered.make_uint64_constant 1))
+                    in
                     check_if
-                      (Binary
-                         ( Not_equal,
-                           Copy (Storage.index_element view (Copy (Lowered.make_local_place last))),
-                           zero ))
+                      (Binary (Not_equal, Copy (Storage.index_element view last), zero))
                       message)
             | Some (Value _ | Written _ | Always _ | Fixed _) | None -> ())
           passed;
