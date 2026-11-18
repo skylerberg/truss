@@ -1114,8 +1114,8 @@ fn Slice[Element].zip[Other](self, other: Slice[Other]) -> Zipped[Element, Other
 ### Overloads by receiver mode
 
 ```truss
-fn Slice[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
-fn List[Element].filter(own self, keep: fn(Element) -> Bool) -> List[Element]
+fn Slice[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
+fn List[Element].filter(own self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
 ```
 
 A method can have up to three overloads that differ only in the mode of

@@ -836,9 +836,9 @@ public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, item
   }
 }
 
-public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool uses generic Granted))
-  uses generic Granted
+public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool cost time finite))
   ensures self.length() <= old(self.length())
+  ensures forall i in 0..self.length() => keep(self.model()[i])
   cost time O(old(self.length()) * time(keep))
 {
   let count = self.length()
@@ -846,6 +846,7 @@ public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool uses generic
   for index in 0..count
     invariant self.length() == count
     invariant retained_count <= index
+    invariant forall i in 0..retained_count => keep(self.model()[i])
   {
     if keep(self[index]) {
       intrinsic::storage_swap(mut self.storage, first: retained_count, second: index)
@@ -855,9 +856,9 @@ public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool uses generic
   mut self.truncate(retained_count)
 }
 
-public fn List[Element].filter(own self, keep: (fn(Element) -> Bool uses generic Granted)) -> List[Element]
-  uses generic Granted
+public fn List[Element].filter(own self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
   ensures result.length() <= self.length()
+  ensures forall i in 0..result.length() => keep(result.model()[i])
   cost time O(self.length() * time(keep))
 {
   var retained = own self
