@@ -1,0 +1,12 @@
+fn f()
+  uses Meter
+  cost calls(Meter.poll) <= 3
+{
+  var index: UInt32 = 0
+  while Meter.poll() && index < 2
+    invariant index <= 2
+    cost calls(Meter.poll) <= index
+  {
+    index = index + 1
+  }
+}

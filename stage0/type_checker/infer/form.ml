@@ -968,7 +968,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
         For
           {
             pattern;
-            iteration = Cursor { cursor = place; next };
+            iteration = Cursor { cursor = place; next; uses = State.compute_callee_uses state next };
             clauses = clauses @ Option.to_list measure;
             body;
             mode;

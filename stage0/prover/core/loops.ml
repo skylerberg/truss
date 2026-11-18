@@ -39,7 +39,7 @@ type while_loop = {
 
 type iterable =
   | Over_range of { low : Logic.term; high : Logic.term; inclusive : bool }
-  | Over_cursor of { cursor : State.passed_place; cursor_type : Types.ty; next : Invocation.callee }
+  | Over_cursor of { cursor : State.passed_place; cursor_type : Types.ty; next : Invocation.t }
 
 type for_loop = {
   for_at : Core.origin;
@@ -266,7 +266,7 @@ let check_loop_iterations context loop_at (head : State.frame) costs ~mark ~fact
                 (Logic.Boolean false)))
     costs
 
-let exit_loop context (exit_ : State.frame) costs ~iterations ~most =
+let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) costs ~iterations ~most =
   let iterations = Option.value iterations ~default:Costs.zero in
   let spent =
     List.map
@@ -279,7 +279,7 @@ let exit_loop context (exit_ : State.frame) costs ~iterations ~most =
               | Order_of amount | At_most amount | Exactly amount ->
                   snd
                     (Validity.read_specification context
-                       { exit_ with makes_obligations = false }
+                       { clause_at with makes_obligations = false }
                        amount)
               | Finite -> Costs.zero
             in
@@ -290,7 +290,9 @@ let exit_loop context (exit_ : State.frame) costs ~iterations ~most =
               | Exactly -> amount
             in
             ( cost.counter,
-              Costs.minus (Costs.plus cost.entry counted) (cost.measure_gained gain exit_) )
+              Costs.plus
+                (Costs.minus (Costs.plus cost.entry counted) (cost.measure_gained gain clause_at))
+                (Costs.since ~start:(lookup_spent clause_at cost.counter) at) )
         | Per_iteration rules ->
             List.iter
               (fun (gain, per) ->
@@ -572,7 +574,7 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
     Lambdas.list_facts_since context ended_mark @ Lambdas.list_facts_since context loop.facts_mark
   in
   let exit_ =
-    exit_loop context
+    exit_loop context ~clause_at:head
       { ended with yielded = Some before }
       costs ~iterations:(Some iterations)
       ~most:(most @ Costs.list_upper_bounds ~varies ~facts:ended_facts iterations)
@@ -580,7 +582,8 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
   let left =
     List.map
       (fun (exit_frame : State.frame) ->
-        exit_loop context (with_through exit_frame) costs
+        let left_at = with_through exit_frame in
+        exit_loop context ~clause_at:left_at left_at costs
           ~iterations:(Some (Costs.plus iterations (Logic.int 1)))
           ~most:
             (most
@@ -671,7 +674,7 @@ let oblige_next_gives_the_model context (after : State.frame) location ~element 
   | _ -> ()
 
 let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
-    (cursor_access : State.passed_place) (next : Invocation.callee) ~cursor_type =
+    (cursor_access : State.passed_place) (next : Invocation.t) ~cursor_type =
   let location = Facts.locate context frame.source for_loop.for_at in
   let clauses = for_loop.for_clauses in
   ignore (cursor_access.read frame);
@@ -685,7 +688,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   in
   let entry_model = find_model frame in
   let trait, evidence =
-    match next with
+    match next.callee with
     | Trait_method { trait; evidence = Impl _ as evidence; _ } -> (trait, evidence)
     | _ ->
         Facts.raise_unsupported location "a loop over `%s`, whose `Cursor` the prover cannot find"
@@ -706,7 +709,6 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   in
   let path = Path.Method { owner = impl; name = "next"; receiver = Mut } in
   let option_type = Types.Named { path = option_path; arguments = [ Types.Type element_type ] } in
-  let invocation : Invocation.t = { callee = next; lends = None; uses = Types.no_capabilities } in
   let pulling : Invocation.site = { origin = for_loop.for_at; type_ = option_type } in
   let measures = find_measures clauses in
   if context.terminates && measures = None then
@@ -775,7 +777,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
         cursor_access.write frame (Facts.arrive context frame "changed" cursor_type)
       in
       let after, pulled =
-        Calls.call_contract ~lent_final:None context head pulling invocation path contract
+        Calls.call_contract ~lent_final:None context head pulling next path contract
           [
             {
               position = 0;
@@ -919,14 +921,15 @@ let run_for_loop context frame (for_loop : for_loop) =
         ends;
       let most = [ Costs.at_least_zero count ] in
       let exit_ =
-        exit_loop context
+        exit_loop context ~clause_at:head
           (Facts.restrict head (Logic.Operation (">=", [ iterations; count ])))
           costs ~iterations:(Some iterations) ~most
       in
       let left =
         List.map
           (fun (exit_frame : State.frame) ->
-            exit_loop context (with_through exit_frame) costs
+            let left_at = with_through exit_frame in
+            exit_loop context ~clause_at:left_at left_at costs
               ~iterations:(Some (Costs.plus iterations (Logic.int 1)))
               ~most)
           breaks
@@ -1019,7 +1022,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
   let failing =
     Option.bind tested (fun (at_condition, holds) ->
         loop.on_failure
-          (exit_loop context
+          (exit_loop context ~clause_at:head
              (Facts.restrict at_condition (Logic.not_ holds))
              costs ~iterations ~most))
   in
@@ -1027,7 +1030,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
     (Option.to_list failing
     @ List.map
         (fun (leaving : State.frame) ->
-          exit_loop context leaving costs
+          exit_loop context ~clause_at:leaving leaving costs
             ~iterations:(Option.map (fun count -> Costs.plus count (Logic.int 1)) iterations)
             ~most)
         breaks)

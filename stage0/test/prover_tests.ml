@@ -1024,6 +1024,83 @@ let () =
   Harness.test "an impl's method keeps its trait's cost" (fun () ->
       expect_not_proven Fixtures.Prover.sized_impl_with_the_traits_cost "prover.cost")
 
+let () =
+  let callees = Fixtures.Prover.meter_and_step in
+  let expect_with_the_last ~without ~with_ =
+    expect_not_proven (callees ^ without) "prover.cost";
+    expect_proven (callees ^ with_)
+  in
+  Harness.test
+    "a `while` loop's `<=` clause leaves out the evaluation of the condition that ends it"
+    (fun () ->
+      expect_with_the_last
+        ~without:Fixtures.Prover.polls_of_a_while_condition_bounded_without_the_last
+        ~with_:Fixtures.Prover.polls_of_a_while_condition_bounded_with_the_last);
+  Harness.test
+    "a `while` loop's `==` clause leaves out the evaluation of the condition that ends it"
+    (fun () ->
+      expect_with_the_last
+        ~without:Fixtures.Prover.ticks_of_a_while_condition_counted_without_the_last
+        ~with_:Fixtures.Prover.ticks_of_a_while_condition_counted_with_the_last);
+  Harness.test "the operand of `||` that is evaluated only where a `while` loop ends is counted"
+    (fun () ->
+      expect_with_the_last
+        ~without:Fixtures.Prover.tick_of_the_operand_that_ends_a_while_counted_as_none
+        ~with_:Fixtures.Prover.tick_of_the_operand_that_ends_a_while_counted);
+  Harness.test "an inner loop's last evaluation of its condition is counted in the outer iteration"
+    (fun () ->
+      expect_with_the_last
+        ~without:Fixtures.Prover.ticks_of_an_inner_while_condition_counted_without_the_last
+        ~with_:Fixtures.Prover.ticks_of_an_inner_while_condition_counted_with_the_last);
+  Harness.test "a loop whose condition and whose exit spend nothing keeps its exact count"
+    (fun () ->
+      expect_proven (callees ^ Fixtures.Prover.ticks_in_the_body_of_a_while_with_a_clause_counted);
+      expect_proven
+        (callees ^ Fixtures.Prover.ticks_in_the_body_of_a_list_loop_with_a_clause_counted));
+  Harness.test "the allocations of the evaluation of the condition that ends a `while` are counted"
+    (fun () ->
+      let grows = Fixtures.Prover.grows_allocating_once in
+      expect_not_proven
+        (grows ^ Fixtures.Prover.allocations_of_a_while_condition_bounded_without_the_last)
+        "prover.cost";
+      expect_proven (grows ^ Fixtures.Prover.allocations_of_a_while_condition_bounded_with_the_last));
+  Harness.test "the time of the evaluation of the condition that ends a `while` is counted"
+    (fun () ->
+      let costly = Fixtures.Prover.costly_refusing_in_linear_time in
+      expect_not_proven
+        (costly ^ Fixtures.Prover.time_of_the_operand_that_ends_a_while_left_out)
+        "prover.cost";
+      expect_proven (costly ^ Fixtures.Prover.time_of_the_operand_that_ends_a_while_counted))
+
+let () =
+  let ticking = Fixtures.Prover.ticking_countdown in
+  Harness.test "a pulled `next` that uses a capability makes its calls of the capability's method"
+    (fun () ->
+      expect_not_proven
+        (ticking ^ Fixtures.Prover.ticks_of_a_pulled_next_counted_as_none)
+        "prover.cost";
+      expect_not_proven
+        (ticking ^ Fixtures.Prover.ticks_of_a_pulled_next_bounded_by_none)
+        "prover.cost");
+  Harness.test "a loop over a cursor counts the `next` that returns `None`" (fun () ->
+      expect_not_proven
+        (ticking ^ Fixtures.Prover.ticks_of_a_cursor_loop_bounded_without_the_last_next)
+        "prover.cost";
+      expect_proven (ticking ^ Fixtures.Prover.ticks_of_a_cursor_loop_counted_with_the_last_next));
+  Harness.test "the allocations of the `next` that returns `None` are counted" (fun () ->
+      let allocating = Fixtures.Prover.allocating_countdown in
+      expect_not_proven
+        (allocating ^ Fixtures.Prover.allocations_of_a_cursor_loop_bounded_without_the_last_next)
+        "prover.cost";
+      expect_proven
+        (allocating ^ Fixtures.Prover.allocations_of_a_cursor_loop_bounded_with_the_last_next));
+  Harness.test "the time of the `next` that returns `None` is counted" (fun () ->
+      let weighted = Fixtures.Prover.weighted_countdown in
+      expect_not_proven
+        (weighted ^ Fixtures.Prover.time_of_a_cursor_loop_without_the_last_next)
+        "prover.cost";
+      expect_proven (weighted ^ Fixtures.Prover.time_of_a_cursor_loop_with_the_last_next))
+
 let meter = Fixtures.Prover.meter
 
 let () =

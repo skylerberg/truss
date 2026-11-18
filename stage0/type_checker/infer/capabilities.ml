@@ -642,7 +642,7 @@ and check_statement checking scope (statement : Core.statement) =
           Core_walk.walk_place
             { Core_walk.ignore_all with expression = check_expression checking scope }
             element
-      | Cursor { cursor; next } ->
+      | Cursor { cursor; next; uses = _ } ->
           Core_walk.walk_place
             { Core_walk.ignore_all with expression = check_expression checking scope }
             cursor;

@@ -1,0 +1,13 @@
+fn f(start: Countdown) -> UInt8
+  cost allocations <= start.left
+{
+  var left = start
+  var last: UInt8 = 0
+  for value in left
+    invariant visited.length() + left.left == start.left
+    cost allocations <= visited.length()
+  {
+    last = value
+  }
+  last
+}
