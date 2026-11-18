@@ -76,7 +76,7 @@ type state = {
   mutable law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
   mutable locals_read : Syntax.id list;
-  mutable receiver_modes : (Syntax.id * Types.mode) list;
+  mutable keyword_modes : (Syntax.id * Types.mode) list;
   mutable places_without_keyword : (Syntax.id * Types.mode) list;
   mutable mode_keywords : Core.mode_keyword list;
   yielded : (Syntax.id, Types.mode) Hashtbl.t;
@@ -992,12 +992,13 @@ let rec is_place state (value : Syntax.expression) =
   | Parenthesized inner -> is_place state inner
   | _ -> false
 
-let rec find_call_with_mode_keyword state (value : Syntax.expression) =
+let rec find_keyword_operation state (value : Syntax.expression) =
   match value.kind with
   | Call ({ kind = Member (base, _); _ }, _)
-  | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _) ->
-      if is_place state base then Some (value.id, base) else find_call_with_mode_keyword state base
-  | Member (base, _) | Bracket (base, _) | Try base -> find_call_with_mode_keyword state base
+  | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _)
+  | With (base, _) ->
+      if is_place state base then Some (value.id, base) else find_keyword_operation state base
+  | Member (base, _) | Bracket (base, _) | Try base -> find_keyword_operation state base
   | _ -> None
 
 let note_mode_keyword state (written : Syntax.expression) (mode : Syntax.mode)
@@ -1006,7 +1007,7 @@ let note_mode_keyword state (written : Syntax.expression) (mode : Syntax.mode)
     match value.kind with Parenthesized inner -> strip_parentheses inner | _ -> value
   in
   let place =
-    match find_call_with_mode_keyword state operand with
+    match find_keyword_operation state operand with
     | Some (_, receiver) -> receiver
     | None -> operand
   in

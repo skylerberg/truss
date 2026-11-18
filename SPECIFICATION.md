@@ -507,13 +507,15 @@ parameter. A temporary takes no keyword:
 | `push(mut names, item: name.copy())` | `push` gets a copy. |
 
 A mode keyword applies to the longest place expression at the start of its
-operand. The first method call after that place takes it as its receiver,
-and the rest of the expression works on the result of that call:
+operand. The first method call or `with` after that place takes it, a
+method call as its receiver and `with` as its base, and the rest of the
+expression works on the result:
 
 | Expression | Place the keyword applies to |
 |---|---|
 | `mut config.servers.sort()` | `config.servers` |
 | `mut config.load_servers().sort()` | `config`, for `load_servers` |
+| `own config with (port: 443)` | `config`, for `with` |
 | `sort(mut items[..middle])` | `items[..middle]` |
 
 An expression that does not start with a place takes no mode keyword.
@@ -1402,7 +1404,8 @@ let production = own config with (server.port: 443, log_level: LogLevel.Warning)
 
 - `base with (updates)` means copying the base into a new variable,
   assigning its fields, and returning it.
-- The base is passed as an `own` argument is.
+- The base is passed as an `own` argument is: a base that is a place takes
+  `own`, unless it copies implicitly.
 - `with` works on records, and updates only fields visible at that point.
 
 ### Lambdas
