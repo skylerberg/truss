@@ -1840,6 +1840,7 @@ as every source of randomness is a capability.
 | A collection that is made from its elements alone takes a literal and has no `new()`. | *One spelling.* A constructor is for a collection that needs more than its elements: a `Heap` needs an order, and an `LruCache` a capacity. |
 | A collection method takes a pure callback. A method of `Option` or `Result` takes a callback that may use capabilities. | `map` and `sort_by` may later run their callback in parallel. `Option.map` calls its callback at most once, in place of an `if`. |
 | A lookup that can miss lends an `Option`. | Nothing is copied, whatever the element type. |
+| A comparison, a hash, and a lookup state an allocation bound, in terms of `allocations(Element.equal)` for a generic collection. | A function with an allocation bound otherwise cannot compare two strings or look up a key. |
 | A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write, and every helper works with every implementation. |
 | Every failure of the operating system is a `SystemError`. | Code that reads a file and sends it over a connection handles one error type. |
 | Text in an embedded language is a tagged template, and a `processes::Command` is a program and a list of arguments. | Neither is a string that is passed to an interpreter, so neither allows an injection. |

@@ -566,6 +566,7 @@ impl Equal for List[Element: Equal] {
   fn equal(self, other: List[Element]) -> Bool
     ensures result == (self.length() == other.length()
       && forall i in 0..self.length() => self.model()[i] == other.model()[i])
+    cost allocations <= self.length() * allocations(Element.equal)
   {
     if self.length() != other.length() {
       return false
@@ -888,6 +889,7 @@ impl FromElements for List[Element] {
 impl Ordered for List[Element: Ordered] {
   fn compare(self, other: List[Element]) -> Ordering
     ensures result == slice::lexicographic(self.model(), second: other.model(), from: 0)
+    cost allocations <= self.length() * allocations(Element.compare)
   {
     self.slice().compare(other.slice())
   }
@@ -906,7 +908,9 @@ proof Ordered.transitive for List[Element: Ordered] {
 }
 
 impl Hash for List[Element: Hash] {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations <= self.length() * allocations(Element.hash)
+  {
     self.slice().hash(mut hasher)
   }
 }

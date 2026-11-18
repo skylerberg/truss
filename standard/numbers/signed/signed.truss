@@ -14,6 +14,7 @@ impl Ordered for Int8 {
   fn compare(self, other: Int8) -> Ordering
     ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -154,7 +155,9 @@ impl Negate for Int8 {
 }
 
 impl Hash for Int8 {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(intrinsic::convert(self))
   }
 }
@@ -260,6 +263,7 @@ impl Ordered for Int16 {
   fn compare(self, other: Int16) -> Ordering
     ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -400,7 +404,9 @@ impl Negate for Int16 {
 }
 
 impl Hash for Int16 {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(intrinsic::convert(self))
   }
 }
@@ -500,6 +506,7 @@ impl Ordered for Int32 {
   fn compare(self, other: Int32) -> Ordering
     ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -640,7 +647,9 @@ impl Negate for Int32 {
 }
 
 impl Hash for Int32 {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(intrinsic::convert(self))
   }
 }
@@ -734,6 +743,7 @@ impl Ordered for Int64 {
   fn compare(self, other: Int64) -> Ordering
     ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
     cost time O(1)
+    cost allocations == 0
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -874,7 +884,9 @@ impl Negate for Int64 {
 }
 
 impl Hash for Int64 {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(intrinsic::convert(self))
   }
 }
