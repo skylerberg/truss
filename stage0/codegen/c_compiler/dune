@@ -1,0 +1,3 @@
+(library
+ (name c_compiler)
+ (libraries process unix blake3 cbor file_system))

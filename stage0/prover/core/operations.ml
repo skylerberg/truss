@@ -89,20 +89,19 @@ let spend (context : State.context) (frame : State.frame) (amount_of : Costs.cou
 
 let declare_unknown_amount context frame (counter : Costs.counter) =
   let amount = Facts.declare_fresh context frame "spent" Logic.Int in
-  let least =
-    match counter.resource with Time -> 1 | Allocations | Allocated_bytes | Calls _ -> 0
-  in
-  Facts.assume context frame (Logic.Operation ("<=", [ Logic.int least; amount ]));
+  Facts.assume context frame
+    (Logic.Operation ("<=", [ Costs.least_amount counter.resource; amount ]));
   amount
 
 let convert_to_any context frame (site : Invocation.site) =
   let frame =
     spend context frame (fun (counter : Costs.counter) ->
         match (counter.resource, counter.counting) with
-        | Allocations, _ -> Logic.int 1
-        | Allocated_bytes, Units -> Logic.int 1
-        | Allocated_bytes, (At_most | Exactly) -> declare_unknown_amount context frame counter
-        | (Time | Calls _), _ -> Costs.zero)
+        | Metric Allocations, _ -> Logic.int 1
+        | Metric Allocated_bytes, Units -> Logic.int 1
+        | Metric Allocated_bytes, (At_most | Exactly) ->
+            declare_unknown_amount context frame counter
+        | (Metric Time | Calls _), _ -> Costs.zero)
   in
   (frame, Facts.arrive context frame "any" (Facts.substitute_type context frame site.type_))
 
@@ -177,8 +176,8 @@ let find_written_equal context ty left right =
       { trait = Facts.equal_trait; trait_arguments = []; associated = [] }
       ty
   with
-  | Some (((Impl _ : Path.t) as impl), arguments) -> (
-      let evidence : Core.evidence = Impl { impl; arguments } in
+  | Some (((Impl _ : Path.t) as impl), substitution) -> (
+      let evidence : Core.evidence = Impl { impl; substitution } in
       match
         Contracts.find_method_contract context.lookups
           { trait = Facts.equal_trait; trait_arguments = []; associated = [] }

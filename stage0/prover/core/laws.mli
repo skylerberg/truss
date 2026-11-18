@@ -22,7 +22,7 @@ val assume_laws :
   State.context -> State.frame -> at:State.location -> Types.trait_reference -> Types.ty -> unit
 
 val template_trait : Path.t
-val signature_terminates : State.context -> Path.t -> bool
+val has_method_cost : State.context -> Invocation.callee -> Path.t -> bool
 
 val check_named_callback :
   State.context ->

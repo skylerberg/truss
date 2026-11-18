@@ -19,4 +19,4 @@ val list_manifest_problems :
 
 val select_files : Workspace.snapshot -> Path.package list -> string list -> Path.file list
 val read_source : Workspace.snapshot -> Path.package list -> Path.file -> Source.t
-val show_workspace_path : Workspace.snapshot -> Path.package list -> string -> string
+val show_file : Workspace.snapshot -> Path.package list -> Path.file -> string

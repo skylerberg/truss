@@ -141,6 +141,8 @@ module Code : sig
     | Negated_unsigned
     | Unused_value
     | Unbounded_time
+    | Upper_bound_in_exact_bound
+    | Cost_of_other_resource
     | Not_assignable
     | Wrong_try
     | Lambda_needs_type

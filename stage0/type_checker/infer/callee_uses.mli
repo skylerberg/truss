@@ -1,3 +1,5 @@
+val instantiate : Interface.Lookups.t -> Core.callee -> Types.capability_set
+
 val compute :
   Interface.Lookups.t ->
   list_bounds:(Types.parameter -> Types.trait_reference list) ->

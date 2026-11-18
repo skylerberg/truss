@@ -16,12 +16,11 @@
   manifest
   registry
   libc
-  toolchain
+  c_compiler
   process
-  build
   emit_c
   unicode
-  compile
+  backend
   database
   solver
   prover

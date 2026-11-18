@@ -1,0 +1,11 @@
+trait Opened {
+  fn open(mut self) -> UInt64
+
+  fn open(own self) -> UInt64
+}
+
+fn f[Door: Opened](door: mut Door) -> UInt64
+  cost allocations <= allocations(Door.open)
+{
+  mut door.open()
+}

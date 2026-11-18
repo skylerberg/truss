@@ -37,8 +37,8 @@ let list_components program root =
     ~list_successors:(list_references program) [ root ]
 
 let derive_component_keys program ~read_known_key component =
-  Compile.derive_test_keys
-    ~read_lowered:(fun key -> Compile.For_testing.make_lowered (lookup program key))
+  Backend.derive_test_keys
+    ~read_lowered:(fun key -> Backend.For_testing.make_lowered (lookup program key))
     ~read_known_key component
 
 let derive_test_key program root =
@@ -166,7 +166,7 @@ let () =
   Codegen_support.test
     "the test runner reports each test's outcome, message, and echo output, a leak, and a worker \
      that ends without a word" (fun () ->
-      let _, compile =
+      let _, backend =
         Codegen_support.load
           ~roots:
             [
@@ -245,7 +245,7 @@ let () =
           (Lazy.force Codegen_support.scratch)
           (Printf.sprintf "tests%d" !Codegen_support.counter)
       in
-      match Compile.For_testing.build_supplied_tests compile ~time_limit_ms:300 tests ~output with
+      match Backend.For_testing.build_supplied_tests backend ~time_limit_ms:300 tests ~output with
       | Error message -> Codegen_support.fail "%s" message
       | Ok () ->
           let status, out, _ = Process.run output [] in
@@ -266,20 +266,21 @@ let () =
                    "test 6 panicked\nmessage 45\ncompiler bug: the test left 1 block allocated\n";
                    "test 7 crashed\nmessage 19\nended with status 3\n";
                  ])
-            (match Compile.For_testing.parse_report out with
+            (match Backend.For_testing.parse_report out with
             | Ok records -> Codegen_support.render_records records
             | Error message -> message))
 
 let () =
   Codegen_support.test "an object that a build finds again is as new as that build" (fun () ->
       let directory = Filename.concat (Lazy.force Codegen_support.scratch) "aged-objects" in
-      let cache = Build.make_cache directory in
+      let c_compiler =
+        match C_compiler.find ~objects:directory with
+        | Ok c_compiler -> c_compiler
+        | Error message -> failwith message
+      in
       let compile_objects () =
         match
-          Build.For_testing.compile_objects
-            (Lazy.force Codegen_support.compiler)
-            cache
-            (Lazy.force Codegen_support.settings)
+          C_compiler.For_testing.compile_objects c_compiler O1
             [ ("one", "int one(void) { return 1; }\n") ]
         with
         | Ok [ path ] -> path

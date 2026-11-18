@@ -4,6 +4,7 @@ use standard::intrinsic
 impl Equal for Int8 {
   fn equal(self, other: Int8) -> Bool
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic::equal(self, right: other)
   }
@@ -249,6 +250,7 @@ impl TryFrom[UInt64] for Int8 {
 impl Equal for Int16 {
   fn equal(self, other: Int16) -> Bool
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic::equal(self, right: other)
   }
@@ -488,6 +490,7 @@ impl TryFrom[UInt64] for Int16 {
 impl Equal for Int32 {
   fn equal(self, other: Int32) -> Bool
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic::equal(self, right: other)
   }
@@ -721,6 +724,7 @@ impl TryFrom[UInt64] for Int32 {
 impl Equal for Int64 {
   fn equal(self, other: Int64) -> Bool
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic::equal(self, right: other)
   }

@@ -98,7 +98,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
               match
                 Interface.Impls.find_evidence lookups.interface ~list_bounds of_type reference
               with
-              | Some (From_impl { impl; substitution }) -> Impl { impl; arguments = substitution }
+              | Some (From_impl { impl; substitution }) -> Impl { impl; substitution }
               | Some From_bound -> Bound
               | Some From_any -> Dynamic
               | Some Built_in | Some (Accepted _) | None ->
@@ -862,7 +862,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                               receiver = Read;
                               self_type = string_type;
                               instantiation = Types.no_instantiation;
-                              evidence = Impl { impl; arguments = substitution };
+                              evidence = Impl { impl; substitution };
                             }
                       | _ -> raise_bug "`String` has no `Equal`"
                     in

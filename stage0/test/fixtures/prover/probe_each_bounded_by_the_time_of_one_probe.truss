@@ -1,0 +1,10 @@
+fn f[Source: Probe](source: Source, count: UInt64) -> Bool
+  cost time O(time(Source.probe))
+{
+  for done in 0..count
+    cost time O(done * time(Source.probe))
+  {
+    let _ = source.probe()
+  }
+  source.probe()
+}
