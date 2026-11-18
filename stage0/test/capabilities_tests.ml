@@ -226,10 +226,7 @@ let () =
           (fun (node : Core.expression) ->
             match (node.kind, node.type_) with
             | Lambda _, Function { uses; _ } ->
-                Some
-                  (List.mem
-                     (Types.Capability (Well_known.make_path Panic))
-                     (uses :> Types.capability list))
+                Some (Types.has_capability (Types.Capability (Well_known.make_path Panic)) uses)
             | _ -> None)
           (list_core_expressions text ~of_function:"f")
       with

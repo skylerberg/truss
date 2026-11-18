@@ -18,14 +18,12 @@ type function_body = { path : Path.t; implementation : Interface.Impls.implement
 type scope_kind =
   | Function_body of function_body
   | Lambda_body of Core.origin
-  | Restricted of {
-      description : string;
-      reason : string;
-      allowed : Types.capability_set;
-      enclosing : scope option;
-    }
+  | Restricted of { description : string; reason : string; enclosing : scope option }
 
-and scope = { available : Types.capability_set; kind : scope_kind }
+and scope = { allowed : Types.capability_set; provided : Types.capability_set; kind : scope_kind }
+
+let make_scope ~allowed kind = { allowed; provided = Types.no_capabilities; kind }
+let compute_available scope = Types.union_capabilities scope.allowed scope.provided
 
 let find_implemented_capability scope : Types.capability option =
   match scope.kind with
@@ -38,7 +36,7 @@ let value_reason =
    instead."
 
 let make_restricted_scope ?enclosing ~allowed ~reason description =
-  { available = allowed; kind = Restricted { description; reason; allowed; enclosing } }
+  make_scope ~allowed (Restricted { description; reason; enclosing })
 
 let make_parallel_scope ~enclosing description =
   make_restricted_scope ~enclosing ~allowed:Types.built_in_capabilities
@@ -54,7 +52,7 @@ let make_quantifier_scope ~enclosing =
 
 let find_enclosing_restriction scope =
   match scope.kind with
-  | Restricted { enclosing = Some enclosing; allowed; _ } -> Some (enclosing, allowed)
+  | Restricted { enclosing = Some enclosing; _ } -> Some (enclosing, scope.allowed)
   | Function_body _ | Lambda_body _ | Restricted { enclosing = None; _ } -> None
 
 let show_exceptions (allowed : Types.capability_set) =
@@ -123,11 +121,12 @@ let add_alternative ~sentence_start alternative =
 let rec require_available checking scope (origin : Core.origin) ?(subject = "This call")
     ?alternative ?(indirect_call = false) ?restriction (required : Types.capability_set) =
   let state = checking.state in
+  let available = compute_available scope in
   let superset =
     if indirect_call then
-      Types.union_capabilities scope.available
+      Types.union_capabilities available
         (Types.make_capability_set (Option.to_list (find_implemented_capability scope)))
-    else scope.available
+    else available
   in
   let report_missing (missing : Types.capability_set) =
     List.iter
@@ -147,12 +146,12 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
             report checking Not_available origin
               (Printf.sprintf "%s uses `RunForever`, but %s must terminate.%s" subject description
                  (add_alternative ~sentence_start:true alternative))
-        | Restricted { description; reason; allowed; _ } ->
+        | Restricted { description; reason; _ } ->
             report checking Not_available origin
               (Printf.sprintf
                  "%s uses `%s`, but %s may use no capability%s, even one that is available outside \
                   it. %s"
-                 subject shown description (show_exceptions allowed) reason)
+                 subject shown description (show_exceptions scope.allowed) reason)
         | Function_body { path; _ } ->
             let can_provide =
               match capability with
@@ -219,10 +218,10 @@ let compute_node_origin = function
 let rec check_expression checking scope (node : Core.expression) =
   match node.kind with
   | Lambda { body; _ } ->
-      let available =
+      let allowed =
         match node.type_ with Types.Function { uses; _ } -> uses | _ -> Types.no_capabilities
       in
-      check_block checking { available; kind = Lambda_body node.origin } body
+      check_block checking (make_scope ~allowed (Lambda_body node.origin)) body
   | Provide { implementations; body } -> check_provide checking scope implementations body
   | Quantified _ ->
       check_children checking (make_quantifier_scope ~enclosing:scope) (`Expression node)
@@ -357,9 +356,9 @@ and check_provide checking scope implementations body =
                 (fun ((provided : Core.provided), _) -> Types.Capability provided.capability)
                 impls)))
     implementations;
-  checking.provides <- (scope.available, implementations, body) :: checking.provides;
+  checking.provides <- (compute_available scope, implementations, body) :: checking.provides;
   check_block checking
-    { scope with available = Types.union_capabilities scope.available !provided }
+    { scope with provided = Types.union_capabilities scope.provided !provided }
     body
 
 let solve (state : State.state) =
@@ -501,11 +500,7 @@ let check_monitor_lock checking ~(read_solved : int -> Types.capability_set) ava
         | capability -> [ capability ])
       available
   in
-  if
-    not
-      (List.mem tasks (available :> Types.capability list)
-      || List.exists provides_tasks implementations)
-  then
+  if not (Types.has_capability tasks available || List.exists provides_tasks implementations) then
     List.iter
       (fun (implementation : Core.implementation) ->
         if implementation.mode = Mut && not (provides_tasks implementation) then
@@ -565,21 +560,18 @@ let check_monitor_callbacks checking implementations =
 let check (state : State.state) (elaborated : Interface.Environment.elaborated_interface)
     (form : Core.t) =
   let checking = { state; provides = [] } in
-  let make_function_body_scope available =
+  let make_function_body_scope allowed =
     let path = state.key.path in
-    {
-      available;
-      kind =
-        Function_body
-          {
-            path;
-            implementation =
-              (match path with
-              | Method { owner = (Impl _ | Derived _) as owner; _ } ->
-                  Interface.Impls.find_implementation state.lookups.interface owner
-              | _ -> None);
-          };
-    }
+    make_scope ~allowed
+      (Function_body
+         {
+           path;
+           implementation =
+             (match path with
+             | Method { owner = (Impl _ | Derived _) as owner; _ } ->
+                 Interface.Impls.find_implementation state.lookups.interface owner
+             | _ -> None);
+         })
   in
   let check_specification =
     check_expression checking (make_no_capabilities_scope "a specification")

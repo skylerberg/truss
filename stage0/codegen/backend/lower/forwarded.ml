@@ -179,12 +179,7 @@ let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit 
           | Default -> None)
         inner.arguments (Some [])
     in
-    if
-      List.for_all
-        (fun capability -> capability = Types.run_forever)
-        (inner.callee.uses :> Types.capability list)
-    then Some { outer with callee = { inner.callee with target }; arguments }
-    else None
+    Some { outer with callee = { inner.callee with target }; arguments }
   in
   let* setup =
     List.fold_right

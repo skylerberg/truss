@@ -1063,14 +1063,20 @@ let find_forwarded_call st (call : Mir.call) : Forwarded.t option =
         -frame.forwarded_locals
       in
       let code = Definitions.make_code st.context path instantiation in
+      let passes_no_evidence (forwarded_call : Mir.call) =
+        Definitions.list_evidence st.context code.substitution forwarded_call.callee.uses = []
+      in
       Option.bind
         (Forwarded.forward_call ~substitution:code.substitution ~make_fresh_local:take_fresh_number
            (read_mir_graph st.context path) call)
         (fun (forwarded : Forwarded.t) ->
           if
-            List.for_all
-              (fun (_, type_, _) -> Lowering.is_trivial st (Lowering.ground st type_))
-              forwarded.setup
+            passes_no_evidence forwarded.call
+            && List.for_all
+                 (fun (_, type_, setup_call) ->
+                   Lowering.is_trivial st (Lowering.ground st type_)
+                   && passes_no_evidence setup_call)
+                 forwarded.setup
           then Some forwarded
           else None)
   | _ -> None

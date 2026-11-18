@@ -66,6 +66,7 @@ val make_capability_set : capability list -> capability_set
 val no_capabilities : capability_set
 val union_capabilities : capability_set -> capability_set -> capability_set
 val run_forever : capability
+val has_capability : capability -> capability_set -> bool
 val built_in_capabilities : capability_set
 val is_built_in_capability : capability -> bool
 val terminates : capability_set -> bool
