@@ -441,6 +441,15 @@ let finalize_argument state = function
       | Types.Value_variable _ -> Types.Type (make_unsolved_type state)
       | value -> Types.Value value)
 
+let finalize_instantiation state (instantiation : Types.instantiation) : Types.instantiation =
+  {
+    type_arguments = List.map (finalize_argument state) instantiation.type_arguments;
+    capability_arguments =
+      List.map
+        (fun (name, argument) -> (name, finalize_capabilities state argument))
+        instantiation.capability_arguments;
+  }
+
 let unify state left right =
   let normalize type_ =
     Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
@@ -604,12 +613,12 @@ let settle state frame =
     List.concat_map
       (fun id ->
         match state.tables.calls.(id) with
-        | Some { callee = Trait_method { trait; type_arguments; _ }; _ } ->
-            trait.trait_arguments @ type_arguments
+        | Some { callee = Trait_method { trait; instantiation; _ }; _ } ->
+            trait.trait_arguments @ instantiation.type_arguments
         | Some
             {
               callee =
-                ( Function { type_arguments; _ }
+                ( Function { instantiation = { type_arguments; _ }; _ }
                 | Constructor { type_arguments; _ }
                 | Intrinsic { type_arguments; _ } );
               _;
@@ -1037,8 +1046,7 @@ let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
     Function
       {
         path = Method { owner = path; name; receiver = Read };
-        type_arguments;
-        capability_arguments = [];
+        instantiation = { Types.no_instantiation with type_arguments };
       }
   in
   let build_read_argument = Operands.build_argument Read in
@@ -1109,8 +1117,8 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                                 (Function
                                    {
                                      path = Method { owner = path; name = "slice"; receiver = Read };
-                                     type_arguments = arguments;
-                                     capability_arguments = [];
+                                     instantiation =
+                                       { Types.no_instantiation with type_arguments = arguments };
                                    })
                               ~arguments:[ Operands.build_argument Read inner ]
                               ~lends:None))

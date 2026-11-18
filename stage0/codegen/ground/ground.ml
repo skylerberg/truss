@@ -9,6 +9,12 @@ type ty =
 and argument = Type of ty | Value of Z.t
 and function_type = { parameters : (mode * ty) list; result : ty; uses : Path.t list }
 
+type instantiation = {
+  type_arguments : argument list;
+  capability_arguments : (string * Path.t list) list;
+}
+
+let no_instantiation = { type_arguments = []; capability_arguments = [] }
 let compare = Stdlib.compare
 let make_builtin builtin = Named { path = Intrinsic.make_builtin_path builtin; arguments = [] }
 

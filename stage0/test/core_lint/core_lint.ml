@@ -70,14 +70,17 @@ let make_substitution context generics arguments ~subject =
   end
 
 let make_capability_substitution context (signature : Types.signature) arguments ~subject =
-  if List.length signature.capability_parameters = List.length arguments then
-    Types.make_capability_substitution signature.capability_parameters arguments
-  else begin
-    context.report "%s has %d capability arguments for %d capability parameters" subject
-      (List.length arguments)
-      (List.length signature.capability_parameters);
-    Types.no_substitution
-  end
+  let parameters =
+    List.sort compare
+      (List.map
+         (fun (parameter : Types.parameter) -> parameter.name)
+         signature.capability_parameters)
+  in
+  if List.sort compare (List.map fst arguments) <> parameters then
+    context.report "%s gives capability arguments for [%s], and its callee has [%s]" subject
+      (String.concat ", " (List.map fst arguments))
+      (String.concat ", " parameters);
+  Types.make_capability_substitution signature.capability_parameters arguments
 
 let instantiate context (callee : Core.callee) =
   let subject = "a call of `" ^ show_callee callee ^ "`" in
@@ -94,20 +97,20 @@ let instantiate context (callee : Core.callee) =
         signature.output )
   in
   match callee with
-  | Function { path; type_arguments; capability_arguments } -> (
+  | Function { path; instantiation } -> (
       match Interface.Impls.read_signature context.interface path with
       | Some signature ->
           of_signature
             (Types.combine_substitutions
-               (make_substitution context signature.generics type_arguments ~subject)
-               (make_capability_substitution context signature capability_arguments ~subject))
+               (make_substitution context signature.generics instantiation.type_arguments ~subject)
+               (make_capability_substitution context signature instantiation.capability_arguments
+                  ~subject))
             signature
       | None -> None)
   | Intrinsic { operation; type_arguments } ->
       let signature = Intrinsic_signatures.make_signature operation in
       of_signature (make_substitution context signature.generics type_arguments ~subject) signature
-  | Trait_method
-      { trait = reference; name; receiver; self_type; type_arguments; capability_arguments; _ } -> (
+  | Trait_method { trait = reference; name; receiver; self_type; instantiation; _ } -> (
       match
         ( find_method_signature context.interface reference.trait name receiver,
           Interface.Definition.find_trait_interface context.interface reference.trait )
@@ -117,8 +120,10 @@ let instantiate context (callee : Core.callee) =
             (Types.combine_substitutions
                (Interface.Properties.make_trait_substitution interface ~self:self_type reference)
                (Types.combine_substitutions
-                  (make_substitution context signature.generics type_arguments ~subject)
-                  (make_capability_substitution context signature capability_arguments ~subject)))
+                  (make_substitution context signature.generics instantiation.type_arguments
+                     ~subject)
+                  (make_capability_substitution context signature instantiation.capability_arguments
+                     ~subject)))
             signature
       | _ -> None)
   | Capability_method { capability; name } -> (
@@ -514,17 +519,19 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         Hashtbl.replace task_origins node.origin ()
     | _ -> ()
   in
+  let check_instantiation subject (instantiation : Types.instantiation) =
+    List.iter (check_argument (subject ^ "'s type argument")) instantiation.type_arguments;
+    List.iter
+      (fun (_, argument) -> check_capabilities (subject ^ "'s capability argument") argument)
+      instantiation.capability_arguments
+  in
   let check_callee (callee : Core.callee) =
     match callee with
-    | Function { type_arguments; capability_arguments; _ } ->
-        List.iter (check_argument "a call's type argument") type_arguments;
-        List.iter (check_capabilities "a call's capability argument") capability_arguments
-    | Trait_method
-        { trait = reference; self_type; type_arguments; capability_arguments; evidence; _ } -> (
+    | Function { instantiation; _ } -> check_instantiation "a call" instantiation
+    | Trait_method { trait = reference; self_type; instantiation; evidence; _ } -> (
         check_trait "a call's trait" reference;
         check_type "a call's `Self`" self_type;
-        List.iter (check_argument "a call's type argument") type_arguments;
-        List.iter (check_capabilities "a call's capability argument") capability_arguments;
+        check_instantiation "a call" instantiation;
         match evidence with
         | Impl { arguments; _ } ->
             List.iter
@@ -720,11 +727,8 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                        report "a `match` arm does not have one pattern per scrutinee";
                      List.iter2 (check_binds_own "a `match`") scrutinees arm.patterns)
                    arms
-             | Function_value { type_arguments; capability_arguments; _ } ->
-                 List.iter (check_argument "a function value's type argument") type_arguments;
-                 List.iter
-                   (check_capabilities "a function value's capability argument")
-                   capability_arguments
+             | Function_value { instantiation; _ } ->
+                 check_instantiation "a function value" instantiation
              | Value_parameter named -> check_parameter "a value" named
              | Method_time method_ -> check_callee method_
              | Lambda { result; captures; _ } ->

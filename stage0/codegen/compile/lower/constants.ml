@@ -251,21 +251,14 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
               (Static_storage { contents with elements = contents.elements @ [ element ] });
             Some ()
         | _ -> None)
-    | Function { path; type_arguments; capability_arguments }, arguments when depth > 0 ->
+    | Function { path; instantiation }, arguments when depth > 0 ->
         let* { form = callee_mir; _ } = Mir.read_graph st.context.lookups.mir path in
-        let type_arguments =
-          List.map
-            (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)
-            type_arguments
-        and capability_arguments =
-          List.map
-            (Monomorphic.list_capabilities st.context.monomorphic st.frame.code.substitution)
-            capability_arguments
-        in
         let callee =
           Lowering.enter st.context ~builder:st.builder
             (Lowering.make_frame
-               (Definitions.make_code st.context path ~type_arguments ~capability_arguments))
+               (Definitions.make_code st.context path
+                  (Monomorphic.ground_instantiation st.context.monomorphic
+                     st.frame.code.substitution instantiation)))
         in
         let defaults = (Mir_form.read_parameter_defaults st.context path).form in
         let* values =
@@ -345,7 +338,7 @@ let write_output (st : Lowering.state) output =
     | Lends _ -> Definitions.raise_bug "write_fully does not return"
   in
   Targets.lower_instance_call st
-    (Code { path = write_fully; type_arguments = []; capability_arguments = [] })
+    (Code { path = write_fully; instantiation = Ground.no_instantiation })
     ~signature ~substitution:Types.no_substitution
     ~arguments:[ (Read, int32, descriptor); (Read, view_ty, view) ]
     ~destination:(Lowering.allocate_temporary st result)

@@ -179,20 +179,24 @@ let compute_operand_type : Core.operand -> Types.ty = function
   | Value value -> value.type_
 
 let diverges_whatever_it_is_passed (state : State.state) (callee : Core.callee) =
-  let empty = List.map (fun _ -> Types.no_capabilities) in
+  let empty (instantiation : Types.instantiation) =
+    {
+      instantiation with
+      capability_arguments =
+        List.map (fun (name, _) -> (name, Types.no_capabilities)) instantiation.capability_arguments;
+    }
+  in
   match callee with
   | Function function_ ->
       not
         (Types.terminates
            (State.compute_callee_uses state
-              (Function
-                 { function_ with capability_arguments = empty function_.capability_arguments })))
+              (Function { function_ with instantiation = empty function_.instantiation })))
   | Trait_method method_ ->
       not
         (Types.terminates
            (State.compute_callee_uses state
-              (Trait_method
-                 { method_ with capability_arguments = empty method_.capability_arguments })))
+              (Trait_method { method_ with instantiation = empty method_.instantiation })))
   | Capability_method _ -> not (Types.terminates (State.compute_callee_uses state callee))
   | Intrinsic _ | Indirect _ -> false
 
@@ -323,7 +327,7 @@ let rec check_expression checking scope (node : Core.expression) =
       check_children checking (make_quantifier_scope ~enclosing:scope) (`Expression node)
   | Function_value { path; _ } ->
       check_callee_grants checking node.origin
-        (Function { path; type_arguments = []; capability_arguments = [] })
+        (Function { path; instantiation = Types.no_instantiation })
   | Call call -> (
       check_children checking scope (`Expression node);
       check_callee_grants checking node.origin call.callee;

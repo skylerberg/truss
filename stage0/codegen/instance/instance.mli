@@ -1,9 +1,5 @@
 type key =
-  | Code of {
-      path : Path.t;
-      type_arguments : Ground.argument list;
-      capability_arguments : Path.t list list;
-    }
+  | Code of { path : Path.t; instantiation : Ground.instantiation }
   | Constant of Path.t
   | Drop of Ground.ty
   | Copy of Ground.ty
@@ -23,8 +19,7 @@ and generated =
   | Locked_entry of { capability : Path.t; name : string }
   | Adapter of {
       function_ : Path.t;
-      type_arguments : Ground.argument list;
-      capability_arguments : Path.t list list;
+      instantiation : Ground.instantiation;
       ty : Ground.function_type;
     }
   | Program_main of Path.t

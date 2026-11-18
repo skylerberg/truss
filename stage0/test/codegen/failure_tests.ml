@@ -112,8 +112,7 @@ let () =
         Instance.Code
           {
             path = Top { module_ = Codegen_support.example; name = "Point" };
-            type_arguments = [];
-            capability_arguments = [];
+            instantiation = Ground.no_instantiation;
           }
       in
       let _, compile = Codegen_support.load ~roots:[ not_code ] "type Point(x: Int64)\n" in

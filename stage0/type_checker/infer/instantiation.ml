@@ -199,32 +199,26 @@ and check_type_argument state (value : Syntax.expression) : Types.argument =
 type instance = {
   signature : Types.signature;
   substitution : Types.substitution;
-  type_arguments : Types.argument list;
-  capability_arguments : Types.capability_set list;
+  instantiation : Types.instantiation;
 }
 
 let instantiate (state : State.state) (span : Source.Definition_span.t)
     ?(extra = Types.no_substitution) (signature : Types.signature) =
-  let type_arguments = make_fresh_generic_arguments state signature.generics in
-  let capability_arguments =
-    List.map
-      (fun _ -> Unify.make_fresh_capability_variable state.unifier)
-      signature.capability_parameters
+  let instantiation : Types.instantiation =
+    {
+      type_arguments = make_fresh_generic_arguments state signature.generics;
+      capability_arguments =
+        List.map
+          (fun (parameter : Types.parameter) ->
+            (parameter.name, Unify.make_fresh_capability_variable state.unifier))
+          signature.capability_parameters;
+    }
   in
   let substitution =
-    Types.combine_substitutions
-      (Types.combine_substitutions
-         (Types.make_substitution signature.generics type_arguments)
-         (Types.make_capability_substitution signature.capability_parameters capability_arguments))
-      extra
+    Types.combine_substitutions (Types.make_signature_substitution signature instantiation) extra
   in
   require_bounds state span signature.generics substitution;
-  {
-    signature = Types.substitute_signature substitution signature;
-    substitution;
-    type_arguments;
-    capability_arguments;
-  }
+  { signature = Types.substitute_signature substitution signature; substitution; instantiation }
 
 let find_intrinsic_signature path =
   Option.map Intrinsic_signatures.make_signature (Intrinsic.find_operation path)

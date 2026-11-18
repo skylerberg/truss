@@ -35,8 +35,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
             name;
             receiver;
             self_type;
-            type_arguments = [];
-            capability_arguments = [];
+            instantiation = Types.no_instantiation;
             evidence = State.convert_evidence evidence;
           };
       arguments =

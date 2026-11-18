@@ -36,8 +36,7 @@ let build ?(roots = []) files =
         (Code
            {
              path = Top { module_ = Support.parse_module "app::main"; name };
-             type_arguments = [];
-             capability_arguments = [];
+             instantiation = { type_arguments = []; capability_arguments = [] };
            }))
     roots;
   Database.propagate database;

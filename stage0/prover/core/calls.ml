@@ -843,8 +843,10 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         | other -> other)
       type_arguments
   in
-  let list_capability_arguments (capability_arguments : Types.capability_set list) =
-    List.map (Types.substitute_capabilities frame.substitution) capability_arguments
+  let list_capability_arguments (instantiation : Types.instantiation) =
+    List.map
+      (fun (name, argument) -> (name, Types.substitute_capabilities frame.substitution argument))
+      instantiation.capability_arguments
   in
   let read_signature path = Interface.Impls.read_signature context.lookups.interface path in
   let list_generics path =
@@ -903,22 +905,21 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         Some (frame, Facts.arrive context frame "result" result_type)
   in
   match invocation.callee with
-  | Function { path; type_arguments; capability_arguments } ->
-      let arguments = list_arguments type_arguments in
+  | Function { path; instantiation } ->
+      let arguments = list_arguments instantiation.type_arguments in
       let substitution =
         Types.combine_substitutions
           (pair (list_generics path) arguments ~fixed:Types.no_substitution)
           (Types.make_capability_substitution (list_capability_parameters path)
-             (list_capability_arguments capability_arguments))
+             (list_capability_arguments instantiation))
       in
       with_contract
         ~substitution_of:(fun _ -> substitution)
         ~instance:arguments path
         (Contracts.find_function_contract context.lookups path)
-  | Trait_method
-      { trait; name; receiver; evidence; self_type; type_arguments; capability_arguments } -> (
-      let arguments = list_arguments type_arguments in
-      let capability_arguments = list_capability_arguments capability_arguments in
+  | Trait_method { trait; name; receiver; evidence; self_type; instantiation } -> (
+      let arguments = list_arguments instantiation.type_arguments in
+      let capability_arguments = list_capability_arguments instantiation in
       let self_type = Facts.substitute_type context frame self_type in
       let trait = { trait with trait_arguments = list_arguments trait.trait_arguments } in
       let evidence : Core.evidence =
@@ -960,12 +961,13 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                 (Logic.Boolean false)
           | _ -> ());
           let trait_path = Path.Method { owner = trait.trait; name; receiver } in
-          let trait_capability_parameters = list_capability_parameters trait_path in
           let trait_substitution =
             Types.combine_substitutions
               (pair (list_generics trait_path) arguments
                  ~fixed:(Contracts.make_trait_substitution context.lookups trait self_type))
-              (Types.make_capability_substitution trait_capability_parameters capability_arguments)
+              (Types.make_capability_substitution
+                 (list_capability_parameters trait_path)
+                 capability_arguments)
           in
           let path, declared_substitution =
             match evidence with
@@ -984,8 +986,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                 ( path,
                   Types.combine_substitutions
                     (pair (list_generics path) arguments ~fixed:impl_substitution)
-                    (Types.transfer_capability_arguments ~declared:trait_capability_parameters
-                       ~arguments:capability_arguments (list_capability_parameters path)) )
+                    (Types.make_capability_substitution (list_capability_parameters path)
+                       capability_arguments) )
             | _ -> (trait_path, trait_substitution)
           in
           let compute_substitution (part : State.part) =

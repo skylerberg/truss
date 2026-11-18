@@ -60,7 +60,7 @@ let begin_body (st : Lowering.state) ~(body : Mir.Graph.body) ~defaults =
   (List.filter_map (fun (arrives, _, _) -> arrives) bound @ Option.to_list mask @ evidence, places)
 
 let make_code_state context ~key path =
-  let code = Definitions.make_code context path ~type_arguments:[] ~capability_arguments:[] in
+  let code = Definitions.make_code context path Ground.no_instantiation in
   ( Lowering.enter context
       ~builder:(Emit_c.Builder.create context.env ~key)
       (Lowering.make_frame code),
@@ -128,7 +128,7 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.instanc
       in
       let result = Lowering.allocate_temporary st result_ty in
       Targets.lower_instance_call st
-        (Code { path = function_; type_arguments = []; capability_arguments = [] })
+        (Code { path = function_; instantiation = Ground.no_instantiation })
         ~signature ~substitution:Types.no_substitution ~arguments:passed ~destination:result ();
       let output = Targets.begin_output st in
       Encoding.encode_call context.env st.builder
@@ -137,10 +137,9 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.Builder.instanc
       Constants.write_output st output);
   Lowering.finish_instance st ~rest:[] ()
 
-let lower_source_code context ~path ~type_arguments ~capability_arguments : Emit_c.Builder.instance
-    =
-  let key = Instance.Code { path; type_arguments; capability_arguments } in
-  let code = Definitions.make_code context path ~type_arguments ~capability_arguments in
+let lower_source_code context ~path ~instantiation : Emit_c.Builder.instance =
+  let key = Instance.Code { path; instantiation } in
+  let code = Definitions.make_code context path instantiation in
   let body = (Mir_form.read_mir_graph context path).body in
   let st =
     Lowering.enter context

@@ -223,9 +223,8 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
           else begin
             let written_generics = Types.list_generic_arguments written.generics in
             let capability_renaming =
-              Types.transfer_capability_arguments ~declared:written.capability_parameters
-                ~arguments:(Types.list_capability_arguments written.capability_parameters)
-                declared.capability_parameters
+              Types.make_capability_substitution declared.capability_parameters
+                (Types.list_capability_arguments written.capability_parameters)
             in
             let expected =
               Impls.normalize_signature_in_impl state.lookups ~list_bounds ~missing_associated

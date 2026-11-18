@@ -11,7 +11,7 @@ let compute (interface : Interface.Lookups.t) ~list_bounds (callee : Core.callee
     | None -> raise_bug "`%s` has no method `%s`" (Path.show owner) name
   in
   match callee with
-  | Function { path; type_arguments; capability_arguments } -> (
+  | Function { path; instantiation } -> (
       let signature =
         match Intrinsic.find_operation path with
         | Some operation -> Some (Intrinsic_signatures.make_signature operation)
@@ -21,11 +21,10 @@ let compute (interface : Interface.Lookups.t) ~list_bounds (callee : Core.callee
       | Some signature ->
           normalize
             (Types.substitute_capabilities
-               (Types.make_signature_substitution signature ~type_arguments ~capability_arguments)
+               (Types.make_signature_substitution signature instantiation)
                signature.uses)
       | None -> raise_bug "the callee `%s` has no signature" (Path.show path))
-  | Trait_method
-      { trait; name; receiver; self_type; type_arguments; capability_arguments; evidence } -> (
+  | Trait_method { trait; name; receiver; self_type; instantiation; evidence } -> (
       match
         ( Interface.Definition.find_trait_method interface trait.trait ~name ~receiver,
           Interface.Definition.find_trait_interface interface trait.trait )
@@ -40,8 +39,7 @@ let compute (interface : Interface.Lookups.t) ~list_bounds (callee : Core.callee
                  (Types.combine_substitutions
                     (Interface.Properties.make_trait_substitution trait_interface ~self:self_type
                        trait)
-                    (Types.make_signature_substitution signature ~type_arguments
-                       ~capability_arguments))
+                    (Types.make_signature_substitution signature instantiation))
                  signature.uses)
           in
           match evidence with
@@ -63,11 +61,11 @@ let compute (interface : Interface.Lookups.t) ~list_bounds (callee : Core.callee
                           (Types.substitute_capabilities
                              (Types.combine_substitutions arguments
                                 (Types.combine_substitutions
-                                   (Types.make_substitution own_generics type_arguments)
-                                   (Types.transfer_capability_arguments
-                                      ~declared:signature.capability_parameters
-                                      ~arguments:capability_arguments
-                                      implemented.capability_parameters)))
+                                   (Types.make_substitution own_generics
+                                      instantiation.type_arguments)
+                                   (Types.make_capability_substitution
+                                      implemented.capability_parameters
+                                      instantiation.capability_arguments)))
                              implemented.uses)))
               | None -> declared)
           | Bound | Dynamic -> declared)

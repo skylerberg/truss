@@ -105,7 +105,6 @@ val extract_result_type : result -> ty
 val show_mode : mode -> string
 val map : ?map_capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
 val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
-val list_capability_parameters : ty -> parameter list
 val find_specification_only_type : ty -> ty option
 val has_capability_variable : capability_set -> bool
 val may_panic : capability_set -> bool
@@ -129,10 +128,10 @@ type generic_kind = Type_generic of trait_reference list | Value_generic
 type generic = { generic : parameter; kind : generic_kind }
 
 val list_generic_arguments : generic list -> argument list
-val list_capability_arguments : parameter list -> capability_set list
+val list_capability_arguments : parameter list -> (string * capability_set) list
 val list_bounds : generic list -> parameter -> trait_reference list
 val make_substitution : generic list -> argument list -> substitution
-val make_capability_substitution : parameter list -> capability_set list -> substitution
+val make_capability_substitution : parameter list -> (string * capability_set) list -> substitution
 
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 
@@ -148,15 +147,14 @@ type signature = {
   capture_free_parameters : string list;
 }
 
-val make_signature_substitution :
-  signature ->
-  type_arguments:argument list ->
-  capability_arguments:capability_set list ->
-  substitution
+type instantiation = {
+  type_arguments : argument list;
+  capability_arguments : (string * capability_set) list;
+}
 
-val transfer_capability_arguments :
-  declared:parameter list -> arguments:capability_set list -> parameter list -> substitution
-
+val no_instantiation : instantiation
+val substitute_instantiation : substitution -> instantiation -> instantiation
+val make_signature_substitution : signature -> instantiation -> substitution
 val map_signature : (ty -> ty) -> signature -> signature
 val substitute_signature : substitution -> signature -> signature
 

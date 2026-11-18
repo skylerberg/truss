@@ -302,19 +302,12 @@ and parse_generics cursor : Syntax.generic_parameter list =
 and parse_generic_parameter cursor : Syntax.generic_parameter =
   let start = Cursor.index cursor in
   let kind =
-    match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-    | Keyword Capability, Upper name ->
-        Cursor.report cursor Unexpected_token (Cursor.lookup_token cursor start).span
-          (Printf.sprintf
-             "A capability parameter is not declared among generic parameters. Write `generic %s` \
-              at each use instead, as in `uses generic %s`."
-             name name);
-        raise Cursor.Failed
-    | Upper text, _ ->
+    match Cursor.peek_kind cursor with
+    | Upper text ->
         let name = Atoms.make_name cursor (Cursor.take cursor) text in
         Syntax.Type_parameter
           (name, if Cursor.accept_punctuation cursor Colon then parse_bounds cursor else [])
-    | Lower text, _ ->
+    | Lower text ->
         let name = Atoms.make_name cursor (Cursor.take cursor) text in
         Cursor.expect_punctuation cursor Colon;
         Value_parameter (name, parse_type_expression cursor)

@@ -476,9 +476,8 @@ let () =
       expect_fine (later ^ Fixtures.Capabilities.held_still_then_tick_using_clock));
   Harness.test "only a function, a method, or a theorem names a capability parameter" (fun () ->
       expect_one_diagnostic "type Holder(action: (fn() -> Instant uses generic Granted))\n"
-        "resolve.misplaced_capability_parameter";
-      expect_one_diagnostic "test \"t\" uses generic Granted {}\n"
-        "resolve.misplaced_capability_parameter";
+        "resolve.unknown_name";
+      expect_one_diagnostic "test \"t\" uses generic Granted {}\n" "resolve.unknown_name";
       expect_fine "type Holder(action: (fn() -> Instant uses Clock))\n")
 
 let () =

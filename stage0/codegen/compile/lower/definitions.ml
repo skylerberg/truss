@@ -77,7 +77,7 @@ let read_signature context (path : Path.t) =
   | Some signature -> signature
   | None -> raise_bug "no signature for %s" (Path.show path)
 
-let make_code context (path : Path.t) ~type_arguments ~capability_arguments : code =
+let make_code context (path : Path.t) (instantiation : Ground.instantiation) : code =
   let make_function_code ~enclosing_impl (key : Resolve.Names.key) ~(interface : Types.signature)
       ~substitution =
     {
@@ -110,9 +110,7 @@ let make_code context (path : Path.t) ~type_arguments ~capability_arguments : co
       | _ -> raise_bug "%s is not a test" (Path.show path))
   | Top _ | Method _ -> (
       let interface = read_signature context path in
-      let substitution =
-        Monomorphic.make_signature_substitution interface ~type_arguments ~capability_arguments
-      in
+      let substitution = Monomorphic.make_signature_substitution interface instantiation in
       let enclosing_impl =
         match path with
         | Method { owner = (Impl _ | Derived _) as impl; _ } -> Some impl
@@ -150,17 +148,14 @@ let make_code context (path : Path.t) ~type_arguments ~capability_arguments : co
               (fun (generic : Types.generic) -> not (Path.equal generic.generic.owner trait))
               trait_signature.generics
           in
-          let own = List.drop count type_arguments in
+          let own = List.drop count instantiation.type_arguments in
           make_function_code ~enclosing_impl provided ~interface:trait_signature
             ~substitution:
               (Types.combine_substitutions of_trait
                  (Types.combine_substitutions (bind own_generics own)
                     (Types.combine_substitutions substitution
-                       (Types.transfer_capability_arguments
-                          ~declared:interface.capability_parameters
-                          ~arguments:
-                            (List.map Monomorphic.convert_capabilities capability_arguments)
-                          trait_signature.capability_parameters))))
+                       (Types.make_capability_substitution trait_signature.capability_parameters
+                          (Monomorphic.convert_capability_arguments instantiation)))))
       | Some (Inherited _, _), _ ->
           raise_bug "%s inherits a method outside an impl" (Path.show path)
       | None, _ -> raise_bug "%s is not a function" (Path.show path))

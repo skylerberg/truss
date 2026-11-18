@@ -326,28 +326,6 @@ let rec exists ?(resolve = Fun.id) transform type_ =
   | Any reference -> trait_exists reference
   | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> false
 
-let rec list_capability_parameters type_ =
-  let list_in_argument = function
-    | Type type_ -> list_capability_parameters type_
-    | Value _ -> []
-  in
-  let list_in_trait (reference : trait_reference) =
-    List.concat_map list_in_argument reference.trait_arguments
-    @ List.concat_map (fun (_, type_) -> list_capability_parameters type_) reference.associated
-  in
-  match type_ with
-  | Named { arguments; _ } -> List.concat_map list_in_argument arguments
-  | Projection { base; trait = reference; _ } ->
-      list_capability_parameters base @ list_in_trait reference
-  | Function { inputs; output; uses; _ } ->
-      List.concat_map (fun (_, type_) -> list_capability_parameters type_) inputs
-      @ list_capability_parameters output
-      @ List.filter_map
-          (function Capability_parameter parameter -> Some parameter | _ -> None)
-          uses
-  | Any reference -> list_in_trait reference
-  | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> []
-
 let is_specification_only = function
   | Integer -> true
   | Named { path = Top { module_; _ }; _ } -> module_ = Well_known.specification
@@ -534,7 +512,9 @@ let list_generic_arguments generics =
 let list_capability_arguments parameters =
   List.map
     (fun parameter ->
-      make_capability_set [ Capability_parameter parameter; Divergence (Of_parameter parameter) ])
+      ( parameter.name,
+        make_capability_set [ Capability_parameter parameter; Divergence (Of_parameter parameter) ]
+      ))
     parameters
 
 let list_bounds generics parameter =
@@ -556,12 +536,16 @@ let make_substitution (generics : generic list) arguments : substitution =
       (List.length arguments) (List.length generics)
 
 let make_capability_substitution (parameters : parameter list) arguments : substitution =
-  if List.length parameters = List.length arguments then
-    { arguments = []; capability_arguments = List.combine parameters arguments }
-  else
-    Compiler_bug.raise_bug ~stage:"Types"
-      "a substitution of %d capability sets for %d capability parameters" (List.length arguments)
-      (List.length parameters)
+  {
+    arguments = [];
+    capability_arguments =
+      List.filter_map
+        (fun parameter ->
+          Option.map
+            (fun argument -> (parameter, argument))
+            (List.assoc_opt parameter.name arguments))
+        parameters;
+  }
 
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 
@@ -577,23 +561,26 @@ type signature = {
   capture_free_parameters : string list;
 }
 
-let make_signature_substitution (signature : signature) ~type_arguments ~capability_arguments =
-  combine_substitutions
-    (make_substitution signature.generics type_arguments)
-    (make_capability_substitution signature.capability_parameters capability_arguments)
+type instantiation = {
+  type_arguments : argument list;
+  capability_arguments : (string * capability_set) list;
+}
 
-let transfer_capability_arguments ~(declared : parameter list) ~arguments
-    (implemented : parameter list) =
-  let by_name =
-    List.combine (List.map (fun (parameter : parameter) -> parameter.name) declared) arguments
-  in
-  let transferred =
-    List.filter_map
-      (fun (parameter : parameter) ->
-        Option.map (fun argument -> (parameter, argument)) (List.assoc_opt parameter.name by_name))
-      implemented
-  in
-  make_capability_substitution (List.map fst transferred) (List.map snd transferred)
+let no_instantiation = { type_arguments = []; capability_arguments = [] }
+
+let substitute_instantiation substitution instantiation =
+  {
+    type_arguments = List.map (substitute_argument substitution) instantiation.type_arguments;
+    capability_arguments =
+      List.map
+        (fun (name, argument) -> (name, substitute_capabilities substitution argument))
+        instantiation.capability_arguments;
+  }
+
+let make_signature_substitution (signature : signature) instantiation =
+  combine_substitutions
+    (make_substitution signature.generics instantiation.type_arguments)
+    (make_capability_substitution signature.capability_parameters instantiation.capability_arguments)
 
 let map_signature transform (signature : signature) =
   {

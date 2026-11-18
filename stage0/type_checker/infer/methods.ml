@@ -68,8 +68,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
                                name = "at";
                                receiver = Read;
                                self_type = parts;
-                               type_arguments = [];
-                               capability_arguments = [];
+                               instantiation = Types.no_instantiation;
                                evidence;
                              })
                         ~arguments:
@@ -204,8 +203,7 @@ and check_method_time state (value : Syntax.expression) (type_ : Types.ty) (memb
                  name = member.text;
                  receiver = method_.method_receiver;
                  self_type = type_;
-                 type_arguments = [];
-                 capability_arguments = [];
+                 instantiation = Types.no_instantiation;
                  evidence = Bound;
                }));
       Types.Integer
@@ -264,7 +262,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                     List.take
                       (List.length
                          (match type_ with Types.Named { arguments; _ } -> arguments | _ -> []))
-                      instance.type_arguments
+                      instance.instantiation.type_arguments
                   in
                   ignore
                     (Unify.unify_arguments state.unifier head
@@ -280,11 +278,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                   | Ok (checked, left_out) ->
                       Name_lookup.finish_call state env value method_path
                         (Tables.Function
-                           {
-                             path = method_path;
-                             type_arguments = instance.type_arguments;
-                             capability_arguments = instance.capability_arguments;
-                           })
+                           { path = method_path; instantiation = instance.instantiation })
                         instance checked left_out)
               | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path)))
       | None -> (
@@ -443,7 +437,9 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
       let reference = { trait with trait_arguments } in
       let result = Types.extract_result_type instance.signature.output in
       Modes.note_lending state value instance.signature.output;
-      let own_arguments = List.take (List.length signature.generics) instance.type_arguments in
+      let own_arguments =
+        List.take (List.length signature.generics) instance.instantiation.type_arguments
+      in
       state.tables.calls.(value.id) <-
         Some
           {
@@ -454,8 +450,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
                   name = method_.method_name;
                   receiver = method_.method_receiver;
                   self_type;
-                  type_arguments = own_arguments;
-                  capability_arguments = instance.capability_arguments;
+                  instantiation = { instance.instantiation with type_arguments = own_arguments };
                   evidence = Built_in;
                 };
             arguments = receiver_argument @ checked;
@@ -718,12 +713,7 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
                 }
               in
               Name_lookup.finish_call state env value method_path
-                (Tables.Function
-                   {
-                     path = method_path;
-                     type_arguments = instance.type_arguments;
-                     capability_arguments = instance.capability_arguments;
-                   })
+                (Tables.Function { path = method_path; instantiation = instance.instantiation })
                 instance (receiver_argument :: checked) left_out))
 
 and check_trait_method_with_receiver state env (value : Syntax.expression)
@@ -803,8 +793,7 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                           name = method_.method_name;
                           receiver = method_.method_receiver;
                           self_type = receiver_type;
-                          type_arguments = instance.type_arguments;
-                          capability_arguments = instance.capability_arguments;
+                          instantiation = instance.instantiation;
                           evidence;
                         };
                     arguments = receiver_argument :: checked;

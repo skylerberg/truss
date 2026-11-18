@@ -677,32 +677,23 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
     | Some (Lends (mode, result)) -> Types.Lends (elaborate_mode mode, elaborate_type context result)
   in
   let result_type = Types.extract_result_type output in
-  let uses =
-    Types.union_capabilities
-      (elaborate_uses context written.clauses)
-      (elaborate_divergence context ~parameters written.clauses)
-  in
   {
     generics = generics_;
     capability_parameters =
-      List.fold_left
-        (fun listed (parameter : Types.parameter) ->
-          if Path.equal parameter.owner owner && not (List.mem parameter listed) then
-            listed @ [ parameter ]
-          else listed)
-        []
-        (List.concat_map
-           (fun (parameter : Types.parameter_info) ->
-             Types.list_capability_parameters parameter.type_)
-           parameters
-        @ Types.list_capability_parameters result_type
-        @ List.filter_map
-            (function Types.Capability_parameter parameter -> Some parameter | _ -> None)
-            (uses :> Types.capability list));
+      Array.fold_left
+        (fun listed -> function
+          | Some (Resolve.Capability_parameter (parameter : Types.parameter))
+            when Path.equal parameter.owner owner && not (List.mem parameter listed) ->
+              listed @ [ parameter ]
+          | _ -> listed)
+        [] context.resolved.names;
     receiver;
     parameters;
     output;
-    uses;
+    uses =
+      Types.union_capabilities
+        (elaborate_uses context written.clauses)
+        (elaborate_divergence context ~parameters written.clauses);
     costs = list_constant_costs written.clauses;
     specification_only =
       Well_known.is Model owner

@@ -116,16 +116,26 @@ let make_substitution (generics : Types.generic list) arguments =
       (List.length arguments);
   Types.make_substitution generics (List.map convert_argument arguments)
 
-let make_signature_substitution (signature : Types.signature) ~type_arguments ~capability_arguments
+let convert_capability_arguments (instantiation : Ground.instantiation) =
+  List.map (fun (name, set) -> (name, convert_capabilities set)) instantiation.capability_arguments
+
+let make_signature_substitution (signature : Types.signature) (instantiation : Ground.instantiation)
     =
-  if List.length signature.capability_parameters <> List.length capability_arguments then
-    raise_bug "%d capability parameters for %d capability arguments"
-      (List.length signature.capability_parameters)
-      (List.length capability_arguments);
   Types.combine_substitutions
-    (make_substitution signature.generics type_arguments)
+    (make_substitution signature.generics instantiation.type_arguments)
     (Types.make_capability_substitution signature.capability_parameters
-       (List.map convert_capabilities capability_arguments))
+       (convert_capability_arguments instantiation))
+
+let ground_instantiation context substitution (instantiation : Types.instantiation) :
+    Ground.instantiation =
+  {
+    type_arguments = List.map (ground_argument context substitution) instantiation.type_arguments;
+    capability_arguments =
+      List.sort compare
+        (List.map
+           (fun (name, set) -> (name, list_capabilities context substitution set))
+           instantiation.capability_arguments);
+  }
 
 let ground_fields context substitution (fields : Types.field list) =
   List.map

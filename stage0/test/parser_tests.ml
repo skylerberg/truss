@@ -502,10 +502,7 @@ let () =
   Harness.test "a capability parameter is written `generic` at each use" (fun () ->
       Parse_support.expect_definition
         "fn f(visit: (fn() uses Clock, generic Granted)) uses generic Granted {}"
-        "(fn f ((visit: (fn () (uses Clock generic Granted)))) (uses generic Granted) (block))");
-  Harness.test "a capability parameter among generic parameters is an error" (fun () ->
-      Parse_support.expect_error "fn f[capability Granted]() {}" ~code:Unexpected_token
-        ~at:"capability")
+        "(fn f ((visit: (fn () (uses Clock generic Granted)))) (uses generic Granted) (block))")
 
 let () =
   let expect_pattern text expected =

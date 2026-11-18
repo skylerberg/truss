@@ -109,7 +109,6 @@ module Code = struct
     | Not_a_constant
     | Alternative_bindings
     | Not_a_generic_parameter
-    | Misplaced_capability_parameter
     | Unconstrained_capability_parameter
     | Null
 
@@ -369,7 +368,6 @@ module Code = struct
     | Not_a_constant -> "not_a_constant"
     | Alternative_bindings -> "alternative_bindings"
     | Not_a_generic_parameter -> "not_a_generic_parameter"
-    | Misplaced_capability_parameter -> "misplaced_capability_parameter"
     | Unconstrained_capability_parameter -> "unconstrained_capability_parameter"
     | Null -> "null"
 

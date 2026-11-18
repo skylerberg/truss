@@ -207,9 +207,11 @@ let () =
     List.concat_map
       (fun (call : Core.call) ->
         match call.callee with
-        | Function { path; capability_arguments; _ }
+        | Function { path; instantiation }
           when Path.equal path (Support.make_top_path "app::main" "apply") ->
-            List.concat_map list_capabilities capability_arguments
+            List.concat_map
+              (fun (_, argument) -> list_capabilities argument)
+              instantiation.capability_arguments
         | _ -> [])
       (list_calls form)
   in

@@ -148,6 +148,7 @@ val normalize : state -> Types.ty -> Types.ty
 val finalize_type : state -> Types.ty -> Types.ty
 val finalize_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_argument : state -> Types.argument -> Types.argument
+val finalize_instantiation : state -> Types.instantiation -> Types.instantiation
 val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
 val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impls.evidence option

@@ -592,8 +592,8 @@ let () =
         Instance.Code
           {
             path = Method { owner = Well_known.make_path List; name = "each"; receiver = Read };
-            type_arguments = [ Type Codegen_support.int64 ];
-            capability_arguments = [];
+            instantiation =
+              { Ground.no_instantiation with type_arguments = [ Type Codegen_support.int64 ] };
           }
       in
       Codegen_support.expect_string ~expected:"t_standard__list__List_each_Of_test__Int64_End_"
@@ -603,8 +603,7 @@ let () =
       (Instance.Code
          {
            path = Top { module_ = { package; modules }; name = "length" };
-           type_arguments = [];
-           capability_arguments = [];
+           instantiation = Ground.no_instantiation;
          })
   in
   Codegen_support.test "a symbol marks a package's owner apart from its modules" (fun () ->

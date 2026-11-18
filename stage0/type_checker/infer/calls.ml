@@ -361,14 +361,9 @@ and check_named_call state env ?expected (value : Syntax.expression) path
           let callee =
             match Intrinsic.find_operation path with
             | Some operation ->
-                Tables.Intrinsic { operation; type_arguments = instance.type_arguments }
-            | None ->
-                Tables.Function
-                  {
-                    path;
-                    type_arguments = instance.type_arguments;
-                    capability_arguments = instance.capability_arguments;
-                  }
+                Tables.Intrinsic
+                  { operation; type_arguments = instance.instantiation.type_arguments }
+            | None -> Tables.Function { path; instantiation = instance.instantiation }
           in
           Name_lookup.finish_call state env value path callee instance checked left_out)
 

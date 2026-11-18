@@ -77,7 +77,7 @@ let build_entry context (key : Instance.key) (impl_method : Instance.impl_method
       (Types.extract_result_type capability_signature.output)
   in
   Targets.lower_instance_call st
-    (Code { path; type_arguments; capability_arguments = [] })
+    (Code { path; instantiation = { Ground.no_instantiation with type_arguments } })
     ~signature:method_signature ~substitution
     ~arguments:
       ((self_mode, self_ty, { Lowered.root = Local implementation; projections = [ Deref ] })
@@ -251,7 +251,7 @@ let list_real_implementations (st : Lowering.state) ~user capabilities =
                   (Path.show capability)
           in
           Targets.lower_instance_call st
-            (Code { path = constructor; type_arguments = []; capability_arguments = [] })
+            (Code { path = constructor; instantiation = Ground.no_instantiation })
             ~signature:(Definitions.read_signature st.context constructor)
             ~substitution:Types.no_substitution ~arguments:[] ~destination:value ();
           Address { place = value; writable = true }
@@ -322,7 +322,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
                ~length:(Copy (Lowered.make_local_place length)) ));
       let text = Lowering.allocate_temporary st string_ty in
       Targets.lower_instance_call st
-        (Code { path = text_copied_from; type_arguments = []; capability_arguments = [] })
+        (Code { path = text_copied_from; instantiation = Ground.no_instantiation })
         ~signature:(Definitions.read_signature context text_copied_from)
         ~substitution:Types.no_substitution
         ~arguments:[ (Read, view_ty, view) ]
@@ -340,7 +340,7 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
   in
   let exit = Lowering.allocate_temporary st exit_ty in
   Targets.lower_instance_call st
-    (Code { path = main_path; type_arguments = []; capability_arguments = [] })
+    (Code { path = main_path; instantiation = Ground.no_instantiation })
     ~signature ~substitution:Types.no_substitution
     ~arguments:[ (list_mode, list_ty, list) ]
     ~destination:exit ();
@@ -352,12 +352,10 @@ let build_program_main context (key : Instance.key) main_path : Emit_c.Builder.i
   Emit_c.Builder.build st.builder
     (Lowering.finish_function st ~first:[ count; arguments_pointer ] ~rest:[] ())
 
-let build_adapter context (key : Instance.key) ~(function_ : Path.t) ~type_arguments
-    ~capability_arguments ~(ty : Ground.function_type) : Emit_c.Builder.instance =
+let build_adapter context (key : Instance.key) ~(function_ : Path.t) ~instantiation
+    ~(ty : Ground.function_type) : Emit_c.Builder.instance =
   let signature = Definitions.read_signature context function_ in
-  let substitution =
-    Monomorphic.make_signature_substitution signature ~type_arguments ~capability_arguments
-  in
+  let substitution = Monomorphic.make_signature_substitution signature instantiation in
   let st = make_generated_state context ~key ~definition:function_ ~substitution in
   let builder = st.builder in
   let environment = Emit_c.Builder.allocate_local builder (Raw (Nullable_pointer Opaque)) in
@@ -372,7 +370,7 @@ let build_adapter context (key : Instance.key) ~(function_ : Path.t) ~type_argum
   let evidence = Lowering.list_evidence_parameters st ty.uses in
   Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
   Targets.lower_instance_call st
-    (Code { path = function_; type_arguments; capability_arguments })
+    (Code { path = function_; instantiation })
     ~signature ~substitution
     ~arguments:(List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(choose_result_place st ty.result)
@@ -436,7 +434,7 @@ let build_any_entry context (key : Instance.key) (impl_method : Instance.impl_me
     | Lends _, None -> Lowering.allocate_temporary st (Ground.make_builtin Unit)
   in
   Targets.lower_instance_call st
-    (Code { path; type_arguments; capability_arguments = [] })
+    (Code { path; instantiation = { Ground.no_instantiation with type_arguments } })
     ~signature:method_signature ~substitution
     ~arguments:
       ((self_mode, self_ty, { Lowered.root = Local typed; projections = [ Deref ] })
@@ -491,8 +489,8 @@ let lower context (generated : Instance.generated) : Emit_c.Builder.instance =
   | Entry impl_method -> build_entry context key impl_method
   | Any_entry impl_method -> build_any_entry context key impl_method
   | Locked_entry { capability; name } -> build_locked_entry context key ~capability ~name
-  | Adapter { function_; type_arguments; capability_arguments; ty } ->
-      build_adapter context key ~function_ ~type_arguments ~capability_arguments ~ty
+  | Adapter { function_; instantiation; ty } ->
+      build_adapter context key ~function_ ~instantiation ~ty
   | Program_main main -> build_program_main context key main
 
 let lower_table context (table : Instance.table) : Lowered.table =

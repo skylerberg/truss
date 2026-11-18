@@ -26,8 +26,7 @@ val check_written_arguments :
 type instance = {
   signature : Types.signature;
   substitution : Types.substitution;
-  type_arguments : Types.argument list;
-  capability_arguments : Types.capability_set list;
+  instantiation : Types.instantiation;
 }
 
 val instantiate :

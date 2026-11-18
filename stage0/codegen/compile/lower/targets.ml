@@ -47,33 +47,13 @@ let resolve_impl (context : Definitions.context) substitution ~(trait : Types.tr
   (impl, impl_arguments)
 
 let make_trait_method_key context substitution ~(trait : Types.trait_reference) ~name ~receiver
-    ~self_type ~type_arguments ~capability_arguments ~(evidence : Core.evidence) =
+    ~self_type ~(instantiation : Types.instantiation) ~(evidence : Core.evidence) =
   let impl, impl_arguments = resolve_impl context substitution ~trait ~self_type ~evidence in
-  let path = Path.Method { owner = impl; name; receiver } in
-  let declared =
-    match
-      Interface.Definition.find_trait_method context.lookups.interface trait.trait ~name ~receiver
-    with
-    | Some method_ ->
-        (Interface.Definition.read_method_signature context.lookups.interface ~owner:trait.trait
-           method_)
-          .capability_parameters
-    | None -> Definitions.raise_bug "%s has no method %s" (Path.show trait.trait) name
-  in
-  let transferred =
-    Types.transfer_capability_arguments ~declared ~arguments:capability_arguments
-      (Definitions.read_signature context path).capability_parameters
-  in
+  let own = Monomorphic.ground_instantiation context.monomorphic substitution instantiation in
   Instance.Code
     {
-      path;
-      type_arguments =
-        impl_arguments
-        @ List.map (Monomorphic.ground_argument context.monomorphic substitution) type_arguments;
-      capability_arguments =
-        List.map
-          (fun (_, set) -> Monomorphic.list_capabilities context.monomorphic substitution set)
-          transferred.capability_arguments;
+      path = Method { owner = impl; name; receiver };
+      instantiation = { own with type_arguments = impl_arguments @ own.type_arguments };
     }
 
 let convert_operand st (mode : Types.mode) ty (place : Lowered.place) (passed : Lowered.ty option) =

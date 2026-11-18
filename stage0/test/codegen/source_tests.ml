@@ -95,8 +95,7 @@ let () =
                   name = "equal";
                   receiver = Read;
                 };
-            type_arguments = [];
-            capability_arguments = [];
+            instantiation = Ground.no_instantiation;
           }
       in
       let _, compile =
@@ -133,8 +132,7 @@ let () =
         Code
           {
             path = Top { module_ = Codegen_support.example; name };
-            type_arguments = [];
-            capability_arguments = [];
+            instantiation = Ground.no_instantiation;
           }
       in
       let _, compile =
@@ -191,8 +189,7 @@ let () =
         Code
           {
             path = Top { module_ = Codegen_support.example; name = "sum" };
-            type_arguments = [];
-            capability_arguments = [];
+            instantiation = Ground.no_instantiation;
           }
       in
       let _, compile =

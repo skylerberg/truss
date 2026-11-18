@@ -109,7 +109,6 @@ module Code : sig
     | Not_a_constant
     | Alternative_bindings
     | Not_a_generic_parameter
-    | Misplaced_capability_parameter
     | Unconstrained_capability_parameter
     | Null
 

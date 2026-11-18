@@ -171,11 +171,7 @@ let () =
           ~roots:
             [
               Code
-                {
-                  path = Well_known.make_path Run_tests;
-                  type_arguments = [];
-                  capability_arguments = [];
-                };
+                { path = Well_known.make_path Run_tests; instantiation = Ground.no_instantiation };
             ]
           "fn suite() {\n}\n"
       in

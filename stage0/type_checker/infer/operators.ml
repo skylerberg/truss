@@ -243,8 +243,7 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
               name = method_;
               receiver = Read;
               self_type = left;
-              type_arguments = [];
-              capability_arguments = [];
+              instantiation = Types.no_instantiation;
               evidence = Built_in;
             };
         arguments = operands;
@@ -283,8 +282,7 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
                         name = method_;
                         receiver = Read;
                         self_type = left;
-                        type_arguments = [];
-                        capability_arguments = [];
+                        instantiation = Types.no_instantiation;
                         evidence = State.convert_evidence evidence;
                       };
                   arguments = operands;
@@ -423,8 +421,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                     name = method_;
                     receiver = Read;
                     self_type = left_type;
-                    type_arguments = [];
-                    capability_arguments = [];
+                    instantiation = Types.no_instantiation;
                     evidence = Built_in;
                   };
               arguments =

@@ -41,7 +41,7 @@ type specification = {
 type scope = {
   values : (value * string) String_map.t;
   types : target String_map.t;
-  capability_parameters : target String_map.t option;
+  capability_parameters : target String_map.t;
   specification : specification;
   is_lending_method : bool;
 }
@@ -277,7 +277,7 @@ and resolve_associated_base state scope (base : Syntax.name) (member : Syntax.na
 and resolve_capability_reference state scope (reference : Syntax.capability_reference) =
   match reference.kind with
   | Capability_path { path = { modules = []; last }; arguments = []; _ }
-    when Option.fold ~none:false ~some:(String_map.mem last.text) scope.capability_parameters
+    when String_map.mem last.text scope.capability_parameters
          && not (String_map.mem last.text scope.types) ->
       let span = read_span state last.id in
       set_target state last
@@ -298,28 +298,17 @@ and resolve_capability_reference state scope (reference : Syntax.capability_refe
   | Self_capabilities _ -> ()
   | Associated_capabilities (base, member) ->
       resolve_associated_base state scope base member "capability set"
-  | Generic_capability name -> (
-      let span = read_span state reference.id in
-      match scope.capability_parameters with
-      | None ->
-          set_target state name
-            (Unknown
-               (add_diagnostic state Misplaced_capability_parameter span
-                  (Printf.sprintf
-                     "`generic %s` names a capability parameter, and only a function, a method, or \
-                      a theorem has one."
-                     name.text)))
-      | Some parameters -> (
-          match String_map.find_opt name.text parameters with
-          | Some target -> set_target state name target
-          | None ->
-              set_target state name
-                (Unknown
-                   (add_diagnostic state Unknown_name span
-                      (Printf.sprintf
-                         "The signature names no `generic %s`, and a body names only the \
-                          capability parameters of its signature."
-                         name.text)))))
+  | Generic_capability name ->
+      set_target state name
+        (match String_map.find_opt name.text scope.capability_parameters with
+        | Some target -> target
+        | None ->
+            Unknown
+              (add_diagnostic state Unknown_name (read_span state reference.id)
+                 (Printf.sprintf
+                    "`generic %s` names no capability parameter here. A capability parameter \
+                     belongs to a function, a method, or a theorem, whose signature names it."
+                    name.text)))
 
 and resolve_path_type state scope (path : Syntax.path_type) =
   resolve_type_name state scope path.path;
@@ -904,7 +893,7 @@ let declare_capability_parameters state scope ~(owner : Path.t)
             parameters)
       String_map.empty (constrained @ used)
   in
-  { scope with capability_parameters = Some parameters }
+  { scope with capability_parameters = parameters }
 
 let list_parameter_types (parameters : Syntax.parameter list) =
   List.filter_map
@@ -965,7 +954,7 @@ let empty_scope =
   {
     values = String_map.empty;
     types = String_map.empty;
-    capability_parameters = None;
+    capability_parameters = String_map.empty;
     specification = no_specification;
     is_lending_method = false;
   }
