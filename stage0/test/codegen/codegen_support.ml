@@ -17,8 +17,8 @@ let render_records records =
   in
   String.concat ""
     (List.mapi
-       (fun index (record : Compile.record) ->
-         Printf.sprintf "test %d %s\n" index (Compile.show_outcome record.outcome)
+       (fun index (record : Backend.record) ->
+         Printf.sprintf "test %d %s\n" index (Backend.show_outcome record.outcome)
          ^ render_block "message" record.message
          ^ render_block "echo" record.echo
          ^ render_block "output" record.output)
@@ -161,37 +161,18 @@ let call name ?(result = Some (value int32)) ?(parameters = []) arguments place 
 let make_shape_env ?(extra = []) () = Memory_layout.create host ~compute_shape:(compute_shape extra)
 let scratch = lazy (Harness.make_scratch_directory "codegen")
 
-let compiler =
+let c_compiler =
   lazy
-    (match Toolchain.find () with Ok toolchain -> toolchain | Error message -> failwith message)
-
-let strict =
-  lazy
-    [
-      "-Wall";
-      "-Wextra";
-      "-Wtype-limits";
-      "-Werror";
-      "-Wno-unused-parameter";
-      "-Wno-unused-but-set-variable";
-      "-Wno-array-parameter";
-      (if String.includes ~affix:"clang" (Lazy.force compiler).identity then
-         "-Wno-sometimes-uninitialized"
-       else "-Wno-maybe-uninitialized");
-    ]
+    (match C_compiler.find ~objects:(Cache.make_objects_directory (Workspace.open_cache ())) with
+    | Ok c_compiler -> C_compiler.For_testing.reject_warnings c_compiler
+    | Error message -> failwith message)
 
 let counter = ref 0
-let cache = lazy (Build.make_cache (Cache.make_objects_directory (Workspace.open_cache ())))
-
-let added_flags =
-  Toolchain.split_flags (Option.value (Sys.getenv_opt Toolchain.added_flags_variable) ~default:"")
-
-let settings : Build.settings Lazy.t =
-  lazy { build = Development; optimization = O1; extra = Lazy.force strict @ added_flags }
 
 let worker_counts =
-  if List.exists (String.starts_with ~prefix:"-fsanitize=") added_flags then [ 8 ]
-  else [ 1; 2; 8; 32 ]
+  match Sys.getenv_opt "TRUSS_CFLAGS" with
+  | Some flags when String.includes ~affix:"-fsanitize=" flags -> [ 8 ]
+  | Some _ | None -> [ 1; 2; 8; 32 ]
 
 let test_position (site : Lowered.site) : Emit_c.position =
   { file = "test.truss"; line = 1; column = site.offset + 1 }
@@ -203,15 +184,18 @@ let run_program ?(extra = []) ?env ?input (instances : instance list) =
   let fragments =
     List.map (fun instance -> Emit_c.make_fragment env (Code (instance env))) instances
   in
-  let sources =
-    [
-      ("main", Startup.For_testing.render_main_start (Instance.make_symbol (key "entry")));
-      ("sites", Emit_c.render_sites_file ~resolve_position:test_position fragments);
-    ]
-  in
   match
-    Build.build_program (Lazy.force compiler) (Lazy.force cache) env (Lazy.force settings)
-      ~files:[ fragments ] ~sources ~output
+    C_compiler.build_executable (Lazy.force c_compiler) O1
+      ~units:
+        [
+          ("the runtime", Startup.render_runtime ~tests:false);
+          ( "the program",
+            Emit_c.render_file env Development
+              (List.map (fun fragment -> (fragment, Emit_c.External)) fragments) );
+          ("main", Startup.For_testing.render_main_start (Instance.make_symbol (key "entry")));
+          ("sites", Emit_c.render_sites_file ~resolve_position:test_position fragments);
+        ]
+      ~output
   with
   | Ok () -> Process.run ?input output []
   | Error message -> failwith message
@@ -230,10 +214,10 @@ let make_database ?checks packages =
 let make_example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
 
-let compile ?results ?evaluation_time_limit_ms database =
-  Compile.create ?results ?evaluation_time_limit_ms
+let make_backend ?results ?evaluation_time_limit_ms database =
+  Backend.create ?results ?evaluation_time_limit_ms
     (Database.make_lowering_requests database [ example.package ])
-    (Lazy.force compiler) (Lazy.force cache) (Lazy.force settings)
+    (Lazy.force c_compiler) Development
 
 let load_files ?results ?(roots = []) ?checks files =
   let packages = make_example_package files in
@@ -256,7 +240,7 @@ let load_files ?results ?(roots = []) ?checks files =
           fail "the source has diagnostics:\n%s"
             (String.concat "" (List.map (Diagnostic.render source) diagnostics)))
     files;
-  (database, compile ?results database)
+  (database, make_backend ?results database)
 
 let load ?results ?roots ?checks text = load_files ?results ?roots ?checks [ (example_file, text) ]
 
@@ -269,8 +253,8 @@ let list_tests_in database (module_ : Path.module_) =
 let list_tests database = list_tests_in database example
 
 let run_source text =
-  let database, compile = load text in
-  match Compile.run_tests compile ~time_limit_ms:2000 (list_tests database) with
+  let database, backend = load text in
+  match Backend.run_tests backend ~time_limit_ms:2000 (list_tests database) with
   | Ok records -> render_records records
   | Error message -> failwith message
 
@@ -278,9 +262,9 @@ let expect_output text expected = expect_string ~expected (run_source text)
 let expect_pass name source = test name (fun () -> expect_output source "test 0 passed\n")
 
 let run_main ?(arguments = []) ?input ?checks text =
-  let _, compile = load ?checks text in
+  let _, backend = load ?checks text in
   match
-    Compile.For_testing.run_program ?input compile
+    Backend.For_testing.run_program ?input backend
       ~main:(Top { module_ = example; name = "main" })
       ~arguments
   with

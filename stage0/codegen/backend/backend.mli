@@ -13,6 +13,8 @@ type requests = {
   list_reached_todo_types : Instance.key -> Path.t list;
 }
 
+type profile = Emit_c.profile = Development | Release
+
 exception Todo_type of Ground.ty
 exception Infinite_size of Ground.ty
 
@@ -27,9 +29,8 @@ val create :
   ?programs:string ->
   ?is_worked_on:(Path.package -> bool) ->
   requests ->
-  Toolchain.t ->
-  Build.cache ->
-  Build.settings ->
+  C_compiler.t ->
+  profile ->
   t
 
 type outcome = Passed | Failed | Panicked | Incomplete | Timed_out | Crashed

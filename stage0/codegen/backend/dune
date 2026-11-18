@@ -1,7 +1,7 @@
 (include_subdirs qualified)
 
 (library
- (name compile)
+ (name backend)
  (modules_without_implementation lookups)
  (libraries
   compiler_bug
@@ -19,10 +19,9 @@
   emit_c
   cbor
   blake3
-  toolchain
+  c_compiler
   process
   startup
-  build
   unix
   monomorphic
   zarith
