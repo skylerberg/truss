@@ -617,7 +617,23 @@ let () =
       | texts -> fail "found %d" (List.length texts));
   test "show lists the public definitions of a package with an owner" (fun () ->
       if List.length (run_show (make_directory owned) "acme::geometry") < 3 then
-        fail "found too few")
+        fail "found too few");
+  test "show finds a public definition of another package where the directory has no valid package"
+    (fun () ->
+      let root =
+        make_directory
+          [
+            ("truss.toml", "[project]\n");
+            ("tools/truss.toml", make_manifest "tools");
+            ("tools/main.truss", Fixtures.public_double_with_a_requires);
+            ("broken/truss.toml", make_manifest "Broken Name");
+          ]
+      in
+      match run_show (Filename.concat root "broken") "tools::double" with
+      | [ text ] ->
+          if not (String.includes ~affix:"public fn double(value: Int64) -> Int64" text) then
+            fail "showed %s" text
+      | texts -> fail "found %d" (List.length texts))
 
 let () =
   test "the project's [test] time_limit gives each test's limit in seconds" (fun () ->

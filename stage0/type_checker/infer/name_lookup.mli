@@ -39,12 +39,11 @@ val finish_call :
   string list ->
   Types.ty
 
-val list_trait_static_methods :
+val lookup_trait_static_methods :
   State.state ->
   Path.t ->
   string ->
-  Path.receiver ->
-  (Types.trait_reference * Types.trait_method) list
+  (Types.trait_reference * Types.trait_method) list Resolve.Names.lookup
 
 val resolve_evidence : State.state -> Syntax.expression -> Types.ty -> Types.trait_reference -> unit
 

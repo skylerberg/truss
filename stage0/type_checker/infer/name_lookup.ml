@@ -364,24 +364,43 @@ and reject_specification_call state (env : State.env) (value : Syntax.expression
                 Printf.sprintf
                   "`%s` is for specifications only, so it is called only in specifications." name)))
 
-and list_trait_static_methods (state : State.state) path name receiver =
+and lookup_trait_static_methods (state : State.state) path name =
+  Resolve.Names.collect_visible
+    (List.map
+       (lookup_trait_method state name Path.Static)
+       (list_implemented_trait_lookups state
+          (Types.Named { path; arguments = Instantiation.make_fresh_arguments state path })
+          name))
+
+and list_implemented_trait_lookups (state : State.state) self_type name =
   List.filter_map
-    (fun trait ->
-      match
-        Interface.Definition.find_trait_method state.lookups.interface trait ~name ~receiver
-      with
-      | Some method_ ->
+    (fun (lookup : Path.t Resolve.Names.lookup) ->
+      match lookup with
+      | Visible trait | Hidden (trait, _) ->
           let reference = Instantiation.make_fresh_trait_reference state trait in
-          if
-            Option.is_some
-              (State.find_evidence state
-                 (Types.Named { path; arguments = Instantiation.make_fresh_arguments state path })
-                 reference)
-          then Some (reference, method_)
+          if Option.is_some (State.find_evidence state self_type reference) then
+            Some (Resolve.Names.map_visible (fun _ -> reference) lookup)
           else None
-      | None -> None)
-    (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
+      | Absent -> None)
+    (Resolve.Names.list_declaring_trait_lookups state.lookups.interface.names
        ~from:state.key.module_ name)
+
+and lookup_trait_method (state : State.state) name receiver
+    (candidate : Types.trait_reference Resolve.Names.lookup) :
+    (Types.trait_reference * Types.trait_method) Resolve.Names.lookup =
+  let find_method trait =
+    List.find_opt
+      (fun (method_ : Types.trait_method) -> method_.method_receiver = receiver)
+      (Members.list_trait_methods state.lookups trait name)
+  in
+  match candidate with
+  | Visible trait -> (
+      match find_method trait.trait with Some method_ -> Visible (trait, method_) | None -> Absent)
+  | Hidden (trait, visibility) -> (
+      match find_method trait with
+      | Some _ -> Hidden (Method { owner = trait; name; receiver }, visibility)
+      | None -> Absent)
+  | Absent -> Absent
 
 and resolve_evidence state (value : Syntax.expression) self_type (reference : Types.trait_reference)
     =
@@ -419,35 +438,18 @@ and resolve_evidence state (value : Syntax.expression) self_type (reference : Ty
       end)
 
 and list_trait_candidates (state : State.state) receiver_type name =
-  let with_method (trait : Types.trait_reference) =
-    match
-      List.filter
-        (fun (method_ : Types.trait_method) -> method_.method_receiver <> Path.Static)
-        (Members.list_trait_methods state.lookups trait.trait name)
-    with
-    | [] -> None
-    | methods -> Some (trait, methods)
+  let list_bound_candidates bounds =
+    List.map (fun bound -> Resolve.Names.Visible bound) (merge_bounds_by_trait state bounds)
   in
   match receiver_type with
   | Types.Parameter parameter ->
-      List.filter_map with_method
-        (merge_bounds_by_trait state
-           (Interface.Properties.list_known_bounds state.lookups.interface
-              ~list_bounds:(State.lookup_bounds state) (Types.Parameter parameter)))
+      list_bound_candidates
+        (Interface.Properties.list_known_bounds state.lookups.interface
+           ~list_bounds:(State.lookup_bounds state) (Types.Parameter parameter))
   | Types.Any trait ->
-      List.filter_map with_method
-        (merge_bounds_by_trait state
-           (Interface.Properties.list_bound_closure state.lookups.interface ~self:receiver_type
-              trait))
-  | _ ->
-      List.filter_map
-        (fun trait ->
-          let reference = Instantiation.make_fresh_trait_reference state trait in
-          if Option.is_some (State.find_evidence state receiver_type reference) then
-            with_method reference
-          else None)
-        (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
-           ~from:state.key.module_ name)
+      list_bound_candidates
+        (Interface.Properties.list_bound_closure state.lookups.interface ~self:receiver_type trait)
+  | _ -> list_implemented_trait_lookups state receiver_type name
 
 and merge_bounds_by_trait state = function
   | [] -> []
@@ -485,46 +487,47 @@ and is_one_family (state : State.state) (traits : Types.trait_reference list) =
 and resolve_overloads state receiver_type name :
     ((Path.receiver * overload) list Resolve.Names.lookup, Types.trait_reference list) Result.t =
   let candidates = list_trait_candidates state receiver_type name in
-  if not (is_one_family state (List.map fst candidates)) then Error (List.map fst candidates)
+  let has_instance_method (trait : Types.trait_reference) =
+    List.exists
+      (fun (method_ : Types.trait_method) -> method_.method_receiver <> Path.Static)
+      (Members.list_trait_methods state.lookups trait.trait name)
+  in
+  let visible_traits =
+    List.filter_map
+      (function
+        | Resolve.Names.Visible trait when has_instance_method trait -> Some trait
+        | Visible _ | Hidden _ | Absent -> None)
+      candidates
+  in
+  if not (is_one_family state visible_traits) then Error visible_traits
   else
     let lookup_method make owner receiver : overload Resolve.Names.lookup =
       match owner with
-      | Some (Types.Named { path; _ }) -> (
-          match Members.lookup_method state path name receiver with
-          | Visible method_path -> Visible (make method_path)
-          | Hidden hidden -> Hidden hidden
-          | Absent -> Absent)
+      | Some (Types.Named { path; _ }) ->
+          Resolve.Names.map_visible make (Members.lookup_method state path name receiver)
       | _ -> Absent
-    in
-    let lookup_trait_method receiver : overload Resolve.Names.lookup =
-      match
-        List.find_map
-          (fun ((trait : Types.trait_reference), methods) ->
-            Option.map
-              (fun method_ -> Trait_overload (trait, method_))
-              (List.find_opt
-                 (fun (method_ : Types.trait_method) -> method_.method_receiver = receiver)
-                 methods))
-          candidates
-      with
-      | Some overload -> Visible overload
-      | None -> Absent
     in
     Ok
       (Resolve.Names.collect_visible
          (List.map
             (fun receiver ->
-              ( receiver,
-                Resolve.Names.choose_visible
-                  [
-                    lookup_method
+              Resolve.Names.map_visible
+                (fun overload -> (receiver, overload))
+                (Resolve.Names.choose_visible
+                   (lookup_method
                       (fun method_path -> Type_overload method_path)
-                      (Some receiver_type) receiver;
-                    lookup_trait_method receiver;
-                    lookup_method
-                      (fun method_path -> View_overload method_path)
-                      (Types.find_view receiver_type) receiver;
-                  ] ))
+                      (Some receiver_type) receiver
+                    :: List.map
+                         (fun candidate ->
+                           Resolve.Names.map_visible
+                             (fun (trait, method_) -> Trait_overload (trait, method_))
+                             (lookup_trait_method state name receiver candidate))
+                         candidates
+                   @ [
+                       lookup_method
+                         (fun method_path -> View_overload method_path)
+                         (Types.find_view receiver_type) receiver;
+                     ])))
             [ Path.Read; Mut; Own ]))
 
 and find_method_version state (span : Source.Definition_span.t) type_ name

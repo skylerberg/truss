@@ -42,6 +42,7 @@ val is_type_kind : named -> bool
 val is_value_kind : named -> bool
 val is_public : Syntax.visibility -> bool
 val is_visible : from:Path.module_ -> Path.module_ -> Syntax.visibility -> bool
+val is_visible_to_package : package:Path.package -> Path.module_ -> Syntax.visibility -> bool
 
 type law_proof_name = { trait : Path.t; law : string; type_head : Path.t }
 
@@ -111,10 +112,11 @@ val lookup_in :
   (entry * Path.t) lookup
 
 val lookup_member : lookups -> from:Path.module_ -> Path.t -> Path.t lookup
+val map_visible : ('visible -> 'converted) -> 'visible lookup -> 'converted lookup
 val choose_visible : 'visible lookup list -> 'visible lookup
-val collect_visible : ('key * 'visible lookup) list -> ('key * 'visible) list lookup
+val collect_visible : 'visible lookup list -> 'visible list lookup
 val describe_hidden : Path.t -> Syntax.visibility -> string
-val list_visible_traits_declaring : lookups -> from:Path.module_ -> string -> Path.t list
+val list_declaring_trait_lookups : lookups -> from:Path.module_ -> string -> Path.t lookup list
 
 val list_members_visible_to_package :
   lookups -> package:Path.package -> Path.t -> string -> key list

@@ -2602,12 +2602,13 @@ and the prelude changes only with a language version.
 | `public` | Every package |
 
 - An `impl`, a test, and a law proof take no visibility.
-- A method and a member constant have their own visibility. A use that
-  reaches a member through its type finds it only where it is visible:
-  `Shape.unit`, `shape.area()`, a constant in a pattern, and the `count`,
-  `element`, and `cursor` of a `for` loop or a quantifier. A member that the
-  use cannot see is skipped, as if it did not exist. A use that finds no
-  member except one it cannot see is an error that names that member.
+- A method and a member constant of a type have their own visibility. A
+  trait's methods are visible where the trait is. A use that reaches a
+  member through its type finds it only where it is visible: `Shape.unit`,
+  `shape.area()`, a constant in a pattern, and the `count`, `element`, and
+  `cursor` of a `for` loop or a quantifier. A member that the use cannot see
+  is skipped, as if it did not exist. A use that finds no member except one
+  it cannot see is an error that names that member.
 - `opaque` appears only before `public type`. Outside its package, an opaque
   type's fields cannot be read, built, updated, or matched on. Visibility is
   set for a type as a whole.

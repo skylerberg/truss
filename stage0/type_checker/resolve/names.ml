@@ -91,6 +91,9 @@ let is_public = function Syntax.Public | Public_opaque -> true | Private | Inter
 let is_visible ~(from : Path.module_) (module_ : Path.module_) visibility =
   module_ = from || is_public visibility || (visibility = Internal && module_.package = from.package)
 
+let is_visible_to_package ~(package : Path.package) (module_ : Path.module_) visibility =
+  module_.package = package || is_public visibility
+
 type impl_index = {
   impls : ((Path.t * Path.t) * Path.t) list;
   by_type : (Path.t * Path.t) list Path.Map.t;
@@ -311,6 +314,11 @@ let lookup_member lookups ~(from : Path.module_) member =
       else Hidden (member, declaration.visibility)
   | None -> Absent
 
+let map_visible convert = function
+  | Visible visible -> Visible (convert visible)
+  | Hidden hidden -> Hidden hidden
+  | Absent -> Absent
+
 let find_hidden lookups =
   List.find_map (function Hidden hidden -> Some hidden | Visible _ | Absent -> None) lookups
 
@@ -319,18 +327,12 @@ let choose_visible lookups =
   | Some visible -> visible
   | None -> ( match find_hidden lookups with Some hidden -> Hidden hidden | None -> Absent)
 
-let collect_visible keyed_lookups =
+let collect_visible lookups =
   match
-    List.filter_map
-      (fun (key, lookup) ->
-        match lookup with Visible visible -> Some (key, visible) | Hidden _ | Absent -> None)
-      keyed_lookups
+    List.filter_map (function Visible visible -> Some visible | Hidden _ | Absent -> None) lookups
   with
   | _ :: _ as visible -> Visible visible
-  | [] -> (
-      match find_hidden (List.map snd keyed_lookups) with
-      | Some hidden -> Hidden hidden
-      | None -> Absent)
+  | [] -> ( match find_hidden lookups with Some hidden -> Hidden hidden | None -> Absent)
 
 let describe_hidden hidden (visibility : Syntax.visibility) =
   Printf.sprintf "`%s` is %s, so it cannot be used here." (Path.show hidden)
@@ -340,19 +342,16 @@ let describe_hidden hidden (visibility : Syntax.visibility) =
     | Public | Public_opaque ->
         Compiler_bug.raise_bug ~stage:"Names" "%s is public, so it is not hidden" (Path.show hidden))
 
-let list_visible_traits_declaring lookups ~(from : Path.module_) name =
+let list_declaring_trait_lookups lookups ~(from : Path.module_) name =
   List.concat_map
     (fun package ->
-      List.filter
+      List.map
         (fun (trait : Path.t) ->
           match trait with
-          | Top { module_; name = trait_name } -> (
-              match
-                lookup_in lookups ~from module_ trait_name ~is_kind:(fun (kind : named) ->
-                    kind = Trait)
-              with
-              | Visible _ -> true
-              | Hidden _ | Absent -> false)
+          | Top { module_; name = trait_name } ->
+              map_visible snd
+                (lookup_in lookups ~from module_ trait_name ~is_kind:(fun (kind : named) ->
+                     kind = Trait))
           | _ ->
               Compiler_bug.raise_bug ~stage:"Names" "the trait %s is not a top-level definition"
                 (Path.show trait))
@@ -363,7 +362,7 @@ let list_members_visible_to_package lookups ~(package : Path.package) owner name
   List.filter
     (fun key ->
       let declaration = lookups.read_declaration key in
-      declaration.module_.package = package || is_public declaration.visibility)
+      is_visible_to_package ~package declaration.module_ declaration.visibility)
     (lookups.list_members owner name)
 
 let find_bare_type lookups ~(from : Path.module_) name =

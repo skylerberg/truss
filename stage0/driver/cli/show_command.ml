@@ -18,8 +18,12 @@ let list_package_declarations database package =
   (Database.make_name_lookups database [ package ]).list_package_declarations package
   |> List.filter (fun (declaration : Resolve.Names.declaration) -> declaration.ordinal = 0)
 
-let is_visible packages (declaration : Resolve.Names.declaration) =
-  List.mem declaration.module_.package packages || Resolve.Names.is_public declaration.visibility
+let is_shown packages (declaration : Resolve.Names.declaration) =
+  Resolve.Names.is_public declaration.visibility
+  || List.exists
+       (fun package ->
+         Resolve.Names.is_visible_to_package ~package declaration.module_ declaration.visibility)
+       packages
 
 let resolve database packages text =
   let names = Database.make_name_lookups database packages in
@@ -33,7 +37,7 @@ let resolve database packages text =
           Resolve.Names.is_public declaration.visibility)
         (list_package_declarations database package)
   | _, Some module_, _ ->
-      List.filter (is_visible packages) (list_module_declarations database module_)
+      List.filter (is_shown packages) (list_module_declarations database module_)
   | _, None, member -> (
       match find_module names argument.prefix with
       | None -> []
@@ -66,8 +70,8 @@ let resolve database packages text =
                       (fun (declaration : Resolve.Names.declaration) ->
                         List.exists (Path.equal declaration.path) impls)
                       package_declarations
-                  |> List.filter (is_visible packages)
-              | declarations -> List.filter (is_visible packages) declarations)
+                  |> List.filter (is_shown packages)
+              | declarations -> List.filter (is_shown packages) declarations)
           | Some member ->
               let owner : Path.t = Top { module_; name = argument.last } in
               list_package_declarations database module_.package
@@ -77,7 +81,7 @@ let resolve database packages text =
                   | Member_constant { owner = owning_path; name } ->
                       Path.equal owning_path owner && name = member
                   | _ -> false)
-              |> List.filter (is_visible packages)))
+              |> List.filter (is_shown packages)))
 
 let find snapshot database packages ~body text =
   List.map

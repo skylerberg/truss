@@ -477,7 +477,9 @@ let () =
       ( "member constant, in a pattern,",
         Fixtures.Infer.pattern_of_another_modules_private_member_constant );
     ];
-  Harness.test "an internal method and a public method of another module are visible" (fun () ->
+  Harness.test
+    "an internal method, an internal trait's method, and a public method of another module are \
+     visible" (fun () ->
       expect_no_diagnostics
         [
           ("app::main", Fixtures.Infer.calls_of_another_modules_internal_and_public_methods);
@@ -489,10 +491,50 @@ let () =
         ~others:[ ("tools::shapes", shapes) ]
         Fixtures.Infer.call_of_another_packages_internal_method "types.member_not_visible"
         ~says:"internal to its package");
-  Harness.test "a call with a dot does not find a method of another module's private trait"
+  List.iter
+    (fun (call, fixture, method_) ->
+      Harness.test
+        (Printf.sprintf "%s of another module's private trait names the method as not visible" call)
+        (fun () ->
+          expect_one_diagnostic ~others fixture "types.member_not_visible"
+            ~says:(Printf.sprintf "`app::shapes::Measured.%s` is private to its module" method_)))
+    [
+      ( "a call with a dot of a method",
+        Fixtures.Infer.call_of_a_method_of_another_modules_private_trait,
+        "measure" );
+      ( "a call in full of a method",
+        Fixtures.Infer.call_in_full_of_a_method_of_another_modules_private_trait,
+        "measure" );
+      ( "a call of a static method",
+        Fixtures.Infer.call_of_a_static_method_of_another_modules_private_trait,
+        "sample" );
+    ];
+  Harness.test
+    "a call with a dot of a method of another package's internal trait names the method as not \
+     visible" (fun () ->
+      expect_one_diagnostic
+        ~setup:(Support.setup ~dependencies:[ ("app", "tools") ])
+        ~others:[ ("tools::shapes", shapes) ]
+        Fixtures.Infer.call_of_a_method_of_another_packages_internal_trait
+        "types.member_not_visible"
+        ~says:"`tools::shapes::Sided.side_count` is internal to its package");
+  Harness.test
+    "a call with a dot does not name a private trait that the receiver's type does not implement"
     (fun () ->
-      expect_one_diagnostic ~others Fixtures.Infer.call_of_a_method_of_another_modules_private_trait
-        "types.unknown_member");
+      expect_one_diagnostic ~others
+        Fixtures.Infer
+        .call_of_a_method_of_another_modules_private_trait_that_the_type_does_not_implement
+        "types.unknown_member" ~says:"`Shape` has no method `weigh`.");
+  Harness.test
+    "a call reaches a visible trait's method where another module's private trait declares a \
+     method of the same name" (fun () ->
+      expect_no_diagnostics
+        [
+          ( "app::main",
+            Fixtures.Infer
+            .call_of_a_visible_trait_method_named_like_another_modules_private_trait_method );
+          ("app::shapes", shapes);
+        ]);
   List.iter
     (fun (construct, fixture) ->
       Harness.test
