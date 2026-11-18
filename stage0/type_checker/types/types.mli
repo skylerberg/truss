@@ -144,6 +144,7 @@ type signature = {
   uses : capability_set;
   costs : cost list;
   specification_only : bool;
+  is_update_step : bool;
   capture_free_parameters : string list;
 }
 

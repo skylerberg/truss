@@ -168,8 +168,8 @@ let keep_promise context (frame : State.frame) (promise : promise) ~(at : State.
     ]
     goal
 
-let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
-    ?(substitution = Types.no_substitution) (lookups : Lookups.t) (source : State.source) ~path =
+let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_substitution)
+    (lookups : Lookups.t) (source : State.source) ~path =
   let contract =
     match Mir.read_contract lookups.mir path with
     | Some { form; _ } -> form
@@ -180,6 +180,11 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
     Option.map
       (Types.map_signature (Types.substitute substitution))
       (Interface.Impls.read_signature lookups.interface path)
+  in
+  let is_update_step =
+    match signature with
+    | Some (signature : Types.signature) -> signature.is_update_step
+    | None -> false
   in
   let terminates =
     proof
@@ -247,7 +252,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
             (match self with
             | Logic.Symbol symbol -> context.entry <- symbol :: context.entry
             | _ -> ());
-            if not is_updating_helper then Validity.assume_valid context frame self_type self;
+            if not is_update_step then Validity.assume_valid context frame self_type self;
             { frame with self = Some self; self_type = Some self_type }
         | local ->
             let ty = Facts.substitute_type context frame parameter.type_ in
@@ -417,7 +422,7 @@ let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
                      (Facts.read_parameter_name parameter))
           | _ -> ())
         mut_parameters;
-      (match (mut_self, is_updating_helper, frame.self, frame.self_type) with
+      (match (mut_self, is_update_step, frame.self, frame.self_type) with
       | true, false, Some self, Some self_type ->
           Lambdas.check_valid context frame Whole_definition self_type self ~deep:true
             ~when_:"for `self` when the method returns"

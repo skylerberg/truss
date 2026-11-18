@@ -103,6 +103,14 @@ let evaluate_default_value (context : State.context) frame (clauses : State.clau
 
 let is_datatype ty = match ty with Types.Named _ -> Types.find_builtin ty = None | _ -> false
 
+let calls_update_step (context : State.context) (invocation : Invocation.t) =
+  match invocation.callee with
+  | Function { path; _ } -> (
+      match Interface.Impls.read_signature context.lookups.interface path with
+      | Some signature -> signature.is_update_step
+      | None -> false)
+  | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
+
 let list_structural_parameters context (frame : State.frame) (clauses : State.clauses) =
   List.concat
     (List.mapi
@@ -410,10 +418,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           ~when_:"when the lend of this part ends"
     | None -> ()
   in
-  let is_updating_helper = Laws.calls_updating_helper context invocation in
+  let is_update_step = calls_update_step context invocation in
   List.iter
     (fun (passed : State.passed) ->
-      if passed.mode = Types.Mut && not (is_updating_helper && passed.position = 0) then
+      if passed.mode = Types.Mut && not (is_update_step && passed.position = 0) then
         match List.assoc_opt passed.position changed with
         | Some term ->
             let valid = Validity.make_validity context after ~assuming:true passed.type_ term in
@@ -853,10 +861,10 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
   (match invocation.callee with
   | Intrinsic _ -> ()
   | _ ->
-      let exempt = Laws.calls_updating_helper context invocation in
+      let is_update_step = calls_update_step context invocation in
       List.iter
         (fun (passed : State.passed) ->
-          if not (exempt && passed.position = 0) then
+          if not (is_update_step && passed.position = 0) then
             Lambdas.check_valid context frame location passed.type_ passed.term ~deep:true
               ~when_:"when it is passed to this call")
         values);

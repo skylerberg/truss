@@ -813,6 +813,7 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
     costs = list_constant_costs written.clauses;
     specification_only =
       Well_known.is Model owner || Types.mentions_specification_only_type parameters output;
+    is_update_step = false;
     capture_free_parameters = Types.list_capture_free_parameters parameters;
   }
 
@@ -1160,9 +1161,19 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                     (generics, Some self)
               in
               let context = { context with self_type } in
+              let elaborated = elaborate_signature context ~owner:path ~head ~self_type signature in
+              let takes_mut_self =
+                match elaborated.receiver with
+                | Some (Mut, _) -> true
+                | Some ((Static | Read | Own), _) | None -> false
+              in
               make_elaborated_interface context
                 (Function_interface
-                   (elaborate_signature context ~owner:path ~head ~self_type signature))
+                   {
+                     elaborated with
+                     is_update_step =
+                       takes_mut_self && (lookups.names.read_declaration key).visibility = Private;
+                   })
           | Type_definition { generics; body; clauses; _ } ->
               let type_generics = elaborate_generics context path generics in
               let self =
@@ -1228,6 +1239,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                      uses = elaborate_capabilities context uses;
                      costs = [];
                      specification_only = false;
+                     is_update_step = false;
                      capture_free_parameters = [];
                    })
           | Theorem { name; generics; parameters; clauses; _ } ->
