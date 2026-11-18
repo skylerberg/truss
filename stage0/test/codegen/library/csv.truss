@@ -78,10 +78,10 @@ test "rows are written so that they read back the same" {
   let text = csv::format(rows.slice())
   assert text == "a,\"b,c\",\"say \"\"hi\"\"\"\n,\" padded \",\"two\nlines\"\n\"\"\n\n"
   assert csv::parse(text.slice()) is Ok(read) && read == rows
-  var builder = TextBuilder.new()
+  var builder = ""
   let fields: List[String] = ["x", "y z"]
   csv::format_row(fields.slice(), output: mut builder, options: csv::Options(delimiter: Character";"))
-  assert own builder.finish() == "x;y z"
+  assert builder == "x;y z"
 }
 
 test "a table gives cells by the name of their column" {

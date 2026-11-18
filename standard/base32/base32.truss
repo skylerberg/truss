@@ -7,16 +7,16 @@ public type DecodeError =
   derives Equal
 
 impl Display for DecodeError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       InvalidCharacter(offset) => {
-        mut output.write("the byte at offset ")
+        mut output.push("the byte at offset ")
         offset.display(mut output)
-        mut output.write(" is not in the alphabet")
+        mut output.push(" is not in the alphabet")
       }
-      InvalidLength => mut output.write("the text has a number of symbols that no count of bytes encodes to")
-      InvalidPadding => mut output.write("the padding is wrong, or the last symbol has bits that no byte uses")
+      InvalidLength => mut output.push("the text has a number of symbols that no count of bytes encodes to")
+      InvalidPadding => mut output.push("the padding is wrong, or the last symbol has bits that no byte uses")
     }
   }
 }

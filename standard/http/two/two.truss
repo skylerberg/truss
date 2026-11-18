@@ -64,19 +64,19 @@ internal type Failure =
   derives Equal
 
 impl Display for Failure {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Closed => mut output.write("the HTTP/2 connection closed")
+      Closed => mut output.push("the HTTP/2 connection closed")
       Reset(code) => {
-        mut output.write("the peer reset the HTTP/2 stream with code ")
+        mut output.push("the peer reset the HTTP/2 stream with code ")
         code.display(mut output)
       }
       Protocol(code, message) => {
-        mut output.write("HTTP/2 error ")
+        mut output.push("HTTP/2 error ")
         code.display(mut output)
-        mut output.write(": ")
-        mut output.write(message.slice())
+        mut output.push(": ")
+        mut output.push(message.slice())
       }
       System(error) => error.display(mut output)
     }

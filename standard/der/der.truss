@@ -20,9 +20,9 @@ public type Error(offset: UInt64)
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write("malformed DER at byte ")
+    mut output.push("malformed DER at byte ")
     self.offset.display(mut output)
   }
 }

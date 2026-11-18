@@ -62,19 +62,19 @@ public fn Method.from_name(name: StringSlice) -> Method
 }
 
 impl Display for Method {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Get => mut output.write("GET")
-      Head => mut output.write("HEAD")
-      Post => mut output.write("POST")
-      Put => mut output.write("PUT")
-      Patch => mut output.write("PATCH")
-      Delete => mut output.write("DELETE")
-      Options => mut output.write("OPTIONS")
-      Connect => mut output.write("CONNECT")
-      Trace => mut output.write("TRACE")
-      Other(name) => mut output.write(name.slice())
+      Get => mut output.push("GET")
+      Head => mut output.push("HEAD")
+      Post => mut output.push("POST")
+      Put => mut output.push("PUT")
+      Patch => mut output.push("PATCH")
+      Delete => mut output.push("DELETE")
+      Options => mut output.push("OPTIONS")
+      Connect => mut output.push("CONNECT")
+      Trace => mut output.push("TRACE")
+      Other(name) => mut output.push(name.slice())
     }
   }
 }
@@ -727,21 +727,21 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       Malformed(message) => {
-        mut output.write("malformed HTTP: ")
-        mut output.write(message.slice())
+        mut output.push("malformed HTTP: ")
+        mut output.push(message.slice())
       }
-      HeadTooLarge => mut output.write("the request line and headers are too large")
-      BodyTooLarge => mut output.write("the body is too large")
-      Closed => mut output.write("the connection closed before the message ended")
+      HeadTooLarge => mut output.push("the request line and headers are too large")
+      BodyTooLarge => mut output.push("the body is too large")
+      Closed => mut output.push("the connection closed before the message ended")
       System(error) => error.display(mut output)
       Tls(error) => error.display(mut output)
       Json(error) => error.display(mut output)
-      Unsupported(message) => mut output.write(message.slice())
-      TooManyRedirects => mut output.write("the server redirected more times than the client follows")
+      Unsupported(message) => mut output.push(message.slice())
+      TooManyRedirects => mut output.push("the server redirected more times than the client follows")
     }
   }
 }
@@ -2357,7 +2357,7 @@ fn request_target(url: url::Url) -> String {
 fn authority_of(url: url::Url) -> String {
   var authority = ""
   match url.host() {
-    Some(host) => mut authority.push("${host}".slice())
+    Some(host) => host.display(mut authority)
     None => {}
   }
   match url.port() {

@@ -6,15 +6,15 @@ public type DecodeError =
   derives Equal
 
 impl Display for DecodeError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       InvalidCharacter(offset) => {
-        mut output.write("the byte at offset ")
+        mut output.push("the byte at offset ")
         offset.display(mut output)
-        mut output.write(" is not a hexadecimal digit")
+        mut output.push(" is not a hexadecimal digit")
       }
-      OddLength => mut output.write("the text has an odd number of digits")
+      OddLength => mut output.push("the text has an odd number of digits")
     }
   }
 }

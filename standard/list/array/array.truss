@@ -210,7 +210,7 @@ impl Hash for Array[Element: Hash, count: UInt64] {
 }
 
 impl Display for Array[Element: Display, count: UInt64] {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     self.slice().display(mut output)
   }

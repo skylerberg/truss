@@ -41,7 +41,7 @@ let types =
             "Range";
             "ExitCode";
           ] );
-        ([ "text" ], [ "String"; "StringSlice"; "TextBuilder"; "FromTemplate"; "Template" ]);
+        ([ "text" ], [ "String"; "StringSlice"; "FromTemplate"; "Template" ]);
         ([ "list" ], [ "List"; "Slice"; "FromElements" ]);
         ([ "specification" ], [ "Sequence"; "FiniteSet"; "FiniteMap"; "Multiset" ]);
         ([ "map" ], [ "Map"; "FromEntries" ]);

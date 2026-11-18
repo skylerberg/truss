@@ -9,11 +9,11 @@ fn bytes_of(text: StringSlice) -> List[UInt8] {
 }
 
 fn joined(parts: Slice[String]) -> List[UInt8] {
-  var text = TextBuilder.new()
+  var text = ""
   for part in parts {
-    mut text.write(part.slice())
+    mut text.push(part.slice())
   }
-  bytes_of(own text.finish().slice())
+  bytes_of(text.slice())
 }
 
 fn words(count: UInt64) -> List[UInt8] {

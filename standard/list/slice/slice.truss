@@ -655,19 +655,19 @@ public fn Slice[Element: Copyable].repeated(self, times: UInt64) -> List[Element
 public fn Slice[Element: Display].join(self, separator: StringSlice) -> String
   cost time finite
 {
-  var output = TextBuilder.new()
+  var output = ""
   var index: UInt64 = 0
   while index < self.length()
     invariant index <= self.length()
     decreases self.length() - index
   {
     if index > 0 {
-      mut output.write(separator)
+      mut output.push(separator)
     }
     self[index].display(mut output)
     index += 1
   }
-  own output.finish()
+  output
 }
 
 public fn Slice[Element].enumerate(self) -> list::Enumerated[Element]
@@ -1680,15 +1680,15 @@ impl Hash for Slice[Element: Hash] {
 }
 
 impl Display for Slice[Element: Display] {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write("[")
+    mut output.push("[")
     for index in 0..self.length() {
       if index > 0 {
-        mut output.write(", ")
+        mut output.push(", ")
       }
       self[index].display(mut output)
     }
-    mut output.write("]")
+    mut output.push("]")
   }
 }

@@ -17,17 +17,17 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Closed => mut output.write("the TLS connection was closed")
+      Closed => mut output.push("the TLS connection was closed")
       Alert(description) => {
-        mut output.write("the peer sent the TLS alert ")
+        mut output.push("the peer sent the TLS alert ")
         description.display(mut output)
       }
       Protocol(message) => {
-        mut output.write("TLS: ")
-        mut output.write(message.slice())
+        mut output.push("TLS: ")
+        mut output.push(message.slice())
       }
       Certificate(error) => error.display(mut output)
       System(error) => error.display(mut output)
