@@ -350,7 +350,7 @@ let write_output (st : Lowering.state) output =
     ~signature ~substitution:Types.no_substitution
     ~arguments:[ (Read, int32, descriptor); (Read, view_ty, view) ]
     ~destination:(Lowering.allocate_temporary st result)
-    ()
+    ~site:None ()
 
 let build_evaluator context path : Emit_c.fragment =
   let st, mir, ty = make_constant_state context path in

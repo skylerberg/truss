@@ -146,12 +146,32 @@ let make_any_entry_signature context ~any ~trait (signature : Types.signature) =
     result,
     Definitions.list_evidence context substitution signature.uses )
 
-let lower_implementation_evidence (st : Lowering.state) ~impl ~type_arguments ~implementation =
+let extend_evidence (st : Lowering.state) ~(site : Lowered.site option) capability evidence =
+  match site with
+  | Some site when Path.equal capability Definitions.panic_path ->
+      let link = Emit_c.Builder.allocate_local st.builder Trace in
+      Emit_c.Builder.emit st.builder
+        (Call
+           {
+             target = Intrinsic Trace_link;
+             arguments =
+               [
+                 Address { place = Lowered.make_local_place link; writable = true };
+                 Constant (Site site);
+                 evidence;
+               ];
+             result = Discarded;
+           });
+      Lowered.Address { place = Lowered.make_local_place link; writable = false }
+  | Some _ | None -> evidence
+
+let lower_implementation_evidence (st : Lowering.state) ~impl ~type_arguments ~implementation ~site
+    =
   let outer =
     List.map
       (fun captured ->
         match List.find_opt (fun (path, _) -> Path.equal path captured) st.evidence with
-        | Some (_, operand) -> operand
+        | Some (_, operand) -> extend_evidence st ~site captured operand
         | None -> Definitions.raise_bug "no evidence for %s here" (Path.show captured))
       (Definitions.list_evidence st.context Types.no_substitution
          (Definitions.read_impl_interface st.context impl).impl_uses)
@@ -201,8 +221,11 @@ let lookup_evidence (st : Lowering.state) capability =
                 | None -> Definitions.raise_bug "an unbound parameter of %s" (Path.show impl))
               interface.impl_generics
           in
-          lower_implementation_evidence st ~impl ~type_arguments ~implementation
+          lower_implementation_evidence st ~impl ~type_arguments ~implementation ~site:None
       | _ -> raise_missing ())
+
+let pass_evidence (st : Lowering.state) ~site capability =
+  extend_evidence st ~site capability (lookup_evidence st capability)
 
 let lower_nested_function (st : Lowering.state) ~(function_type : Ground.function_type)
     ~(output : Types.result option) ~(captures : (Lowered.place * Ground.ty) list)
@@ -265,6 +288,7 @@ let lower_nested_function (st : Lowering.state) ~(function_type : Ground.functio
           function_type.parameters
       in
       let evidence = Lowering.list_evidence_parameters inner function_type.uses in
+      Lowering.start_trace inner;
       let environment_pointer =
         Emit_c.Builder.allocate_local builder
           (Pointer { target = Environment index; writable = false })
@@ -288,7 +312,7 @@ let lower_nested_function (st : Lowering.state) ~(function_type : Ground.functio
         ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
         ())
 
-let lower_indirect_call st ~(function_type : Ground.function_type) ~(value : Lowered.place)
+let lower_indirect_call st ~(function_type : Ground.function_type) ~(value : Lowered.place) ~site
     (places : Lowered.place list) destination =
   let passed =
     List.concat
@@ -297,7 +321,7 @@ let lower_indirect_call st ~(function_type : Ground.function_type) ~(value : Low
            let mode : Types.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
            Option.to_list (pass st mode ty place))
          function_type.parameters places)
-    @ List.map (lookup_evidence st) function_type.uses
+    @ List.map (pass_evidence st ~site) function_type.uses
   in
   let target =
     Lowered.Indirect
@@ -320,7 +344,7 @@ let lower_indirect_call st ~(function_type : Ground.function_type) ~(value : Low
 
 let lower_call_through_any (st : Lowering.state) ~(any_type : Types.trait_reference) ~trait ~name
     ~receiver ~(any : Lowered.place) ~(arguments : (Types.mode * Ground.ty * Lowered.place) list)
-    ?(lending = []) destination =
+    ?(lending = []) ~site destination =
   let index, signature = lookup_dynamic_method st.context trait name receiver in
   let slot =
     Drop_and_copy.compute_first_method_slot ~is_copyable:(is_copyable_any st.context any_type)
@@ -330,7 +354,7 @@ let lower_call_through_any (st : Lowering.state) ~(any_type : Types.trait_refere
     make_any_entry_signature st.context ~any:any_type ~trait signature
   in
   let passed = List.filter_map (fun (mode, ty, place) -> pass st mode ty place) arguments in
-  let evidence = List.map (lookup_evidence st) capabilities in
+  let evidence = List.map (pass_evidence st ~site) capabilities in
   let target =
     Lowered.Table_call
       {
@@ -422,7 +446,8 @@ let lower_any_into (st : Lowering.state) ~any_ty ~inner_ty ~impl ~type_arguments
                ];
            } ))
 
-let lower_provided_evidence (st : Lowering.state) ~(implementation : Lowered.operand) provides =
+let lower_provided_evidence (st : Lowering.state) ~(implementation : Lowered.operand) ~site provides
+    =
   List.map
     (fun (capability, impl, (arguments : Types.substitution)) ->
       let type_arguments =
@@ -435,7 +460,7 @@ let lower_provided_evidence (st : Lowering.state) ~(implementation : Lowered.ope
             | None -> Definitions.raise_bug "an unbound parameter of %s" (Path.show impl))
           (Definitions.read_impl_interface st.context impl).impl_generics
       in
-      (capability, lower_implementation_evidence st ~impl ~type_arguments ~implementation))
+      (capability, lower_implementation_evidence st ~impl ~type_arguments ~implementation ~site))
     provides
 
 let count_passed (signature : Types.signature) =
@@ -449,7 +474,7 @@ let count_passed (signature : Types.signature) =
 
 let lower_item_call (st : Lowering.state) item ~(signature : Types.signature) ~substitution
     ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?mask ?(lending = []) ~destination
-    () =
+    ~site () =
   let mask = match mask with Some mask -> mask | None -> count_passed signature in
   let c_signature, result =
     Definitions.make_c_signature st.context substitution
@@ -462,7 +487,7 @@ let lower_item_call (st : Lowering.state) item ~(signature : Types.signature) ~s
     (if Definitions.has_defaults signature then
        [ Lowering.make_int_constant UInt64 (Z.of_int mask) ]
      else [])
-    @ List.map (lookup_evidence st)
+    @ List.map (pass_evidence st ~site)
         (Definitions.list_evidence st.context substitution signature.uses)
   in
   let target = Lowered.Direct { function_ = Item item; signature = c_signature } in
@@ -521,7 +546,8 @@ let lower_list_into (st : Lowering.state) ty destination ~site fills =
   let lower operation arguments destination =
     ignore
       (Intrinsics.lower ~checks:(Lowering.checks_operations st) st.context.env st.builder
-         st.context.types operation ~type_arguments:[ element ] arguments ~destination ~site)
+         st.context.types operation ~type_arguments:[ element ] arguments ~destination ~site
+         ~trace:(Lowering.find_panic_trace st))
   in
   lower (Buffer Storage_with_capacity)
     [ Value (Lowered.make_uint64_constant (List.length fills)) ]

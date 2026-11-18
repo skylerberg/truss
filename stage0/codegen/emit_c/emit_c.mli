@@ -25,7 +25,7 @@ val is_small : fragment -> bool
 val failures : fragment -> (failure * Lowered.site) list
 val render_fragment : fragment -> string
 val render_file : Memory_layout.env -> profile -> (fragment * linkage) list -> string
-val site_struct : string
+val site_structs : string
 
 type position = { file : string; line : int; column : int }
 

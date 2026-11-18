@@ -23,7 +23,7 @@ let list_consumed_places : Intrinsic.operation -> int list = function
   | _ -> []
 
 let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types operation
-    ~type_arguments arguments ~destination ~site =
+    ~type_arguments arguments ~destination ~site ~trace =
   let set rvalue =
     Option.iter
       (fun destination_place -> Emit_c.Builder.emit builder (Assign (destination_place, rvalue)))
@@ -57,6 +57,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
            length = Lowered.make_uint64_constant (String.length message);
            site;
            reported;
+           trace;
          });
     Emit_c.Builder.start builder go_on
   in
@@ -94,6 +95,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                  length = Lowered.make_uint64_constant (String.length message);
                  site;
                  reported;
+                 trace;
                });
           Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder)
       | None ->
@@ -786,6 +788,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                length = Copy (Storage.project_view_length bytes);
                site;
                reported;
+               trace;
              });
         Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder)
     | Handle_from ->
@@ -899,6 +902,7 @@ let lower ?(checks = false) ?(value_arguments = []) ?reported env builder types 
                length = Lowered.make_uint64_constant (String.length message);
                site;
                reported;
+               trace;
              });
         Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder)
     | Libc function_ -> (

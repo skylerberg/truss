@@ -136,6 +136,9 @@ let render_intrinsic context (intrinsic : Lowered.intrinsic)
         "(%s->evidence.implementation = (void *)%s, %s->evidence.table = (const void *const *)%s, \
          %s%s->evidence.outer = %s->outer)"
         slot (render_argument 1) slot (render_argument 2) (String.concat "" outer) slot slot
+  | Trace_link ->
+      Printf.sprintf "(%s->site = %s, %s->caller = (const struct t_trace *)%s)" (render_argument 0)
+        (render_argument 1) (render_argument 0) (render_argument 2)
   | Evidence_implementation ->
       Printf.sprintf "((const struct t_evidence *)%s)->implementation" (render_argument 0)
   | Program_argument ->
@@ -398,7 +401,7 @@ let write_terminator context fc buffer (terminator : Lowered.terminator) =
       | None -> write_line "return;"
       | Some (text, _) -> write_line "return %s;" text)
   | Unreachable -> write_line "%s" (render_unreachable context)
-  | Fail { failure; message; length; site; reported } ->
+  | Fail { failure; message; length; site; reported; trace } ->
       if match failure with Lowered.Todo -> true | Panic | Assertion -> false then
         context.failures <- (Todo, site) :: context.failures;
       let runtime =
@@ -412,7 +415,14 @@ let write_terminator context fc buffer (terminator : Lowered.terminator) =
         | Some reported -> fst (render_operand reported)
         | None -> C_values.render_site context site
       in
-      write_line "%s(%s, %s, %s);" runtime
-        (fst (render_operand message))
-        (fst (render_operand length))
-        site
+      let chain =
+        match (failure, trace) with
+        | Panic, Some trace -> [ fst (render_operand trace) ]
+        | Panic, None -> [ fst (render_operand (Constant Null)) ]
+        | (Assertion | Todo), None -> []
+        | (Assertion | Todo), Some _ ->
+            C_runtime.raise_bug "a call chain on a failure that is not a panic"
+      in
+      write_line "%s(%s);" runtime
+        (String.concat ", "
+           ([ fst (render_operand message); fst (render_operand length); site ] @ chain))

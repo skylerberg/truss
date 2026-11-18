@@ -7,7 +7,7 @@ module Path_table = Hashtbl.Make (Path)
 type profile = Development | Release
 type linkage = C_runtime.linkage = External | Internal
 
-let site_struct = C_runtime.site_struct
+let site_structs = C_runtime.site_structs
 let version = 28
 
 type failure = C_runtime.failure = Echo | Todo

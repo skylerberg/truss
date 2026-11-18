@@ -7,6 +7,7 @@ type ty =
   | Raw of Memory_layout.scalar
   | Environment of int
   | Evidence of int
+  | Trace
   | Lend
   | Lend_mark
 
@@ -101,6 +102,7 @@ type intrinsic =
   | Evidence_outer
   | Program_argument
   | Evidence_fill
+  | Trace_link
   | Coroutine_start
   | Coroutine_resume
   | Coroutine_suspend
@@ -163,6 +165,7 @@ type terminator =
       length : operand;
       site : site;
       reported : operand option;
+      trace : operand option;
     }
 
 type static_value =
