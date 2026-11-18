@@ -104,7 +104,7 @@ let () =
         Harness.fail "message %S" actual);
   Harness.test "a function that declares `uses Panic` stops at an operation that fails" (fun () ->
       expect_proven Fixtures.Prover.failing_operations_of_a_function_that_may_panic);
-  Harness.test "a test checks an operation it cannot prove when it runs, as `uses Panic` does"
+  Harness.test "a test has `Panic`, so an operation it cannot prove is checked when it runs"
     (fun () -> expect_proven Fixtures.Prover.test_indexing_by_a_sum_from_a_loop);
   Harness.test "a lambda proves its operations, since it has no `uses` of its own" (fun () ->
       let actual = read_message Fixtures.Prover.overflow_in_a_lambda_of_a_function_that_may_panic in
@@ -112,6 +112,8 @@ let () =
         (not (String.includes ~affix:"may overflow `UInt8`" actual))
         || String.includes ~affix:"uses Panic" actual
       then Harness.fail "message %S" actual);
+  Harness.test "a lambda in a test proves its operations, as one in a function with `Panic` does"
+    (fun () -> expect_not_proven Fixtures.Prover.overflow_in_a_lambda_of_a_test "prover.overflow");
   Harness.test "an overflow in an impl names where the impl can declare `Panic`" (fun () ->
       List.iter
         (fun (text, declaration) ->

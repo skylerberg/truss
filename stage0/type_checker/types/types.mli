@@ -78,6 +78,7 @@ val make_capability_set : capability list -> capability_set
 val no_capabilities : capability_set
 val union_capabilities : capability_set -> capability_set -> capability_set
 val unconditional_divergence : capability
+val panic : capability
 val list_divergence : capability_set -> capability_set
 val remove_divergence : capability_set -> capability_set
 val terminates : capability_set -> bool

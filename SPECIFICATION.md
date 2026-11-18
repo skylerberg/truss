@@ -1816,8 +1816,8 @@ public trait Add[Right] {
 
 ## Failure
 
-Code panics only in a test and where its signature declares `uses Panic`.
-Running out of memory and overflowing the stack are the exceptions.
+Code panics only where it has `Panic`. Running out of memory and overflowing
+the stack are the exceptions.
 
 Every operation that can fail is a proof obligation: integer overflow,
 division by zero, indexing or slicing out of bounds, a shift that is too
@@ -1831,10 +1831,10 @@ is an error, and one of these makes it compile:
 
 `unreachable` admits only the first.
 
-In a test, and in the body of a function that declares `uses Panic`, an
-operation that is not proven safe is checked when it runs, in every build,
-and panics when it fails. The check prevents the out-of-bounds read or the
-wrapped result that the unchecked operation would give.
+In code that has `Panic`, an operation that is not proven safe is checked
+when it runs, in every build, and panics when it fails. The check prevents
+the out-of-bounds read or the wrapped result that the unchecked operation
+would give.
 
 - An overflow, a division by zero, and a shift that is too large are checked
   where they happen.
@@ -1842,7 +1842,7 @@ wrapped result that the unchecked operation would give.
   `requires` of the method it calls. One through a trait bound or `any` is
   proven, and so is a `requires` that cannot be evaluated at run time (see
   [Deriving](#deriving)).
-- A lambda in that body, a `proof` block, and every clause are proven. A
+- A lambda in that code, a `proof` block, and every clause are proven. A
   lambda's capabilities are inferred from its body, not declared, and a
   `proof` block and a clause do not run.
 

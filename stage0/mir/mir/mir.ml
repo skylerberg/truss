@@ -96,7 +96,10 @@ let find_contract (definition : Core.definition) =
                     | None -> [])
                   parameters));
         }
-  | Type _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty -> None
+  | Test _ ->
+      Some
+        { parameters = []; requires = []; ensures = []; decreases = []; costs = []; callbacks = [] }
+  | Type _ | Trait _ | Constant _ | Law_proof _ | Empty -> None
 
 let list_laws (definition : Core.definition) =
   match definition with

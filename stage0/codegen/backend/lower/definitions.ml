@@ -42,7 +42,6 @@ type code = {
   result : Types.result;
   substitution : Types.substitution;
   uses : Types.capability_set;
-  real : Path.t list;
   has_defaults : bool;
 }
 
@@ -54,7 +53,6 @@ let make_unwritten_code ~definition ~substitution ~result =
     result;
     substitution;
     uses = Types.no_capabilities;
-    real = [];
     has_defaults = false;
   }
 
@@ -86,7 +84,6 @@ let make_function_code context ~enclosing_impl (key : Resolve.Names.key)
     result = interface.output;
     substitution;
     uses = interface.uses;
-    real = [];
     has_defaults =
       List.exists
         (fun (parameter : Types.parameter_info) -> parameter.has_default)
@@ -133,21 +130,7 @@ let make_declaration_code context (path : Path.t) instantiation =
 
 let make_code context (path : Path.t) (instantiation : Ground.instantiation) : code =
   match path with
-  | Test _ -> (
-      match Resolve.Names.find_definition context.lookups.interface.names path with
-      | Some (key, { kind = Test _; _ }) ->
-          {
-            (make_unwritten_code ~definition:path ~substitution:Types.no_substitution
-               ~result:(Returns Types.unit))
-            with
-            written = Some (read_written context key);
-            uses = Types.make_capability_set [ Capability Monomorphic.panic_capability ];
-            real =
-              Monomorphic.list_evidence context.monomorphic Types.no_substitution
-                (Interface.Definition.read_test_uses context.lookups.interface path);
-          }
-      | _ -> raise_bug "%s is not a test" (Path.show path))
-  | Top _ | Method _ -> (
+  | Top _ | Method _ | Test _ -> (
       let interface = read_signature context path in
       let substitution = Monomorphic.make_signature_substitution interface instantiation in
       let enclosing_impl =
