@@ -128,7 +128,8 @@ and visit_statement_places visit (kind : Tree.statement_kind) =
       Option.iter (fun (value, _) -> visit_operand_places visit value) returned
   | Jump (Break | Continue | Unreachable | Written_unreachable | Todo)
   | Basic (Live _ | Dead _ | Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _)
-  | Choose _ | While _ | Fork _ | Resume _ ->
+  | Choose { choice = Cases _ | Conditional _ | Connective _; _ }
+  | While _ | Fork _ | Resume _ ->
       ());
   List.iter (iter_places_read visit) (list_nested_blocks_of_kind kind)
 

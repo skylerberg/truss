@@ -1058,17 +1058,12 @@ and lower_statement builder (node : Core.statement) =
                    [ (place, compute_operand_origin value) ]
                    origin)
           | Some place, Some else_ ->
-              let bound = ref [] in
-              let matches =
-                lower_condition_block builder (fun () ->
-                    let matches, deferred =
-                      Emitter.run_deferring builder (fun () ->
-                          match_patterns builder [ pattern ]
-                            [ (place, compute_operand_origin value) ]
-                            origin)
-                    in
-                    bound := deferred;
-                    matches)
+              let matches, bound =
+                Emitter.run_deferring builder (fun () ->
+                    lower_condition_block builder (fun () ->
+                        match_patterns builder [ pattern ]
+                          [ (place, compute_operand_origin value) ]
+                          origin))
               in
               Option.iter
                 (fun condition ->
@@ -1084,7 +1079,7 @@ and lower_statement builder (node : Core.statement) =
                     (Emitter.hold_choice builder Types.unit origin
                        (Conditional { condition; then_; else_; if_condition = None })))
                 matches;
-              List.iter (Emitter.register_binding builder) !bound)
+              List.iter (Emitter.register_binding builder) bound)
       | Evaluate value -> ignore (lower_expression builder value)
       | Assign { target; value = written; _ } -> (
           match lower_expression builder written with
