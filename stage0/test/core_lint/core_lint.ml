@@ -542,10 +542,10 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         check_type "a call's `Self`" self_type;
         check_instantiation "a call" instantiation;
         match evidence with
-        | Impl { arguments; _ } ->
+        | Impl { substitution; _ } ->
             List.iter
               (fun (_, inner) -> check_argument "an `impl`'s type argument" inner)
-              arguments.arguments
+              (Types.For_testing.list_arguments substitution)
         | Bound | Dynamic -> ())
     | Intrinsic { type_arguments; _ } ->
         List.iter (check_argument "an intrinsic's type argument") type_arguments

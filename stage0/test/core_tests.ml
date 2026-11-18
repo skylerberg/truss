@@ -528,7 +528,7 @@ let () =
           List.map
             (fun ((parameter : Types.parameter), argument) ->
               parameter.name ^ " = " ^ Types.show_argument argument)
-            substitution.arguments )
+            (Types.For_testing.list_arguments substitution) )
     | None -> failwith "no core form"
   in
   let list_observed name =
@@ -555,7 +555,10 @@ let () =
           Database.For_testing.read_core (Support.make_database packages)
             (Method { owner; name = "not_equal"; receiver = Read }) )
       with
-      | Some (_, { arguments = []; _ }), Some (_, { arguments = [ _ ]; _ }) -> ()
+      | Some (_, derived), Some (_, inherited)
+        when Types.For_testing.list_arguments derived = []
+             && List.length (Types.For_testing.list_arguments inherited) = 1 ->
+          ()
       | _ ->
           Harness.fail
             "expected the derived method with no substitution and the inherited method with one")

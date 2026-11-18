@@ -9,7 +9,7 @@ type local =
   | Synthetic of int
 
 type quantifier = Forall | Exists
-type evidence = Impl of { impl : Path.t; arguments : Types.substitution } | Bound | Dynamic
+type evidence = Impl of { impl : Path.t; substitution : Types.substitution } | Bound | Dynamic
 
 type pattern_constant =
   | Boolean_constant of bool

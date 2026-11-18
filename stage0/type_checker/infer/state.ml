@@ -561,8 +561,7 @@ let make_call state ~callee ~arguments ~lends =
     ~arguments ~lends
 
 let convert_evidence = function
-  | Interface.Impls.From_impl { impl; substitution } ->
-      Tables.Impl { impl; arguments = substitution }
+  | Interface.Impls.From_impl { impl; substitution } -> Tables.Impl { impl; substitution }
   | Interface.Impls.From_bound -> Tables.Bound
   | Interface.Impls.From_any -> Tables.Dynamic
   | Interface.Impls.Built_in | Interface.Impls.Accepted _ -> Tables.Built_in

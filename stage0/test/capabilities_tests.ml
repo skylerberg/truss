@@ -105,9 +105,12 @@ let () =
           (list_core_expressions Fixtures.Capabilities.provide_of_a_generic_fixed_clock
              ~of_function:"f")
       with
-      | [ [ [ { capability; impl = Impl _; arguments = { arguments = [ (_, Type tag) ]; _ } } ] ] ]
+      | [ [ [ { capability; impl = Impl _; arguments } ] ] ]
         when Path.equal capability (Support.make_top_path "standard::capabilities" "Clock")
-             && Types.show tag = "Bool" ->
+             &&
+             match Types.For_testing.list_arguments arguments with
+             | [ (_, Type tag) ] -> Types.show tag = "Bool"
+             | _ -> false ->
           ()
       | _ -> Harness.fail "not recorded");
   Harness.test "a specification may not use Panic" (fun () ->
