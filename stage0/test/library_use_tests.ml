@@ -31,7 +31,7 @@ let () =
     (fun () -> expect_proven Fixtures.Library_use.point_display_called_by_a_timed_function);
   Harness.test "a display that may not end is rejected" (fun () ->
       Support.expect_one_diagnostic ~check Fixtures.Library_use.display_with_an_endless_loop
-        "prover.termination")
+        "capabilities.may_not_terminate")
 
 let () =
   Harness.test "two strings with the same text are equal" (fun () ->

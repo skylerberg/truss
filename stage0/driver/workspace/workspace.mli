@@ -16,7 +16,6 @@ val read_source : snapshot -> Path.file -> Source.t
 val locate_file : snapshot -> Path.file -> string
 val list_package_databases : unit -> string list
 val make_trial : snapshot -> (string * string option) list -> snapshot
-val fetch_published : Path.package -> Registry.Version.t -> (snapshot, string) result
 val flush : unit -> unit
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }

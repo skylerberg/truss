@@ -122,6 +122,7 @@ val register_statement : state -> Syntax.statement -> (unit -> Core.statement_ki
 val build_statement : state -> Syntax.statement -> Core.statement
 val register_pattern : state -> Syntax.pattern -> (unit -> Core.pattern_kind) -> unit
 val build_pattern : state -> Syntax.pattern -> Core.pattern
+val build_scrutinee_pattern : state -> Syntax.pattern -> Core.pattern
 val alias_expression : state -> Syntax.expression -> Syntax.expression -> unit
 val mark_lent_tails : state -> Syntax.expression -> unit
 val make_place : Core.expression -> Core.place
@@ -147,6 +148,7 @@ val normalize : state -> Types.ty -> Types.ty
 val finalize_type : state -> Types.ty -> Types.ty
 val finalize_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_argument : state -> Types.argument -> Types.argument
+val finalize_instantiation : state -> Types.instantiation -> Types.instantiation
 val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
 val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impls.evidence option

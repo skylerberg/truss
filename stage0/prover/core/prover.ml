@@ -47,7 +47,7 @@ let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
             match generic.kind with
             | Type_generic bounds ->
                 Some (generic.generic, Types.find_bound_integer_implementors bounds)
-            | Value_generic | Capability_generic -> None)
+            | Value_generic -> None)
           signature.generics
     | None -> []
   in
@@ -71,10 +71,12 @@ let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
                         Printf.sprintf "`%s` is `%s`" parameter.name
                           (Intrinsic.show_builtin builtin);
                       ],
-                    (parameter, Types.Type (Types.make_builtin builtin)) :: substitution ))
+                    Types.bind_argument parameter
+                      (Types.Type (Types.make_builtin builtin))
+                      substitution ))
                 builtins)
             instances)
-    [ ([], []) ]
+    [ ([], Types.no_substitution) ]
     (self @ generics)
   |> List.filter (fun (shown, _) -> shown <> [])
 
@@ -132,7 +134,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                 ~substitution lookups source ~path:key.path
             in
             match list_integer_instances lookups key.path with
-            | [] -> Obligations (prove_with [])
+            | [] -> Obligations (prove_with Types.no_substitution)
             | instances ->
                 let outcomes =
                   List.map

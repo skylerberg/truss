@@ -114,7 +114,7 @@ name resolution gives the rest their meaning:
 
 ```text
 amortized time allocations allocated_bytes calls O finite potential
-log power result old by bit_vector
+log power result old by bit_vector generic
 ```
 
 | Words | Meaning |
@@ -128,6 +128,7 @@ log power result old by bit_vector
 | `visited` | In a `for` loop's clauses, the `Sequence` of the values of the iterations before |
 | `final(result)` | In a lending method's `ensures`, the lent part as the caller left it |
 | `by`, `bit_vector` | After an `assert`'s condition: `assert condition by bit_vector` |
+| `generic` | In a `uses` list, before the name of a capability parameter |
 
 A parameter cannot be named `result`, a parameter of a lending method cannot
 be named `final`, and no function can be named `old` or `identical`.
@@ -443,16 +444,12 @@ type_argument  = type | INTEGER | LOWER_NAME | UPPER_NAME "=" type ;
 ```ebnf
 generics          = "[" generic_parameter { "," generic_parameter } [ "," ] "]" ;
 generic_parameter = UPPER_NAME [ ":" bound ]
-                  | LOWER_NAME ":" type
-                  | "capability" UPPER_NAME ;
+                  | LOWER_NAME ":" type ;
 bound             = path_type { "+" path_type } ;
 ```
 
 - A `LOWER_NAME` parameter has type `UInt64`, and its value is known when the
   code is compiled.
-- A `capability` parameter stands for a set of capabilities (see
-  [Capability parameters](#capability-parameters)). Only a function, a
-  method, or a theorem takes one.
 - Generic code is monomorphized: it is compiled once for each set of type
   arguments. So a generic function cannot call itself, or a function in a
   cycle with it, with a type argument built from its own type parameters, and
@@ -559,6 +556,11 @@ fn Option[Value].take(mut self) -> Option[Value] {
 - **`Plain` types copy implicitly.** A type made only of fixed-size data with
   nothing on the heap, such as the integers, floats, `Bool`, `Character`,
   and records, sum types, and `Array`s built only from those, is `Plain`.
+- **A name bound to a `Plain` value is a copy.** A `let`, or a pattern of a
+  `match` or an `is`, that binds a `Plain` value without `mut` copies it, so
+  the place it was bound from can be assigned while the name is live. The
+  variable of a `for` loop is not copied: the loop lends its collection for
+  the body.
 - **`Copyable` types have `copy()`.** An implicit copy never allocates.
 - A copy has the original's capacity.
 - **Handles are not `Copyable`,** nor is a type that holds one.
@@ -641,10 +643,10 @@ public let seconds_per_day: Int64 = 24 * 60 * 60
 ```
 
 - The value is a *constant expression*: literals, arithmetic on numbers,
-  other constants, and records, variants, lists, maps, arrays, sets, and
-  strings built from those. It calls no function. The compiler evaluates it,
-  building a `Map` or `Set` with the standard library's compiled code and no
-  random hash key.
+  other constants, and records, variants, collection literals, and strings
+  built from those. It calls no function. The compiler evaluates it, running
+  the compiled `from_elements` or `from_entries` of a collection that takes
+  its literal through one, with no random hash key.
 - A constant's value does not depend on itself, through another constant or
   through the default of a field that a record or variant in it leaves out.
 - A constant lives in static memory. Reading it or taking a view of it costs
@@ -735,6 +737,11 @@ arguments or an index (see
 [Constructs resolved after parsing](#constructs-resolved-after-parsing)), and
 a diagnostic about `f[X]` says which reading applied.
 
+- The written arguments give the generic parameters in brackets, in order.
+- A capability parameter takes no type argument, since it is written at its
+  uses and not in brackets: `for_each[String](names, visit: greet)` gives
+  `Item` alone.
+
 ### Clauses
 
 ```ebnf
@@ -746,7 +753,8 @@ clause               = "uses" capability_list
 capability_list      = capability_reference { "," capability_reference } ;
 capability_reference = path_type
                      | "Self" "." UPPER_NAME
-                     | UPPER_NAME "." UPPER_NAME ;
+                     | UPPER_NAME "." UPPER_NAME
+                     | "generic" UPPER_NAME ;
 ```
 
 ```truss
@@ -790,6 +798,8 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
   terminate for a parameter whose type takes one. The one exception is a
   call through the function's own parameter, where its bound names that
   parameter's `time` (see [Capability parameters](#capability-parameters)).
+- A loop without a measure may not terminate either, so a function with a
+  `time` clause holds none (see [Loops](#loops)).
 - A recursive call on a part of a parameter needs nothing written. A part is
   a field taken out by a pattern, or an element of a collection that is
   itself a part:
@@ -943,11 +953,11 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
 ### Capability parameters
 
 ```truss
-public fn for_each[Item, capability Granted](
+public fn for_each[Item](
   items: List[Item],
-  visit: (fn(Item) uses Granted),
+  visit: (fn(Item) uses generic Granted),
 )
-  uses Granted
+  uses generic Granted
   cost calls(visit) == items.length()
   cost time O(items.length() * time(visit))
 ```
@@ -955,10 +965,39 @@ public fn for_each[Item, capability Granted](
 A capability parameter passes on whatever a callback may do: the
 capabilities it uses, and whether it terminates.
 
-- A call infers `Granted` from the functions it passes. Where the type of
-  `visit` has no `time` clause and the function passed may not terminate,
-  `Granted` records that, and so the call may not terminate.
-- `(fn(Item) uses Granted cost time finite)` takes only functions that
+- `generic Granted` names a capability parameter of the enclosing function,
+  method, or theorem, and is written at each use. Every `generic Granted` in
+  one signature names the same parameter, including one inside the type of
+  a parameter's parameter. Nothing else declares it.
+- A capability parameter is named only in `uses`, in the signature of a
+  function, a method, or a theorem, and in its body. A body names only the
+  capability parameters of its signature, and a type, a constant, an `impl`,
+  and a test name none.
+- A capability parameter named in the function's own `uses` is also named in
+  the type of a parameter or the result. Otherwise no argument gives it
+  capabilities, and the name is a misspelling.
+- A call infers `Granted` from the functions it passes, and writes no type
+  argument for it (see [Explicit type arguments](#explicit-type-arguments)).
+  Where the type of `visit` has no `time` clause and the function passed may
+  not terminate, `Granted` records that, and so the call may not terminate.
+- A function declares `uses generic Granted` only where it calls a function
+  that uses it. One that returns or stores such a function does not, and its
+  caller needs the capabilities only where it calls the result:
+
+  ```truss
+  fn later(run: (fn() uses generic Granted)) -> (fn() uses generic Granted) {
+    run
+  }
+  ```
+
+- In the body of `for_each`, `(fn(Item) uses generic Granted)` takes only a
+  function that terminates if the functions passed for `generic Granted` do.
+  No function type states that a function uses `generic Granted` and may not
+  terminate. A lambda that does both is passed in a call, which infers a
+  capability parameter of its callee from the lambda.
+- An `impl`'s method names its capability parameters as its trait's method
+  does. Capability parameters have no order to rename them by.
+- `(fn(Item) uses generic Granted cost time finite)` takes only functions that
   terminate, whatever capabilities they use.
 - A `time` clause follows a function parameter only through its bound.
   `O(items.length() * time(visit))` is unbounded where `visit` may not
@@ -1334,9 +1373,11 @@ mut scores.update_each(fn(score) { score = score / 2 })
   lambda that captures a variable is a view; one that captures none can be
   returned, stored, and moved.
 - A lambda's capabilities are inferred from its body, and so is whether it
-  terminates: a lambda may not terminate when it calls a function that may
-  not, or holds a loop without a measure. Such a lambda is an error where
-  its function type promises that it terminates.
+  terminates: a lambda may not terminate when its body makes a call that may
+  not, or holds a loop without a measure. Such a call or loop is an error
+  where the lambda's function type takes only a function that terminates,
+  or one that terminates if the functions passed for a capability parameter
+  do.
 - `return` and `?` exit the lambda. `break` and `continue` do not reach a
   loop outside it.
 - A lambda is always passed inside the call's parentheses.
@@ -1390,12 +1431,19 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   exits, has type `Never`.
 - `invariant` holds at the start of every iteration and when the loop ends.
 - `decreases` names a measure that every iteration makes smaller and that
-  never goes below zero. A `while` loop in a function with a `time` clause is
-  proven to terminate, and so is a `for` loop over a cursor. Where a loop
-  states no measure, a `while` loop whose condition is `<`, `<=`, `>`, or
-  `>=` has the distance between the two sides as its measure, and a `for`
+  never goes below zero. Where a loop states no measure, a `while` loop
+  whose condition compares two sides that mutate nothing with `<`, `<=`,
+  `>`, or `>=` has the distance between them as its measure, and a `for`
   loop over a cursor whose type has a `remaining(self) -> UInt64` method has
   that method's value.
+- **A loop without a measure may not terminate.** A function with a `time`
+  clause therefore holds none, and neither does a lambda whose function type
+  takes only a function that terminates, or one that terminates if the
+  functions passed for a capability parameter do (see
+  [Termination](#termination)). In
+  both, each `while` loop and each `for` loop over a cursor has a measure,
+  which is proven to decrease. A `for` loop over a range or over a
+  collection's elements always terminates.
 - In the clauses of a loop over a range, the loop variable is the index of
   the next iteration: in `for i in start..end`, `i` is `start` on entry and
   `end` where the loop ends, and `end + 1` after `start..=end`.
@@ -1449,18 +1497,38 @@ map_entry = expression ":" expression ;
 
 | Literal | Value |
 |---|---|
-| `[2, 3, 5, 7]` | A `List`, or an `Array`, a `Set`, or a type of specifications where one is expected |
+| `[2, 3, 5, 7]` | A `List`, or where one is expected an `Array`, a `Sequence`, a `FiniteSet`, or a type that implements `FromElements` |
 | `[]` | An empty one of the same |
-| `["http": 80, "https": 443]` | A `Map`, or a `FiniteMap` where one is expected |
-| `[:]` | An empty `Map` |
+| `["http": 80, "https": 443]` | A `Map`, or where one is expected a `FiniteMap` or a type that implements `FromEntries` |
+| `[:]` | An empty one of the same |
+
+```truss
+impl FromElements for Stack[Element] {
+  type Element = Element
+
+  fn from_elements(elements: own List[Element]) -> Stack[Element] {
+    Stack(items: own elements)
+  }
+}
+
+let pending: Stack[Int64] = [1, 2, 3]
+```
 
 - An `Array` literal has exactly as many elements as its type says.
 - A non-empty list literal in a function body counts as one allocation, and
   an empty one as none.
-- A set or map literal makes an empty collection with room for every
-  element, then calls `insert` for each element in order, and costs as much
-  as those calls. `insert` requires a key that is not there yet, so a map
-  literal's keys are proven distinct.
+- A type takes a list literal by implementing the prelude trait
+  `FromElements`, and a map literal by implementing the prelude trait
+  `FromEntries`. The literal's elements have the type's `Element`, and a map
+  literal's keys and values its `Key` and its `Value`.
+- Such a literal is a call of `from_elements` with the `List` of its
+  elements, or of `from_entries` with a `List` of one `map::Entry` for each
+  key and value, in the order written. It costs that list and that call.
+- `from_entries` requires keys that are pairwise distinct by `==`, so a map
+  literal's keys are proven distinct. An `impl` for a type that holds a key
+  more than once states a weaker `requires`.
+- A list literal may repeat an element, and `from_elements` decides which of
+  two equal elements a collection keeps.
 
 ### Indexing
 
@@ -1484,6 +1552,8 @@ map_entry = expression ":" expression ;
   element that `IndexMut` lends, so the key is there.
 - A type that computes its elements, such as a `BitSet`, implements `Index`
   and `IndexAssign` and not `IndexMut`: it has no place to lend `mut`.
+- Each method of the three traits terminates: `contains_key`, `accepts_key`,
+  both overloads of `at`, and `assign` have `cost time finite`.
 - Strings cannot be indexed.
 
 ## Expressions
@@ -2009,6 +2079,7 @@ trait Index {
     cost time finite
   fn at(self, key: Self.Key) lends Self.Output
     requires self.contains_key(key)
+    cost time finite
 }
 ```
 
@@ -2031,9 +2102,9 @@ fn count[Source: Cursor](source: own Source) -> UInt64
 ```
 
 - `capability Uses` in a trait declares a set of capabilities that each
-  `impl` defines, as a list of capabilities, capability parameters, and the
-  sets of its type's parameters. An `impl` that leaves it out has the empty
-  set, and its methods use only the set's capabilities.
+  `impl` defines, as a list of capabilities and the sets of its type's
+  parameters. An `impl` that leaves it out has the empty set, and its
+  methods use only the set's capabilities.
 - `Self.Uses` and `Source.Uses` name the set in a `uses` clause. A call needs
   the set's capabilities for its type arguments. A function generic over a
   `Cursor` that advances it declares `uses Source.Uses`.
@@ -2114,7 +2185,7 @@ mut server.handlers.push(any HealthCheck())
   `any Cursor[Element = Int64]`, and each of its associated capability sets
   to the empty set.
 - A method can be called through `any` if it takes `self` in any mode, has no
-  generic parameters, and does not take or return `Self`.
+  generic or capability parameters, and does not take or return `Self`.
 - An `any` value cannot be converted back to its type.
 
 ## Tests
@@ -2369,13 +2440,17 @@ The prelude is in scope in every file, and all its names are
   `Set`
 - the core traits, such as `Equal`, `Ordered`, `From`, `TryFrom`, `Default`,
   `Copyable`, `Plain`, `Storable`, `Index`, `IndexMut`, `IndexAssign`,
-  `Iterable`, `Cursor`, `FromTemplate`, `Model`, and the arithmetic traits
+  `Iterable`, `Cursor`, `FromTemplate`, `FromElements`, `FromEntries`,
+  `Model`, and the arithmetic traits
 - `Integer`, `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`
 - the standard capabilities, and `Path`, `Instant`, `Duration`, and
   `SystemError`
 
 No definition can have a prelude name, a project cannot change the prelude,
 and the prelude changes only with a language version.
+
+`From.from`, `TryFrom.try_from`, and `Default.default` terminate: each has
+`cost time finite`.
 
 ### Visibility
 

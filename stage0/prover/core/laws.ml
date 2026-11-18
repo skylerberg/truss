@@ -147,7 +147,7 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
         let inside =
           Validity.bind_arguments frame callee_clauses
             ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
-            ~substitution:[]
+            ~substitution:Types.no_substitution
         in
         List.iter
           (fun (requirement : Mir.formula) ->

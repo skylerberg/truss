@@ -1,5 +1,5 @@
-fn checked[capability Granted](action: (fn() -> Instant uses Granted)) -> (fn() -> Instant uses Granted)
-  uses Granted
+fn checked(action: (fn() -> Instant uses generic Granted)) -> (fn() -> Instant uses generic Granted)
+  uses generic Granted
 {
   let _ = action()
   action

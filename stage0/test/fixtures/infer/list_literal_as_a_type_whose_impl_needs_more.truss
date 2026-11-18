@@ -1,0 +1,17 @@
+type Point(x: Int64)
+
+type Ranked[Element](items: List[Element])
+
+impl FromElements for Ranked[Element: Ordered] {
+  type Element = Element
+
+  fn from_elements(elements: own List[Element]) -> Ranked[Element]
+    cost time O(1)
+  {
+    Ranked(items: own elements)
+  }
+}
+
+fn f() {
+  let ranked: Ranked[Point] = [Point(x: 1)]
+}

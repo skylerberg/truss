@@ -9,6 +9,13 @@ public opaque type List[Element](storage: intrinsic::Storage[Element])
 public opaque type Slice[Element](elements: intrinsic::View[Element])
   derives Plain
 
+public trait FromElements {
+  type Element
+
+  fn from_elements(elements: own List[Self.Element]) -> Self
+    cost time finite
+}
+
 public type SplitFirst[Element](first: Element, rest: Slice[Element])
 
 public type SplitLast[Element](last: Element, rest: Slice[Element])
@@ -809,8 +816,8 @@ public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, item
   }
 }
 
-public fn List[Element].retain[capability Granted](mut self, keep: (fn(Element) -> Bool uses Granted))
-  uses Granted
+public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool uses generic Granted))
+  uses generic Granted
   ensures self.length() <= old(self.length())
   cost time O(old(self.length()) * time(keep))
 {
@@ -828,8 +835,8 @@ public fn List[Element].retain[capability Granted](mut self, keep: (fn(Element) 
   mut self.truncate(retained_count)
 }
 
-public fn List[Element].filter[capability Granted](own self, keep: (fn(Element) -> Bool uses Granted)) -> List[Element]
-  uses Granted
+public fn List[Element].filter(own self, keep: (fn(Element) -> Bool uses generic Granted)) -> List[Element]
+  uses generic Granted
   ensures result.length() <= self.length()
   cost time O(self.length() * time(keep))
 {
@@ -863,6 +870,18 @@ public fn List[Element: Equal].deduplicate(mut self)
 impl Default for List[Element] {
   fn default() -> List[Element] {
     []
+  }
+}
+
+impl FromElements for List[Element] {
+  type Element = Element
+
+  fn from_elements(elements: own List[Element]) -> List[Element]
+    ensures identical(result.model(), elements.model())
+    cost time O(1)
+    cost allocations == 0
+  {
+    elements
   }
 }
 

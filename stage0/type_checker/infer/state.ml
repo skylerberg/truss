@@ -440,7 +440,15 @@ let finalize_argument state = function
       match Unify.resolve_value state.unifier value with
       | Types.Value_variable _ -> Types.Type (make_unsolved_type state)
       | value -> Types.Value value)
-  | Types.Capabilities capabilities -> Types.Capabilities (finalize_capabilities state capabilities)
+
+let finalize_instantiation state (instantiation : Types.instantiation) : Types.instantiation =
+  {
+    type_arguments = List.map (finalize_argument state) instantiation.type_arguments;
+    capability_arguments =
+      List.map
+        (fun (name, argument) -> (name, finalize_capabilities state argument))
+        instantiation.capability_arguments;
+  }
 
 let unify state left right =
   let normalize type_ =
@@ -501,6 +509,20 @@ let is_plain state type_ =
 let is_view state type_ =
   Interface.Impls.is_view state.lookups.interface ~list_bounds:(lookup_bounds state)
     (zonk state type_)
+
+let rec copy_plain_bindings state (pattern : Core.pattern) : Core.pattern =
+  let copy_fields = List.map (fun (field, inner) -> (field, copy_plain_bindings state inner)) in
+  match pattern.kind with
+  | Bind ({ mode = Read; _ } as bound) when is_plain state pattern.type_ ->
+      { pattern with kind = Bind { bound with mode = Own } }
+  | Variant { variant; fields } ->
+      { pattern with kind = Variant { variant; fields = copy_fields fields } }
+  | Record fields -> { pattern with kind = Record (copy_fields fields) }
+  | Alternatives alternatives ->
+      { pattern with kind = Alternatives (List.map (copy_plain_bindings state) alternatives) }
+  | Bind _ | Wildcard | Literal _ | Range _ | Equal_to _ -> pattern
+
+let build_scrutinee_pattern state written = copy_plain_bindings state (build_pattern state written)
 
 let resolve_associated_type state type_ (trait : Types.trait_reference) name
     ~(at : Source.Definition_span.t) =
@@ -563,8 +585,8 @@ let settle state frame =
           (Printf.sprintf
              "Two function types here must use the same capabilities, and one uses `%s` where the \
               other uses `%s`."
-             (Types.show_argument (Types.Capabilities (resolve_capabilities state left)))
-             (Types.show_argument (Types.Capabilities (resolve_capabilities state right))))
+             (Types.show_capabilities (resolve_capabilities state left))
+             (Types.show_capabilities (resolve_capabilities state right)))
       in
       state.capability_constraints <-
         { subset = left; superset = right; report_missing }
@@ -591,12 +613,12 @@ let settle state frame =
     List.concat_map
       (fun id ->
         match state.tables.calls.(id) with
-        | Some { callee = Trait_method { trait; type_arguments; _ }; _ } ->
-            trait.trait_arguments @ type_arguments
+        | Some { callee = Trait_method { trait; instantiation; _ }; _ } ->
+            trait.trait_arguments @ instantiation.type_arguments
         | Some
             {
               callee =
-                ( Function { type_arguments; _ }
+                ( Function { instantiation = { type_arguments; _ }; _ }
                 | Constructor { type_arguments; _ }
                 | Intrinsic { type_arguments; _ } );
               _;
@@ -1021,7 +1043,11 @@ let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
     | type_ -> raise_bug "a slice of `%s`" (Types.show type_)
   in
   let make_callee name : Core.callee =
-    Function { path = Method { owner = path; name; receiver = Read }; type_arguments }
+    Function
+      {
+        path = Method { owner = path; name; receiver = Read };
+        instantiation = { Types.no_instantiation with type_arguments };
+      }
   in
   let build_read_argument = Operands.build_argument Read in
   let start = match start with Some start -> start | None -> make uint64 (Integer Z.zero) in
@@ -1091,7 +1117,8 @@ let convert state env ?argument ?expression (span : Source.Definition_span.t) ~a
                                 (Function
                                    {
                                      path = Method { owner = path; name = "slice"; receiver = Read };
-                                     type_arguments = arguments;
+                                     instantiation =
+                                       { Types.no_instantiation with type_arguments = arguments };
                                    })
                               ~arguments:[ Operands.build_argument Read inner ]
                               ~lends:None))

@@ -74,7 +74,9 @@ let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference
           let variables =
             List.map (fun (generic : Types.generic) -> generic.generic) proven.generics
           in
-          match Interface.Impls.match_type ~variables [] proven.for_type for_type with
+          match
+            Interface.Impls.match_type ~variables Types.no_substitution proven.for_type for_type
+          with
           | Some renaming
             when List.equal is_same_argument
                    (List.map (Types.substitute_argument renaming) proven.trait.trait_arguments)

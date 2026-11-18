@@ -89,7 +89,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       in
       State.register_statement state written (fun () ->
           let value = Operands.build mode (State.build_expression state value) in
-          let pattern = State.build_pattern state written_pattern in
+          let pattern = State.build_scrutinee_pattern state written_pattern in
           Let { pattern; value; else_ = Option.map (State.build_block state) else_ });
       (match (annotation, written_pattern.kind) with
       | None, Binding name -> Hashtbl.replace state.annotatable name.id ()
@@ -282,7 +282,7 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
                       name = "assign";
                       receiver = Mut;
                       self_type = base_type;
-                      type_arguments = [];
+                      instantiation = Types.no_instantiation;
                       evidence = State.convert_evidence evidence_source;
                     };
                 arguments =

@@ -47,7 +47,7 @@ let rec list_mentioned_paths = function
 
 and list_argument_paths = function
   | Types.Type type_ -> list_mentioned_paths type_
-  | Types.Value _ | Types.Capabilities _ -> []
+  | Types.Value _ -> []
 
 let find_visibility (state : Checking.state) (path : Path.t) =
   match path with
@@ -125,7 +125,7 @@ let check_real_implementations (state : Checking.state) (resolved : Resolve.reso
                      (Elaborator.show_path written.path)
                      recipient)
           | _ -> ())
-      | Self_capabilities _ | Associated_capabilities _ -> ())
+      | Self_capabilities _ | Associated_capabilities _ | Generic_capability _ -> ())
     uses
 
 let main_message =
@@ -324,21 +324,6 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
       | _ -> ())
     clauses
 
-let check_no_capability_parameter state definition_kind (name : Syntax.name)
-    (generics : Syntax.generic_parameter list) =
-  List.iter
-    (fun (generic : Syntax.generic_parameter) ->
-      match generic.kind with
-      | Capability_parameter parameter ->
-          Checking.report state Misplaced_capability_parameter state.spans.(generic.id)
-            (Printf.sprintf
-               "Only a function can take a capability parameter. No type argument can be written \
-                for `%s`, so no signature or field could name %s `%s` with the capabilities that \
-                it uses. Write the capabilities in the function type, as in `(fn() uses Clock)`."
-               parameter.text definition_kind name.text)
-      | Type_parameter _ | Value_parameter _ | Generic_error -> ())
-    generics
-
 let check_trait_cycle (state : Checking.state) (requires : Syntax.path_type list) =
   let is_required_by required =
     List.exists (Path.equal state.key.path) (Elaborator.list_trait_closure state.lookups required)
@@ -383,17 +368,8 @@ let check_redeclared (state : Checking.state) (name : Syntax.name) (receiver : P
 let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
     (generics : Types.generic list) (impl : Types.impl_interface) =
   if List.length generics = List.length impl.impl_generics then begin
-    let renaming : Types.substitution =
-      List.map2
-        (fun (proof : Types.generic) (of_impl : Types.generic) ->
-          ( proof.generic,
-            match of_impl.kind with
-            | Type_generic _ -> Types.Type (Types.Parameter of_impl.generic)
-            | Value_generic -> Types.Value (Types.Value_parameter of_impl.generic)
-            | Capability_generic ->
-                Types.Capabilities
-                  (Types.make_capability_set [ Types.Capability_parameter of_impl.generic ]) ))
-        generics impl.impl_generics
+    let renaming =
+      Types.make_substitution generics (Types.list_generic_arguments impl.impl_generics)
     in
     let list_impl_bounds = Types.list_bounds impl.impl_generics in
     List.iteri
@@ -419,7 +395,7 @@ let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
                         law is proven for every type that the `impl` is for."
                        proof.generic.name (Types.show_trait bound)))
               bounds
-        | Value_generic | Capability_generic -> ())
+        | Value_generic -> ())
       (List.combine generics impl.impl_generics)
   end
 
@@ -490,8 +466,7 @@ let check (state : Checking.state) =
                 (check_proof_bounds state type_ generics)
                 (Definition.find_impl_interface lookups impl)
           | Some _ -> ())
-    | None, Type_definition { name; generics; body; clauses }, Type_interface interface ->
-        check_no_capability_parameter state "the type" name generics;
+    | None, Type_definition { name; body; clauses; _ }, Type_interface interface ->
         (match body with
         | Fields fields -> check_duplicates state "field" (list_field_names fields)
         | Variants variants ->
@@ -509,8 +484,7 @@ let check (state : Checking.state) =
           check_private_in_public state ~visibility:definition.visibility
             (Types.list_field_types interface)
             state.spans.(name.id)
-    | None, Trait { name; generics; requires; _ }, Trait_interface trait ->
-        check_no_capability_parameter state "the trait" name generics;
+    | None, Trait { name; requires; _ }, Trait_interface trait ->
         check_trait_cycle state requires;
         check_private_in_public state ~visibility:definition.visibility
           (List.map (fun (bound : Types.trait_reference) -> Types.Any bound) trait.requires)

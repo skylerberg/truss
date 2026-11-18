@@ -61,7 +61,9 @@ let select_field context ty variant field term =
 
 let make_type_frame context frame source (ty : Types.ty) ~self =
   let substitution =
-    match Facts.find_visible_type context ty with Some (_, symbol) -> symbol | None -> []
+    match Facts.find_visible_type context ty with
+    | Some (_, substitution) -> substitution
+    | None -> Types.no_substitution
   in
   {
     frame with
@@ -238,14 +240,14 @@ let bind_arguments frame (clauses : State.clauses) ~arguments ~substitution =
     substitution;
   }
 
-let make_callee_substitution (frame : State.frame) (signature : Types.signature) type_arguments =
-  Types.make_substitution signature.generics
-    (List.map (Types.substitute_argument frame.substitution) type_arguments)
+let make_callee_substitution (frame : State.frame) (signature : Types.signature) instantiation =
+  Types.make_signature_substitution signature
+    (Types.substitute_instantiation frame.substitution instantiation)
 
 let list_callback_facts (context : State.context) frame (invocation : Invocation.t) position known
     arguments =
   match invocation.callee with
-  | Function { path; type_arguments } -> (
+  | Function { path; instantiation } -> (
       match
         Option.bind (Contracts.find_source context.lookups path) (fun (callee, _, _) ->
             Contracts.find_clauses context.lookups path callee)
@@ -256,8 +258,8 @@ let list_callback_facts (context : State.context) frame (invocation : Invocation
               let substitution =
                 match Interface.Impls.read_signature context.lookups.interface path with
                 | Some (signature : Types.signature) ->
-                    make_callee_substitution frame signature type_arguments
-                | None -> []
+                    make_callee_substitution frame signature instantiation
+                | None -> Types.no_substitution
               in
               let inside = bind_arguments frame clauses ~arguments:known ~substitution in
               let inside =
@@ -276,7 +278,7 @@ let list_callback_facts (context : State.context) frame (invocation : Invocation
 
 let find_parameter_type (context : State.context) frame (invocation : Invocation.t) index =
   match invocation.callee with
-  | Function { path; type_arguments } -> (
+  | Function { path; instantiation } -> (
       match Interface.Impls.read_signature context.lookups.interface path with
       | Some (signature : Types.signature) ->
           let types =
@@ -286,7 +288,7 @@ let find_parameter_type (context : State.context) frame (invocation : Invocation
             @ List.map (fun (info : Types.parameter_info) -> info.type_) signature.parameters
           in
           Option.map
-            (Types.substitute (make_callee_substitution frame signature type_arguments))
+            (Types.substitute (make_callee_substitution frame signature instantiation))
             (List.nth_opt types index)
       | None -> None)
   | _ -> None

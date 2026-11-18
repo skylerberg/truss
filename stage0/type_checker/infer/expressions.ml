@@ -133,7 +133,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
           Matches
             {
               value = Operands.build mode (State.build_expression state tested);
-              pattern = State.build_pattern state written;
+              pattern = State.build_scrutinee_pattern state written;
             });
       Types.bool
   | Range { start; stop; inclusive; _ } ->
@@ -385,7 +385,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                             name = "at";
                             receiver = Read;
                             self_type = base_type;
-                            type_arguments = [];
+                            instantiation = Types.no_instantiation;
                             evidence = State.convert_evidence evidence;
                           };
                       arguments =

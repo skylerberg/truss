@@ -81,7 +81,7 @@ test "union, intersection, and the differences make new sets" {
 
 test "a set is made from a list or a cursor, and gives its elements away" {
   let items: List[Int64] = [4, 4, 2, 4, 9]
-  let numbers: Set[Int64] = Set.from(items.copy())
+  let numbers: Set[Int64] = Set.from_elements(items.copy())
   assert order(numbers) == "4 2 9 "
   var collected: Set[Int64] = Set.collect(items.cursor())
   assert collected == numbers

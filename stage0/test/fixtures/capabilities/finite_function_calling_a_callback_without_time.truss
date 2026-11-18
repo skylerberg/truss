@@ -1,5 +1,5 @@
-fn f[capability Granted](value: Int64, change: (fn(Int64) -> Int64 uses Granted)) -> Int64
-  uses Granted
+fn f(value: Int64, change: (fn(Int64) -> Int64 uses generic Granted)) -> Int64
+  uses generic Granted
   cost time finite
 {
   change(value)

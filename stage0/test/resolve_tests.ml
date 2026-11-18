@@ -295,7 +295,35 @@ let () =
       | Some Resolve.Method_bracket -> ()
       | _ -> Harness.fail "decided");
   Harness.test "brackets after a function without generic parameters are an error" (fun () ->
-      expect_one_diagnostic Fixtures.Resolve.brackets_after_a_plain_function "resolve.not_generic")
+      expect_one_diagnostic Fixtures.Resolve.brackets_after_a_plain_function "resolve.not_generic");
+  Harness.test "brackets after a function with only a capability parameter are an error" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Resolve.brackets_after_a_function_with_only_a_capability_parameter
+        "resolve.not_generic")
+
+let () =
+  Harness.test "a capability parameter named only in its function's own uses is an error" (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.capability_parameter_named_only_in_uses
+        "resolve.unconstrained_capability_parameter"
+        ~says:
+          "`generic Granted` appears only in the function's own `uses`, so no argument gives it \
+           capabilities, and it stands for none. Name it in the type of a parameter, as in `visit: \
+           (fn() uses generic Granted)`.");
+  Harness.test "a body names only the capability parameters of its signature" (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.body_naming_a_capability_parameter_of_no_signature
+        "resolve.unknown_name");
+  Harness.test "a body can name a capability parameter of its signature" (fun () ->
+      expect_no_diagnostics [ ("app::main", Fixtures.Resolve.body_naming_its_capability_parameter) ]);
+  Harness.test "a capability parameter without `generic` is an error with a fix that writes it"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.capability_parameter_without_its_marker
+        "resolve.unknown_name" ~fixed:Fixtures.Resolve.capability_parameter_without_its_marker_fixed);
+  Harness.test "a capability parameter cannot share its name with a type parameter" (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.capability_parameter_named_like_a_type_parameter
+        "resolve.shadowed_name");
+  Harness.test "a capability parameter cannot shadow a capability" (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.capability_parameter_named_like_a_capability
+        "resolve.shadowed_name")
 
 let () =
   Harness.test "mut before a call to a function is an error with a fix that removes it" (fun () ->

@@ -173,11 +173,13 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
       | Some contract ->
           let callee_clauses = contract.callee_clauses in
           let entry =
-            Validity.bind_arguments frame callee_clauses ~arguments:[ (0, value_) ] ~substitution:[]
+            Validity.bind_arguments frame callee_clauses
+              ~arguments:[ (0, value_) ]
+              ~substitution:Types.no_substitution
           in
           let is_evaluable (requirement : Mir.requirement) =
             match (evidence, callee_clauses.parameters) with
-            | Impl { arguments = []; _ }, [ parameter ] ->
+            | Impl { arguments; _ }, [ parameter ] when arguments = Types.no_substitution ->
                 requirement.is_executable && reads_only_literals parameter.local requirement.clause
             | _ -> false
           in
@@ -224,7 +226,7 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
                    {
                      (Validity.bind_arguments frame clauses
                         ~arguments:[ (0, value_) ]
-                        ~substitution:[])
+                        ~substitution:Types.no_substitution)
                      with
                      result = Some result;
                    })
@@ -355,7 +357,7 @@ let assume_contract_for_every_argument context (frame : State.frame) (contract :
     {
       (Validity.bind_arguments over clauses
          ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
-         ~substitution:[])
+         ~substitution:Types.no_substitution)
       with
       result = Some value;
     }
@@ -410,7 +412,7 @@ let translate_named_function (context : State.context) (frame : State.frame)
         let inside =
           Validity.bind_arguments frame callee_clauses
             ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
-            ~substitution:[]
+            ~substitution:Types.no_substitution
         in
         List.iter
           (fun (requirement : Mir.formula) ->

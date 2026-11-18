@@ -1,13 +1,13 @@
 trait Visitor {
-  fn visit_all[capability Granted](self, visit: (fn(Int64) uses Granted))
-    uses Granted
+  fn visit_all(self, visit: (fn(Int64) uses generic Granted))
+    uses generic Granted
 }
 
 type Numbers(items: List[Int64])
 
 impl Visitor for Numbers {
-  fn visit_all[capability Granted](self, visit: (fn(Int64) uses Granted))
-    uses Granted
+  fn visit_all(self, visit: (fn(Int64) uses generic Granted))
+    uses generic Granted
   {
     todo
   }

@@ -85,7 +85,7 @@ let make_empty_frame source =
     panic = Undeclarable;
     bound = [];
     binders = [];
-    substitution = [];
+    substitution = Types.no_substitution;
     self_type = None;
     aliases = Locals.empty;
     slices = Locals.empty;
@@ -168,7 +168,7 @@ let keep_promise context (frame : State.frame) (promise : promise) ~(at : State.
     goal
 
 let translate_function ?(proof = false) ?(is_updating_helper = false) ?inherited
-    ?(substitution = []) (lookups : Lookups.t) (source : State.source) ~path =
+    ?(substitution = Types.no_substitution) (lookups : Lookups.t) (source : State.source) ~path =
   let contract =
     match Mir.read_contract lookups.mir path with
     | Some { form; _ } -> form

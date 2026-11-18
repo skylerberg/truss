@@ -208,7 +208,7 @@ let find_law_parameters lookups (trait : Path.t) law =
         members
   | _ -> None
 
-type generic_kind = Type_kind | Value_kind | Capability_kind
+type generic_kind = Type_kind | Value_kind
 
 let list_generic_kinds (generics : Syntax.generic_parameter list) =
   List.filter_map
@@ -216,7 +216,6 @@ let list_generic_kinds (generics : Syntax.generic_parameter list) =
       match generic.kind with
       | Type_parameter (name, _) -> Some (name.text, Type_kind)
       | Value_parameter (name, _) -> Some (name.text, Value_kind)
-      | Capability_parameter name -> Some (name.text, Capability_kind)
       | Generic_error -> None)
     generics
 
@@ -341,8 +340,7 @@ let list_head_parameters (head : Syntax.type_head) =
   List.filter_map
     (fun (generic : Syntax.generic_parameter) ->
       match generic.kind with
-      | Type_parameter (name, _) | Value_parameter (name, _) | Capability_parameter name ->
-          Some name.text
+      | Type_parameter (name, _) | Value_parameter (name, _) -> Some name.text
       | Generic_error -> None)
     head.generics
 

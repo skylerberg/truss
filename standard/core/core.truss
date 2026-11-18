@@ -141,6 +141,7 @@ public fn Hasher.finish(self) -> UInt64 {
 
 public trait Default {
   fn default() -> Self
+    cost time finite
 }
 
 public trait Display {
@@ -150,11 +151,13 @@ public trait Display {
 
 public trait From[Source] {
   fn from(value: own Source) -> Self
+    cost time finite
 }
 
 public trait TryFrom[Source] {
   type Error
   fn try_from(value: own Source) -> Result[Self, Self.Error]
+    cost time finite
 }
 
 public trait Copyable {
@@ -249,11 +252,13 @@ public trait Index {
 
   fn at(self, key: Self.Key) lends Self.Output
     requires self.contains_key(key)
+    cost time finite
 }
 
 public trait IndexMut: Index {
   fn at(mut self, key: Self.Key) lends mut Self.Output
     requires self.contains_key(key)
+    cost time finite
 }
 
 public trait IndexAssign: Index {
@@ -262,6 +267,7 @@ public trait IndexAssign: Index {
 
   fn assign(mut self, key: own Self.Key, value: own Self.Output)
     requires self.accepts_key(key)
+    cost time finite
 }
 
 public trait Iterable {
@@ -274,12 +280,12 @@ public trait Iterable {
     requires position < self.count()
     cost time finite
 
-  fn fold[Total, capability Granted](
+  fn fold[Total](
     self,
     initial: own Total,
-    combine: (fn(own Total, Self.Element) -> Total uses Granted),
+    combine: (fn(own Total, Self.Element) -> Total uses generic Granted),
   ) -> Total
-    uses Granted
+    uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(combine)))
   {
     var total = own initial
@@ -289,8 +295,8 @@ public trait Iterable {
     total
   }
 
-  fn map[Output, capability Granted](self, transform: (fn(Self.Element) -> Output uses Granted)) -> List[Output]
-    uses Granted
+  fn map[Output](self, transform: (fn(Self.Element) -> Output uses generic Granted)) -> List[Output]
+    uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
     let count = self.count()
@@ -304,11 +310,11 @@ public trait Iterable {
     List.from_storage(own outputs)
   }
 
-  fn filter_map[Output, capability Granted](
+  fn filter_map[Output](
     self,
-    transform: (fn(Self.Element) -> Option[Output] uses Granted),
+    transform: (fn(Self.Element) -> Option[Output] uses generic Granted),
   ) -> List[Output]
-    uses Granted
+    uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
     let count = self.count()
@@ -341,8 +347,8 @@ public trait Iterable {
     results
   }
 
-  fn count_where[capability Granted](self, predicate: (fn(Self.Element) -> Bool uses Granted)) -> UInt64
-    uses Granted
+  fn count_where(self, predicate: (fn(Self.Element) -> Bool uses generic Granted)) -> UInt64
+    uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(predicate)))
   {
     var count: UInt64 = 0
@@ -354,8 +360,8 @@ public trait Iterable {
     count
   }
 
-  fn find[capability Granted](self, predicate: (fn(Self.Element) -> Bool uses Granted)) lends Option[Self.Element]
-    uses Granted
+  fn find(self, predicate: (fn(Self.Element) -> Bool uses generic Granted)) lends Option[Self.Element]
+    uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(predicate)))
   {
     for item in self {
@@ -407,12 +413,12 @@ public trait Cursor {
     last
   }
 
-  fn fold[Total, capability Granted](
+  fn fold[Total](
     own self,
     initial: own Total,
-    combine: (fn(own Total, own Self.Element) -> Total uses Granted),
+    combine: (fn(own Total, own Self.Element) -> Total uses generic Granted),
   ) -> Total
-    uses Self.Uses, Granted
+    uses Self.Uses, generic Granted
   {
     var cursor = own self
     var total = own initial

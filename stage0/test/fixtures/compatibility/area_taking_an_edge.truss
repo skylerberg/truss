@@ -1,3 +1,0 @@
-public fn area(edge: Int64) -> Int64 {
-  edge
-}

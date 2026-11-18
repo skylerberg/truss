@@ -613,24 +613,31 @@ let return_from_frame (st : Lowering.state) =
       Emit_c.Builder.finish st.builder (Lowering.return_result st));
   Emit_c.Builder.start st.builder (Emit_c.Builder.allocate_block st.builder)
 
-let resolve_callee st (callee : Mir.callee) : (Path.t * Ground.argument list) option =
+let ground_instantiation (st : Lowering.state) instantiation =
+  Monomorphic.ground_instantiation st.context.monomorphic st.frame.code.substitution instantiation
+
+let resolve_callee st (callee : Mir.callee) : (Path.t * Ground.instantiation) option =
   match callee with
-  | Function { path; type_arguments } -> Some (path, List.map (ground_argument st) type_arguments)
+  | Function { path; instantiation } -> Some (path, ground_instantiation st instantiation)
   | Trait_method { evidence = Dynamic; _ } -> None
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } -> (
+  | Trait_method { trait; name; receiver; self_type; instantiation; evidence } -> (
       match
         Targets.make_trait_method_key st.context st.frame.code.substitution ~trait ~name ~receiver
-          ~self_type ~type_arguments ~evidence
+          ~self_type ~instantiation ~evidence
       with
-      | Code { path; type_arguments } -> Some (path, type_arguments)
+      | Code { path; instantiation } -> Some (path, instantiation)
       | _ -> Definitions.raise_bug "a trait method's key")
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
 
+let read_callee_signature (st : Lowering.state) path instantiation =
+  let signature = Definitions.read_signature st.context path in
+  (signature, Monomorphic.make_signature_substitution signature instantiation)
+
 let resolve_call_signature st (callee : Mir.callee) =
   match resolve_callee st callee with
-  | Some (path, type_arguments) ->
-      let signature = Definitions.read_signature st.context path in
-      (path, type_arguments, signature, Definitions.bind signature.generics type_arguments)
+  | Some (path, instantiation) ->
+      let signature, substitution = read_callee_signature st path instantiation in
+      (path, Instance.Code { path; instantiation }, signature, substitution)
   | None -> Definitions.raise_bug "a callee that is not a function or a method"
 
 let compute_result_type st (callee : Mir.callee) =
@@ -640,7 +647,7 @@ let compute_result_type st (callee : Mir.callee) =
   | Lends _ -> Definitions.raise_bug "%s does not return a value" (Path.show path)
 
 let lower_call_with_places st (callee : Mir.callee) (places : Lowered.place list) ~destination =
-  let path, type_arguments, signature, substitution = resolve_call_signature st callee in
+  let _, key, signature, substitution = resolve_call_signature st callee in
   let arguments =
     List.map2
       (fun (mode, ty) place ->
@@ -648,9 +655,7 @@ let lower_call_with_places st (callee : Mir.callee) (places : Lowered.place list
       (Definitions.list_interface_parameters signature)
       places
   in
-  Targets.lower_instance_call st
-    (Code { path; type_arguments })
-    ~signature ~substitution ~arguments ~destination ()
+  Targets.lower_instance_call st key ~signature ~substitution ~arguments ~destination ()
 
 let evaluate_arguments (st : Lowering.state) (signature : Types.signature) substitution
     (arguments : Mir.argument list) =
@@ -797,7 +802,9 @@ let make_tasks_call (st : Lowering.state) name ?result (places : Lowered.place l
         List.filter_map Fun.id
           (List.map2
              (fun (mode, ty) place ->
-               Targets.pass st mode (Monomorphic.ground st.context.monomorphic [] ty) place)
+               Targets.pass st mode
+                 (Monomorphic.ground st.context.monomorphic Types.no_substitution ty)
+                 place)
              (Definitions.list_interface_parameters { signature with receiver = None })
              places);
       result =
@@ -833,7 +840,8 @@ let compute_task_function_type (st : Lowering.state) : Lowered.ty =
     Targets.lookup_capability_method st.context (Well_known.make_path Tasks) "spawn"
   in
   match signature.parameters with
-  | [ _; work; _ ] -> Value (Monomorphic.ground st.context.monomorphic [] work.type_)
+  | [ _; work; _ ] ->
+      Value (Monomorphic.ground st.context.monomorphic Types.no_substitution work.type_)
   | _ -> Definitions.raise_bug "Tasks.spawn does not take a group, a function, and an item"
 
 let lower_task_body st ~(id : Mir.task) ~group ~parts (f : Lowering.task -> unit) : Lowered.rvalue =
@@ -1040,13 +1048,13 @@ let emit_mark (st : Lowering.state) (intrinsic : Lowered.intrinsic) (call : Lowe
 
 let find_forwarded_call st (call : Mir.call) : Forwarded.t option =
   match resolve_callee st call.callee with
-  | Some (path, type_arguments) when Path.locate_package path = Path.standard_package ->
+  | Some (path, instantiation) when Path.locate_package path = Path.standard_package ->
       let frame = require_mir_frame st in
       let take_fresh_number () =
         frame.forwarded_locals <- frame.forwarded_locals + 1;
         -frame.forwarded_locals
       in
-      let code = Definitions.make_code st.context path type_arguments in
+      let code = Definitions.make_code st.context path instantiation in
       if Types.may_panic code.uses then None
       else
         Option.bind
@@ -1416,10 +1424,8 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
   | Array elements ->
       List.iteri
         (fun index element ->
-          Emit_c.Builder.emit st.builder
-            (Assign
-               ( Lowered.project destination (Index (Lowered.make_uint64_constant index)),
-                 Use (lower_operand st element) )))
+          write_operand st element
+            (Lowered.project destination (Index (Lowered.make_uint64_constant index))))
         elements
   | Is_variant { place = tested; variant } -> assign (Is_variant (lower_place st tested, variant))
   | Convert { conversion = Widen; value = inner; _ } -> write_operand st inner destination
@@ -1435,14 +1441,14 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
   | Copy source ->
       Drop_and_copy.copy_into st.context.drop_and_copy st.builder ~destination
         ~source:(lower_operand_place st source) ty
-  | Function_value { path; type_arguments; _ } -> (
+  | Function_value { path; instantiation; _ } -> (
       match ty with
       | Function function_type ->
           let adapter : Instance.generated =
             Adapter
               {
                 function_ = path;
-                type_arguments = List.map (ground_argument st) type_arguments;
+                instantiation = ground_instantiation st instantiation;
                 ty = function_type;
               }
           in
@@ -1515,17 +1521,16 @@ and lower_mir_into ?(arguments = []) st (expression_mir : Mir.Graph.t) (destinat
 
 and lower_call_into ?failure st (call : Mir.call) destination ~origin =
   match (resolve_callee st call.callee, call.callee) with
-  | Some (path, type_arguments), _ -> (
-      let signature = Definitions.read_signature st.context path in
-      let substitution = Definitions.bind signature.generics type_arguments in
+  | Some (path, instantiation), _ -> (
+      let signature, substitution = read_callee_signature st path instantiation in
       let arguments, mask = evaluate_arguments st signature substitution call.arguments in
       Option.iter
-        (fun failure -> check_requires st ~path ~type_arguments arguments ~origin ~failure)
+        (fun failure -> check_requires st ~path ~instantiation arguments ~origin ~failure)
         failure;
       match signature.output with
       | Returns _ ->
           Targets.lower_instance_call st
-            (Code { path; type_arguments })
+            (Code { path; instantiation })
             ~signature ~substitution ~arguments ~mask ~destination ()
       | Lends _ -> Definitions.raise_bug "a lending call that lends no part")
   | None, Intrinsic { operation = Runtime Holds_invariant; _ } -> (
@@ -1542,7 +1547,9 @@ and lower_call_into ?failure st (call : Mir.call) destination ~origin =
   | None, Capability_method { capability; name } ->
       let slot, signature = Targets.lookup_capability_method st.context capability name in
       let arguments, _ =
-        evaluate_arguments st { signature with receiver = None } [] call.arguments
+        evaluate_arguments st
+          { signature with receiver = None }
+          Types.no_substitution call.arguments
       in
       lower_capability_defaults st ~capability ~name call.arguments arguments;
       if Path.equal capability Definitions.panic_path then
@@ -1616,7 +1623,7 @@ and lower_capability_defaults st ~capability ~name (arguments : Mir.argument lis
             definition = defaults.source.path;
             written = Some (Definitions.read_written st.context defaults.source);
             enclosing_impl = None;
-            substitution = [];
+            substitution = Types.no_substitution;
           };
         self_place = None;
       };
@@ -1664,13 +1671,13 @@ and check_invariant st ~value ~clause ~destination =
   Targets.run_in_type_definition st ~source value_ty (fun () ->
       lower_mir_into ~arguments:[ value_place ] st invariant destination)
 
-and check_requires st ~path ~type_arguments arguments ~origin ~failure =
+and check_requires st ~path ~instantiation arguments ~origin ~failure =
   let requires = list_checked_requires st path in
   if requires <> [] then begin
     let site = locate_site st origin and reported = find_reported_site st in
     let caller = st.frame in
     st.frame <-
-      { caller with code = Definitions.make_code st.context path type_arguments; self_place = None };
+      { caller with code = Definitions.make_code st.context path instantiation; self_place = None };
     List.iter
       (fun (requirement : Mir.requirement) ->
         let holds = Lowering.allocate_temporary st st.context.bool in
@@ -1765,16 +1772,15 @@ and lend ?(forwards = 0) st part (call : Mir.call) ~origin =
       in
       let place =
         match (resolve_callee st callee, callee) with
-        | Some (path, type_arguments), _ ->
-            let signature = Definitions.read_signature st.context path in
-            let substitution = Definitions.bind signature.generics type_arguments in
+        | Some (path, instantiation), _ ->
+            let signature, substitution = read_callee_signature st path instantiation in
             let arguments, mask = evaluate_arguments st signature substitution call.arguments in
             if checks_index then
-              check_requires st ~path ~type_arguments arguments ~origin
+              check_requires st ~path ~instantiation arguments ~origin
                 ~failure:"index out of bounds";
             compute_lent_place signature.output substitution (fun ~lending destination ->
                 Targets.lower_instance_call st
-                  (Code { path; type_arguments })
+                  (Code { path; instantiation })
                   ~signature ~substitution ~arguments ~mask ~lending ~destination ())
         | None, Trait_method { trait; name; receiver; self_type; _ } -> (
             let any_type =

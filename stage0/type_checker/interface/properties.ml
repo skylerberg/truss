@@ -1,7 +1,9 @@
 let make_trait_substitution (interface : Types.trait_interface) ~self
     (reference : Types.trait_reference) : Types.substitution =
-  (Types.make_self_parameter reference.trait, Types.Type self)
-  :: Types.make_substitution interface.trait_generics reference.trait_arguments
+  Types.bind_argument
+    (Types.make_self_parameter reference.trait)
+    (Types.Type self)
+    (Types.make_substitution interface.trait_generics reference.trait_arguments)
 
 let list_bound_closure lookups ~self (bound : Types.trait_reference) =
   let closure = ref [] in

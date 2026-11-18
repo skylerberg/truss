@@ -5,10 +5,14 @@ let resolve_impl (context : Definitions.context) substitution ~(trait : Types.tr
     match evidence with
     | Impl { impl; arguments } ->
         ( impl,
-          List.map
-            (fun (parameter, argument) ->
-              (parameter, Types.substitute_argument substitution argument))
-            arguments )
+          {
+            arguments with
+            arguments =
+              List.map
+                (fun (parameter, argument) ->
+                  (parameter, Types.substitute_argument substitution argument))
+                arguments.arguments;
+          } )
     | Bound -> (
         let self = context.monomorphic.normalize (substitute self_type) in
         match
@@ -34,22 +38,22 @@ let resolve_impl (context : Definitions.context) substitution ~(trait : Types.tr
   let impl_arguments =
     List.map
       (fun (generic : Types.generic) ->
-        match List.assoc_opt generic.generic arguments with
-        | Some argument -> Monomorphic.ground_argument context.monomorphic [] argument
+        match Types.find_argument generic.generic arguments with
+        | Some argument ->
+            Monomorphic.ground_argument context.monomorphic Types.no_substitution argument
         | None -> Definitions.raise_bug "the impl's parameter %s is not bound" generic.generic.name)
       impl_interface.impl_generics
   in
   (impl, impl_arguments)
 
 let make_trait_method_key context substitution ~(trait : Types.trait_reference) ~name ~receiver
-    ~self_type ~type_arguments ~(evidence : Core.evidence) =
+    ~self_type ~(instantiation : Types.instantiation) ~(evidence : Core.evidence) =
   let impl, impl_arguments = resolve_impl context substitution ~trait ~self_type ~evidence in
+  let own = Monomorphic.ground_instantiation context.monomorphic substitution instantiation in
   Instance.Code
     {
       path = Method { owner = impl; name; receiver };
-      type_arguments =
-        impl_arguments
-        @ List.map (Monomorphic.ground_argument context.monomorphic substitution) type_arguments;
+      instantiation = { own with type_arguments = impl_arguments @ own.type_arguments };
     }
 
 let convert_operand st (mode : Types.mode) ty (place : Lowered.place) (passed : Lowered.ty option) =
@@ -94,7 +98,7 @@ let lookup_capability_method (context : Definitions.context) capability name =
 
 let make_entry_signature context (signature : Types.signature) =
   let entry, result =
-    Definitions.make_c_signature context []
+    Definitions.make_c_signature context Types.no_substitution
       ~parameters:(Definitions.list_interface_parameters { signature with receiver = None })
       ~has_defaults:false signature.output
   in
@@ -158,7 +162,7 @@ let lower_implementation_evidence (st : Lowering.state) ~impl ~type_arguments ~i
         match List.find_opt (fun (path, _) -> Path.equal path captured) st.evidence with
         | Some (_, operand) -> operand
         | None -> Definitions.raise_bug "no evidence for %s here" (Path.show captured))
-      (Definitions.list_evidence st.context []
+      (Definitions.list_evidence st.context Types.no_substitution
          (Definitions.read_impl_interface st.context impl).impl_uses)
   in
   let slot = Emit_c.Builder.allocate_local st.builder (Evidence (List.length outer)) in
@@ -199,8 +203,10 @@ let lookup_evidence (st : Lowering.state) capability =
           let type_arguments =
             List.map
               (fun (generic : Types.generic) ->
-                match List.assoc_opt generic.generic st.frame.code.substitution with
-                | Some argument -> Monomorphic.ground_argument st.context.monomorphic [] argument
+                match Types.find_argument generic.generic st.frame.code.substitution with
+                | Some argument ->
+                    Monomorphic.ground_argument st.context.monomorphic Types.no_substitution
+                      argument
                 | None -> Definitions.raise_bug "an unbound parameter of %s" (Path.show impl))
               interface.impl_generics
           in
@@ -431,7 +437,7 @@ let lower_provided_evidence (st : Lowering.state) ~(implementation : Lowered.ope
       let type_arguments =
         List.map
           (fun (generic : Types.generic) ->
-            match List.assoc_opt generic.generic arguments with
+            match Types.find_argument generic.generic arguments with
             | Some argument ->
                 Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution
                   argument

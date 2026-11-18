@@ -230,7 +230,7 @@ let find_generic_argument context frame (operation : Intrinsic.operation) type_a
       | Types.Value value when parameter.name = name ->
           Some (Models.make_value_term context frame value)
       | _ -> None)
-    (Types.make_substitution generics type_arguments)
+    (Types.make_substitution generics type_arguments).arguments
 
 let compute_step_amount context frame (invocation : Invocation.t) (values : State.passed list)
     (counter : Costs.counter) =
@@ -295,7 +295,7 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
                     (List.map
                        (fun (passed : State.passed) -> (passed.position, passed.term))
                        values)
-                  ~substitution:[]
+                  ~substitution:Types.no_substitution
               in
               compute_callee_amount context frame
                 ~path:(Path.make_capability_method capability name)

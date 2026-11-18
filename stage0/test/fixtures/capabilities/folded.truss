@@ -1,8 +1,8 @@
-fn folded[Source: Feed, capability Granted](
+fn folded[Source: Feed](
   source: mut Source,
-  step: (fn(Int64) -> Int64 uses Granted),
+  step: (fn(Int64) -> Int64 uses generic Granted),
 ) -> Int64
-  uses Source.Uses, Granted
+  uses Source.Uses, generic Granted
 {
   match mut source.pull() {
     Some(value) => step(value)

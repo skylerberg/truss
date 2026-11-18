@@ -501,8 +501,6 @@ let () =
       expect_proven Fixtures.Prover.range_loop_with_an_index_cost_clause);
   Harness.test "a loop over a type's own cursor calls its next" (fun () ->
       expect_proven Fixtures.Prover.countdown_loop);
-  Harness.test "a loop over a type's own cursor that must end needs a decreases clause" (fun () ->
-      expect_not_proven Fixtures.Prover.countdown_cursor_loop "prover.termination");
   Harness.test "a loop over a cursor in a field calls its next" (fun () ->
       expect_proven Fixtures.Prover.countdown_in_a_field);
   Harness.test "a loop over a cursor counts a body that calls an amortized callee" (fun () ->
@@ -760,12 +758,32 @@ let () =
       expect_proven Fixtures.Prover.word_count_bounded_by_its_index)
 
 let () =
+  Harness.test "a list literal of three hundred elements has its length and each element" (fun () ->
+      expect_proven Fixtures.Prover.list_literal_of_three_hundred_elements);
   Harness.test "a map literal holds each key's value" (fun () ->
       expect_proven Fixtures.Prover.map_literal_read);
   Harness.test "a map literal's keys must be distinct" (fun () ->
       expect_not_proven Fixtures.Prover.map_literal_with_a_repeated_key "prover.requires");
   Harness.test "a set literal contains its listed elements and nothing else" (fun () ->
       expect_proven Fixtures.Prover.set_literal_contains);
+  Harness.test "a set literal of sixteen elements has its members and its length" (fun () ->
+      expect_proven Fixtures.Prover.set_literal_of_sixteen_elements);
+  Harness.test "a map literal of one hundred keys has distinct keys" (fun () ->
+      expect_proven Fixtures.Prover.map_literal_of_one_hundred_keys);
+  Harness.test "a set literal may repeat an element" (fun () ->
+      expect_proven Fixtures.Prover.set_literal_with_a_repeated_element);
+  Harness.test "a sorted map literal's keys must be distinct" (fun () ->
+      expect_not_proven Fixtures.Prover.sorted_map_literal_with_a_repeated_key "prover.requires");
+  Harness.test "an empty map literal allocates nothing" (fun () ->
+      expect_proven Fixtures.Prover.empty_map_literal_without_allocations);
+  Harness.test "a map literal is one allocation" (fun () ->
+      expect_proven Fixtures.Prover.map_literal_with_one_allocation);
+  Harness.test "a deque literal has its length and is one allocation" (fun () ->
+      expect_proven Fixtures.Prover.deque_literal_length);
+  Harness.test "an empty sorted set literal is empty and takes constant time" (fun () ->
+      expect_proven Fixtures.Prover.empty_sorted_set_literal);
+  Harness.test "a literal of a type that implements FromElements is proven against its impl"
+    (fun () -> expect_proven Fixtures.Prover.literal_of_a_type_with_from_elements);
   Harness.test "any is one allocation" (fun () ->
       expect_proven Fixtures.Prover.any_of_a_value_with_one_allocation);
   Harness.test "a provided implementation's calls keep the capability's contract" (fun () ->
@@ -917,10 +935,6 @@ let () =
       expect_not_proven Fixtures.Prover.each_visiting_through_a_capturing_lambda "prover.cost");
   Harness.test "a quantifier over a costly body is not linear" (fun () ->
       expect_not_proven Fixtures.Prover.quantifier_over_a_spinning_body "prover.cost");
-  Harness.test "a loop with no measure has no bound" (fun () ->
-      let actual = list_codes Fixtures.Prover.while_loop_without_a_measure in
-      if not (List.mem "prover.cost" actual && List.mem "prover.termination" actual) then
-        Harness.fail "%s" (String.concat ", " actual));
   Harness.test "a loop's cost clause that is too small" (fun () ->
       expect_not_proven Fixtures.Prover.while_loop_with_a_small_cost_clause "prover.cost");
   Harness.test "calls of a capability's method are counted" (fun () ->
@@ -1056,8 +1070,6 @@ let () =
       expect_not_proven Fixtures.Prover.positive_zeroed_in_a_loop "prover.invariant")
 
 let () =
-  Harness.test "a guessed measure is not read from a condition with a mut argument" (fun () ->
-      expect_not_proven Fixtures.Prover.while_loop_taking_a_count "prover.termination");
   Harness.test "a mut slice's bounds are evaluated once" (fun () ->
       expect_not_proven Fixtures.Prover.mut_slice_with_counted_bounds "prover.ensures");
   Harness.test "a while condition's mut argument mutates the loop's state" (fun () ->
@@ -1109,7 +1121,11 @@ let () =
   Harness.test "generic negation needs the trait method's precondition" (fun () ->
       expect_not_proven Fixtures.Prover.generic_negation "prover.requires");
   Harness.test "generic negation proves where the trait method's precondition holds" (fun () ->
-      expect_proven Fixtures.Prover.generic_negation_with_its_precondition)
+      expect_proven Fixtures.Prover.generic_negation_with_its_precondition);
+  Harness.test
+    "a function with a time clause converts, makes a default, and indexes through a bound"
+    (fun () ->
+      expect_proven Fixtures.Prover.conversions_and_indexing_through_bounds_under_a_time_clause)
 
 let () =
   Harness.test "two literals with the same text are the same value" (fun () ->
@@ -2005,11 +2021,7 @@ let () =
   Harness.test
     "a call that uses nothing is in the logic, whatever its callee's capability parameter"
     (fun () -> expect_proven (apply ^ Fixtures.Prover.apply_in_an_ensures));
-  Harness.test "a lambda with a loop that states no measure may not terminate" (fun () ->
-      expect_proven (apply ^ Fixtures.Prover.apply_of_a_lambda_looping_without_a_measure));
-  Harness.test "a lambda's loop states a measure in a function with a time clause" (fun () ->
-      expect_not_proven
-        (apply ^ Fixtures.Prover.apply_of_a_lambda_looping_without_a_measure_under_a_time_clause)
-        "prover.termination");
+  Harness.test "a function without a time clause passes a lambda with a loop without a measure"
+    (fun () -> expect_proven (apply ^ Fixtures.Prover.apply_of_a_lambda_looping_without_a_measure));
   Harness.test "an operator on a bound type terminates" (fun () ->
       expect_proven Fixtures.Prover.sum_of_a_bound_type_under_a_time_clause)

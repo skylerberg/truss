@@ -115,7 +115,7 @@ let block statements terminator = { statements; terminator }
 let function_ ?(parameters = []) ?result ?(environment = []) locals blocks =
   { parameters; result; returns = true; environment; locals; blocks }
 
-let key name = Instance.Code { path = definition name; type_arguments = [] }
+let key name = Instance.Code { path = definition name; instantiation = Ground.no_instantiation }
 
 let write builder (function_ : function_) =
   List.iter
