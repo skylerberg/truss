@@ -305,42 +305,11 @@ let list_free_locals (parameters : Core.pattern list) (body : Core.block) =
     body;
   List.rev !read
 
-let is_executable context (condition : Core.expression) =
-  not
-    (Core_walk.For_testing.expression_exists
-       (fun (node : Core.expression) ->
-         Types.equal node.type_ Integer
-         ||
-         match node.kind with
-         | Quantified { binder = Over_type _; _ }
-         | Old _ | Result | Specification_function _ | Method_cost _ ->
-             true
-         | Call { callee = Function { path; _ }; _ } -> (
-             match Interface.Impls.read_signature context.interface path with
-             | Some signature -> signature.specification_only
-             | None -> false)
-         | _ -> false)
-       condition)
-
 let check_semantics context (form : Core.t) =
-  let check_executable subject (condition : Core.condition) =
-    if condition.executable <> is_executable context condition.value then
-      context.report "%s is marked %sexecutable" subject
-        (if condition.executable then "" else "not ")
-  in
-  (match form.definition with
-  | Function { contract; _ } -> List.iter (check_executable "a `requires` clause") contract.requires
-  | Type { invariants; _ } -> List.iter (check_executable "an `invariant` clause") invariants
-  | _ -> ());
   Core_walk.walk_definition
     (track_location context.at
        {
          Core_walk.ignore_all with
-         statement =
-           (fun (node : Core.statement) ->
-             match node.kind with
-             | Assert { condition; _ } -> check_executable "an `assert`" condition
-             | _ -> ());
          expression =
            (fun (node : Core.expression) ->
              match node.kind with

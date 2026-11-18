@@ -30,7 +30,3 @@ val compute_tasks_use : ?read_solved:(int -> Types.capability_set) -> Core.block
 val can_use_tasks : Core.block -> bool
 val traverse_indirect : ('a -> 'b option) -> 'a Core.target -> 'b Core.target option
 val find_local_name : Core.local -> string option
-
-module For_testing : sig
-  val expression_exists : (Core.expression -> bool) -> Core.expression -> bool
-end
