@@ -844,9 +844,11 @@ let compute_task_function_type (st : Lowering.state) : Lowered.ty =
       Value (Monomorphic.ground st.context.monomorphic Types.no_substitution work.type_)
   | _ -> Definitions.raise_bug "Tasks.spawn does not take a group, a function, and an item"
 
-let lower_task_body st ~(id : Mir.task) ~group ~parts (f : Lowering.task -> unit) : Lowered.rvalue =
+let lower_task_body (st : Lowering.state) ~(id : Mir.task) ~group ~parts (f : Lowering.task -> unit)
+    : Lowered.rvalue =
+  let capabilities = Emit_c.Builder.allocate_local st.builder Convention.capabilities in
   let nested, environment =
-    Lowering.outline st ~parts (fun () ->
+    Lowering.outline st ~parts:(parts @ [ capabilities ]) (fun () ->
         let task =
           {
             Lowering.id;
@@ -1420,7 +1422,18 @@ and lower_rvalue_into ?types_ty st (rvalue : Mir.rvalue) (destination : Lowered.
             (Lowered.project destination (Index (Lowered.make_uint64_constant index))))
         elements
   | Is_variant { place = tested; variant } -> assign (Is_variant (lower_place st tested, variant))
-  | Convert { conversion = Widen; value = inner; _ } -> write_operand st inner destination
+  | Convert { conversion = Widen; value = inner; _ } -> (
+      match (compute_operand_type st inner, ty) with
+      | Function source, Function target when source <> target ->
+          let source_place = lower_operand_place st inner in
+          List.iter
+            (fun field ->
+              Emit_c.Builder.emit st.builder
+                (Assign
+                   ( Lowered.project destination (Field field),
+                     Use (Copy (Lowered.project source_place (Field field))) )))
+            [ "code"; "environment" ]
+      | _ -> write_operand st inner destination)
   | Convert { conversion = To_integer | From_integer; _ } ->
       Definitions.raise_bug "a conversion that exists only in specifications"
   | Convert { conversion = View_to_owned; _ } ->
