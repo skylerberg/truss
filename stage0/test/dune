@@ -72,6 +72,7 @@
   manifest
   registry)
  (deps
+  served_length/served_length.exe
   (glob_files %{workspace_root}/*.md)
   (glob_files_rec %{workspace_root}/standard/*.md)
   (glob_files_rec %{workspace_root}/standard/*.truss)
