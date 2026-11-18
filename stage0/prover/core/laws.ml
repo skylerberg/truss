@@ -98,8 +98,8 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
 let assume_laws (context : State.context) frame ~at (trait : Types.trait_reference) (ty : Types.ty)
     =
   let key = (trait, ty) in
-  if not (List.mem key context.axioms.laws_assumed) then begin
-    context.axioms.laws_assumed <- key :: context.axioms.laws_assumed;
+  if not (List.mem key context.assertions.laws_assumed) then begin
+    context.assertions.laws_assumed <- key :: context.assertions.laws_assumed;
     List.iter
       (fun (required : Types.trait_reference) ->
         let substitution =

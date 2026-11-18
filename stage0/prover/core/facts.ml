@@ -84,6 +84,10 @@ let make_assertions () : State.assertions =
     logs = [];
     powers = [];
     indexes = [];
+    potentials = [];
+    axiom_clauses = Tables.Axiom_clause_table.create 16;
+    axioms_of = Tables.Symbol_table.create 16;
+    laws_assumed = [];
   }
 
 let add_fact (context : State.context) fact =

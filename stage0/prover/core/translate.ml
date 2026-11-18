@@ -35,30 +35,19 @@ let make_context (definition : State.definition) ~terminates ~proving : State.co
         fresh = 0;
         fresh_order = Tables.Symbol_table.create 64;
         models = Tables.Model_table.create 16;
+        holds_potential = Tables.Type_table.create 16;
+        buffers = Tables.Type_table.create 16;
         lambda_definitions = Tables.Symbol_table.create 8;
+        lambda_costs = [];
+        lambda_captures = [];
       };
     assertions = Facts.make_assertions ();
-    axioms =
-      {
-        axiom_clauses = Tables.Axiom_clause_table.create 16;
-        axioms_of = Tables.Symbol_table.create 16;
-        laws_assumed = [];
-      };
     report =
       {
         obligations = [];
         holes = [];
         local_names = Tables.Local_table.create 16;
         local_origins = Tables.Local_table.create 16;
-      };
-    costs =
-      {
-        potentials = [];
-        holds_potential = Tables.Type_table.create 16;
-        buffers = Tables.Type_table.create 16;
-        lambda_costs = [];
-        lambda_captures = [];
-        lent_back = [];
       };
     entry = no_entry;
     scope =
@@ -71,7 +60,7 @@ let make_context (definition : State.definition) ~terminates ~proving : State.co
         instantiating = [];
         axiomatizing = [];
       };
-    reader = { run_body = Reader.read_body; read_formula = Reader.read_formula };
+    reader = { read_lambda_body = Reader.read_lambda_body; read_formula = Reader.read_formula };
   }
 
 let make_outcome (context : State.context) =
@@ -424,7 +413,7 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
             let result = Option.map (Facts.arrive context start "result") output in
             ignore (Validity.read_specification context { start with result } amount))
     promised;
-  let returns = Reader.read_body context start ~lambdas:mir.lambdas mir.body in
+  let returns, lent_back = Reader.read_body context start ~lambdas:mir.lambdas mir.body in
   let mut_parameters =
     List.filter
       (fun (parameter : Mir.parameter) -> parameter.mode = Types.Mut && parameter.local <> Self)
@@ -523,7 +512,7 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
                 (Costs.minus
                    (Amounts.compute_potential context frame ty back)
                    (Amounts.compute_potential context frame ty handed)))
-            potential_change context.costs.lent_back
+            potential_change lent_back
         in
         match (returned, output) with
         | Some term, Some output ->
@@ -577,7 +566,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
     (fun (law_source, (law : Mir.law)) ->
       let types = Laws.list_law_parameter_types ~substitution law in
       if not (List.exists (fun ty -> Types.is_error ty) types) then begin
-        context.axioms.laws_assumed <- (trait, for_type) :: context.axioms.laws_assumed;
+        context.assertions.laws_assumed <- (trait, for_type) :: context.assertions.laws_assumed;
         let terms =
           List.map
             (fun ty ->

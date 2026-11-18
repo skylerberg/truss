@@ -111,7 +111,7 @@ let make_may_be_target (context : State.context) frame term ty target =
 
 let lambda_captures_target (context : State.context) lambda target =
   match
-    ( List.assoc_opt lambda context.costs.lambda_captures,
+    ( List.assoc_opt lambda context.vocabulary.lambda_captures,
       List.assoc_opt target context.entry.call_targets )
   with
   | Some captured, Some local -> List.mem local captured
@@ -356,11 +356,11 @@ let compute_buffer_elements context (ty : Types.ty) =
 
 let find_buffer_elements (context : State.context) (ty : Types.ty) =
   let key = ty in
-  match Tables.Type_table.find_opt context.costs.buffers key with
+  match Tables.Type_table.find_opt context.vocabulary.buffers key with
   | Some elements -> elements
   | None ->
       let elements = compute_buffer_elements context ty in
-      Tables.Type_table.replace context.costs.buffers key elements;
+      Tables.Type_table.replace context.vocabulary.buffers key elements;
       elements
 
 let declare_buffer_slack context (ty : Types.ty) term =
@@ -374,8 +374,8 @@ let declare_potential_measure context element =
   Facts.declare context
     (Logic.Constant (symbol, Facts.declare_sort context (Types.Function measure)));
   let term = Logic.Symbol symbol in
-  if not (List.mem term context.costs.potentials) then begin
-    context.costs.potentials <- term :: context.costs.potentials;
+  if not (List.mem term context.assertions.potentials) then begin
+    context.assertions.potentials <- term :: context.assertions.potentials;
     let each = Logic.Symbol.Variable { label = "potential.element"; numbers = [] } in
     Facts.add_fact context
       (Logic.forall
@@ -412,11 +412,11 @@ and has_potential (context : State.context) ?(seen = []) (ty : Types.ty) =
   if seen <> [] then holds_potential_type context ~seen ty
   else
     let key = ty in
-    match Tables.Type_table.find_opt context.costs.holds_potential key with
+    match Tables.Type_table.find_opt context.vocabulary.holds_potential key with
     | Some holds -> holds
     | None ->
         let holds = holds_potential_type context ~seen ty in
-        Tables.Type_table.replace context.costs.holds_potential key holds;
+        Tables.Type_table.replace context.vocabulary.holds_potential key holds;
         holds
 
 and holds_potential_type context ~seen (ty : Types.ty) =
@@ -460,8 +460,9 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
   if not (has_potential context ty) then Costs.zero
   else begin
     let held = declare_held_symbol context ty term in
-    if (not (List.mem held context.costs.potentials)) && not (Logic.mentions frame.bound term) then begin
-      context.costs.potentials <- held :: context.costs.potentials;
+    if (not (List.mem held context.assertions.potentials)) && not (Logic.mentions frame.bound term)
+    then begin
+      context.assertions.potentials <- held :: context.assertions.potentials;
       Facts.add_frame_fact context frame
         Logic.(
           Validity.make_validity context frame ~assuming:true ty term

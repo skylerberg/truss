@@ -10,4 +10,11 @@ val read_body :
   State.frame ->
   lambdas:Mir.body array ->
   Mir.body ->
+  (State.frame * Logic.term option) list * (Types.ty * Logic.term * Logic.term) list
+
+val read_lambda_body :
+  State.context ->
+  State.frame ->
+  lambdas:Mir.body array ->
+  Mir.body ->
   (State.frame * Logic.term option) list

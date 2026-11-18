@@ -13,6 +13,7 @@ type run = {
   mutable loops : loop_exits list;
   mutable cancelled : (Mir.task * State.frame list ref) list;
   mutable returns : (State.frame * Logic.term option) list;
+  mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
 }
 
 let make_unit_callee : _ Core.target -> Invocation.callee = function
@@ -658,7 +659,8 @@ let oblige_unreachable context frame location =
     [ Text "This `unreachable` may be reached." ]
     (Logic.Boolean false)
 
-let lend_part context (frame : State.frame) origin (mode : Types.mode) ~handed ~lends ~write_back =
+let lend_part context (frame : State.frame) run origin (mode : Types.mode) ~handed ~lends
+    ~write_back =
   let location = Facts.locate context frame.source origin in
   match
     (context.definition.yielded_part, context.definition.yield_ensures, frame.yielded_so_far)
@@ -685,7 +687,7 @@ let lend_part context (frame : State.frame) origin (mode : Types.mode) ~handed ~
       let frame, part_after =
         if mode = Types.Mut && lends then (
           let part_after = Facts.arrive context frame "lent" part_type in
-          context.costs.lent_back <- (part_type, handed, part_after) :: context.costs.lent_back;
+          run.lent_back <- (part_type, handed, part_after) :: run.lent_back;
           (write_back frame part_after, part_after))
         else (frame, handed)
       in
@@ -987,7 +989,7 @@ and read_statement context frame run (statement : Mir.statement) =
         | Part operand -> compute_operand_type context frame operand
         | Built { type_; _ } -> Facts.substitute_type context frame type_
       in
-      lend_part context frame origin mode ~handed ~lends:(lends_places part)
+      lend_part context frame run origin mode ~handed ~lends:(lends_places part)
         ~write_back:(fun frame after -> write_back_part context run part_type part frame after)
   | Jump jump ->
       (match jump with
@@ -1467,7 +1469,15 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
     | _ -> written)
 
 let make_run ~locals ~lambdas =
-  { infos = locals; lambdas; provides = Hashtbl.create 2; loops = []; cancelled = []; returns = [] }
+  {
+    infos = locals;
+    lambdas;
+    provides = Hashtbl.create 2;
+    loops = [];
+    cancelled = [];
+    returns = [];
+    lent_back = [];
+  }
 
 let read_formula context (frame : State.frame) (formula : Mir.formula) ~arguments =
   let run = make_run ~locals:formula.locals ~lambdas:formula.lambdas in
@@ -1520,5 +1530,10 @@ let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
       start (list_returned_locals body.code)
   in
   match read_statements context start run body.code.statements with
-  | None -> List.rev run.returns
+  | None -> (List.rev run.returns, run.lent_back)
   | Some _ -> Facts.raise_bug "a body whose end control reaches"
+
+let read_lambda_body context start ~lambdas body =
+  match read_body context start ~lambdas body with
+  | returns, [] -> returns
+  | _, _ :: _ -> Facts.raise_bug "a lambda's body lends back a part of its function"

@@ -483,7 +483,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       axiom.hypotheses <- drop_fresh_terms axiom.hypotheses;
       (stated, Logic.conjunction (drop_fresh_terms !facts), axiom)
     in
-    let record_axiom symbol axiom = Tables.Symbol_table.add context.axioms.axioms_of symbol axiom in
+    let record_axiom symbol axiom =
+      Tables.Symbol_table.add context.assertions.axioms_of symbol axiom
+    in
     let add_contract_axiom ~is_triggered symbol sorts =
       Facts.run_once context (Contract_of symbol) (fun () ->
           let parameters = make_parameters "ensured" sorts in
@@ -570,7 +572,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                   (fun ((clauses : State.clauses), _, ensures) ->
                     List.iter
                       (fun ((clause : Mir.formula), _) ->
-                        Tables.Axiom_clause_table.replace context.axioms.axiom_clauses
+                        Tables.Axiom_clause_table.replace context.assertions.axiom_clauses
                           (symbol, clauses.callee.name, clause.origin)
                           ())
                       ensures)
@@ -617,7 +619,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     let is_in_axiom (clauses : State.clauses) (clause : Mir.formula) =
       match axiom_symbol with
       | Some (symbol, _) ->
-          Tables.Axiom_clause_table.mem context.axioms.axiom_clauses
+          Tables.Axiom_clause_table.mem context.assertions.axiom_clauses
             (symbol, clauses.callee.name, clause.origin)
       | None -> false
     in
@@ -698,7 +700,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             (fun hypothesis -> Amounts.assume_typed context after (substitute hypothesis))
             axiom.hypotheses;
           List.iter (fun apply_hook -> apply_hook after substitute) axiom.at_calls)
-        (Tables.Symbol_table.find_all context.axioms.axioms_of symbol)
+        (Tables.Symbol_table.find_all context.assertions.axioms_of symbol)
   | _ -> ());
   let compute_change () =
     List.fold_left
@@ -778,9 +780,10 @@ let make_callback_cost (context : State.context) frame (metric : Metric.t) (ty :
                (fun (signature : Types.signature) ->
                  Costs.find_stated_operand signature.costs metric))
       | _ -> ());
-      (match List.assoc_opt (term, metric) context.costs.lambda_costs with
+      (match List.assoc_opt (term, metric) context.vocabulary.lambda_costs with
       | Some (bound, showing) ->
-          context.costs.lambda_costs <- List.remove_assoc (term, metric) context.costs.lambda_costs;
+          context.vocabulary.lambda_costs <-
+            List.remove_assoc (term, metric) context.vocabulary.lambda_costs;
           context.report.obligations <- List.rev_append showing context.report.obligations;
           state_value bound
       | None -> ());

@@ -151,7 +151,11 @@ type vocabulary = {
   mutable fresh : int;
   fresh_order : int Tables.Symbol_table.t;
   models : (Logic.term -> Logic.term) option Tables.Model_table.t;
+  holds_potential : bool Tables.Type_table.t;
+  buffers : (Types.ty * (Logic.term -> Logic.term)) option Tables.Type_table.t;
   lambda_definitions : Logic.term Tables.Symbol_table.t;
+  mutable lambda_costs : ((Logic.term * Metric.t) * (Logic.term * obligation list)) list;
+  mutable lambda_captures : (Logic.term * Core.local list) list;
 }
 
 type assertions = {
@@ -164,9 +168,7 @@ type assertions = {
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
   mutable indexes : (int * place_value) list;
-}
-
-type axioms = {
+  mutable potentials : Logic.term list;
   axiom_clauses : unit Tables.Axiom_clause_table.t;
   axioms_of : open_axiom Tables.Symbol_table.t;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
@@ -177,15 +179,6 @@ type report = {
   mutable holes : (Resolve.Names.key * location) list;
   local_names : string Tables.Local_table.t;
   local_origins : Core.origin Tables.Local_table.t;
-}
-
-type costs = {
-  mutable potentials : Logic.term list;
-  holds_potential : bool Tables.Type_table.t;
-  buffers : (Types.ty * (Logic.term -> Logic.term)) option Tables.Type_table.t;
-  mutable lambda_costs : ((Logic.term * Metric.t) * (Logic.term * obligation list)) list;
-  mutable lambda_captures : (Logic.term * Core.local list) list;
-  mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
 }
 
 type entry = {
@@ -212,16 +205,14 @@ type context = {
   definition : definition;
   vocabulary : vocabulary;
   assertions : assertions;
-  axioms : axioms;
   report : report;
-  costs : costs;
   entry : entry;
   scope : scope;
   reader : reader;
 }
 
 and reader = {
-  run_body :
+  read_lambda_body :
     context -> frame -> lambdas:Mir.body array -> Mir.body -> (frame * Logic.term option) list;
   read_formula : context -> frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
 }

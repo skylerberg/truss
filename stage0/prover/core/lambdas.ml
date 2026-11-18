@@ -123,7 +123,7 @@ let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.f
   let inside = enter { frame with locals = remove_temporaries frame.locals } in
   let returns =
     Facts.run_in_source context frame.source (fun () ->
-        context.reader.run_body context inside ~lambdas body)
+        context.reader.read_lambda_body context inside ~lambdas body)
   in
   match Facts.join context ~value_type:type_ returns with
   | Some (returned, Some term) -> Some ({ frame with spent = returned.spent }, term)
@@ -402,7 +402,9 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         { inside with locals = remove_temporaries inside.locals }
         written.code.parameters arguments
     in
-    let returns = context.reader.run_body context inside ~lambdas:written.lambdas written.code in
+    let returns =
+      context.reader.read_lambda_body context inside ~lambdas:written.lambdas written.code
+    in
     let exits = List.map fst returns in
     ended := returns;
     List.iter
@@ -502,11 +504,11 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
             ~ended:!ended;
         term
   in
-  context.costs.lambda_captures <-
-    (term, list_captured_locals written) :: context.costs.lambda_captures;
-  context.costs.lambda_costs <-
+  context.vocabulary.lambda_captures <-
+    (term, list_captured_locals written) :: context.vocabulary.lambda_captures;
+  context.vocabulary.lambda_costs <-
     List.map (fun (metric, pending_cost) -> ((term, metric), pending_cost)) pending
-    @ context.costs.lambda_costs;
+    @ context.vocabulary.lambda_costs;
   (frame, term)
 
 let translate_lambda context (frame : State.frame) ~(site : Invocation.site)
