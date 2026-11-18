@@ -1386,6 +1386,7 @@ it is.
 |---|---|
 | A trait can require other traits. | A law can then span traits. `Hash` requires `Equal`, so its law, that equal values hash equally, is stated and proven. In Rust, `Hash` does not require `Eq`, and that law is only a comment. |
 | A type has one `impl` of each trait. | Two traits that both require `Equal` share that `impl`, so there is no diamond problem. |
+| An `impl`'s method has its trait's signature, which the `impl` restates. | The body of the method and every call of it are checked against the same types. A method with a signature of its own would have a body checked against types that no call is checked against: with a bound of its own, the body calls a method of a trait that the type argument does not implement, and with a callback type that adds a `time` clause, the body counts on a callback that terminates while a caller passes one that does not. The written signature must equal the trait's so that the source states the types that are checked. If that comparison missed a difference, the body would still be checked against the trait's types: the outcome would be a confusing error in the body, never an accepted wrong program. |
 
 ### Implementations
 

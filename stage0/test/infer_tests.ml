@@ -1581,3 +1581,10 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.cost_naming_allocations_of_an_overloaded_method
         "types.ambiguous_method" ~says:"so `allocations` cannot tell which one is meant.")
+
+let () =
+  Harness.test "the body of an impl's method whose signature is not its trait's is not checked"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Infer.meters_fed_to_an_impl_bounding_its_item_by_another_trait_argument
+        "types.signature_mismatch" ~at:("feed", 2))

@@ -2325,6 +2325,10 @@ module For_testing = struct
     drain database ~through [ file.module_.package ];
     List.concat_map (list_checker_diagnostics database file) checkers
 
+  let make_unchecked_interface_lookups database packages =
+    drain database ~through:Signature_checks packages;
+    make_recording_interface_lookups database (note_untracked_read database) ~is_checked:false
+
   let read_derived_form database path =
     drain database ~through:Checked_bodies [ Path.locate_package path ];
     match

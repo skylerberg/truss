@@ -457,7 +457,7 @@ and elaborate_function_type context (written : Syntax.function_type) :
     if states_time written.clauses then uses else Types.leave_divergence_to_parameters uses
   in
   match elaborate_costs context written.clauses with
-  | Ok costs -> Ok { inputs; output; uses; costs }
+  | Ok costs -> Ok { inputs; output; uses; costs = List.sort_uniq compare costs }
   | Error report -> Error report
 
 and states_time (clauses : Syntax.clause list) =
@@ -563,9 +563,6 @@ let elaborate_generics context owner (written : Syntax.generic_parameter list) :
           { Types.generic = parameter; kind = Type_generic bounds }
       | `Value _ -> { Types.generic = parameter; kind = Value_generic })
     declared
-
-let mentions_specification_only_type type_ =
-  Option.is_some (Types.find_specification_only_type type_)
 
 let list_constant_costs (clauses : Syntax.clause list) : Types.cost list =
   List.filter_map
@@ -826,7 +823,6 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
     | Some (Returns result) -> Types.Returns (elaborate_type context result)
     | Some (Lends (mode, result)) -> Types.Lends (elaborate_mode mode, elaborate_type context result)
   in
-  let result_type = Types.extract_result_type output in
   {
     generics = generics_;
     capability_parameters =
@@ -846,19 +842,8 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
         (elaborate_divergence context ~parameters written.clauses);
     costs = list_constant_costs written.clauses;
     specification_only =
-      Well_known.is Model owner
-      || mentions_specification_only_type result_type
-      || List.exists
-           (fun (parameter : Types.parameter_info) ->
-             mentions_specification_only_type parameter.type_)
-           parameters;
-    capture_free_parameters =
-      List.filter_map
-        (fun (parameter : Types.parameter_info) ->
-          match (parameter.mode, parameter.type_) with
-          | Own, Function _ -> Some parameter.name
-          | _ -> None)
-        parameters;
+      Well_known.is Model owner || Types.mentions_specification_only_type parameters output;
+    capture_free_parameters = Types.list_capture_free_parameters parameters;
   }
 
 let elaborate_type_head context owner (head : Syntax.type_head) =

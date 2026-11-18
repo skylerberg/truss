@@ -139,20 +139,23 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
   List.iter
     (fun (parameter : Syntax.parameter) ->
       match parameter.kind with
-      | Named_parameter { name; default = Some value; _ } -> (
+      | Named_parameter { name; default; _ } -> (
           match
-            List.find_opt
-              (fun (info : Types.parameter_info) -> info.name = name.text)
-              signature.parameters
+            ( List.find_opt
+                (fun (info : Types.parameter_info) -> info.name = name.text)
+                signature.parameters,
+              default )
           with
-          | Some info ->
+          | Some info, Some value ->
               State.run_in_statement state env (State.read_span state value.id) (fun () ->
                   let actual = Expressions.check_expression state env ~expected:info.type_ value in
                   Name_lookup.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
               Constant.check state ~default:true value
-          | None -> ())
-      | _ -> ())
+          | Some { has_default = true; _ }, None ->
+              State.raise_bug "`%s` has no default, and its signature has one" name.text
+          | (Some _ | None), _ -> ())
+      | Self_parameter _ | Parameter_error -> ())
     written
 
 let build_core_contract state (clauses : Syntax.clause list) : Core.contract =
@@ -707,7 +710,10 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   let module_ = key.module_ in
   let definition = lookups.interface.names.read_definition key in
   let spans = lookups.interface.names.read_spans key in
-  let context = Interface.Elaborator.create lookups.interface resolved ~spans elaborated.scope in
+  let context =
+    Interface.Elaborator.create lookups.interface resolved ~spans
+      (Interface.Impls.read_scope lookups.interface key)
+  in
   let text = lazy (lookups.interface.names.read_text key) in
   let state : State.state =
     {

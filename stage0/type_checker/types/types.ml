@@ -518,7 +518,9 @@ and show_function (function_type : function_type) =
             | Exactly_cost (Some value) -> "== " ^ Z.to_string value
             | Exactly_cost None -> "== ..."
           in
-          "cost " ^ show_resource cost.resource ^ " " ^ bound)
+          Printf.sprintf "cost %s%s %s"
+            (if cost.amortized then "amortized " else "")
+            (show_resource cost.resource) bound)
         function_type.costs
   in
   match (uses, costs) with
@@ -584,6 +586,19 @@ let make_capability_substitution (parameters : parameter list) arguments : subst
 
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 
+let list_capture_free_parameters parameters =
+  List.filter_map
+    (fun parameter ->
+      match (parameter.mode, parameter.type_) with
+      | Own, Function _ -> Some parameter.name
+      | _ -> None)
+    parameters
+
+let mentions_specification_only_type parameters output =
+  List.exists
+    (fun type_ -> Option.is_some (find_specification_only_type type_))
+    (extract_result_type output :: List.map (fun parameter -> parameter.type_) parameters)
+
 type signature = {
   generics : generic list;
   capability_parameters : parameter list;
@@ -623,9 +638,30 @@ let make_trait_substitution generics ~self (reference : trait_reference) =
     (Type self)
     (make_substitution generics reference.trait_arguments)
 
+let map_bounds transform generics =
+  List.map
+    (fun generic ->
+      match generic.kind with
+      | Type_generic bounds -> { generic with kind = Type_generic (transform bounds) }
+      | Value_generic -> generic)
+    generics
+
 let map_signature transform (signature : signature) =
+  let transform_argument = function
+    | Type type_ -> Type (transform type_)
+    | Value _ as value -> value
+  in
   {
     signature with
+    generics =
+      map_bounds
+        (List.map (fun (bound : trait_reference) ->
+             {
+               bound with
+               trait_arguments = List.map transform_argument bound.trait_arguments;
+               associated = List.map (fun (name, type_) -> (name, transform type_)) bound.associated;
+             }))
+        signature.generics;
     receiver = Option.map (fun (receiver, type_) -> (receiver, transform type_)) signature.receiver;
     parameters =
       List.map
@@ -638,17 +674,9 @@ let map_signature transform (signature : signature) =
   }
 
 let substitute_signature substitution (signature : signature) =
-  let signature = map_signature (substitute substitution) signature in
   {
-    signature with
-    generics =
-      List.map
-        (fun (generic : generic) ->
-          match generic.kind with
-          | Type_generic bounds ->
-              { generic with kind = Type_generic (List.map (substitute_trait substitution) bounds) }
-          | Value_generic -> generic)
-        signature.generics;
+    (map_signature (substitute substitution) signature) with
+    generics = map_bounds (List.map (substitute_trait substitution)) signature.generics;
     uses = substitute_capabilities substitution signature.uses;
   }
 
