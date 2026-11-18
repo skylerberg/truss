@@ -10,12 +10,7 @@ let resolve_call_node (interface : Interface.Lookups.t) (path : Path.t) =
   | _ -> path
 
 let is_runtime_call (path : Path.t) =
-  Well_known.is Write_fully path
-  ||
-  match path with
-  | Method { owner = Top { module_; _ }; name = "new"; receiver = Static } ->
-      Well_known.is_system_module module_
-  | _ -> false
+  Well_known.is Write_fully path || Well_known.is_runtime_constructor path
 
 let list_bound_methods (interface : Interface.Lookups.t) path type_arguments =
   match Interface.Impls.read_signature interface path with

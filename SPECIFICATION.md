@@ -2589,6 +2589,12 @@ and the prelude changes only with a language version.
   use call no private or `internal` function and name no such constant. An
   `ensures` may name any function the definition can, so that callers in its
   package can know its result in terms of private helpers.
+- An `internal` function, method, or constant that no definition of its
+  package uses is an error. A use counts when the user is not `internal` or
+  is itself used, so `internal` definitions that use only each other are an
+  error together. A definition the compiler calls is exempt, such as the
+  static `new` of a `system` module's type, which builds the implementation
+  of a capability.
 
 ## No foreign code
 

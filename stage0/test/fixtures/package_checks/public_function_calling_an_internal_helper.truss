@@ -1,0 +1,5 @@
+use app::helpers
+
+public fn quadruple(value: Int64) -> Int64 {
+  helpers::double(helpers::double(value))
+}
