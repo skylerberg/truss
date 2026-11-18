@@ -320,7 +320,7 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
         (Assign
            ( view,
              Storage.build_view view_ty
-               ~elements:(Copy (Lowered.make_local_place bytes))
+               ~buffer:(Copy (Lowered.make_local_place bytes))
                ~length:(Copy (Lowered.make_local_place length)) ));
       let text = Lowering.allocate_temporary st string_ty in
       Targets.lower_item_call st

@@ -39,7 +39,7 @@ let rec render_initializer context ty (value : Lowered.static_value) : string op
       let count = List.length elements in
       let buffer =
         if count = 0 || Memory_layout.has_zero_size context.env element then
-          "((void *)" ^ C_values.render_bytes_name context "" ^ ")"
+          fst (C_values.render_constant context Storage.empty_buffer)
         else begin
           let values = List.filter_map (render_initializer context element) elements in
           let name = allocate_static_name context in

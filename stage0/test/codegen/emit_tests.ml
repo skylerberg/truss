@@ -644,10 +644,7 @@ let operate builder ?destination ?(type_arguments = [ Codegen_support.int32 ]) ?
 let () =
   Codegen_support.test
     "storage with room is pushed onto, and inserts, removes, swaps, and pops in place" (fun () ->
-      let storage_ty =
-        Ground.Named
-          { path = Intrinsic.make_builtin_path Storage; arguments = [ Type Codegen_support.int32 ] }
-      in
+      let storage_ty = Storage.make_storage_type Codegen_support.int32 in
       Codegen_support.expect_status 171
         [
           build_entry (fun builder ->
@@ -779,16 +776,9 @@ let () =
               sum);
         ]);
   Codegen_support.test "an array's elements are moved into new storage, in order" (fun () ->
-      let storage_ty =
-        Ground.Named
-          { path = Intrinsic.make_builtin_path Storage; arguments = [ Type Codegen_support.int32 ] }
-      in
+      let storage_ty = Storage.make_storage_type Codegen_support.int32 in
       let array_ty =
-        Ground.Named
-          {
-            path = Intrinsic.make_builtin_path Array;
-            arguments = [ Type Codegen_support.int32; Value (Z.of_int 3) ];
-          }
+        Ground.make_builtin Array ~arguments:[ Type Codegen_support.int32; Value (Z.of_int 3) ]
       in
       Codegen_support.expect_status 165
         [
@@ -872,23 +862,10 @@ let () =
         ]);
   Codegen_support.test "a view of an array has the array's elements" (fun () ->
       let array_ty =
-        Ground.Named
-          {
-            path = Intrinsic.make_builtin_path Array;
-            arguments = [ Type Codegen_support.int32; Value (Z.of_int 3) ];
-          }
+        Ground.make_builtin Array ~arguments:[ Type Codegen_support.int32; Value (Z.of_int 3) ]
       in
-      let view_ty =
-        Ground.Named
-          { path = Intrinsic.make_builtin_path View; arguments = [ Type Codegen_support.int32 ] }
-      in
-      let extra =
-        [
-          ( Ground.to_string view_ty,
-            Storage.make_view_shape ~uint64:(Codegen_support.named "UInt64") Codegen_support.int32
-          );
-        ]
-      in
+      let view_ty = Storage.make_view_type Codegen_support.int32 in
+      let extra = [ (Ground.to_string view_ty, Storage.make_view_shape Codegen_support.int32) ] in
       let operate builder ?destination operation arguments =
         Backend.For_testing.Intrinsics.lower ~may_panic:false
           ~value_arguments:[ Z.of_int 3 ]
@@ -969,11 +946,7 @@ let () =
     "an array made of a storage has its elements, and the storage's buffer is freed" (fun () ->
       let storage_ty = Storage.make_storage_type Codegen_support.int32 in
       let array_ty =
-        Ground.Named
-          {
-            path = Intrinsic.make_builtin_path Array;
-            arguments = [ Type Codegen_support.int32; Value (Z.of_int 3) ];
-          }
+        Ground.make_builtin Array ~arguments:[ Type Codegen_support.int32; Value (Z.of_int 3) ]
       in
       let operate builder ?destination operation arguments =
         Backend.For_testing.Intrinsics.lower ~may_panic:false
@@ -1163,12 +1136,12 @@ let () =
               in
               Emit_c.Builder.emit builder
                 (Assign (Lowered.make_local_place status, Use (Codegen_support.constant_int32 0)));
-              read_part (Lowered.project (Lowered.make_local_place storage) (Field "length"));
-              read_part (Lowered.project (Lowered.make_local_place storage) (Field "capacity"));
+              read_part (Storage.project_length (Lowered.make_local_place storage));
+              read_part (Storage.project_capacity (Lowered.make_local_place storage));
               read_part
-                (Lowered.project
-                   (Lowered.project (Lowered.make_local_place storage) (Field "buffer"))
-                   (Index (Lowered.make_uint64_constant (to_ - 1))));
+                (Storage.index_element
+                   (Lowered.make_local_place storage)
+                   (Lowered.make_uint64_constant (to_ - 1)));
               status);
         ]
       in
@@ -1180,17 +1153,8 @@ let () =
   Codegen_support.test
     "a checked build stops a storage or view operation whose precondition does not hold" (fun () ->
       let storage_ty = Storage.make_storage_type Codegen_support.uint8 in
-      let view_ty =
-        Ground.Named
-          { path = Intrinsic.make_builtin_path View; arguments = [ Type Codegen_support.uint8 ] }
-      in
-      let extra =
-        [
-          ( Ground.to_string view_ty,
-            Storage.make_view_shape ~uint64:(Codegen_support.named "UInt64") Codegen_support.uint8
-          );
-        ]
-      in
+      let view_ty = Storage.make_view_type Codegen_support.uint8 in
+      let extra = [ (Ground.to_string view_ty, Storage.make_view_shape Codegen_support.uint8) ] in
       let operate_checked builder ?destination operation arguments =
         ignore
           (Backend.For_testing.Intrinsics.lower ~may_panic:false
@@ -1321,12 +1285,8 @@ let () =
 let () =
   Codegen_support.test
     "a small read-only value is passed by value unless it holds an array's elements" (fun () ->
-      let make_array_type count : Ground.ty =
-        Named
-          {
-            path = Intrinsic.make_builtin_path Array;
-            arguments = [ Type Codegen_support.int32; Value (Z.of_int count) ];
-          }
+      let make_array_type count =
+        Ground.make_builtin Array ~arguments:[ Type Codegen_support.int32; Value (Z.of_int count) ]
       in
       let pair = Codegen_support.named "Pair" in
       let extra =

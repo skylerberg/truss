@@ -28,7 +28,7 @@ let encode env ty =
          ( Lowered.make_local_place first,
            Convert (Address { place; writable = false }, Pointer (Data byte)) ));
     Writing.emit_write_bytes_call env builder ~output Writing_append
-      ~elements:(Copy (Lowered.make_local_place first))
+      ~buffer:(Copy (Lowered.make_local_place first))
       ~length:(Lowered.make_uint64_constant size)
   in
   let encode_fields place variant (fields : (string * Memory_layout.member) list) =

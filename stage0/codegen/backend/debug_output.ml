@@ -20,7 +20,7 @@ let make_signature env ty =
 let write_text env builder ~output value =
   if value <> "" then
     Writing.emit_write_bytes_call env builder ~output Writing_append
-      ~elements:(Constant (Bytes value))
+      ~buffer:(Constant (Bytes value))
       ~length:(Lowered.make_uint64_constant (String.length value))
 
 let emit_debug_call env builder ~output ty (place : Lowered.place) =
@@ -85,15 +85,14 @@ let build_debug env ty =
         emit_output_call element (index_element (Lowered.Copy (Lowered.make_local_place index))));
     write_output_text "]"
   and write_storage_or_view field_ty (place : Lowered.place) ~as_text =
-    let element, buffer, count =
-      match (Storage.match_storage_element field_ty, Storage.match_view_element field_ty) with
-      | Some element, _ -> (element, Storage.project_buffer place, Storage.project_length place)
-      | None, Some element ->
-          (element, Storage.project_view_elements place, Storage.project_view_length place)
+    let element =
+      match (Storage.find_storage_element field_ty, Storage.find_view_element field_ty) with
+      | Some element, _ | None, Some element -> element
       | None, None -> raise_bug "%s is not storage or a view" (Ground.to_string field_ty)
     in
+    let buffer = Storage.project_buffer place and count = Storage.project_length place in
     if as_text then
-      Writing.emit_write_bytes_call env builder ~output Writing_quoted_text ~elements:(Copy buffer)
+      Writing.emit_write_bytes_call env builder ~output Writing_quoted_text ~buffer:(Copy buffer)
         ~length:(Copy count)
     else
       write_list element

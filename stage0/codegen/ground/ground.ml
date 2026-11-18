@@ -16,7 +16,9 @@ type instantiation = {
 
 let no_instantiation = { type_arguments = []; capability_arguments = [] }
 let compare = Stdlib.compare
-let make_builtin builtin = Named { path = Intrinsic.make_builtin_path builtin; arguments = [] }
+
+let make_builtin ?(arguments = []) builtin =
+  Named { path = Intrinsic.make_builtin_path builtin; arguments }
 
 let rec show_path_name : Path.t -> string = function
   | Top { name; _ } | Test { name; _ } -> name

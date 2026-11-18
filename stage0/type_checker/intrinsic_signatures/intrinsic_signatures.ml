@@ -1,12 +1,8 @@
 let make_parameter operation name : Types.parameter =
   { owner = Intrinsic.make_operation_path operation; name }
 
-let make_storage_type element =
-  Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
-
-let make_view_type element =
-  Types.Named { path = Intrinsic.make_builtin_path View; arguments = [ Types.Type element ] }
-
+let make_storage_type element = Types.make_builtin Storage ~arguments:[ Type element ]
+let make_view_type element = Types.make_builtin View ~arguments:[ Type element ]
 let make_libc_scalar_type scalar = Types.make_builtin (Intrinsic.convert_libc_scalar scalar)
 
 let make_sequence_type element =
@@ -50,11 +46,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
   let make_array_signature ~make_output list_parameters =
     let count = make_parameter operation "count" in
     let array =
-      Types.Named
-        {
-          path = Intrinsic.make_builtin_path Array;
-          arguments = [ Types.Type element; Types.Value (Value_parameter count) ];
-        }
+      Types.make_builtin Array ~arguments:[ Type element; Value (Value_parameter count) ]
     in
     {
       (make ~output:(make_output array) (list_parameters array)) with
@@ -239,9 +231,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
       make ~generics:[ "Value" ] ~output:(Returns bool)
         [ input "value" value; input "clause" uint64 ]
   | Runtime (Shared_new | Shared_update | Shared_key) -> (
-      let shared =
-        Types.Named { path = Intrinsic.make_builtin_path Shared; arguments = [ Types.Type value ] }
-      in
+      let shared = Types.make_builtin Shared ~arguments:[ Type value ] in
       match operation with
       | Runtime Shared_new ->
           {

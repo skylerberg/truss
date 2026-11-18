@@ -17,6 +17,6 @@ val emit_write_bytes_call :
   Emit_c.Builder.t ->
   output:Lowered.operand ->
   Well_known.t ->
-  elements:Lowered.operand ->
+  buffer:Lowered.operand ->
   length:Lowered.operand ->
   unit

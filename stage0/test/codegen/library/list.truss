@@ -365,6 +365,24 @@ test "clear and truncate drop elements from the end and keep the room" {
   assert words[0] == "a1"
 }
 
+test "shrink_to_fit frees the buffer of an empty list and leaves it usable" {
+  var numbers: List[Int64] = [1, 2, 3]
+  mut numbers.clear()
+  mut numbers.shrink_to_fit()
+  assert numbers.capacity() == 0
+  let wrapped: Option[List[Int64]] = Some(numbers.copy())
+  assert wrapped.is_some()
+  mut numbers.push(4)
+  assert numbers == [4]
+  var words: List[String] = ["a${1}", "b${2}"]
+  mut words.clear()
+  mut words.shrink_to_fit()
+  assert words.capacity() == 0
+  var unallocated: List[String] = []
+  mut unallocated.shrink_to_fit()
+  assert unallocated.capacity() == 0
+}
+
 test "a copy of a list keeps its capacity" {
   var items: List[Int64] = List.with_capacity(10)
   mut items.push(1)

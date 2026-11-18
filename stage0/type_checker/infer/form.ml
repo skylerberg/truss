@@ -411,9 +411,7 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
 let build_list_literal state ~origin (element : Types.ty) (elements : Core.expression list) :
     Core.kind =
   let make = State.make_synthetic_expression state ~origin in
-  let storage_type =
-    Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
-  in
+  let storage_type = Types.make_builtin Storage ~arguments:[ Type element ] in
   let make_storage operation ~type_arguments arguments =
     make storage_type
       (Call
@@ -430,11 +428,7 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
         let count = Types.Value (Known (Z.of_int (List.length elements))) in
         let array =
           make
-            (Types.Named
-               {
-                 path = Intrinsic.make_builtin_path Array;
-                 arguments = [ Types.Type element; count ];
-               })
+            (Types.make_builtin Array ~arguments:[ Type element; count ])
             (Collection_literal { elements; construction = Array })
         in
         make_storage (Buffer Storage_from_array) ~type_arguments:[ Types.Type element; count ]

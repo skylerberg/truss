@@ -39,8 +39,8 @@ let emit_write_call env builder ~output (writer : Well_known.t) ty (place : Lowe
          result = Discarded;
        })
 
-let emit_write_bytes_call env builder ~output writer ~elements ~length =
+let emit_write_bytes_call env builder ~output writer ~buffer ~length =
   let view = Emit_c.Builder.allocate_local builder (Value bytes_ty) in
   Emit_c.Builder.emit builder
-    (Assign (Lowered.make_local_place view, Storage.build_view bytes_ty ~elements ~length));
+    (Assign (Lowered.make_local_place view, Storage.build_view bytes_ty ~buffer ~length));
   emit_write_call env builder ~output writer bytes_ty (Lowered.make_local_place view)

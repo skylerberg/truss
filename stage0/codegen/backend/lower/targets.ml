@@ -523,7 +523,7 @@ let lower_literal_place st (ty : Ground.ty) text =
     | Named { path; _ }, Record [ (field, Typed storage) ] when Well_known.is String path ->
         (field, build storage (Storage.build_storage storage ~buffer:bytes ~length ~capacity:length))
     | _, Record [ (field, Typed view) ] ->
-        (field, build view (Storage.build_view view ~elements:bytes ~length))
+        (field, build view (Storage.build_view view ~buffer:bytes ~length))
     | _ -> Definitions.raise_bug "a string literal of type %s" (Ground.to_string ty)
   in
   build ty (Build { ty; variant = None; fields = [ (field, Copy part) ] })
@@ -532,23 +532,23 @@ let lower_owner_of_view (st : Lowering.state) ~(owner : Ground.ty) ~(view : Grou
     (viewed : Lowered.place) (destination : Lowered.place) =
   let storage_field, storage =
     match Monomorphic.compute_shape st.context.monomorphic owner with
-    | Record [ (field, Typed storage) ] when Storage.match_storage_element storage <> None ->
+    | Record [ (field, Typed storage) ] when Storage.find_storage_element storage <> None ->
         (field, storage)
     | _ -> Definitions.raise_bug "%s owns no storage" (Ground.to_string owner)
   in
-  let elements =
+  let view_place =
     match Monomorphic.compute_shape st.context.monomorphic view with
-    | Record [ (field, Typed elements) ] when Storage.match_view_element elements <> None ->
+    | Record [ (field, Typed field_ty) ] when Storage.find_view_element field_ty <> None ->
         Lowered.project viewed (Field field)
     | _ -> Definitions.raise_bug "%s views no storage" (Ground.to_string view)
   in
-  let length : Lowered.operand = Copy (Storage.project_view_length elements) in
+  let length : Lowered.operand = Copy (Storage.project_length view_place) in
   let built = Lowering.allocate_local st (Value storage) in
   Emit_c.Builder.emit st.builder
     (Assign
        ( built,
          Storage.build_storage storage
-           ~buffer:(Copy (Storage.project_view_elements elements))
+           ~buffer:(Copy (Storage.project_buffer view_place))
            ~length ~capacity:length ));
   Emit_c.Builder.emit st.builder
     (Assign
@@ -561,7 +561,7 @@ let lower_static_constant (st : Lowering.state) path : Lowered.place =
 let read_list_parts monomorphic ty =
   match Monomorphic.compute_shape monomorphic ty with
   | Record [ (field, Typed storage) ] -> (
-      match Storage.match_storage_element storage with
+      match Storage.find_storage_element storage with
       | Some element -> (field, storage, element)
       | None -> Definitions.raise_bug "%s is not a list" (Ground.to_string ty))
   | _ -> Definitions.raise_bug "%s is not a list" (Ground.to_string ty)
