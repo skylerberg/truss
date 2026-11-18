@@ -158,8 +158,14 @@ let is_visible_module lookups ~(from : Path.module_) (module_ : Path.module_) =
   || List.mem module_.package (list_visible_packages lookups from.package)
      && lookups.module_exists module_
 
+let is_restricted_module ~(from : Path.module_) (module_ : Path.module_) =
+  module_ = Intrinsic.module_ && from.package <> Path.standard_package
+
+let restricted_module_message = "Only the `standard` package can use `standard::intrinsic`."
+
 type module_lookup =
-  | Found_module of Path.module_ * [ `Import of string | `Package ]
+  | Found_module of Path.module_
+  | Restricted_module
   | Ambiguous_module of Path.module_ * Path.module_
   | No_module of string
 
@@ -175,8 +181,9 @@ let lookup_module lookups ~(from : Path.module_) ~imports first rest =
   match imported with
   | Some imported when exists imported && exists package && imported <> package ->
       Ambiguous_module (imported, package)
-  | Some imported when exists imported -> Found_module (imported, `Import first)
-  | _ when exists package -> Found_module (package, `Package)
+  | Some imported when exists imported -> Found_module imported
+  | _ when exists package ->
+      if is_restricted_module ~from package then Restricted_module else Found_module package
   | _ -> No_module (String.concat "::" (first :: rest))
 
 let make_top_path module_ name : Path.t = Top { module_; name }
@@ -385,11 +392,11 @@ let find_head_type lookups ~(from : Path.module_) ~imports (path : Syntax.path) 
         lookup_module lookups ~from ~imports first.text
           (List.map (fun (name : Syntax.name) -> name.text) rest)
       with
-      | Found_module (module_, _) -> (
+      | Found_module module_ -> (
           match lookup_in lookups ~from module_ path.last.text ~is_kind:is_type_kind with
           | Visible (item, path) -> Some (item, path)
           | Hidden _ | Absent -> None)
-      | Ambiguous_module _ | No_module _ -> None)
+      | Restricted_module | Ambiguous_module _ | No_module _ -> None)
 
 let make_unresolved_path (file : Path.file) names : Path.t = Unresolved { file; names }
 

@@ -71,6 +71,24 @@ let rec locate_package = function
   | Derived { type_; _ } -> locate_package type_
   | Unresolved { file; _ } -> file.module_.package
 
+let rec is_resolved = function
+  | Top _ | Test _ -> true
+  | Method { owner; _ } | Member_constant { owner; _ } -> is_resolved owner
+  | Impl { trait; for_type; _ } | Law_proof { trait; for_type; _ } ->
+      is_resolved_reference trait && is_resolved for_type
+  | Derived { type_; trait } -> is_resolved type_ && is_resolved trait
+  | Unresolved _ -> false
+
+and is_resolved_reference { path; arguments; associated } =
+  is_resolved path
+  && List.for_all is_resolved_argument arguments
+  && List.for_all (fun (_, argument) -> is_resolved_argument argument) associated
+
+and is_resolved_argument = function
+  | Named reference | Any reference -> is_resolved_reference reference
+  | Constant path -> is_resolved path
+  | Parameter _ | Count _ -> true
+
 let show_receiver = function
   | Static -> "no `self`"
   | Read -> "`self`"
