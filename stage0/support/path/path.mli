@@ -48,6 +48,7 @@ val is_entry_point : t -> bool
 val locate_package : t -> package
 val is_resolved : t -> bool
 val show : t -> string
+val show_name : t -> string
 val compare : t -> t -> int
 val equal : t -> t -> bool
 val hash : t -> int

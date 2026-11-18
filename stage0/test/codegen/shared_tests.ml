@@ -55,7 +55,8 @@ let () =
             ( Diagnostic.Code.name diagnostic.code,
               String.sub text diagnostic.span.start (diagnostic.span.stop - diagnostic.span.start)
             ))
-          (Codegen_support.list_fragment_diagnostics database checks)
+          (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database
+             checks)
       in
       let expected =
         [

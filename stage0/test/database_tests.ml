@@ -2,7 +2,8 @@ let check_text text =
   let database = Support.make_database (Support.setup [ ("app::main", text) ]) in
   (match
      Support.list_codes
-       (Support.list_fragment_diagnostics database (Support.parse_file "app::main"))
+       (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database
+          (Support.parse_file "app::main"))
    with
   | [] -> ()
   | codes -> Harness.fail "the program has diagnostics: %s" (String.concat ", " codes));

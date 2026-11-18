@@ -127,8 +127,8 @@ let () =
     (fun () ->
       let work : Ground.function_type =
         {
-          parameters = [ (Read, Codegen_support.named "UInt64") ];
-          result = Codegen_support.named "Unit";
+          parameters = [ (Read, Codegen_support.uint64) ];
+          result = Codegen_support.unit;
           uses = [];
         }
       in
@@ -145,8 +145,7 @@ let () =
         Codegen_support.function_ ~parameters:[ 0; 1; 4 ] ~environment
           [
             Codegen_support.local ~name:"environment" (Raw (Nullable_pointer Opaque));
-            Codegen_support.local ~name:"item"
-              (Codegen_support.value (Codegen_support.named "UInt64"));
+            Codegen_support.local ~name:"item" (Codegen_support.value Codegen_support.uint64);
             Codegen_support.local (Pointer { target = Environment 0; writable = false });
             Codegen_support.local (Codegen_support.value Codegen_support.int32);
             Codegen_support.local ~name:"capabilities" Convention.capabilities;

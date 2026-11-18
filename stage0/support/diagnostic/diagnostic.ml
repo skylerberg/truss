@@ -837,7 +837,4 @@ let to_json_object source diagnostic =
 
 module For_testing = struct
   let limit = limit
-
-  let is_unused_definition (code : Code.t) =
-    match code with Usage (Unused_function | Unused_constant) -> true | _ -> false
 end

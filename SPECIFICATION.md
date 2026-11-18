@@ -1443,8 +1443,23 @@ update = LOWER_NAME { "." LOWER_NAME } ":" expression | LOWER_NAME ;
 ```
 
 ```truss
-let moved = origin with (x: 1.0)
-let production = own config with (server.port: 443, log_level: LogLevel.Warning)
+type Point(x: Float64, y: Float64)
+
+type LogLevel =
+  | Information
+  | Warning
+
+type Server(host: String, port: Int64)
+
+type Config(server: Server, log_level: LogLevel)
+
+fn moved(origin: Point) -> Point {
+  origin with (x: 1.0)
+}
+
+fn production(config: own Config) -> Config {
+  own config with (server.port: 443, log_level: LogLevel.Warning)
+}
 ```
 
 - `base with (updates)` means copying the base into a new variable,
@@ -2378,17 +2393,11 @@ laws, loop invariants, and every operation that could fail.
 There is no `assume`.
 
 ```truss
-theorem reverse_twice[Element](items: Slice[Element])
-  ensures items.reverse().reverse() == items.to_list()
-  decreases items.length()
+theorem reverse_twice[Element](items: Sequence[Element])
+  ensures identical(items.reversed().reversed(), items)
 {
-  match items.split_first() {
-    None => {}
-    Some((first, rest)) => {
-      reverse_twice(rest)
-      reverse_of_append(rest.reverse(), suffix: [first])
-    }
-  }
+  assert forall i in 0..items.length() =>
+    identical(items.reversed().reversed()[i], items[i])
 }
 
 proof Ordered.transitive for Box[Item: Ordered] {
