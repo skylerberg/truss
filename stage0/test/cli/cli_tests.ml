@@ -941,7 +941,7 @@ let () =
       match
         Backend.list_unshippable (make_lowered_lookups project) ~main:(List.hd (list_mains project))
       with
-      | [ { failure = `Todo; line = 6; way; _ } ] ->
+      | [ { failure = `Todo; location = { line = 6; _ }; way } ] ->
           expect_strings ~expected:[ "demo::main"; "demo::helper" ] (List.map Path.show way)
       | reached -> fail "found %d" (List.length reached));
   test "a todo in a capability's method counts only where the method is called" (fun () ->
@@ -953,7 +953,7 @@ let () =
       | [] -> ()
       | _ -> fail "a method nothing calls stops the program");
       match list_reached_from "shout" with
-      | [ { failure = `Todo; line = 12; way; _ } ] -> (
+      | [ { failure = `Todo; location = { line = 12; _ }; way } ] -> (
           match List.map Path.show way with
           | "demo::main" :: "demo::speak" :: _ -> ()
           | way -> fail "reached by %s" (String.concat ", " way))
@@ -979,7 +979,7 @@ let () =
       match
         Backend.list_unshippable (make_lowered_lookups project) ~main:(List.hd (list_mains project))
       with
-      | [ { failure = `Echo; line = 2; _ } ] -> ()
+      | [ { failure = `Echo; location = { line = 2; _ }; _ } ] -> ()
       | reached -> fail "found %d" (List.length reached))
 
 let two_files =

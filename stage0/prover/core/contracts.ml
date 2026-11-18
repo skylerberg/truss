@@ -166,7 +166,7 @@ let find_method_contract lookups (trait : Types.trait_reference) name receiver
 
 let find_integer_literal (formula : Mir.formula) =
   match formula.value with
-  | { statements = []; value = Some (Constant { value = Integer number; _ }) } -> Some number
+  | { statements = []; value = Some (Immediate { value = Integer number; _ }) } -> Some number
   | _ -> None
 
 let deduplicate_counters counters =

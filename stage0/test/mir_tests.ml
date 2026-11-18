@@ -7,7 +7,7 @@ let list_place_locals (place : Mir.place) =
 
 let list_operand_locals : Mir.operand -> Mir.local list = function
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> list_place_locals place
-  | Constant _ -> []
+  | Immediate _ -> []
 
 let list_call_locals (call : Mir.call) =
   (match call.callee.target with Indirect callee -> list_operand_locals callee | _ -> [])
@@ -518,7 +518,7 @@ let () =
                   call =
                     {
                       callee = { target = Function { path = Top { name = "step"; _ }; _ }; _ };
-                      arguments = [ _; Passed { value = Constant { value = Integer next; _ }; _ } ];
+                      arguments = [ _; Passed { value = Immediate { value = Integer next; _ }; _ } ];
                       _;
                     };
                   _;
@@ -674,7 +674,7 @@ let () =
           basic.statements
       in
       let returns_one = function
-        | Mir.Graph.Return (Some (Constant { value = Integer one; _ })) -> Z.equal one Z.one
+        | Mir.Graph.Return (Some (Immediate { value = Integer one; _ })) -> Z.equal one Z.one
         | _ -> false
       in
       match
@@ -957,7 +957,7 @@ let () =
         List.find_map
           (fun (_, (terminator : Mir.Graph.terminator)) ->
             match terminator with
-            | Return (Some (Constant { value = Integer value; _ })) -> Some (Z.to_int value)
+            | Return (Some (Immediate { value = Integer value; _ })) -> Some (Z.to_int value)
             | _ -> None)
           (list_terminators default.body)
       in

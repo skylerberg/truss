@@ -14,7 +14,7 @@ let require_main database packages =
 let refuse_unshippable snapshot packages lookups main proofs =
   let in_code =
     List.map
-      (fun ({ failure; file; line; column; way } : Backend.unshippable) ->
+      (fun ({ failure; location = { file; line; column }; way } : Backend.unshippable) ->
         ( Command_packages.show_file snapshot packages file,
           line,
           column,

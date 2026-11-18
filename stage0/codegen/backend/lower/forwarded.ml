@@ -148,10 +148,10 @@ let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit 
               | Some whole, [] -> Some whole
               | Some (Borrow { place; _ } | Use { place; _ }), projections ->
                   Some (of_place { place with projections = place.projections @ projections })
-              | Some (Take _ | Constant _), _ :: _ | None, _ -> None))
+              | Some (Take _ | Immediate _), _ :: _ | None, _ -> None))
     in
     match value with
-    | Constant _ -> Some value
+    | Immediate _ -> Some value
     | Borrow borrow ->
         find_projected borrow.place borrow.type_ ~of_place:(fun place ->
             Borrow

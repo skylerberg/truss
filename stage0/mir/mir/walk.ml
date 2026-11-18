@@ -38,7 +38,7 @@ let list_nested_blocks (statement : Tree.statement) = list_nested_blocks_of_kind
 
 let visit_operand_places visit = function
   | Tree.Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> visit place
-  | Constant _ -> ()
+  | Immediate _ -> ()
 
 let visit_target_places visit : Tree.operand Core.target -> unit = function
   | Indirect function_value -> visit_operand_places visit function_value
@@ -185,4 +185,4 @@ let find_callee (statement : Tree.statement) : Tree.callee option =
       None
 
 let extract_operand_type : Tree.operand -> Types.ty = function
-  | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Constant { type_; _ } -> type_
+  | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Immediate { type_; _ } -> type_
