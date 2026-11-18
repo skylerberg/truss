@@ -716,7 +716,7 @@ let () =
 let () =
   test "a report's records come back in the order of the tests, however they ended" (fun () ->
       let records =
-        Backend.For_testing.parse_report
+        Backend.Test_report.For_testing.parse ~tests:2
           "start 0\nstart 1\nmessage 4\nboom\ntest 1 panicked 30\ntest 0 passed 12\n"
       in
       match records with

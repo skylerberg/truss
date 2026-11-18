@@ -17,7 +17,7 @@ val run_tests :
   Workspace.snapshot ->
   Path.package list ->
   test list ->
-  Backend.record list
+  Backend.Test_report.record list
 
 val run : paths:string list -> match_:string option -> timings:bool -> rerun:bool -> int
 

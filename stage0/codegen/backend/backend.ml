@@ -65,85 +65,9 @@ let list_references = function
   | Compiled fragment | Folded (_, fragment) -> Emit_c.references fragment
   | Evaluate (path, _) -> [ Instance.Evaluator path ]
 
-let resolve_call_node (interface : Interface.Lookups.t) (path : Path.t) =
-  match path with
-  | Method { owner; name; receiver }
-    when not
-           (List.exists (Path.equal path)
-              (Mir.Call_edges.list_written_methods interface.names owner)) -> (
-      match Interface.Definition.find_impl_interface interface owner with
-      | Some impl -> Path.Method { owner = impl.implements.trait; name; receiver }
-      | None -> path)
-  | _ -> path
-
-let is_runtime_call (path : Path.t) =
-  Well_known.is Write_fully path
-  ||
-  match path with
-  | Method { owner = Top { module_; _ }; name = "new"; receiver = Static } ->
-      Well_known.is_system_module module_
-  | _ -> false
-
-let list_bound_methods (interface : Interface.Lookups.t) path type_arguments =
-  match Interface.Impls.read_signature interface path with
-  | Some (signature : Types.signature) ->
-      let rec pair_generics (generics : Types.generic list) (arguments : Ground.argument list) =
-        match (generics, arguments) with
-        | ( { kind = Type_generic bounds; _ } :: generics,
-            Type (Named { path = head; _ }) :: arguments ) ->
-            (bounds, head) :: pair_generics generics arguments
-        | _ :: generics, _ :: arguments -> pair_generics generics arguments
-        | _ -> []
-      in
-      List.concat_map
-        (fun ((bounds : Types.trait_reference list), head) ->
-          let traits =
-            List.concat_map
-              (fun (bound : Types.trait_reference) ->
-                Mir.Call_edges.list_traits_with_required interface bound.trait)
-              bounds
-          in
-          List.concat_map
-            (fun package ->
-              List.concat_map
-                (Mir.Call_edges.list_impl_methods interface)
-                (Mir.Call_edges.list_impls_for interface package traits
-                   (Named { path = head; arguments = [] })))
-            (List.sort_uniq Path.compare_package
-               (Path.locate_package head :: List.map Path.locate_package traits)))
-        (pair_generics signature.generics type_arguments)
-  | None -> []
-
-let check_calls (interface : Interface.Lookups.t) ~find_call_edges (key : Instance.key) lowered =
-  match (key, lowered) with
-  | Code { path = caller; instantiation }, Compiled fragment -> (
-      match caller with
-      | Method { owner = Derived _; _ } -> ()
-      | _ -> (
-          match find_call_edges (resolve_call_node interface caller) with
-          | None -> ()
-          | Some call_edges ->
-              let allowed =
-                call_edges
-                @ List.concat_map
-                    (fun callee -> Option.value (find_call_edges callee) ~default:[])
-                    call_edges
-                @ list_bound_methods interface caller instantiation.type_arguments
-              in
-              List.iter
-                (fun (called : Instance.key) ->
-                  match called with
-                  | Code { path = callee; _ }
-                    when not
-                           (is_runtime_call callee
-                           || List.exists (Path.equal callee) allowed
-                           || List.exists (Path.equal (resolve_call_node interface callee)) allowed
-                           ) ->
-                      raise_bug "%s calls %s, which is not among its call edges"
-                        (Instance.to_string key) (Instance.to_string called)
-                  | _ -> ())
-                (Emit_c.called fragment)))
-  | _ -> ()
+let check_calls interface ~find_call_edges key = function
+  | Compiled fragment -> Call_edge_check.check interface ~find_call_edges key fragment
+  | Folded _ | Evaluate _ -> ()
 
 module Instance_table = Hashtbl.Make (Instance)
 
@@ -157,70 +81,10 @@ let hash_fragment = function
       derive_fragment_hash (Emit_c.render_fragment fragment)
   | Evaluate _ -> evaluated_fragment_hash
 
-let derive_test_key = Blake3.derive_key ~context:"truss 2026-11-12 reach key"
-let encode_test_key fields = derive_test_key (Cbor.encode (Cbor.Array fields))
-
-let derive_cycle_member_key ~read_known_key members start =
-  let visit_order = Instance_table.create 8 in
-  let rec visit visited = function
-    | [] -> List.rev visited
-    | key :: queue ->
-        if Instance_table.mem visit_order key then visit visited queue
-        else begin
-          Instance_table.replace visit_order key (Instance_table.length visit_order);
-          let fragment_hash, references = Instance_table.find members key in
-          visit
-            ((fragment_hash, references) :: visited)
-            (queue @ List.filter (Instance_table.mem members) references)
-        end
-  in
-  encode_test_key
-    [
-      Text "group";
-      Cbor.Array
-        (List.map
-           (fun (fragment_hash, references) ->
-             Cbor.Array
-               [
-                 Bytes fragment_hash;
-                 Cbor.Array
-                   (List.map
-                      (fun reference ->
-                        if Instance_table.mem members reference then
-                          Cbor.Array
-                            [ Text "in"; Cbor.int (Instance_table.find visit_order reference) ]
-                        else Cbor.Array [ Text "out"; Bytes (read_known_key reference) ])
-                      references);
-               ])
-           (visit [] [ start ]));
-    ]
-
-let derive_test_keys ~read_lowered ~read_known_key component =
-  match component with
-  | [ key ] ->
-      let code = read_lowered key in
-      [
-        ( key,
-          encode_test_key
-            [
-              Text "unit";
-              Bytes (hash_fragment code);
-              Cbor.Array
-                (List.map
-                   (fun reference -> Cbor.Bytes (read_known_key reference))
-                   (list_references code));
-            ] );
-      ]
-  | component ->
-      let members = Instance_table.create 8 in
-      List.iter
-        (fun member ->
-          let code = read_lowered member in
-          Instance_table.replace members member (hash_fragment code, list_references code))
-        component;
-      List.map
-        (fun member -> (member, derive_cycle_member_key ~read_known_key members member))
-        component
+let derive_test_keys ~read_lowered ~read_known_key =
+  Test_keys.derive ~read_known_key ~read_hash_and_references:(fun key ->
+      let lowered = read_lowered key in
+      (hash_fragment lowered, list_references lowered))
 
 type 'a ran = Ran of 'a | Ran_too_long | Stopped of string
 type results = { find : string -> string option; add : string -> string -> unit }
@@ -463,164 +327,40 @@ let capture_failure backend work =
   match work () with
   | result -> Ok result
   | exception Cannot_build message -> Error message
+  | exception Test_report.Malformed message -> Error message
   | exception Lower.Unsupported unsupported -> Error (show_unsupported backend unsupported)
 
-type outcome = Passed | Failed | Panicked | Incomplete | Timed_out | Crashed
+module Test_report = Test_report
 
-let outcomes =
-  [
-    ("passed", Passed);
-    ("failed", Failed);
-    ("panicked", Panicked);
-    ("incomplete", Incomplete);
-    ("timed_out", Timed_out);
-    ("crashed", Crashed);
-  ]
-
-let show_outcome outcome = fst (List.find (fun (_, shown) -> shown = outcome) outcomes)
-
-type record = {
-  outcome : outcome;
-  message : string option;
-  echo : string option;
-  output : string option;
-  microseconds : int;
-  cached : bool;
-}
-
-type reader = {
-  pending : Buffer.t;
-  mutable unread_from : int;
-  mutable message : string option;
-  mutable echo : string option;
-  mutable output : string option;
-  on_start : int -> unit;
-  on_record : int -> record -> unit;
-}
-
-let make_reader ?(on_start = ignore) on_record =
-  {
-    pending = Buffer.create 1024;
-    unread_from = 0;
-    message = None;
-    echo = None;
-    output = None;
-    on_start;
-    on_record;
-  }
-
-let raise_malformed_report text = raise_cannot_build "A test report cannot be read: %s" text
-
-let find_line_end reader =
-  let rec scan index =
-    if index >= Buffer.length reader.pending then None
-    else if Buffer.nth reader.pending index = '\n' then Some index
-    else scan (index + 1)
-  in
-  scan reader.unread_from
-
-let rec drain reader =
-  match find_line_end reader with
-  | None -> ()
-  | Some stop -> (
-      let line = Buffer.sub reader.pending reader.unread_from (stop - reader.unread_from) in
-      let consume_through last = reader.unread_from <- last + 1 in
-      match String.split_on_char ' ' line with
-      | [ (("message" | "echo" | "output") as label); count ] ->
-          let count =
-            match int_of_string_opt count with
-            | Some parsed_count -> parsed_count
-            | None -> raise_malformed_report line
-          in
-          if Buffer.length reader.pending >= stop + 1 + count + 1 then begin
-            let content = Buffer.sub reader.pending (stop + 1) count in
-            (match label with
-            | "message" -> reader.message <- Some content
-            | "echo" -> reader.echo <- Some content
-            | _ -> reader.output <- Some content);
-            consume_through (stop + 1 + count);
-            drain reader
-          end
-      | [ "start"; number ] -> (
-          match int_of_string_opt number with
-          | Some number ->
-              consume_through stop;
-              reader.on_start number;
-              drain reader
-          | None -> raise_malformed_report line)
-      | [ "test"; number; outcome; microseconds ] -> (
-          match
-            ( int_of_string_opt number,
-              List.assoc_opt outcome outcomes,
-              int_of_string_opt microseconds )
-          with
-          | Some number, Some outcome, Some microseconds ->
-              let record =
-                {
-                  outcome;
-                  message = reader.message;
-                  echo = reader.echo;
-                  output = reader.output;
-                  microseconds;
-                  cached = false;
-                }
-              in
-              reader.message <- None;
-              reader.echo <- None;
-              reader.output <- None;
-              consume_through stop;
-              reader.on_record number record;
-              drain reader
-          | _ -> raise_malformed_report line)
-      | _ -> raise_malformed_report line)
-
-let feed reader text =
-  Buffer.add_string reader.pending text;
-  drain reader;
-  if reader.unread_from > 0 then begin
-    let unread =
-      Buffer.sub reader.pending reader.unread_from
-        (Buffer.length reader.pending - reader.unread_from)
-    in
-    Buffer.clear reader.pending;
-    Buffer.add_string reader.pending unread;
-    reader.unread_from <- 0
-  end
-
-let parse_report text =
-  let records = ref [] in
-  let reader = make_reader (fun number record -> records := (number, record) :: !records) in
-  match
-    feed reader text;
-    if
-      Buffer.length reader.pending > 0
-      || reader.message <> None || reader.echo <> None || reader.output <> None
-    then raise_malformed_report "it ends partway through a record"
-  with
-  | () -> Ok (List.map snd (List.sort (fun (left, _) (right, _) -> compare left right) !records))
-  | exception Cannot_build message -> Error message
-
-let is_cacheable record =
+let is_cacheable (record : Test_report.record) =
   record.outcome = Passed && record.message = None && record.echo = None && record.output = None
 
 let find_stored results key =
   Option.map
     (fun microseconds ->
-      { outcome = Passed; message = None; echo = None; output = None; microseconds; cached = true })
+      {
+        Test_report.outcome = Passed;
+        message = None;
+        echo = None;
+        output = None;
+        microseconds;
+        cached = true;
+      })
     (Option.bind (results.find key) int_of_string_opt)
 
-let store results key record = results.add key (string_of_int record.microseconds)
+let store results key (record : Test_report.record) =
+  results.add key (string_of_int record.microseconds)
 
 type progress =
   | Lowering
   | Compiling of { compiled : int; total : int }
   | Running of { tests : int }
   | Started of { test : int }
-  | Ended of { test : int; record : record }
+  | Ended of { test : int; record : Test_report.record }
 
 let make_incomplete_record backend todo_types =
   {
-    outcome = Incomplete;
+    Test_report.outcome = Incomplete;
     message =
       Some
         (String.concat "\n"
@@ -674,13 +414,11 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
         report_progress (Compiling { compiled; total }));
     report_progress (Running { tests = Array.length missing });
     let read_test_index number =
-      if number < 0 || number >= Array.length missing then
-        raise_malformed_report (Printf.sprintf "a test numbered %d" number);
       let index, _, _, _ = missing.(number) in
       index
     in
     let reader =
-      make_reader
+      Test_report.make_reader ~tests:(Array.length missing)
         ~on_start:(fun number -> report_progress (Started { test = read_test_index number }))
         (fun number record ->
           let index = read_test_index number in
@@ -694,7 +432,7 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
     let _, report, errors =
       Fun.protect
         ~finally:(fun () -> try Sys.remove output with Sys_error _ -> ())
-        (fun () -> Process.run ~input:"" ~on_output:(feed reader) output [])
+        (fun () -> Process.run ~input:"" ~on_output:(Test_report.feed reader) output [])
     in
     if Array.exists Option.is_none fresh then
       raise_cannot_build "The test program ended before reporting every test:\n%s%s" report errors
@@ -892,7 +630,6 @@ module For_testing = struct
 
   module Intrinsics = Intrinsics
 
-  let parse_report = parse_report
   let build_supplied_tests = build_supplied_tests
   let compile_fragment = compile_fragment
   let run_program = run_program

@@ -3,7 +3,7 @@ val list_diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val fail : ('a, unit, string, unit) format4 -> 'a
 val expect_string : expected:String.t -> String.t -> unit
 val expect_int : expected:int -> int -> unit
-val render_records : Backend.record list -> string
+val render_records : Backend.Test_report.record list -> string
 val definition : string -> Path.t
 val named : ?arguments:Ground.argument list -> string -> Ground.ty
 val int64 : Ground.ty
