@@ -811,8 +811,9 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  | Bind { is_var = true; _ }, Place _ ->
                      report "a `let` that binds a mutable local receives a place"
                  | _ -> ())
-             | For { iteration = Cursor { cursor; _ }; _ } ->
-                 check_mutable_place "a `for` loop" cursor
+             | For { iteration = Cursor { cursor; uses; _ }; _ } ->
+                 check_mutable_place "a `for` loop" cursor;
+                 check_capabilities "a pulled `next`'s `uses`" uses
              | For { iteration = Elements { count; position; element }; _ } -> (
                  (match count.kind with
                  | Call _ -> ()

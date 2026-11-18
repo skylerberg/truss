@@ -243,13 +243,19 @@ public fn Character.from_digit(value: UInt32, radix: UInt32 = 10) -> Option[Char
 }
 
 impl From[Character] for UInt32 {
-  fn from(value: own Character) -> UInt32 {
+  fn from(value: own Character) -> UInt32
+    ensures result == value.code()
+    cost time O(1)
+  {
     value.code()
   }
 }
 
 impl From[UInt8] for Character {
-  fn from(value: own UInt8) -> Character {
+  fn from(value: own UInt8) -> Character
+    ensures result.code() == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
@@ -257,7 +263,11 @@ impl From[UInt8] for Character {
 impl TryFrom[UInt32] for Character {
   type Error = core::ConversionError
 
-  fn try_from(value: own UInt32) -> Result[Character, core::ConversionError] {
+  fn try_from(value: own UInt32) -> Result[Character, core::ConversionError]
+    ensures (result is Ok(_)) == (value <= 1114111 && (value < 55296 || value > 57343))
+    ensures !(result is Ok(converted) && converted.code() != value)
+    cost time O(1)
+  {
     if value > 1114111 || (value >= 55296 && value <= 57343) {
       Err(core::ConversionError())
     } else {
@@ -269,7 +279,11 @@ impl TryFrom[UInt32] for Character {
 impl TryFrom[Character] for UInt8 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Character) -> Result[UInt8, core::ConversionError] {
+  fn try_from(value: own Character) -> Result[UInt8, core::ConversionError]
+    ensures (result is Ok(_)) == (value.code() <= UInt8.maximum)
+    ensures !(result is Ok(converted) && converted != value.code())
+    cost time O(1)
+  {
     let code = value.code()
     if code > 255 { Err(core::ConversionError()) } else { Ok(intrinsic::convert(code)) }
   }

@@ -204,6 +204,54 @@ let make_configured_source construction =
      { %s }\n"
     construction
 
+let make_default_source version =
+  "type Key(value: Int64)\n\
+  \  derives Default\n\
+   type Loop(value: Int64)\n\
+   impl Default for Loop {\n\
+  \  fn default() -> Loop {\n\
+  \    Loop(value: check().major.value)\n\
+  \  }\n\
+   }\n" ^ version
+  ^ "fn make[Item: Default]() -> Item\n\
+    \  cost time finite\n\
+     {\n\
+    \  Item.default()\n\
+     }\n\
+     fn check() -> Version\n\
+    \  cost time finite\n\
+     {\n\
+    \  make[Version]()\n\
+     }\n"
+
+let version_deriving_over_a_key =
+  make_default_source "type Version(major: Key)\n  derives Default\n"
+
+let version_deriving_over_a_loop =
+  make_default_source "type Version(major: Loop)\n  derives Default\n"
+
+let version_with_a_written_default =
+  make_default_source
+    "type Version(major: Key)\n\
+     impl Default for Version {\n\
+    \  fn default() -> Version {\n\
+    \    check()\n\
+    \  }\n\
+     }\n"
+
+let derived_version_default = "derived standard::core::Default for app::main::Version.default"
+
+let expect_recursion_group text ~of_:name ~expected =
+  let database = build [ ("app::main", text) ] in
+  let group =
+    List.map Path.show
+      ((Database.make_proof_lookups database).list_recursion_group
+         (Support.make_top_path "app::main" name))
+  in
+  if group <> expected then
+    Harness.fail "the recursion group of %s is [%s], not [%s]" name (String.concat "; " group)
+      (String.concat "; " expected)
+
 let callee_and_caller =
   "fn callee(x: Int64) -> Int64 { x + 1 }\nfn caller() -> Int64 { callee(1) }\n"
 
@@ -488,6 +536,71 @@ let () =
             "recursion group app::main::make";
             "recursion group app::main::start";
             "proof app::main::start";
+          ]);
+  Harness.test "a derived method's MIR call edges read its generated MIR" (fun () ->
+      expect_reads
+        (build [ ("app::main", version_deriving_over_a_key) ])
+        ("MIR call edges " ^ derived_version_default)
+        ~includes:[ "generated mir " ^ derived_version_default ]
+        ~excludes:[]);
+  Harness.test "a function that passes a derived impl where a bound needs one has a proof"
+    (fun () ->
+      let database = check_text version_deriving_over_a_key in
+      let file = Support.parse_file "app::main" in
+      List.iter
+        (fun (declaration : Resolve.Names.declaration) ->
+          match
+            Database.For_testing.find_proof (Support.prove database file)
+              (Resolve.Names.make_key declaration)
+          with
+          | Some (Value _) -> ()
+          | Some (Failed _ | Blocked) | None ->
+              Harness.fail "%s has no proof" (Path.show declaration.path))
+        ((Database.make_name_lookups database [ file.module_.package ]).list_declarations_in file));
+  Harness.test
+    "a field's type whose impl calls back joins the recursion group of a function that passes the \
+     derived impl where a bound needs one" (fun () ->
+      expect_recursion_group version_deriving_over_a_key ~of_:"check" ~expected:[];
+      expect_recursion_group version_deriving_over_a_loop ~of_:"check"
+        ~expected:
+          [
+            "app::main::check";
+            "app::main::impl standard::core::Default for app::main::Loop.default";
+            derived_version_default;
+          ];
+      expect_included
+        (list_propagated
+           ~before:[ ("app::main", version_deriving_over_a_key) ]
+           ~after:[ ("app::main", version_deriving_over_a_loop) ])
+        ~parts:
+          [
+            "MIR call edges " ^ derived_version_default;
+            "recursion group app::main::check";
+            "proof app::main::check";
+          ]);
+  Harness.test
+    "a trait leaving a type's `derives` list takes the derived method out of the call graph"
+    (fun () ->
+      expect_recursion_group version_with_a_written_default ~of_:"check"
+        ~expected:
+          [
+            "app::main::check";
+            "app::main::impl standard::core::Default for app::main::Version.default";
+          ];
+      expect_included
+        (list_propagated
+           ~before:[ ("app::main", version_deriving_over_a_key) ]
+           ~after:[ ("app::main", version_with_a_written_default) ])
+        ~parts:[ "recursion group app::main::check"; "proof app::main::check" ];
+      expect_included
+        (list_propagated
+           ~before:[ ("app::main", version_with_a_written_default) ]
+           ~after:[ ("app::main", version_deriving_over_a_key) ])
+        ~parts:
+          [
+            "MIR call edges " ^ derived_version_default;
+            "call edges app " ^ derived_version_default;
+            "proof app::main::check";
           ]);
   Harness.test
     "adding a file and then removing it recomputes no part of the other file's definitions"

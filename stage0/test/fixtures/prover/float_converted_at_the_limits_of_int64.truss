@@ -1,0 +1,15 @@
+fn f() -> Int64
+  ensures result == Int64.minimum
+{
+  match Int64.try_from(-9223372036854775808.0) {
+    Ok(lowest) => lowest
+    Err(_) => unreachable
+  }
+}
+
+fn g() -> Int64 {
+  match Int64.try_from(9223372036854775808.0) {
+    Ok(_) => unreachable
+    Err(_) => 0
+  }
+}

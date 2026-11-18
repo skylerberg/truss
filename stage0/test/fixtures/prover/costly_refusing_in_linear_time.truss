@@ -1,0 +1,9 @@
+fn costly(items: List[Int64]) -> Bool
+  ensures !result
+  cost time O(items.length())
+{
+  for _ in items {
+  }
+  false
+}
+

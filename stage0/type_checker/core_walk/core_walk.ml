@@ -157,7 +157,7 @@ let walk_statement_children visit (node : Core.statement) =
           visit.expression count;
           visit.pattern position;
           walk_place visit element
-      | Cursor { cursor; next } ->
+      | Cursor { cursor; next; uses = _ } ->
           walk_place visit cursor;
           visit.callee next);
       visit.pattern pattern;

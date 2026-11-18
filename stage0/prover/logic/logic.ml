@@ -245,6 +245,15 @@ let truncated_divide left right =
 let truncated_remainder left right =
   Operation ("-", [ left; Operation ("*", [ right; truncated_divide left right ]) ])
 
+let integer_of_bits ~is_signed ~width bits =
+  let unsigned = Operation ("bv2nat", [ bits ]) in
+  if is_signed then
+    ite
+      (Operation (">=", [ unsigned; Integer (Z.shift_left Z.one (width - 1)) ]))
+      (Operation ("-", [ unsigned; Integer (Z.shift_left Z.one width) ]))
+      unsigned
+  else unsigned
+
 let rec mentions symbols = function
   | Symbol name -> List.mem name symbols
   | Integer _ | Boolean _ | Bits _ -> false

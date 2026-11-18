@@ -1,0 +1,14 @@
+fn f(start: Countdown) -> UInt8
+  uses Meter
+  cost calls(Meter.tick) <= start.left
+{
+  var left = start
+  var last: UInt8 = 0
+  for value in left
+    invariant visited.length() + left.left == start.left
+    cost calls(Meter.tick) <= visited.length()
+  {
+    last = value
+  }
+  last
+}
