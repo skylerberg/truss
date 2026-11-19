@@ -728,7 +728,7 @@ let () =
              output)
       then fail "%s" output);
   test "build refuses a program that can reach a hole in a contract" (fun () ->
-      let root = make_package [ ("main.truss", Fixtures.main_with_a_todo_requires) ] in
+      let root = make_package [ ("main.truss", Fixtures.Cli.main_with_a_todo_requires) ] in
       let status, output = run_truss [ "build"; "-C"; root ] in
       if status <> 1 then fail "did not refuse";
       if
