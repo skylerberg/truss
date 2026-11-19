@@ -129,6 +129,18 @@ let list_structural_parameters context (frame : State.frame) (clauses : State.cl
              | _ -> []))
        clauses.parameters)
 
+let rec applies symbol (term : Logic.term) =
+  match term with
+  | Apply (applied, _) when applied = symbol -> true
+  | Forall (_, _, body) | Exists (_, body) -> applies symbol body
+  | _ -> List.exists (applies symbol) (Logic.list_arguments term)
+
+let find_definition ~symbol result (term : Logic.term) =
+  match term with
+  | Operation ("=", [ left; right ]) when left = result && not (applies symbol right) -> Some right
+  | Operation ("=", [ left; right ]) when right = result && not (applies symbol left) -> Some left
+  | _ -> None
+
 let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
     path (contract : State.contract) (values : State.passed list) ~recursive_callee ~lent_final
     ~havoc_mut ~substitution_of ~type_arguments =
@@ -333,6 +345,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let is_on_bound_values = List.exists (Logic.mentions after.bound) callee_arguments in
   let result_type = Facts.substitute_type context frame site.type_ in
   let applied_as = ref None in
+  let definition = ref None in
   let is_limited_call = ref false in
   let result =
     if is_logic_call && List.length callee_arguments = List.length callee_bindings then begin
@@ -679,7 +692,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                   else ensures_frame
                 in
                 match Validity.read_specification context frame_for_clause clause with
-                | _, term -> state (Logic.( ==> ) (compute_required clauses) term)
+                | _, term ->
+                    (match (!applied_as, !definition) with
+                    | Some (symbol, _), None -> definition := find_definition ~symbol result term
+                    | _ -> ());
+                    state (Logic.( ==> ) (compute_required clauses) term)
                 | exception Facts.Unsupported _ -> ())
             clauses.ensures)
         (Contracts.list_declared_clauses contract)
@@ -751,7 +768,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                 })
               ~uses:invocation.uses ~values ~change:(Some compute_change) counter)
   in
-  (after, result)
+  (after, Option.value !definition ~default:result)
 
 let make_callback_cost (context : State.context) frame (metric : Metric.t) (ty : Types.ty) term =
   let stated_by_type =
