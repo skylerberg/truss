@@ -1,8 +1,9 @@
+use standard::capabilities
 use standard::intrinsic
 use standard::system::calls
 
 internal fn set_raw_mode(descriptor: Int32, enabled: Bool) -> Result[Unit, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let size = intrinsic::libc_termios_size()
   let flag_size = intrinsic::libc_termios_flag_size()

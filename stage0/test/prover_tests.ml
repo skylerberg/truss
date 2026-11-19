@@ -2612,6 +2612,24 @@ let expect_proven_in_standard text =
            (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual))
 
 let () =
+  Harness.test "two calls of a function that uses `System` are not known to return one value"
+    (fun () ->
+      let probe = Support.parse_file "standard::probe" in
+      let database =
+        Support.extend_standard_library
+          [
+            {
+              name = Path.standard_package;
+              dependencies = [];
+              files = [ (probe, Fixtures.Prover.error_number_read_twice) ];
+            };
+          ]
+      in
+      match Support.list_codes (check_file database probe) with
+      | [ "prover.ensures" ] -> ()
+      | codes -> Harness.fail "reported [%s]" (String.concat "; " codes))
+
+let () =
   Harness.test "a view of a scalar ends within the address space and is not at zero" (fun () ->
       expect_proven_in_standard Fixtures.Prover.view_address_placed)
 

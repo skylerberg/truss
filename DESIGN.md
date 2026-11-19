@@ -1061,6 +1061,7 @@ narrowing limits the reach of one capability.
 | Rule | Reason |
 |---|---|
 | A callback uses capabilities only through a capability parameter. | One rule stays true: no `uses` means pure. A callback is pure by default, which is the safe default for a comparator and for code that runs in parallel. |
+| An intrinsic that reaches the operating system uses `System`, a capability that only the standard library names and that the runtime grants to the real implementations. | No `uses` means pure inside the standard library too. A helper that called `read` without declaring it would be a function in the logic, so the prover could prove that two reads return the same bytes. Nothing implements `System`, so no `provide` grants it to code that does not declare it. |
 | Providing a type provides every capability that the type implements. | A type that narrows both reading and writing cannot leave one of them unnarrowed by mistake. |
 | An `impl` of a capability can declare `uses`, and a `provide` of it requires those capabilities. | Capabilities layer instead of inheriting. `ReadDatabase` is implemented with `NetworkClient`, which is required where the implementation is provided. A dependency that is granted `ReadDatabase` alone never reaches the network. |
 

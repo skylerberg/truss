@@ -1,0 +1,6 @@
+use standard::capabilities
+
+type Granted()
+
+impl capabilities::System for Granted {
+}

@@ -1,0 +1,8 @@
+use standard::capabilities
+use standard::intrinsic
+
+internal fn error_number() -> Int32
+  uses capabilities::System
+{
+  intrinsic::libc_errno()
+}

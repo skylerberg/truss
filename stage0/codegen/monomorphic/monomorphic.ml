@@ -12,7 +12,8 @@ let list_capabilities context substitution (set : Types.capability_set) : Path.t
   List.sort_uniq Path.compare
     (List.filter_map
        (function
-         | Types.Capability path when Well_known.is Run_forever path -> None
+         | Types.Capability path when Well_known.is Run_forever path || Well_known.is System path ->
+             None
          | Types.Capability path -> Some path
          | Capability_parameter parameter ->
              raise_bug "the capability parameter %s of %s is not substituted" parameter.name

@@ -1,3 +1,4 @@
+use standard::capabilities
 use standard::environment
 use standard::intrinsic
 use standard::system::calls
@@ -6,7 +7,7 @@ use standard::system::handles
 internal type SystemEnvironment()
 
 impl Environment for SystemEnvironment
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   fn variable(self, name: StringSlice) -> Option[String] {
     variable(name)
@@ -95,7 +96,9 @@ impl Environment for SystemEnvironment
   }
 }
 
-fn variable(name: StringSlice) -> Option[String] {
+fn variable(name: StringSlice) -> Option[String]
+  uses capabilities::System
+{
   match calls::ended_with_zero_byte(name.bytes) {
     Ok(name_for_c) => {
       var is_present = false
@@ -163,7 +166,9 @@ fn set_or(value: Option[String], otherwise: StringSlice) -> Path {
   }
 }
 
-fn home() -> Option[Path] {
+fn home() -> Option[Path]
+  uses capabilities::System
+{
   if variable("HOME") is Some(text) && !text.is_empty() {
     Some(Path.new(text))
   } else {
@@ -171,7 +176,9 @@ fn home() -> Option[Path] {
   }
 }
 
-fn for_this_user(name: StringSlice, on_linux: StringSlice, on_macos: StringSlice) -> Option[Path] {
+fn for_this_user(name: StringSlice, on_linux: StringSlice, on_macos: StringSlice) -> Option[Path]
+  uses capabilities::System
+{
   if intrinsic::system_is_linux() && variable(name) is Some(text) && !text.is_empty() {
     return Some(Path.new(text))
   }
@@ -224,7 +231,7 @@ fn names_a_zone(name: intrinsic::View[UInt8]) -> Bool {
 }
 
 fn zone_file(name: StringSlice) -> Result[List[UInt8], SystemError]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   var handle = handles::open_to_read(Path(text: "/usr/share/zoneinfo/${name}"))?
   let rules = handles::read_all(mut handle)?

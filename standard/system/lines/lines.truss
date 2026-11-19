@@ -1,3 +1,4 @@
+use standard::capabilities
 use standard::intrinsic
 use standard::system::calls
 
@@ -9,7 +10,7 @@ internal fn LineInput.new() -> LineInput {
 }
 
 internal fn LineInput.next_line(mut self, descriptor: Int32) -> Result[Option[String], Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   var end: UInt64 = self.consumed
   var has_newline = false

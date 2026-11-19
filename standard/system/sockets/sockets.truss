@@ -1,3 +1,4 @@
+use standard::capabilities
 use standard::growth
 use standard::intrinsic
 use standard::network
@@ -8,7 +9,9 @@ use standard::system::handles
 internal fn listen(
   address: network::SocketAddress,
   options: network::ListenOptions,
-) -> Result[network::Listener, SystemError] {
+) -> Result[network::Listener, SystemError]
+  uses capabilities::System
+{
   let handle = handles::with_file_error(
     bound(address, kind: intrinsic::libc_sock_stream(), reuse_port: options.reuse_port),
   )?
@@ -22,7 +25,9 @@ fn backlog_of(options: network::ListenOptions) -> Int32 {
   if options.backlog > 65535 { 65535 } else { intrinsic::convert(options.backlog) }
 }
 
-internal fn listen_local(path: Path) -> Result[network::LocalListener, SystemError] {
+internal fn listen_local(path: Path) -> Result[network::LocalListener, SystemError]
+  uses capabilities::System
+{
   let bytes = handles::with_file_error(local_address_bytes(path))?
   let handle = handles::with_file_error(opened(intrinsic::libc_af_unix(), kind: intrinsic::libc_sock_stream()))?
   let descriptor = intrinsic::handle_descriptor(handle)
@@ -40,7 +45,7 @@ internal fn listen_local(path: Path) -> Result[network::LocalListener, SystemErr
 }
 
 internal fn connect_local(path: Path) -> Result[network::LocalConnection, SystemError]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let bytes = handles::with_file_error(local_address_bytes(path))?
   let handle = handles::with_file_error(opened(intrinsic::libc_af_unix(), kind: intrinsic::libc_sock_stream()))?
@@ -74,13 +79,17 @@ fn local_address_bytes(path: Path) -> Result[intrinsic::Storage[UInt8], Int32] {
   Ok(own bytes)
 }
 
-internal fn bind_datagram(address: network::SocketAddress) -> Result[network::DatagramSocket, SystemError] {
+internal fn bind_datagram(address: network::SocketAddress) -> Result[network::DatagramSocket, SystemError]
+  uses capabilities::System
+{
   let handle = handles::with_file_error(bound(address, kind: intrinsic::libc_sock_dgram(), reuse_port: false))?
   let local = handles::with_file_error(local_address(intrinsic::handle_descriptor(handle)))?
   Ok(network::DatagramSocket(handle: streams::Handle(descriptor: own handle, number: 0), local: local))
 }
 
-internal fn open_datagram() -> Result[network::DatagramSocket, SystemError] {
+internal fn open_datagram() -> Result[network::DatagramSocket, SystemError]
+  uses capabilities::System
+{
   let every = network::IpAddress.Version6([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
   match bind_datagram(network::SocketAddress(address: every, port: 0)) {
     Ok(socket) => Ok(own socket)
@@ -92,7 +101,7 @@ internal fn connect(
   address: network::SocketAddress,
   timeout: Option[Duration],
 ) -> Result[network::Connection, SystemError]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let handle = handles::with_file_error(opened(family_of(address), kind: intrinsic::libc_sock_stream()))?
   let descriptor = intrinsic::handle_descriptor(handle)
@@ -114,14 +123,14 @@ internal fn connect(
 }
 
 internal fn accept_local(listener: Int32) -> Result[streams::Handle, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   var from = room_for_an_address()
   accepted(listener, from: mut from)
 }
 
 fn accepted(listener: Int32, from: mut intrinsic::Storage[UInt8]) -> Result[streams::Handle, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
   requires intrinsic::storage_length(from) == 28
 {
   var length: UInt32 = 28
@@ -143,7 +152,9 @@ fn accepted(listener: Int32, from: mut intrinsic::Storage[UInt8]) -> Result[stre
   Ok(own handle)
 }
 
-internal fn configure(descriptor: Int32, option: network::SocketOption) -> Result[Unit, Int32] {
+internal fn configure(descriptor: Int32, option: network::SocketOption) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   match option {
     NoDelay(enabled) => level_option(
       descriptor,
@@ -163,7 +174,9 @@ internal fn configure(descriptor: Int32, option: network::SocketOption) -> Resul
   }
 }
 
-fn level_option(descriptor: Int32, level: Int32, name: Int32, number: UInt64) -> Result[Unit, Int32] {
+fn level_option(descriptor: Int32, level: Int32, name: Int32, number: UInt64) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   var value: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
   calls::add_number(mut value, number: number, size: 4)
   calls::done(
@@ -178,7 +191,7 @@ fn level_option(descriptor: Int32, level: Int32, name: Int32, number: UInt64) ->
 }
 
 internal fn accept(listener: Int32) -> Result[network::Accepted, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   var from = room_for_an_address()
   let handle = accepted(listener, from: mut from)?
@@ -188,7 +201,9 @@ internal fn accept(listener: Int32) -> Result[network::Accepted, Int32]
   }
 }
 
-internal fn shut_down(descriptor: Int32, direction: network::Direction) -> Result[Unit, Int32] {
+internal fn shut_down(descriptor: Int32, direction: network::Direction) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   let how = match direction {
     Receiving => intrinsic::libc_shut_rd()
     Sending => intrinsic::libc_shut_wr()
@@ -201,7 +216,9 @@ internal fn set_timeout(
   descriptor: Int32,
   direction: network::Direction,
   timeout: Option[Duration],
-) -> Result[Unit, Int32] {
+) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   var nanoseconds: Int64 = 0
   if timeout is Some(limit) {
     nanoseconds = limit.total_nanoseconds()
@@ -226,7 +243,7 @@ internal fn send_to(
   bytes: intrinsic::View[UInt8],
   address: network::SocketAddress,
 ) -> Result[UInt64, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let to = address_bytes(address_for(descriptor, address: address))
   var ticket = calls::watch(descriptor, writing: true)
@@ -262,7 +279,7 @@ internal fn receive_from(
   limit: UInt64,
 ) -> Result[network::Datagram, Int32]
   ensures intrinsic::storage_length(buffer) >= old(intrinsic::storage_length(buffer))
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   growth::reserve(mut buffer, additional: limit)
   let before = intrinsic::storage_length(buffer)
@@ -305,7 +322,9 @@ internal fn receive_from(
   }
 }
 
-internal fn addresses_of(host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
+internal fn addresses_of(host: StringSlice) -> Result[List[network::IpAddress], SystemError]
+  uses capabilities::System
+{
   let name = handles::with_file_error(calls::ended_with_zero_byte(host.bytes))?
   let room: UInt64 = 4096
   var resolved_bytes: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
@@ -375,7 +394,9 @@ fn add_once(addresses: mut List[network::IpAddress], address: network::IpAddress
   mut addresses.push(address)
 }
 
-fn opened(family: Int32, kind: Int32) -> Result[intrinsic::Handle, Int32] {
+fn opened(family: Int32, kind: Int32) -> Result[intrinsic::Handle, Int32]
+  uses capabilities::System
+{
   let descriptor = intrinsic::libc_socket(family, kind: kind, protocol: 0)
   if descriptor < 0 {
     return Err(intrinsic::libc_errno())
@@ -386,7 +407,9 @@ fn opened(family: Int32, kind: Int32) -> Result[intrinsic::Handle, Int32] {
   Ok(own handle)
 }
 
-fn bound(address: network::SocketAddress, kind: Int32, reuse_port: Bool) -> Result[intrinsic::Handle, Int32] {
+fn bound(address: network::SocketAddress, kind: Int32, reuse_port: Bool) -> Result[intrinsic::Handle, Int32]
+  uses capabilities::System
+{
   let handle = opened(family_of(address), kind: kind)?
   let descriptor = intrinsic::handle_descriptor(handle)
   var on: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
@@ -417,7 +440,9 @@ fn bound(address: network::SocketAddress, kind: Int32, reuse_port: Bool) -> Resu
   Ok(own handle)
 }
 
-fn socket_option(descriptor: Int32, name: Int32, value: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
+fn socket_option(descriptor: Int32, name: Int32, value: intrinsic::View[UInt8]) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   calls::done(
     intrinsic::libc_setsockopt(
       descriptor,
@@ -430,7 +455,7 @@ fn socket_option(descriptor: Int32, name: Int32, value: intrinsic::View[UInt8]) 
 }
 
 fn connected(descriptor: Int32, address: intrinsic::Storage[UInt8]) -> Result[Unit, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let started = intrinsic::libc_connect(
     descriptor,
@@ -483,7 +508,9 @@ fn connected(descriptor: Int32, address: intrinsic::Storage[UInt8]) -> Result[Un
   }
 }
 
-fn local_address(descriptor: Int32) -> Result[network::SocketAddress, Int32] {
+fn local_address(descriptor: Int32) -> Result[network::SocketAddress, Int32]
+  uses capabilities::System
+{
   var named = room_for_an_address()
   var length: UInt32 = 28
   calls::done(intrinsic::libc_getsockname(descriptor, address: mut named, length: mut length))?
@@ -623,7 +650,9 @@ fn plain(address: network::SocketAddress) -> network::SocketAddress {
   }
 }
 
-fn address_for(descriptor: Int32, address: network::SocketAddress) -> network::SocketAddress {
+fn address_for(descriptor: Int32, address: network::SocketAddress) -> network::SocketAddress
+  uses capabilities::System
+{
   match address.address {
     Version4(octets) => match local_address(descriptor) {
       Ok(local) => if local.address is Version6(_) {

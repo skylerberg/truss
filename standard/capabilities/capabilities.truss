@@ -157,6 +157,9 @@ public capability Panic {
 public capability RunForever {
 }
 
+internal capability System {
+}
+
 public type SystemError =
   | NotFound
   | PermissionDenied

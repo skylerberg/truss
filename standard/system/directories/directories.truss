@@ -1,3 +1,4 @@
+use standard::capabilities
 use standard::files
 use standard::growth
 use standard::intrinsic
@@ -5,7 +6,7 @@ use standard::system::calls
 use standard::system::handles
 
 internal fn entries(directory: Path) -> Result[List[files::DirectoryEntry], SystemError]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let flags = intrinsic::libc_o_rdonly() | intrinsic::libc_o_directory()
   let handle = handles::with_file_error(calls::open_file(directory.text.slice().bytes, flags: flags))?
@@ -26,7 +27,7 @@ fn entries_on_linux(
   directory: intrinsic::View[UInt8],
   listed: mut List[files::DirectoryEntry],
 ) -> Result[Unit, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let room: UInt64 = 32768
   let length_at = intrinsic::libc_dirent_length_offset()
@@ -84,7 +85,7 @@ fn entries_on_linux(
 }
 
 fn entries_on_macos(descriptor: Int32, listed: mut List[files::DirectoryEntry]) -> Result[Unit, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let attributes = intrinsic::libc_attr_cmn_returned_attrs()
     | intrinsic::libc_attr_cmn_name()
@@ -172,7 +173,7 @@ fn add(listed: mut List[files::DirectoryEntry], name: own intrinsic::Storage[UIn
 }
 
 fn kind_by_status(directory: intrinsic::View[UInt8], name: intrinsic::View[UInt8]) -> files::FileKind
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   var path: intrinsic::Storage[UInt8] = calls::copy_of(directory)
   growth::push(mut path, value: 47)
