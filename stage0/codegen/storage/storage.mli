@@ -12,7 +12,7 @@ val project_buffer : Lowered.place -> Lowered.place
 val project_length : Lowered.place -> Lowered.place
 val project_capacity : Lowered.place -> Lowered.place
 val index_element : Lowered.place -> Lowered.operand -> Lowered.place
-val build_is_allocated : Lowered.place -> Lowered.rvalue
+val make_allocated_test : Lowered.place -> Lowered.test
 
 val build_storage :
   Ground.ty ->

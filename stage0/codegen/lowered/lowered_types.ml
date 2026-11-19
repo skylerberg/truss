@@ -59,6 +59,8 @@ type binary =
   | Bit_xor
   | Shift_left
   | Shift_right
+
+type comparison =
   | Equal
   | Not_equal
   | Less
@@ -68,6 +70,8 @@ type binary =
   | Ieee_equal
   | Ieee_less
   | Ieee_less_equal
+
+type test = comparison * operand * operand
 
 type intrinsic =
   | Allocate
@@ -138,6 +142,7 @@ type rvalue =
   | Use of operand
   | Unary of unary * operand
   | Binary of binary * operand * operand
+  | Compare of test
   | Convert of operand * Memory_layout.scalar
   | Build of { ty : Ground.ty; variant : string option; fields : (string * operand) list }
   | Is_variant of place * string
@@ -158,6 +163,7 @@ type statement =
 
 type terminator =
   | Goto of block
+  | Branch of { test : test; yes : block; no : block }
   | Switch of { value : operand; cases : (Z.t * block) list; default : block }
   | Switch_variant of { place : place; cases : (string * block) list; default : block option }
   | Return of operand option

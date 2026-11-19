@@ -241,7 +241,7 @@ let drop_scope st (scope : scope) =
           if not (List.mem place st.moved) then Emit_c.Ir_builder.emit st.builder (Drop place)
       | Drop_flagged { place; flag } ->
           if not (List.mem place st.moved) then
-            Emit_c.Ir_builder.emit_when st.builder (Use (Copy flag)) (fun () ->
+            Emit_c.Ir_builder.emit_when st.builder (Holds (Copy flag)) (fun () ->
                 Emit_c.Ir_builder.emit st.builder (Drop place))
       | Free_pointed pointer ->
           Emit_c.Ir_builder.emit st.builder

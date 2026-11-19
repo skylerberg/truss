@@ -404,14 +404,14 @@ let () =
               let emit_bool rvalue = Emit_c.Ir_builder.emit_temporary builder (Raw Bool) rvalue in
               let is_recent =
                 emit_bool
-                  (Binary
+                  (Compare
                      ( Greater,
                        Copy (Lowered.make_local_place seconds),
                        Codegen_support.constant_int64 1_700_000_000 ))
               in
               let is_whole =
                 emit_bool
-                  (Binary
+                  (Compare
                      ( Less,
                        Copy (Lowered.make_local_place nanoseconds),
                        Codegen_support.constant_int64 1_000_000_000 ))
@@ -534,7 +534,7 @@ let () =
               let second = draw () in
               let differ =
                 Emit_c.Ir_builder.emit_temporary builder (Raw Bool)
-                  (Binary
+                  (Compare
                      ( Not_equal,
                        Copy (Lowered.make_local_place first),
                        Copy (Lowered.make_local_place second) ))
@@ -712,7 +712,7 @@ let () =
         let second = open_test_file () in
         let same =
           Emit_c.Ir_builder.emit_temporary builder (Raw Bool)
-            (Binary
+            (Compare
                (Equal, Copy (Lowered.make_local_place first), Copy (Lowered.make_local_place second)))
         in
         let status =

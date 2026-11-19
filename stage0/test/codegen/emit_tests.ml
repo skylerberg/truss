@@ -16,7 +16,6 @@ let () =
             [
               Codegen_support.local ~name:"total" (Codegen_support.value Codegen_support.int32);
               Codegen_support.local ~name:"i" (Codegen_support.value Codegen_support.int32);
-              Codegen_support.local (Raw Bool);
             ]
             [
               Codegen_support.block
@@ -25,14 +24,13 @@ let () =
                   Assign (Codegen_support.at 1, Use (Codegen_support.constant_int32 1));
                 ]
                 (Goto 1);
-              Codegen_support.block
-                [
-                  Assign
-                    ( Codegen_support.at 2,
-                      Binary (Less_equal, Codegen_support.copy 1, Codegen_support.constant_int32 10)
-                    );
-                ]
-                (Switch { value = Codegen_support.copy 2; cases = [ (Z.one, 2) ]; default = 3 });
+              Codegen_support.block []
+                (Branch
+                   {
+                     test = (Less_equal, Codegen_support.copy 1, Codegen_support.constant_int32 10);
+                     yes = 2;
+                     no = 3;
+                   });
               Codegen_support.block
                 [
                   Assign
@@ -370,7 +368,7 @@ let () =
             [
               Assign
                 ( Codegen_support.at 0,
-                  Binary (Equal, float64_constant Float.nan, float64_constant Float.nan) );
+                  Compare (Equal, float64_constant Float.nan, float64_constant Float.nan) );
             ];
         ]);
   Codegen_support.test "IEEE float equality does not" (fun () ->
@@ -381,7 +379,7 @@ let () =
             [
               Assign
                 ( Codegen_support.at 0,
-                  Binary (Ieee_equal, float64_constant Float.nan, float64_constant Float.nan) );
+                  Compare (Ieee_equal, float64_constant Float.nan, float64_constant Float.nan) );
             ];
         ]);
   Codegen_support.test "NaN is ordered after every number" (fun () ->
@@ -392,7 +390,7 @@ let () =
             [
               Assign
                 ( Codegen_support.at 0,
-                  Binary (Less, float64_constant Float.infinity, float64_constant Float.nan) );
+                  Compare (Less, float64_constant Float.infinity, float64_constant Float.nan) );
             ];
         ]);
   Codegen_support.test "negative zero equals zero" (fun () ->
@@ -402,7 +400,8 @@ let () =
             [ Codegen_support.local (Raw Bool) ]
             [
               Assign
-                (Codegen_support.at 0, Binary (Equal, float64_constant (-0.0), float64_constant 0.0));
+                ( Codegen_support.at 0,
+                  Compare (Equal, float64_constant (-0.0), float64_constant 0.0) );
             ];
         ]);
   Codegen_support.test "a shift amount is masked to the width of the value" (fun () ->
@@ -1050,7 +1049,7 @@ let () =
                     in
                     let is_right =
                       Emit_c.Ir_builder.emit_temporary builder (Raw Bool)
-                        (Binary
+                        (Compare
                            (Equal, Copy (Lowered.make_local_place fits), Constant (Bool expected)))
                     in
                     let bit = emit_int32 (Convert (is_right, Integer Int32)) in

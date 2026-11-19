@@ -183,15 +183,60 @@ let render_lawful_equal left right =
 let render_lawful_less left right =
   Printf.sprintf "(%s < %s || (%s == %s && %s != %s))" left right left left right right
 
+let render_required_operand (emission : Emission.t) fc operand =
+  match render_operand emission fc operand with
+  | Some rendered -> rendered
+  | None -> C_runtime.raise_bug "an operand of zero size"
+
+let is_unsigned : Memory_layout.scalar -> bool = function
+  | Integer (UInt8 | UInt16 | UInt32 | UInt64) -> true
+  | _ -> false
+
+let is_zero : Lowered.operand -> bool = function
+  | Constant (Integer (_, value)) -> Z.sign value = 0
+  | _ -> false
+
+let render_comparison (emission : Emission.t) fc ((comparison, left, right) : Lowered.test) =
+  let left_text, left_ty = render_required_operand emission fc left in
+  let right_text, right_ty = render_required_operand emission fc right in
+  let scalar = classify_scalar emission left_ty in
+  let is_unsigned_pair = is_unsigned scalar && classify_scalar emission right_ty = scalar in
+  let render_boolean text = Printf.sprintf "((uint8_t)%s)" text in
+  let compare symbol = render_boolean (Printf.sprintf "(%s %s %s)" left_text symbol right_text) in
+  match comparison with
+  | (Greater_equal | Less) when is_unsigned_pair && is_zero right ->
+      render_boolean (if comparison = Greater_equal then "1" else "0")
+  | (Less_equal | Greater) when is_unsigned_pair && is_zero left ->
+      render_boolean (if comparison = Less_equal then "1" else "0")
+  | Equal ->
+      if is_float scalar then render_boolean (render_lawful_equal left_text right_text)
+      else compare "=="
+  | Not_equal ->
+      if is_float scalar then render_boolean ("!" ^ render_lawful_equal left_text right_text)
+      else compare "!="
+  | Less ->
+      if is_float scalar then render_boolean (render_lawful_less left_text right_text)
+      else compare "<"
+  | Less_equal ->
+      if is_float scalar then render_boolean ("!" ^ render_lawful_less right_text left_text)
+      else compare "<="
+  | Greater ->
+      if is_float scalar then render_boolean (render_lawful_less right_text left_text)
+      else compare ">"
+  | Greater_equal ->
+      if is_float scalar then render_boolean ("!" ^ render_lawful_less left_text right_text)
+      else compare ">="
+  | Ieee_equal -> compare "=="
+  | Ieee_less -> compare "<"
+  | Ieee_less_equal -> compare "<="
+
 let render_binary (emission : Emission.t) (op : Lowered.binary) (left, a_ty) (right, _) =
   let scalar = classify_scalar emission a_ty in
   let c_type = C_types.render_scalar_type emission.types scalar in
-  let render_boolean text = Printf.sprintf "((uint8_t)%s)" text in
   let render_arithmetic symbol =
     if is_float scalar then Printf.sprintf "(%s %s %s)" left symbol right
     else Printf.sprintf "((%s)(%s %s %s))" c_type left symbol right
   in
-  let compare symbol = render_boolean (Printf.sprintf "(%s %s %s)" left symbol right) in
   let mask = compute_bit_width scalar - 1 in
   match op with
   | Add -> render_arithmetic "+"
@@ -212,21 +257,6 @@ let render_binary (emission : Emission.t) (op : Lowered.binary) (left, a_ty) (ri
         (render_unsigned_type emission scalar)
         left right mask
   | Shift_right -> Printf.sprintf "((%s)(%s >> (%s & %d)))" c_type left right mask
-  | Equal ->
-      if is_float scalar then render_boolean (render_lawful_equal left right) else compare "=="
-  | Not_equal ->
-      if is_float scalar then render_boolean ("!" ^ render_lawful_equal left right)
-      else compare "!="
-  | Less -> if is_float scalar then render_boolean (render_lawful_less left right) else compare "<"
-  | Less_equal ->
-      if is_float scalar then render_boolean ("!" ^ render_lawful_less right left) else compare "<="
-  | Greater ->
-      if is_float scalar then render_boolean (render_lawful_less right left) else compare ">"
-  | Greater_equal ->
-      if is_float scalar then render_boolean ("!" ^ render_lawful_less left right) else compare ">="
-  | Ieee_equal -> compare "=="
-  | Ieee_less -> compare "<"
-  | Ieee_less_equal -> compare "<="
 
 let render_unary (emission : Emission.t) (op : Lowered.unary) (operand_text, a_ty) =
   let scalar = classify_scalar emission a_ty in
@@ -420,11 +450,7 @@ let build_c (emission : Emission.t) fc (ty : Ground.ty) variant
 
 let render_rvalue (emission : Emission.t) fc (target : Lowered.ty) (rvalue : Lowered.rvalue) :
     built option =
-  let render_required_operand argument =
-    match render_operand emission fc argument with
-    | Some expression -> expression
-    | None -> C_runtime.raise_bug "an operand of zero size"
-  in
+  let render_required_operand = render_required_operand emission fc in
   match rvalue with
   | Use argument ->
       Option.map (fun (text, _) -> Expression text) (render_operand emission fc argument)
@@ -434,6 +460,7 @@ let render_rvalue (emission : Emission.t) fc (target : Lowered.ty) (rvalue : Low
       Some
         (Expression
            (render_binary emission op (render_required_operand left) (render_required_operand right)))
+  | Compare test -> Some (Expression (render_comparison emission fc test))
   | Convert (argument, scalar) ->
       Some
         (Expression

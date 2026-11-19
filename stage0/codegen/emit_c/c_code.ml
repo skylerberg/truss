@@ -373,6 +373,9 @@ let write_terminator (emission : Emission.t) fc buffer (terminator : Lowered.ter
   in
   match terminator with
   | Goto block -> write_line "goto b%d;" block
+  | Branch { test; yes; no } ->
+      write_line "if (%s) goto b%d;" (C_values.render_comparison emission fc test) yes;
+      write_line "goto b%d;" no
   | Switch { value; cases; default } ->
       let text, ty = render_operand value in
       let c_type =

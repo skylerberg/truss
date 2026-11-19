@@ -31,8 +31,8 @@ let project_length sequence = Lowered.project sequence (Lowered.Field length_fie
 let project_capacity storage = Lowered.project storage (Lowered.Field capacity_field)
 let index_element sequence index = Lowered.project (project_buffer sequence) (Index index)
 
-let build_is_allocated storage : Lowered.rvalue =
-  Binary (Not_equal, Copy (project_capacity storage), Lowered.make_uint64_constant 0)
+let make_allocated_test storage : Lowered.test =
+  (Not_equal, Copy (project_capacity storage), Lowered.make_uint64_constant 0)
 
 let build_storage ty ~buffer ~length ~capacity : Lowered.rvalue =
   Build
