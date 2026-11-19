@@ -1,4 +1,5 @@
 use standard::intrinsic
+use standard::specification
 
 public opaque type Generator(state: Array[UInt64, 4])
   derives Plain
@@ -184,17 +185,23 @@ public fn Generator.fill(mut self, buffer: mut Slice[UInt8])
 }
 
 public fn Generator.shuffle[Element](mut self, items: mut Slice[Element])
+  ensures items.model().is_permutation_of(old(items.model()))
+  ensures forall i in 0..items.length() => old(items.model()).contains(items[i])
   cost time O(items.length())
 {
   var remaining = items.length()
   while remaining > 1
     invariant items.length() == old(items.length())
+    invariant items.model().is_permutation_of(old(items.model()))
     invariant remaining <= items.length()
     decreases remaining
   {
     let chosen = mut self.index(remaining)
     remaining -= 1
     mut items.swap(chosen, second: remaining)
+  }
+  proof {
+    specification::elements_of_a_permutation(items.model(), original: old(items.model()))
   }
 }
 

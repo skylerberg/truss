@@ -274,6 +274,7 @@ public fn List[Element].swap(mut self, first: UInt64, second: UInt64)
   ensures identical(self.model()[second], old(self.model())[first])
   ensures forall i in 0..self.length() =>
     i == first || i == second || identical(self.model()[i], old(self.model())[i])
+  ensures self.model().is_permutation_of(old(self.model()))
   cost time O(1)
   cost amortized time O(1)
   cost allocations == 0
@@ -285,8 +286,7 @@ public fn List[Element].reverse(mut self)
   ensures self.length() == old(self.length())
   ensures forall i in 0..self.length() =>
     identical(self.model()[i], old(self.model())[self.length() - 1 - i])
-  ensures forall measure: fn(Element) -> Integer =>
-    self.model().sum(measure) == old(self.model()).sum(measure)
+  ensures self.model().is_permutation_of(old(self.model()))
   ensures self.capacity() == old(self.capacity())
   cost time O(self.length())
   cost amortized time O(self.length())
@@ -301,8 +301,7 @@ public fn List[Element].reverse(mut self)
     invariant forall i in high..self.length() =>
       identical(self.model()[i], old(self.model())[self.length() - 1 - i])
     invariant forall i in low..high => identical(self.model()[i], old(self.model())[i])
-    invariant forall measure: fn(Element) -> Integer =>
-      self.model().sum(measure) == old(self.model()).sum(measure)
+    invariant self.model().is_permutation_of(old(self.model()))
     invariant intrinsic::storage_capacity(self.storage) == old(intrinsic::storage_capacity(self.storage))
     decreases high - low
   {
