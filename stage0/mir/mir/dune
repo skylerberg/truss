@@ -11,6 +11,5 @@
   intrinsic
   well_known
   resolve
-  infer
   interface
   zarith))

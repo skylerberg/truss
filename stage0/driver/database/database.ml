@@ -726,7 +726,7 @@ let type_check run lookups key =
   | exception Reads_failed_part -> Blocked
 
 let make_form_origin database note =
-  Infer.find_form_origin (make_recording_interface_lookups database note ~is_checked:true)
+  Interface.find_form_origin (make_recording_interface_lookups database note ~is_checked:true)
     ~is_derived:(fun path -> Option.is_some (find_part database note (Generated_mir path)))
 
 let read_body_mir database note key = read_value database note (Body_mir key)
@@ -2418,7 +2418,7 @@ module For_testing = struct
         Option.map
           (fun form -> (form, substitution))
           (match origin with
-          | Infer.Written key | Inherited key ->
+          | Interface.Written key | Inherited key ->
               Option.map
                 (fun (checked : Infer.checked) -> checked.form)
                 (read_checked_body database key)
