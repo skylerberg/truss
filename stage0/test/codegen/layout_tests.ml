@@ -191,6 +191,22 @@ let () =
       Codegen_support.expect_string ~expected:"24/8 struct(left@0 right@8 value@16)"
         (Memory_layout.For_testing.to_string
            (Memory_layout.lay_out_block env (Codegen_support.named "Tree") "Node")));
+  Codegen_support.test "an indirect variant whose fields take no space has a one-byte block"
+    (fun () ->
+      let shape =
+        Memory_layout.Sum
+          [
+            Codegen_support.variant ~indirect:true "Dot" [];
+            Codegen_support.variant "Square" [ Codegen_support.field "side" Codegen_support.int64 ];
+          ]
+      in
+      let env =
+        Memory_layout.create Codegen_support.host
+          ~compute_shape:(Codegen_support.compute_shape [ ("Shape", shape) ])
+      in
+      Codegen_support.expect_string ~expected:"1/1 struct(_filler@0)"
+        (Memory_layout.For_testing.to_string
+           (Memory_layout.lay_out_block env (Codegen_support.named "Shape") "Dot")));
   Codegen_support.test "an Array holds its elements in place" (fun () ->
       Codegen_support.expect_string ~expected:"32/1 array(32 x 1/1 UInt8)"
         (Codegen_support.describe (Codegen_support.array Codegen_support.uint8 32)));

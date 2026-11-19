@@ -460,8 +460,10 @@ public type Interval =
 - Repeated invariants all hold, and each may rely on the ones before it.
 - Invariants are proven, never checked when the program runs. An invariant
   holds wherever other code can observe the value: when it is built,
-  directly or with `with`, passed to a call, or returned, and when the
-  function that holds it ends. A `with` is checked after all of its updates.
+  directly or with `with`, passed to a call, or returned, and when its
+  holder ends: a `var` at the end of its scope, and a `mut` parameter or
+  `mut self` when the function returns. A `with` is checked after all of
+  its updates.
 - A private method that takes `mut self` is a step of an update: the
   invariant of its `self` is neither assumed when it is called nor required
   when it returns. A method written in a trait, a capability, or an `impl`
@@ -1440,7 +1442,7 @@ greet(user)
 ### Updating records
 
 ```ebnf
-update = LOWER_NAME { "." LOWER_NAME } ":" expression | LOWER_NAME ;
+update = [ LOWER_NAME { "." LOWER_NAME } ":" ] expression ;
 ```
 
 ```truss
@@ -1467,6 +1469,12 @@ fn production(config: own Config) -> Config {
   assigning its fields, and returning it.
 - The base is passed as an `own` argument is: a base that is a place takes
   `own`, unless it copies implicitly.
+- The updates follow the rules of a construction's arguments, with a path
+  of fields for a label: each names a field of the record once, a bare name
+  goes to the field it names, as in `with (own name)`, and each value is
+  passed to its field as an `own` argument is.
+- `a.b: value` builds `a` anew with `b` updated, so it names `a`, and no
+  other update names `a` itself.
 - `with` works on records, and updates only fields visible at that point.
 
 ### Lambdas
@@ -2048,7 +2056,8 @@ fn profile(id: UserId) -> Result[Profile, DatabaseError]
   `Result`, `None` where it returns an `Option`, and early where it returns
   nothing. `Tasks.cancelled()` tells whether the task is cancelled. A task
   blocked on the mutex of a `mut` implementation waits until it acquires it.
-- A function that waits for another task has no `time` clause.
+- A function that waits for another task has no `time` clause, and the end
+  of a `concurrent` block or a `concurrent for` waits for its tasks.
 
 The iterations of a `parallel for` and of a `concurrent for` run at the same
 time, and a `concurrent for` iteration keeps running after the loop
@@ -2446,6 +2455,8 @@ an invariant, a law, or a proof.
   `requires`, and each index is in bounds. `&&`, `||`, `==>`, and `if` read
   left to right, so the right side can rely on the left.
 - `==` is the type's `Equal`, and `identical(a, b)` is identity, for any type.
+- A specification is read as a formula, not run: it holds no `return`,
+  `break`, `continue`, `?`, `var`, loop, or `unreachable`.
 
 | Form | Meaning |
 |---|---|
@@ -2513,9 +2524,11 @@ public opaque type Session = todo
   definition.
 - Code with a `todo` is type-checked and proven, and callers are checked
   against the signature of an unfinished function.
-- A release build refuses a program whose `main` can reach a `todo`. In a
-  development build, a `todo` that runs stops the program and reports its
-  position.
+- A `todo` in a specification is a hole: on the paths through it, the
+  specification is neither proven nor assumed.
+- A release build refuses a program whose `main` can reach a `todo`, in its
+  code or its specifications. In a development build, a `todo` that runs
+  stops the program and reports its position.
 - A type defined as `todo` can be named, but its contents cannot be used.
 
 ## Debug output

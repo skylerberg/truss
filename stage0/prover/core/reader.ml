@@ -8,6 +8,7 @@ type loop_exits = {
 
 type run = {
   infos : Mir.local_info array;
+  changed_in_place : (Mir.local, unit) Hashtbl.t;
   lambdas : Mir.body array;
   provides : (Core.origin, Mir.provided list) Hashtbl.t;
   mutable loops : loop_exits list;
@@ -199,7 +200,10 @@ let write_resolved context frame run (place : Mir.place) new_value =
   | Local local -> (
       let whole =
         if place.Mir.projections = [] then new_value
-        else rebuild [] (read_root context frame run place.Mir.root) place.Mir.projections
+        else begin
+          Hashtbl.replace run.changed_in_place local ();
+          rebuild [] (read_root context frame run place.Mir.root) place.Mir.projections
+        end
       in
       match Locals.make_key run.infos local with
       | Core_local Self -> { frame with self = Some whole }
@@ -363,6 +367,11 @@ let make_passed_place context run place =
     State.read =
       (fun frame -> read_place context { frame with makes_obligations = false } run place);
     write = (fun frame term -> write_place context frame run place term);
+    note_changed_in_place =
+      (fun () ->
+        match place.root with
+        | Local local -> Hashtbl.replace run.changed_in_place local ()
+        | Constant _ | Literal _ -> ());
   }
 
 let classify_shape run ?function_ (value : Mir.operand) : Invocation.shape =
@@ -394,6 +403,11 @@ let merge_places context (places : (Logic.term * State.passed_place) list) : Sta
                     (fun ((condition, place) : Logic.term * State.passed_place) ->
                       place.write (Facts.restrict frame condition) term)
                     places)));
+        note_changed_in_place =
+          (fun () ->
+            List.iter
+              (fun ((_, place) : Logic.term * State.passed_place) -> place.note_changed_in_place ())
+              places);
       }
 
 let find_argument_place context (frame : State.frame) run (mode : Types.mode) (value : Mir.operand)
@@ -641,8 +655,9 @@ let refresh_place context frame ty (place : State.passed_place) =
   frame
 
 let record_todo (context : State.context) (frame : State.frame) location =
-  if context.proving then begin
-    context.holes <- (context.home, location) :: context.holes;
+  if frame.is_ghost then begin
+    if not (List.mem (context.home, location) context.holes) then
+      context.holes <- (context.home, location) :: context.holes;
     context.unfinished <- frame.condition :: context.unfinished
   end
 
@@ -1025,17 +1040,20 @@ and read_statement context frame run (statement : Mir.statement) =
       | Written_unreachable -> oblige_unreachable context frame location
       | Todo -> record_todo context frame location);
       None
-  | Fork { fork; branches; _ } ->
-      List.fold_left
-        (fun frame (index, (branch : Mir.block)) ->
-          let* frame = frame in
-          let cancelled = ref [] in
-          run.cancelled <- (Mir.Branch { block = fork; index }, cancelled) :: run.cancelled;
-          let ended = read_statements context frame run branch.statements in
-          run.cancelled <- List.tl run.cancelled;
-          Facts.join_frames context (Option.to_list ended @ List.rev !cancelled))
-        (Some frame)
-        (List.mapi (fun index branch -> (index, branch)) branches)
+  | Fork { fork; concurrent; branches } ->
+      let ended =
+        List.fold_left
+          (fun frame (index, (branch : Mir.block)) ->
+            let* frame = frame in
+            let cancelled = ref [] in
+            run.cancelled <- (Mir.Branch { block = fork; index }, cancelled) :: run.cancelled;
+            let ended = read_statements context frame run branch.statements in
+            run.cancelled <- List.tl run.cancelled;
+            Facts.join_frames context (Option.to_list ended @ List.rev !cancelled))
+          (Some frame)
+          (List.mapi (fun index branch -> (index, branch)) branches)
+      in
+      if concurrent then Option.map (wait_for_tasks context) ended else ended
   | Resume { winner; exits } ->
       let won =
         read_operand context frame run
@@ -1220,7 +1238,14 @@ and read_statement context frame run (statement : Mir.statement) =
           bind_parts = (fun frame -> bind_parts context frame run);
         }
       in
-      Loops.run_for_loop context frame for_loop
+      let ended = Loops.run_for_loop context frame for_loop in
+      if loop.schedule = Concurrent_loop then Option.map (wait_for_tasks context) ended else ended
+
+and wait_for_tasks context frame =
+  Operations.spend context frame (fun (counter : Costs.counter) ->
+      match counter.resource with
+      | Metric Time -> Operations.declare_unknown_amount context frame counter
+      | Metric (Allocations | Allocated_bytes) | Calls _ -> Costs.zero)
 
 and read_basic context frame run (statement : Mir.statement) ~location (basic : Mir.basic) =
   match basic with
@@ -1272,6 +1297,25 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       | None -> None)
   | Live _ | Loan_start _ | Loan_end _ | Echo _ -> Some frame
   | Dead locals ->
+      if frame.makes_obligations then
+        List.iter
+          (fun local ->
+            match
+              (run.infos.(local), Locals.find_opt (Locals.make_key run.infos local) frame.locals)
+            with
+            | ( { kind = (Source { is_var = true; _ } | Temporary) as kind; type_; origin; _ },
+                Some term )
+              when Hashtbl.mem run.changed_in_place local ->
+                Lambdas.check_valid context frame
+                  (Facts.locate context frame.source origin)
+                  (Facts.substitute_type context frame type_)
+                  term ~deep:true
+                  ~when_:
+                    (match kind with
+                    | Temporary -> "for the value built here"
+                    | _ -> Printf.sprintf "for %s when its scope ends" (describe_local kind))
+            | _ -> ())
+          locals;
       let frame =
         List.fold_left
           (fun (frame : State.frame) local ->
@@ -1460,7 +1504,14 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
     | _ -> written)
 
 let make_run ~locals ~lambdas =
-  { infos = locals; lambdas; provides = Hashtbl.create 2; loops = []; cancelled = [] }
+  {
+    infos = locals;
+    changed_in_place = Hashtbl.create 4;
+    lambdas;
+    provides = Hashtbl.create 2;
+    loops = [];
+    cancelled = [];
+  }
 
 let read_formula context (frame : State.frame) (formula : Mir.formula) ~arguments =
   let run = make_run ~locals:formula.locals ~lambdas:formula.lambdas in
@@ -1471,6 +1522,7 @@ let read_formula context (frame : State.frame) (formula : Mir.formula) ~argument
       aliases = Locals.empty;
       slices = Locals.empty;
       lends = Locals.empty;
+      is_ghost = true;
     }
   in
   let inside =
@@ -1485,8 +1537,10 @@ let read_formula context (frame : State.frame) (formula : Mir.formula) ~argument
         inside formula.parameters arguments
   in
   Facts.run_in_source context frame.source (fun () ->
-      let after, term = read_value context inside run formula.value in
-      ({ frame with spent = after.spent }, term))
+      match read_block context inside run formula.value with
+      | Some (after, term) -> ({ frame with spent = after.spent }, term)
+      | None when Types.equal formula.type_ Types.bool -> (frame, Logic.Boolean true)
+      | None -> (frame, Facts.arrive context frame "unfinished" formula.type_))
 
 let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
   let run = make_run ~locals:body.locals ~lambdas in

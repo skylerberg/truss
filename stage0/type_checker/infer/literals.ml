@@ -1,8 +1,14 @@
 let round_float ~precision ~minimum ~maximum ~(significand : Z.t) ~(exponent : Z.t) : float option =
+  let negative = Z.sign significand < 0 in
+  let magnitude = Z.abs significand in
+  let order_of_magnitude = Z.add exponent (Z.of_int (String.length (Z.to_string magnitude))) in
+  let overflow_order = ((maximum + 1) * 302 / 1000) + 2
+  and underflow_order = ((minimum - precision) * 302 / 1000) - 1 in
   if Z.equal significand Z.zero then Some 0.0
+  else if Z.gt order_of_magnitude (Z.of_int overflow_order) then None
+  else if Z.lt order_of_magnitude (Z.of_int underflow_order) then
+    Some (if negative then Float.neg 0.0 else 0.0)
   else
-    let negative = Z.sign significand < 0 in
-    let magnitude = Z.abs significand in
     let power = Z.pow (Z.of_int 10) (Z.to_int (Z.abs exponent)) in
     let numerator, denominator =
       if Z.sign exponent >= 0 then (Z.mul magnitude power, Z.one) else (magnitude, power)

@@ -698,6 +698,28 @@ let () =
       expect_not_proven (span ^ Fixtures.Prover.span_high_assigned_below_low) "prover.invariant");
   Harness.test "a body may break an invariant between calls" (fun () ->
       expect_proven (span ^ Fixtures.Prover.span_low_assigned_above_high));
+  Harness.test "a var must meet its invariant when its scope ends" (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_var_assigned_past_its_invariant)
+        "prover.invariant";
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_var_in_a_loop_body_past_its_invariant)
+        "prover.invariant");
+  Harness.test "a with must meet the invariant" (fun () ->
+      expect_not_proven (span ^ Fixtures.Prover.span_updated_past_its_invariant) "prover.invariant";
+      expect_proven (span ^ Fixtures.Prover.span_updated_within_its_invariant));
+  Harness.test "a with through a path must meet the invariant of the record it rebuilds" (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.interval_updated_past_its_span_invariant)
+        "prover.invariant");
+  Harness.test "a var may break its invariant before its scope ends" (fun () ->
+      expect_proven (span ^ Fixtures.Prover.span_var_restored_before_its_scope_ends));
+  Harness.test "a var changed through a field passed mut must meet its invariant" (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_var_field_passed_mut_past_its_invariant)
+        "prover.invariant");
+  Harness.test "a var that a step of an update leaves broken must meet its invariant" (fun () ->
+      expect_not_proven (span ^ Fixtures.Prover.span_var_left_broken_by_a_step) "prover.invariant");
   Harness.test "a value passed to a call must meet its invariant" (fun () ->
       expect_not_proven
         (span ^ Fixtures.Prover.span_passed_after_breaking_its_invariant)
@@ -1219,6 +1241,17 @@ let () =
       let text = Fixtures.Prover.theorem_of_todo in
       expect_proven text;
       if count_holes text <> 1 then Harness.fail "%d holes" (count_holes text));
+  Harness.test "a todo in a contract is a hole where it is written and where it is relied on"
+    (fun () ->
+      List.iter
+        (fun (text, holes) ->
+          expect_proven text;
+          if count_holes text <> holes then Harness.fail "%d holes" (count_holes text))
+        [
+          (Fixtures.Prover.todo_requires_with_a_caller, 2);
+          (Fixtures.Prover.todo_ensures_with_a_caller, 3);
+          (Fixtures.Prover.positive_with_a_todo_invariant, 2);
+        ]);
   Harness.test "a todo in a proof block leaves the rest of its path to it" (fun () ->
       let text = Fixtures.Prover.proof_block_of_todo in
       expect_proven text;
@@ -1700,7 +1733,12 @@ let () =
   Harness.test "a concurrent for may return early, with a value known by its type" (fun () ->
       expect_proven Fixtures.Prover.any_negative_through_a_concurrent_for);
   Harness.test "a value returned from a concurrent for is not known to be any one iteration's"
-    (fun () -> expect_not_proven Fixtures.Prover.claimed_through_a_concurrent_for "prover.ensures")
+    (fun () -> expect_not_proven Fixtures.Prover.claimed_through_a_concurrent_for "prover.ensures");
+  Harness.test "a function that waits for its tasks has no time bound" (fun () ->
+      expect_not_proven Fixtures.Prover.concurrent_block_under_a_time_bound "prover.cost";
+      expect_not_proven Fixtures.Prover.concurrent_for_under_a_time_bound "prover.cost");
+  Harness.test "waiting for tasks allocates nothing" (fun () ->
+      expect_proven Fixtures.Prover.concurrent_block_under_an_allocation_bound)
 
 let () =
   let fix_titles text =

@@ -1,0 +1,4 @@
+fn f(span: Span) -> Int64 {
+  let widened = span with (low: 10)
+  widened.high
+}
