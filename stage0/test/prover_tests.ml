@@ -1608,7 +1608,11 @@ let () =
 
 let () =
   Harness.test "a constant's value is well defined" (fun () ->
-      expect_not_proven "let shifted: UInt8 = 1 << 8\n" "prover.shift");
+      expect_not_proven
+        "type Amounts(far: UInt64)\n\n\
+         let amounts: Amounts = Amounts(far: 8)\n\n\
+         let shifted: UInt8 = 1 << amounts.far\n"
+        "prover.shift");
   Harness.test "a constant whose value is in range proves" (fun () ->
       expect_proven "let shifted: UInt8 = 1 << 7\n")
 
