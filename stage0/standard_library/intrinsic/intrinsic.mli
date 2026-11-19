@@ -98,4 +98,3 @@ val operations : operation list
 val show_operation : operation -> string
 val make_operation_path : operation -> Path.t
 val find_operation : Path.t -> operation option
-val list_uses : operation -> Path.t list

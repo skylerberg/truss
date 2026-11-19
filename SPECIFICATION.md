@@ -2021,13 +2021,14 @@ These capabilities are in the prelude:
 | `Panic` | Ending the program |
 | `RunForever` | Running a loop or a recursion that no measure bounds (see [Termination](#termination)) |
 
-The runtime holds a *real implementation* of every standard capability.
-Those of `Panic` and `RunForever` are built in, and no `impl` implements
-either. A capability that a package declares has no real implementation.
-An intrinsic that reaches the operating system uses `System`, a
-capability of the standard library that no other package can name. The
-runtime grants it to the real implementations, and nothing implements it,
-so a function without `uses` is pure in the standard library too.
+`Panic`, `RunForever`, and `System` are *built-in* capabilities: the
+compiler gives each its meaning, and no `impl` implements any of them. The
+runtime holds a *real implementation* of every other standard capability.
+A capability that a package declares has no real implementation. An
+intrinsic that reaches the operating system uses `System`, which no
+package but the standard library can name. The runtime grants `System`
+only to the real implementations, so a function without `uses` is pure in
+the standard library too.
 
 ### Handles
 

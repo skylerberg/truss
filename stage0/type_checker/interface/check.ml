@@ -115,15 +115,23 @@ let check_real_implementations (state : Checking.state) (resolved : Resolve.reso
       match capability.kind with
       | Capability_path written -> (
           match resolved.names.(written.path.last.id) with
-          | Some (Definition (Capability, path))
-            when (not (Types.is_built_in_capability (Capability path)))
-                 && Option.is_none (Definition.find_real_implementation state.lookups path) ->
-              Checking.report state No_real_implementation state.spans.(capability.id)
-                (Printf.sprintf
-                   "`%s` has no real implementation, so the runtime cannot provide it to %s. \
-                    Provide an implementation in the body with `provide`."
-                   (Elaborator.show_path written.path)
-                   recipient)
+          | Some (Definition (Capability, path)) -> (
+              match Well_known.find_builtin_capability path with
+              | Some (Panic | Run_forever) -> ()
+              | Some System ->
+                  Checking.report state No_real_implementation state.spans.(capability.id)
+                    (Printf.sprintf
+                       "The runtime grants `System` only to the real implementations of the \
+                        standard capabilities, so it cannot provide it to %s."
+                       recipient)
+              | None when Option.is_none (Definition.find_real_implementation state.lookups path) ->
+                  Checking.report state No_real_implementation state.spans.(capability.id)
+                    (Printf.sprintf
+                       "`%s` has no real implementation, so the runtime cannot provide it to %s. \
+                        Provide an implementation in the body with `provide`."
+                       (Elaborator.show_path written.path)
+                       recipient)
+              | None -> ())
           | _ -> ())
       | Self_capabilities _ | Associated_capabilities _ | Generic_capability _ -> ())
     uses

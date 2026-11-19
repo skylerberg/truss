@@ -416,7 +416,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let rec check_capabilities subject (set : Types.capability_set) =
     List.iter
       (function
-        | Types.Capability _ -> ()
+        | Types.Built_in _ | Types.Capability _ -> ()
         | Types.Capability_parameter mentioned -> check_capability_parameter subject mentioned
         | Types.Capability_projection { base; trait = reference; name } ->
             (match base with

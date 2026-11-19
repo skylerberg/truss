@@ -225,8 +225,7 @@ let () =
         List.filter_map
           (fun (node : Core.expression) ->
             match (node.kind, node.type_) with
-            | Lambda _, Function { uses; _ } ->
-                Some (Types.has_capability (Types.Capability (Well_known.make_path Panic)) uses)
+            | Lambda _, Function { uses; _ } -> Some (Types.has_capability (Built_in Panic) uses)
             | _ -> None)
           (list_core_expressions text ~of_function:"f")
       with
@@ -794,9 +793,7 @@ let () =
             | _ -> None)
           (list_core_expressions text ~of_function:"run")
       with
-      | [ [ Capability path; Capability_parameter { name = "Mine"; _ } ] ]
-        when Well_known.is Run_forever path ->
-          ()
+      | [ [ Built_in Run_forever; Capability_parameter { name = "Mine"; _ } ] ] -> ()
       | _ -> Harness.fail "the lambda's type does not hold `RunForever` and `Mine` alone");
   Harness.test
     "a binding without a type holds a function that uses a capability parameter and RunForever"
@@ -886,10 +883,23 @@ let () =
         ~says:"This call uses `Tasks`, which is not available here. Declare it with `uses Tasks`"
         ~at:("intrinsic::shared_update", 1);
       expect_fine_in_standard Fixtures.Capabilities.shared_count_updated_using_tasks);
-  Harness.test "a call of an intrinsic that reaches the operating system needs `System`" (fun () ->
+  Harness.test
+    "a call of an intrinsic that reaches the operating system needs `System`, which nothing can \
+     provide" (fun () ->
       expect_one_in_standard Fixtures.Capabilities.error_number_read_without_system
-        "capabilities.not_available" ~says:"This call uses `System`" ~at:("intrinsic::libc_errno", 1);
+        "capabilities.not_available"
+        ~says:"This call uses `System`, which is not available here. Declare it with `uses System`."
+        ~at:("intrinsic::libc_errno", 1);
       expect_fine_in_standard Fixtures.Capabilities.error_number_read_using_system);
+  Harness.test "the runtime does not grant `System` to a test" (fun () ->
+      expect_one_in_standard Fixtures.Capabilities.test_using_system "types.no_real_implementation"
+        ~says:
+          "The runtime grants `System` only to the real implementations of the standard \
+           capabilities, so it cannot provide it to a test.");
+  Harness.test
+    "a capability implemented by a monitor may take a callback that uses only `System`, since no \
+     `provide` implements it" (fun () ->
+      expect_fine_in_standard Fixtures.Capabilities.monitor_table_with_callbacks_that_use_system);
   Harness.test
     "an implementation of a capability that reaches the operating system declares `System`"
     (fun () ->

@@ -292,6 +292,7 @@ let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Ty
   let usage = ref No_tasks in
   let rec mark_used (capability : Types.capability) =
     match capability with
+    | Built_in _ -> ()
     | Capability path -> if Path.equal path (Well_known.make_path Tasks) then usage := Uses_tasks
     | Capability_parameter _ | Capability_projection _ ->
         if !usage = No_tasks then usage := Through_parameter

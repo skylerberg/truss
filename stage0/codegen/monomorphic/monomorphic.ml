@@ -12,9 +12,9 @@ let list_capabilities context substitution (set : Types.capability_set) : Path.t
   List.sort_uniq Path.compare
     (List.filter_map
        (function
-         | Types.Capability path when Well_known.is Run_forever path || Well_known.is System path ->
-             None
-         | Types.Capability path -> Some path
+         | Types.Built_in Panic -> Some (Well_known.make_builtin_capability_path Panic)
+         | Built_in (Run_forever | System) -> None
+         | Capability path -> Some path
          | Capability_parameter parameter ->
              raise_bug "the capability parameter %s of %s is not substituted" parameter.name
                (Path.show parameter.owner)
@@ -76,9 +76,7 @@ let rec convert_ty : Ground.ty -> Types.ty = function
           inputs =
             List.map (fun (yield_mode, ty) -> (yield_mode, convert_ty ty)) function_type.parameters;
           output = convert_ty function_type.result;
-          uses =
-            Types.make_capability_set
-              (List.map (fun path -> Types.Capability path) function_type.uses);
+          uses = Types.make_capability_set (List.map Types.make_capability function_type.uses);
           costs = [];
         }
   | Any { trait; arguments; associated } ->
@@ -93,8 +91,7 @@ and convert_argument : Ground.argument -> Types.argument = function
   | Type ty -> Type (convert_ty ty)
   | Value value -> Value (Known value)
 
-let convert_capabilities set =
-  Types.make_capability_set (List.map (fun path -> Types.Capability path) set)
+let convert_capabilities set = Types.make_capability_set (List.map Types.make_capability set)
 
 let make_substitution (generics : Types.generic list) arguments =
   if List.length generics <> List.length arguments then

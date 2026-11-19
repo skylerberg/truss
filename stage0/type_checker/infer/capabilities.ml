@@ -28,7 +28,7 @@ let compute_available scope = Types.union_capabilities scope.allowed scope.provi
 let find_implemented_capability scope : Types.capability option =
   match scope.kind with
   | Function_body { implementation = Some { trait = { is_capability = true; _ }; impl; _ }; _ } ->
-      Some (Capability impl.implements.trait)
+      Some (Types.make_capability impl.implements.trait)
   | Function_body _ | Lambda_body _ | Restricted _ -> None
 
 let value_reason =
@@ -39,7 +39,8 @@ let make_restricted_scope ?enclosing ~allowed ~reason description =
   make_scope ~allowed (Restricted { description; reason; enclosing })
 
 let make_parallel_scope ~enclosing description =
-  make_restricted_scope ~enclosing ~allowed:Types.built_in_capabilities
+  make_restricted_scope ~enclosing
+    ~allowed:(Types.make_capability_set [ Built_in Panic; Built_in Run_forever ])
     ~reason:"Parallel calls of one implementation could race." description
 
 let make_no_capabilities_scope description =
@@ -47,7 +48,7 @@ let make_no_capabilities_scope description =
 
 let make_quantifier_scope ~enclosing =
   make_restricted_scope ~enclosing
-    ~allowed:(Types.make_capability_set [ Types.run_forever ])
+    ~allowed:(Types.make_capability_set [ Built_in Run_forever ])
     ~reason:value_reason "a quantifier's body"
 
 let find_enclosing_restriction scope =
@@ -142,7 +143,7 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
               (Printf.sprintf
                  "This lambda uses `%s`, which the function type it is passed as does not allow."
                  shown)
-        | Restricted { description; _ } when capability = Types.run_forever ->
+        | Restricted { description; _ } when capability = Built_in Run_forever ->
             report checking Not_available origin
               (Printf.sprintf "%s uses `RunForever`, but %s must terminate.%s" subject description
                  (add_alternative ~sentence_start:true alternative))
@@ -155,8 +156,10 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
         | Function_body { path; _ } ->
             let can_provide =
               match capability with
-              | Types.Capability _ -> not (Types.is_built_in_capability capability)
-              | Capability_parameter _ | Capability_projection _ | Capability_variable _ -> false
+              | Types.Capability _ -> true
+              | Built_in _ | Capability_parameter _ | Capability_projection _
+              | Capability_variable _ ->
+                  false
               | Capability_error _ -> State.raise_bug "a capability with an error is missing"
             in
             report checking Not_available origin
@@ -209,7 +212,7 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
 
 let require_run_forever_of_unmeasured_loop checking scope (origin : Core.origin) ~alternative =
   require_available checking scope origin ~subject:"This loop has no measure, so it" ~alternative
-    (Types.make_capability_set [ Types.run_forever ])
+    (Types.make_capability_set [ Built_in Run_forever ])
 
 let compute_node_origin = function
   | `Expression (inner : Core.expression) -> inner.origin
@@ -354,7 +357,7 @@ and check_provide checking scope implementations body =
         Types.union_capabilities !provided
           (Types.make_capability_set
              (List.map
-                (fun ((provided : Core.provided), _) -> Types.Capability provided.capability)
+                (fun ((provided : Core.provided), _) -> Types.make_capability provided.capability)
                 impls)))
     implementations;
   checking.provides <- (compute_available scope, implementations, body) :: checking.provides;
@@ -429,8 +432,8 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
   let trait_uses (trait : Types.trait_reference) =
     let can_hold_a_capability : Types.capability -> bool = function
       | Capability_projection _ -> ( match type_ with Types.Any _ -> false | _ -> true)
-      | Capability _ as capability -> not (Types.is_built_in_capability capability)
-      | Capability_parameter _ | Capability_variable _ -> true
+      | Built_in _ -> false
+      | Capability _ | Capability_parameter _ | Capability_variable _ -> true
       | Capability_error _ -> State.raise_bug "a trait's method uses a capability with an error"
     in
     List.exists
@@ -454,7 +457,13 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
   in
   match type_ with
   | Types.Function { uses; inputs; output; _ } ->
-      Types.exists_capability (fun capability -> not (Types.is_built_in_capability capability)) uses
+      Types.exists_capability
+        (function
+          | Types.Built_in _ -> false
+          | Capability _ | Capability_parameter _ | Capability_projection _ | Capability_variable _
+          | Capability_error _ ->
+              true)
+        uses
       || List.exists (fun (_, input) -> can_call_inside input) inputs
       || can_call_inside output
   | Types.Any trait -> trait_uses trait
@@ -545,7 +554,7 @@ let check_monitor_callbacks checking implementations =
                               enter the monitor of a nested `provide`, and two tasks could \
                               deadlock. Pass the method the values that it needs instead of a \
                               callback."
-                             (Types.show_capability (Types.Capability provided.capability))
+                             (Path.show_name provided.capability)
                              method_.method_name parameter.name)
                     | None -> ())
                   capability.methods
