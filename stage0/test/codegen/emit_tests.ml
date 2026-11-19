@@ -282,7 +282,7 @@ let () =
         ]);
   Codegen_support.test "a mut parameter is a restrict pointer in C" (fun () ->
       let c_file = render_c_file (Codegen_support.make_shape_env ()) [ (bump, External) ] in
-      let expected = "void t_test__bump(int32_t *restrict l0_count)" in
+      let expected = "void truss_test__bump(int32_t *restrict l0_count)" in
       if not (String.includes ~affix:expected c_file) then
         Codegen_support.fail "no %S in:\n%s" expected c_file);
   let callback =
@@ -541,10 +541,10 @@ let () =
       let c_file =
         render_c_file (Codegen_support.make_shape_env ()) [ (caller, External); (callee, Internal) ]
       in
-      let copy = "static inline int32_t t_test__callee(int32_t l0) {" in
+      let copy = "static inline int32_t truss_test__callee(int32_t l0) {" in
       if not (String.includes ~affix:copy c_file) then
         Codegen_support.fail "no %S in:\n%s" copy c_file;
-      if String.includes ~affix:"\nint32_t t_test__callee(int32_t);" c_file then
+      if String.includes ~affix:"\nint32_t truss_test__callee(int32_t);" c_file then
         Codegen_support.fail "the callee is also declared as another file's:\n%s" c_file);
   Codegen_support.test "the C checks each type's size and alignment against its layout" (fun () ->
       let pair_shape =
@@ -584,7 +584,8 @@ let () =
           [ (holder, External) ]
       in
       let expected =
-        "_Static_assert(sizeof(t_test__Pair) == 16 && _Alignof(t_test__Pair) == 8, \"layout\");"
+        "_Static_assert(sizeof(truss_test__Pair) == 16 && _Alignof(truss_test__Pair) == 8, \
+         \"layout\");"
       in
       if not (String.includes ~affix:expected c_file) then
         Codegen_support.fail "no %S in:\n%s" expected c_file);
@@ -642,7 +643,7 @@ let () =
           }
       in
       Codegen_support.expect_string
-        ~expected:"t_standard__list__List_each_Of_standard__intrinsic__Int64_End_"
+        ~expected:"truss_standard__list__List_each_Of_standard__intrinsic__Int64_End_"
         (Emit_c.make_symbol item));
   let render_function_symbol package modules =
     Emit_c.make_symbol
@@ -653,7 +654,7 @@ let () =
          })
   in
   Codegen_support.test "a symbol marks a package's owner apart from its modules" (fun () ->
-      Codegen_support.expect_string ~expected:"t_acme_Owns_geometry__vector__length"
+      Codegen_support.expect_string ~expected:"truss_acme_Owns_geometry__vector__length"
         (render_function_symbol { owner = Some "acme"; name = "geometry" } [ "vector" ]);
       if
         render_function_symbol { owner = Some "acme"; name = "geometry" } [ "vector" ]
