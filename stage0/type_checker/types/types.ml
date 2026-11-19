@@ -209,6 +209,9 @@ let signed_integer_types : Language.Builtin_type.t list = [ Int8; Int16; Int32; 
 let unsigned_integer_types : Language.Builtin_type.t list = [ UInt8; UInt16; UInt32; UInt64 ]
 let integer_types = signed_integer_types @ unsigned_integer_types
 
+let sealed_traits : Well_known.t list =
+  [ Fixed_width_integer; Signed_integer; Unsigned_integer; Floating_point ]
+
 let find_integer_implementors trait =
   if Well_known.is Signed_integer trait then Some signed_integer_types
   else if Well_known.is Unsigned_integer trait then Some unsigned_integer_types
@@ -225,6 +228,7 @@ let find_bound_integer_implementors bounds =
     None bounds
 
 let float_types : Language.Builtin_type.t list = [ Float32; Float64 ]
+let number_types = integer_types @ float_types @ [ Language.Builtin_type.Integer ]
 
 let find_sealed_implementors trait =
   if Well_known.is Floating_point trait then Some float_types else find_integer_implementors trait

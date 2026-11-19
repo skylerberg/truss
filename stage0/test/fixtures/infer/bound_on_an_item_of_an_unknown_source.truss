@@ -1,0 +1,43 @@
+trait Producer {
+  type Item
+
+  fn produce(self) -> Self.Item
+}
+
+trait Shown {
+  fn shown(self) -> String
+}
+
+impl Producer for Int64 {
+  type Item = Bool
+
+  fn produce(self) -> Bool {
+    true
+  }
+}
+
+impl Shown for Bool {
+  fn shown(self) -> String {
+    "bool"
+  }
+}
+
+fn first_item[Source: Producer](source: Source) -> Source.Item {
+  source.produce()
+}
+
+fn show[Value: Shown](value: Value) -> String {
+  value.shown()
+}
+
+fn make[Element]() -> Element {
+  todo
+}
+
+fn f() -> String {
+  show(first_item(make()))
+}
+
+fn g(count: Int64) -> String {
+  show(first_item(count))
+}

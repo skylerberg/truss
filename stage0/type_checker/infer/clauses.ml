@@ -1,6 +1,6 @@
 let run_in_specification state (env : State.env) (value : Syntax.expression) check =
   let env = { env with specification = true } in
-  State.run_in_statement state env (State.read_span state value.id) (fun () -> check env)
+  Solver.run_in_statement state env (State.read_span state value.id) (fun () -> check env)
 
 let check_condition state env value =
   run_in_specification state env value (fun env -> Hooks.check state env value Types.bool)
@@ -8,9 +8,8 @@ let check_condition state env value =
 let check_integer state env (value : Syntax.expression) ~described =
   run_in_specification state env value (fun env ->
       ignore
-        (State.narrow state (Hooks.check_expression state env value)
-           (Types.integer_types @ [ Language.Builtin_type.Integer ])
-           ~report_excluded:(fun excluded ->
+        (Solver.require_within state (Hooks.check_expression state env value)
+           (Types.integer_types @ [ Language.Builtin_type.Integer ]) ~reason:(fun excluded ->
              State.add_diagnostic state Mismatch (State.read_span state value.id)
                (Printf.sprintf "%s is an integer, not %s." described (State.describe state excluded)))))
 

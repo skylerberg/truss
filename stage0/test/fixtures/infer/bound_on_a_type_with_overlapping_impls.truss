@@ -1,0 +1,25 @@
+trait Into2[Target] {
+  fn into2(self) -> Target
+}
+
+type Pair[First, Second](first: First, second: Second)
+
+impl Into2[First] for Pair[First, Second] {
+  fn into2(self) -> First {
+    todo
+  }
+}
+
+impl Into2[Second] for Pair[First, Second] {
+  fn into2(self) -> Second {
+    todo
+  }
+}
+
+fn convert[Value: Into2[Target], Target](value: Value) -> Target {
+  value.into2()
+}
+
+fn f(pair: Pair[Int64, Bool]) -> Bool {
+  convert(pair)
+}

@@ -1,0 +1,5 @@
+fn f(small: UInt8) -> UInt8 {
+  let big = 300
+  let sum = small + big
+  sum
+}

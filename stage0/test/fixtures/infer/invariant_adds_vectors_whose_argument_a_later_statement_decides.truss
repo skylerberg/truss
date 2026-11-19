@@ -1,0 +1,26 @@
+type Vector[Element](first: Element) derives Equal
+
+impl Add[Vector[Element]] for Vector[Element] {
+  type Output = Vector[Element]
+
+  fn add_is_defined(self, right: Vector[Element]) -> Bool {
+    true
+  }
+
+  fn add(self, right: Vector[Element]) -> Vector[Element] {
+    todo
+  }
+}
+
+fn f() -> Bool {
+  let first = Vector(first: 1)
+  let second = Vector(first: 2)
+  var index: UInt64 = 0
+  while index < 3
+    invariant first + second == first
+  {
+    index = index + 1
+  }
+  let decided: Vector[UInt8] = second
+  index == 3
+}

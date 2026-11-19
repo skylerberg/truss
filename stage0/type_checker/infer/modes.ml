@@ -196,51 +196,29 @@ let check_slice_writes state ~(by : mutation) ~is_to_generic ~code (value : Synt
           collection, as in `mut items[1..]`, or through a `mut Slice` parameter."
          (describe_stored_slice stored))
   in
-  let check () =
-    match by with
-    | Assignment -> (
-        match find_assigned_slice_parameter state value with
-        | Some parameter ->
-            report
-              (Printf.sprintf
-                 "`%s` is a `mut` slice parameter, so it cannot be assigned: the caller lends it \
-                  write access to a range of elements, and a different slice would carry that \
-                  access to elements the caller did not lend. Write its elements instead."
-                 (show_slice_parameter parameter))
-        | None -> (
-            match value.kind with
-            | Member (base, _) | Bracket (base, _) ->
-                Option.iter report_stored (find_slice_written_through state base)
-            | _ -> ()))
-    | Passed_mut when is_to_generic && has_slice_type state value ->
-        report
-          "A slice is passed `mut` only to a `mut Slice` parameter, and this parameter's declared \
-           type is a type parameter or an associated type. The callee could assign it a different \
-           slice, which would leave the elements the caller lent unchanged while its contract \
-           describes them as written."
-    | Passed_mut -> Option.iter report_stored (find_slice_written_through state value)
-  in
-  let is_solved (part : Syntax.expression) =
-    match state.tables.types.(part.id) with
-    | Some type_ ->
-        not
-          (Types.exists (function Types.Variable _ -> true | _ -> false) (State.zonk state type_))
-    | None -> false
-  in
-  let rec list_path (part : Syntax.expression) =
-    part
-    ::
-    (match part.kind with
-    | Parenthesized inner | Mode (_, inner) | Member (inner, _) | Bracket (inner, _) ->
-        list_path inner
-    | _ -> [])
-  in
-  State.defer state (fun () ->
-      if List.for_all is_solved (list_path value) then begin
-        check ();
-        true
-      end
-      else false)
+  State.check_when_final state (fun () ->
+      match by with
+      | Assignment -> (
+          match find_assigned_slice_parameter state value with
+          | Some parameter ->
+              report
+                (Printf.sprintf
+                   "`%s` is a `mut` slice parameter, so it cannot be assigned: the caller lends it \
+                    write access to a range of elements, and a different slice would carry that \
+                    access to elements the caller did not lend. Write its elements instead."
+                   (show_slice_parameter parameter))
+          | None -> (
+              match value.kind with
+              | Member (base, _) | Bracket (base, _) ->
+                  Option.iter report_stored (find_slice_written_through state base)
+              | _ -> ()))
+      | Passed_mut when is_to_generic && has_slice_type state value ->
+          report
+            "A slice is passed `mut` only to a `mut Slice` parameter, and this parameter's \
+             declared type is a type parameter or an associated type. The callee could assign it a \
+             different slice, which would leave the elements the caller lent unchanged while its \
+             contract describes them as written."
+      | Passed_mut -> Option.iter report_stored (find_slice_written_through state value))
 
 let mutate_with state env ~(by : mutation) ~is_to_generic (value : Syntax.expression) =
   let code : Diagnostic.Code.types =

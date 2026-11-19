@@ -176,10 +176,20 @@ decides it: after `let limit = 10`, `count < limit` with a `UInt8` count makes
 - A literal whose type is a type parameter bounded by an integer trait fits
   every type that implements the trait: -128 to 127 under `SignedInteger`, 0
   to 255 under `UnsignedInteger`, and 0 to 127 under `FixedWidthInteger`.
-- A literal meets a bound once its type is decided. Until then, a lookup
-  proceeds as if the bound is met: after `let range = 0..3`,
-  `for index in range` finds `Range`'s `Iterable`, and the loop's body may
-  still decide the type, which must then meet `Countable`.
+- A literal meets a bound of a sealed number trait that every type it may
+  have implements. A sealed bound that only some of those types implement
+  narrows the literal to them: `kept(3)` with `Value: UnsignedInteger` makes
+  the `3` a `UInt64`. A literal meets any other bound once its type is
+  decided. Until then, a lookup proceeds as if the bound is met: after
+  `let range = 0..3`, `for index in range` finds `Range`'s `Iterable`, and
+  the loop's body may still decide the type, which must then meet
+  `Countable`.
+- A statement whose type depends on an undecided literal through an
+  operator's or a trait's result gives the literal its default type at the
+  statement's end, and so does reading a member, an index, or a method of
+  such a result: after `let count = 2`, `let scaled = span * count` and
+  `(span * count).ticks` make `count` an `Int64` when `Span` implements
+  `Multiply[Int64]`.
 
 ### String literals
 
@@ -255,9 +265,6 @@ These sequences are errors:
 ```text
 //  /*  #  ;  '  `  @  ++  --  ===  !==
 ```
-
-`--` is rejected even where it could be two negations, and `//` is never two
-divisions.
 
 ### Line breaks
 
@@ -407,7 +414,7 @@ type Expression =
   Building one costs one allocation, which `cost` clauses count; mutating or
   moving its fields allocates nothing.
 - Every cycle of types that contain each other passes through an `indirect`
-  variant or a collection. A record cannot contain itself.
+  variant or a collection.
 - A variant that is not recursive may be `indirect` too.
 - In its own fields, at any depth, a type does not occur in the input of a
   function type without `RunForever`: `type Knot(run: fn(Knot) -> Bool)` is
@@ -567,7 +574,7 @@ fn Option[Value].take(mut self) -> Option[Value] {
   the target can assign the operand's place. The variable of a `for` loop is
   not copied: the loop lends its collection for the body.
 - **`Copyable` types have `copy()`,** whose result is identical to the
-  original. An implicit copy never allocates.
+  original.
 - **Handles are not `Copyable`,** nor is a type that holds one.
 - `Copyable` and `Plain` are prelude traits that the compiler implements and
   no `impl` can, and `Plain` requires `Copyable`. The compiler derives them
@@ -752,8 +759,6 @@ let connection = connect(host, port: 8080)?
   may come in any order, evaluated in the order written, and only a record
   or variant with exactly one field takes a bare value, as in `Some(3)`.
 - A call through a function value passes its arguments by position.
-- An `UpperCamelCase` name before `(` is always a type or a variant being
-  built.
 
 ### Explicit type arguments
 
@@ -1032,7 +1037,6 @@ public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
 - `O(f)` means that the cost is at most `c * f + d` for every input, for
   some constants `c` and `d`.
 - `time` counts abstract steps: each primitive operation and each call is one.
-- A caller's cost is proven from its callees' cost clauses.
 
 A bound is an expression on exact integers. It can use the parameters,
 `self`, their fields, pure methods, `result`, `+`, `*`, and `/` and `-`
@@ -2680,8 +2684,8 @@ an invariant, a law, or a proof.
   specification, so `invariant small <= limit` with a `UInt8` `small` leaves
   the type of `limit` to the code. A use that would decide the type of a
   float literal of the code, or join or bind a type that the code left open,
-  is the error `types.decided_in_specification`. Declaring the local with a
-  type, as in `let ratio: Float32 = 0.75`, removes the error.
+  is an error. Declaring the local with a type, as in
+  `let ratio: Float32 = 0.75`, removes the error.
 - A function whose signature mentions a type that exists only in
   specifications is for specifications only: it is called only from
   specifications, never compiled, and its body and defaults are
@@ -2778,13 +2782,11 @@ beside the package's manifest are its root module, `weather`.
 - The files of a module share one namespace: each names the others'
   definitions without a module, private ones included. Two files of a
   module cannot define one name.
-- A file's name says nothing about its definitions. Moving a definition to
-  another file of its module changes no path.
 - A module's subdirectory is a module of its own: `forecast/hourly/` is
   `weather::forecast::hourly`, which names `weather::forecast` with `::`
   like any other module.
 - Every path starts with a package name, including inside the package.
-- There are no relative paths, and a path holds no version.
+- A path holds no version.
 - The modules of a package may use each other in a cycle.
 
 ### The prelude
