@@ -113,9 +113,11 @@ let resolve_used_module lookups ~from (path : Syntax.path) =
   | first :: rest ->
       resolve_full_module lookups ~from first.text (list_texts rest @ [ path.last.text ])
 
-let is_visible_module lookups ~(from : Path.module_) (module_ : Path.module_) =
-  List.mem module_.package (list_visible_packages lookups from.package)
-  && lookups.module_exists module_
+let is_visible_package lookups ~(from : Path.module_) package =
+  List.mem package (list_visible_packages lookups from.package)
+
+let is_visible_module lookups ~from (module_ : Path.module_) =
+  is_visible_package lookups ~from module_.package && lookups.module_exists module_
 
 let find_syntax_error (lookups : lookups) key part =
   Parts.find_syntax_error ~spans:(lookups.read_spans key)
@@ -182,11 +184,17 @@ module Scope = struct
 
   let restricted_module_message = "Only the `standard` package can use `standard::intrinsic`."
 
+  let describe_path_start (module_ : Path.module_) =
+    Printf.sprintf
+      "Every path starts with a package name, even inside the package. This file's module is `%s`."
+      (Path.show_module module_)
+
   type module_lookup =
     | Found_module of Path.module_
     | Restricted_module
     | Ambiguous_module of Path.module_ * Path.module_
     | No_module of string
+    | No_package of string
 
   let lookup_module lookups ~(from : Path.module_) ~imports first rest =
     let imported =
@@ -203,6 +211,8 @@ module Scope = struct
     | Some imported when exists imported -> Found_module imported
     | _ when exists package ->
         if is_restricted_module ~from package then Restricted_module else Found_module package
+    | None when not (is_visible_package lookups ~from package.package) ->
+        No_package (String.concat "::" (first :: rest))
     | _ -> No_module (String.concat "::" (first :: rest))
 
   let make_top_path module_ name : Path.t = Top { module_; name }

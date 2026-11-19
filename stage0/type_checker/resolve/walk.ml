@@ -180,6 +180,11 @@ let resolve_module_names state (first : Syntax.name) (rest : Syntax.name list) =
       make_failure
         (add_diagnostic state Unknown_module (read_span state first.id)
            (Printf.sprintf "No module `%s` is imported or exists." text))
+  | No_package text ->
+      make_failure
+        (add_diagnostic state Unknown_module (read_span state first.id)
+           (Printf.sprintf "No module `%s` is imported or exists. %s" text
+              (Names.Scope.describe_path_start state.key.module_)))
   end
 
 let find_in_module state module_ (name : Syntax.name) ~types =

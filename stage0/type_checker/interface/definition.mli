@@ -14,6 +14,10 @@ val find_impl_interface : Lookups.t -> Path.t -> Types.impl_interface option
 val read_impl_interface : Lookups.t -> Path.t -> Types.impl_interface
 val find_constant_type : Lookups.t -> Path.t -> Types.ty option
 val read_constant_type : Lookups.t -> Path.t -> Types.ty
+
+val find_shadowed_constant :
+  Lookups.t -> Path.module_ -> name:string -> type_:Types.ty -> Path.t option
+
 val is_external_test : Lookups.t -> Path.t -> bool
 val find_real_implementation : Lookups.t -> Path.t -> Path.t option
 

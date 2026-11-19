@@ -820,7 +820,9 @@ module then silently changes the semantics of a pattern in another file, and
 every binding in a pattern depends on the names of the module. In Truss, a
 constant written as the bare name `limit` still compiles, as in Python, but
 the binding matches every value. It therefore makes a later arm unreachable
-or is itself unused, and both are errors.
+or is itself unused, and both are errors. When a constant of the module has
+the binding's name and type, both errors name it, and their fixes write its
+path.
 
 | Rule | Reason |
 |---|---|
