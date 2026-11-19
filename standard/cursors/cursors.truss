@@ -33,6 +33,7 @@ impl Cursor for Take[Source: Cursor] {
 
   fn next(mut self) -> Option[Source.Element]
     uses Self.Uses
+    ensures (result is Some(_)) ==> self.left < old(self.left)
     cost time O(time(Source.next))
   {
     if self.left == 0 {
@@ -40,6 +41,16 @@ impl Cursor for Take[Source: Cursor] {
     }
     self.left -= 1
     mut self.source.next()
+  }
+}
+
+impl FiniteCursor for Take[Source: Cursor] {
+  fn remaining(self) -> UInt64
+    ensures result == self.left
+    cost time O(1)
+    cost allocations == 0
+  {
+    self.left
   }
 }
 

@@ -184,10 +184,27 @@ let () =
       expect_not_proven
         Fixtures.Prover.while_loop_whose_measure_does_not_decrease_where_it_may_run_forever
         "prover.termination");
-  Harness.test "a cursor's remaining holds where the function may run forever" (fun () ->
-      expect_not_proven
-        Fixtures.Prover.cursor_whose_remaining_does_not_decrease_where_it_may_run_forever
-        "prover.termination");
+  Harness.test "an impl of FiniteCursor whose next does not decrease remaining is rejected"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.finite_cursor_whose_next_does_not_decrease_remaining
+        "prover.ensures");
+  Harness.test "a restated clause is proven of the receiver that the method changes" (fun () ->
+      expect_not_proven Fixtures.Prover.restated_clause_that_the_changed_receiver_breaks
+        "prover.ensures");
+  Harness.test "an impl of FiniteCursor proves the decrease from its next's ensures" (fun () ->
+      expect_proven Fixtures.Prover.finite_cursor_kept_by_its_next);
+  Harness.test "a loop over a type parameter bound by FiniteCursor ends" (fun () ->
+      expect_proven Fixtures.Prover.loop_over_a_bound_finite_cursor);
+  Harness.test "a call through a bound has the clauses that the bound's trait restates" (fun () ->
+      expect_proven Fixtures.Prover.restated_clause_through_a_bound);
+  Harness.test "a call that names the restating trait has the restated clauses" (fun () ->
+      expect_proven Fixtures.Prover.restated_method_called_through_its_trait);
+  Harness.test "a loop over a take of a list ends through FiniteCursor's restated next" (fun () ->
+      expect_proven Fixtures.Prover.loop_over_a_take_of_a_list);
+  Harness.test "an impl whose method's cost exceeds the restated cost is rejected" (fun () ->
+      expect_not_proven Fixtures.Prover.restated_cost_that_the_contract_breaks "prover.cost");
+  Harness.test "an impl whose method's cost meets the restated cost is proven" (fun () ->
+      expect_proven Fixtures.Prover.restated_cost_that_the_contract_keeps);
   Harness.test "a loop that counts up to its bound ends" (fun () ->
       expect_proven Fixtures.Prover.while_loop_counting_up);
   Harness.test "a for loop over a range knows its index is in range" (fun () ->

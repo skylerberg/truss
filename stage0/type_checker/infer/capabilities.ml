@@ -264,12 +264,16 @@ and check_statement checking scope (statement : Core.statement) =
       Core_walk.walk_iteration (make_visitor checking scope (`Statement statement)) iteration;
       (match iteration with
       | Cursor { cursor; _ } when not (Core_walk.states_measure clauses) ->
+          let cursor_type =
+            State.finalize_type checking.state (Core_walk.compute_place_type cursor)
+          in
           require_run_forever_of_unmeasured_loop checking scope statement.origin
             ~alternative:
-              (Printf.sprintf
-                 "give the loop a `decreases` clause, or `%s` a `remaining(self) -> UInt64` method"
-                 (Types.show
-                    (State.finalize_type checking.state (Core_walk.compute_place_type cursor))))
+              (Printf.sprintf "give the loop a `decreases` clause, or %s"
+                 (match cursor_type with
+                 | Types.Parameter _ | Projection _ ->
+                     Printf.sprintf "bound `%s` by `FiniteCursor`" (Types.show cursor_type)
+                 | _ -> Printf.sprintf "implement `FiniteCursor` for `%s`" (Types.show cursor_type)))
       | Integer_range _ | Elements _ | Cursor _ -> ());
       check_children checking scope (`Pattern pattern);
       check_loop_clauses checking clauses;

@@ -1,0 +1,5 @@
+trait Drained: Cursor {
+  fn next(mut self) -> Option[UInt64]
+    uses Self.Uses
+    ensures result is None
+}

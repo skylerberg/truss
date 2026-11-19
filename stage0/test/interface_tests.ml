@@ -293,7 +293,26 @@ let () =
       expect_one_diagnostic Fixtures.Interface.subtrait_redeclaring_compare
         "types.redeclared_method");
   Harness.test "a trait may add an overload of a method of a trait it requires" (fun () ->
-      expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_overloading_element) ])
+      expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_overloading_element) ]);
+  Harness.test "a trait may restate a method of a trait it requires to promise more" (fun () ->
+      expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_restating_next) ]);
+  Harness.test "a restated method has no body" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_with_a_body
+        "types.restated_method_body");
+  Harness.test "a restated method adds no requires" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_with_a_requires
+        "types.restated_method_clause" ~at:("requires", 1));
+  Harness.test "a restated method keeps the result of the method it restates" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_with_another_result
+        "types.signature_mismatch"
+        ~says:"so it has the signature `next(mut self) -> Option[Self.Element] uses Self.Uses`");
+  Harness.test "a restated method keeps the uses of the method it restates" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_without_its_uses
+        "types.signature_mismatch");
+  Harness.test "an impl of a trait that restates a method does not give the method" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.impl_giving_a_restated_method "types.extra_member"
+        ~says:"Give `next` in the `impl` of `standard::core::Cursor` for `Countdown`."
+        ~at:("next", 2))
 
 let expect_signature_mismatch text ~declared =
   expect_one_diagnostic text "types.signature_mismatch" ~says:declared

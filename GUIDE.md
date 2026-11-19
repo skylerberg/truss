@@ -3878,7 +3878,7 @@ written for this:
 | Code | Its measure |
 |---|---|
 | A `for` loop over a range or a collection | The elements left to visit |
-| A `for` loop over a cursor whose type has a `remaining()` method, such as `text.characters()` | `remaining()` |
+| A `for` loop over a cursor whose type implements `FiniteCursor`, such as `text.characters()` | `remaining()` |
 | A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` | The distance between the two sides |
 | A recursive call on a part of a parameter, such as `Expression.evaluate` in [Chapter 5](#recursive-types) | The parameter, which gets smaller |
 | A loop or a function with a `decreases` clause | The clause |
@@ -4290,23 +4290,25 @@ trait Cursor {
 ```truss
 type Countdown(left: UInt64)
 
-fn Countdown.remaining(self) -> UInt64
-  ensures result == self.left
-{
-  self.left
-}
-
 impl Cursor for Countdown {
   type Element = UInt64
 
   fn next(mut self) -> Option[UInt64]
-    ensures (result is Some(_)) ==> self.remaining() < old(self.remaining())
+    ensures (result is Some(_)) ==> self.left < old(self.left)
   {
     if self.left == 0 {
       return None
     }
     self.left -= 1
     Some(self.left)
+  }
+}
+
+impl FiniteCursor for Countdown {
+  fn remaining(self) -> UInt64
+    ensures result == self.left
+  {
+    self.left
   }
 }
 
@@ -4336,12 +4338,14 @@ test "a cursor's provided methods" uses RunForever {
 - A `for` loop over a cursor pulls it until it returns `None`. A cursor in a
   variable can be pulled again after a `break`.
 - **A loop over a cursor terminates when the cursor measures itself.** Its
-  type has a method `remaining(self) -> UInt64`, and `next` promises to make
-  it smaller each time it returns `Some`. `Countdown` does both, so the loop
-  in the first test needs nothing more. Without `remaining`:
+  type implements the prelude trait `FiniteCursor`, whose `remaining()`
+  counts down: `FiniteCursor` promises that each `next` that returns `Some`
+  makes `remaining()` smaller. `impl FiniteCursor for Countdown` proves that
+  promise from the `ensures` of `next` and of `remaining`, so the loop in the
+  first test needs nothing more. Without the `impl`:
 
   ```text
-  main.truss:17:3: error[capabilities.not_available]: This loop has no measure, so it uses `RunForever`, which is not available here. Declare it with `uses RunForever`, or give the loop a `decreases` clause, or `Countdown` a `remaining(self) -> UInt64` method.
+  main.truss:19:3: error[capabilities.not_available]: This loop has no measure, so it uses `RunForever`, which is not available here. Declare it with `uses RunForever`, or give the loop a `decreases` clause, or implement `FiniteCursor` for `Countdown`.
     |   for value in Countdown(left: 3) {
     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   1 error
@@ -4351,9 +4355,10 @@ test "a cursor's provided methods" uses RunForever {
   adapters `skip`, `take`, `step_by`, `chain`, `zip`, `enumerate`, and
   `peekable`. Each adapter returns a new cursor, so they chain.
 - **The provided methods that pull a cursor to its end use `RunForever`,**
-  since the trait cannot know that every cursor ends. The adapters' cursors
-  have no `remaining`, so a loop over one uses `RunForever` too. The second
-  test declares `uses RunForever` for both.
+  since the trait cannot know that every cursor ends. Of the adapters, only
+  `take` gives a `FiniteCursor`, so a loop over another adapter's cursor
+  uses `RunForever` too. The second test declares `uses RunForever` for
+  both.
 - `capability Uses` is an *associated capability set*: the capabilities
   `next` uses. A cursor that reads lines from a file has `Uses = FileRead,
   Handles`, and a function that pulls a generic cursor declares `uses

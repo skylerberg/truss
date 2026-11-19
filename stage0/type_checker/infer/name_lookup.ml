@@ -600,8 +600,15 @@ and find_consuming_cursor state (span : Source.Definition_span.t) type_ :
   | Visible _ | Absent -> Absent
 
 and find_remaining_call state (span : Source.Definition_span.t) cursor =
-  match find_method_version state span cursor "remaining" (Instance Read) with
-  | Visible (callee, { parameters = []; output = Returns bound; _ })
-    when Types.is_builtin UInt64 (State.normalize state bound) ->
+  let finite_cursor =
+    State.make_trait_reference ~arguments:[] (Well_known.make_path Finite_cursor)
+  in
+  match State.find_evidence state cursor finite_cursor with
+  | Some _ ->
+      let { Well_known.name; receiver; _ } = Well_known.locate_method Finite_cursor_remaining in
+      let _, callee =
+        instantiate_trait_method state span ~self_type:cursor finite_cursor
+          { method_name = name; method_receiver = receiver; provided = false }
+      in
       Some (make_argumentless_call callee (Types.make_builtin UInt64))
-  | Visible _ | Hidden _ | Absent -> None
+  | None -> None

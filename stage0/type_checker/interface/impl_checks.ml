@@ -241,9 +241,24 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
   | Some { implementation; shown_trait; _ } -> (
       let trait = implementation.trait in
       match Impls.find_implemented_method state.lookups state.key.path with
-      | None ->
-          Checking.report state Extra_member state.spans.(name.id)
-            (Printf.sprintf "`%s` declares no method `%s` with this receiver." shown_trait name.text)
+      | None -> (
+          match
+            List.find_opt
+              (fun (restated : Types.restated_method) ->
+                restated.restated_name = name.text && restated.restated_receiver = receiver)
+              trait.restated
+          with
+          | Some restated ->
+              Checking.report state Extra_member state.spans.(name.id)
+                (Printf.sprintf
+                   "`%s` restates `%s.%s` and declares no method of its own by that name. Give \
+                    `%s` in the `impl` of `%s` for `%s`."
+                   shown_trait (Path.show restated.declared_by) name.text name.text
+                   (Path.show restated.declared_by) (Types.show impl.for_type))
+          | None ->
+              Checking.report state Extra_member state.spans.(name.id)
+                (Printf.sprintf "`%s` declares no method `%s` with this receiver." shown_trait
+                   name.text))
       | Some implemented ->
           if trait.is_capability && not (receiver = Instance Read || receiver = Instance Mut) then
             Checking.report state Wrong_receiver state.spans.(name.id)

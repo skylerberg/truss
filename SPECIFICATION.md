@@ -1300,7 +1300,9 @@ type Countdown(left: UInt64)
 impl Cursor for Countdown {
   type Element = UInt64
 
-  fn next(mut self) -> Option[UInt64] {
+  fn next(mut self) -> Option[UInt64]
+    ensures (result is Some(_)) ==> self.left < old(self.left)
+  {
     if self.left == 0 {
       return None
     }
@@ -1314,6 +1316,34 @@ impl Cursor for Countdown {
   `None` when the cursor has no more.
 - `Uses` is the set of capabilities that `next` uses. Each `next` uses the
   implementations provided where it is called.
+
+A cursor whose values run out implements the prelude trait `FiniteCursor`:
+
+```truss
+trait FiniteCursor: Cursor {
+  fn remaining(self) -> UInt64
+
+  fn next(mut self) -> Option[Self.Element]
+    uses Self.Uses
+    ensures (result is Some(_)) ==> self.remaining() < old(self.remaining())
+}
+
+impl FiniteCursor for Countdown {
+  fn remaining(self) -> UInt64
+    ensures result == self.left
+  {
+    self.left
+  }
+}
+```
+
+- `FiniteCursor` restates `next` to promise that each `next` that returns
+  `Some` makes `remaining()` smaller (see
+  [Traits and laws](#traits-and-laws)). `impl FiniteCursor for Countdown`
+  proves it from the `ensures` of `Countdown`'s `next` and `remaining`.
+- A loop over a `FiniteCursor` therefore terminates with no measure written
+  (see [Loops](#loops)). A cursor that may give values forever, such as a
+  channel's `Messages`, implements only `Cursor`.
 
 ## Statements and blocks
 
@@ -1594,8 +1624,10 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   of its condition, so a change that the condition makes counts toward the
   iteration.
 - Where a `for` loop over a cursor states no measure, and the cursor's type
-  has a `remaining(self) -> UInt64` method, that method's value is the
-  loop's measure, and it holds as a written one does.
+  implements `FiniteCursor`, the cursor's `remaining()` is the loop's
+  measure, and it holds as a written one does. A loop over a cursor of type
+  `Items: Cursor` has no measure, and one over `Items: FiniteCursor` has
+  `remaining()`.
 - In a function without `RunForever`, a `while` loop that states no measure,
   and whose condition compares two sides that mutate nothing with `<`, `<=`,
   `>`, or `>=`, has the distance between them as its measure.
@@ -2259,9 +2291,17 @@ trait Ordered: Equal {
   bound or `any` against the trait's.
 - An `impl`'s method without a `time` clause has its trait's.
 - **Required traits:** a type implements the traits a trait requires before
-  it implements the trait, and a bound includes them. A trait cannot
-  redeclare a method of a trait it requires, but can add an overload in
-  another mode. Traits cannot require each other in a cycle.
+  it implements the trait, and a bound includes them. A trait can add an
+  overload of a required trait's method in another mode. Traits cannot
+  require each other in a cycle.
+- **A trait can restate a method of a trait it requires, to promise more.**
+  The restated method has the required trait's signature, adds `ensures`
+  and `cost` clauses, and has no body. It is the same method: an `impl` of
+  the trait does not write it, and each `impl` proves the added clauses
+  from the contract of the method in its type's `impl` of the required
+  trait. A call through a bound of the trait, and a call on a type that
+  implements it, has the added clauses. `FiniteCursor` restates
+  `Cursor.next` (see [Cursors](#cursors)).
 - **A method with a body** is provided to every implementation. An `impl` can
   override it with a method that keeps the trait's contract for it, as it
   keeps the contract of every other method.
@@ -2502,7 +2542,8 @@ proof Ordered.transitive for Box[Item: Ordered] {
 - Every callee is known to its callers' proofs by its contract, in every
   package: a function, a method of a type, a trait's method, and an
   `impl`'s method alike.
-- An `impl`'s laws are proven from the contracts of its methods.
+- An `impl`'s laws, and the clauses that its trait adds to a required
+  trait's method, are proven from the contracts of its type's methods.
 - A derived `Ordered` states its comparison in its `ensures`.
 - A clause applies only where every name that it mentions is visible.
 - A function with a `requires` is defined only where it holds.
@@ -2668,8 +2709,8 @@ The prelude is in scope in every file, and all its names are
   `Set`
 - the core traits, such as `Equal`, `Ordered`, `From`, `TryFrom`, `Default`,
   `Copyable`, `Plain`, `Storable`, `Index`, `IndexMut`, `IndexAssign`,
-  `Iterable`, `Cursor`, `FromTemplate`, `FromElements`, `FromEntries`,
-  `Model`, and the arithmetic traits
+  `Iterable`, `Cursor`, `FiniteCursor`, `FromTemplate`, `FromElements`,
+  `FromEntries`, `Model`, and the arithmetic traits
 - `Integer`, `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`
 - the standard capabilities, and `Path`, `Instant`, `Duration`, and
   `SystemError`

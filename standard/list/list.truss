@@ -324,13 +324,15 @@ impl Model for ListCursor[Element] {
   }
 }
 
-public fn ListCursor[Element].remaining(self) -> UInt64
-  ensures result == self.reversed.length()
-  ensures result == self.model().length()
-  cost time O(1)
-  cost allocations == 0
-{
-  self.reversed.length()
+impl FiniteCursor for ListCursor[Element] {
+  fn remaining(self) -> UInt64
+    ensures result == self.reversed.length()
+    ensures result == self.model().length()
+    cost time O(1)
+    cost allocations == 0
+  {
+    self.reversed.length()
+  }
 }
 
 impl Cursor for ListCursor[Element] {
@@ -380,12 +382,14 @@ public fn Array[Element, count: UInt64].cursor(own self) -> ListCursor[Element]
 public type SliceCursor[Element: Plain](elements: Slice[Element], offset: UInt64)
   invariant offset <= elements.length()
 
-public fn SliceCursor[Element: Plain].remaining(self) -> UInt64
-  ensures result == self.elements.length() - self.offset
-  cost time O(1)
-  cost allocations == 0
-{
-  self.elements.length() - self.offset
+impl FiniteCursor for SliceCursor[Element: Plain] {
+  fn remaining(self) -> UInt64
+    ensures result == self.elements.length() - self.offset
+    cost time O(1)
+    cost allocations == 0
+  {
+    self.elements.length() - self.offset
+  }
 }
 
 impl Cursor for SliceCursor[Element: Plain] {
