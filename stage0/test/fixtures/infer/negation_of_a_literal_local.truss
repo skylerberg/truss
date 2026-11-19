@@ -1,0 +1,5 @@
+fn f() {
+  let count = 10
+  let negated = -count
+  let _ = negated
+}

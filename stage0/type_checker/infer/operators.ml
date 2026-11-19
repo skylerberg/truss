@@ -157,6 +157,15 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
   let arguments = match right with Some right -> [ Types.Type right ] | None -> [] in
   let reference = State.make_trait_reference ~arguments trait in
   let result = State.make_fresh_type state in
+  let is_one_built_in_number =
+    match (State.resolve state left, Option.map (State.resolve state) right) with
+    | Types.Literal (left_kind, _), Some (Types.Literal (right_kind, _)) -> left_kind = right_kind
+    | Types.Literal _, None -> true
+    | resolved, operand ->
+        (State.is_integer_type state resolved || Types.is_float_type resolved)
+        && Option.fold ~none:true ~some:(Types.equal resolved) operand
+  in
+  if is_one_built_in_number then ignore (State.unify state result left);
   state.tables.calls.(value.id) <-
     Some
       {
@@ -422,13 +431,6 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           Types.Integer
         end
         else
-          let same_builtin =
-            match (State.resolve state left_type, State.resolve state right_type) with
-            | Types.Literal (left_kind, _), Types.Literal (right_kind, _) -> left_kind = right_kind
-            | left_resolved, right_resolved ->
-                (State.is_integer_type state left_resolved || Types.is_float_type left_resolved)
-                && Types.equal left_resolved right_resolved
-          in
           let trait, method_ = select_arithmetic_trait arithmetic in
           if
             (State.is_integer_type state (State.normalize state left_type)
@@ -438,20 +440,13 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           then Types.Error (add_operand_mismatch state value left right ~left_type ~right_type)
           else begin
             Form.register_call state value;
-            let result =
-              check_operator_call
-                ~operands:
-                  [
-                    { Tables.expression = left.id; core_argument_index = 0; mode = Types.Read };
-                    { Tables.expression = right.id; core_argument_index = 1; mode = Types.Read };
-                  ]
-                state value ~trait ~method_ ~left:left_type ~right:(Some right_type)
-            in
-            if same_builtin then begin
-              ignore (State.unify state result left_type);
-              left_type
-            end
-            else result
+            check_operator_call
+              ~operands:
+                [
+                  { Tables.expression = left.id; core_argument_index = 0; mode = Types.Read };
+                  { Tables.expression = right.id; core_argument_index = 1; mode = Types.Read };
+                ]
+              state value ~trait ~method_ ~left:left_type ~right:(Some right_type)
           end
         end
 

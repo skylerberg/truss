@@ -170,6 +170,10 @@ decides it: after `let limit = 10`, `count < limit` with a `UInt8` count makes
 - A literal whose type is a type parameter bounded by an integer trait fits
   every type that implements the trait: -128 to 127 under `SignedInteger`, 0
   to 255 under `UnsignedInteger`, and 0 to 127 under `FixedWidthInteger`.
+- Until its type is decided, a literal meets a bound that every type of its
+  kind meets: after `let range = 0..3`, `for index in range` finds
+  `Range`'s `Iterable`, whose bound `Countable` every integer type meets,
+  and the loop's body may still decide the type.
 
 ### String literals
 
