@@ -114,13 +114,18 @@ module Scope : sig
   val find_bare_type : lookups -> from:Path.module_ -> string -> (entry * Path.t) option
 end
 
+val is_visible_from : from:Path.module_ -> declaration -> bool
 val lookup_member : lookups -> from:Path.module_ -> Path.t -> Path.t lookup
 val choose_visible : 'visible lookup list -> 'visible lookup
 val collect_visible : ('key * 'visible lookup) list -> ('key * 'visible) list lookup
 val describe_hidden : Path.t -> visibility -> string
 val list_visible_traits_declaring : lookups -> from:Path.module_ -> string -> Path.t list
+val is_visible_to_package : package:Path.package -> declaration -> bool
 
 val list_members_visible_to_package :
   lookups -> package:Path.package -> Path.t -> string -> key list
+
+val list_view_methods :
+  lookups -> is_visible:(declaration -> bool) -> Path.t -> string -> (Path.receiver * Path.t) list
 
 val find_kind : lookups -> Path.t -> named option

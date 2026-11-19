@@ -246,11 +246,14 @@ module Scope = struct
         | None -> None)
 end
 
-let lookup_member lookups ~(from : Path.module_) member =
+let is_visible_from ~from declaration =
+  Scope.is_visible ~from declaration.key.module_ declaration.visibility
+
+let lookup_member lookups ~from member =
   match lookups.find_key member with
   | Some key ->
       let declaration = lookups.read_declaration key in
-      if Scope.is_visible ~from declaration.key.module_ declaration.visibility then Visible member
+      if is_visible_from ~from declaration then Visible member
       else Hidden (member, declaration.visibility)
   | None -> Absent
 
@@ -302,12 +305,32 @@ let list_visible_traits_declaring lookups ~(from : Path.module_) name =
         (lookups.list_traits_declaring package name))
     (list_visible_packages lookups from.package)
 
-let list_members_visible_to_package lookups ~(package : Path.package) owner name =
+let is_visible_to_package ~(package : Path.package) declaration =
+  declaration.key.module_.package = package || is_public declaration.visibility
+
+let list_members_visible_to_package lookups ~package owner name =
   List.filter
-    (fun key ->
-      let declaration = lookups.read_declaration key in
-      declaration.key.module_.package = package || is_public declaration.visibility)
+    (fun key -> is_visible_to_package ~package (lookups.read_declaration key))
     (lookups.list_members owner name)
+
+let list_view_methods lookups ~is_visible type_ name =
+  let list_instance_methods owner =
+    List.filter_map
+      (fun key ->
+        match key.path with
+        | Path.Method { receiver = Instance _ as receiver; _ }
+          when is_visible (lookups.read_declaration key) ->
+            Some (receiver, key.path)
+        | _ -> None)
+      (lookups.list_members owner name)
+  in
+  match Well_known.find_view type_ with
+  | Some view ->
+      let own = list_instance_methods type_ in
+      List.filter
+        (fun (receiver, _) -> not (List.mem_assoc receiver own))
+        (list_instance_methods view)
+  | None -> []
 
 let derived_methods : Well_known.method_ list =
   [

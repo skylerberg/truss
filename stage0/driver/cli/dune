@@ -9,7 +9,6 @@
   diagnostic
   syntax
   path
-  well_known
   grant
   resolve
   inspect

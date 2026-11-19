@@ -465,14 +465,21 @@ and resolve_overloads state receiver_type name :
   let candidates = list_trait_candidates state receiver_type name in
   if not (is_one_family state (List.map fst candidates)) then Error (List.map fst candidates)
   else
-    let lookup_method make owner receiver : overload Resolve.Names.lookup =
-      match owner with
-      | Some (Types.Named { path; _ }) -> (
+    let lookup_own_method receiver : overload Resolve.Names.lookup =
+      match receiver_type with
+      | Types.Named { path; _ } -> (
           match Members.lookup_method state path name receiver with
-          | Visible method_path -> Visible (make method_path)
+          | Visible method_path -> Visible (Type_overload method_path)
           | Hidden hidden -> Hidden hidden
           | Absent -> Absent)
       | _ -> Absent
+    and view_methods =
+      match receiver_type with
+      | Types.Named { path; _ } ->
+          Resolve.Names.list_view_methods state.lookups.interface.names
+            ~is_visible:(Resolve.Names.is_visible_from ~from:state.key.module_)
+            path name
+      | _ -> []
     in
     let lookup_trait_method receiver : overload Resolve.Names.lookup =
       match
@@ -495,13 +502,11 @@ and resolve_overloads state receiver_type name :
               ( receiver,
                 Resolve.Names.choose_visible
                   [
-                    lookup_method
-                      (fun method_path -> Type_overload method_path)
-                      (Some receiver_type) receiver;
+                    lookup_own_method receiver;
                     lookup_trait_method receiver;
-                    lookup_method
-                      (fun method_path -> View_overload method_path)
-                      (Types.find_view receiver_type) receiver;
+                    (match List.assoc_opt receiver view_methods with
+                    | Some method_path -> Visible (View_overload method_path)
+                    | None -> Absent);
                   ] ))
             [ Path.Instance Read; Instance Mut; Instance Own ]))
 

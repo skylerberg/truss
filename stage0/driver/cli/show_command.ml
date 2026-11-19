@@ -11,16 +11,25 @@ let list_top_level (names : Resolve.Names.lookups) declarations =
       declaration.key.ordinal = 0 && names.find_container declaration.key = None)
     declarations
 
-let list_type_parts declarations (type_ : Path.t) =
+let list_type_parts names packages (type_ : Path.t) =
+  let declarations = Path_argument.list_shown_declarations names packages in
   let is_member (declaration : Resolve.Names.declaration) =
     match declaration.key.path with
     | Method { owner; _ } | Member_constant { owner; _ } -> Path.equal owner type_
+    | _ -> false
+  and is_view_method (declaration : Resolve.Names.declaration) =
+    match declaration.key.path with
+    | Method { name; _ } ->
+        List.exists
+          (fun (_, method_) -> Path.equal method_ declaration.key.path)
+          (Resolve.Names.list_view_methods names ~is_visible:(Path_argument.is_shown packages) type_
+             name)
     | _ -> false
   and is_impl (declaration : Resolve.Names.declaration) =
     match declaration.key.path with Impl { for_type; _ } -> Path.equal for_type type_ | _ -> false
   in
   List.filter is_member declarations
-  @ Path_argument.list_view_methods declarations type_
+  @ List.filter is_view_method declarations
   @ List.filter is_impl declarations
 
 let list_target_declarations (names : Resolve.Names.lookups) packages :
@@ -36,8 +45,7 @@ let list_target_declarations (names : Resolve.Names.lookups) packages :
   | Definition path -> (
       let declared = Option.to_list (Option.map names.read_declaration (names.find_key path)) in
       match Resolve.Names.find_kind names path with
-      | Some Type ->
-          declared @ list_type_parts (Path_argument.list_shown_declarations names packages) path
+      | Some Type -> declared @ list_type_parts names packages path
       | Some (Function | Trait | Capability | Constant | Theorem) | None -> declared)
 
 let show_definition snapshot database (names : Resolve.Names.lookups) packages ~body

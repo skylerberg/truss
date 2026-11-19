@@ -141,22 +141,17 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
       Interface.Definition.find_trait_interface lookups.interface impl.implements.trait )
   with
   | Types.Named { path; _ }, Some trait when not trait.is_capability ->
-      let view = Types.find_view impl.for_type in
-      let list_counted_members owner =
-        Resolve.Names.list_members_visible_to_package lookups.interface.names
-          ~package:declaration.key.module_.package owner
-      in
+      let view = Types.find_view impl.for_type
+      and names = lookups.interface.names
+      and package = declaration.key.module_.package in
       List.filter_map
         (fun (method_ : Types.trait_method) ->
-          let own = list_counted_members path method_.method_name
+          let own =
+            Resolve.Names.list_members_visible_to_package names ~package path method_.method_name
           and of_view =
-            match view with
-            | Some (Types.Named view) ->
-                List.filter
-                  (fun (key : Resolve.Names.key) ->
-                    match key.path with Method { receiver; _ } -> receiver <> Static | _ -> false)
-                  (list_counted_members view.path method_.method_name)
-            | _ -> []
+            Resolve.Names.list_view_methods names
+              ~is_visible:(Resolve.Names.is_visible_to_package ~package)
+              path method_.method_name
           in
           let describe_method ~is_own =
             match view with
@@ -181,7 +176,7 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
                  message)
           in
           let is_own_version = List.exists is_same_version own in
-          if is_own_version || List.exists is_same_version of_view then
+          if is_own_version || List.mem_assoc method_.method_receiver of_view then
             make_clash
               (Printf.sprintf "`%s` has %s, which takes %s, so it cannot also get one from `%s`."
                  (Types.show impl.for_type)
