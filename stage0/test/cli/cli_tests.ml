@@ -725,11 +725,47 @@ let () =
       if not (String.includes ~affix:"main.truss:3:5: `todo` in a proof can be reached" output) then
         fail "%s" output)
 
+let encode_report_record kind fields =
+  let payload = Buffer.create 32 in
+  List.iter
+    (function
+      | `Unsigned_8 value -> Buffer.add_uint8 payload value
+      | `Unsigned_32 value -> Buffer.add_int32_le payload (Int32.of_int value)
+      | `Unsigned_64 value -> Buffer.add_int64_le payload (Int64.of_int value)
+      | `Counted text ->
+          Buffer.add_int32_le payload (Int32.of_int (String.length text));
+          Buffer.add_string payload text)
+    fields;
+  let record = Buffer.create 64 in
+  Buffer.add_uint8 record kind;
+  Buffer.add_int32_le record (Int32.of_int (Buffer.length payload));
+  Buffer.add_buffer record payload;
+  Buffer.contents record
+
+let encode_started number = encode_report_record 0 [ `Unsigned_32 number ]
+
+let encode_ended number ~outcome ~microseconds ~message =
+  encode_report_record 1
+    [
+      `Unsigned_32 number;
+      `Unsigned_8 outcome;
+      `Unsigned_64 microseconds;
+      `Counted message;
+      `Counted "";
+      `Counted "";
+    ]
+
 let () =
   test "a report's records come back in the order of the tests, however they ended" (fun () ->
       let records =
         Backend.Test_report.For_testing.parse ~tests:2
-          "start 0\nstart 1\nmessage 4\nboom\ntest 1 panicked 30\ntest 0 passed 12\n"
+          (String.concat ""
+             [
+               encode_started 0;
+               encode_started 1;
+               encode_ended 1 ~outcome:2 ~microseconds:30 ~message:"boom";
+               encode_ended 0 ~outcome:0 ~microseconds:12 ~message:"";
+             ])
       in
       match records with
       | Ok
@@ -740,6 +776,17 @@ let () =
           ()
       | Ok records -> fail "read %d records differently" (List.length records)
       | Error message -> fail "%s" message);
+  test "a report record split across reads is read once, when it is whole" (fun () ->
+      let record = encode_ended 0 ~outcome:1 ~microseconds:7 ~message:"values differ" in
+      let bytes = List.init (String.length record) (fun index -> String.sub record index 1) in
+      match Backend.Test_report.For_testing.list_records_by_piece ~tests:1 bytes with
+      | [ (pieces_fed, { message = Some "values differ"; _ }) ]
+        when pieces_fed = String.length record ->
+          ()
+      | [ (pieces_fed, _) ] when pieces_fed <> String.length record ->
+          fail "read the record after %d of its %d bytes" pieces_fed (String.length record)
+      | [ _ ] -> fail "read the record with a different message"
+      | records -> fail "read %d records" (List.length records));
   test "a duration is shown in the largest unit under its size" (fun () ->
       expect_strings ~expected:[ "2.31s"; "42ms"; "87µs" ]
         (List.map Cli.Test_command.For_testing.show_duration [ 2_310_000; 42_000; 87 ]));
@@ -764,7 +811,17 @@ let () =
       expect_strings ~expected:[ "elsewhere" ]
         (List.map
            (fun (test : Cli.Test_command.test) -> test.name)
-           (select project ~paths:[ Filename.concat root "other.truss" ] ~match_:None)))
+           (select project ~paths:[ Filename.concat root "other.truss" ] ~match_:None)));
+  test "the file-system root as a path keeps every test" (fun () ->
+      let root =
+        make_package [ ("main.truss", suite); ("other.truss", "test \"elsewhere\" {\n}\n") ]
+      in
+      let project = Cli.Command_packages.load root in
+      expect_strings
+        ~expected:[ "doubles two"; "doubles three"; "halves"; "elsewhere" ]
+        (List.map
+           (fun (test : Cli.Test_command.test) -> test.name)
+           (select project ~paths:[ "/" ] ~match_:None)))
 
 let () =
   test "a function's signature is its text without its body" (fun () ->

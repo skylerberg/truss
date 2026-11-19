@@ -1103,13 +1103,20 @@ let () =
       ignore (settle_on_disk root);
       Workspace.flush ();
       let list = Filename.concat root ".truss/list" in
-      File_system.write list
-        (String.concat "\n"
-           (List.map
-              (fun line ->
-                if String.starts_with ~prefix:"header compiler " line then "header compiler other"
-                else line)
-              (String.split_on_char '\n' (File_system.read list))));
+      let digest = Workspace.For_testing.compiler_digest in
+      (match String.split_first ~sep:digest (File_system.read list) with
+      | Some (before, after) ->
+          File_system.write list (before ^ String.make (String.length digest) '0' ^ after)
+      | None -> Harness.fail "the list does not name the compiler");
+      expect_included (settle_on_disk root) ~parts:[ "checked body app::main::caller" ];
+      Workspace.flush ());
+  Harness.test "a database whose list is in the earlier text format is rebuilt" (fun () ->
+      let root = project [ ("main/main", callee_and_caller) ] in
+      ignore (settle_on_disk root);
+      Workspace.flush ();
+      File_system.write
+        (Filename.concat root ".truss/list")
+        ("truss database\nheader compiler " ^ Workspace.For_testing.compiler_digest ^ "\n");
       expect_included (settle_on_disk root) ~parts:[ "checked body app::main::caller" ];
       Workspace.flush ())
 
