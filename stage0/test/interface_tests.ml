@@ -9,6 +9,11 @@ let make_standard_path = Path.make_standard_path
 let int64 = Types.make_builtin Int64
 
 let () =
+  Harness.test "a constant of type UInt64 is a type argument in a signature" (fun () ->
+      expect_no_diagnostics [ ("app::main", Fixtures.Interface.array_sized_by_a_uint64_constant) ]);
+  Harness.test "a constant of another type is not a type argument in a signature" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.array_sized_by_an_int64_constant "types.arity"
+        ~says:"`size` in a type argument must be a constant of type `UInt64`.");
   Harness.test "a function's signature is elaborated" (fun () ->
       let packages =
         Support.setup
