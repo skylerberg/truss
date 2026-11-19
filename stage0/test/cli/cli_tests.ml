@@ -777,19 +777,16 @@ let () =
       | Ok records -> fail "read %d records differently" (List.length records)
       | Error message -> fail "%s" message);
   test "a report record split across reads is read once, when it is whole" (fun () ->
-      let ended = ref [] in
-      let reader =
-        Backend.Test_report.make_reader ~tests:1 (fun number record ->
-            ended := (number, record.message) :: !ended)
-      in
       let record = encode_ended 0 ~outcome:1 ~microseconds:7 ~message:"values differ" in
-      String.iteri
-        (fun index _ ->
-          if !ended <> [] then
-            fail "read the record after %d of its %d bytes" index (String.length record);
-          Backend.Test_report.feed reader (String.sub record index 1))
-        record;
-      if !ended <> [ (0, Some "values differ") ] then fail "read %d records" (List.length !ended));
+      let bytes = List.init (String.length record) (fun index -> String.sub record index 1) in
+      match Backend.Test_report.For_testing.list_records_by_piece ~tests:1 bytes with
+      | [ (pieces_fed, { message = Some "values differ"; _ }) ]
+        when pieces_fed = String.length record ->
+          ()
+      | [ (pieces_fed, _) ] when pieces_fed <> String.length record ->
+          fail "read the record after %d of its %d bytes" pieces_fed (String.length record)
+      | [ _ ] -> fail "read the record with a different message"
+      | records -> fail "read %d records" (List.length records));
   test "a duration is shown in the largest unit under its size" (fun () ->
       expect_strings ~expected:[ "2.31s"; "42ms"; "87µs" ]
         (List.map Cli.Test_command.For_testing.show_duration [ 2_310_000; 42_000; 87 ]));

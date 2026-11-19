@@ -123,4 +123,16 @@ module For_testing = struct
     with
     | () -> Ok (List.map snd (List.sort (fun (left, _) (right, _) -> compare left right) !records))
     | exception Malformed message -> Error message
+
+  let list_records_by_piece ~tests pieces =
+    let records = ref [] and pieces_fed = ref 0 in
+    let reader =
+      make_reader ~tests (fun _ record -> records := (!pieces_fed, record) :: !records)
+    in
+    List.iter
+      (fun piece ->
+        incr pieces_fed;
+        feed reader piece)
+      pieces;
+    List.rev !records
 end
