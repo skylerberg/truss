@@ -1536,6 +1536,22 @@ fn List[Element].push(mut self, item: own Element)
 | An opaque type has a model. | Other packages reason about the type through its model, without its fields. |
 | `identical(a, b)` is identity, and is separate from `==`. | A generic contract must say that an element is a given value, whatever its type. `==` cannot say that: it is the type's `Equal`, which `List[Element]` does not require, and which is an equivalence and not identity for a set stored as an unsorted list. `==` therefore keeps one meaning everywhere. |
 
+### What proofs do not model
+
+Every proof treats a value as a value. A call changes only its `mut`
+arguments and the state behind the capabilities it uses, and `mut` access
+lasts one call, one iteration, or one `provide mut` block. The prover
+therefore models no memory and no time. Each feature below would need a
+model of one, so the language leaves it out, and adding it would change
+every proof.
+
+| Not modeled | Reason, or the section that gives it |
+|---|---|
+| A fact about a capability's state that relates two calls, such as a counter that never decreases or the order of a channel's messages | Such a fact needs ghost state or permissions that persist across calls, as Verus's tracked tokens and Iris provide. The prover never models an implementation's state between calls ([Shared state](#shared-state)), and it proves the invariant of the shared value's type, which each update re-establishes. |
+| Stored `mut` access: a cursor over mutable elements, a returned mutable view, or a record that holds one | [Views](#views): `mut` access is never stored. |
+| Code that runs after a lend | [Lending methods](#lending-methods) |
+| Foreign code | [No foreign code](#no-foreign-code) |
+
 ## Unfinished code
 
 Rules: [Unfinished code](SPECIFICATION.md#unfinished-code).
