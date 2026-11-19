@@ -2227,3 +2227,30 @@ let () =
       expect_one_diagnostic Fixtures.Infer.record_update_of_a_field_twice "types.repeated_argument";
       expect_one_diagnostic Fixtures.Infer.record_update_of_a_field_and_its_part
         "types.repeated_argument")
+
+let () =
+  Harness.test "a clause is checked with its condition's bounds" (fun () ->
+      expect_fine Fixtures.Infer.clause_calling_a_method_of_its_condition);
+  Harness.test "a clause without a condition has only the definition's bounds" (fun () ->
+      match
+        Support.list_codes
+          (check
+             (Support.setup
+                [ ("app::main", Fixtures.Infer.clause_calling_a_method_without_its_condition) ])
+             (Support.parse_file "app::main"))
+      with
+      | [] -> Harness.fail "no diagnostics"
+      | codes ->
+          if List.exists (fun code -> code <> "types.unknown_member") codes then
+            Harness.fail "%s" (String.concat ", " codes));
+  Harness.test "a condition names a type parameter or Self" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.condition_on_a_concrete_type "types.decided_condition"
+        ~says:"`Int64` is neither");
+  Harness.test "a clause whose condition never holds is rejected" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.clause_whose_condition_never_holds
+        "types.decided_condition" ~says:"never holds");
+  Harness.test "a bound goal of a clause is decided with the clause's condition" (fun () ->
+      expect_fine Fixtures.Infer.clause_whose_bound_goal_needs_its_condition);
+  Harness.test "a bound goal of the body is decided without a loop clause's condition" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.loop_clause_condition_after_a_pending_bound_goal
+        "types.unsatisfied_bound" ~says:"`Item: Convert[Int64]`")

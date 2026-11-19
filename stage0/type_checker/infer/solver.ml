@@ -126,7 +126,14 @@ let fail_unification (state : State.state) =
   | None -> Fails Unmet
 
 let make_goal (state : State.state) subject requirement ~outputs ~cause : State.goal =
-  { subject; requirement; outputs; cause; is_specification = state.unifier.checks_specification }
+  {
+    subject;
+    requirement;
+    outputs;
+    cause;
+    is_specification = state.unifier.checks_specification;
+    condition_bounds = state.condition_bounds;
+  }
 
 let has_unknowns (state : State.state) arguments =
   List.exists (fun argument -> Unify.list_argument_unknowns state.unifier argument <> []) arguments
@@ -335,6 +342,9 @@ let require_within state subject set ~reason =
   | Some report -> Types.Error report
   | None -> subject
 
+let has_active_bounds (state : State.state) (goal : State.goal) =
+  Types.implies_condition goal.condition_bounds state.condition_bounds
+
 let solve (state : State.state) ~selects =
   let enclosing = state.unifier.checks_specification in
   let rec loop () =
@@ -343,15 +353,16 @@ let solve (state : State.state) ~selects =
     state.goals <-
       List.filter
         (fun (goal : State.goal) ->
-          (not (selects goal))
+          (not (selects goal && has_active_bounds state goal))
           || begin
             state.unifier.checks_specification <- goal.is_specification;
-            match decide state ~depth:0 goal with
-            | Waits -> true
-            | Holds -> false
-            | Fails failure ->
-                ignore (fail state goal failure);
-                false
+            State.apply_condition_bounds state goal.condition_bounds (fun () ->
+                match decide state ~depth:0 goal with
+                | Waits -> true
+                | Holds -> false
+                | Fails failure ->
+                    ignore (fail state goal failure);
+                    false)
           end)
         pending;
     if

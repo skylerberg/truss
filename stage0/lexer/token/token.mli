@@ -44,10 +44,12 @@ type keyword =
   | Trait
   | True
   | Type
+  | Unless
   | Unreachable
   | Use
   | Uses
   | Var
+  | When
   | While
   | With
 

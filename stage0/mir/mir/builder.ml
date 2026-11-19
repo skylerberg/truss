@@ -1586,18 +1586,21 @@ and of_law_statement ~entry_locals (written : Core.block) =
 and lower_attached_formula builder (written : Core.expression) =
   of_specification ~entry_locals:(Emitter.entry_locals builder) written
 
-and lower_loop_clauses builder (clauses : Core.loop_clause list) : Tree.loop_clause list =
+and lower_loop_clauses builder (clauses : Core.loop_clause Core.conditional list) :
+    Tree.loop_clause list =
   let lower_bound : Core.bound -> Tree.bound = function
     | Order_of amount -> Order_of (lower_attached_formula builder amount)
     | At_most amount -> At_most (lower_attached_formula builder amount)
     | Exactly amount -> Exactly (lower_attached_formula builder amount)
   in
   List.map
-    (function
-      | Core.Invariant invariant -> Tree.Invariant (lower_attached_formula builder invariant)
-      | Decreases measures -> Decreases (List.map (lower_attached_formula builder) measures)
+    (fun ({ holds_when; clause } : Core.loop_clause Core.conditional) ->
+      let lower_formula written = { (lower_attached_formula builder written) with holds_when } in
+      match clause with
+      | Core.Invariant invariant -> Tree.Invariant (lower_formula invariant)
+      | Decreases measures -> Decreases (List.map lower_formula measures)
       | Cost { origin; amortized; resource; bound = written } ->
-          Cost { origin; amortized; resource; bound = lower_bound written })
+          Cost { origin; amortized; resource; bound = lower_bound written; holds_when })
     clauses
 
 let of_expression (written : Core.expression) =

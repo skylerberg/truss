@@ -1,0 +1,12 @@
+fn spin[Source: Cursor](source: own Source) -> UInt64
+  uses Source.Uses, RunForever unless Source: FiniteCursor
+{
+  var cursor = own source
+  var count: UInt64 = 0
+  while count < 10 || count > 5
+    decreases cursor.remaining() when Source: FiniteCursor
+  {
+    count = count.saturating_add(1)
+  }
+  count
+}

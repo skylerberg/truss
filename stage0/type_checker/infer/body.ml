@@ -79,11 +79,12 @@ let classify_self_mode (signature : Types.signature) =
 let check_clauses state env (clauses : Syntax.clause list) =
   List.iter
     (fun (clause : Syntax.clause) ->
-      match clause.kind with
-      | Requires value | Ensures value -> Clauses.check_condition state env value
-      | Decreases measures -> Clauses.check_measures state env measures
-      | Cost cost -> Clauses.check_cost state env cost
-      | Uses _ | Clause_error -> ())
+      Clauses.check_under_condition state ~id:clause.id clause.condition (fun () ->
+          match clause.kind with
+          | Requires value | Ensures value -> Clauses.check_condition state env value
+          | Decreases measures -> Clauses.check_measures state env measures
+          | Cost cost -> Clauses.check_cost state env cost
+          | Uses _ | Clause_error -> ()))
     clauses
 
 let check_function_type_requires state env (written : Syntax.parameter list)
@@ -144,35 +145,48 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
 
 let build_core_contract state (clauses : Syntax.clause list) : Core.contract =
   let collect_each choose =
-    List.concat_map (fun (clause : Syntax.clause) -> choose clause.kind) clauses
+    List.concat_map
+      (fun (clause : Syntax.clause) ->
+        match choose clause with
+        | Some build ->
+            List.concat
+              (Option.to_list
+                 (Option.map
+                    (fun (built : _ Core.conditional) ->
+                      List.map (fun each -> { built with clause = each }) built.clause)
+                    (Clauses.build_under_condition state ~id:clause.id clause.condition build)))
+        | None -> [])
+      clauses
   in
   let requires =
-    collect_each (function
-      | Requires value ->
-          let value = State.build_expression state value in
-          [ { Core.value; executable = Form.is_executable state value } ]
-      | _ -> [])
+    collect_each (fun clause ->
+        match clause.kind with
+        | Requires value ->
+            Some
+              (fun () ->
+                let value = State.build_expression state value in
+                [ { Core.value; executable = Form.is_executable state value } ])
+        | _ -> None)
   in
   let ensures =
-    collect_each (function Ensures value -> [ State.build_expression state value ] | _ -> [])
+    collect_each (fun clause ->
+        match clause.kind with
+        | Ensures value -> Some (fun () -> [ State.build_expression state value ])
+        | _ -> None)
   in
   let decreases =
-    collect_each (function
-      | Decreases measures -> List.map (State.build_expression state) measures
-      | _ -> [])
+    collect_each (fun clause ->
+        match clause.kind with
+        | Decreases measures -> Some (fun () -> List.map (State.build_expression state) measures)
+        | _ -> None)
   in
-  {
-    requires;
-    ensures;
-    decreases;
-    costs =
-      List.filter_map
-        (fun (clause : Syntax.clause) ->
-          match clause.kind with
-          | Cost cost -> Some (Form.build_cost state ~origin:clause.id cost)
-          | _ -> None)
-        clauses;
-  }
+  let costs =
+    collect_each (fun clause ->
+        match clause.kind with
+        | Cost cost -> Some (fun () -> [ Form.build_cost state ~origin:clause.id cost ])
+        | _ -> None)
+  in
+  { requires; ensures; decreases; costs }
 
 let build_core_parameters state (written : Syntax.parameter list) (signature : Types.signature) :
     Core.parameter list =
@@ -619,7 +633,10 @@ let finalize (state : State.state) =
           {
             cursor = finalize_type cursor;
             cursor_call = Option.map finalize_call cursor_call;
-            remaining = Option.map finalize_call remaining;
+            remaining =
+              Option.map
+                (fun (condition, remaining) -> (condition, finalize_call remaining))
+                remaining;
           });
   update tables.patterns (function
     | Tables.Variant_pattern { type_; variant } ->
@@ -722,6 +739,7 @@ let infer (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body ~assumed_
       evidence_packages = [];
       final_type_checks = [];
       log = [];
+      condition_bounds = [];
       annotatable = Hashtbl.create 8;
       goals = [];
       assumed_types;

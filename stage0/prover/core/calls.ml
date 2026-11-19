@@ -168,6 +168,32 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let substitution_of (clauses : State.clauses) =
     Types.combine_substitutions (substitution_of clauses) clauses.bindings
   in
+  let find_clause_condition (clauses : State.clauses) holds_when =
+    Conditions.find_obligation_condition
+      (Conditions.decide context ~substitution:(substitution_of clauses) holds_when)
+  in
+  let keep_holding_clauses (clauses : State.clauses) =
+    let holds holds_when = Option.is_some (find_clause_condition clauses holds_when) in
+    {
+      clauses with
+      requires =
+        List.filter
+          (fun (requirement : Mir.requirement) -> holds requirement.clause.holds_when)
+          clauses.requires;
+      ensures = List.filter (fun (clause : Mir.formula) -> holds clause.holds_when) clauses.ensures;
+      decreases =
+        List.filter (fun (measure : Mir.formula) -> holds measure.holds_when) clauses.decreases;
+      costs = List.filter (fun (cost : Mir.cost) -> holds cost.holds_when) clauses.costs;
+    }
+  in
+  let contract =
+    {
+      contract with
+      callee_clauses = keep_holding_clauses contract.callee_clauses;
+      trait_clauses = Option.map keep_holding_clauses contract.trait_clauses;
+      restated_clauses = List.map keep_holding_clauses contract.restated_clauses;
+    }
+  in
   let is_logic_call = contract.is_logic_function && invocation.uses = Types.no_capabilities in
   let values =
     if is_logic_call then
@@ -344,7 +370,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             Text (Printf.sprintf "` may not hold for this call to `%s`." (Facts.show_callee path));
           ]
         in
-        Facts.oblige context frame Requires location ?cited ~fixes message term;
+        Facts.oblige context frame Requires location ?cited ~fixes
+          ?holds_when:(find_clause_condition precondition_clauses clause.holds_when)
+          message term;
         term)
       precondition_clauses.requires
   in
@@ -404,8 +432,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             | Some passed -> Facts.declare_sort context passed.type_
             | None ->
                 Facts.declare_sort context
-                  ((Interface.Impls.normalize context.lookups.interface
-                      ~list_bounds:Interface.Impls.list_no_bounds)
+                  ((Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
                      (Types.substitute (substitution_of callee_clauses) parameter.type_)))
           callee_bindings
       in
@@ -416,8 +443,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         when self.local = Self
              && Well_known.is_method Model_model (Method { owner = trait.path; name; receiver }) ->
           Models.rank_model context
-            ((Interface.Impls.normalize context.lookups.interface
-                ~list_bounds:Interface.Impls.list_no_bounds)
+            ((Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
                (Types.substitute (substitution_of callee_clauses) self.type_))
             ~model:result_type ~impl function_symbol
       | _ -> ());

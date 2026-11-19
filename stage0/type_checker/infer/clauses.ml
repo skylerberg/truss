@@ -103,3 +103,20 @@ let check_cost state env (cost : Syntax.cost) =
       List.iter (check_cost_operand state cost)
         (Interface.Elaborator.list_cost_operands state.context bound);
       check_integer state env bound ~described:"A cost bound"
+
+let check_under_condition state ~id (written : Syntax.condition option) check =
+  match (written, State.record_condition state id written) with
+  | _, Some condition -> State.apply_condition_bounds state condition check
+  | Some _, None ->
+      State.report state Decided_condition (State.read_span state id)
+        "This clause's condition never holds where it is written, so the clause would bind \
+         nothing. Remove the clause, or name a type parameter in its condition."
+  | None, None -> State.raise_bug "a clause without a condition never holds"
+
+let build_under_condition state ~id (written : Syntax.condition option) build :
+    'clause Core.conditional option =
+  match (State.find_condition state id, written) with
+  | Some holds_when, _ ->
+      Some { holds_when; clause = State.apply_condition_bounds state holds_when build }
+  | None, None -> Some { holds_when = []; clause = build () }
+  | None, Some _ -> None

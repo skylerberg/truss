@@ -1,0 +1,5 @@
+fn spin[Source: Cursor](source: own Source)
+  uses Source.Uses, RunForever unless Source: FiniteCursor
+{
+  while true {}
+}

@@ -39,6 +39,7 @@ type goal = {
   outputs : (string * Types.ty) list;
   cause : cause;
   is_specification : bool;
+  condition_bounds : Types.condition;
 }
 
 type frame = {
@@ -94,6 +95,7 @@ type state = {
   mutable evidence_packages : Path.package list;
   mutable final_type_checks : (unit -> unit) list;
   mutable log : logged list;
+  mutable condition_bounds : Types.condition;
   annotatable : (Syntax.id, unit) Hashtbl.t;
   assumed_types : (Syntax.id * Types.ty) list;
   mutable unchecked_fixes :
@@ -160,6 +162,10 @@ val note_compiled_expression : state -> env -> Syntax.expression -> unit
 val report_specification_only : state -> Source.Definition_span.t -> string -> Diagnostic.reported
 val check_compiled_binding : state -> Syntax.id -> unit
 val check_compiled_expression : state -> Syntax.id -> unit
+val reduce_condition : state -> Types.condition -> Types.condition option
+val record_condition : state -> Syntax.id -> Syntax.condition option -> Types.condition option
+val find_condition : state -> Syntax.id -> Types.condition option
+val apply_condition_bounds : state -> Types.condition -> (unit -> 'a) -> 'a
 val check_when_final : state -> (unit -> unit) -> unit
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty

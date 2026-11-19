@@ -620,6 +620,7 @@ let build_formula builder ~origin ~type_ (build : unit -> Tree.local list * Tree
           type_;
           origin;
           lambdas = [||];
+          holds_when = [];
         }
   in
   let held = ref None in

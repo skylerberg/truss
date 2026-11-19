@@ -504,6 +504,31 @@ let () =
       let root = make_package [ ("main.truss", ""); (".hidden/x.truss", "") ] in
       expect_strings ~expected:[ "demo" ]
         (List.map Path.show_module (list_modules (Cli.Command_packages.load root))));
+  test "a diagnostic and a failed test name a file the same way from any working directory"
+    (fun () ->
+      let root =
+        make_directory
+          [
+            ("truss.toml", "[project]\n");
+            ("app/truss.toml", make_manifest "app");
+            ("app/main.truss", Fixtures.Cli.unused_helper_and_failing_test);
+          ]
+      in
+      let list_named_lines directory =
+        let _, output = run_truss [ "test"; "-C"; directory ] in
+        List.filter
+          (fun line -> String.includes ~affix:"main.truss" line)
+          (String.split_on_char '\n' output)
+      in
+      let from_root = list_named_lines root in
+      expect_strings ~expected:from_root (list_named_lines (Filename.concat root "app"));
+      if
+        not
+          (List.exists (String.includes ~affix:"app/main.truss:1:") from_root
+          && List.exists (String.includes ~affix:"at app/main.truss:10:") from_root)
+      then
+        fail "the warning or the failed assert does not name app/main.truss: %s"
+          (String.concat "\n" from_root));
   test "a path is shown relative to the directory it is read from" (fun () ->
       expect_string ~expected:"../weather/forecast.truss"
         (Cli.Shown_path.make_relative ~from:"/code/app" "/code/weather/forecast.truss"))

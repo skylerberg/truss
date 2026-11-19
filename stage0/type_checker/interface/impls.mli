@@ -94,6 +94,9 @@ val project_capability_set :
 val normalize_capabilities :
   Lookups.t -> list_bounds:bounds -> ?depth:int -> Types.capability_set -> Types.capability_set
 
+val decide_condition :
+  Lookups.t -> list_bounds:bounds -> ?depth:int -> Types.condition -> Types.condition option
+
 val normalize : Lookups.t -> list_bounds:bounds -> ?defining:Path.t list ref -> Types.ty -> Types.ty
 
 module Conformance : sig

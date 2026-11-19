@@ -201,7 +201,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
         clauses;
       State.register_statement state written (fun () ->
           let pattern = State.build_pattern state written_pattern in
-          let clauses = List.map (Form.build_loop_clause state) clauses in
+          let clauses = build_loop_clauses state clauses in
           Form.build_for_loop state written inner ~pattern ~clauses
             ~body:(State.build_block state body) ~mode:running);
       check_loop_body state env body
@@ -212,7 +212,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       List.iter (check_loop_clause state env) clauses;
       State.register_statement state written (fun () ->
           let condition = State.build_expression state test in
-          let clauses = List.map (Form.build_loop_clause state) clauses in
+          let clauses = build_loop_clauses state clauses in
           While
             {
               condition;
@@ -315,10 +315,18 @@ and check_loop_body state env (body : Syntax.block) =
     body.statements
 
 and check_loop_clause state env (clause : Syntax.loop_clause) =
-  match clause.kind with
-  | Invariant value -> Clauses.check_condition state env value
-  | Loop_decreases measures -> Clauses.check_measures state env measures
-  | Loop_cost cost -> Clauses.check_cost state env cost
+  Clauses.check_under_condition state ~id:clause.id clause.condition (fun () ->
+      match clause.kind with
+      | Invariant value -> Clauses.check_condition state env value
+      | Loop_decreases measures -> Clauses.check_measures state env measures
+      | Loop_cost cost -> Clauses.check_cost state env cost)
+
+and build_loop_clauses state (clauses : Syntax.loop_clause list) =
+  List.filter_map
+    (fun (clause : Syntax.loop_clause) ->
+      Clauses.build_under_condition state ~id:clause.id clause.condition (fun () ->
+          Form.build_loop_clause state clause))
+    clauses
 
 and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression)
     =
@@ -332,6 +340,7 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
           (element, mode)
       | _ -> State.raise_bug "a range is not of the range type")
   | _ -> (
+      let span = State.read_span state iterable.id in
       let type_ = Conversions.read_checked_head state env iterable in
       match type_ with
       | Types.Error _ | Types.Hole -> (type_, mode)
@@ -358,16 +367,14 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
                      {
                        cursor = type_;
                        cursor_call = None;
-                       remaining = Name_lookup.find_remaining_call state iterable type_;
+                       remaining = Name_lookup.find_remaining_call state span type_;
                      });
-              ( State.resolve_associated_type state type_ cursor Cursor_element
-                  ~at:(State.read_span state iterable.id),
+              ( State.resolve_associated_type state type_ cursor Cursor_element ~at:span,
                 Language.Mode.Own )
           | Hidden hidden, _, None | _, Hidden hidden, None ->
-              (Members.make_hidden_error state (State.read_span state iterable.id) hidden, mode)
+              (Members.make_hidden_error state span hidden, mode)
           | Absent, Absent, None ->
-              ( State.make_error_type state Not_indexable
-                  (State.read_span state iterable.id)
+              ( State.make_error_type state Not_indexable span
                   (match mode with
                   | Language.Mode.Read ->
                       Printf.sprintf

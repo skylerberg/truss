@@ -1,0 +1,6 @@
+type decision = Always | In_run of Types.condition | Elsewhere
+
+val decide : State.context -> substitution:Types.substitution -> Types.condition -> decision
+val holds_here : State.context -> ?substitution:Types.substitution -> Types.condition -> bool
+val find_obligation_condition : decision -> Types.condition option
+val with_obligation_condition : State.context -> Types.condition -> (unit -> 'a) -> 'a

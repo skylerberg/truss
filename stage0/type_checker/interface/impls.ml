@@ -502,17 +502,71 @@ and normalize_capabilities lookups ~list_bounds ?depth (capabilities : Types.cap
     | Capability_projection _ -> true
     | _ -> false
   in
-  if not (Types.exists_capability reads_an_impl capabilities) then capabilities
+  let is_conditional : Types.capability -> bool = function
+    | Capability_unless _ -> true
+    | _ -> false
+  in
+  let capabilities =
+    if not (Types.exists_capability reads_an_impl capabilities) then capabilities
+    else
+      Types.replace_capabilities
+        (function
+          | Types.Capability_projection { base; trait; name } ->
+              Some
+                (project_capability_set lookups ~list_bounds ?depth
+                   (normalize lookups ~list_bounds base)
+                   { trait with associated = [] } name)
+          | _ -> None)
+        capabilities
+  in
+  if not (List.exists is_conditional (Types.list_capabilities capabilities)) then capabilities
   else
-    Types.replace_capabilities
-      (function
-        | Types.Capability_projection { base; trait; name } ->
-            Some
-              (project_capability_set lookups ~list_bounds ?depth
-                 (normalize lookups ~list_bounds base)
-                 { trait with associated = [] } name)
+    Types.make_capability_set
+      (List.concat_map
+         (fun (capability : Types.capability) ->
+           match capability with
+           | Capability_unless { capability; unless } -> (
+               match decide_condition lookups ~list_bounds ?depth unless with
+               | None -> [ capability ]
+               | Some [] -> []
+               | Some unless -> [ Types.Capability_unless { capability; unless } ])
+           | _ -> [ capability ])
+         (Types.list_capabilities capabilities))
+
+and decide_condition lookups ~list_bounds ?(depth = 0) (condition : Types.condition) =
+  List.fold_left
+    (fun decided (bound : Types.bound_condition) ->
+      match (decided, decide_bound_condition lookups ~list_bounds ~depth bound) with
+      | Some remaining, Some undecided -> Some (remaining @ undecided)
+      | _ -> None)
+    (Some []) condition
+  |> Option.map Types.make_condition
+
+and decide_bound_condition lookups ~list_bounds ~depth (bound : Types.bound_condition) =
+  let subject = normalize lookups ~list_bounds bound.subject in
+  let holds () = Option.is_some (find_evidence lookups ~list_bounds ~depth subject bound.bound) in
+  match subject with
+  | Types.Error _ -> Some []
+  | Types.Variable _ | Types.Hole -> Some [ { bound with subject } ]
+  | Types.Parameter _ | Types.Projection _ ->
+      if holds () then Some [] else Some [ { bound with subject } ]
+  | Types.Named _ -> (
+      if holds () then Some []
+      else
+        match
+          find_evidence lookups ~list_bounds ~depth ~checks_conditions:false subject bound.bound
+        with
+        | Some (From_impl { impl; substitution }) -> (
+            match Definition.find_impl_interface lookups impl with
+            | Some interface ->
+                decide_condition lookups ~list_bounds ~depth:(depth + 1)
+                  (List.map
+                     (fun (argument, required) -> { Types.subject = argument; bound = required })
+                     (list_required_bounds interface.impl_generics substitution))
+            | None -> None)
         | _ -> None)
-      capabilities
+  | Types.Any _ | Types.Function _ | Types.Never | Types.Integer ->
+      if holds () then Some [] else None
 
 and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
   let normalize = normalize lookups ~list_bounds ?defining in

@@ -59,4 +59,5 @@ val find_elements_calls :
 val find_consuming_cursor :
   State.state -> Syntax.expression -> Types.ty -> (Tables.loop * Types.ty) Resolve.Names.lookup
 
-val find_remaining_call : State.state -> Syntax.expression -> Types.ty -> Tables.call option
+val find_remaining_call :
+  State.state -> Source.Definition_span.t -> Types.ty -> (Types.condition * Tables.call) option
