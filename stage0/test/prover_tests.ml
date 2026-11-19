@@ -1701,6 +1701,17 @@ let () =
       expect_proven Fixtures.Prover.zeros_filled)
 
 let () =
+  Harness.test "a requires fix reads a negated negation as the value it negates" (fun () ->
+      let text = Fixtures.Prover.negation_of_a_negated_parameter in
+      let packages = Support.setup [ ("app::main", text) ] in
+      match check packages (Support.parse_file "app::main") with
+      | [ { fixes = [ fix ]; _ } ] ->
+          if fix.title <> "Add `requires value <= Int64.maximum - 1`" then
+            Harness.fail "%s" fix.title;
+          expect_proven (Diagnostic.apply_edits text fix.edits)
+      | actual -> Harness.fail "%d diagnostics" (List.length actual))
+
+let () =
   Harness.test "a callee's requires about the caller's parameters is offered as the caller's"
     (fun () ->
       let packages =

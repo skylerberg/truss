@@ -1051,7 +1051,8 @@ and parse_arm cursor : Syntax.arm =
   let body = parse_statement cursor in
   (match Cursor.peek cursor with
   | { kind = Punctuation Comma; _ } as comma ->
-      Habits.match_arm_comma cursor ~comma;
+      Habits.match_arm_comma cursor ~comma
+        ~next:(Cursor.lookup_token cursor (Cursor.index cursor + 1));
       Cursor.advance cursor
   | _ -> ());
   { patterns; guard; body; id = Cursor.allocate_id_from cursor start }
