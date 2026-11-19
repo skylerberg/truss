@@ -1,0 +1,5 @@
+use standard::intrinsic
+
+internal fn error_number() -> Int32 {
+  intrinsic::libc_errno()
+}

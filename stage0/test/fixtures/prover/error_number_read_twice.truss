@@ -1,0 +1,15 @@
+use standard::capabilities
+use standard::intrinsic
+
+internal fn error_number() -> Int32
+  uses capabilities::System
+{
+  intrinsic::libc_errno()
+}
+
+internal fn read_twice() -> Bool
+  uses capabilities::System
+  ensures result
+{
+  error_number() == error_number()
+}

@@ -886,6 +886,19 @@ let () =
         ~says:"This call uses `Tasks`, which is not available here. Declare it with `uses Tasks`"
         ~at:("intrinsic::shared_update", 1);
       expect_fine_in_standard Fixtures.Capabilities.shared_count_updated_using_tasks);
+  Harness.test "a call of an intrinsic that reaches the operating system needs `System`" (fun () ->
+      expect_one_in_standard Fixtures.Capabilities.error_number_read_without_system
+        "capabilities.not_available" ~says:"This call uses `System`" ~at:("intrinsic::libc_errno", 1);
+      expect_fine_in_standard Fixtures.Capabilities.error_number_read_using_system);
+  Harness.test
+    "an implementation of a capability that reaches the operating system declares `System`"
+    (fun () ->
+      expect_one_in_standard
+        Fixtures.Capabilities.error_number_read_by_an_implementation_of_a_capability
+        "capabilities.not_available" ~says:"This call uses `System`" ~at:("intrinsic::libc_errno", 1));
+  Harness.test "nothing can implement `System`" (fun () ->
+      expect_one_in_standard Fixtures.Capabilities.system_implemented
+        "types.implements_built_in_capability" ~says:"Nothing can implement `System`");
   Harness.test
     "an implementation of a capability calls an intrinsic without the capabilities that the \
      intrinsic uses" (fun () ->

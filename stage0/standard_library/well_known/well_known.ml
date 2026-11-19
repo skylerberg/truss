@@ -55,6 +55,7 @@ type t =
   | File_path
   | Panic
   | Run_forever
+  | System
   | Tasks
   | System_error
   | Serialize
@@ -229,6 +230,7 @@ let items =
     (File_path, [ "files" ], "Path");
     (Panic, [ "capabilities" ], "Panic");
     (Run_forever, [ "capabilities" ], "RunForever");
+    (System, [ "capabilities" ], "System");
     (Tasks, [ "capabilities" ], "Tasks");
     (System_error, [ "capabilities" ], "SystemError");
     (Serialize, [ "serialization" ], "Serialize");

@@ -1,8 +1,11 @@
+use standard::capabilities
 use standard::intrinsic
 
 internal type SystemRandom()
 
-impl Random for SystemRandom {
+impl Random for SystemRandom
+  uses capabilities::System
+{
   fn next(self) -> UInt64 {
     var value: UInt64 = 0
     if intrinsic::libc_getentropy(mut value) != 0 {

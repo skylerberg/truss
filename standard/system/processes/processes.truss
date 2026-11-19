@@ -1,3 +1,4 @@
+use standard::capabilities
 use standard::growth
 use standard::intrinsic
 use standard::processes
@@ -9,7 +10,7 @@ internal type SystemProcesses()
 type Started(process: Int32, input: Int32, output: Int32, error_output: Int32)
 
 impl Processes for SystemProcesses
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   fn run(self, command: processes::Command) -> Result[processes::Output, SystemError] {
     let started = begin(command)?
@@ -58,7 +59,7 @@ impl Processes for SystemProcesses
 }
 
 fn begin(command: processes::Command) -> Result[Started, SystemError]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   var texts: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
   var starts: intrinsic::Storage[UInt64] = intrinsic::storage_empty()
@@ -136,6 +137,7 @@ fn arrange(
 ) -> Int32
   requires intrinsic::storage_length(actions) >= intrinsic::libc_spawn_file_actions_size()
   ensures intrinsic::storage_length(actions) == old(intrinsic::storage_length(actions))
+  uses capabilities::System
 {
   match redirect {
     Inherit => 0
@@ -193,7 +195,7 @@ fn add_variables(
   texts: mut intrinsic::Storage[UInt8],
   starts: mut intrinsic::Storage[UInt64],
 ) -> Result[Unit, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   if command.inherits_variables {
     var index: UInt64 = 0
@@ -267,7 +269,7 @@ fn collect(
   error_output: Int32,
   error_into: mut intrinsic::Storage[UInt8],
 ) -> Result[Unit, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   var output_open = output >= 0
   var error_open = error_output >= 0
@@ -292,7 +294,7 @@ fn collect(
 }
 
 fn drain(pipe: Int32, into: mut intrinsic::Storage[UInt8]) -> Result[Bool, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   var open = true
   var empty = false

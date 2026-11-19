@@ -1,10 +1,11 @@
+use standard::capabilities
 use standard::network
 use standard::system::sockets
 
 internal type SystemNetworkClient()
 
 impl NetworkClient for SystemNetworkClient
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   fn resolve(self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
     sockets::addresses_of(host)
