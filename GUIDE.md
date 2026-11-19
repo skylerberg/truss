@@ -4629,15 +4629,13 @@ From the tightest binding to the loosest:
   `TRUSS_NO_SERVER=1`, runs a command in its own process.
 - **`TRUSS_CC`** names the C compiler, and **`TRUSS_Z3`** the Z3 executable.
 - **A release build has a line table,** so a profiler, a debugger, and
-  `objdump -S` attribute machine code to the Truss line it came from. A
-  file of your own packages is named by its path from the project's
-  directory, or from the package's when it is in no project, so run
-  `objdump -S` there. A file of a dependency is named by the package's
-  path, as in `standard/text/text.truss`. Code that Truss
-  generates, such as a drop, is on `<generated>`, and the runtime is on
-  `<runtime>`. A release build keeps frame pointers, so `perf record -g`
-  records call stacks. On macOS, `truss build` writes the line table to
-  `PATH.dSYM` beside the program, where profilers and debuggers find it.
+  `objdump -S` attribute machine code to the Truss line it came from. Run
+  `objdump -S` in the project's directory, where the table's file names
+  resolve. Code that Truss generates, such as a drop, is on `<generated>`,
+  and the runtime is on `<runtime>`. A release build keeps frame pointers,
+  so `perf record -g` records call stacks. On macOS, `truss build` writes
+  the line table to `PATH.dSYM` beside the program, where profilers and
+  debuggers find it.
 
 `truss show` takes a path to any definition, including the standard
 library's, and a prelude name alone:

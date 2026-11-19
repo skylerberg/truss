@@ -4,7 +4,7 @@ let select snapshot database packages ~paths ~match_ =
   let names = Database.make_name_lookups database in
   List.concat_map
     (fun (file : Path.file) ->
-      let source = Command_packages.read_source snapshot database packages file in
+      let source = Command_packages.read_source snapshot database file in
       List.filter_map
         (fun (declaration : Resolve.Names.declaration) ->
           match declaration.key.path with
@@ -199,7 +199,7 @@ let run_tests ?rerun ?report_progress database snapshot packages tests =
   else
     match
       Backend.run_tests ?rerun ?report_progress
-        (Workspace_backend.create snapshot packages
+        (Workspace_backend.create snapshot
            (Workspace_backend.require_lowered_lookups database packages)
            Development)
         ~time_limit_ms:(Workspace.time_limit_ms snapshot)

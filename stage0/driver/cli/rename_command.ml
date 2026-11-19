@@ -199,10 +199,10 @@ let make_trial_snapshot snapshot after =
   in
   Workspace.make_trial snapshot (written @ removed)
 
-let encode_edits snapshot packages plan =
+let encode_edits snapshot plan =
   List.concat_map
     (fun (file, edits) ->
-      let path = Command_packages.show_file snapshot packages file in
+      let path = Workspace.locate_file snapshot file in
       List.map
         (fun (edit : Source.span Diagnostic.edit) ->
           Json.Object
@@ -239,10 +239,7 @@ let run ~from_ ~to_ =
             Some
               {
                 Report.file;
-                source =
-                  Source.create
-                    ~path:(Shown_path.show_path (locate_path snapshot packages file))
-                    text;
+                source = Source.create ~path:(Workspace.locate_file snapshot file) text;
                 diagnostics;
               })
       after
@@ -257,7 +254,7 @@ let run ~from_ ~to_ =
       end;
       1
   | [] ->
-      let edits = encode_edits snapshot packages plan in
+      let edits = encode_edits snapshot plan in
       List.iter
         (fun (old_file, file, text) ->
           if List.mem_assoc old_file plan.edits || old_file <> file then begin
@@ -278,7 +275,8 @@ let run ~from_ ~to_ =
                  | Some (old_m, new_m) ->
                      let encode_directory module_ =
                        Json.String
-                         (Shown_path.show_path (locate_directory snapshot packages module_))
+                         (Command_packages.show_project_path snapshot
+                            (locate_directory snapshot packages module_))
                      in
                      Json.Object
                        [ ("from", encode_directory old_m); ("to", encode_directory new_m) ]
