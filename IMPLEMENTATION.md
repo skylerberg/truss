@@ -48,7 +48,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
   library, `stage0/tools/docs/library_uses` lists the names that the
   library's `.cmt` and `.cmti` files reference in other libraries and the
   names that other libraries reference in it, each linked to its entry in
-  odoc's index. The script needs odoc and dune-deps from opam and Graphviz
+  odoc's index. After each definition, it lists the modules of any library
+  or executable that reference the definition, leaving out the references
+  by which a library re-exports its own modules. The script needs odoc and
+  dune-deps from opam and Graphviz
   and jq from Homebrew, which `dune-project` does not list because CI never
   builds the documentation.
 - **CI** (`.github/workflows/ci.yml`) builds, checks formatting, checks that
