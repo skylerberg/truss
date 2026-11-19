@@ -1,0 +1,4 @@
+fn f() {
+  let count = 16
+  let root = count.integer_square_root()
+}

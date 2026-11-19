@@ -156,7 +156,10 @@ A literal takes its type from its context, as in `let small: UInt8 = 3`. A
 local declared from literals alone takes its type from its first use that
 decides it: after `let limit = 10`, `count < limit` with a `UInt8` count makes
 `limit` a `UInt8`, and so does `let digit: UInt8 = index` in the body of
-`for index in 0..10`. When nothing decides it, a literal has the first of
+`for index in 0..10`. The use may follow a method call on the local, which
+then computes for the decided type: after `let mask = 255`,
+`mask.count_zeros()` is 0 when a later `let small: UInt8 = mask` makes `mask` a
+`UInt8`, and 56 without it. When nothing decides it, a literal has the first of
 `Int64`, `UInt64`, and `Float64` that its value fits and its uses allow, so
 `9223372036854775808` is a `UInt64`.
 
@@ -184,6 +187,16 @@ decides it: after `let limit = 10`, `count < limit` with a `UInt8` count makes
   `let range = 0..3`, `for index in range` finds `Range`'s `Iterable`, and
   the loop's body may still decide the type, which must then meet
   `Countable`.
+- A method call on an undecided literal looks up the method in the sealed
+  number traits that some of the literal's types implement, and in the traits
+  those require. A method found there narrows the literal to the implementors
+  of the sealed trait that provides it: `count.integer_square_root()` makes
+  `count` an unsigned integer, `level.negate()` makes `level` a signed
+  integer, and `count.saturating_add(1)` leaves `count` undecided. Any other
+  method gives the literal its default type at the call, and so does a method
+  that two unrelated traits declare: `first.absolute_difference(4)` makes
+  `first` an `Int64`, since both `SignedInteger` and `UnsignedInteger` declare
+  `absolute_difference`.
 - A statement whose type depends on an undecided literal through an
   operator's or a trait's result gives the literal its default type at the
   statement's end, and so does reading a member, an index, or a method of

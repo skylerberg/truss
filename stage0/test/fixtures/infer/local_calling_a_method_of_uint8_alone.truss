@@ -1,0 +1,8 @@
+fn UInt8.twice(self) -> UInt8 {
+  self
+}
+
+fn f() {
+  let limit = 10
+  let doubled = limit.twice()
+}

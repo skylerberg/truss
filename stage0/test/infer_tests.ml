@@ -2,6 +2,19 @@ let check packages =
   Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
     (Support.make_database packages)
 
+let make_standard_packages files : Project.package list =
+  [
+    {
+      name = Path.standard_package;
+      dependencies = [];
+      files = List.map (fun (name, text) -> (Support.parse_file name, text)) files;
+    };
+  ]
+
+let check_as_standard_library packages =
+  Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
+    (Support.extend_standard_library packages)
+
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_no_diagnostics = Support.expect_no_diagnostics ~check
 let expect_fine text = expect_no_diagnostics [ ("app::main", text) ]
@@ -215,17 +228,26 @@ let () =
       expect_one_diagnostic Fixtures.Infer.loop_over_uint16s_annotated_uint8 "types.mismatch"
         ~says:"Each element of this loop is `UInt16`, not `UInt8`.");
   Harness.test
+    "a loop variable's method of a sealed trait that covers its literal types leaves its type to \
+     the loop's body" (fun () ->
+      let text = Fixtures.Infer.range_loop_wrapping_added_then_bound_to_a_uint8 in
+      expect_fine text;
+      expect_type text "index" ~occurrence:2 "UInt8");
+  Harness.test
     "a loop variable given its default type by a method call has a fix that annotates the loop"
     (fun () ->
-      expect_one_diagnostic Fixtures.Infer.range_loop_wrapping_added_then_bound_to_a_uint8
-        "types.mismatch" ~fixed:Fixtures.Infer.range_loop_wrapping_added_then_bound_to_a_uint8_fixed);
+      expect_one_diagnostic Fixtures.Infer.range_loop_absolute_difference_then_bound_to_a_uint8
+        "types.mismatch"
+        ~fixed:Fixtures.Infer.range_loop_absolute_difference_then_bound_to_a_uint8_fixed);
   Harness.test "a local used as two types is one error, at the second use" (fun () ->
       expect_one_diagnostic Fixtures.Infer.local_bound_to_two_types "types.mismatch"
         ~says:"An earlier statement decided that the type of `base` is `UInt8`.");
-  Harness.test "a local given its default type by a method call is one error, with a fix" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.local_wrapping_added_then_bound_to_a_uint8
-        "types.mismatch" ~says:"`base` took its default type, `Int64`, at an earlier method call."
-        ~fixed:Fixtures.Infer.local_wrapping_added_then_bound_to_a_uint8_fixed)
+  Harness.test
+    "a local's method of a sealed trait that covers its literal types leaves its type to a later \
+     statement" (fun () ->
+      let text = Fixtures.Infer.local_wrapping_added_then_bound_to_a_uint8 in
+      expect_fine text;
+      expect_type text "base" ~occurrence:2 "UInt8")
 
 let () =
   Harness.test "a literal local used as a shift amount defaults to UInt64" (fun () ->
@@ -372,9 +394,14 @@ let () =
         ~says:"A specification cannot decide the type of `scaled`. Declare `scaled` with a type.");
   Harness.test "a method call in an invariant cannot give a float local in code its default type"
     (fun () ->
-      expect_one_diagnostic Fixtures.Infer.invariant_calls_a_method_of_a_float_local
+      expect_one_diagnostic Fixtures.Infer.invariant_calls_an_inherent_method_of_a_float_local
         "types.decided_in_specification"
         ~says:"A specification cannot decide the type of `ratio`. Declare `ratio` with a type.");
+  Harness.test "a float local's method of FloatingPoint in an invariant leaves its type to code"
+    (fun () ->
+      let text = Fixtures.Infer.invariant_calls_a_method_of_a_float_local in
+      expect_fine text;
+      expect_type text "ratio" ~occurrence:2 "Float32");
   Harness.test "an integer pattern in an invariant matches a local in code as an Integer" (fun () ->
       let text = Fixtures.Infer.invariant_matches_a_code_local in
       expect_fine text;
@@ -600,7 +627,7 @@ let () =
   Harness.test
     "a local given its default type by a method call has no fix to a type that is no number"
     (fun () ->
-      let text = Fixtures.Infer.local_wrapping_added_then_bound_to_a_bool in
+      let text = Fixtures.Infer.local_absolute_difference_then_bound_to_a_bool in
       expect_one_diagnostic text "types.mismatch"
         ~says:"`count` took its default type, `Int64`, at an earlier method call.";
       expect_fix_titles text []);
@@ -697,6 +724,126 @@ let () =
       with
       | [ "types.cannot_infer"; "types.not_indexable" ] -> ()
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported))
+
+let () =
+  Harness.test "a local's type is the same whichever statement decides it first" (fun () ->
+      expect_fine Fixtures.Infer.local_saturating_added_then_compared_with_a_length;
+      expect_fine Fixtures.Infer.local_compared_with_a_length_then_saturating_added);
+  Harness.test "the argument of a local's method of a sealed trait decides the local's type"
+    (fun () ->
+      let text = Fixtures.Infer.local_whose_trait_method_takes_a_length in
+      expect_fine text;
+      expect_type text "limit" ~occurrence:2 "UInt64");
+  Harness.test "a local's method of a sealed trait is called on the type a later statement decides"
+    (fun () ->
+      let text = Fixtures.Infer.local_counted_zeros_then_bound_to_a_uint8 in
+      expect_fine text;
+      expect_type text "mask" ~occurrence:2 "UInt8");
+  Harness.test
+    "a trait that is not sealed and declares a sealed trait's method does not change a local's \
+     lookup" (fun () ->
+      let text = Fixtures.Infer.local_counted_zeros_beside_another_trait_of_the_method in
+      expect_fine text;
+      expect_type text "mask" ~occurrence:2 "UInt8");
+  Harness.test "a local's method of SignedInteger narrows the local to the signed integers"
+    (fun () ->
+      let text = Fixtures.Infer.local_absolute_then_bound_to_an_int8 in
+      expect_fine text;
+      expect_type text "level" ~occurrence:2 "Int8");
+  Harness.test
+    "a local's method of a trait that only SignedInteger requires narrows the local to the signed \
+     integers" (fun () ->
+      let text = Fixtures.Infer.local_negated_then_bound_to_an_int8 in
+      expect_fine text;
+      expect_type text "level" ~occurrence:2 "Int8");
+  Harness.test
+    "a later statement that excludes the types of a local's method of a sealed trait is one error, \
+     at the call" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.local_absolute_then_bound_to_a_uint8 "types.no_impl"
+        ~at:("level.absolute()", 1) ~says:"`UInt8` does not implement `SignedInteger`.");
+  Harness.test "a local's method of UnsignedInteger narrows the local's default to UInt64"
+    (fun () ->
+      let text = Fixtures.Infer.integer_square_root_of_a_literal_local in
+      expect_fine text;
+      expect_type text "count" ~occurrence:2 "UInt64");
+  Harness.test "a float local's method of FloatingPoint leaves its type to a later statement"
+    (fun () ->
+      let text = Fixtures.Infer.float_literal_method_then_bound_to_a_float32 in
+      expect_fine text;
+      expect_type text "ratio" ~occurrence:2 "Float32");
+  Harness.test "a literal's method that two sealed traits declare gives it its default type"
+    (fun () ->
+      let text = Fixtures.Infer.literal_absolute_difference in
+      expect_fine text;
+      expect_type text "first" ~occurrence:2 "Int64");
+  Harness.test
+    "a local's method that two sealed traits declare gives the local its default type at the call, \
+     with a fix" (fun () ->
+      let text = Fixtures.Infer.local_absolute_difference_then_bound_to_a_uint8 in
+      expect_one_diagnostic text "types.mismatch"
+        ~says:"`first` took its default type, `Int64`, at an earlier method call."
+        ~fixed:Fixtures.Infer.local_absolute_difference_then_bound_to_a_uint8_fixed;
+      expect_fix_titles text [ "Declare `first` as a `UInt8`." ]);
+  Harness.test
+    "a local's method of a trait that is not sealed gives the local its default type at the call, \
+     with a fix" (fun () ->
+      let text = Fixtures.Infer.local_halved_then_bound_to_a_uint64 in
+      expect_one_diagnostic text "types.mismatch"
+        ~says:"`value` took its default type, `Int64`, at an earlier method call."
+        ~fixed:Fixtures.Infer.local_halved_then_bound_to_a_uint64_fixed;
+      expect_fix_titles text [ "Declare `value` as a `UInt64`." ]);
+  Harness.test
+    "a local given its default type at a call has no fix to a type that lacks the called method"
+    (fun () ->
+      let text = Fixtures.Infer.local_halved_then_bound_to_a_uint8 in
+      expect_one_diagnostic text "types.mismatch";
+      expect_fix_titles text []);
+  Harness.test
+    "a local's method that only UInt8 declares gives the local its default type at the call"
+    (fun () ->
+      Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard::probe"
+        ~check:check_as_standard_library Fixtures.Infer.local_calling_a_method_of_uint8_alone
+        "types.unknown_member" ~says:"`Int64` has no method `twice`.");
+  Harness.test
+    "a literal's method that two traits declare, neither sealed, is looked up on its default type"
+    (fun () ->
+      let text = Fixtures.Infer.literal_method_that_two_unsealed_traits_declare in
+      expect_fine text;
+      expect_type text "limit.twice()" "Int64");
+  Harness.test
+    "a trait's method written in full on a literal local leaves the local's type to a later \
+     statement" (fun () ->
+      expect_fine Fixtures.Infer.trait_method_written_in_full_then_bound_to_a_uint64);
+  Harness.test
+    "a local's method of a trait that is not sealed checks its arguments against the default \
+     type's impl" (fun () -> expect_fine Fixtures.Infer.unsealed_trait_methods_of_literal_locals);
+  Harness.test
+    "a local that an earlier use decides calls the decided type's method of a trait that is not \
+     sealed" (fun () ->
+      expect_fine Fixtures.Infer.literal_local_compared_before_its_unsealed_method);
+  Harness.test
+    "a statement whose types depend on a literal local gives the local its default type, with a fix"
+    (fun () ->
+      let text = Fixtures.Infer.local_converted_to_bytes_then_bound_to_a_uint32 in
+      expect_one_diagnostic text "types.mismatch"
+        ~fixed:Fixtures.Infer.local_converted_to_bytes_then_bound_to_a_uint32_fixed;
+      expect_fix_titles text [ "Declare `value` as a `UInt32`." ];
+      expect_type Fixtures.Infer.local_converted_to_bytes_then_bound_to_a_uint32_fixed "bytes"
+        ~occurrence:3 "Array[UInt8, 4]");
+  Harness.test "the result of a literal local's method is viewed as a parameter's slice" (fun () ->
+      expect_fine Fixtures.Infer.bytes_of_a_literal_local_passed_as_a_slice);
+  Harness.test
+    "a literal local whose method gives an associated type takes its default type at that statement"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.local_unsigned_absolute_then_compared_with_a_uint8
+        "types.mismatched_integers");
+  Harness.test
+    "a literal local joined with an associated type of another literal local takes the type the \
+     other's default gives" (fun () ->
+      let text = Fixtures.Infer.literal_local_joined_with_an_associated_type_of_another in
+      expect_fine text;
+      expect_type text "magnitude" ~occurrence:2 "UInt64";
+      expect_type text "chosen" ~occurrence:2 "UInt64")
 
 let () =
   Harness.test "comparing integer types that differ is an error with a fix that converts" (fun () ->
@@ -1463,20 +1610,9 @@ let () =
   Harness.test
     "storage_lengthen rejects an element type with a drop, which would free memory that nothing \
      wrote" (fun () ->
-      let make_standard_packages files : Project.package list =
-        [
-          {
-            name = Path.standard_package;
-            dependencies = [];
-            files = List.map (fun (name, text) -> (Support.parse_file name, text)) files;
-          };
-        ]
-      in
       Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard::probe"
-        ~check:(fun packages ->
-          Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
-            (Support.extend_standard_library packages))
-        Fixtures.Infer.storage_lengthen_of_storages "types.unsatisfied_bound");
+        ~check:check_as_standard_library Fixtures.Infer.storage_lengthen_of_storages
+        "types.unsatisfied_bound");
   Harness.test "a type written in a body that is not a type is an error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.let_of_type_display "types.not_a_type");
   Harness.test "an operator's result must be the type expected of it" (fun () ->
@@ -1528,8 +1664,11 @@ let () =
         "types.wrong_receiver");
   Harness.test "an associated type of an argument is normalized" (fun () ->
       expect_fine Fixtures.Infer.has_key_of_a_list);
-  Harness.test "a literal receiver has its default type" (fun () ->
-      expect_type Fixtures.Infer.wrapping_add_on_a_literal "5.wrapping_add(3)" "Int64");
+  Harness.test "a literal receiver's method of a sealed trait takes the type its use decides"
+    (fun () ->
+      let text = Fixtures.Infer.wrapping_add_on_a_literal in
+      expect_fine text;
+      expect_type text "5.wrapping_add(3)" "UInt8");
   Harness.test "a for loop over characters counts" (fun () ->
       expect_fine Fixtures.Infer.range_loop_over_characters);
   Harness.test "an operation on a hole is a hole" (fun () ->
@@ -1785,7 +1924,7 @@ let () =
       in
       if
         not
-          (List.mem "types.no_impl"
+          (List.mem "types.unsatisfied_bound"
              (Support.list_codes (check packages (Support.parse_file "app::main"))))
       then Harness.fail "the written argument was ignored");
   Harness.test "a literal is the receiver of a trait method written in full" (fun () ->

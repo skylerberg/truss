@@ -1,0 +1,5 @@
+fn f() {
+  let ratio = 2.0
+  let root = ratio.square_root()
+  let small: Float32 = ratio
+}

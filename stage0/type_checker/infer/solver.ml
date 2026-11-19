@@ -232,6 +232,19 @@ let decide_by_bounds (state : State.state) goal trait ~subject ~(wanted : Types.
   else if matching <> [] then decide_outputs ()
   else Fails Unmet
 
+let list_sealed_closures (state : State.state) subject ~includes =
+  List.filter_map
+    (fun sealed ->
+      let path = Well_known.make_path sealed in
+      match Types.find_sealed_implementors path with
+      | Some implementors when includes implementors ->
+          let trait = State.make_trait_reference ~arguments:[] path in
+          Some
+            ( trait,
+              Interface.Properties.list_bound_closure state.lookups.interface ~self:subject trait )
+      | _ -> None)
+    Types.sealed_traits
+
 let decide_number (state : State.state) (goal : State.goal) (trait : Types.trait_reference) ~subject
     ~(wanted : Types.trait_reference) domain =
   let covers domain implementors =
@@ -260,17 +273,9 @@ let decide_number (state : State.state) (goal : State.goal) (trait : Types.trait
   in
   let covering_bounds =
     List.sort_uniq compare
-      (List.concat_map
-         (fun sealed ->
-           let path = Well_known.make_path sealed in
-           match Types.find_sealed_implementors path with
-           | Some implementors when covers domain implementors ->
-               List.filter
-                 (fun (bound : Types.trait_reference) -> Path.equal bound.trait wanted.trait)
-                 (Interface.Properties.list_bound_closure state.lookups.interface ~self:subject
-                    (State.make_trait_reference ~arguments:[] path))
-           | _ -> [])
-         Types.sealed_traits)
+      (List.filter
+         (fun (bound : Types.trait_reference) -> Path.equal bound.trait wanted.trait)
+         (List.concat_map snd (list_sealed_closures state subject ~includes:(covers domain))))
   in
   match (narrowing, covering_bounds) with
   | (Fails _ as failed), _ -> failed

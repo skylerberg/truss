@@ -1,0 +1,25 @@
+trait Describe {
+  fn describe(self) -> String
+}
+
+impl Describe for UInt8 {
+  fn describe(self) -> String {
+    "small"
+  }
+}
+
+fn both(same: Bool, text: String) -> Bool {
+  same && text.length() > 0
+}
+
+fn f(small: UInt8) -> Bool {
+  let limit = 10
+  both(small == limit, text: limit.describe())
+}
+
+fn g(small: UInt8) -> Bool {
+  let limit = 10
+  let same = small == limit
+  let text = limit.describe()
+  same && text.length() > 0
+}

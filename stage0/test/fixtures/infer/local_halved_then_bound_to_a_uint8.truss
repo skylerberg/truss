@@ -1,0 +1,17 @@
+trait Halved {
+  fn halved(self) -> Self
+}
+
+impl Halved for Int64 {
+  fn halved(self) -> Int64 { self / 2 }
+}
+
+impl Halved for UInt64 {
+  fn halved(self) -> UInt64 { self / 2 }
+}
+
+fn f() {
+  let value = 1
+  let half = value.halved()
+  let small: UInt8 = value
+}

@@ -1,0 +1,5 @@
+fn f() {
+  let level = 5
+  let magnitude = level.absolute()
+  let small: UInt8 = level
+}

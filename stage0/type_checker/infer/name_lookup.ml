@@ -385,18 +385,20 @@ and list_trait_candidates (state : State.state) receiver_type name =
     | [] -> None
     | methods -> Some (trait, methods)
   in
-  match receiver_type with
-  | Types.Parameter parameter ->
+  match (receiver_type, list_meeting_closures state receiver_type) with
+  | Types.Parameter parameter, _ ->
       List.filter_map with_method
         (merge_bounds_by_trait state
            (Interface.Properties.list_known_bounds state.lookups.interface
               ~list_bounds:(State.lookup_bounds state) (Types.Parameter parameter)))
-  | Types.Any trait ->
+  | Types.Any trait, _ ->
       List.filter_map with_method
         (merge_bounds_by_trait state
            (Interface.Properties.list_bound_closure state.lookups.interface ~self:receiver_type
               trait))
-  | _ ->
+  | _, (_ :: _ as closures) ->
+      List.filter_map with_method (merge_bounds_by_trait state (List.concat_map snd closures))
+  | _, [] ->
       List.filter_map
         (fun trait ->
           let reference = Instantiation.make_fresh_trait_reference state trait in
@@ -405,6 +407,31 @@ and list_trait_candidates (state : State.state) receiver_type name =
           else None)
         (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
            ~from:state.key.module_ name)
+
+and list_meeting_closures (state : State.state) receiver_type =
+  match State.find_domain state receiver_type with
+  | Some domain ->
+      Solver.list_sealed_closures state receiver_type
+        ~includes:(List.exists (fun member -> List.mem member domain))
+  | None -> []
+
+and find_sealed_provider state receiver_type (trait : Types.trait_reference) =
+  List.find_map
+    (fun (sealed, closure) ->
+      if
+        List.exists
+          (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait.trait)
+          closure
+      then Some sealed
+      else None)
+    (list_meeting_closures state receiver_type)
+
+and has_sealed_method state receiver_type name =
+  Option.is_some (State.find_domain state receiver_type)
+  &&
+  match resolve_overloads state receiver_type name with
+  | Ok (Visible _) -> true
+  | Ok (Hidden _ | Absent) | Error _ -> false
 
 and merge_bounds_by_trait state = function
   | [] -> []

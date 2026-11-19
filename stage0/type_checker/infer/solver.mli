@@ -25,6 +25,12 @@ val resolve_associated_type :
   at:Source.Definition_span.t ->
   Types.ty
 
+val list_sealed_closures :
+  State.state ->
+  Types.ty ->
+  includes:(Language.Builtin_type.t list -> bool) ->
+  (Types.trait_reference * Types.trait_reference list) list
+
 val decide_default :
   State.state -> site:State.decision_site -> at:Source.Definition_span.t -> Types.ty -> Types.ty
 

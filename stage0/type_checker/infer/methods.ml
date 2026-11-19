@@ -435,9 +435,6 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
             let mode =
               Calls.check_argument state env first.value parameter ~has_generic_type:false
             in
-            ignore
-              (Solver.decide_default state ~site:Method_call ~at:(State.read_span state value.id)
-                 self_type);
             ([ { Tables.expression = first.value.id; core_argument_index = 0; mode } ], rest)
         | [] -> ([], []))
     | None -> ([], arguments)
@@ -545,8 +542,11 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
 and check_method_call state env ?expected (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) ~type_arguments arguments =
   let receiver_type =
-    Solver.decide_default state ~site:Method_call ~at:(State.read_span state value.id)
-      (Conversions.read_checked_head state env base)
+    let head = Conversions.read_expected_head state (Hooks.check_expression state env base) in
+    if Name_lookup.has_sealed_method state head member.text then head
+    else
+      Solver.decide_default state ~site:Method_call ~at:(State.read_span state value.id)
+        (Conversions.read_actual_head state base head)
   in
   let has_mode_keyword = List.mem_assoc value.id state.keyword_modes in
   let lent_mode = if has_mode_keyword then None else Modes.find_lent_mode state base in
@@ -793,7 +793,8 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                     callee_result = result;
                   };
               Form.register_call state value;
-              Solver.require state
-                (Method_call (State.read_span state value.id))
-                receiver_type trait;
+              List.iter
+                (Solver.require state (Method_call (State.read_span state value.id)) receiver_type)
+                (Option.to_list (Name_lookup.find_sealed_provider state receiver_type trait)
+                @ [ trait ]);
               State.normalize state result))

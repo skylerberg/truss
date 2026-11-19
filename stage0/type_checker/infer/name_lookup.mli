@@ -43,6 +43,11 @@ val instantiate_trait_method :
   Types.trait_method ->
   Instantiation.instance * Tables.callee
 
+val has_sealed_method : State.state -> Types.ty -> string -> bool
+
+val find_sealed_provider :
+  State.state -> Types.ty -> Types.trait_reference -> Types.trait_reference option
+
 val resolve_overloads :
   State.state ->
   Types.ty ->
