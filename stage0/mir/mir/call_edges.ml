@@ -76,9 +76,7 @@ let rec list_code_of_impl_for interface ((type_ : Types.ty), (bound : Types.trai
                    (Interface.Definition.read_impl_interface interface impl).impl_generics
                    substitution)
         | Some From_any -> list_trait_methods interface required.trait
-        | Some (From_bound | Built_in | Undetermined | Absorbed _ | For_every_type_of_kind _) | None
-          ->
-            [])
+        | Some (From_bound | Built_in | Undetermined | Absorbed _) | None -> [])
     (Interface.Properties.list_bound_closure interface ~self:type_ bound)
 
 let list_code_supplied_to_bound interface instance (type_, bound) =
@@ -138,11 +136,7 @@ let resolve_callee (interface : Interface.Lookups.t) instance (callee : _ Core.t
         | Bound -> (
             match find_evidence interface self_type trait with
             | Some (From_impl { impl; substitution }) -> Impl { impl; substitution }
-            | Some
-                ( From_bound | From_any | Built_in | Undetermined | Absorbed _
-                | For_every_type_of_kind _ )
-            | None ->
-                Bound)
+            | Some (From_bound | From_any | Built_in | Undetermined | Absorbed _) | None -> Bound)
         | Dynamic -> Dynamic
       in
       let list_code_supplied_to path ~bound_by_owner =
@@ -192,10 +186,7 @@ let resolve_node (lookups : lookups) (declaration : Path.t) instance =
     let* method_ =
       match find_evidence lookups.interface self trait with
       | Some (From_impl { impl; _ }) -> Some (Path.Method { owner = impl; name; receiver })
-      | Some
-          (From_bound | From_any | Built_in | Undetermined | Absorbed _ | For_every_type_of_kind _)
-      | None ->
-          None
+      | Some (From_bound | From_any | Built_in | Undetermined | Absorbed _) | None -> None
     in
     match lookups.mir.find_form_origin method_ with
     | Some (Inherited key, _) when Path.equal key.path declaration -> Some method_

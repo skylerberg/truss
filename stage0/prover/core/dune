@@ -11,6 +11,7 @@
   path
   well_known
   types
+  scalar_set
   core
   resolve
   interface

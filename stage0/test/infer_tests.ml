@@ -236,12 +236,22 @@ let () =
       let text = Fixtures.Infer.local_whose_trait_method_takes_a_length in
       expect_type text "limit" ~occurrence:2 "UInt64";
       expect_fine text);
-  Harness.test
-    "a local given its default type by a method of an unsealed trait is one error, with a fix"
+  Harness.test "a local's method of an unsealed trait leaves its type to a later statement"
     (fun () ->
-      expect_one_diagnostic Fixtures.Infer.local_halved_then_bound_to_a_uint64 "types.mismatch"
-        ~says:"`value` took its default type, `Int64`, at a method call that needs its type."
-        ~fixed:Fixtures.Infer.local_halved_then_bound_to_a_uint64_fixed);
+      let text = Fixtures.Infer.local_halved_then_bound_to_a_uint64 in
+      expect_type text "value" ~occurrence:2 "UInt64";
+      expect_fine text);
+  Harness.test "a local's method of an unsealed trait that its decided type lacks is one error"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.local_halved_then_bound_to_a_uint8 "types.no_impl"
+        ~says:"`UInt8` does not implement `Halved`.");
+  Harness.test
+    "a local given its default type by a method that two sealed traits declare is one error, with \
+     a fix" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.local_absolute_difference_then_bound_to_a_uint8
+        "types.mismatch"
+        ~says:"`first` took its default type, `Int64`, at a method call that needs its type."
+        ~fixed:Fixtures.Infer.local_absolute_difference_then_bound_to_a_uint8_fixed);
   Harness.test "a literal's method with an associated result type waits for the literal's type"
     (fun () ->
       let text = Fixtures.Infer.local_converted_to_bytes_then_bound_to_a_uint32 in
@@ -995,7 +1005,7 @@ let () =
                     (Array.iter (function
                       | Some type_
                         when Types.exists
-                               (function Variable _ | Literal _ -> true | _ -> false)
+                               (function Variable _ | Number_variable _ -> true | _ -> false)
                                type_ ->
                           Harness.fail "%s: an unsolved type" (Path.show declaration.key.path)
                       | _ -> ()))

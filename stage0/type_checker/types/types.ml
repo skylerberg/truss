@@ -1,6 +1,5 @@
 type mode = Read | Mut | Own
 type parameter = { owner : Path.t; name : string }
-type literal_kind = Integer_literal | Float_literal
 
 type ty =
   | Named of { path : Path.t; arguments : argument list }
@@ -11,7 +10,7 @@ type ty =
   | Never
   | Integer
   | Variable of int
-  | Literal of literal_kind * int
+  | Number_variable of int
   | Hole
   | Error of Diagnostic.reported
 
@@ -120,28 +119,7 @@ let find_view = function
 let signed_integer_types : Intrinsic.builtin list = [ Int8; Int16; Int32; Int64 ]
 let unsigned_integer_types : Intrinsic.builtin list = [ UInt8; UInt16; UInt32; UInt64 ]
 let integer_types = signed_integer_types @ unsigned_integer_types
-
-let find_integer_implementors trait =
-  if Well_known.is Signed_integer trait then Some signed_integer_types
-  else if Well_known.is Unsigned_integer trait then Some unsigned_integer_types
-  else if Well_known.is Fixed_width_integer trait then Some integer_types
-  else None
-
-let find_bound_integer_implementors bounds =
-  List.fold_left
-    (fun implementors (bound : trait_reference) ->
-      match (implementors, find_integer_implementors bound.trait) with
-      | Some implementors, Some these ->
-          Some (List.filter (fun builtin -> List.mem builtin these) implementors)
-      | None, these | these, None -> these)
-    None bounds
-
 let float_types : Intrinsic.builtin list = [ Float32; Float64 ]
-
-let find_sealed_implementors trait =
-  match find_integer_implementors trait with
-  | Some implementors -> Some implementors
-  | None -> if Well_known.is Floating_point trait then Some float_types else None
 
 let is_integer_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin integer_types | None -> false
@@ -167,10 +145,6 @@ let find_integer_range type_ =
 
 let is_signed type_ =
   match find_integer_bits type_ with Some (_, signed) -> signed | None -> false
-
-let list_literal_types (kind : literal_kind) =
-  List.map make_builtin
-    (match kind with Integer_literal -> integer_types | Float_literal -> float_types)
 
 let is_float_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin float_types | None -> false
@@ -216,7 +190,7 @@ let rec substitute substitution type_ =
         | None -> Projection { base; trait; name })
     | Function function_type -> Function (substitute_function substitution function_type)
     | Any trait -> Any (substitute_trait substitution trait)
-    | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_
+    | Never | Integer | Variable _ | Number_variable _ | Hole | Error _ -> type_
 
 and substitute_argument substitution = function
   | Type type_ -> Type (substitute substitution type_)
@@ -303,7 +277,7 @@ let rec map ?(map_capabilities = Fun.id) transform type_ =
               uses = map_capabilities function_type.uses;
             }
       | Any reference -> Any (map_trait reference)
-      | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_)
+      | Parameter _ | Never | Integer | Variable _ | Number_variable _ | Hole | Error _ -> type_)
 
 let rec exists ?(resolve = Fun.id) transform type_ =
   let type_ = resolve type_ in
@@ -321,7 +295,7 @@ let rec exists ?(resolve = Fun.id) transform type_ =
   | Function { inputs; output; _ } ->
       List.exists (fun (_, type_) -> exists type_) inputs || exists output
   | Any reference -> trait_exists reference
-  | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> false
+  | Parameter _ | Never | Integer | Variable _ | Number_variable _ | Hole | Error _ -> false
 
 let is_specification_only = function
   | Integer -> true
@@ -346,7 +320,7 @@ let is_error : ty -> bool = function Error _ -> true | _ -> false
 let is_open_type : ty -> bool = function Error _ | Variable _ | Hole -> true | _ -> false
 
 let rec contains_unsolved = function
-  | Variable _ | Literal _ | Hole -> true
+  | Variable _ | Number_variable _ | Hole -> true
   | Named { arguments; _ } -> List.exists is_unsolved_argument arguments
   | Projection { base; trait; _ } -> contains_unsolved base || is_unsolved_trait trait
   | Function { inputs; output; _ } ->
@@ -416,7 +390,7 @@ and show = function
   | Any trait -> "any " ^ show_trait trait
   | Never -> "Never"
   | Integer -> "Integer"
-  | Variable _ | Literal _ | Hole | Error _ -> "_"
+  | Variable _ | Number_variable _ | Hole | Error _ -> "_"
 
 and show_argument = function
   | Type type_ -> show type_
@@ -475,10 +449,7 @@ and show_function (function_type : function_type) =
         (if uses = [] then "" else " uses " ^ String.concat ", " uses)
         (String.concat "" (List.map (fun cost -> " " ^ cost) costs))
 
-let describe = function
-  | Literal (Integer_literal, _) -> "an integer"
-  | Literal (Float_literal, _) -> "a float"
-  | type_ -> "`" ^ show type_ ^ "`"
+let describe type_ = "`" ^ show type_ ^ "`"
 
 type generic_kind = Type_generic of trait_reference list | Value_generic
 type generic = { generic : parameter; kind : generic_kind }

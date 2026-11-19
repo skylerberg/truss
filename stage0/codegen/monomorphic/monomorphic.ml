@@ -45,7 +45,7 @@ let rec ground context substitution (ty : Types.ty) : Ground.ty =
         (Path.show parameter.owner)
   | Projection { name; _ } -> raise_bug "the associated type %s is not normalized" name
   | Integer -> raise_bug "Integer exists only in specifications"
-  | (Variable _ | Literal _ | Hole) as ty ->
+  | (Variable _ | Number_variable _ | Hole) as ty ->
       raise_bug "a type the checker left undecided: %s" (Types.show ty)
   | Error _ -> raise_bug "a type with an error, which no build reaches"
 

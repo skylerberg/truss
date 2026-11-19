@@ -10,6 +10,7 @@
   intrinsic
   intrinsic_signatures
   types
+  scalar_set
   core
   core_walk
   syntax

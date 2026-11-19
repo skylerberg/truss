@@ -50,7 +50,7 @@ let rec holds_array context (type_ : Types.ty) =
                (Option.value ~default:[] (Types.instantiate_variants interface arguments))
       | None -> false)
   | Parameter _ | Projection _ -> true
-  | Function _ | Any _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> false
+  | Function _ | Any _ | Never | Integer | Variable _ | Number_variable _ | Hole | Error _ -> false
 
 let lends_nothing context type_ = is_plain context type_ && not (holds_array context type_)
 

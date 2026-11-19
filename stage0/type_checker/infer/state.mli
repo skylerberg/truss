@@ -19,17 +19,38 @@ type subset_constraint = {
   report_missing : Types.capability_set -> unit;
 }
 
+type narrowing_reason =
+  | Integer_literal of Z.t
+  | Float_literal
+  | Negation
+  | Shift_amount
+  | Integer_operand of string
+  | Range_element of string
+  | Range_pattern
+  | Sealed_bound of Path.t
+  | Method_receiver of string
+
+type narrowing = {
+  variable : int;
+  narrowed_at : Source.Definition_span.t;
+  members : Scalar_set.t;
+  reason : narrowing_reason;
+}
+
 type requirement =
   | Implements of {
       trait : Types.trait_reference;
+      span : Source.Definition_span.t;
       on_met : Interface.Impls.evidence -> unit;
       on_unmet : Types.ty -> (string * Types.ty) option -> Diagnostic.reported;
     }
-  | Satisfies of {
-      holds : Types.ty -> bool;
+  | Within of {
+      members : Scalar_set.t;
+      reason : narrowing_reason;
+      span : Source.Definition_span.t;
       on_met : Types.ty -> unit;
-      on_unmet : Types.ty -> Diagnostic.reported;
     }
+  | When_solved of (Types.ty -> unit)
 
 type obligation = { subject : Types.ty; requirement : requirement }
 
@@ -48,7 +69,7 @@ type frame = {
   span : Source.Definition_span.t;
 }
 
-type undecided_literal = { index : int; kind : Types.literal_kind; local : Syntax.id }
+type undecided_literal = { index : int; local : Syntax.id }
 
 type literal_decision = {
   decided_local : Syntax.id;
@@ -98,6 +119,7 @@ type state = {
   decisions : (int, literal_decision) Hashtbl.t;
   annotatable : (Syntax.id, unit) Hashtbl.t;
   mutable unmet_impls : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
+  mutable narrowings : narrowing list;
 }
 
 val add_diagnostic :
@@ -165,8 +187,20 @@ val compare_in_source_order : state -> Syntax.id -> Syntax.id -> int
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty
 val make_fresh_type : state -> Types.ty
+val is_within : state -> Scalar_set.t -> Types.ty -> bool
 val is_integer_type : state -> Types.ty -> bool
-val is_signed_type : state -> Types.ty -> bool
+
+val record_narrowing :
+  state ->
+  variable:int ->
+  span:Source.Definition_span.t ->
+  members:Scalar_set.t ->
+  narrowing_reason ->
+  unit
+
+val explain_narrowing :
+  state -> narrowing_reason -> found:Types.ty -> (Diagnostic.Code.types * string) option
+
 val lookup_bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Types.ty -> Types.ty
 val resolve_capabilities : state -> Types.capability_set -> Types.capability_set

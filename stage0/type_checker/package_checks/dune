@@ -10,6 +10,7 @@
   resolve
   syntax
   types
+  scalar_set
   intrinsic
   well_known
   core

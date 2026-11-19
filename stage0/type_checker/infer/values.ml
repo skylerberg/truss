@@ -6,8 +6,7 @@ let takes_literal (state : State.state) (collection : Types.ty) (trait : Types.t
           ~list_bounds:(State.lookup_bounds state) ~checks_conditions:false collection trait
       with
       | Some (From_impl _ | From_bound) -> true
-      | Some (From_any | Built_in | Undetermined | Absorbed _ | For_every_type_of_kind _) | None ->
-          false)
+      | Some (From_any | Built_in | Undetermined | Absorbed _) | None -> false)
   | _ -> false
 
 let record_conversion (state : State.state) (value : Syntax.expression) (collection : Types.ty)
@@ -87,7 +86,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
       List.iteri
         (fun index ((part : Syntax.expression), part_type) ->
           let display = State.make_trait_reference ~arguments:[] (Well_known.make_path Display) in
-          Solver.require state part_type display
+          Solver.require state part_type display ~span:(State.read_span state part.id)
             ~on_met:(fun evidence ->
               set_part index
                 (trait_call display "display" Path.Read (State.normalize state part_type) evidence
@@ -132,6 +131,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                     ~part:(State.finalize_type state part)
               | None -> State.raise_bug "a tagged string's part type was not inferred");
           Solver.require state tag_type template_trait
+            ~span:(State.read_span state literal.id)
             ~on_met:(fun evidence ->
               let tag_type = State.normalize state tag_type in
               (match state.tables.templates.(literal.id) with
@@ -160,6 +160,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                             (Well_known.make_path From)
                         in
                         Solver.require state part from
+                          ~span:(State.read_span state part_expression.id)
                           ~on_met:(fun evidence ->
                             set_part index
                               (trait_call ~mode:Own from "from" Path.Static part evidence

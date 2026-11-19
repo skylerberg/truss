@@ -153,7 +153,6 @@ type evidence =
   | Built_in
   | Undetermined
   | Absorbed of Types.ty
-  | For_every_type_of_kind of Types.literal_kind
 
 type through_any = Callable | Has_generics | Names_self
 
@@ -243,23 +242,8 @@ let rename_as_written (declared : Types.signature) (written : Types.signature) =
         renamed.capability_parameters;
   }
 
-let replace_type ~from ~into type_ =
-  Types.map (fun part -> if Types.equal part from then Some into else None) type_
-
-let replace_in_trait ~from ~into (reference : Types.trait_reference) : Types.trait_reference =
-  {
-    reference with
-    trait_arguments =
-      List.map
-        (function
-          | Types.Type argument -> Types.Type (replace_type ~from ~into argument) | value -> value)
-        reference.trait_arguments;
-    associated =
-      List.map (fun (name, type_) -> (name, replace_type ~from ~into type_)) reference.associated;
-  }
-
 let find_open_evidence : Types.ty -> evidence = function
-  | Types.Variable _ -> Undetermined
+  | Types.Variable _ | Types.Number_variable _ -> Undetermined
   | open_type -> Absorbed open_type
 
 let find_built_in_evidence : Properties.decision -> evidence option = function
@@ -300,17 +284,8 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
            type_)
   else
     match type_ with
-    | Types.Error _ | Types.Hole | Types.Variable _ -> Some (find_open_evidence type_)
-    | Types.Literal (kind, _) ->
-        if
-          List.for_all
-            (fun candidate ->
-              Option.is_some
-                (find_evidence lookups ~list_bounds ~depth:(depth + 1) ~checks_conditions candidate
-                   (replace_in_trait ~from:type_ ~into:candidate wanted)))
-            (Types.list_literal_types kind)
-        then Some (For_every_type_of_kind kind)
-        else None
+    | Types.Error _ | Types.Hole | Types.Variable _ | Types.Number_variable _ ->
+        Some (find_open_evidence type_)
     | Types.Never | Types.Integer | Types.Function _ -> None
     | Types.Parameter _ | Types.Projection _ ->
         if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then Some From_bound
@@ -462,26 +437,8 @@ and project_declared_type lookups ~list_bounds ?defining type_ (trait : Types.tr
                 (fun (bound : Types.trait_reference) -> List.assoc_opt name bound.associated)
                 (any :: Properties.list_bound_closure lookups ~self:type_ any)
           | _ -> None)
-      | Some (For_every_type_of_kind kind) ->
-          project_for_every_type_of_kind lookups ~list_bounds ?defining type_ kind trait name
       | Some Built_in | Some Undetermined | None -> None
       | Some (Absorbed absorbing) -> Some absorbing)
-
-and project_for_every_type_of_kind lookups ~list_bounds ?defining literal kind
-    (trait : Types.trait_reference) name =
-  match
-    List.map
-      (fun candidate ->
-        Option.map
-          (replace_type ~from:candidate ~into:literal)
-          (project_declared_type lookups ~list_bounds ?defining candidate
-             (replace_in_trait ~from:literal ~into:candidate trait)
-             name))
-      (Types.list_literal_types kind)
-  with
-  | Some projected :: rest when List.for_all (Option.equal Types.equal (Some projected)) rest ->
-      Some projected
-  | _ -> None
 
 and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Types.trait_reference)
     name =
@@ -507,7 +464,7 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
                  (Option.value ~default:Types.no_capabilities
                     (List.assoc_opt name interface.capability_sets)))
         | None -> Types.no_capabilities)
-    | Some (From_bound | Undetermined | For_every_type_of_kind _) | None -> projection
+    | Some (From_bound | Undetermined) | None -> projection
     | Some (From_any | Built_in | Absorbed _) -> Types.no_capabilities
 
 and normalize_capabilities lookups ~list_bounds ?depth (capabilities : Types.capability_set) =
@@ -548,7 +505,8 @@ and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
               name
           in
           match base with
-          | Types.Variable _ | Types.Hole -> Some (Types.Projection { base; trait; name })
+          | Types.Variable _ | Types.Number_variable _ | Types.Hole ->
+              Some (Types.Projection { base; trait; name })
           | Types.Error _ -> Some base
           | Types.Parameter _ | Types.Projection _ -> (
               match project_declared_type base trait name with

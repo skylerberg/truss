@@ -16,7 +16,15 @@ val coerce :
   expected:Types.ty ->
   unit
 
-val infer_literal_type : State.state -> expected:Types.ty option -> Types.literal_kind -> Types.ty
+val infer_literal_type :
+  State.state ->
+  State.env ->
+  expected:Types.ty option ->
+  span:Source.Definition_span.t ->
+  fitting:Scalar_set.t ->
+  State.narrowing_reason ->
+  Types.ty
+
 val check_name : State.state -> State.env -> Syntax.expression -> Resolve.head -> Types.ty
 val check_field : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
 val check_static_member : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty

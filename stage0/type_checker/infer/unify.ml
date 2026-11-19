@@ -5,8 +5,8 @@ type t = {
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
   mutable deferred_projection_equalities : (Types.ty * Types.ty) list;
-  mutable find_integer_range : Types.ty -> (Z.t * Z.t) option;
-  code_literals : (int, unit) Hashtbl.t;
+  domains : (int, Scalar_set.t) Hashtbl.t;
+  mutable list_rigid_members : Types.ty -> Scalar_set.t option;
   levels : (int, int) Hashtbl.t;
   mutable level : int;
 }
@@ -19,8 +19,8 @@ let create () =
     capability_variable_count = 0;
     deferred_capability_equalities = [];
     deferred_projection_equalities = [];
-    find_integer_range = (fun _ -> None);
-    code_literals = Hashtbl.create 4;
+    domains = Hashtbl.create 8;
+    list_rigid_members = (fun _ -> None);
     levels = Hashtbl.create 16;
     level = 0;
   }
@@ -31,7 +31,6 @@ let allocate_unknown unifier =
   unifier.next
 
 let make_fresh_type unifier = Types.Variable (allocate_unknown unifier)
-let make_fresh_literal unifier kind = Types.Literal (kind, allocate_unknown unifier)
 let make_fresh_value unifier = Types.Value_variable (allocate_unknown unifier)
 let read_level unifier index = Hashtbl.find unifier.levels index
 
@@ -53,7 +52,7 @@ let unify_capabilities unifier (left : Types.capability_set) right =
 
 let rec resolve unifier (type_ : Types.ty) =
   match type_ with
-  | Variable index | Literal (_, index) -> (
+  | Variable index | Number_variable index -> (
       match Hashtbl.find_opt unifier.type_solutions index with
       | Some bound -> resolve unifier bound
       | None -> type_)
@@ -112,29 +111,42 @@ and zonk_function unifier (function_type : Types.function_type) =
 
 let occurs unifier index =
   Types.exists ~resolve:(resolve unifier) (function
-    | Variable other | Literal (_, other) -> other = index
+    | Variable other | Number_variable other -> other = index
     | _ -> false)
 
-let literal_fits unifier (kind : Types.literal_kind) (type_ : Types.ty) =
-  match (kind, type_) with
-  | Integer_literal, (Parameter _ | Projection _) -> unifier.find_integer_range type_ <> None
-  | Integer_literal, _ -> Types.is_integer_type type_ || type_ = Types.Integer
-  | Float_literal, _ -> Types.is_float_type type_
+let read_domain unifier index =
+  match Hashtbl.find_opt unifier.domains index with
+  | Some domain -> domain
+  | None -> Compiler_bug.raise_bug ~stage:"Infer" "the number variable %d has no domain" index
 
-type unknown =
-  | Unknown_type of int
-  | Unknown_literal of Types.literal_kind * int
-  | Unknown_value of int
+let make_fresh_number unifier domain =
+  match Scalar_set.find_single domain with
+  | Some member -> Scalar_set.make_type member
+  | None ->
+      if Scalar_set.is_empty domain then
+        Compiler_bug.raise_bug ~stage:"Infer" "a number variable is made with no possible type";
+      let index = allocate_unknown unifier in
+      Hashtbl.replace unifier.domains index domain;
+      Types.Number_variable index
+
+let list_possible_members unifier type_ =
+  match resolve unifier type_ with
+  | Number_variable index -> Some (read_domain unifier index)
+  | (Parameter _ | Projection _) as rigid -> unifier.list_rigid_members rigid
+  | resolved ->
+      Option.map (fun member -> Scalar_set.make [ member ]) (Scalar_set.find_member resolved)
+
+type unknown = Unknown_type of int | Unknown_number of int | Unknown_value of int
 
 let read_unknown_index = function
-  | Unknown_type index | Unknown_literal (_, index) | Unknown_value index -> index
+  | Unknown_type index | Unknown_number index | Unknown_value index -> index
 
 let collect_unknowns unifier ~through_projections (type_ : Types.ty) =
   let unknowns = ref [] in
   let rec collect (type_ : Types.ty) =
     match resolve unifier type_ with
     | Variable index -> unknowns := Unknown_type index :: !unknowns
-    | Literal (kind, index) -> unknowns := Unknown_literal (kind, index) :: !unknowns
+    | Number_variable index -> unknowns := Unknown_number index :: !unknowns
     | Named { arguments; _ } -> List.iter collect_argument arguments
     | Projection { base; trait = reference; _ } ->
         if through_projections then begin
@@ -184,6 +196,17 @@ let bind unifier index type_ =
     true
   end
 
+let restrict unifier index domain =
+  match Scalar_set.find_single domain with
+  | Some member -> bind unifier index (Scalar_set.make_type member)
+  | None ->
+      Hashtbl.replace unifier.domains index domain;
+      true
+
+let narrow unifier index members =
+  let domain = Scalar_set.inter (read_domain unifier index) members in
+  (not (Scalar_set.is_empty domain)) && restrict unifier index domain
+
 let list_argument_unknowns unifier = function
   | Types.Type type_ -> list_unknowns unifier type_
   | Types.Value value -> (
@@ -207,15 +230,16 @@ let defer_projection_equality unifier projection other =
 let rec unify unifier (left : Types.ty) (right : Types.ty) =
   let left = resolve unifier left and right = resolve unifier right in
   match (left, right) with
-  | (Types.Variable index | Types.Literal (_, index)), ((Types.Error _ | Types.Hole) as unknown)
-  | ((Types.Error _ | Types.Hole) as unknown), (Types.Variable index | Types.Literal (_, index)) ->
+  | (Types.Variable index | Types.Number_variable index), ((Types.Error _ | Types.Hole) as unknown)
+  | ((Types.Error _ | Types.Hole) as unknown), (Types.Variable index | Types.Number_variable index)
+    ->
       Hashtbl.replace unifier.type_solutions index unknown;
       true
   | ((Types.Error _ | Types.Hole) as unknown), other
   | other, ((Types.Error _ | Types.Hole) as unknown) ->
       List.iter
         (function
-          | Unknown_type index | Unknown_literal (_, index) ->
+          | Unknown_type index | Unknown_number index ->
               Hashtbl.replace unifier.type_solutions index unknown
           | Unknown_value _ -> ())
         (list_unknowns unifier other);
@@ -226,18 +250,22 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
       defer_projection_equality unifier projection other
   | other, (Projection _ as projection) when is_unsolved_projection unifier projection ->
       defer_projection_equality unifier projection other
-  | Literal (left_kind, left_index), Literal (right_kind, right_index) ->
+  | Number_variable left_index, Number_variable right_index ->
       let join () =
         let root = min left_index right_index and joined = max left_index right_index in
-        if Hashtbl.mem unifier.code_literals joined then
-          Hashtbl.replace unifier.code_literals root ();
-        bind unifier joined (Types.Literal (left_kind, root))
+        let domain =
+          Scalar_set.inter (read_domain unifier left_index) (read_domain unifier right_index)
+        in
+        (not (Scalar_set.is_empty domain))
+        && bind unifier joined (Types.Number_variable root)
+        && restrict unifier root domain
       in
-      left_kind = right_kind && (left_index = right_index || join ())
-  | Literal (kind, index), other | other, Literal (kind, index) ->
-      literal_fits unifier kind other
-      && (not (other = Integer && Hashtbl.mem unifier.code_literals index))
-      && bind unifier index other
+      left_index = right_index || join ()
+  | Number_variable index, other | other, Number_variable index -> (
+      match list_possible_members unifier other with
+      | Some possible when Scalar_set.is_subset possible ~of_:(read_domain unifier index) ->
+          bind unifier index other
+      | _ -> false)
   | Named left, Named right ->
       Path.equal left.path right.path && unify_arguments unifier left.arguments right.arguments
   | Parameter left, Parameter right -> left = right

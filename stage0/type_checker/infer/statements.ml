@@ -18,17 +18,15 @@ let check_bit_vector_names state (value : Core.expression) =
 
 let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
     (range : Syntax.expression) element ~inclusive =
+  let members =
+    Scalar_set.union Scalar_set.fixed_width_integers
+      (Scalar_set.make (if admits_integer then [ Character; Integer ] else [ Character ]))
+  in
   ignore
-    (Solver.require_type state element
-       ~holds:(fun element ->
-         State.is_integer_type state element
-         || Types.is_builtin Character element
-         || (admits_integer && Types.equal element Types.Integer))
+    (Solver.require_within state element ~members ~reason:(Range_element described)
+       ~span:(State.read_span state range.id)
        ~on_met:(fun element ->
          state.tables.loops.(loop) <- Some (Integer_range { element; inclusive }))
-       ~on_unmet:(fun element ->
-         State.add_diagnostic state Not_indexable (State.read_span state range.id)
-           (Printf.sprintf "%s range is of integers, not `%s`." described (Types.show element)))
        ())
 
 let rec check_block_value state env ?expected (written : Syntax.block) =
@@ -116,7 +114,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
           Modes.note_owned_value state env value
       | Compound operation -> (
           let right_type = Hooks.check_expression state env ~expected:target_type value in
-          Operators.check_literal_operands state ~left:target_type ~right:right_type;
+          Operators.check_literal_operands state env ~left:target_type ~right:right_type;
           State.register_statement state written (fun () ->
               Form.build_compound_assign state written written_target value operation);
           match operation with

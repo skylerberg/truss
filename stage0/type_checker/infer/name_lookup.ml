@@ -18,10 +18,48 @@ let rec coerce state env ?argument ?takes_view_as_owner (value : Syntax.expressi
   State.convert state env ?argument ?takes_view_as_owner ~expression:value.id
     (State.read_span state value.id) ~actual ~expected
 
-and infer_literal_type state ~expected kind =
-  match Option.map (State.resolve state) expected with
-  | Some expected when Unify.literal_fits state.unifier kind expected -> expected
-  | _ -> Unify.make_fresh_literal state.unifier kind
+and infer_literal_type state (env : State.env) ~expected ~(span : Source.Definition_span.t) ~fitting
+    (reason : State.narrowing_reason) =
+  let domain =
+    if env.specification then fitting else Scalar_set.inter fitting Scalar_set.code_numbers
+  in
+  let report_unfitting found =
+    match State.explain_narrowing state reason ~found with
+    | Some (code, message) -> Some (Types.Error (State.add_diagnostic state code span message))
+    | None -> None
+  in
+  let make_fresh () =
+    match Unify.make_fresh_number state.unifier domain with
+    | Types.Number_variable index as fresh ->
+        State.record_narrowing state ~variable:index ~span ~members:domain reason;
+        fresh
+    | fixed -> fixed
+  in
+  let expected_members =
+    Option.bind expected (fun expected ->
+        match State.resolve state expected with
+        | Types.Number_variable _ | Types.Variable _ -> None
+        | resolved ->
+            Option.map
+              (fun possible -> (resolved, possible))
+              (Unify.list_possible_members state.unifier resolved))
+  in
+  match expected_members with
+  | Some (resolved, possible) when Scalar_set.is_subset possible ~of_:fitting -> resolved
+  | Some (resolved, _) -> (
+      match report_unfitting resolved with Some error -> error | None -> make_fresh ())
+  | None ->
+      if Scalar_set.is_empty domain then
+        let widest : Scalar_set.member =
+          match reason with
+          | Integer_literal value when Z.sign value < 0 -> Int64
+          | Integer_literal _ -> UInt64
+          | _ -> Float64
+        in
+        match report_unfitting (Scalar_set.make_type widest) with
+        | Some error -> error
+        | None -> State.raise_bug "a literal fits no type, and nothing explains why"
+      else make_fresh ()
 
 and check_name (state : State.state) (env : State.env) (value : Syntax.expression)
     ({ name; target; type_arguments } : Resolve.head) =
@@ -380,7 +418,7 @@ and list_trait_static_methods (state : State.state) path name receiver =
 
 and resolve_evidence ?report_unmet state (value : Syntax.expression) self_type
     (reference : Types.trait_reference) =
-  Solver.require state self_type reference
+  Solver.require state self_type reference ~span:(State.read_span state value.id)
     ~on_met:(fun evidence ->
       match state.tables.calls.(value.id) with
       | Some ({ callee = Trait_method method_; _ } as call) ->
@@ -427,31 +465,27 @@ and list_trait_candidates (state : State.state) receiver_type name =
            (Interface.Properties.list_bound_closure state.lookups.interface ~self:receiver_type
               trait))
   | _ ->
-      let is_sealed_to_receiver_kind trait =
-        match (State.resolve state receiver_type, Types.find_sealed_implementors trait) with
-        | Types.Literal (kind, _), Some implementors ->
-            List.for_all
-              (fun implementor ->
-                List.mem (Types.make_builtin implementor) (Types.list_literal_types kind))
-              implementors
-        | _ -> false
-      in
-      let implemented, unimplemented =
-        List.partition
-          (fun reference -> Option.is_some (State.find_evidence state receiver_type reference))
-          (List.map
-             (Instantiation.make_fresh_trait_reference state)
-             (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
-                ~from:state.key.module_ name))
+      let declaring =
+        List.map
+          (Instantiation.make_fresh_trait_reference state)
+          (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
+             ~from:state.key.module_ name)
       in
       List.filter_map with_method
-        (match
-           List.filter
-             (fun (reference : Types.trait_reference) -> is_sealed_to_receiver_kind reference.trait)
-             unimplemented
-         with
-        | [ only ] -> implemented @ [ only ]
-        | [] | _ :: _ :: _ -> implemented)
+        (match State.resolve state receiver_type with
+        | Types.Number_variable index ->
+            let domain = Unify.read_domain state.unifier index in
+            List.filter
+              (fun (reference : Types.trait_reference) ->
+                match Scalar_set.find_sealed_implementors reference.trait with
+                | Some implementors ->
+                    not (Scalar_set.is_empty (Scalar_set.inter implementors domain))
+                | None -> true)
+              declaring
+        | _ ->
+            List.filter
+              (fun reference -> Option.is_some (State.find_evidence state receiver_type reference))
+              declaring)
 
 and merge_bounds_by_trait state = function
   | [] -> []

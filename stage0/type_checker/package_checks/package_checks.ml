@@ -66,19 +66,18 @@ let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
       read_definition lookups declaration )
   with
   | Some ((trait, type_), _), (definition, spans) -> (
-      match (Types.find_sealed_implementors trait, Intrinsic.find_builtin type_) with
-      | Some builtins, Some builtin when List.mem builtin builtins -> []
-      | Some builtins, _ ->
+      match
+        ( Scalar_set.find_sealed_implementors trait,
+          Scalar_set.find_member (Types.Named { path = type_; arguments = [] }) )
+      with
+      | Some implementors, Some member when Scalar_set.mem member implementors -> []
+      | Some implementors, _ ->
           [
             make_diagnostic declaration.key Sealed_trait_impl (locate_header spans definition)
               (Printf.sprintf
                  "Only the built-in %s types implement `%s`, so `%s` cannot: generic code over the \
                   trait is proven for each of them."
-                 (if
-                    List.for_all
-                      (fun builtin -> Types.is_float_type (Types.make_builtin builtin))
-                      builtins
-                  then "float"
+                 (if Scalar_set.is_subset implementors ~of_:Scalar_set.floats then "float"
                   else "integer")
                  (Path.show trait) (Path.show type_));
           ]

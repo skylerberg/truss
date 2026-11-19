@@ -36,26 +36,30 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Integer number ->
       state.tables.literals.(value.id) <- Some (Integer_value number);
       State.register_expression state value (fun () -> Form.build_numeric_literal state value.id);
-      Pattern_typing.require_literal_fits state (State.read_span state value.id) number
-        (Name_lookup.infer_literal_type state ~expected Integer_literal)
+      Name_lookup.infer_literal_type state env ~expected ~span:(State.read_span state value.id)
+        ~fitting:(Scalar_set.list_fitting_integers number)
+        (Integer_literal number)
   | Float number ->
       State.register_expression state value (fun () -> Form.build_numeric_literal state value.id);
-      let type_ = Name_lookup.infer_literal_type state ~expected Float_literal in
       let significand = number.significand and exponent = number.exponent in
       let round resolved =
         if Types.is_builtin Float32 resolved then Literals.round_float32 ~significand ~exponent
         else Literals.round_float64 ~significand ~exponent
       in
-      Solver.require_type state type_
-        ~holds:(fun resolved -> Option.is_some (round resolved))
-        ~on_met:(fun resolved ->
+      let fitting =
+        Scalar_set.make
+          (List.filter
+             (fun member -> Option.is_some (round (Scalar_set.make_type member)))
+             (Scalar_set.list_members Scalar_set.floats))
+      in
+      let type_ =
+        Name_lookup.infer_literal_type state env ~expected ~span:(State.read_span state value.id)
+          ~fitting Float_literal
+      in
+      Solver.check_solved state type_ (fun resolved ->
           state.tables.literals.(value.id) <-
-            Option.map (fun rounded -> Tables.Float_value rounded) (round resolved))
-        ~on_unmet:(fun resolved ->
-          State.add_diagnostic state Literal_out_of_range (State.read_span state value.id)
-            (Printf.sprintf "This literal is too large for `%s`; it would round to infinity."
-               (Types.show resolved)))
-        ()
+            Option.map (fun rounded -> Tables.Float_value rounded) (round resolved));
+      type_
   | String literal -> (
       match Pattern_typing.find_character_tag state literal with
       | Some builtin ->
@@ -133,7 +137,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
         | Some start, Some stop ->
             let element = check_expression state env start in
             let stop_type = check_expression state env ~expected:element stop in
-            Operators.check_literal_operands state ~left:element ~right:stop_type;
+            Operators.check_literal_operands state env ~left:element ~right:stop_type;
             if not (State.unify state element stop_type) then
               State.report_mismatch state (State.read_span state stop.id) ~expected:element
                 ~actual:stop_type;

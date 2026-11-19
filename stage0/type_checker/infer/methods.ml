@@ -575,15 +575,39 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
         arguments;
       receiver_type
   | _ -> (
+      let decide_receiver lookup =
+        match
+          Solver.decide_for_method_call state ~at:(State.read_span state value.id) receiver_type
+        with
+        | decided when Types.equal decided receiver_type -> (receiver_type, lookup)
+        | decided -> (decided, Name_lookup.resolve_overloads state decided member.text)
+      in
       let receiver_type, overloads =
-        match Name_lookup.resolve_overloads state receiver_type member.text with
-        | Ok Absent as absent -> (
+        match
+          ( State.resolve state receiver_type,
+            Name_lookup.resolve_overloads state receiver_type member.text )
+        with
+        | Types.Number_variable index, (Ok Absent as absent) -> (
             match
-              Solver.decide_for_method_call state ~at:(State.read_span state value.id) receiver_type
+              List.filter
+                (fun owner ->
+                  match
+                    Name_lookup.resolve_overloads state (Scalar_set.make_type owner) member.text
+                  with
+                  | Ok (Visible _) -> true
+                  | Ok (Hidden _ | Absent) | Error _ -> false)
+                (Scalar_set.list_members (Unify.read_domain state.unifier index))
             with
-            | decided when Types.equal decided receiver_type -> (receiver_type, absent)
-            | decided -> (decided, Name_lookup.resolve_overloads state decided member.text))
-        | lookup -> (receiver_type, lookup)
+            | [ owner ] ->
+                let owner_type = Scalar_set.make_type owner in
+                State.record_narrowing state ~variable:index ~span:(State.read_span state value.id)
+                  ~members:(Scalar_set.make [ owner ]) (Method_receiver member.text);
+                ignore (State.unify state receiver_type owner_type);
+                (owner_type, Name_lookup.resolve_overloads state owner_type member.text)
+            | _ -> decide_receiver absent)
+        | Types.Number_variable _, (Error _ as ambiguous) -> decide_receiver ambiguous
+        | _, (Ok Absent as absent) -> decide_receiver absent
+        | _, lookup -> (receiver_type, lookup)
       in
       match overloads with
       | Ok (Hidden hidden) ->

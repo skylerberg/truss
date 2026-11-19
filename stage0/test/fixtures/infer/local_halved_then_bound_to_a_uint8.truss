@@ -11,7 +11,7 @@ impl Halved for UInt64 {
 }
 
 fn f() {
-  let value: UInt64 = 1
+  let value = 1
   let half = value.halved()
-  let small: UInt64 = value
+  let small: UInt8 = value
 }

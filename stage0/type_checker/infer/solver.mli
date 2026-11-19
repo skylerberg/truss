@@ -7,16 +7,18 @@ val require :
   State.state ->
   Types.ty ->
   Types.trait_reference ->
+  span:Source.Definition_span.t ->
   on_met:(Interface.Impls.evidence -> unit) ->
   on_unmet:(Types.ty -> (string * Types.ty) option -> Diagnostic.reported) ->
   unit
 
-val require_type :
+val require_within :
   State.state ->
   Types.ty ->
-  holds:(Types.ty -> bool) ->
+  members:Scalar_set.t ->
+  reason:State.narrowing_reason ->
+  span:Source.Definition_span.t ->
   ?on_met:(Types.ty -> unit) ->
-  on_unmet:(Types.ty -> Diagnostic.reported) ->
   unit ->
   Types.ty
 

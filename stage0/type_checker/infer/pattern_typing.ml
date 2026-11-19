@@ -51,22 +51,14 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
               stop = Form.build_range_bound state stop;
               inclusive;
             });
-      let rejects_ranges (resolved : Types.ty) =
-        match resolved with
-        | Types.Named _ | Types.Function _ | Types.Any _ | Types.Parameter _ ->
-            not (State.is_integer_type state resolved || Types.is_builtin Character resolved)
-        | _ -> false
-      in
-      let report_not_range_type resolved =
-        State.add_diagnostic state Mismatch
-          (State.read_span state written.id)
-          (Printf.sprintf "A range pattern matches an integer or a `Character`, not `%s`."
-             (State.show state resolved))
-      in
       begin match
-        Solver.require_type state type_
-          ~holds:(fun resolved -> not (rejects_ranges resolved))
-          ~on_unmet:report_not_range_type ()
+        Solver.require_within state type_
+          ~members:
+            (Scalar_set.union Scalar_set.fixed_width_integers
+               (Scalar_set.make [ Character; Integer ]))
+          ~reason:Range_pattern
+          ~span:(State.read_span state written.id)
+          ()
       with
       | Types.Error _ -> ()
       | _ ->
@@ -357,30 +349,6 @@ and check_qualified_constant state id span constant type_ =
   | Hidden hidden -> ignore (Members.make_hidden_error state span hidden)
   | Absent -> State.report state Unknown_member span "This names no constant."
 
-and find_literal_range (state : State.state) (type_ : Types.ty) =
-  match type_ with
-  | Parameter _ | Projection _ -> state.unifier.find_integer_range type_
-  | _ -> Types.find_integer_range type_
-
-and is_within_range state number type_ =
-  match find_literal_range state type_ with
-  | Some (low, high) -> Z.geq number low && Z.leq number high
-  | None -> true
-
-and report_out_of_range state span number type_ =
-  match find_literal_range state type_ with
-  | Some (low, high) ->
-      State.add_diagnostic state Literal_out_of_range span
-        (Printf.sprintf "`%s` does not fit in `%s`, which holds %s to %s." (Z.to_string number)
-           (Types.show type_) (Z.to_string low) (Z.to_string high))
-  | None ->
-      State.raise_bug "`%s` holds every integer, and a literal does not fit it" (Types.show type_)
-
-and require_literal_fits state span number type_ =
-  Solver.require_type state type_ ~holds:(is_within_range state number)
-    ~on_unmet:(report_out_of_range state span number)
-    ()
-
 and find_character_tag state (literal : Syntax.string_literal) =
   match literal.tag with
   | Some tag -> (
@@ -428,8 +396,18 @@ and check_literal_pattern state id (span : Source.Definition_span.t) literal typ
   match literal with
   | Literal_integer number ->
       state.tables.literals.(id) <- Some (Integer_value number);
-      if State.unify state type_ (Unify.make_fresh_literal state.unifier Integer_literal) then
-        ignore (require_literal_fits state span number type_)
+      let fitting = Scalar_set.list_fitting_integers number in
+      let is_number =
+        match State.resolve state type_ with
+        | Types.Variable _ ->
+            State.unify state type_ (Unify.make_fresh_number state.unifier fitting)
+        | Types.Error _ | Types.Hole -> true
+        | resolved -> Option.is_some (Unify.list_possible_members state.unifier resolved)
+      in
+      if is_number then
+        ignore
+          (Solver.require_within state type_ ~members:fitting ~reason:(Integer_literal number) ~span
+             ())
       else
         State.report state Mismatch span
           (Printf.sprintf "An integer pattern matches an integer, not `%s`."

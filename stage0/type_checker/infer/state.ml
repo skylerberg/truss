@@ -20,17 +20,38 @@ type subset_constraint = {
   report_missing : Types.capability_set -> unit;
 }
 
+type narrowing_reason =
+  | Integer_literal of Z.t
+  | Float_literal
+  | Negation
+  | Shift_amount
+  | Integer_operand of string
+  | Range_element of string
+  | Range_pattern
+  | Sealed_bound of Path.t
+  | Method_receiver of string
+
+type narrowing = {
+  variable : int;
+  narrowed_at : Source.Definition_span.t;
+  members : Scalar_set.t;
+  reason : narrowing_reason;
+}
+
 type requirement =
   | Implements of {
       trait : Types.trait_reference;
+      span : Source.Definition_span.t;
       on_met : Interface.Impls.evidence -> unit;
       on_unmet : Types.ty -> (string * Types.ty) option -> Diagnostic.reported;
     }
-  | Satisfies of {
-      holds : Types.ty -> bool;
+  | Within of {
+      members : Scalar_set.t;
+      reason : narrowing_reason;
+      span : Source.Definition_span.t;
       on_met : Types.ty -> unit;
-      on_unmet : Types.ty -> Diagnostic.reported;
     }
+  | When_solved of (Types.ty -> unit)
 
 type obligation = { subject : Types.ty; requirement : requirement }
 
@@ -49,7 +70,7 @@ type frame = {
   span : Source.Definition_span.t;
 }
 
-type undecided_literal = { index : int; kind : Types.literal_kind; local : Syntax.id }
+type undecided_literal = { index : int; local : Syntax.id }
 
 type literal_decision = {
   decided_local : Syntax.id;
@@ -99,6 +120,7 @@ type state = {
   decisions : (int, literal_decision) Hashtbl.t;
   annotatable : (Syntax.id, unit) Hashtbl.t;
   mutable unmet_impls : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
+  mutable narrowings : narrowing list;
 }
 
 let add_diagnostic state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
@@ -375,22 +397,88 @@ let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
 let make_fresh_type state = Unify.make_fresh_type state.unifier
 
-let is_integer_type state (type_ : Types.ty) =
-  Types.is_integer_type type_
-  ||
-  match type_ with
-  | Parameter _ | Projection _ -> state.unifier.find_integer_range type_ <> None
-  | _ -> false
+let is_within state members type_ =
+  match Unify.list_possible_members state.unifier type_ with
+  | Some possible -> Scalar_set.is_subset possible ~of_:members
+  | None -> false
 
-let is_signed_type state (type_ : Types.ty) =
-  Types.is_signed type_
-  ||
-  match type_ with
-  | Parameter _ | Projection _ -> (
-      match state.unifier.find_integer_range type_ with
-      | Some (low, _) -> Z.sign low < 0
-      | None -> false)
-  | _ -> false
+let is_integer_type state type_ =
+  match resolve state type_ with
+  | Types.Number_variable _ -> false
+  | resolved -> is_within state Scalar_set.fixed_width_integers resolved
+
+let record_narrowing state ~variable ~(span : Source.Definition_span.t) ~members reason =
+  state.narrowings <- { variable; narrowed_at = span; members; reason } :: state.narrowings
+
+let describe state type_ =
+  match resolve state type_ with
+  | Types.Number_variable index -> Scalar_set.describe (Unify.read_domain state.unifier index)
+  | resolved -> Types.describe (zonk state resolved)
+
+let explain_narrowing state reason ~found =
+  let shown = describe state found in
+  let possible = Unify.list_possible_members state.unifier found in
+  let is_number_variable =
+    match resolve state found with Types.Number_variable _ -> true | _ -> false
+  in
+  let is_subset members =
+    match possible with
+    | Some possible -> Scalar_set.is_subset possible ~of_:members
+    | None -> false
+  in
+  let may_be members =
+    match possible with
+    | Some possible -> not (Scalar_set.is_empty (Scalar_set.inter possible members))
+    | None -> false
+  in
+  let explain_negation () : Diagnostic.Code.types * string =
+    if is_number_variable then
+      (Negated_unsigned, Printf.sprintf "This value is %s, so it cannot be negated." shown)
+    else if is_subset Scalar_set.unsigned_integers then
+      (Negated_unsigned, Printf.sprintf "%s is unsigned, so it cannot be negated." shown)
+    else if may_be Scalar_set.unsigned_integers then
+      (Negated_unsigned, Printf.sprintf "%s may be unsigned, so it cannot be negated." shown)
+    else (No_impl, Printf.sprintf "%s cannot be negated." shown)
+  in
+  match reason with
+  | Integer_literal value -> (
+      if Z.sign value < 0 && is_subset Scalar_set.unsigned_integers then Some (explain_negation ())
+      else
+        match Option.bind possible Scalar_set.find_common_range with
+        | Some (low, high) ->
+            Some
+              ( Literal_out_of_range,
+                Printf.sprintf "`%s` does not fit in %s, which holds %s to %s." (Z.to_string value)
+                  shown (Z.to_string low) (Z.to_string high) )
+        | None -> None)
+  | Float_literal ->
+      if is_subset Scalar_set.floats then
+        Some
+          ( Literal_out_of_range,
+            Printf.sprintf "This literal is too large for %s; it would round to infinity." shown )
+      else None
+  | Negation -> Some (explain_negation ())
+  | Shift_amount ->
+      Some (Mismatch, Printf.sprintf "A shift amount is an unsigned integer, not %s." shown)
+  | Integer_operand operation ->
+      Some (No_impl, Printf.sprintf "%s on built-in integers, not %s." operation shown)
+  | Range_element described ->
+      Some (Not_indexable, Printf.sprintf "%s range is of integers, not %s." described shown)
+  | Range_pattern ->
+      Some
+        ( Mismatch,
+          Printf.sprintf "A range pattern matches an integer or a `Character`, not %s." shown )
+  | Sealed_bound _ | Method_receiver _ -> None
+
+let find_excluding_narrowing state root wanted =
+  match Unify.list_possible_members state.unifier wanted with
+  | None -> None
+  | Some possible ->
+      List.find_opt
+        (fun narrowing ->
+          resolve state (Types.Number_variable narrowing.variable) = Types.Number_variable root
+          && not (Scalar_set.is_subset possible ~of_:narrowing.members))
+        (List.rev state.narrowings)
 
 let lookup_bounds state parameter = Interface.Elaborator.list_bounds state.context parameter
 
@@ -446,7 +534,7 @@ let resolve_capabilities state (capabilities : Types.capability_set) =
 let rec finalize_type state type_ =
   Types.map ~map_capabilities:(finalize_capabilities state)
     (function
-      | Types.Variable _ | Types.Literal _ -> Some (make_unsolved_type state)
+      | Types.Variable _ | Types.Number_variable _ -> Some (make_unsolved_type state)
       | Types.Hole when Option.is_some state.form.tables_with_holes -> Some Types.Never
       | _ -> None)
     (normalize state type_)
@@ -584,8 +672,7 @@ let convert_evidence = function
   | Interface.Impls.From_impl { impl; substitution } -> Tables.Impl { impl; substitution }
   | Interface.Impls.From_bound -> Tables.Bound
   | Interface.Impls.From_any -> Tables.Dynamic
-  | Interface.Impls.Built_in | Undetermined | Absorbed _ | For_every_type_of_kind _ ->
-      Tables.Built_in
+  | Interface.Impls.Built_in | Undetermined | Absorbed _ -> Tables.Built_in
 
 let make_trait_reference ~arguments trait : Types.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }
@@ -644,12 +731,11 @@ let is_variant_name (member : Syntax.name) =
   member.text <> "" && member.text.[0] >= 'A' && member.text.[0] <= 'Z'
 
 let show state type_ = Types.show (zonk state type_)
-let describe state type_ = Types.describe (zonk state type_)
 
 let find_literal_decision state type_ =
   let rec follow (type_ : Types.ty) =
     match type_ with
-    | Literal (_, index) | Variable index -> (
+    | Number_variable index | Variable index -> (
         match Hashtbl.find_opt state.decisions index with
         | Some decision -> Some decision
         | None -> Option.bind (Hashtbl.find_opt state.unifier.type_solutions index) follow)
@@ -660,62 +746,97 @@ let find_literal_decision state type_ =
 let add_mismatch_diagnostic state ?(fixes = []) code (span : Source.Definition_span.t)
     ~(sides : (Types.ty * Types.ty) list) message =
   let other_fixes = fixes in
-  match
+  let narrowed =
     List.find_map
       (fun (decided, wanted) ->
-        Option.map (fun decision -> (decision, wanted)) (find_literal_decision state decided))
+        match resolve state decided with
+        | Types.Number_variable root ->
+            Option.map
+              (fun narrowing -> (narrowing, wanted))
+              (find_excluding_narrowing state root wanted)
+        | _ -> None)
       sides
-  with
-  | None -> add_diagnostic state ~fixes code span message
-  | Some ({ decision_report = Some report; _ }, _) -> report
-  | Some (decision, wanted) ->
-      let name = read_span state decision.decided_local in
-      let text = quote_span state name in
-      let local = Printf.sprintf "`%s`" text in
-      let decided = Types.show decision.decided_type and wanted = zonk state wanted in
-      let explanation, note =
-        if decision.is_default then
-          ( Printf.sprintf "%s took its default type, `%s`, at a method call that needs its type."
-              local decided,
-            Printf.sprintf "This call needs the type of %s, so %s takes its default type `%s` here."
-              local local decided )
-        else
-          ( Printf.sprintf "An earlier statement decided that the type of %s is `%s`." local decided,
-            Printf.sprintf "This statement decides that the type of %s is `%s`." local decided )
-      in
-      let fixes =
-        if
-          decision.is_default
-          && Hashtbl.mem state.annotatable decision.decided_local
-          && not (Types.contains_unsolved wanted || Types.is_error wanted)
-        then
-          fix
-            (Printf.sprintf "Declare `%s` as a `%s`." text (Types.show wanted))
-            [ insert name.stop (": " ^ Types.show wanted) ]
-          :: other_fixes
-        else other_fixes
-      in
-      let report =
-        add_diagnostic state code span
-          ~notes:[ (decision.decided_at, note) ]
-          ~fixes
-          (message ^ " " ^ explanation)
-      in
-      decision.decision_report <- Some report;
-      report
+  in
+  match narrowed with
+  | Some (narrowing, wanted) -> (
+      let use_note = (span, Printf.sprintf "It is used as %s here." (describe state wanted)) in
+      match explain_narrowing state narrowing.reason ~found:wanted with
+      | Some (narrowing_code, explanation) ->
+          add_diagnostic state ~notes:[ use_note ] narrowing_code narrowing.narrowed_at explanation
+      | None ->
+          add_diagnostic state ~fixes
+            ~notes:
+              [
+                ( narrowing.narrowed_at,
+                  Printf.sprintf "Here it becomes %s." (Scalar_set.describe narrowing.members) );
+              ]
+            code span message)
+  | None -> (
+      match
+        List.find_map
+          (fun (decided, wanted) ->
+            Option.map (fun decision -> (decision, wanted)) (find_literal_decision state decided))
+          sides
+      with
+      | None -> add_diagnostic state ~fixes code span message
+      | Some ({ decision_report = Some report; _ }, _) -> report
+      | Some (decision, wanted) ->
+          let name = read_span state decision.decided_local in
+          let text = quote_span state name in
+          let local = Printf.sprintf "`%s`" text in
+          let decided = Types.show decision.decided_type and wanted = zonk state wanted in
+          let explanation, note =
+            if decision.is_default then
+              ( Printf.sprintf
+                  "%s took its default type, `%s`, at a method call that needs its type." local
+                  decided,
+                Printf.sprintf
+                  "This call needs the type of %s, so %s takes its default type `%s` here." local
+                  local decided )
+            else
+              ( Printf.sprintf "An earlier statement decided that the type of %s is `%s`." local
+                  decided,
+                Printf.sprintf "This statement decides that the type of %s is `%s`." local decided
+              )
+          in
+          let fixes =
+            if
+              decision.is_default
+              && Hashtbl.mem state.annotatable decision.decided_local
+              && not (Types.contains_unsolved wanted || Types.is_error wanted)
+            then
+              fix
+                (Printf.sprintf "Declare `%s` as a `%s`." text (Types.show wanted))
+                [ insert name.stop (": " ^ Types.show wanted) ]
+              :: other_fixes
+            else other_fixes
+          in
+          let report =
+            add_diagnostic state code span
+              ~notes:[ (decision.decided_at, note) ]
+              ~fixes
+              (message ^ " " ^ explanation)
+          in
+          decision.decision_report <- Some report;
+          report)
 
 let add_mismatch state (span : Source.Definition_span.t) ~expected ~actual =
   let sides = [ (actual, expected); (expected, actual) ] in
   let expected = zonk state expected and actual = zonk state actual in
   match (resolve state actual, expected) with
-  | Types.Literal (Integer_literal, _), _ when Types.is_float_type expected ->
+  | Types.Number_variable index, _
+    when Types.is_float_type expected
+         && Scalar_set.is_subset
+              (Unify.read_domain state.unifier index)
+              ~of_:(Scalar_set.union Scalar_set.fixed_width_integers (Scalar_set.make [ Integer ]))
+    ->
       add_diagnostic state Integer_for_float span
         ~fixes:[ fix "Write it as a float." [ insert span.stop ".0" ] ]
         (Printf.sprintf "An integer literal is never a float, and `%s` is expected here."
            (Types.show expected))
   | _ ->
       add_mismatch_diagnostic state Mismatch span ~sides
-        (Printf.sprintf "Expected %s, found %s." (Types.describe expected) (Types.describe actual))
+        (Printf.sprintf "Expected %s, found %s." (describe state expected) (describe state actual))
 
 let report_mismatch state span ~expected ~actual =
   ignore (add_mismatch state span ~expected ~actual)
@@ -999,8 +1120,9 @@ let convert state env ?argument ?(takes_view_as_owner = false) ?expression
       | Types.Integer, _, Some _
         when is_argument && env.specification && is_integer_type state wanted ->
           Some From_integer
-      | Types.Literal (Integer_literal, index), Types.Integer, _
-        when env.specification && Hashtbl.mem state.unifier.code_literals index ->
+      | Types.Number_variable index, Types.Integer, _
+        when env.specification
+             && not (Scalar_set.mem Integer (Unify.read_domain state.unifier index)) ->
           Some To_integer
       | _, Types.Integer, _ when env.specification && is_integer_type state actual_type ->
           Some To_integer

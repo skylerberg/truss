@@ -477,7 +477,7 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
                  can_call_fields (Option.value ~default:[] variant.fields))
                variants
          | None -> false)
-  | Types.Projection _ | Types.Never | Types.Integer | Types.Literal _ | Types.Variable _
+  | Types.Projection _ | Types.Never | Types.Integer | Types.Number_variable _ | Types.Variable _
   | Types.Hole | Types.Error _ ->
       false
 

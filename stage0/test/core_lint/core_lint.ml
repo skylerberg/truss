@@ -460,7 +460,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         check_type subject output
     | Any reference -> check_trait subject reference
     | Never | Integer -> ()
-    | Variable _ | Literal _ | Hole | Error _ ->
+    | Variable _ | Number_variable _ | Hole | Error _ ->
         report "%s has the type `%s`, which is not fully inferred" subject (Types.show ty)
   and check_argument subject = function
     | Types.Type inner -> check_type subject inner

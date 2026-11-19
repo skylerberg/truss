@@ -24,7 +24,7 @@ type static_ =
 let require_bounds state (span : Source.Definition_span.t) ?of_type generics substitution =
   List.iter
     (fun (argument, bound) ->
-      Solver.require state argument bound ~on_met:(check_evidence_grants state span)
+      Solver.require state argument bound ~span ~on_met:(check_evidence_grants state span)
         ~on_unmet:(fun argument other ->
           let bound = Unify.zonk_trait state.unifier bound in
           let earlier =

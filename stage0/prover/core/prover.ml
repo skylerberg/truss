@@ -36,6 +36,14 @@ let translate_impl_laws (lookups : Lookups.t) (key : Resolve.Names.key) source =
 
 let is_specification_module (key : Resolve.Names.key) = key.module_ = Well_known.specification
 
+let list_integer_members implementors =
+  Option.bind implementors (fun implementors ->
+      match
+        Scalar_set.list_members (Scalar_set.inter implementors Scalar_set.fixed_width_integers)
+      with
+      | [] -> None
+      | members -> Some members)
+
 let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
   let generics =
     match Interface.Impls.read_signature lookups.interface path with
@@ -44,7 +52,8 @@ let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
           (fun (generic : Types.generic) ->
             match generic.kind with
             | Type_generic bounds ->
-                Some (generic.generic, Types.find_bound_integer_implementors bounds)
+                Some
+                  (generic.generic, list_integer_members (Scalar_set.find_bound_implementors bounds))
             | Value_generic -> None)
           signature.generics
     | None -> []
@@ -52,27 +61,25 @@ let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
   let self =
     match path with
     | Method { owner; _ } ->
-        [ (Types.make_self_parameter owner, Types.find_integer_implementors owner) ]
+        [
+          ( Types.make_self_parameter owner,
+            list_integer_members (Scalar_set.find_sealed_implementors owner) );
+        ]
     | _ -> []
   in
   List.fold_left
     (fun instances ((parameter : Types.parameter), implementors) ->
       match implementors with
       | None -> instances
-      | Some builtins ->
+      | Some members ->
           List.concat_map
             (fun (shown, substitution) ->
               List.map
-                (fun builtin ->
-                  ( shown
-                    @ [
-                        Printf.sprintf "`%s` is `%s`" parameter.name
-                          (Intrinsic.show_builtin builtin);
-                      ],
-                    Types.bind_argument parameter
-                      (Types.Type (Types.make_builtin builtin))
-                      substitution ))
-                builtins)
+                (fun member ->
+                  let integer = Scalar_set.make_type member in
+                  ( shown @ [ Printf.sprintf "`%s` is `%s`" parameter.name (Types.show integer) ],
+                    Types.bind_argument parameter (Types.Type integer) substitution ))
+                members)
             instances)
     [ ([], Types.no_substitution) ]
     (self @ generics)

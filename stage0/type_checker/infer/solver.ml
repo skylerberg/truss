@@ -26,11 +26,75 @@ let list_obligation_unknowns (state : State.state) (obligation : State.obligatio
       List.concat_map
         (Unify.list_argument_unknowns state.unifier)
         (Unify.zonk_trait state.unifier trait).trait_arguments
-  | Satisfies _ -> []
+  | Within _ | When_solved _ -> []
 
 type outcome = Pending | Met | Unmet of Diagnostic.reported | Vacuous
 
-let decide (state : State.state) (obligation : State.obligation) =
+let list_covering_traits (state : State.state) root =
+  let domain = Unify.read_domain state.unifier root in
+  List.filter_map
+    (fun sealed ->
+      let path = Well_known.make_path sealed in
+      match Scalar_set.find_sealed_implementors path with
+      | Some implementors when Scalar_set.is_subset domain ~of_:implementors ->
+          Some (State.make_trait_reference ~arguments:[] path)
+      | _ -> None)
+    [ Fixed_width_integer; Signed_integer; Unsigned_integer; Floating_point ]
+
+let solve_number_associated_types (state : State.state) root (trait : Types.trait_reference) =
+  let subject = Types.Number_variable root in
+  let bounds =
+    List.concat_map
+      (fun covering ->
+        covering
+        :: Interface.Properties.list_bound_closure state.lookups.interface ~self:subject covering)
+      (list_covering_traits state root)
+  in
+  let arguments = (Unify.zonk_trait state.unifier trait).trait_arguments in
+  List.iter
+    (fun (name, wanted) ->
+      match
+        List.find_map
+          (fun (bound : Types.trait_reference) ->
+            if
+              Path.equal bound.trait trait.trait
+              && (Unify.zonk_trait state.unifier bound).trait_arguments = arguments
+            then List.assoc_opt name bound.associated
+            else None)
+          bounds
+      with
+      | Some fixed -> ignore (State.unify state wanted fixed)
+      | None -> ())
+    trait.associated
+
+let report_within (state : State.state) reason (span : Source.Definition_span.t) ~members ~found =
+  let notes =
+    match State.resolve state found with
+    | Types.Number_variable root -> (
+        match
+          List.find_opt
+            (fun (narrowing : State.narrowing) ->
+              State.resolve state (Types.Number_variable narrowing.variable)
+              = Types.Number_variable root
+              && Scalar_set.is_empty (Scalar_set.inter narrowing.members members))
+            state.narrowings
+        with
+        | Some narrowing ->
+            [
+              ( narrowing.narrowed_at,
+                Printf.sprintf "Here it becomes %s." (Scalar_set.describe narrowing.members) );
+            ]
+        | None -> [])
+    | _ -> []
+  in
+  match State.explain_narrowing state reason ~found with
+  | Some (code, message) -> State.add_diagnostic state ~notes code span message
+  | None ->
+      State.add_diagnostic state ~notes Mismatch span
+        (Printf.sprintf "Expected %s, found %s." (Scalar_set.describe members)
+           (State.describe state found))
+
+let rec decide (state : State.state) (obligation : State.obligation) =
   let subject = State.normalize state obligation.subject in
   match obligation.requirement with
   | Implements implements -> (
@@ -38,62 +102,81 @@ let decide (state : State.state) (obligation : State.obligation) =
         State.normalize_trait state (State.solve_trait_arguments state subject implements.trait)
       in
       let unannotated = { trait with associated = [] } in
-      if list_obligation_unknowns state obligation <> [] then Pending
-      else
-        match find_absorbing state (subject :: list_argument_types trait) with
-        | Some absorbing ->
-            List.iter
-              (fun (_, wanted) -> ignore (State.unify state wanted absorbing))
-              trait.associated;
-            Vacuous
-        | None -> (
-            match State.find_evidence state subject unannotated with
-            | None ->
-                let report = implements.on_unmet subject None in
-                state.unmet_impls <- (subject, unannotated, report) :: state.unmet_impls;
+      match (State.resolve state subject, Scalar_set.find_sealed_implementors trait.trait) with
+      | Types.Number_variable root, Some implementors
+        when not (Scalar_set.is_subset (Unify.read_domain state.unifier root) ~of_:implementors) ->
+          if Unify.narrow state.unifier root implementors then begin
+            State.record_narrowing state ~variable:root ~span:implements.span ~members:implementors
+              (Sealed_bound trait.trait);
+            decide state obligation
+          end
+          else Unmet (implements.on_unmet subject None)
+      | resolved, _ -> (
+          (match resolved with
+          | Types.Number_variable root -> solve_number_associated_types state root trait
+          | _ -> ());
+          if list_obligation_unknowns state obligation <> [] then Pending
+          else
+            match find_absorbing state (subject :: list_argument_types trait) with
+            | Some absorbing ->
                 List.iter
-                  (fun (_, wanted) -> ignore (State.unify state wanted (Types.Error report)))
+                  (fun (_, wanted) -> ignore (State.unify state wanted absorbing))
                   trait.associated;
-                Unmet report
-            | Some evidence ->
-                List.iter
-                  (fun (name, wanted) ->
-                    match
-                      Interface.Impls.project_associated_type state.lookups.interface
-                        ~list_bounds:(State.lookup_bounds state) subject unannotated name
-                    with
-                    | Some actual when not (State.unify state actual wanted) ->
-                        ignore (implements.on_unmet subject (Some (name, actual)))
-                    | _ -> ())
-                  trait.associated;
-                implements.on_met evidence;
-                Met))
-  | Satisfies satisfies -> (
-      if list_obligation_unknowns state obligation <> [] then Pending
+                Vacuous
+            | None -> (
+                match State.find_evidence state subject unannotated with
+                | None ->
+                    let report = implements.on_unmet subject None in
+                    state.unmet_impls <- (subject, unannotated, report) :: state.unmet_impls;
+                    List.iter
+                      (fun (_, wanted) -> ignore (State.unify state wanted (Types.Error report)))
+                      trait.associated;
+                    Unmet report
+                | Some evidence ->
+                    List.iter
+                      (fun (name, wanted) ->
+                        match
+                          Interface.Impls.project_associated_type state.lookups.interface
+                            ~list_bounds:(State.lookup_bounds state) subject unannotated name
+                        with
+                        | Some actual when not (State.unify state actual wanted) ->
+                            ignore (implements.on_unmet subject (Some (name, actual)))
+                        | _ -> ())
+                      trait.associated;
+                    implements.on_met evidence;
+                    Met)))
+  | Within within -> (
+      match State.resolve state subject with
+      | Types.Error _ | Types.Hole -> Vacuous
+      | Types.Variable _ -> Pending
+      | Types.Number_variable root ->
+          if Scalar_set.is_subset (Unify.read_domain state.unifier root) ~of_:within.members then
+            Pending
+          else if Unify.narrow state.unifier root within.members then begin
+            State.record_narrowing state ~variable:root ~span:within.span ~members:within.members
+              within.reason;
+            decide state obligation
+          end
+          else
+            Unmet
+              (report_within state within.reason within.span ~members:within.members ~found:subject)
+      | resolved ->
+          if State.is_within state within.members resolved then begin
+            within.on_met resolved;
+            Met
+          end
+          else
+            Unmet
+              (report_within state within.reason within.span ~members:within.members ~found:resolved)
+      )
+  | When_solved check -> (
+      if Unify.list_unknowns state.unifier subject <> [] then Pending
       else
         match find_absorbing state [ subject ] with
         | Some _ -> Vacuous
         | None ->
-            if satisfies.holds subject then begin
-              satisfies.on_met subject;
-              Met
-            end
-            else Unmet (satisfies.on_unmet subject))
-
-let is_met_by_trial (state : State.state) (obligation : State.obligation) =
-  let subject = State.normalize state obligation.subject in
-  let is_open types =
-    List.exists (fun type_ -> Unify.list_unknowns state.unifier type_ <> []) types
-    || Option.is_some (find_absorbing state types)
-  in
-  match obligation.requirement with
-  | Implements { trait; _ } -> (
-      is_open [ subject ]
-      ||
-      match (Types.find_builtin subject, Types.find_sealed_implementors trait.trait) with
-      | Some builtin, Some implementors -> List.mem builtin implementors
-      | _ -> true)
-  | Satisfies { holds; _ } -> is_open [ subject ] || holds subject
+            check subject;
+            Met)
 
 let is_pending state obligation =
   match decide state obligation with Pending -> true | Met | Unmet _ | Vacuous -> false
@@ -105,7 +188,7 @@ let add (state : State.state) (obligation : State.obligation) =
         (fun level ->
           List.iter (fun (_, wanted) -> Unify.lower state.unifier ~level wanted) trait.associated)
         (Unify.find_lowest_level state.unifier (list_obligation_unknowns state obligation))
-  | Satisfies _ -> ());
+  | Within _ | When_solved _ -> ());
   let outcome = decide state obligation in
   (match (outcome, State.find_current_frame state) with
   | Pending, Some frame -> frame.obligations <- obligation :: frame.obligations
@@ -115,8 +198,8 @@ let add (state : State.state) (obligation : State.obligation) =
   | (Met | Unmet _ | Vacuous), _ -> ());
   outcome
 
-let require state subject trait ~on_met ~on_unmet =
-  ignore (add state { subject; requirement = Implements { trait; on_met; on_unmet } })
+let require state subject trait ~span ~on_met ~on_unmet =
+  ignore (add state { subject; requirement = Implements { trait; span; on_met; on_unmet } })
 
 let describe_associated_type (state : State.state) base (trait : Types.trait_reference) name =
   Printf.sprintf "the `%s` of `%s` under `%s`" name (State.show state base)
@@ -149,7 +232,7 @@ let require_projection_equalities (state : State.state) (frame : State.frame) =
       | Types.Projection { base; trait; name }, wanted ->
           require state base
             { trait with associated = [ (name, wanted) ] }
-            ~on_met:ignore
+            ~span:frame.span ~on_met:ignore
             ~on_unmet:(fun base mismatch ->
               match mismatch with
               | Some (_, actual) ->
@@ -178,48 +261,29 @@ let rec solve (state : State.state) (frame : State.frame) =
   require_projection_equalities state frame;
   if List.length remaining < List.length pending || has_deferred then solve state frame
 
-let require_type state subject ~holds ?(on_met = ignore) ~on_unmet () =
-  match add state { subject; requirement = Satisfies { holds; on_met; on_unmet } } with
+let require_within state subject ~members ~reason ~span ?(on_met = ignore) () =
+  match add state { subject; requirement = Within { members; reason; span; on_met } } with
   | Unmet report -> Types.Error report
   | Pending | Met | Vacuous -> subject
 
 let check_solved state type_ check =
-  ignore
-    (require_type state type_
-       ~holds:(fun _ -> true)
-       ~on_met:check
-       ~on_unmet:(fun _ -> State.raise_bug "a check that always holds is unmet")
-       ())
+  ignore (add state { subject = type_; requirement = When_solved check })
 
-let list_default_types ~specification (kind : Types.literal_kind) =
-  match kind with
-  | Integer_literal ->
-      (if specification then [ Types.Integer ] else [])
-      @ [ Types.make_builtin Int64; Types.make_builtin UInt64 ]
-  | Float_literal -> [ Types.make_builtin Float64 ]
-
-let choose_default (state : State.state) ~specification ~obligations (kind, root) =
-  let specification = specification && not (Hashtbl.mem state.unifier.code_literals root) in
-  let is_met_by default =
-    Hashtbl.replace state.unifier.type_solutions root default;
-    let is_met = List.for_all (is_met_by_trial state) obligations in
-    Hashtbl.remove state.unifier.type_solutions root;
-    is_met
-  in
-  match list_default_types ~specification kind with
-  | [] -> State.raise_bug "a literal kind has no default type"
-  | first :: _ as defaults -> (
-      match List.find_opt is_met_by defaults with Some default -> default | None -> first)
+let choose_default (state : State.state) root =
+  let domain = Unify.read_domain state.unifier root in
+  match Scalar_set.choose_default domain with
+  | Some member -> Scalar_set.make_type member
+  | None -> State.raise_bug "%s has no default type" (Scalar_set.describe domain)
 
 let make_undecided_type (undecided : State.undecided_literal) =
-  Types.Literal (undecided.kind, undecided.index)
+  Types.Number_variable undecided.index
 
 let record_decisions (state : State.state) ~(at : Source.Definition_span.t) ~is_default =
   state.undecided <-
     List.filter
       (fun (undecided : State.undecided_literal) ->
         match Unify.resolve state.unifier (make_undecided_type undecided) with
-        | Types.Literal _ -> true
+        | Types.Number_variable _ -> true
         | _ ->
             Hashtbl.replace state.decisions undecided.index
               {
@@ -235,7 +299,7 @@ let record_decisions (state : State.state) ~(at : Source.Definition_span.t) ~is_
 let decide_for_method_call (state : State.state) ~at type_ =
   match
     ( List.filter_map
-        (function Unify.Unknown_literal (kind, root) -> Some (kind, root) | _ -> None)
+        (function Unify.Unknown_number root -> Some root | _ -> None)
         (Unify.list_unknowns state.unifier (State.normalize state type_)),
       State.find_current_frame state )
   with
@@ -244,16 +308,10 @@ let decide_for_method_call (state : State.state) ~at type_ =
       List.iter (solve state) state.frames;
       record_decisions state ~at:frame.span ~is_default:false;
       List.iter
-        (fun (kind, root) ->
-          match Unify.resolve state.unifier (Types.Literal (kind, root)) with
-          | Types.Literal (kind, root) ->
-              let default =
-                choose_default state ~specification:false
-                  ~obligations:
-                    (List.concat_map (fun (frame : State.frame) -> frame.obligations) state.frames)
-                  (kind, root)
-              in
-              ignore (State.unify state (Types.Literal (kind, root)) default);
+        (fun root ->
+          match Unify.resolve state.unifier (Types.Number_variable root) with
+          | Types.Number_variable root ->
+              ignore (State.unify state (Types.Number_variable root) (choose_default state root));
               List.iter (solve state) state.frames
           | _ -> ())
         literals;
@@ -320,11 +378,9 @@ let hand_literals_to_parent (state : State.state) (frame : State.frame) ~escapin
       (fun (local, type_) ->
         List.iter
           (function
-            | Unify.Unknown_literal (kind, index) as unknown when is_owned_by state frame unknown ->
+            | Unify.Unknown_number index as unknown when is_owned_by state frame unknown ->
                 Unify.lower_to state.unifier ~level:parent.level index;
-                if not frame.frame_specification then
-                  Hashtbl.replace state.unifier.code_literals index ();
-                state.undecided <- { index; kind; local } :: state.undecided
+                state.undecided <- { index; local } :: state.undecided
             | _ -> ())
           (Unify.list_reachable_unknowns state.unifier (State.normalize state type_)))
       (declared @ escaping)
@@ -334,20 +390,16 @@ let default_literals (state : State.state) (frame : State.frame) =
     List.sort_uniq compare
       (List.filter_map
          (function
-           | Unify.Unknown_literal (kind, index) as unknown when is_owned_by state frame unknown ->
-               Some (index, kind)
+           | Unify.Unknown_number index as unknown when is_owned_by state frame unknown ->
+               Some index
            | _ -> None)
          (list_frame_unknowns state frame))
   in
   List.iter
-    (fun (index, kind) ->
-      match Unify.resolve state.unifier (Types.Literal (kind, index)) with
-      | Types.Literal (kind, root) ->
-          let default =
-            choose_default state ~specification:frame.frame_specification
-              ~obligations:frame.obligations (kind, root)
-          in
-          Hashtbl.replace state.unifier.type_solutions root default;
+    (fun index ->
+      match Unify.resolve state.unifier (Types.Number_variable index) with
+      | Types.Number_variable root ->
+          Hashtbl.replace state.unifier.type_solutions root (choose_default state root);
           solve state frame
       | _ -> ())
     literals
@@ -415,7 +467,7 @@ let report_unsolved (state : State.state) (frame : State.frame) unsolved =
   if Option.is_none state.unsolved then state.unsolved <- Some report;
   List.iter
     (function
-      | Unify.Unknown_type index | Unknown_literal (_, index) ->
+      | Unify.Unknown_type index | Unknown_number index ->
           Hashtbl.replace state.unifier.type_solutions index (Types.Error report)
       | Unknown_value _ -> ())
     unsolved
@@ -468,7 +520,7 @@ let settle (state : State.state) (frame : State.frame) ~escaping =
     List.filter
       (fun (undecided : State.undecided_literal) ->
         match Unify.resolve state.unifier (make_undecided_type undecided) with
-        | Types.Literal (kind, root) -> not (is_owned_by state frame (Unknown_literal (kind, root)))
+        | Types.Number_variable root -> not (is_owned_by state frame (Unknown_number root))
         | _ -> true)
       state.undecided;
   default_literals state frame;

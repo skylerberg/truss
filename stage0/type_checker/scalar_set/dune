@@ -1,0 +1,3 @@
+(library
+ (name scalar_set)
+ (libraries types intrinsic well_known path zarith))

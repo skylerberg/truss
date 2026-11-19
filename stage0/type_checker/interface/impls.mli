@@ -45,7 +45,6 @@ type evidence =
   | Built_in
   | Undetermined
   | Absorbed of Types.ty
-  | For_every_type_of_kind of Types.literal_kind
 
 type through_any = Callable | Has_generics | Names_self
 

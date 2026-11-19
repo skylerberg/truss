@@ -5,36 +5,41 @@ let select_arithmetic_trait : Syntax.arithmetic -> Path.t * string = function
   | Divide -> (Well_known.make_path Divide, "divide")
   | Remainder -> (Well_known.make_path Remainder, "remainder")
 
-let is_unsigned_integer state type_ =
-  State.is_integer_type state type_ && not (State.is_signed_type state type_)
-
 let is_built_in_number : Types.ty -> bool = function
-  | Literal _ -> true
+  | Number_variable _ -> true
   | resolved -> Types.is_integer_type resolved || Types.is_float_type resolved
 
-let require_integer state span type_ ~(describe : Types.ty -> string) =
-  Solver.require_type state type_ ~holds:(State.is_integer_type state)
-    ~on_unmet:(fun resolved -> State.add_diagnostic state No_impl span (describe resolved))
-    ()
+let require_integer state span type_ operation =
+  Solver.require_within state type_ ~members:Scalar_set.fixed_width_integers
+    ~reason:(Integer_operand operation) ~span ()
 
 let infer_bitwise_result state span type_ =
-  require_integer state span type_ ~describe:(fun resolved ->
-      Printf.sprintf "Bitwise operators work on built-in integers, not `%s`." (Types.show resolved))
+  require_integer state span type_ "Bitwise operators work"
 
 let infer_shift_result state ~left:(left_span, left_type) ~right:(right_span, right_type) =
   ignore
-    (Solver.require_type state right_type ~holds:(is_unsigned_integer state)
-       ~on_unmet:(fun resolved ->
-         State.add_diagnostic state Mismatch right_span
-           (Printf.sprintf "A shift amount is an unsigned integer, not `%s`." (Types.show resolved)))
-       ());
-  require_integer state left_span left_type ~describe:(fun resolved ->
-      Printf.sprintf "Shifts work on built-in integers, not `%s`." (Types.show resolved))
+    (Solver.require_within state right_type ~members:Scalar_set.unsigned_integers
+       ~reason:Shift_amount ~span:right_span ());
+  require_integer state left_span left_type "Shifts work"
+
+let integers_and_integer =
+  Scalar_set.union Scalar_set.fixed_width_integers (Scalar_set.make [ Integer ])
 
 let is_integer_operand state type_ =
   let type_ = State.normalize state type_ in
   State.is_integer_type state type_ || type_ = Types.Integer
-  || match State.resolve state type_ with Types.Literal (Integer_literal, _) -> true | _ -> false
+  ||
+  match State.resolve state type_ with
+  | Types.Number_variable index ->
+      Scalar_set.is_subset (Unify.read_domain state.unifier index) ~of_:integers_and_integer
+  | _ -> false
+
+let unify_specification_literal state type_ =
+  match State.resolve state type_ with
+  | Types.Number_variable index when Scalar_set.mem Integer (Unify.read_domain state.unifier index)
+    ->
+      ignore (State.unify state type_ Types.Integer)
+  | _ -> ()
 
 let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
   State.reject_in_formula state env (State.read_span state value.id) "`?`";
@@ -168,8 +173,7 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
       check_built_in_operator state value [ inner ] type_;
       State.register_expression state value (fun () ->
           Form.build_operator state value Complement [ inner ]);
-      require_integer state (State.read_span state value.id) type_ ~describe:(fun resolved ->
-          Printf.sprintf "`~` works on built-in integers, not %s." (Types.describe resolved))
+      require_integer state (State.read_span state value.id) type_ "`~` works"
   | Negate -> (
       match inner.kind with
       | Integer number ->
@@ -177,27 +181,20 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
           state.tables.literals.(value.id) <- Some (Integer_value (Z.neg number));
           State.register_expression state value (fun () ->
               Form.build_numeric_literal state value.id);
-          let type_ = Name_lookup.infer_literal_type state ~expected Integer_literal in
+          let type_ =
+            Name_lookup.infer_literal_type state env ~expected
+              ~span:(State.read_span state value.id)
+              ~fitting:(Scalar_set.list_fitting_integers (Z.neg number))
+              (Integer_literal (Z.neg number))
+          in
           State.record state inner type_;
-          Solver.require_type state type_
-            ~holds:(fun resolved ->
-              (Z.equal number Z.zero || not (is_unsigned_integer state resolved))
-              && Pattern_typing.is_within_range state (Z.neg number) resolved)
-            ~on_unmet:(fun resolved ->
-              if is_unsigned_integer state resolved && not (Z.equal number Z.zero) then
-                report_negated_unsigned state value resolved
-              else
-                Pattern_typing.report_out_of_range state (State.read_span state value.id)
-                  (Z.neg number) resolved)
-            ()
+          type_
       | _ ->
           let type_ = Hooks.check_expression state env ?expected inner in
           let resolved = State.normalize state type_ in
           if resolved = Types.Hole then Types.Hole
           else if env.specification && is_integer_operand state resolved then begin
-            (match resolved with
-            | Types.Literal _ -> ignore (State.unify state type_ Types.Integer)
-            | _ -> ());
+            unify_specification_literal state type_;
             State.register_expression state value (fun () ->
                 Form.build_operator state value Negate [ inner ]);
             Types.Integer
@@ -206,27 +203,26 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
             check_built_in_operator state value [ inner ] type_;
             State.register_expression state value (fun () ->
                 Form.build_operator state value Negate [ inner ]);
-            Solver.require_type state type_
-              ~holds:(fun resolved -> not (is_unsigned_integer state resolved))
-              ~on_unmet:(report_negated_unsigned state value)
-              ()
+            Solver.require_within state type_ ~members:Scalar_set.negatable ~reason:Negation
+              ~span:(State.read_span state value.id) ()
           end
           else begin
             Form.register_call state value;
             check_operator_call
               ~report_no_impl:(fun resolved ->
-                if is_unsigned_integer state resolved then
-                  Some (report_negated_unsigned state value resolved)
-                else None)
+                match Unify.list_possible_members state.unifier resolved with
+                | Some possible when not (Scalar_set.is_subset possible ~of_:Scalar_set.negatable)
+                  ->
+                    Option.map
+                      (fun (code, message) ->
+                        State.add_diagnostic state code (State.read_span state value.id) message)
+                      (State.explain_narrowing state Negation ~found:resolved)
+                | _ -> None)
               ~operands:
                 [ { Tables.expression = inner.id; core_argument_index = 0; mode = Types.Read } ]
               state value ~trait:(Well_known.make_path Negate) ~method_:"negate" ~left:type_
               ~right:None
           end)
-
-and report_negated_unsigned state (value : Syntax.expression) resolved =
-  State.add_diagnostic state Negated_unsigned (State.read_span state value.id)
-    (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (Types.show resolved))
 
 and check_operator_call ?(report_no_impl = fun _ -> None) ~operands state
     (value : Syntax.expression) ~trait ~method_ ~left ~right =
@@ -260,14 +256,12 @@ and check_operator_call ?(report_no_impl = fun _ -> None) ~operands state
                (Types.show_trait (Unify.zonk_trait state.unifier reference))));
   State.normalize state result
 
-and check_literal_operands state ~left ~right =
+and check_literal_operands state (env : State.env) ~left ~right =
   match (State.resolve state left, State.resolve state right) with
-  | Types.Literal (kind, _), other when Unify.literal_fits state.unifier kind other ->
-      ignore (State.unify state left right)
-  | other, Types.Literal (kind, _) when Unify.literal_fits state.unifier kind other ->
-      ignore (State.unify state left right)
-  | Types.Literal (left_kind, _), Types.Literal (right_kind, _) when left_kind = right_kind ->
-      ignore (State.unify state left right)
+  | _ when env.specification && is_integer_operand state left && is_integer_operand state right ->
+      ()
+  | Types.Number_variable _, Types.Variable _ | Types.Variable _, Types.Number_variable _ -> ()
+  | Types.Number_variable _, _ | _, Types.Number_variable _ -> ignore (State.unify state left right)
   | _ -> ()
 
 and check_built_in_operator state (value : Syntax.expression) (operands : Syntax.expression list)
@@ -321,7 +315,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
       check_built_in_operator state value [ left; right ] left_type;
       State.register_expression state value (fun () ->
           Form.build_operator state value (Form.convert_to_operation operation) [ left; right ]);
-      check_literal_operands state ~left:left_type ~right:right_type;
+      check_literal_operands state env ~left:left_type ~right:right_type;
       if not (State.unify state left_type right_type) then
         State.report_mismatch state (State.read_span state right.id) ~expected:left_type
           ~actual:right_type;
@@ -342,7 +336,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
   | Comparison comparison ->
       let left_type = Option.get state.tables.types.(left.id) in
       let right_type = Option.get state.tables.types.(right.id) in
-      check_literal_operands state ~left:left_type ~right:right_type;
+      check_literal_operands state env ~left:left_type ~right:right_type;
       if
         env.specification
         && is_integer_operand state left_type
@@ -413,7 +407,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
   | Operation (Arithmetic arithmetic as operation) ->
       let left_type = Option.get state.tables.types.(left.id) in
       let right_type = Option.get state.tables.types.(right.id) in
-      check_literal_operands state ~left:left_type ~right:right_type;
+      check_literal_operands state env ~left:left_type ~right:right_type;
       if arithmetic = Add && (is_string state left_type || is_string state right_type) then begin
         let spell_piece (side : Syntax.expression) =
           match side.kind with
@@ -443,14 +437,8 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           && is_integer_operand state left_type
           && is_integer_operand state right_type
         then begin
-          ignore
-            (match State.resolve state left_type with
-            | Types.Literal _ -> State.unify state left_type Types.Integer
-            | _ -> true);
-          ignore
-            (match State.resolve state right_type with
-            | Types.Literal _ -> State.unify state right_type Types.Integer
-            | _ -> true);
+          unify_specification_literal state left_type;
+          unify_specification_literal state right_type;
           State.register_expression state value (fun () ->
               Form.build_operator state value (Form.convert_to_operation operation) [ left; right ]);
           Types.Integer
@@ -458,7 +446,8 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
         else
           let same_builtin =
             match (State.resolve state left_type, State.resolve state right_type) with
-            | Types.Literal (left_kind, _), Types.Literal (right_kind, _) -> left_kind = right_kind
+            | Types.Number_variable left_root, Types.Number_variable right_root ->
+                left_root = right_root
             | left_resolved, right_resolved ->
                 (State.is_integer_type state left_resolved || Types.is_float_type left_resolved)
                 && Types.equal left_resolved right_resolved
@@ -540,7 +529,7 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
                   evidence = Form.convert_evidence (State.convert_evidence implementation);
                 }
           | _ -> State.raise_bug "`any` of a value whose type does not implement the trait");
-      Solver.require state inner_type trait
+      Solver.require state inner_type trait ~span:(State.read_span state value.id)
         ~on_met:(fun evidence ->
           Instantiation.check_evidence_grants state (State.read_span state value.id) evidence;
           let inner_type = State.normalize state inner_type in

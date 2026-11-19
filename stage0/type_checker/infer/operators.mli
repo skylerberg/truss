@@ -37,7 +37,7 @@ val check_operator_call :
   right:Types.ty option ->
   Types.ty
 
-val check_literal_operands : State.state -> left:Types.ty -> right:Types.ty -> unit
+val check_literal_operands : State.state -> State.env -> left:Types.ty -> right:Types.ty -> unit
 
 val check_binary :
   State.state ->
