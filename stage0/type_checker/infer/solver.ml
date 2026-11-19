@@ -68,14 +68,12 @@ let report_failure (state : State.state) (goal : State.goal) ?associated subject
       in
       let sides =
         match goal.subject with
-        | Types.Variable index -> (
-            match
-              List.filter meets
-                (Option.value ~default:[]
-                   (Unify.find_domain state.unifier (Unify.read_root state.unifier index)))
-            with
-            | [ member ] -> [ (goal.subject, Types.make_builtin member) ]
-            | _ -> [])
+        | Types.Variable index ->
+            List.filter_map
+              (fun member ->
+                if meets member then Some (goal.subject, Types.make_builtin member) else None)
+              (Option.value ~default:[]
+                 (Unify.find_domain state.unifier (Unify.read_root state.unifier index)))
         | _ -> []
       in
       report_unmet_bound state ~at ~of_type ~sides shown bound ~associated

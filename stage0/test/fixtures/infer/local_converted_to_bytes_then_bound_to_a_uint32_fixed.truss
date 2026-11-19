@@ -1,6 +1,0 @@
-fn f() {
-  let value: UInt32 = 1
-  let bytes = value.to_big_endian_bytes()
-  let small: UInt32 = value
-  let last: UInt8 = bytes[3]
-}

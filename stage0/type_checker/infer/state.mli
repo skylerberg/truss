@@ -97,9 +97,6 @@ type state = {
   mutable log : logged list;
   mutable condition_bounds : Types.condition;
   annotatable : (Syntax.id, unit) Hashtbl.t;
-  assumed_types : (Syntax.id * Types.ty) list;
-  mutable unchecked_fixes :
-    (Source.Definition_span.t Diagnostic.fix * (Syntax.id * Types.ty) list) list;
 }
 
 val add_diagnostic :

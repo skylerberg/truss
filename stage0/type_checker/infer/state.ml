@@ -116,9 +116,6 @@ type state = {
   mutable log : logged list;
   mutable condition_bounds : Types.condition;
   annotatable : (Syntax.id, unit) Hashtbl.t;
-  assumed_types : (Syntax.id * Types.ty) list;
-  mutable unchecked_fixes :
-    (Source.Definition_span.t Diagnostic.fix * (Syntax.id * Types.ty) list) list;
 }
 
 let add_diagnostic state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
@@ -460,18 +457,15 @@ let read_integer_range state type_ =
 let record_in_log state member entry = state.log <- { member; entry } :: state.log
 
 let make_literal_type state (value : Syntax.expression) allowed ~report_excluded =
-  match List.assoc_opt value.id state.assumed_types with
-  | Some assumed -> assumed
-  | None ->
-      let literal = Unify.make_fresh_number state.unifier allowed in
-      record_in_log state state.unifier.next
-        (Literal
-           {
-             allowed;
-             report_excluded = keep_condition_bounds state report_excluded;
-             literal = value.id;
-           });
-      literal
+  let literal = Unify.make_fresh_number state.unifier allowed in
+  record_in_log state state.unifier.next
+    (Literal
+       {
+         allowed;
+         report_excluded = keep_condition_bounds state report_excluded;
+         literal = value.id;
+       });
+  literal
 
 let record_narrowing state member ~allowed ~report_excluded =
   record_in_log state member
@@ -669,11 +663,6 @@ let declare state (name : Syntax.name) type_ ~binding ~mode =
   state.tables.local_types.(name.id) <- Some type_;
   let frame = read_current_frame state in
   frame.bindings <- name.id :: frame.bindings;
-  (match List.assoc_opt name.id state.assumed_types with
-  | Some assumed when not (unify state type_ assumed) ->
-      report state Mismatch (read_span state name.id)
-        "A fix would declare this local with a type that it cannot have."
-  | _ -> ());
   match resolve state type_ with
   | Types.Variable index when Option.is_some (Unify.find_domain state.unifier index) ->
       record_in_log state index (Local name.id)
@@ -733,13 +722,6 @@ let explain_decision site ~name ~decided =
           name decided )
   | Method_call -> (took "at an earlier method call", needs "Method lookup")
 
-let propose_fix state title edits ~assumed_types =
-  let proposed = fix title edits in
-  state.unchecked_fixes <- (proposed, assumed_types) :: state.unchecked_fixes;
-  proposed
-
-let is_decimal text = String.for_all (function '0' .. '9' | '_' | '-' -> true | _ -> false) text
-
 let find_log_report state ~fixes code span message (root, wanted) =
   let entries =
     List.rev
@@ -754,7 +736,6 @@ let find_log_report state ~fixes code span message (root, wanted) =
   let quote id = quote_span state (read_span state id) in
   let wanted_type = normalize state wanted in
   let wanted = zonk state wanted in
-  let is_assumable = not (Types.contains_unsolved wanted || Types.is_error wanted) in
   match
     List.find_opt
       (function
@@ -766,19 +747,17 @@ let find_log_report state ~fixes code span message (root, wanted) =
   with
   | Some (Literal { allowed; _ })
     when is_within state wanted Types.float_types && not (is_float_domain allowed) ->
-      let fixes =
-        if is_assumable && List.for_all (fun literal -> is_decimal (quote literal)) literals then
-          [
-            propose_fix state "Write it as a float."
-              (List.map (fun literal -> insert (read_span state literal).stop ".0") literals)
-              ~assumed_types:(List.map (fun literal -> (literal, wanted)) literals);
-          ]
-        else []
+      let spell_as_float literal =
+        match state.tables.literals.(literal) with
+        | Some (Integer_value number) ->
+            Printf.sprintf "`%s` as `%s.0`" (quote literal) (Z.to_string number)
+        | Some (Float_value _) | None -> raise_bug "`%s` is no integer literal" (quote literal)
       in
       Some
-        (add_diagnostic state Integer_for_float span ~fixes
-           (Printf.sprintf "An integer literal is never a float, and %s is expected here."
-              (describe state wanted)))
+        (add_diagnostic state Integer_for_float span
+           (Printf.sprintf "An integer literal is never a float, and %s is expected here. Write %s."
+              (describe state wanted)
+              (String.concat " and " (List.map spell_as_float literals))))
   | Some (Literal { allowed; report_excluded; _ })
     when is_within state wanted
            (if is_float_domain allowed then Types.float_types else Integer :: Types.integer_types)
@@ -796,21 +775,20 @@ let find_log_report state ~fixes code span message (root, wanted) =
       let explanation, note =
         explain_decision site ~name:(Printf.sprintf "`%s`" name) ~decided:(Types.show decided_type)
       in
-      let fixes =
+      let remedy =
         match local with
-        | Some local when site <> Use && is_assumable && Hashtbl.mem state.annotatable local ->
-            propose_fix state
-              (Printf.sprintf "Declare `%s` as a `%s`." name (Types.show wanted))
-              [ insert (read_span state local).stop (": " ^ Types.show wanted) ]
-              ~assumed_types:[ (local, wanted) ]
-            :: fixes
-        | _ -> fixes
+        | Some local
+          when site <> Use
+               && is_within state wanted Types.number_types
+               && Hashtbl.mem state.annotatable local ->
+            [ Printf.sprintf "Declare `%s` with a type." name ]
+        | _ -> []
       in
       let report =
         add_diagnostic state code span
           ~notes:[ (decided_at, note) ]
           ~fixes
-          (message ^ " " ^ explanation)
+          (String.concat " " (message :: explanation :: remedy))
       in
       Hashtbl.replace state.unifier.type_solutions root (Types.Error report);
       Some report

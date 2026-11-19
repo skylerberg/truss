@@ -1,5 +1,0 @@
-fn f() {
-  let first: UInt8 = 9
-  let difference = first.absolute_difference(4)
-  let small: UInt8 = first
-}

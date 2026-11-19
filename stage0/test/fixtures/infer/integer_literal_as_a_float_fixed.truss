@@ -1,3 +1,0 @@
-fn f() {
-  let ratio: Float64 = 1.0
-}
