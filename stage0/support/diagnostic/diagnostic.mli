@@ -172,6 +172,8 @@ module Code : sig
     | Cannot_derive
     | Derives_inferred
     | Redeclared_method
+    | Restated_method_body
+    | Restated_method_clause
     | Trait_cycle
     | Recursion_limit
     | Missing_member

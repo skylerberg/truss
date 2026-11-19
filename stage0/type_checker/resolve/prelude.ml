@@ -30,6 +30,7 @@ let items : Well_known.t list =
     Model;
     Iterable;
     Cursor;
+    Finite_cursor;
     Range;
     Exit_code;
     String;

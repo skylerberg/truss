@@ -1,0 +1,6 @@
+trait Drained: Cursor {
+  fn next(mut self) -> Option[Self.Element]
+    uses Self.Uses
+    requires false
+    ensures result is None
+}

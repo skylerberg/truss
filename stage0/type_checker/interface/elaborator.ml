@@ -1071,12 +1071,56 @@ let list_methods (lookups : Lookups.t) key =
       | _ -> None)
     (lookups.names.list_contained key)
 
+let list_required_traits (lookups : Lookups.t) trait =
+  match Option.bind (lookups.names.find_key trait) lookups.find_header with
+  | Some { container = Trait_parts { requires; _ }; _ } ->
+      List.map (fun (required : Types.trait_reference) -> required.trait) requires
+  | Some { container = Capability_parts | Impl_parts _; _ } | None -> []
+
+let list_requirements_first lookups (requires : Types.trait_reference list) =
+  let visited = ref [] in
+  let rec visit trait =
+    if not (List.exists (Path.equal trait) !visited) then begin
+      visited := trait :: !visited;
+      List.concat_map visit (list_required_traits lookups trait) @ [ trait ]
+    end
+    else []
+  in
+  List.concat_map (fun (required : Types.trait_reference) -> visit required.trait) requires
+
+let split_restated_methods (lookups : Lookups.t) (requires : Types.trait_reference list) members =
+  let inherited =
+    List.concat_map
+      (fun trait ->
+        match lookups.names.find_key trait with
+        | Some key ->
+            List.map
+              (fun (method_ : Types.trait_method) ->
+                ((method_.method_name, method_.method_receiver), trait))
+              (list_methods lookups key)
+        | None -> [])
+      (list_requirements_first lookups requires)
+  in
+  List.partition_map
+    (fun (method_ : Types.trait_method) ->
+      match List.assoc_opt (method_.method_name, method_.method_receiver) inherited with
+      | Some declared_by ->
+          Either.Right
+            {
+              Types.restated_name = method_.method_name;
+              restated_receiver = method_.method_receiver;
+              declared_by;
+            }
+      | None -> Either.Left method_)
+    members
+
 let make_container_interface lookups key (header : Environment.header) :
     Environment.elaborated_interface =
   let methods = list_methods lookups key in
   let interface =
     match header.container with
     | Trait_parts { trait_generics; requires; associated_types; associated_capabilities; laws } ->
+        let methods, restated = split_restated_methods lookups requires methods in
         Environment.Trait_interface
           {
             trait_generics;
@@ -1085,6 +1129,7 @@ let make_container_interface lookups key (header : Environment.header) :
             associated_capabilities;
             laws;
             methods;
+            restated;
             is_capability = false;
           }
     | Capability_parts ->
@@ -1096,6 +1141,7 @@ let make_container_interface lookups key (header : Environment.header) :
             associated_capabilities = [];
             laws = [];
             methods;
+            restated = [];
             is_capability = true;
           }
     | Impl_parts { impl_generics; implements; for_type; impl_uses; capability_sets } ->

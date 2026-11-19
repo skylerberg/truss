@@ -1,0 +1,25 @@
+type Countdown(left: UInt64)
+
+impl Cursor for Countdown {
+  type Element = UInt64
+
+  fn next(mut self) -> Option[UInt64]
+    ensures (result is Some(_)) ==> self.left < old(self.left)
+  {
+    if self.left == 0 {
+      return None
+    }
+    self.left -= 1
+    Some(self.left)
+  }
+}
+
+impl FiniteCursor for Countdown {
+  fn remaining(self) -> UInt64 {
+    self.left
+  }
+
+  fn next(mut self) -> Option[UInt64] {
+    None
+  }
+}

@@ -9,11 +9,13 @@ type clauses = {
   costs : Mir.cost list;
   callbacks : (int * Mir.callback) list;
   inherited : bool;
+  bindings : Types.substitution;
 }
 
 type contract = {
   callee_clauses : clauses;
   trait_clauses : clauses option;
+  restated_clauses : clauses list;
   is_logic_function : bool;
   result_kind : [ `Returns | `Lends ];
 }

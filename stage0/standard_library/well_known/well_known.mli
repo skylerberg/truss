@@ -16,6 +16,7 @@ type t =
   | Index_assign
   | Iterable
   | Cursor
+  | Finite_cursor
   | Model
   | Add
   | Subtract
@@ -94,6 +95,7 @@ type method_ =
   | Index_mut_at
   | Index_assign_assign
   | Cursor_next
+  | Finite_cursor_remaining
   | Fixed_width_integer_minimum_value
   | Fixed_width_integer_maximum_value
   | Fixed_width_integer_bit_width

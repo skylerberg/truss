@@ -203,11 +203,13 @@ public fn collections::Heap[Element: Ordered].to_sorted_list(own self) -> List[E
   items
 }
 
-public fn collections::HeapCursor[Element: Ordered].remaining(self) -> UInt64
-  ensures result == self.heap.length()
-  cost time O(1)
-{
-  self.heap.length()
+impl FiniteCursor for collections::HeapCursor[Element: Ordered] {
+  fn remaining(self) -> UInt64
+    ensures result == self.heap.length()
+    cost time O(1)
+  {
+    self.heap.length()
+  }
 }
 
 impl Cursor for collections::HeapCursor[Element: Ordered] {

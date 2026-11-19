@@ -125,6 +125,28 @@ let compute_current_bounds (context : State.context) : Interface.Impls.bounds =
   in
   fun parameter -> Types.list_bounds generics parameter
 
+let compute_bounds_with_self (context : State.context) : Interface.Impls.bounds =
+  let list_current_bounds = compute_current_bounds context in
+  fun parameter ->
+    match
+      if Types.is_self_parameter parameter then
+        Interface.Definition.find_trait_interface context.lookups.interface parameter.owner
+      else None
+    with
+    | Some interface ->
+        {
+          Types.trait = parameter.owner;
+          trait_arguments = Types.list_generic_arguments interface.trait_generics;
+          associated = [];
+        }
+        :: list_current_bounds parameter
+    | None -> list_current_bounds parameter
+
+let list_impl_packages (context : State.context) (ty : Types.ty) =
+  List.sort_uniq compare
+    ((match ty with Types.Named { path; _ } -> [ Path.locate_package path ] | _ -> [])
+    @ [ Path.locate_package context.current; Path.standard_package ])
+
 let find_concrete_impl (context : State.context) (trait : Types.trait_reference) (ty : Types.ty) =
   match ty with
   | Types.Named { path; _ } ->
