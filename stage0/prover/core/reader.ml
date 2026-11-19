@@ -1063,26 +1063,35 @@ and read_statement context frame run (statement : Mir.statement) =
               | None -> Facts.raise_bug "an early exit of a branch that is not around it")
           | Iteration { loop } -> (
               match List.find_opt (fun (exits : loop_exits) -> exits.loop = loop) run.loops with
-              | Some exits -> exits.ends <- frame :: exits.ends
+              | Some exits -> exits.breaks <- frame :: exits.breaks
               | None -> Facts.raise_bug "an early exit of an iteration that is not around it"))
       | Unreachable -> ()
       | Written_unreachable -> oblige_unreachable context frame location
       | Todo -> record_todo context frame location);
       None
   | Fork { fork; concurrent; branches } ->
-      let ended =
+      let ended, exits =
         List.fold_left
-          (fun frame (index, (branch : Mir.block)) ->
-            let* frame = frame in
-            let cancelled = ref [] in
-            run.cancelled <- (Mir.Branch { block = fork; index }, cancelled) :: run.cancelled;
-            let ended = read_statements context frame run branch.statements in
-            run.cancelled <- List.tl run.cancelled;
-            Facts.join_frames context (Option.to_list ended @ List.rev !cancelled))
-          (Some frame)
+          (fun (frame, exits) (index, (branch : Mir.block)) ->
+            match frame with
+            | None -> (None, exits)
+            | Some frame ->
+                let cancelled = ref [] in
+                run.cancelled <- (Mir.Branch { block = fork; index }, cancelled) :: run.cancelled;
+                let ended = read_statements context frame run branch.statements in
+                run.cancelled <- List.tl run.cancelled;
+                (ended, exits @ List.map (fun exited -> (index, exited)) (List.rev !cancelled)))
+          (Some frame, [])
           (List.mapi (fun index branch -> (index, branch)) branches)
       in
-      if concurrent then Option.map (wait_for_tasks context) ended else ended
+      let forget_other_branches (index, (exited : State.frame)) =
+        Loops.havoc context exited
+          (compute_changes run exited (List.filteri (fun other _ -> other <> index) branches))
+      in
+      let joined =
+        Facts.join_frames context (Option.to_list ended @ List.map forget_other_branches exits)
+      in
+      if concurrent then Option.map (wait_for_tasks context) joined else joined
   | Resume { winner; exits } ->
       let won =
         read_operand context frame run
@@ -1194,6 +1203,16 @@ and read_statement context frame run (statement : Mir.statement) =
             | Lent mode -> mode
             | Source _ | Temporary -> Facts.raise_bug "a loop's element that no call lends")
       in
+      let count_kept_by_iterations =
+        Option.bind elements (fun (elements : Mir.elements) ->
+            match find_lent_mode elements with
+            | Mut ->
+                Some
+                  (fun at ->
+                    Validity.run_without_costs context (fun () ->
+                        snd (read_value context at run elements.count)))
+            | Read | Own -> None)
+      in
       let run_body inside element =
         let inside =
           Facts.bind inside (Locals.make_key run.infos part)
@@ -1204,7 +1223,23 @@ and read_statement context frame run (statement : Mir.statement) =
         run.loops <- exits :: run.loops;
         let ended = read_statements context inside run body.statements in
         run.loops <- List.tl run.loops;
-        (List.rev exits.ends @ Option.to_list ended, List.rev exits.breaks)
+        let breaks =
+          match loop.schedule with
+          | Concurrent ->
+              let changed = compute_changes run inside [ body ] in
+              List.map
+                (fun exited ->
+                  let forgotten = Loops.havoc context exited changed in
+                  Option.iter
+                    (fun count_of ->
+                      Facts.assume context forgotten
+                        (Logic.equal (count_of forgotten) (count_of exited)))
+                    count_kept_by_iterations;
+                  forgotten)
+                exits.breaks
+          | Sequential | Parallel -> exits.breaks
+        in
+        (List.rev exits.ends @ Option.to_list ended, List.rev breaks)
       in
       let bindings = List.take binding_count body.statements
       and after_bindings = List.drop binding_count body.statements in
@@ -1247,15 +1282,7 @@ and read_statement context frame run (statement : Mir.statement) =
                 | Lent_by_call part -> run.infos.(part).type_
                 | Sequence_element { place; _ } -> compute_place_type context frame run place)
               elements;
-          invariant_count =
-            Option.bind elements (fun (elements : Mir.elements) ->
-                match find_lent_mode elements with
-                | Mut ->
-                    Some
-                      (fun at ->
-                        Validity.run_without_costs context (fun () ->
-                            snd (read_value context at run elements.count)))
-                | Read | Own -> None);
+          invariant_count = count_kept_by_iterations;
           collection =
             Option.map
               (fun (elements : Mir.elements) frame ->

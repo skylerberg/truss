@@ -1991,12 +1991,21 @@ let make_early_return_source ensures =
   ^ "  uses Tasks\n{\n  concurrent {\n    return 0\n    second += 1\n  }\n}\n"
 
 let () =
-  Harness.test "an early exit from a concurrent block waits for the other branches" (fun () ->
-      expect_proven (make_early_return_source "  ensures second == old(second) + 1\n"));
-  Harness.test "an early exit from a concurrent block sees the other branches' mutations" (fun () ->
+  Harness.test "an early exit from a concurrent block does not know whether a later branch ran"
+    (fun () ->
+      expect_not_proven
+        (make_early_return_source "  ensures second == old(second) + 1\n")
+        "prover.ensures");
+  Harness.test "an early exit from a concurrent block does not know that a later branch did not run"
+    (fun () ->
       expect_not_proven
         (make_early_return_source "  ensures second == old(second)\n")
         "prover.ensures");
+  Harness.test "an early exit from a concurrent block does not know whether an earlier branch ran"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.concurrent_exit_after_an_earlier_branch "prover.ensures");
+  Harness.test "an early exit from a concurrent for keeps the length of the collection it mutates"
+    (fun () -> expect_proven Fixtures.Prover.concurrent_for_exit_keeping_the_length);
   Harness.test "a concurrent block with no early exit is read as its branches in order" (fun () ->
       expect_proven Fixtures.Prover.concurrent_block_bumping_two_counts)
 

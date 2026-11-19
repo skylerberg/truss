@@ -2099,7 +2099,9 @@ fn profile(id: UserId) -> Result[Profile, DatabaseError]
 - **A branch that exits the block with `?`, `return`, or `break` cancels the
   other branches,** waits for them to end, and then exits. A branch that has
   not started does not start, and the first branch to exit decides where
-  control goes.
+  control goes. So after an early exit, a place that another branch or
+  iteration mutates holds a value of its type, and which of its writes
+  happened is not known.
 - The code after the block does not run when a branch exits early, so a
   branch that moves a value out of a place reinitializes it before it ends.
 - **In a cancelled task, a standard capability call that would wait returns
