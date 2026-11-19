@@ -220,7 +220,8 @@ and those that they use in turn. This lock file is the package's *record*.
   is published.
 - **A package is published only when it is finished:** it has no
   diagnostics, every proof is done, it has no `todo` and no `echo`, its
-  deterministic tests pass, and every dependency is a registry package. The registry checks all of this again itself.
+  deterministic tests pass, and every dependency is a registry package.
+  The registry checks all of this again itself.
 - **The registry keeps an append-only log of every version's hash,** and the
   toolchain checks that each hash it puts in a lock file is in the log.
 - **The registry signs the proofs and test results it computed for a
