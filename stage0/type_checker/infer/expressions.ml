@@ -258,7 +258,7 @@ and check_member_value state env (value : Syntax.expression) (base : Syntax.expr
       State.make_error_type state Not_a_value (State.read_span state value.id)
         (Printf.sprintf "`%s` is a method; call it with `(...)`." member.text)
   | None -> (
-      let base_type = State.normalize state (check_expression state env base) in
+      let base_type = State.read_head state (check_expression state env base) in
       match base_type with
       | Types.Error _ | Types.Hole -> base_type
       | _ ->

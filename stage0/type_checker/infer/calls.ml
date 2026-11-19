@@ -39,7 +39,7 @@ let make_arity_error state ?constructor ~has_receiver (value : Syntax.expression
 
 let rec check_function_value_call state env (value : Syntax.expression) (callee : Syntax.expression)
     arguments =
-  let callee_type = State.normalize state (Hooks.check_expression state env callee) in
+  let callee_type = State.read_head state (Hooks.check_expression state env callee) in
   match callee_type with
   | Types.Function function_type when List.length function_type.inputs <> List.length arguments ->
       check_arguments_alone state env arguments

@@ -5,7 +5,7 @@ let rec find_offending_expression (state : State.state) (value : Syntax.expressi
     match state.tables.types.(operand.id) with
     | Some type_ ->
         Types.is_integer_type type_ || Types.is_float_type type_ || Types.is_builtin Bool type_
-        || Types.is_error type_
+        || type_ = Types.Integer || Types.is_error type_
     | None -> true
   in
   let is_rejected (expression : Syntax.expression) =

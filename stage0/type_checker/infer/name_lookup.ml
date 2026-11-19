@@ -46,6 +46,7 @@ and infer_literal_type state (env : State.env) ~expected ~(span : Source.Definit
   in
   match expected_members with
   | Some (resolved, possible) when Scalar_set.is_subset possible ~of_:fitting -> resolved
+  | Some _ when env.specification -> make_fresh ()
   | Some (resolved, _) -> (
       match report_unfitting resolved with Some error -> error | None -> make_fresh ())
   | None ->
@@ -430,7 +431,7 @@ and resolve_evidence ?report_unmet state (value : Syntax.expression) self_type
                   Trait_method
                     {
                       method_ with
-                      trait = Unify.zonk_trait state.unifier reference;
+                      trait = { (Unify.zonk_trait state.unifier reference) with associated = [] };
                       evidence = State.convert_evidence evidence;
                     };
               }

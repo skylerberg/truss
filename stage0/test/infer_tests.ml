@@ -252,11 +252,15 @@ let () =
         "types.mismatch"
         ~says:"`first` took its default type, `Int64`, at a method call that needs its type."
         ~fixed:Fixtures.Infer.local_absolute_difference_then_bound_to_a_uint8_fixed);
-  Harness.test "a literal's method with an associated result type waits for the literal's type"
-    (fun () ->
-      let text = Fixtures.Infer.local_converted_to_bytes_then_bound_to_a_uint32 in
-      expect_type text "bytes" ~occurrence:3 "Array[UInt8, 4]";
-      expect_fine text);
+  Harness.test
+    "a literal's method with an associated result type decides the literal at its statement, with \
+     a fix" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.local_converted_to_bytes_then_bound_to_a_uint32
+        "types.mismatch"
+        ~says:"`value` took its default type, `Int64`, at a statement whose types depend on it."
+        ~fixed:Fixtures.Infer.local_converted_to_bytes_then_bound_to_a_uint32_fixed;
+      expect_type Fixtures.Infer.local_converted_to_bytes_then_bound_to_a_uint32_fixed "bytes"
+        ~occurrence:3 "Array[UInt8, 4]");
   Harness.test "a literal's method of a narrower sealed trait constrains its default" (fun () ->
       let text = Fixtures.Infer.literal_methods_of_narrower_sealed_traits in
       expect_type text "count" ~occurrence:2 "UInt64";
@@ -296,11 +300,10 @@ let () =
       expect_fine
         Fixtures.Infer.literal_passed_to_a_function_returning_an_associated_type_of_its_bound;
       expect_fine Fixtures.Infer.method_of_an_associated_type_of_an_earlier_literal);
-  Harness.test "a deferred associated type that differs from its use is one error at the statement"
+  Harness.test "an associated type of a literal that a use needs takes the literal's default"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.associated_type_of_a_literal_mismatched_with_its_use
-        "types.mismatch"
-        ~says:"The `Output` of `Int64` under `Add[Int64]` is `Int64`, and `UInt8` is expected.");
+        "types.mismatch" ~says:"Expected `UInt8`, found `Int64`.");
   Harness.test
     "associated types under different trait arguments are not equated argument by argument"
     (fun () ->
@@ -309,6 +312,24 @@ let () =
         ~says:
           "The `Output` of `Value` under `Add[Int64]` may differ from the `Output` of `Value` \
            under `Add[UInt64]`.");
+  Harness.test "a later statement does not change the structured type of an earlier local"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.later_statement_keeps_an_earlier_structured_type
+        "types.mismatched_integers"
+        ~says:"`count` took its default type, `Int64`, at a statement whose types depend on it.");
+  Harness.test "an associated type of a call's argument converts to the parameter's view" (fun () ->
+      expect_fine Fixtures.Infer.view_of_an_associated_type_argument);
+  Harness.test "a specification does not decide the type of a local in code" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.invariant_mentions_a_code_local "types.mismatch"
+        ~says:"Expected `Bool`, found an integer.");
+  Harness.test "a literal in a specification's arithmetic is an Integer" (fun () ->
+      expect_fine Fixtures.Infer.requires_adds_a_large_literal_to_a_uint8);
+  Harness.test "a shift amount of a parameter that may be signed is an error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.shift_by_a_fixed_width_integer_parameter "types.mismatch"
+        ~says:"A shift amount is an unsigned integer, not `Value`.");
+  Harness.test "a negated parameter that may be unsigned is an error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.negation_of_a_fixed_width_integer_parameter
+        "types.negated_unsigned" ~says:"`Value` may be unsigned, so it cannot be negated.");
   Harness.test "a scrutinee's literal type is decided by the statement that holds the match"
     (fun () ->
       let text = Fixtures.Infer.match_on_a_literal_decided_by_an_arm in

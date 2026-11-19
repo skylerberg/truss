@@ -494,7 +494,7 @@ and check_arm_value state env ?expected (body : Syntax.statement) =
 
 and check_collection_element state env ~(quantifier : Syntax.expression)
     (collection : Syntax.expression) =
-  let collection_type = State.normalize state (Hooks.check_expression state env collection) in
+  let collection_type = State.read_head state (Hooks.check_expression state env collection) in
   match (collection.kind, collection_type) with
   | ( Range { start = Some _; stop = Some _; inclusive; _ },
       Types.Named { path; arguments = [ Types.Type element ] } )

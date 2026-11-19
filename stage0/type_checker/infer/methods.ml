@@ -508,7 +508,7 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
 
 and check_method_call state env ?expected (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) ~type_arguments arguments =
-  let receiver_type = State.normalize state (Hooks.check_expression state env base) in
+  let receiver_type = State.read_head state (Hooks.check_expression state env base) in
   let has_mode_keyword = List.mem_assoc value.id state.keyword_modes in
   let lent_mode = if has_mode_keyword then None else Modes.find_lent_mode state base in
   let wanted : Path.receiver =

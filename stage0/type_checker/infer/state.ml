@@ -71,12 +71,13 @@ type frame = {
 }
 
 type undecided_literal = { index : int; local : Syntax.id }
+type default_site = At_method_call | At_statement
 
 type literal_decision = {
   decided_local : Syntax.id;
   decided_type : Types.ty;
   decided_at : Source.Definition_span.t;
-  is_default : bool;
+  default : default_site option;
   mutable decision_report : Diagnostic.reported option;
 }
 
@@ -121,6 +122,7 @@ type state = {
   annotatable : (Syntax.id, unit) Hashtbl.t;
   mutable unmet_impls : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
   mutable narrowings : narrowing list;
+  mutable associated_outputs : (Types.ty * Types.ty) list;
 }
 
 let add_diagnostic state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
@@ -396,6 +398,7 @@ let compare_in_source_order state left right =
 let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
 let make_fresh_type state = Unify.make_fresh_type state.unifier
+let show state type_ = Types.show (zonk state type_)
 
 let is_within state members type_ =
   match Unify.list_possible_members state.unifier type_ with
@@ -490,20 +493,130 @@ let find_unmet_impl state subject (trait : Types.trait_reference) =
       else None)
     state.unmet_impls
 
-let normalize state type_ =
-  let normalized =
-    Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
-      (zonk state type_)
+let describe_associated_type state base (trait : Types.trait_reference) name =
+  Printf.sprintf "the `%s` of `%s` under `%s`" name (show state base)
+    (Types.show_trait { (Unify.zonk_trait state.unifier trait) with associated = [] })
+
+let describe_compared_type state type_ =
+  match zonk state type_ with
+  | Projection { base; trait; name } -> describe_associated_type state base trait name
+  | zonked -> Printf.sprintf "`%s`" (Types.show zonked)
+
+let describe_projection_mismatch state base trait name ~actual ~wanted =
+  let associated_type = describe_associated_type state base trait name in
+  if
+    Types.equal (zonk state actual)
+      (zonk state (Types.Projection { base; trait = { trait with associated = [] }; name }))
+  then
+    Printf.sprintf "%s may differ from %s."
+      (String.capitalize_ascii associated_type)
+      (describe_compared_type state wanted)
+  else
+    Printf.sprintf "%s is %s, and %s is expected."
+      (String.capitalize_ascii associated_type)
+      (describe_compared_type state actual)
+      (describe_compared_type state wanted)
+
+let find_associated_output state projection =
+  let zonked = zonk state projection in
+  List.find_map
+    (fun (original, output) ->
+      if Types.equal (zonk state original) zonked then Some output else None)
+    state.associated_outputs
+
+let make_associated_output state (frame : frame) base (trait : Types.trait_reference) name =
+  let output = make_fresh_type state in
+  let projection = Types.Projection { base; trait; name } in
+  state.associated_outputs <- (projection, output) :: state.associated_outputs;
+  Option.iter
+    (fun level -> Unify.lower state.unifier ~level output)
+    (Unify.find_lowest_level state.unifier
+       (List.filter
+          (function Unify.Unknown_number _ -> false | _ -> true)
+          (Unify.list_unknowns state.unifier projection)));
+  let report base mismatch =
+    match mismatch with
+    | Some (_, actual) ->
+        add_diagnostic state Mismatch frame.span
+          (describe_projection_mismatch state base trait name ~actual ~wanted:output)
+    | None -> (
+        match find_unmet_impl state base { trait with associated = [] } with
+        | Some report -> report
+        | None ->
+            add_diagnostic state No_impl frame.span
+              (Printf.sprintf "`%s` does not implement `%s`, so it has no `%s`." (show state base)
+                 (Types.show_trait { (Unify.zonk_trait state.unifier trait) with associated = [] })
+                 name))
   in
-  match state.unmet_impls with
-  | [] -> normalized
-  | _ :: _ ->
-      Types.map
-        (function
-          | Types.Projection { base; trait; _ } ->
-              Option.map (fun report -> Types.Error report) (find_unmet_impl state base trait)
-          | _ -> None)
-        normalized
+  frame.obligations <-
+    {
+      subject = base;
+      requirement =
+        Implements
+          {
+            trait = { trait with associated = [ (name, output) ] };
+            span = frame.span;
+            on_met = ignore;
+            on_unmet = report;
+          };
+    }
+    :: frame.obligations;
+  output
+
+let record_associated_output state projection output =
+  state.associated_outputs <- (projection, output) :: state.associated_outputs
+
+let rec flatten_associated_types state type_ =
+  Types.map
+    (function
+      | Types.Projection { base; trait; name } ->
+          let base = flatten_associated_types state base in
+          let trait =
+            {
+              trait with
+              trait_arguments =
+                List.map
+                  (function
+                    | Types.Type argument -> Types.Type (flatten_associated_types state argument)
+                    | value -> value)
+                  trait.trait_arguments;
+            }
+          in
+          let projection = Types.Projection { base; trait; name } in
+          let has_unknowns = Unify.list_unknowns state.unifier projection <> [] in
+          Some
+            (match (find_associated_output state projection, find_current_frame state) with
+            | Some output, _ when has_unknowns -> output
+            | Some output, _ -> (
+                match resolve state output with Types.Error _ as error -> error | _ -> projection)
+            | None, Some frame when has_unknowns ->
+                make_associated_output state frame base trait name
+            | None, _ -> projection)
+      | _ -> None)
+    type_
+
+let normalize state type_ =
+  flatten_associated_types state
+    (Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
+       (zonk state type_))
+
+let solve_hook : (state -> Types.ty -> unit) ref = ref (fun _ _ -> ())
+
+let is_associated_output state type_ =
+  match resolve state type_ with
+  | Types.Variable index ->
+      List.exists
+        (fun (_, output) -> resolve state output = Types.Variable index)
+        state.associated_outputs
+  | _ -> false
+
+let read_head state type_ =
+  let normalized = normalize state type_ in
+  if is_associated_output state normalized then begin
+    !solve_hook state normalized;
+    normalize state type_
+  end
+  else normalized
 
 let make_unsolved_type state =
   match state.unsolved with
@@ -571,15 +684,19 @@ let finalize_instantiation state (instantiation : Types.instantiation) : Types.i
   }
 
 let unify state left right =
-  let normalize type_ =
-    Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
-      (Unify.zonk state.unifier type_)
-  in
-  Unify.unify state.unifier (normalize left) (normalize right)
+  Unify.unify state.unifier (normalize state left) (normalize state right)
 
 let unify_as_hint state actual expected =
   let deferred_capability_equalities = state.unifier.deferred_capability_equalities in
-  ignore (unify state actual expected);
+  let frozen = state.unifier.frozen in
+  let actual = normalize state actual and expected = normalize state expected in
+  state.unifier.frozen <-
+    List.filter_map
+      (fun (_, output) ->
+        match resolve state output with Types.Variable index -> Some index | _ -> None)
+      state.associated_outputs;
+  ignore (Unify.unify state.unifier actual expected);
+  state.unifier.frozen <- frozen;
   state.unifier.deferred_capability_equalities <- deferred_capability_equalities
 
 let normalize_trait state (trait : Types.trait_reference) : Types.trait_reference =
@@ -730,8 +847,6 @@ let find_head state (value : Syntax.expression) = Resolve.find_head state.resolv
 let is_variant_name (member : Syntax.name) =
   member.text <> "" && member.text.[0] >= 'A' && member.text.[0] <= 'Z'
 
-let show state type_ = Types.show (zonk state type_)
-
 let find_literal_decision state type_ =
   let rec follow (type_ : Types.ty) =
     match type_ with
@@ -786,22 +901,31 @@ let add_mismatch_diagnostic state ?(fixes = []) code (span : Source.Definition_s
           let local = Printf.sprintf "`%s`" text in
           let decided = Types.show decision.decided_type and wanted = zonk state wanted in
           let explanation, note =
-            if decision.is_default then
-              ( Printf.sprintf
-                  "%s took its default type, `%s`, at a method call that needs its type." local
-                  decided,
-                Printf.sprintf
-                  "This call needs the type of %s, so %s takes its default type `%s` here." local
-                  local decided )
-            else
-              ( Printf.sprintf "An earlier statement decided that the type of %s is `%s`." local
-                  decided,
-                Printf.sprintf "This statement decides that the type of %s is `%s`." local decided
-              )
+            match decision.default with
+            | Some At_method_call ->
+                ( Printf.sprintf
+                    "%s took its default type, `%s`, at a method call that needs its type." local
+                    decided,
+                  Printf.sprintf
+                    "This call needs the type of %s, so %s takes its default type `%s` here." local
+                    local decided )
+            | Some At_statement ->
+                ( Printf.sprintf
+                    "%s took its default type, `%s`, at a statement whose types depend on it." local
+                    decided,
+                  Printf.sprintf
+                    "A type in this statement depends on the type of %s, so %s takes its default \
+                     type `%s` here."
+                    local local decided )
+            | None ->
+                ( Printf.sprintf "An earlier statement decided that the type of %s is `%s`." local
+                    decided,
+                  Printf.sprintf "This statement decides that the type of %s is `%s`." local decided
+                )
           in
           let fixes =
             if
-              decision.is_default
+              Option.is_some decision.default
               && Hashtbl.mem state.annotatable decision.decided_local
               && not (Types.contains_unsolved wanted || Types.is_error wanted)
             then
@@ -822,7 +946,7 @@ let add_mismatch_diagnostic state ?(fixes = []) code (span : Source.Definition_s
 
 let add_mismatch state (span : Source.Definition_span.t) ~expected ~actual =
   let sides = [ (actual, expected); (expected, actual) ] in
-  let expected = zonk state expected and actual = zonk state actual in
+  let expected = normalize state expected and actual = normalize state actual in
   match (resolve state actual, expected) with
   | Types.Number_variable index, _
     when Types.is_float_type expected
@@ -1095,7 +1219,7 @@ let convert state env ?argument ?(takes_view_as_owner = false) ?expression
   in
   record_conversion
   @@
-  let actual_type = normalize state actual and wanted = normalize state expected in
+  let actual_type = read_head state actual and wanted = read_head state expected in
   let refuse () =
     report_mismatch state span ~expected ~actual;
     None

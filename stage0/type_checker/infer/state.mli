@@ -70,12 +70,13 @@ type frame = {
 }
 
 type undecided_literal = { index : int; local : Syntax.id }
+type default_site = At_method_call | At_statement
 
 type literal_decision = {
   decided_local : Syntax.id;
   decided_type : Types.ty;
   decided_at : Source.Definition_span.t;
-  is_default : bool;
+  default : default_site option;
   mutable decision_report : Diagnostic.reported option;
 }
 
@@ -120,6 +121,7 @@ type state = {
   annotatable : (Syntax.id, unit) Hashtbl.t;
   mutable unmet_impls : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
   mutable narrowings : narrowing list;
+  mutable associated_outputs : (Types.ty * Types.ty) list;
 }
 
 val add_diagnostic :
@@ -212,6 +214,19 @@ val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
 val normalize_trait : state -> Types.trait_reference -> Types.trait_reference
 val find_unmet_impl : state -> Types.ty -> Types.trait_reference -> Diagnostic.reported option
+
+val describe_projection_mismatch :
+  state ->
+  Types.ty ->
+  Types.trait_reference ->
+  string ->
+  actual:Types.ty ->
+  wanted:Types.ty ->
+  string
+
+val record_associated_output : state -> Types.ty -> Types.ty -> unit
+val solve_hook : (state -> Types.ty -> unit) ref
+val read_head : state -> Types.ty -> Types.ty
 val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impls.evidence option
 val solve_trait_arguments : state -> Types.ty -> Types.trait_reference -> Types.trait_reference
 

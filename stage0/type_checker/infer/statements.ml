@@ -247,7 +247,7 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
   match (target.kind, state.resolved.brackets.(target.id)) with
   | Bracket (_, [ Item { kind = Range _; _ } ]), _ -> false
   | Bracket (base, [ Item key ]), (Some Index | None) -> (
-      let base_type = State.normalize state (Hooks.check_expression state env base) in
+      let base_type = State.read_head state (Hooks.check_expression state env base) in
       let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Index_assign) in
       match
         ( State.find_evidence state base_type trait,
@@ -326,7 +326,7 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
     =
   match iterable.kind with
   | Range { start = Some _; stop = Some _; inclusive; _ } -> (
-      let range_type = State.normalize state (Hooks.check_expression state env iterable) in
+      let range_type = State.read_head state (Hooks.check_expression state env iterable) in
       match range_type with
       | Types.Named { arguments = [ Types.Type element ]; _ } ->
           record_integer_range state ~loop:written.id ~described:"A `for` loop's"
@@ -334,7 +334,7 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
           (element, mode)
       | _ -> State.raise_bug "a range is not of the range type")
   | _ -> (
-      let type_ = State.normalize state (Hooks.check_expression state env iterable) in
+      let type_ = State.read_head state (Hooks.check_expression state env iterable) in
       match type_ with
       | Types.Error _ | Types.Hole -> (type_, mode)
       | _ -> (

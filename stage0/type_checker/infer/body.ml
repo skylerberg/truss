@@ -754,6 +754,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       annotatable = Hashtbl.create 8;
       unmet_impls = [];
       narrowings = [];
+      associated_outputs = [];
     }
   in
   state.unifier.list_rigid_members <-

@@ -43,7 +43,7 @@ let unify_specification_literal state type_ =
 
 let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
   State.reject_in_formula state env (State.read_span state value.id) "`?`";
-  let inner_type = State.normalize state (Hooks.check_expression state env inner) in
+  let inner_type = State.read_head state (Hooks.check_expression state env inner) in
   let output =
     match env.output with Some (Returns output) -> Some (State.normalize state output) | _ -> None
   in
@@ -73,7 +73,7 @@ let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
          function that returns an `Option`. Convert between them with `ok_or` or `ok`."
 
 and check_record_update state env (value : Syntax.expression) (base : Syntax.expression) updates =
-  let base_type = State.normalize state (Hooks.check_expression state env base) in
+  let base_type = State.read_head state (Hooks.check_expression state env base) in
   (match List.assoc_opt value.id state.keyword_modes with
   | None -> Modes.note_owned_value state env base
   | Some Own -> ()
@@ -228,7 +228,10 @@ and check_operator_call ?(report_no_impl = fun _ -> None) ~operands state
     (value : Syntax.expression) ~trait ~method_ ~left ~right =
   let arguments = match right with Some right -> [ Types.Type right ] | None -> [] in
   let reference = State.make_trait_reference ~arguments trait in
-  let result = Types.Projection { base = left; trait = reference; name = "Output" } in
+  let result = State.make_fresh_type state in
+  State.record_associated_output state
+    (Types.Projection { base = left; trait = reference; name = "Output" })
+    result;
   state.tables.calls.(value.id) <-
     Some
       {
@@ -246,10 +249,15 @@ and check_operator_call ?(report_no_impl = fun _ -> None) ~operands state
         omitted_defaults = [];
         callee_result = result;
       };
-  Name_lookup.resolve_evidence state value left reference ~report_unmet:(fun left _ ->
-      match report_no_impl left with
-      | Some report -> report
-      | None ->
+  Name_lookup.resolve_evidence state value left
+    { reference with associated = [ ("Output", result) ] }
+    ~report_unmet:(fun left mismatch ->
+      match (mismatch, report_no_impl left) with
+      | Some (_, actual), _ ->
+          State.add_diagnostic state Mismatch (State.read_span state value.id)
+            (State.describe_projection_mismatch state left reference "Output" ~actual ~wanted:result)
+      | None, Some report -> report
+      | None, None ->
           State.add_diagnostic state No_impl (State.read_span state value.id)
             (Printf.sprintf "`%s` does not implement `%s`, so the operator does not apply."
                (Types.show left)
@@ -257,8 +265,17 @@ and check_operator_call ?(report_no_impl = fun _ -> None) ~operands state
   State.normalize state result
 
 and check_literal_operands state (env : State.env) ~left ~right =
+  let is_code_number type_ =
+    match State.resolve state type_ with
+    | Types.Number_variable index ->
+        not (Scalar_set.mem Integer (Unify.read_domain state.unifier index))
+    | _ -> false
+  in
   match (State.resolve state left, State.resolve state right) with
-  | _ when env.specification && is_integer_operand state left && is_integer_operand state right ->
+  | _
+    when env.specification
+         && (is_code_number left || is_code_number right)
+         && is_integer_operand state left && is_integer_operand state right ->
       ()
   | Types.Number_variable _, Types.Variable _ | Types.Variable _, Types.Number_variable _ -> ()
   | Types.Number_variable _, _ | _, Types.Number_variable _ -> ignore (State.unify state left right)

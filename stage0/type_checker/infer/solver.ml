@@ -187,7 +187,10 @@ let add (state : State.state) (obligation : State.obligation) =
       Option.iter
         (fun level ->
           List.iter (fun (_, wanted) -> Unify.lower state.unifier ~level wanted) trait.associated)
-        (Unify.find_lowest_level state.unifier (list_obligation_unknowns state obligation))
+        (Unify.find_lowest_level state.unifier
+           (List.filter
+              (function Unify.Unknown_number _ -> false | _ -> true)
+              (list_obligation_unknowns state obligation)))
   | Within _ | When_solved _ -> ());
   let outcome = decide state obligation in
   (match (outcome, State.find_current_frame state) with
@@ -201,65 +204,15 @@ let add (state : State.state) (obligation : State.obligation) =
 let require state subject trait ~span ~on_met ~on_unmet =
   ignore (add state { subject; requirement = Implements { trait; span; on_met; on_unmet } })
 
-let describe_associated_type (state : State.state) base (trait : Types.trait_reference) name =
-  Printf.sprintf "the `%s` of `%s` under `%s`" name (State.show state base)
-    (Types.show_trait { (Unify.zonk_trait state.unifier trait) with associated = [] })
-
-let describe_compared_type (state : State.state) : Types.ty -> string = function
-  | Projection { base; trait; name } -> describe_associated_type state base trait name
-  | type_ -> Printf.sprintf "`%s`" (State.show state type_)
-
-let describe_projection_mismatch (state : State.state) base trait name ~actual ~wanted =
-  let associated_type = describe_associated_type state base trait name in
-  if
-    Types.equal (State.zonk state actual)
-      (State.zonk state (Types.Projection { base; trait = { trait with associated = [] }; name }))
-  then
-    Printf.sprintf "%s may differ from %s."
-      (String.capitalize_ascii associated_type)
-      (describe_compared_type state wanted)
-  else
-    Printf.sprintf "%s is %s, and %s is expected."
-      (String.capitalize_ascii associated_type)
-      (describe_compared_type state actual)
-      (describe_compared_type state wanted)
-
-let require_projection_equalities (state : State.state) (frame : State.frame) =
-  let equalities = List.rev state.unifier.deferred_projection_equalities in
-  state.unifier.deferred_projection_equalities <- [];
-  List.iter
-    (function
-      | Types.Projection { base; trait; name }, wanted ->
-          require state base
-            { trait with associated = [ (name, wanted) ] }
-            ~span:frame.span ~on_met:ignore
-            ~on_unmet:(fun base mismatch ->
-              match mismatch with
-              | Some (_, actual) ->
-                  State.add_diagnostic state Mismatch frame.span
-                    (describe_projection_mismatch state base trait name ~actual ~wanted)
-              | None -> (
-                  match State.find_unmet_impl state base (State.normalize_trait state trait) with
-                  | Some report -> report
-                  | None ->
-                      State.add_diagnostic state No_impl frame.span
-                        (Printf.sprintf "`%s` does not implement `%s`, so it has no `%s`."
-                           (Types.show base)
-                           (Types.show_trait (Unify.zonk_trait state.unifier trait))
-                           name)))
-      | projection, _ ->
-          State.raise_bug "`%s` is deferred, and it is not an associated type"
-            (State.show state projection))
-    equalities
-
 let rec solve (state : State.state) (frame : State.frame) =
   let pending = List.rev frame.obligations in
   frame.obligations <- [];
   let remaining = List.filter (is_pending state) pending in
   frame.obligations <- frame.obligations @ List.rev remaining;
-  let has_deferred = state.unifier.deferred_projection_equalities <> [] in
-  require_projection_equalities state frame;
-  if List.length remaining < List.length pending || has_deferred then solve state frame
+  if
+    List.length remaining < List.length pending
+    || List.length frame.obligations > List.length remaining
+  then solve state frame
 
 let require_within state subject ~members ~reason ~span ?(on_met = ignore) () =
   match add state { subject; requirement = Within { members; reason; span; on_met } } with
@@ -278,7 +231,7 @@ let choose_default (state : State.state) root =
 let make_undecided_type (undecided : State.undecided_literal) =
   Types.Number_variable undecided.index
 
-let record_decisions (state : State.state) ~(at : Source.Definition_span.t) ~is_default =
+let record_decisions (state : State.state) ~(at : Source.Definition_span.t) ~default =
   state.undecided <-
     List.filter
       (fun (undecided : State.undecided_literal) ->
@@ -290,7 +243,7 @@ let record_decisions (state : State.state) ~(at : Source.Definition_span.t) ~is_
                 decided_local = undecided.local;
                 decided_type = Unify.zonk state.unifier (make_undecided_type undecided);
                 decided_at = at;
-                is_default;
+                default;
                 decision_report = None;
               };
             false)
@@ -306,7 +259,7 @@ let decide_for_method_call (state : State.state) ~at type_ =
   | [], _ -> type_
   | literals, Some frame ->
       List.iter (solve state) state.frames;
-      record_decisions state ~at:frame.span ~is_default:false;
+      record_decisions state ~at:frame.span ~default:None;
       List.iter
         (fun root ->
           match Unify.resolve state.unifier (Types.Number_variable root) with
@@ -315,7 +268,7 @@ let decide_for_method_call (state : State.state) ~at type_ =
               List.iter (solve state) state.frames
           | _ -> ())
         literals;
-      record_decisions state ~at ~is_default:true;
+      record_decisions state ~at ~default:(Some At_method_call);
       State.normalize state type_
   | _ :: _, None -> State.raise_bug "a method is called outside every statement"
 
@@ -363,27 +316,62 @@ let list_frame_unknowns (state : State.state) (frame : State.frame) =
     @ list_types frame.bindings state.tables.local_types)
   @ List.concat_map (Unify.list_argument_unknowns state.unifier) call_arguments
 
-let is_owned_by (state : State.state) (frame : State.frame) unknown =
-  Unify.read_level state.unifier (Unify.read_unknown_index unknown) >= frame.level
+let is_owned_by (state : State.state) (frame : State.frame) = function
+  | Unify.Unknown_number _ -> List.length state.frames = 1
+  | unknown -> Unify.read_level state.unifier (Unify.read_unknown_index unknown) >= frame.level
 
-let hand_literals_to_parent (state : State.state) (frame : State.frame) ~escaping
-    (parent : State.frame) =
+let track_declared_numbers (state : State.state) (frame : State.frame) ~escaping =
   let declared =
     List.filter_map
       (fun local -> Option.map (fun type_ -> (local, type_)) state.tables.local_types.(local))
       frame.declared
   in
-  if parent.frame_specification = frame.frame_specification then
-    List.iter
-      (fun (local, type_) ->
-        List.iter
-          (function
-            | Unify.Unknown_number index as unknown when is_owned_by state frame unknown ->
-                Unify.lower_to state.unifier ~level:parent.level index;
-                state.undecided <- { index; local } :: state.undecided
-            | _ -> ())
-          (Unify.list_reachable_unknowns state.unifier (State.normalize state type_)))
-      (declared @ escaping)
+  List.iter
+    (fun (local, type_) ->
+      List.iter
+        (function
+          | Unify.Unknown_number index
+            when not
+                   (List.exists
+                      (fun (undecided : State.undecided_literal) -> undecided.index = index)
+                      state.undecided) ->
+              state.undecided <- { index; local } :: state.undecided
+          | _ -> ())
+        (Unify.list_unknowns state.unifier (State.normalize state type_)))
+    (declared @ escaping)
+
+let list_output_unknowns (state : State.state) (obligation : State.obligation) =
+  match obligation.requirement with
+  | Implements { trait; _ } ->
+      List.concat_map (fun (_, wanted) -> Unify.list_unknowns state.unifier wanted) trait.associated
+  | Within _ | When_solved _ -> []
+
+let force_outputs (state : State.state) ~(at : Source.Definition_span.t) outputs =
+  let roots =
+    List.sort_uniq compare
+      (List.concat_map
+         (fun (obligation : State.obligation) ->
+           if
+             List.exists
+               (fun output -> List.mem output outputs)
+               (list_output_unknowns state obligation)
+           then
+             List.filter_map
+               (function Unify.Unknown_number root -> Some root | _ -> None)
+               (list_obligation_unknowns state obligation)
+           else [])
+         (List.concat_map (fun (frame : State.frame) -> frame.obligations) state.frames))
+  in
+  List.iter
+    (fun root ->
+      match Unify.resolve state.unifier (Types.Number_variable root) with
+      | Types.Number_variable root ->
+          ignore (State.unify state (Types.Number_variable root) (choose_default state root))
+      | _ -> ())
+    roots;
+  record_decisions state ~at ~default:(Some At_statement);
+  List.iter (solve state) state.frames;
+  roots <> []
 
 let default_literals (state : State.state) (frame : State.frame) =
   let literals =
@@ -514,8 +502,17 @@ let settle (state : State.state) (frame : State.frame) ~escaping =
   constrain_capability_equalities state frame;
   solve state frame;
   let parent = match state.frames with _ :: parent :: _ -> Some parent | _ -> None in
-  record_decisions state ~at:frame.span ~is_default:false;
-  Option.iter (hand_literals_to_parent state frame ~escaping) parent;
+  record_decisions state ~at:frame.span ~default:None;
+  track_declared_numbers state frame ~escaping;
+  let rec force_owned_outputs () =
+    let owned =
+      List.filter
+        (function Unify.Unknown_type _ as unknown -> is_owned_by state frame unknown | _ -> false)
+        (List.sort_uniq compare (list_frame_unknowns state frame))
+    in
+    if owned <> [] && force_outputs state ~at:frame.span owned then force_owned_outputs ()
+  in
+  force_owned_outputs ();
   state.undecided <-
     List.filter
       (fun (undecided : State.undecided_literal) ->
@@ -542,6 +539,15 @@ let settle (state : State.state) (frame : State.frame) ~escaping =
         @ parent.obligations
   | None -> ()
 
+let () =
+  State.solve_hook :=
+    fun state type_ ->
+      List.iter (solve state) state.frames;
+      match (State.resolve state type_, State.find_current_frame state) with
+      | Types.Variable index, Some frame ->
+          ignore (force_outputs state ~at:frame.span [ Unify.Unknown_type index ])
+      | _ -> ()
+
 let run_frame (state : State.state) (env : State.env) (span : Source.Definition_span.t) body
     ~list_escaping =
   state.unifier.level <- state.unifier.level + 1;
@@ -566,11 +572,6 @@ let run_frame (state : State.state) (env : State.env) (span : Source.Definition_
   settle state frame ~escaping:(list_escaping result);
   state.frames <- List.tl state.frames;
   state.unifier.level <- state.unifier.level - 1;
-  (match (state.frames, state.unifier.deferred_projection_equalities) with
-  | [], (projection, _) :: _ ->
-      State.raise_bug "the equality of `%s` is not decided after every statement"
-        (State.show state projection)
-  | _ -> ());
   result
 
 let run_in_statement state env span body =
