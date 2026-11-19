@@ -2,11 +2,11 @@ type view = Borrow_of of Place.t | Copy_of_view_in of Place.t
 
 let extract_viewed_place = function Borrow_of place | Copy_of_view_in place -> place
 
-type loan = { borrowed : Place.t; mode : Types.mode; duration : Mir.loan_duration }
+type loan = { borrowed : Place.t; mode : Language.Mode.t; duration : Mir.loan_duration }
 
 type borrowed_argument = {
   place : Place.t;
-  mode : Types.mode;
+  mode : Language.Mode.t;
   origin : Core.origin;
   position : int;
 }
@@ -225,7 +225,7 @@ let access_operand builder ~is_use_by_reference (operand : Mir.operand) =
 
 let access_value builder operand = access_operand builder ~is_use_by_reference:false operand
 
-let access_argument builder (mode : Types.mode) operand =
+let access_argument builder (mode : Language.Mode.t) operand =
   access_operand builder ~is_use_by_reference:(mode <> Own) operand
 
 let find_reached_place = function
@@ -259,12 +259,12 @@ let list_given_views builder (operand : Mir.operand) =
   | (Use _ | Take _) when not (is_view_operand builder operand) -> []
   | Use _ | Take _ | Borrow _ | Immediate _ -> list_operand_views builder operand
 
-let find_lent_place builder (mode : Types.mode) operand =
+let find_lent_place builder (mode : Language.Mode.t) operand =
   match access_argument builder mode operand with
   | Place_of view -> Some (extract_viewed_place view)
   | Views _ -> None
 
-let find_stored_type builder (mode : Types.mode) operand =
+let find_stored_type builder (mode : Language.Mode.t) operand =
   match (access_argument builder mode operand, find_operand_type operand) with
   | Place_of _, Some (Named { path; arguments = Type element :: _ }) when Well_known.is Slice path
     ->
@@ -279,7 +279,7 @@ let list_lent_places builder (operand : Mir.operand) =
       match Hashtbl.find_opt builder.held local with Some (Value { lent; _ }) -> lent | _ -> [])
   | Views _, (Use _ | Borrow _ | Take _ | Immediate _) -> []
 
-let result_may_view builder (mode : Types.mode) type_ =
+let result_may_view builder (mode : Language.Mode.t) type_ =
   (mode <> Own && not (Context.lends_nothing builder.context type_))
   || Context.is_view builder.context type_
 
@@ -825,16 +825,11 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
     Array.to_list (Array.mapi (fun block basic -> (block, basic)) body.blocks)
     |> List.filter_map (fun (loop_block, (basic : Mir.Graph.basic_block)) ->
         match basic.terminator with
-        | For
-            {
-              body = inside;
-              blocks;
-              loop = { schedule = Parallel_loop | Concurrent_loop; _ } as loop;
-              _;
-            } ->
+        | For { body = inside; blocks; loop = { schedule = Parallel | Concurrent; _ } as loop; _ }
+          ->
             Some
               {
-                keyword = (if loop.schedule = Parallel_loop then "parallel" else "concurrent");
+                keyword = (if loop.schedule = Parallel then "parallel" else "concurrent");
                 body =
                   List.filter
                     (fun position ->

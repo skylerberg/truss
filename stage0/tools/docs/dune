@@ -1,0 +1,3 @@
+(executable
+ (name library_uses)
+ (libraries compiler-libs.common))

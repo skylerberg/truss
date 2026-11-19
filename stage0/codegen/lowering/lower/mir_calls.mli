@@ -19,9 +19,10 @@ val evaluate_arguments :
   Types.signature ->
   Types.substitution ->
   Mir.argument list ->
-  (Types.mode * Ground.ty * Lowered.place) list * int
+  (Language.Mode.t * Ground.ty * Lowered.place) list * int
 
-val lower_argument_place : Lowering.state -> Mir.argument -> Types.mode * Ground.ty * Lowered.place
+val lower_argument_place :
+  Lowering.state -> Mir.argument -> Language.Mode.t * Ground.ty * Lowered.place
 
 val lower_intrinsic :
   Lowering.state ->

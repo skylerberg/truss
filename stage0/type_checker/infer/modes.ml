@@ -3,7 +3,7 @@ let note_lending (state : State.state) (value : Syntax.expression) (output : Typ
   | Lends (mode, _) -> state.tables.lend_modes.(value.id) <- Some mode
   | Returns _ -> ()
 
-let rec find_lent_mode (state : State.state) (value : Syntax.expression) : Types.mode option =
+let rec find_lent_mode (state : State.state) (value : Syntax.expression) : Language.Mode.t option =
   match value.kind with
   | Call _ -> state.tables.lend_modes.(value.id)
   | Member (base, _) | Parenthesized base -> find_lent_mode state base
@@ -30,7 +30,7 @@ let is_borrowed state (value : Syntax.expression) =
   || Option.is_some (find_lent_mode state value))
   && not (is_slice value)
 
-let classify_scrutinee_mode state (scrutinee : Syntax.expression) : Types.mode =
+let classify_scrutinee_mode state (scrutinee : Syntax.expression) : Language.Mode.t =
   match scrutinee.kind with
   | Mode (Own, inner) when Option.is_none (State.find_keyword_operation state inner) -> Own
   | Mode (Mut, inner)
@@ -62,14 +62,14 @@ let rec find_immutable state (env : State.env) (value : Syntax.expression) : imm
       | _ -> None)
   | Self_value ->
       if state.lambdas <> [] then Some (Captured "self")
-      else if env.self_mode = Types.Mut then None
+      else if env.self_mode = Language.Mode.Mut then None
       else Some (Read_only "self")
   | Member (base, _) | Bracket (base, _) | Parenthesized base -> find_immutable state env base
   | Mode (Mut, inner) when Option.is_some (State.find_keyword_operation state inner) ->
       find_immutable state env inner
   | Call _ -> (
       match find_lent_mode state value with
-      | Some Types.Mut -> None
+      | Some Language.Mode.Mut -> None
       | Some _ -> Some Lent_read_only
       | None -> Some Not_a_place)
   | _ -> Some Not_a_place
@@ -82,10 +82,15 @@ let rec use_mutable_indexes (state : State.state) ~(report_with : Diagnostic.Cod
   | Bracket (base, _) ->
       (match state.tables.calls.(value.id) with
       | Some
-          ({ callee = Trait_method ({ name = "at"; self_type; _ } as method_); arguments; _ } as
-           call) -> (
+          ({
+             callee = Trait_method ({ trait; name; receiver; self_type; _ } as method_);
+             arguments;
+             _;
+           } as call)
+        when Well_known.is_method Index_at (Method { owner = trait.trait; name; receiver }) -> (
+          let index_mut_at = Well_known.locate_method Index_mut_at in
           let index_mut =
-            State.make_trait_reference ~arguments:[] (Well_known.make_path Index_mut)
+            State.make_trait_reference ~arguments:[] (Well_known.make_path index_mut_at.owner)
           in
           match State.find_evidence state self_type index_mut with
           | Some evidence ->
@@ -98,14 +103,15 @@ let rec use_mutable_indexes (state : State.state) ~(report_with : Diagnostic.Cod
                         {
                           method_ with
                           trait = index_mut;
-                          receiver = Mut;
+                          name = index_mut_at.name;
+                          receiver = index_mut_at.receiver;
                           evidence = State.convert_evidence evidence;
                         };
                     arguments =
                       List.map
                         (fun (argument : Tables.argument) ->
                           if argument.core_argument_index = 0 then
-                            { argument with mode = Types.Mut }
+                            { argument with mode = Language.Mode.Mut }
                           else argument)
                         arguments;
                   }
@@ -294,9 +300,9 @@ let rec note_place_without_keyword (state : State.state) env (place : Syntax.exp
         state.places_without_keyword <- (place.id, needs) :: state.places_without_keyword
 
 type argument_form =
-  | With_mode of Types.mode * Syntax.expression
+  | With_mode of Language.Mode.t * Syntax.expression
   | Place
-  | Lent of Types.mode
+  | Lent of Language.Mode.t
   | Temporary
 
 let classify_argument state (value : Syntax.expression) =
@@ -320,8 +326,8 @@ let run_once_solved state type_ check =
 let is_known_not_plain state type_ =
   State.decide_property state Interface.Properties.Plain type_ = Interface.Properties.Fails
 
-let find_lent_field_mode (state : State.state) (value : Syntax.expression) type_ : Types.mode option
-    =
+let find_lent_field_mode (state : State.state) (value : Syntax.expression) type_ :
+    Language.Mode.t option =
   match (Hashtbl.find_opt state.yielded value.id, classify_argument state value) with
   | _ when is_slice value -> None
   | Some Read, With_mode (Mut, _) -> Some Read

@@ -987,7 +987,7 @@ let () =
         Support.setup [ ("app::main", Fixtures.Mir.impls_inheriting_a_default_method) ]
       in
       let module_ = Support.parse_module "app::main" in
-      let make_method_path owner name : Path.t = Method { owner; name; receiver = Read } in
+      let make_method_path owner name : Path.t = Method { owner; name; receiver = Instance Read } in
       let make_impl_path type_name : Path.t =
         Impl
           {
@@ -1055,7 +1055,7 @@ let () =
       if list_positions (read_defaults add) <> [ (0, Some 5) ] then
         Harness.fail "`Tally.add` does not have its default at position 0";
       let advance : Path.t =
-        Method { owner = make_top_path "Counter"; name = "advance"; receiver = Mut }
+        Method { owner = make_top_path "Counter"; name = "advance"; receiver = Instance Mut }
       in
       if list_positions (read_defaults advance) <> [ (1, Some 3) ] then
         Harness.fail "`Counter.advance` does not have its default at position 1";
@@ -1381,10 +1381,10 @@ let () =
   let expect_edges path ~expected =
     expect_paths ~expected (Mir.Call_edges.list_path_edges (Lazy.force lookups) path)
   in
-  let equal_of type_name : Path.t =
-    Method { owner = make_derived_impl type_name Equal; name = "equal"; receiver = Read }
-  and default_of type_name : Path.t =
-    Method { owner = make_derived_impl type_name Default; name = "default"; receiver = Static }
+  let equal_of type_name =
+    Well_known.make_impl_method_path Equal_equal ~impl:(make_derived_impl type_name Equal)
+  and default_of type_name =
+    Well_known.make_impl_method_path Default_default ~impl:(make_derived_impl type_name Default)
   in
   let meters_equal = "app::main::impl standard::core::Equal for app::main::Meters.equal" in
   Harness.test "a derived method of a record calls the method of each field's impl" (fun () ->
@@ -1393,7 +1393,7 @@ let () =
     (fun () ->
       expect_edges (equal_of "Shape") ~expected:[ meters_equal ];
       expect_edges
-        (Method { owner = make_derived_impl "Shape" Hash; name = "hash"; receiver = Read })
+        (Method { owner = make_derived_impl "Shape" Hash; name = "hash"; receiver = Instance Read })
         ~expected:
           [
             "app::main::impl standard::core::Hash for app::main::Meters.hash";
@@ -1432,7 +1432,7 @@ let () =
         List.map Path.show
           (Mir.Call_edges.list_implementations (Lazy.force lookups)
              ~calling_package:(Support.parse_module "app::main").package
-             (Method { owner = Well_known.make_path Equal; name = "equal"; receiver = Read }))
+             (Well_known.make_method_path Equal_equal))
       in
       List.iter
         (fun expected ->
@@ -1483,14 +1483,14 @@ let () =
       expect_paths ~expected:[ "app::main::Level.height" ]
         (List.filter
            (fun edge -> Path.locate_package edge <> Path.standard_package)
-           (list_edges (Method { owner = level; name = "raised"; receiver = Read }))));
+           (list_edges (Method { owner = level; name = "raised"; receiver = Instance Read }))));
   Harness.test "a trait's method reaches the method of every impl, written or inherited" (fun () ->
       expect_paths
         ~expected:
           [ method_of "Shelf" "raised"; method_of "Stair" "raised"; method_of "Pot" "raised" ]
         (Mir.Call_edges.list_implementations (Lazy.force lookups)
            ~calling_package:(Support.parse_module "app::main").package
-           (Method { owner = level; name = "raised"; receiver = Read })));
+           (Method { owner = level; name = "raised"; receiver = Instance Read })));
   Harness.test "a call of a generic impl's method has edges to the impl of the type argument"
     (fun () ->
       expect_paths
@@ -1524,7 +1524,7 @@ let () =
             "app::main::Level.raised";
             "app::main::Level.picked";
           ]
-        (list_edges (Method { owner = level; name = "picked"; receiver = Read })));
+        (list_edges (Method { owner = level; name = "picked"; receiver = Instance Read })));
   Harness.test
     "an inherited method that gives its receiver to a bound has edges to its own impl's methods"
     (fun () ->

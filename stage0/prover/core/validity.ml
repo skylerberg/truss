@@ -333,9 +333,7 @@ let find_parameter_type (context : State.context) frame (invocation : Invocation
       match Interface.Impls.read_signature context.lookups.interface path with
       | Some (signature : Types.signature) ->
           let types =
-            (match signature.receiver with
-              | Some ((Read | Mut | Own), ty) -> [ ty ]
-              | Some (Static, _) | None -> [])
+            (match signature.receiver with Some (_, ty) -> [ ty ] | None -> [])
             @ List.map (fun (info : Types.parameter_info) -> info.type_) signature.parameters
           in
           Option.map

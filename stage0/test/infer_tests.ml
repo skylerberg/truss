@@ -437,9 +437,9 @@ let () =
             (Well_known.of_path owner, receiver)
         | _ -> failwith "the callee is not a method"
       in
-      if find_owner 1 <> (Some String_slice, Read) then
+      if find_owner 1 <> (Some String_slice, Instance Read) then
         Harness.fail "a read-only receiver does not call the view's overload";
-      if find_owner 2 <> (Some String, Own) then
+      if find_owner 2 <> (Some String, Instance Own) then
         Harness.fail "an `own` receiver does not call the `String`'s own overload");
   Harness.test "a method of a view takes no `mut` receiver" (fun () ->
       expect_one_diagnostic Fixtures.Infer.to_string_of_a_string_passed_mut "types.wrong_receiver");
@@ -580,7 +580,7 @@ let () =
       | [ Trait_method { name = "part"; _ } ] -> ()
       | _ -> Harness.fail "the call in `app` does not reach `Parted.part`");
       match list_callees "tools::kits" "measure" with
-      | [ Function { path = Method { name = "part"; receiver = Read; _ }; _ } ] -> ()
+      | [ Function { path = Method { name = "part"; receiver = Instance Read; _ }; _ } ] -> ()
       | _ -> Harness.fail "the call in `tools` does not reach `Kit.part`")
 
 let () =
@@ -1096,7 +1096,7 @@ let () =
             .patterns
       in
       List.iter
-        (fun (name, (expected : Types.mode)) ->
+        (fun (name, (expected : Language.Mode.t)) ->
           match List.assoc_opt name modes with
           | Some mode when mode = expected -> ()
           | Some _ -> Harness.fail "`%s` is bound in another mode" name
@@ -1724,6 +1724,19 @@ let () =
       expect_one_diagnostic
         Fixtures.Infer.meters_fed_to_an_impl_bounding_its_item_by_another_trait_argument
         "types.signature_mismatch" ~at:("feed", 2))
+
+let () =
+  Harness.test "a negated local of literals waits for the same decision" (fun () ->
+      expect_type Fixtures.Infer.negation_of_a_literal_local "-count" "Int64";
+      expect_type Fixtures.Infer.negation_of_a_float_literal_local "-ratio" "Float64");
+  Harness.test "a negated local of literals decided unsigned is an error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.negation_of_a_literal_local_decided_unsigned
+        "types.no_impl");
+  Harness.test "a loop over a range of literals in a local lets its body decide them" (fun () ->
+      expect_type Fixtures.Infer.loop_over_a_literal_range_local "range" ~occurrence:2
+        "Range[UInt8]");
+  Harness.test "a loop over a reversed range of literals" (fun () ->
+      expect_fine Fixtures.Infer.loop_over_a_reversed_literal_range)
 
 let () =
   let declare literal = Printf.sprintf "fn f() {\n  let _: Float64 = %s\n}\n" literal in

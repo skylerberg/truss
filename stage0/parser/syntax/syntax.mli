@@ -8,11 +8,13 @@ type arithmetic = Multiply | Divide | Remainder | Add | Subtract
 type bitwise = Bit_and | Bit_xor | Bit_or
 type shift = Shift_left | Shift_right
 type operation = Arithmetic of arithmetic | Bitwise of bitwise | Shift of shift
-type comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
-type connective = And | Or | Implies
-type binary = Operation of operation | Comparison of comparison | Connective of connective
+
+type binary =
+  | Operation of operation
+  | Comparison of Language.Comparison.t
+  | Connective of Language.Connective.t
+
 type assignment = Assign | Compound of operation
-type quantifier = Forall | Exists
 type 'kind node = { kind : 'kind; id : id }
 
 type type_expression = type_kind node
@@ -66,7 +68,7 @@ and clause_kind =
   | Clause_error
 
 and cost = { amortized : bool; resource : resource; bound : bound }
-and resource = Metric of Metric.t | Calls of call_target
+and resource = Metric of Language.Metric.t | Calls of call_target
 
 and call_target =
   | Call_parameter of name
@@ -105,7 +107,7 @@ and expression_kind =
       stop : expression option;
       inclusive : bool;
     }
-  | Quantified of { quantifier : quantifier; binder : binder; body : expression }
+  | Quantified of { quantifier : Language.Quantifier.t; binder : binder; body : expression }
   | Echo of expression
   | Return of expression option
   | Parenthesized of expression
@@ -135,7 +137,6 @@ and binder = Binder_in of pattern * expression | Binder_type of name * type_expr
 and else_branch = Else of block | Else_if of expression
 and block = { statements : statement list; id : id }
 and statement = statement_kind node
-and loop_mode = Sequential | Parallel_loop | Concurrent_loop
 
 and statement_kind =
   | Let of {
@@ -148,7 +149,7 @@ and statement_kind =
   | Expression of expression
   | Assignment of { target : expression; operator : assignment; value : expression }
   | For of {
-      mode : loop_mode;
+      mode : Language.Loop_mode.t;
       pattern : pattern;
       annotation : type_expression option;
       iterable : expression;

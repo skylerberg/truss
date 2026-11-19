@@ -76,7 +76,7 @@ let fold_negation (value : Lowered.static_value) =
         (Lowered.Static_scalar (Float32 (Int32.bits_of_float (Float.neg (Int32.float_of_bits x)))))
   | _ -> None
 
-let fold_comparison (comparison : Core.comparison) (left : Lowered.static_value)
+let fold_comparison (comparison : Language.Comparison.t) (left : Lowered.static_value)
     (right : Lowered.static_value) =
   match (left, right) with
   | Static_scalar (Integer (_, x)), Static_scalar (Integer (_, y)) ->

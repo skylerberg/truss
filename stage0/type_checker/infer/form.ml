@@ -50,14 +50,14 @@ let build_call state ~lends ?function_value (call : Tables.call) : Core.call =
       | direct, _ -> convert_callee direct)
     ~arguments:(build_arguments state call) ~lends
 
-let arithmetic_traits : (Well_known.t * string * Intrinsic.scalar) list =
+let arithmetic_methods : (Well_known.method_ * Intrinsic.scalar) list =
   [
-    (Add, "add", Add);
-    (Subtract, "subtract", Subtract);
-    (Multiply, "multiply", Multiply);
-    (Divide, "divide", Divide);
-    (Remainder, "remainder", Remainder);
-    (Negate, "negate", Negate);
+    (Add_add, Add);
+    (Subtract_subtract, Subtract);
+    (Multiply_multiply, Multiply);
+    (Divide_divide, Divide);
+    (Remainder_remainder, Remainder);
+    (Negate_negate, Negate);
   ]
 
 let is_number type_ = Types.is_integer_type type_ || Types.is_float_type type_
@@ -65,15 +65,14 @@ let is_number type_ = Types.is_integer_type type_ || Types.is_float_type type_
 let is_built_in_scalar type_ =
   is_number type_ || Types.is_builtin Bool type_ || Types.is_builtin Character type_
 
-let find_built_in_operation (trait : Types.trait_reference) name self_type =
+let find_built_in_operation (trait : Types.trait_reference) name receiver self_type =
   if
     is_number self_type
     && List.for_all (fun argument -> argument = Types.Type self_type) trait.trait_arguments
   then
-    List.find_map
-      (fun (known, method_, operation) ->
-        if method_ = name && Well_known.is known trait.trait then Some operation else None)
-      arithmetic_traits
+    Option.bind
+      (Well_known.find_method (Method { owner = trait.trait; name; receiver }))
+      (fun method_ -> List.assoc_opt method_ arithmetic_methods)
   else None
 
 let build_argument_expressions state (call : Tables.call) =
@@ -111,15 +110,16 @@ let build_call_kind ?lends ?function_value state (value : Syntax.expression) : C
       | [ receiver ] ->
           Copy (Operands.build Read (build_expression_by_id state receiver.expression))
       | _ -> State.raise_bug "`copy` does not have exactly one argument")
-  | Trait_method { trait; name; self_type; _ }
-    when Option.is_some (find_built_in_operation trait name self_type) ->
+  | Trait_method { trait; name; receiver; self_type; _ }
+    when Option.is_some (find_built_in_operation trait name receiver self_type) ->
       Operator
         {
-          operation = Option.get (find_built_in_operation trait name self_type);
+          operation = Option.get (find_built_in_operation trait name receiver self_type);
           arguments = build_argument_expressions state recorded;
         }
-  | Trait_method { trait; name = "equal"; self_type; _ }
-    when is_built_in_scalar self_type && Well_known.is Equal trait.trait -> (
+  | Trait_method { trait; name; receiver; self_type; _ }
+    when is_built_in_scalar self_type
+         && Well_known.is_method Equal_equal (Method { owner = trait.trait; name; receiver }) -> (
       match build_argument_expressions state recorded with
       | [ left; right ] -> Compare { comparison = Equal; left; right }
       | _ -> State.raise_bug "`equal` does not have exactly two arguments")
@@ -157,7 +157,7 @@ let register_call ?function_value state (value : Syntax.expression) =
 let register_index state (value : Syntax.expression) =
   State.register_expression state value (fun () ->
       match (read_call state value.id).callee with
-      | Trait_method { receiver = Mut; _ } -> build_call_kind ~lends:Mut state value
+      | Trait_method { receiver = Instance Mut; _ } -> build_call_kind ~lends:Mut state value
       | _ -> build_call_kind ~lends:Read state value)
 
 let build_numeric_literal (state : State.state) (id : Syntax.id) : Core.kind =
@@ -265,7 +265,10 @@ let build_record fields : Core.kind =
   Construct
     {
       variant = None;
-      fields = List.map (fun (name, value) -> (name, Some (Operands.build Own value))) fields;
+      fields =
+        List.map
+          (fun (field, value) -> (Well_known.show_field field, Some (Operands.build Own value)))
+          fields;
     }
 
 let build_range_record state (value : Syntax.expression) start stop ~inclusive : Core.kind =
@@ -276,7 +279,7 @@ let build_range_record state (value : Syntax.expression) start stop ~inclusive :
       let inclusive =
         State.make_synthetic_expression state ~origin:value.id Types.bool (Core.Boolean inclusive)
       in
-      build_record [ ("start", start); ("stop", stop); ("inclusive", inclusive) ]
+      build_record [ (Range_start, start); (Range_stop, stop); (Range_inclusive, inclusive) ]
   | _ -> State.raise_bug "a range without both bounds is valid only inside a slice"
 
 let list_capability_impls (state : State.state) (type_ : Types.ty) =
@@ -306,7 +309,9 @@ let build_provide state (implementations : Syntax.expression list) (body : Synta
   let implementations =
     List.map
       (fun (implementation : Syntax.expression) : Core.implementation ->
-        let mode : Types.mode = match implementation.kind with Mode (Mut, _) -> Mut | _ -> Read in
+        let mode : Language.Mode.t =
+          match implementation.kind with Mode (Mut, _) -> Mut | _ -> Read
+        in
         let node = State.build_expression state implementation in
         {
           origin = implementation.id;
@@ -321,10 +326,7 @@ let build_provide state (implementations : Syntax.expression list) (body : Synta
 
 let push_target : Core.operand Core.target =
   Function
-    {
-      path = Method { owner = Well_known.make_path String; name = "push"; receiver = Mut };
-      instantiation = Types.no_instantiation;
-    }
+    { path = Well_known.make_method_path String_push; instantiation = Types.no_instantiation }
 
 let read_template (state : State.state) (literal : Syntax.string_literal) =
   match state.tables.templates.(literal.id) with
@@ -439,9 +441,7 @@ let build_list_literal state ~origin (element : Types.ty) (elements : Core.expre
        ~callee:
          (Function
             {
-              path =
-                Method
-                  { owner = Well_known.make_path List; name = "from_storage"; receiver = Static };
+              path = Well_known.make_method_path List_from_storage;
               instantiation =
                 { Types.no_instantiation with type_arguments = [ Types.Type element ] };
             })
@@ -469,7 +469,7 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
         make literal_type
           (build_record
              [
-               ( "text",
+               ( Literal_text,
                  make
                    (Types.make_named (Well_known.make_path String_slice) [])
                    (String written.value) );
@@ -490,7 +490,7 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
   let template =
     make
       (Types.make_named (Well_known.make_path Template) [ part ])
-      (build_record [ ("literals", texts); ("parts", make_list part parts) ])
+      (build_record [ (Template_literals, texts); (Template_parts, make_list part parts) ])
   in
   Template
     {
@@ -517,7 +517,8 @@ let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant
   let type_ = read_pattern_type state id in
   if is_built_in_scalar type_ then Literal value
   else
-    let equal = State.make_trait_reference ~arguments:[] (Well_known.make_path Equal) in
+    let { Well_known.owner; name; receiver } = Well_known.locate_method Equal_equal in
+    let equal = State.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
     match State.find_evidence state type_ equal with
     | Some implementation ->
         Equal_to
@@ -528,8 +529,8 @@ let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant
                 (Trait_method
                    {
                      trait = equal;
-                     name = "equal";
-                     receiver = Read;
+                     name;
+                     receiver;
                      self_type = type_;
                      instantiation = Types.no_instantiation;
                      evidence = convert_evidence (State.convert_evidence implementation);
@@ -602,14 +603,6 @@ let build_operator state (value : Syntax.expression) operation (operands : Synta
          else arguments);
     }
 
-let convert_to_comparison : Syntax.comparison -> Core.comparison = function
-  | Equal -> Equal
-  | Not_equal -> Not_equal
-  | Less -> Less
-  | Less_equal -> Less_equal
-  | Greater -> Greater
-  | Greater_equal -> Greater_equal
-
 let build_built_in_comparison state comparison (left : Syntax.expression)
     (right : Syntax.expression) : Core.kind =
   let left = State.build_expression state left in
@@ -618,7 +611,7 @@ let build_built_in_comparison state comparison (left : Syntax.expression)
     if Types.equal left.type_ right.type_ then (left, right)
     else (convert_to_integer state left, convert_to_integer state right)
   in
-  Compare { comparison = convert_to_comparison comparison; left; right }
+  Compare { comparison; left; right }
 
 let build_comparison state (value : Syntax.expression) comparison (left : Syntax.expression)
     (right : Syntax.expression) : Core.kind =
@@ -640,7 +633,7 @@ let build_comparison state (value : Syntax.expression) comparison (left : Syntax
                 id = State.allocate_node_id state;
                 origin = value.id;
                 type_ = recorded.callee_result;
-                kind = Variant { variant; fields = [] };
+                kind = Variant { variant = Well_known.show_variant variant; fields = [] };
               };
           }
       in
@@ -650,10 +643,10 @@ let build_comparison state (value : Syntax.expression) comparison (left : Syntax
       match comparison with
       | Equal -> call.kind
       | Not_equal -> Not call
-      | Less -> make_matches_variant "Less"
-      | Less_equal -> make_not (make_matches_variant "Greater")
-      | Greater -> make_matches_variant "Greater"
-      | Greater_equal -> make_not (make_matches_variant "Less"))
+      | Less -> make_matches_variant Ordering_less
+      | Less_equal -> make_not (make_matches_variant Ordering_greater)
+      | Greater -> make_matches_variant Ordering_greater
+      | Greater_equal -> make_not (make_matches_variant Ordering_less))
 
 let binds_lent_part state (condition : Core.expression) =
   let may_alias (pattern : Core.pattern) =
@@ -725,8 +718,8 @@ let build_compound_assign state (written : Syntax.statement) (target : Syntax.ex
   in
   let kind, right_operand =
     match state.tables.calls.(written.id) with
-    | Some ({ callee = Trait_method { trait; name; self_type; _ }; _ } as recorded) -> (
-        match find_built_in_operation trait name self_type with
+    | Some ({ callee = Trait_method { trait; name; receiver; self_type; _ }; _ } as recorded) -> (
+        match find_built_in_operation trait name receiver self_type with
         | Some operation -> make_built_in operation
         | None ->
             let read_argument_mode index =
@@ -736,7 +729,7 @@ let build_compound_assign state (written : Syntax.statement) (target : Syntax.ex
                   recorded.arguments
               with
               | Some argument -> argument.mode
-              | None -> Types.Read
+              | None -> Language.Mode.Read
             in
             ( Call
                 (State.make_call state ~callee:(convert_callee recorded.callee)
@@ -760,7 +753,8 @@ let build_compound_assign state (written : Syntax.statement) (target : Syntax.ex
       value = State.make_synthetic_expression state ~origin:written.id target_type kind;
     }
 
-let rec lend_statements state (mode : Types.mode) (value : Core.expression) : Core.statement list =
+let rec lend_statements state (mode : Language.Mode.t) (value : Core.expression) :
+    Core.statement list =
   let make_statement kind : Core.statement list =
     [ { id = State.allocate_node_id state; origin = value.origin; kind } ]
   in
@@ -802,7 +796,7 @@ let rec is_fixed_place : Core.place -> bool = function
   | Field { base; _ } -> is_fixed_place base
   | Element _ | Range _ | Lent _ | Temporary _ -> false
 
-let build_collection_place state (iterable : Syntax.expression) (mode : Types.mode) :
+let build_collection_place state (iterable : Syntax.expression) (mode : Language.Mode.t) :
     Core.place * (type_:Types.ty -> Core.block -> Core.kind) option =
   let collection = State.build_expression state iterable in
   match collection.kind with
@@ -834,7 +828,7 @@ let build_collection_place state (iterable : Syntax.expression) (mode : Types.mo
               }) )
 
 let build_elements state ~origin (collection : Core.place) ~(count : Tables.call)
-    ~(element : Tables.call) ~(lends : Types.mode) : Core.elements =
+    ~(element : Tables.call) ~(lends : Language.Mode.t) : Core.elements =
   let uint64 = Types.make_builtin UInt64 in
   let local = State.allocate_synthetic_local state in
   let make_receiver mode : Core.argument = Passed { mode; value = Place collection } in
@@ -890,15 +884,16 @@ let quantify_over_elements state (collection : Syntax.expression) ~count ~elemen
         }
 
 let build_cursor_next state (cursor : Types.ty) : Core.callee =
-  let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
+  let { Well_known.owner; name; receiver } = Well_known.locate_method Cursor_next in
+  let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
   match State.find_evidence state cursor trait with
   | Some implementation ->
       State.make_callee state
         (Trait_method
            {
              trait;
-             name = "next";
-             receiver = Mut;
+             name;
+             receiver;
              self_type = cursor;
              instantiation = Types.no_instantiation;
              evidence = convert_evidence (State.convert_evidence implementation);
@@ -1152,5 +1147,5 @@ let build_converted_map_literal state (value : Syntax.expression) ~(key : Types.
     (List.map
        (fun (entry_key, entry_value) ->
          State.make_synthetic_expression state ~origin:value.id entry
-           (build_record [ ("key", entry_key); ("value", entry_value) ]))
+           (build_record [ (Entry_key, entry_key); (Entry_value, entry_value) ]))
        entries)

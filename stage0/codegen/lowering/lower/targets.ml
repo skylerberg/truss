@@ -48,11 +48,11 @@ let make_trait_method_item context substitution ~(trait : Types.trait_reference)
       instantiation = { own with type_arguments = impl_arguments @ own.type_arguments };
     }
 
-let convert_operand state (mode : Types.mode) ty (place : Lowered.place)
+let convert_operand state (mode : Language.Mode.t) ty (place : Lowered.place)
     (passed : Lowered.ty option) =
   match passed with
   | None -> None
-  | Some (Pointer _) when mode = Types.Own ->
+  | Some (Pointer _) when mode = Language.Mode.Own ->
       ignore (Lowering.move_place state place);
       Some (Lowered.Moved_address place)
   | Some (Pointer { writable; _ }) -> Some (Lowered.Address { place; writable })
@@ -61,9 +61,8 @@ let convert_operand state (mode : Types.mode) ty (place : Lowered.place)
       | Own -> Some (Lowering.make_owned_operand state place ty)
       | Read | Mut -> Some (Copy place))
 
-let pass state (mode : Types.mode) ty place =
-  convert_operand state mode ty place
-    (Convention.classify_parameter state.context.env (Monomorphic.ground_mode mode) ty)
+let pass state (mode : Language.Mode.t) ty place =
+  convert_operand state mode ty place (Convention.classify_parameter state.context.env mode ty)
 
 let lookup_method_slot (context : Definitions.context) ~owner ~handle_missing
     (methods : Types.trait_method list) ~is_wanted =
@@ -258,7 +257,7 @@ let lower_nested_function (state : Lowering.state) ~(function_type : Ground.func
     ~(body :
        Lowering.state ->
        captures:Lowered.place list ->
-       (Lowered.place * Ground.mode * Ground.ty) list ->
+       (Lowered.place * Language.Mode.t * Ground.ty) list ->
        unit) destination =
   let index = !(state.nested) in
   incr state.nested;
@@ -310,7 +309,7 @@ let lower_nested_function (state : Lowering.state) ~(function_type : Ground.func
         (Convention.classify_result state.context.env function_type.result);
       let parameter_places =
         List.map
-          (fun ((mode : Ground.mode), ty) ->
+          (fun ((mode : Language.Mode.t), ty) ->
             (Lowering.allocate_parameter inner ~in_scope:false ~owned:(mode = Own) mode ty, mode, ty))
           function_type.parameters
       in
@@ -347,9 +346,7 @@ let lower_indirect_call state ~(function_type : Ground.function_type) ~(value : 
   let passed =
     List.concat
       (List.map2
-         (fun ((mode : Ground.mode), ty) place ->
-           let mode : Types.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
-           Option.to_list (pass state mode ty place))
+         (fun ((mode : Language.Mode.t), ty) place -> Option.to_list (pass state mode ty place))
          function_type.parameters places)
     @ [ pass_capabilities state ~site function_type.uses ]
   in
@@ -374,8 +371,9 @@ let lower_indirect_call state ~(function_type : Ground.function_type) ~(value : 
   if function_type.result = Never then Lowering.emit_unreachable_block state
 
 let lower_call_through_any (state : Lowering.state) ~(any_type : Types.trait_reference) ~trait ~name
-    ~receiver ~(any : Lowered.place) ~(arguments : (Types.mode * Ground.ty * Lowered.place) list)
-    ?(lending = []) ~site destination =
+    ~receiver ~(any : Lowered.place)
+    ~(arguments : (Language.Mode.t * Ground.ty * Lowered.place) list) ?(lending = []) ~site
+    destination =
   let index, signature = lookup_dynamic_method state.context trait name receiver in
   let slot =
     Drop_and_copy.compute_first_method_slot ~is_copyable:(is_copyable_any state.context any_type)
@@ -497,8 +495,8 @@ let count_passed (signature : Types.signature) =
   (1 lsl defaulted) - 1
 
 let lower_item_call (state : Lowering.state) item ~(signature : Types.signature) ~substitution
-    ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?mask ?(lending = []) ~destination
-    ~site () =
+    ~(arguments : (Language.Mode.t * Ground.ty * Lowered.place) list) ?mask ?(lending = [])
+    ~destination ~site () =
   let mask = match mask with Some mask -> mask | None -> count_passed signature in
   let c_signature, result =
     Definitions.make_c_signature state.context substitution
@@ -623,13 +621,16 @@ let lower_template_value (state : Lowering.state) template_ty literals ~site ~pa
     let _, _, element = read_list_parts state.context.monomorphic list_ty in
     element
   in
-  let literals_ty = read_field_type template_ty "literals" in
-  let parts_ty = read_field_type template_ty "parts" in
+  let literals_field = Well_known.show_field Template_literals
+  and parts_field = Well_known.show_field Template_parts
+  and text_field = Well_known.show_field Literal_text in
+  let literals_ty = read_field_type template_ty literals_field in
+  let parts_ty = read_field_type template_ty parts_field in
   let literal_ty = read_element_type literals_ty in
-  let slice_ty = read_field_type literal_ty "text" in
+  let slice_ty = read_field_type literal_ty text_field in
   let built = Lowering.allocate_temporary state template_ty in
   lower_list_into state literals_ty
-    (Lowered.project built (Field "literals"))
+    (Lowered.project built (Field literals_field))
     ~site
     (List.map
        (fun text value ->
@@ -640,10 +641,10 @@ let lower_template_value (state : Lowering.state) template_ty literals ~site ~pa
                   {
                     ty = literal_ty;
                     variant = None;
-                    fields = [ ("text", Copy (lower_literal_place state slice_ty text)) ];
+                    fields = [ (text_field, Copy (lower_literal_place state slice_ty text)) ];
                   } )))
        literals);
-  lower_list_into state parts_ty (Lowered.project built (Field "parts")) ~site parts;
+  lower_list_into state parts_ty (Lowered.project built (Field parts_field)) ~site parts;
   built
 
 let pull_loop state ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
@@ -657,11 +658,15 @@ let pull_loop state ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
       Emit_c.Ir_builder.finish state.builder (Goto test);
       Emit_c.Ir_builder.start state.builder test;
       call_next next;
+      let some_variant = Well_known.show_variant Option_some in
       Emit_c.Ir_builder.finish state.builder
-        (Switch_variant { place = next; cases = [ ("Some", inside) ]; default = Some after });
+        (Switch_variant { place = next; cases = [ (some_variant, inside) ]; default = Some after });
       Emit_c.Ir_builder.start state.builder inside;
       Lowering.run_in_scope state (fun () ->
           Lowering.run_in_loop state ~continue_:test ~break_:after ~depth (fun () ->
-              body (Lowered.project next (Variant_field { variant = "Some"; field = "value" }))));
+              body
+                (Lowered.project next
+                   (Variant_field
+                      { variant = some_variant; field = Well_known.show_field Option_some_value }))));
       Emit_c.Ir_builder.finish state.builder (Goto test);
       Emit_c.Ir_builder.start state.builder after)

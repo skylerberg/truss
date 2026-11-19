@@ -6,10 +6,10 @@ type context = {
   spans : Source.Definition_span.t array Lazy.t;
   text : string Lazy.t;
   mode_keywords : (Core.origin, Core.mode_keyword) Hashtbl.t;
-  places_without_keyword : (Core.origin, Types.mode) Hashtbl.t;
+  places_without_keyword : (Core.origin, Language.Mode.t) Hashtbl.t;
   names : string Local_table.t;
   origins : Core.origin Local_table.t;
-  binding_modes : Types.mode Local_table.t;
+  binding_modes : Language.Mode.t Local_table.t;
   literal_views : unit Local_table.t;
   types : Types.ty Local_table.t;
   mutable parameters : Core.local list;
@@ -35,7 +35,7 @@ val report :
   string ->
   unit
 
-val classify_binding_mode : context -> Place.root -> Types.mode
+val classify_binding_mode : context -> Place.root -> Language.Mode.t
 val views_literal : context -> Place.root -> bool
 val show_root : context -> Place.root -> string
 val show : context -> Place.t -> string

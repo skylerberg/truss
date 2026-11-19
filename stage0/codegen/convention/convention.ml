@@ -16,7 +16,7 @@ let is_slice : Ground.ty -> bool = function
   | Named { path; _ } -> Well_known.is Slice path
   | _ -> false
 
-let classify_parameter env (mode : Ground.mode) ty =
+let classify_parameter env (mode : Language.Mode.t) ty =
   let layout = Memory_layout.of_type env ty in
   if layout.size = 0 then None
   else

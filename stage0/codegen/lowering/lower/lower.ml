@@ -32,7 +32,7 @@ let bind_parameters state (body : Mir.Graph.body) ~(defaults : (int * Mir.Graph.
       let arrives, place =
         Lowering.allocate_parameter state ~in_scope:false ?name
           ~owned:(mode = Own && bit = None)
-          (Monomorphic.ground_mode mode) ty
+          mode ty
       in
       (arrives, bit, place))
     body.parameters

@@ -35,7 +35,7 @@ let provide (state : Lowering.state) (provided : Mir.provided list) ~can_use_tas
   in
   let added =
     List.concat_map
-      (fun ((mode : Types.mode), evidence) ->
+      (fun ((mode : Language.Mode.t), evidence) ->
         match tasks with
         | Some tasks when mode = Mut && not (List.exists is_tasks evidence) ->
             Mir_tasks.lock_evidence state ~tasks evidence
@@ -133,7 +133,7 @@ and lower_concurrent_block state (region : Mir_drops.region) ~fork
           in
           Emit_c.Ir_builder.emit state.builder (Assign (function_value, code));
           ignore
-            (Mir_tasks.call_tasks_bool state "spawn"
+            (Mir_tasks.call_tasks_bool state Tasks_spawn
                [ group; function_value; Lowered.make_local_place item ]))
         functions);
   match join with
@@ -674,7 +674,7 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
       Mir_lends.emit_mark state Lend_called lent;
       Mir_places.bind_local state part place
 
-and lend_part state ~(mode : Types.mode) (part : Mir.yielded) =
+and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
   let frame = Mir_places.require_mir_frame state in
   let lending =
     match frame.lending with
@@ -943,7 +943,7 @@ and lower_for_loop state (region : Mir_drops.region) ~(iteration : Mir.iteration
   let origin = loop.origin in
   let each = lower_loop_body state region ~part ~body in
   match loop.schedule with
-  | Concurrent_loop ->
+  | Concurrent ->
       Mir_tasks.with_group state (fun group ->
           let spawning =
             {
@@ -955,8 +955,9 @@ and lower_for_loop state (region : Mir_drops.region) ~(iteration : Mir.iteration
             }
           in
           Mir_loops.lower_for_each state ~schedule:(Spawned spawning) ~iteration ~each ~origin)
-  | Parallel_loop -> Mir_loops.lower_for_each state ~schedule:Chunked ~iteration ~each ~origin
-  | Core.Sequential -> Mir_loops.lower_for_each state ~schedule:Sequential ~iteration ~each ~origin
+  | Parallel -> Mir_loops.lower_for_each state ~schedule:Chunked ~iteration ~each ~origin
+  | Language.Loop_mode.Sequential ->
+      Mir_loops.lower_for_each state ~schedule:Sequential ~iteration ~each ~origin
 
 let fill_defaults (state : Lowering.state) (mask : Lowered.place) (body : Mir.Graph.body)
     ~(defaults : (int * Mir.Graph.t) list) (places : Lowered.place list) =

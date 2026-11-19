@@ -27,20 +27,6 @@
   }
 }
 
-.area-0 { --area: #e5031a; }
-.area-1 { --area: #98f608; }
-.area-2 { --area: #9304fe; }
-.area-3 { --area: #808080; }
-.area-4 { --area: #0159fe; }
-.area-5 { --area: #038db3; }
-.area-6 { --area: #01a200; }
-.area-7 { --area: #fc05df; }
-.area-8 { --area: #fdf70a; }
-.area-9 { --area: #3703f0; }
-.area-10 { --area: #fc8820; }
-.area-11 { --area: #fe5103; }
-.area-12 { --area: #ffbf00; }
-
 * {
   box-sizing: border-box;
 }

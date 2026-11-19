@@ -14,7 +14,7 @@ val check_argument :
   Syntax.expression ->
   Types.parameter_info ->
   has_generic_type:bool ->
-  Types.mode
+  Language.Mode.t
 
 val check_arguments :
   State.state ->

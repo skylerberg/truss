@@ -1,7 +1,7 @@
 (library
  (name resolve)
  (libraries
-  metric
+  language
   structural_key
   path
   grant

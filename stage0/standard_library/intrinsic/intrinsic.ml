@@ -70,10 +70,11 @@ let show_builtin = function
 
 let make_builtin_path builtin = Path.Top { module_; name = show_builtin builtin }
 
-let find_builtin = function
-  | Path.Top { module_ = path_module; name } when path_module = module_ ->
-      List.find_opt (fun builtin -> show_builtin builtin = name) builtins
-  | _ -> None
+let builtins_by_path =
+  Path.Map.of_seq
+    (List.to_seq (List.map (fun builtin -> (make_builtin_path builtin, builtin)) builtins))
+
+let find_builtin path = Path.Map.find_opt path builtins_by_path
 
 let convert_libc_scalar : Libc.scalar -> builtin = function
   | UInt8 -> UInt8
@@ -395,7 +396,9 @@ let list_uses : operation -> Path.t list = function
   | Runtime (Shared_update | Shared_key) -> [ Well_known.make_path Tasks ]
   | Scalar _ | Buffer _ | Lend _ | Runtime _ -> []
 
-let find_operation = function
-  | Path.Top { module_ = path_module; name } when path_module = module_ ->
-      List.find_opt (fun operation -> show_operation operation = name) operations
-  | _ -> None
+let operations_by_path =
+  Path.Map.of_seq
+    (List.to_seq
+       (List.map (fun operation -> (make_operation_path operation, operation)) operations))
+
+let find_operation path = Path.Map.find_opt path operations_by_path

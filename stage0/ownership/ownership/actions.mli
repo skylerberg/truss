@@ -2,11 +2,11 @@ type view = Borrow_of of Place.t | Copy_of_view_in of Place.t
 
 val extract_viewed_place : view -> Place.t
 
-type loan = { borrowed : Place.t; mode : Types.mode; duration : Mir.loan_duration }
+type loan = { borrowed : Place.t; mode : Language.Mode.t; duration : Mir.loan_duration }
 
 type borrowed_argument = {
   place : Place.t;
-  mode : Types.mode;
+  mode : Language.Mode.t;
   origin : Core.origin;
   position : int;
 }

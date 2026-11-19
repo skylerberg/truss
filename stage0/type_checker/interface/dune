@@ -2,7 +2,7 @@
  (name interface)
  (modules_without_implementation environment lookups)
  (libraries
-  metric
+  language
   structural_key
   source
   compiler_bug

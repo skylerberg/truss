@@ -55,7 +55,8 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           let parts : Types.ty =
             Named { path = Well_known.make_path Sequence; arguments = [ Types.Type part ] }
           in
-          let index = State.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
+          let { Well_known.owner; name; receiver } = Well_known.locate_method Index_at in
+          let index = State.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
           let evidence =
             match State.find_evidence state parts index with
             | Some evidence -> Form.convert_evidence (State.convert_evidence evidence)
@@ -73,8 +74,8 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
                           (Trait_method
                              {
                                trait = index;
-                               name = "at";
-                               receiver = Read;
+                               name;
+                               receiver;
                                self_type = parts;
                                instantiation = Types.no_instantiation;
                                evidence;
@@ -157,10 +158,10 @@ and check_specification_function state env (value : Syntax.expression)
     arguments;
   Types.Integer
 
-and check_callee_cost state env (value : Syntax.expression) (metric : Metric.t)
+and check_callee_cost state env (value : Syntax.expression) (metric : Language.Metric.t)
     (arguments : Syntax.argument list) =
   let report_not_a_callee operand_description =
-    let cost_function = Metric.show metric in
+    let cost_function = Language.Metric.show metric in
     State.make_error_type state Not_callable (State.read_span state value.id)
       (Printf.sprintf
          "`%s` takes a function parameter, as in `%s(visit)`, or a method of a bound, as in \
@@ -183,8 +184,8 @@ and check_callee_cost state env (value : Syntax.expression) (metric : Metric.t)
       | _ -> report_not_a_callee (Printf.sprintf "`%s` is neither" last.text))
   | _ -> report_not_a_callee "its operand is neither"
 
-and check_method_cost state (value : Syntax.expression) (metric : Metric.t) (type_ : Types.ty)
-    (member : Syntax.name) =
+and check_method_cost state (value : Syntax.expression) (metric : Language.Metric.t)
+    (type_ : Types.ty) (member : Syntax.name) =
   let overloads = Interface.Elaborator.list_bound_methods state.context type_ member.text in
   match (Interface.Elaborator.find_operand_method overloads, overloads) with
   | Some { self_type; trait; name; receiver }, _ ->
@@ -213,7 +214,7 @@ and check_method_cost state (value : Syntax.expression) (metric : Metric.t) (typ
         (Printf.sprintf
            "`%s` has more than one method `%s`, and none of them is the only one that takes `self` \
             read-only, so `%s` cannot tell which one is meant."
-           (State.show state type_) member.text (Metric.show metric))
+           (State.show state type_) member.text (Language.Metric.show metric))
 
 and report_unknown_static_method state ?expected (value : Syntax.expression) type_
     (member : Syntax.name) (arguments : Syntax.argument list) =
@@ -261,11 +262,8 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
             (State.show state type_) member.text
             (String.concat ", " (List.map (fun trait -> "`" ^ Types.show_trait trait ^ "`") traits))))
   in
-  let wanted : Path.receiver =
-    match arguments with
-    | receiver :: _ -> Name_lookup.classify_receiver receiver.value
-    | [] -> Read
-  in
+  let wanted_mode = Name_lookup.classify_receiver_mode arguments in
+  let wanted = Path.Instance wanted_mode in
   match type_ with
   | Types.Named { path; arguments = type_arguments } when member.case = Upper ->
       Calls.construct state env ?expected ~type_arguments value path (Some member.text) arguments
@@ -342,11 +340,8 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                       then
                         State.report_mismatch state (State.read_span state inner.id) ~expected:type_
                           ~actual:receiver_type;
-                      let mode : Types.mode =
-                        match wanted with Mut -> Mut | Own -> Own | _ -> Read
-                      in
                       Modes.check_mode state env receiver.value
-                        { name = "self"; mode; type_; has_default = false }
+                        { name = "self"; mode = wanted_mode; type_; has_default = false }
                         receiver_type ~has_generic_type:false;
                       check_method_with_receiver state env ?expected value ~receiver:receiver.value
                         ~receiver_type method_path rest
@@ -426,10 +421,9 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
   in
   let receiver_argument, arguments =
     match instance.signature.receiver with
-    | Some (receiver, receiver_type) -> (
+    | Some (mode, receiver_type) -> (
         match arguments with
         | first :: rest ->
-            let mode : Types.mode = match receiver with Mut -> Mut | Own -> Own | _ -> Read in
             let parameter : Types.parameter_info =
               { name = "self"; mode; type_ = receiver_type; has_default = false }
             in
@@ -465,11 +459,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
 
 and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_arguments
     (member : Syntax.name) arguments =
-  let wanted : Path.receiver =
-    match arguments with
-    | receiver :: _ -> Name_lookup.classify_receiver receiver.value
-    | [] -> Read
-  in
+  let wanted = Path.Instance (Name_lookup.classify_receiver_mode arguments) in
   let find_overload receiver =
     Interface.Definition.find_trait_method state.lookups.interface trait ~name:member.text ~receiver
   in
@@ -529,39 +519,42 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
   let lent_mode = if has_mode_keyword then None else Modes.find_lent_mode state base in
   let wanted : Path.receiver =
     match (List.assoc_opt value.id state.keyword_modes, lent_mode) with
-    | Some Mut, _ | None, Some Mut -> Mut
-    | Some Own, _ -> Own
-    | _ -> Read
+    | Some Mut, _ | None, Some Mut -> Instance Mut
+    | Some Own, _ -> Instance Own
+    | _ -> Instance Read
   in
   let place = State.is_place state base || Option.is_some lent_mode in
   let choose overloads =
     match List.assoc_opt wanted overloads with
     | Some method_path -> Some (wanted, method_path)
-    | None when lent_mode = Some Types.Mut && List.mem_assoc Path.Read overloads ->
-        Some (Path.Read, List.assoc Path.Read overloads)
+    | None when lent_mode = Some Language.Mode.Mut && List.mem_assoc (Path.Instance Read) overloads
+      ->
+        Some (Path.Instance Read, List.assoc (Path.Instance Read) overloads)
     | None
       when (not has_mode_keyword)
            && ((not place)
               || State.decide_property state Interface.Properties.Plain receiver_type
                  <> Interface.Properties.Fails
-              || not (List.mem_assoc Path.Mut overloads)) -> (
-        match List.assoc_opt Path.Own overloads with
+              || not (List.mem_assoc (Path.Instance Mut) overloads)) -> (
+        match List.assoc_opt (Path.Instance Own) overloads with
         | Some method_path ->
             if State.is_place state base then
               Modes.note_place_without_keyword state env base ~needs:Own;
-            Some (Path.Own, method_path)
+            Some (Path.Instance Own, method_path)
         | None -> None)
     | None -> None
   in
   let choose_temporary overloads =
     let chosen =
       if (not has_mode_keyword) && not place then
-        match List.assoc_opt Path.Own overloads with
-        | Some method_path -> Some (Path.Own, method_path)
+        match List.assoc_opt (Path.Instance Own) overloads with
+        | Some method_path -> Some (Path.Instance Own, method_path)
         | None -> choose overloads
       else choose overloads
     in
-    (match chosen with Some (Path.Mut, _) -> Modes.mutate state env ~by:Passed_mut base | _ -> ());
+    (match chosen with
+    | Some (Path.Instance Mut, _) -> Modes.mutate state env ~by:Passed_mut base
+    | _ -> ());
     chosen
   in
   let report_wrong_receiver overloads =
@@ -573,7 +566,7 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
   in
   let report_missing_receiver_mode : 'a. (Path.receiver * 'a) list -> Types.ty =
    fun overloads ->
-    if (not has_mode_keyword) && place && List.mem_assoc Path.Mut overloads then
+    if (not has_mode_keyword) && place && List.mem_assoc (Path.Instance Mut) overloads then
       State.make_error_type state Missing_mode (State.read_span state base.id)
         ~fixes:
           [
@@ -673,9 +666,8 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
           | Some (mode, self_type) -> (
               match State.find_view_as state ~owned:receiver_type ~view:self_type with
               | Some _ ->
-                  Name_lookup.coerce state env
-                    ~argument:(match mode with Mut -> Mut | Own -> Own | Read | Static -> Read)
-                    receiver ~actual:receiver_type ~expected:self_type
+                  Name_lookup.coerce state env ~argument:mode receiver ~actual:receiver_type
+                    ~expected:self_type
               | None ->
                   if not (State.unify state self_type receiver_type) then
                     State.report_mismatch state
@@ -695,11 +687,7 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
                 {
                   Tables.expression = receiver.id;
                   core_argument_index = 0;
-                  mode =
-                    (match signature.receiver with
-                    | Some (Mut, _) -> Mut
-                    | Some (Own, _) -> Own
-                    | _ -> Read);
+                  mode = (match signature.receiver with Some (mode, _) -> mode | None -> Read);
                 }
               in
               Name_lookup.finish_call state env value method_path
@@ -757,7 +745,8 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                 {
                   Tables.expression = receiver.id;
                   core_argument_index = 0;
-                  mode = (match method_.method_receiver with Mut -> Mut | Own -> Own | _ -> Read);
+                  mode =
+                    (match method_.method_receiver with Instance mode -> mode | Static -> Read);
                 }
               in
               state.tables.calls.(value.id) <-

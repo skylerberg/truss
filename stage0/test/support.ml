@@ -253,11 +253,36 @@ let solver =
 
 let prove database file = Database.prove database [ file ]
 
+let c_compiler =
+  lazy
+    (match C_compiler.find ~objects:(Cache.make_objects_directory (Workspace.open_cache ())) with
+    | Ok c_compiler -> c_compiler
+    | Error message ->
+        prerr_endline message;
+        exit 1)
+
+let run_template_checks database (file : Path.file) proofs =
+  match Database.list_template_checks proofs with
+  | [] -> []
+  | checks ->
+      let backend =
+        Backend.create
+          (match Database.find_lowered_lookups database [ file.module_.package ] with
+          | Ok lookups -> lookups
+          | Error message -> failwith message)
+          (Lazy.force c_compiler) Development
+      in
+      List.map
+        (fun ({ from_template; literals; clauses } as check : Prover.Obligation.template_check) ->
+          (check, Backend.run_template_check backend ~from_template ~literals ~clauses))
+        checks
+
 let compute_verdicts database file =
-  Prover.decide ~runs:[]
+  let proofs = prove database file in
+  Prover.decide
+    ~runs:(run_template_checks database file proofs)
     (Database.make_proof_lookups database)
-    (Lazy.force solver)
-    (Database.list_proofs (prove database file))
+    (Lazy.force solver) (Database.list_proofs proofs)
 
 let list_proof_diagnostics database file =
   Prover.list_diagnostics (compute_verdicts database file) file

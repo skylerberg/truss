@@ -12,13 +12,12 @@ let show_signature (signature : Types.signature) =
     | generics -> "[" ^ String.concat ", " (List.map show_generic generics) ^ "]")
     (String.concat ", "
        ((match signature.receiver with
-          | Some (Read, _) -> [ "self" ]
-          | Some (Mut, _) -> [ "mut self" ]
-          | Some (Own, _) -> [ "own self" ]
-          | _ -> [])
+          | Some (mode, _) -> [ Language.Mode.show_prefix mode ^ "self" ]
+          | None -> [])
        @ List.map
            (fun (parameter : Types.parameter_info) ->
-             Printf.sprintf "%s: %s%s%s" parameter.name (Types.show_mode parameter.mode)
+             Printf.sprintf "%s: %s%s%s" parameter.name
+               (Language.Mode.show_prefix parameter.mode)
                (Types.show parameter.type_)
                (if parameter.has_default then " = ..." else ""))
            signature.parameters))
@@ -219,7 +218,7 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
         if
           (Types.is_well_known Slice impl.for_type || Types.is_well_known String_slice impl.for_type)
           && List.exists
-               (fun (method_ : Types.trait_method) -> method_.method_receiver = Mut)
+               (fun (method_ : Types.trait_method) -> method_.method_receiver = Instance Mut)
                trait.methods
         then
           Checking.report state Mut_self_for_slice state.spans.(trait_path.id)
@@ -242,7 +241,7 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
           Checking.report state Extra_member state.spans.(name.id)
             (Printf.sprintf "`%s` declares no method `%s` with this receiver." shown_trait name.text)
       | Some implemented ->
-          if trait.is_capability && not (receiver = Read || receiver = Mut) then
+          if trait.is_capability && not (receiver = Instance Read || receiver = Instance Mut) then
             Checking.report state Wrong_receiver state.spans.(name.id)
               "A capability's implementation takes `self`, or `mut self` if it mutates its own \
                state."

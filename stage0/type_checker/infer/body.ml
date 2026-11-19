@@ -2,7 +2,7 @@ type checked = {
   form : Core.t;
   tables : Tables.published;
   used_packages : Path.package list;
-  places_without_keyword : (Core.origin * Types.mode) list;
+  places_without_keyword : (Core.origin * Language.Mode.t) list;
   mode_keywords : Core.mode_keyword list;
 }
 
@@ -11,7 +11,7 @@ let no_output : State.env =
     output = None;
     specification = false;
     self = None;
-    self_mode = Types.Read;
+    self_mode = Language.Mode.Read;
     loop_element = None;
     compile_time = false;
     in_quantifier = false;
@@ -72,10 +72,7 @@ let declare_parameters state (written : Syntax.parameter list) (signature : Type
     written
 
 let classify_self_mode (signature : Types.signature) =
-  match signature.receiver with
-  | Some (Mut, _) -> Types.Mut
-  | Some (Own, _) -> Types.Own
-  | _ -> Types.Read
+  match signature.receiver with Some (mode, _) -> mode | None -> Language.Mode.Read
 
 let list_clause_expressions (clauses : Syntax.clause list) =
   List.concat_map
@@ -197,14 +194,8 @@ let build_core_parameters state (written : Syntax.parameter list) (signature : T
       match parameter.kind with
       | Self_parameter _ ->
           Option.map
-            (fun ((receiver : Path.receiver), type_) : Core.parameter ->
-              {
-                local = Self;
-                mode = (match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read);
-                type_;
-                default = None;
-                callback_contract = None;
-              })
+            (fun (mode, type_) : Core.parameter ->
+              { local = Self; mode; type_; default = None; callback_contract = None })
             signature.receiver
       | Named_parameter { name; default; type_; _ } ->
           Option.map
@@ -470,7 +461,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       | Named_parameter { name; type_; _ } ->
                           State.declare state name
                             (Interface.Elaborator.elaborate_type state.context type_)
-                            ~binding:Let ~mode:Types.Read
+                            ~binding:Let ~mode:Language.Mode.Read
                       | _ -> ())
                     law.parameters;
                   List.iter

@@ -1,4 +1,4 @@
-type specification_function = Log | Power | Call_cost of Metric.t | Calls
+type specification_function = Log | Power | Call_cost of Language.Metric.t | Calls
 
 type target =
   | Binding

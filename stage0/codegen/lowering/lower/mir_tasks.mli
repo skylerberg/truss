@@ -1,4 +1,4 @@
-val call_tasks_bool : Lowering.state -> string -> Lowered.place list -> Lowered.operand
+val call_tasks_bool : Lowering.state -> Well_known.method_ -> Lowered.place list -> Lowered.operand
 val with_group : Lowering.state -> (Lowered.place -> unit) -> unit
 val compute_task_function_type : Lowering.state -> Lowered.ty
 

@@ -1,9 +1,9 @@
 type local = int
 
 type local_kind =
-  | Source of { local : Core.local; mode : Types.mode; is_var : bool; is_binding : bool }
+  | Source of { local : Core.local; mode : Language.Mode.t; is_var : bool; is_binding : bool }
   | Temporary
-  | Lent of Types.mode
+  | Lent of Language.Mode.t
 
 type local_info = {
   kind : local_kind;
@@ -25,7 +25,7 @@ and projection =
 
 and operand =
   | Use of { place : place; type_ : Types.ty; origin : Core.origin }
-  | Borrow of { place : place; type_ : Types.ty; mode : Types.mode; origin : Core.origin }
+  | Borrow of { place : place; type_ : Types.ty; mode : Language.Mode.t; origin : Core.origin }
   | Take of { place : place; type_ : Types.ty; origin : Core.origin }
   | Immediate of { value : constant; type_ : Types.ty }
 
@@ -36,7 +36,7 @@ type function_argument =
   | Lambda_expression of { body : int; origin : Core.origin; type_ : Types.ty }
 
 type argument =
-  | Passed of { mode : Types.mode; value : operand; function_ : function_argument option }
+  | Passed of { mode : Language.Mode.t; value : operand; function_ : function_argument option }
   | Default
 
 type call = { callee : callee; arguments : argument list; node : Core.id; origin : Core.origin }
@@ -47,7 +47,7 @@ type yielded =
   | Built of { variant : string option; fields : (string * yielded option) list; type_ : Types.ty }
 
 type provided = {
-  mode : Types.mode;
+  mode : Language.Mode.t;
   value : operand;
   type_ : Types.ty;
   provides : Core.provided list;
@@ -61,8 +61,6 @@ type iteration =
   | Range of { start : operand; stop : operand; inclusive : bool }
   | Pull of { cursor : place; next : callee }
 
-type connective = And | Or | Implies
-
 type rvalue =
   | Operand of operand
   | Operation of {
@@ -70,7 +68,7 @@ type rvalue =
       type_arguments : Types.argument list;
       operands : operand list;
     }
-  | Compare of { comparison : Core.comparison; left : operand; right : operand }
+  | Compare of { comparison : Language.Comparison.t; left : operand; right : operand }
   | Not of operand
   | Construct of {
       variant : string option;
@@ -99,7 +97,7 @@ and choice =
       if_condition : Core.origin option;
     }
   | Cases of case list
-  | Connective of { connective : connective; left : block; right : block }
+  | Connective of { connective : Language.Connective.t; left : block; right : block }
 
 and specification =
   | Result
@@ -111,10 +109,10 @@ and specification =
       arguments : operand list;
       unconverted : Types.ty list;
     }
-  | Method_cost of { metric : Metric.t; method_ : operand Core.target }
+  | Method_cost of { metric : Language.Metric.t; method_ : operand Core.target }
   | Map of (operand * operand) list
   | Quantified of {
-      quantifier : Core.quantifier;
+      quantifier : Language.Quantifier.t;
       range : quantifier_range;
       parameter : local;
       matches : block;
@@ -141,11 +139,11 @@ and formula = {
 and bound = Order_of of formula | At_most of formula | Exactly of formula
 and cost = { origin : Core.origin; amortized : bool; resource : Core.resource; bound : bound }
 and loop_clause = Invariant of formula | Decreases of formula list | Cost of cost
-and quantified = { quantifier : Core.quantifier; decides : local }
+and quantified = { quantifier : Language.Quantifier.t; decides : local }
 
 and loop = {
   clauses : loop_clause list;
-  schedule : Core.loop_mode;
+  schedule : Language.Loop_mode.t;
   origin : Core.origin;
   quantified : quantified option;
 }
@@ -154,9 +152,9 @@ and elements = { element : loop_element; collection : place; count : block }
 
 and loop_element =
   | Lent_by_call of local
-  | Sequence_element of { place : place; mode : Types.mode }
+  | Sequence_element of { place : place; mode : Language.Mode.t }
 
-and compared = { comparison : Core.comparison; left : operand; right : operand }
+and compared = { comparison : Language.Comparison.t; left : operand; right : operand }
 and early_exit = { resumed : block; returned : local option }
 and statement = { kind : statement_kind; origin : Core.origin }
 
@@ -171,7 +169,12 @@ and basic =
   | Echo of operand
   | Provide of { provided : provided list; can_use_tasks : bool }
   | Provide_end
-  | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
+  | Loan_start of {
+      loan : int;
+      borrowed : operand;
+      mode : Language.Mode.t;
+      duration : loan_duration;
+    }
   | Loan_end of int list
   | Ghost_assert of { condition : formula; by_bit_vector : bool }
   | Matched of { patterns : Core.origin list }
@@ -198,7 +201,7 @@ and statement_kind =
     }
   | Fork of { fork : Core.origin; concurrent : bool; branches : block list }
   | Resume of { winner : local; exits : early_exit list }
-  | Yield of { mode : Types.mode; part : yielded }
+  | Yield of { mode : Language.Mode.t; part : yielded }
   | Jump of jump
 
 and jump =
@@ -239,7 +242,13 @@ type requirement = {
 }
 
 type callback = { inputs : Core.local list; requires : formula list }
-type parameter = { local : Core.local; mode : Types.mode; type_ : Types.ty; has_default : bool }
+
+type parameter = {
+  local : Core.local;
+  mode : Language.Mode.t;
+  type_ : Types.ty;
+  has_default : bool;
+}
 
 type contract = {
   parameters : parameter list;

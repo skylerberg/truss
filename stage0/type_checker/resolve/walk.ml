@@ -1,6 +1,6 @@
 module String_map = Map.Make (String)
 
-type specification_function = Log | Power | Call_cost of Metric.t | Calls
+type specification_function = Log | Power | Call_cost of Language.Metric.t | Calls
 
 type target =
   | Binding
@@ -43,7 +43,7 @@ type scope = {
 let cost_bound_functions =
   String_map.of_list
     ([ ("log", Log); ("power", Power); ("calls", Calls) ]
-    @ List.map (fun metric -> (Metric.show metric, Call_cost metric)) Metric.all)
+    @ List.map (fun metric -> (Language.Metric.show metric, Call_cost metric)) Language.Metric.all)
 
 let bind_words scope words =
   {
@@ -241,7 +241,7 @@ let resolve_type_name state scope ?(variants = false) (path : Syntax.path) =
               | None ->
                   report_unknown state path.last ~expected:"a type here"
                     (list_type_candidates state scope
-                    @ if variants then List.map fst Prelude.variants else []))))
+                    @ if variants then List.map Well_known.show_variant Prelude.variants else []))))
 
 let find_target state (name : Syntax.name) = (lookup_current_names state).names.(name.id)
 

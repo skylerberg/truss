@@ -168,7 +168,7 @@ let allocate_flagged_binding state ty ~flag =
   end;
   place
 
-let allocate_parameter state ?(in_scope = true) ?name ~owned (mode : Ground.mode) ty =
+let allocate_parameter state ?(in_scope = true) ?name ~owned (mode : Language.Mode.t) ty =
   let own place = if in_scope && owned && not (is_trivial state ty) then own_in_scope state place in
   match Convention.classify_parameter state.context.env mode ty with
   | None -> (None, allocate_temporary state ty)

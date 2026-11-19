@@ -91,11 +91,7 @@ let walk_expression_children visit (node : Core.expression) =
       visit.callee call.callee
   | Operator { arguments; _ } | Specification_function { arguments; _ } ->
       List.iter visit.expression arguments
-  | Compare { left; right; _ }
-  | And (left, right)
-  | Or (left, right)
-  | Implies (left, right)
-  | Identical (left, right) ->
+  | Compare { left; right; _ } | Connective { left; right; _ } | Identical (left, right) ->
       visit.expression left;
       visit.expression right
   | Not inner | Echo inner | Old inner | To_any { value = inner; _ } -> visit.expression inner
@@ -252,7 +248,7 @@ let is_functional walk =
               if
                 List.exists
                   (function
-                    | Core.Passed { mode = Types.Mut; _ } -> true
+                    | Core.Passed { mode = Language.Mode.Mut; _ } -> true
                     | Core.Passed _ | Core.Default -> false)
                   arguments
               then fine := false;
@@ -312,8 +308,8 @@ let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Ty
          statement =
            (fun node ->
              match node.kind with
-             | Concurrent _ | For { mode = Concurrent_loop; _ } -> usage := Uses_tasks
-             | For { mode = Sequential | Parallel_loop; _ }
+             | Concurrent _ | For { mode = Concurrent; _ } -> usage := Uses_tasks
+             | For { mode = Sequential | Parallel; _ }
              | Let _ | Evaluate _ | Assign _ | Compound_assign _ | While _ | Parallel _ | Proof _
              | Assert _ | Yield _ ->
                  ());

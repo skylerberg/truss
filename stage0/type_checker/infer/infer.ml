@@ -20,7 +20,7 @@ type checked = Body.checked = {
   form : Core.t;
   tables : tables;
   used_packages : Path.package list;
-  places_without_keyword : (Core.origin * Types.mode) list;
+  places_without_keyword : (Core.origin * Language.Mode.t) list;
   mode_keywords : Core.mode_keyword list;
 }
 
@@ -43,7 +43,7 @@ let check_body (lookups : Lookups.t) key =
   check lookups key ~checks_body:true
 
 let derive_form = Derived.derive_form
-let derives = Derived.derives
+let is_derived_method = Derived.is_derived_method
 let show_resolution = Tables.show_resolution
 
 let statement_diverges (tables : tables) =

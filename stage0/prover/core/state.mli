@@ -56,7 +56,7 @@ type passed_place = {
 
 type passed = {
   position : int;
-  mode : Types.mode;
+  mode : Language.Mode.t;
   shape : Invocation.shape;
   origin : Core.origin option;
   passed_place : passed_place option;
@@ -70,7 +70,7 @@ type call_argument =
   | Value_argument of passed
   | Lambda_argument of {
       position : int;
-      mode : Types.mode;
+      mode : Language.Mode.t;
       site : Invocation.site;
       lambda : lambda_code;
     }
@@ -121,7 +121,7 @@ type context = {
   fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
-  mutable lambda_costs : ((Logic.term * Metric.t) * (Logic.term * Obligation.t list)) list;
+  mutable lambda_costs : ((Logic.term * Language.Metric.t) * (Logic.term * Obligation.t list)) list;
   mutable lambda_captures : (Logic.term * Core.local list) list;
   lambda_definitions : Logic.term Tables.Symbol_table.t;
   mutable potentials : Logic.term list;

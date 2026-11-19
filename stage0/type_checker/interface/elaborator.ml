@@ -437,9 +437,9 @@ and elaborate_capabilities context written =
   Types.make_capability_set (List.concat_map (elaborate_capability context) written)
 
 and elaborate_mode = function
-  | None -> Types.Read
-  | Some Syntax.Mut -> Types.Mut
-  | Some Own -> Types.Own
+  | None -> Language.Mode.Read
+  | Some Syntax.Mut -> Language.Mode.Mut
+  | Some Own -> Language.Mode.Own
 
 and elaborate_function_type context (written : Syntax.function_type) :
     (Types.function_type, Diagnostic.reported) Stdlib.result =
@@ -598,7 +598,7 @@ type operand_callee =
 type cost_operand = {
   written : Syntax.expression;
   cost_function : Syntax.name;
-  metric : Metric.t;
+  metric : Language.Metric.t;
   callee : operand_callee;
 }
 
@@ -726,7 +726,9 @@ let find_operand_method (overloads : bound_method list) =
   match overloads with
   | [ only ] -> Some only
   | several -> (
-      match List.filter (fun (method_ : bound_method) -> method_.receiver = Read) several with
+      match
+        List.filter (fun (method_ : bound_method) -> method_.receiver = Instance Read) several
+      with
       | [ read_only ] -> Some read_only
       | _ -> None)
 
@@ -766,10 +768,7 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
   let receiver =
     match written.parameters with
     | { kind = Self_parameter mode; _ } :: _ ->
-        let receiver : Path.receiver =
-          match mode with None -> Read | Some Mut -> Mut | Some Own -> Own
-        in
-        Option.map (fun self -> (receiver, self)) self_type
+        Option.map (fun self -> (elaborate_mode mode, self)) self_type
     | _ -> None
   in
   let parameters =
@@ -1165,7 +1164,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
               let takes_mut_self =
                 match elaborated.receiver with
                 | Some (Mut, _) -> true
-                | Some ((Static | Read | Own), _) | None -> false
+                | Some ((Read | Own), _) | None -> false
               in
               make_elaborated_interface context
                 (Function_interface

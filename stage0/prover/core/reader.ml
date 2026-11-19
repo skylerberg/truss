@@ -294,7 +294,7 @@ let list_mut_provided_places (provided : Mir.provided list) =
   List.filter_map
     (fun (implementation : Mir.provided) ->
       match (implementation.mode, implementation.value) with
-      | Types.Mut, Borrow { place; _ } -> Some place
+      | Language.Mode.Mut, Borrow { place; _ } -> Some place
       | Mut, (Use _ | Take _ | Immediate _) | (Read | Own), _ -> None)
     provided
 
@@ -324,7 +324,8 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
   let note_passed (call : Mir.call) =
     List.iter
       (function
-        | Mir.Passed { mode = Types.Mut; value = Borrow { place; _ } | Use { place; _ }; _ } ->
+        | Mir.Passed { mode = Language.Mode.Mut; value = Borrow { place; _ } | Use { place; _ }; _ }
+          ->
             note place
         | Passed _ | Default -> ())
       call.arguments
@@ -338,7 +339,9 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
     List.iter
       (fun (statement : Mir.statement) ->
         (match statement.kind with
-        | Basic (Assign { target; value = Operand (Borrow { place; mode = Types.Mut; _ }); _ }) ->
+        | Basic
+            (Assign { target; value = Operand (Borrow { place; mode = Language.Mode.Mut; _ }); _ })
+          ->
             note target;
             note place
         | Basic (Assign { target; _ }) | Choose { target; _ } -> note_assigned target
@@ -351,7 +354,7 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
             note_passed call
         | Basic (Provide { provided; _ }) -> List.iter note (list_mut_provided_places provided)
         | For { iteration = Pull { cursor; _ }; _ } -> note cursor
-        | Yield { mode = Types.Mut; part } -> note_lent part
+        | Yield { mode = Language.Mode.Mut; part } -> note_lent part
         | Jump (Cancel { winner; returned; _ }) ->
             note { root = Local winner; projections = [] };
             Option.iter (fun (_, local) -> note { root = Local local; projections = [] }) returned
@@ -438,10 +441,10 @@ let classify_shape run ?function_ (value : Mir.operand) : Invocation.shape =
       | Temporary | Lent _ -> Other)
   | (Some (Lambda_expression _) | None), None -> Other
 
-let find_argument_place context run (mode : Types.mode) (value : Mir.operand) =
+let find_argument_place context run (mode : Language.Mode.t) (value : Mir.operand) =
   match (mode, value) with
-  | Types.Mut, Borrow { place; _ } -> Some (make_passed_place context run place)
-  | Types.Mut, (Use _ | Take _ | Immediate _) | (Types.Read | Types.Own), _ -> None
+  | Mut, Borrow { place; _ } -> Some (make_passed_place context run place)
+  | Mut, (Use _ | Take _ | Immediate _) | (Read | Own), _ -> None
 
 let evaluate_call_values context frame run (invocation : Invocation.t)
     (arguments : Mir.argument list) =
@@ -483,12 +486,12 @@ let evaluate_call_values context frame run (invocation : Invocation.t)
 let read_call context frame run (call : Mir.call) ~result_type =
   let invocation = make_invocation call.callee ~lends:None in
   match (invocation.callee, call.arguments) with
-  | ( Trait_method { trait; name = "equal"; _ },
+  | ( Trait_method { trait; name; receiver; _ },
       [
         Passed { value = tested; _ };
         Passed { value = Borrow { place = { root = Literal { text; _ }; projections = [] }; _ }; _ };
       ] )
-    when Path.equal trait.trait Facts.equal_trait ->
+    when Well_known.is_method Equal_equal (Method { owner = trait.trait; name; receiver }) ->
       let ty = compute_operand_type context frame tested in
       Some
         ( frame,
@@ -514,7 +517,7 @@ let read_call context frame run (call : Mir.call) ~result_type =
         invocation ~through values
 
 let read_lend context (frame : State.frame) run part (call : Mir.call) =
-  let mode = match run.infos.(part).kind with Lent mode -> mode | _ -> Types.Read in
+  let mode = match run.infos.(part).kind with Lent mode -> mode | _ -> Language.Mode.Read in
   let invocation = make_invocation call.callee ~lends:(Some mode) in
   let site : Invocation.site = { origin = call.origin; type_ = run.infos.(part).type_ } in
   let values = evaluate_call_values context frame run invocation call.arguments in
@@ -523,8 +526,8 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
   in
   let lent, write_back =
     match (invocation.lends, invocation.callee) with
-    | Some Types.Mut, Intrinsic _ -> Facts.raise_bug "an intrinsic that lends `mut`"
-    | Some Types.Mut, _ ->
+    | Some Language.Mode.Mut, Intrinsic _ -> Facts.raise_bug "an intrinsic that lends `mut`"
+    | Some Language.Mode.Mut, _ ->
         ( Validity.run_without_costs context (fun () -> lend frame),
           Some
             (fun frame final ->
@@ -647,7 +650,8 @@ let oblige_unreachable context frame location =
     [ Text "This `unreachable` may be reached." ]
     (Logic.Boolean false)
 
-let lend_part context (frame : State.frame) origin (mode : Types.mode) ~handed ~lends ~write_back =
+let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~handed ~lends
+    ~write_back =
   let location = Facts.locate context frame.source origin in
   match (context.yielded_part, context.yield_ensures, frame.yielded_so_far) with
   | Some part_type, Some (each, _), Some before ->
@@ -670,7 +674,7 @@ let lend_part context (frame : State.frame) origin (mode : Types.mode) ~handed ~
       Lambdas.check_valid context frame location part_type handed ~deep:true
         ~when_:"for the part lent here";
       let frame, part_after =
-        if mode = Types.Mut && lends then (
+        if mode = Language.Mode.Mut && lends then (
           let part_after = Facts.arrive context frame "lent" part_type in
           context.lent_back <- (part_type, handed, part_after) :: context.lent_back;
           (write_back frame part_after, part_after))
@@ -1251,7 +1255,7 @@ and read_statement context frame run (statement : Mir.statement) =
         }
       in
       let ended = Loops.run_for_loop context frame for_loop in
-      if loop.schedule = Concurrent_loop then Option.map (wait_for_tasks context) ended else ended
+      if loop.schedule = Concurrent then Option.map (wait_for_tasks context) ended else ended
 
 and wait_for_tasks context frame =
   Operations.spend context frame (fun (counter : Costs.counter) ->

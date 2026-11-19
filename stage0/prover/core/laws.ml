@@ -118,8 +118,6 @@ let assume_laws (context : State.context) frame ~at (trait : Types.trait_referen
       (Interface.Properties.list_bound_closure context.lookups.interface ~self:ty trait)
   end
 
-let template_trait : Path.t = Well_known.make_path From_template
-
 let has_method_cost (context : State.context) (callee : Invocation.callee) (path : Path.t) =
   match (callee, path) with
   | Trait_method { trait; evidence = Bound; _ }, Method { owner; _ }

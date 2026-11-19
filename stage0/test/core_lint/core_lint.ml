@@ -87,9 +87,7 @@ let instantiate context (target : Core.operand Core.target) =
   let of_signature ?(has_receiver = true) substitution (signature : Types.signature) =
     let signature = Types.substitute_signature substitution signature in
     let receiver =
-      match signature.receiver with
-      | Some ((Read | Mut | Own), receiver) when has_receiver -> [ receiver ]
-      | _ -> []
+      match signature.receiver with Some (_, receiver) when has_receiver -> [ receiver ] | _ -> []
     in
     Some
       ( receiver
@@ -463,7 +461,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let task_origins = Hashtbl.create 4 in
   let check_unique_task_origin (node : Core.statement) =
     match node.kind with
-    | Concurrent _ | For { mode = Concurrent_loop; _ } ->
+    | Concurrent _ | For { mode = Concurrent; _ } ->
         if Hashtbl.mem task_origins node.origin then
           report
             "two `concurrent` statements have the origin %d, so an early exit of a task of one \
@@ -495,14 +493,11 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         List.iter (check_argument "an intrinsic's type argument") type_arguments
     | Capability_method _ | Indirect _ -> ()
   in
-  let find_parameters (target : Core.operand Core.target) : (Types.mode * bool) list option =
+  let find_parameters (target : Core.operand Core.target) : (Language.Mode.t * bool) list option =
     let of_signature ~has_receiver (signature : Types.signature) =
       let receiver =
         match signature.receiver with
-        | Some (((Read | Mut | Own) as receiver), _) when has_receiver ->
-            [
-              ((match receiver with Read -> Types.Read | Mut -> Mut | Own | Static -> Own), false);
-            ]
+        | Some (mode, _) when has_receiver -> [ (mode, false) ]
         | _ -> []
       in
       receiver
@@ -545,7 +540,9 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
             match argument with
             | Passed { mode = passed; _ } when passed <> mode ->
                 report "argument %d of a call of `%s` has the mode `%s`, and its parameter `%s`"
-                  position callee (Types.show_mode passed) (Types.show_mode mode)
+                  position callee
+                  (Language.Mode.show_prefix passed)
+                  (Language.Mode.show_prefix mode)
             | Default when not has_default ->
                 report "a call of `%s` omits argument %d, whose parameter has no default" callee
                   position
@@ -615,7 +612,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     | Lent _ -> report "%s mutates a place that is lent read-only" subject
   in
   let yielded = Hashtbl.create 8 in
-  let rec check_yielded_operand (mode : Types.mode) (part : Core.operand) =
+  let rec check_yielded_operand (mode : Language.Mode.t) (part : Core.operand) =
     match part with
     | Place core_place ->
         if mode = Mut then check_mutable_place "a `Yield` with the mode `mut`" core_place
@@ -636,7 +633,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
              | _ -> ());
        })
     form.definition;
-  let rec list_bindings (pattern : Core.pattern) : (Core.local * Types.ty * Types.mode) list =
+  let rec list_bindings (pattern : Core.pattern) : (Core.local * Types.ty * Language.Mode.t) list =
     match pattern.kind with
     | Bind { local; mode; _ } -> [ (local, pattern.type_, mode) ]
     | Variant { fields; _ } | Record fields ->
@@ -648,7 +645,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     check_operand value;
     match value with
     | Value _ ->
-        if List.exists (fun (_, _, mode) -> mode <> Types.Own) (list_bindings pattern) then
+        if List.exists (fun (_, _, mode) -> mode <> Language.Mode.Own) (list_bindings pattern) then
           report "%s on a value binds a name that is not `own`" subject
     | Place _ -> ()
   in

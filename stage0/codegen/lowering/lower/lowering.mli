@@ -105,7 +105,7 @@ val allocate_parameter :
   ?in_scope:bool ->
   ?name:string ->
   owned:bool ->
-  Ground.mode ->
+  Language.Mode.t ->
   Ground.ty ->
   Lowered.local option * Lowered.place
 

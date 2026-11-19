@@ -35,8 +35,13 @@ let make_sequence_type element =
   Types.Named { path = sequence_path; arguments = [ Types.Type element ] }
 
 let make_sequence_length context element term =
-  let path = Path.Method { owner = sequence_path; name = "length"; receiver = Read } in
-  let symbol = Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type element ] } in
+  let symbol =
+    Logic.Symbol.Function
+      {
+        callee = Well_known.make_method_path Sequence_length;
+        type_arguments = [ Types.Type element ];
+      }
+  in
   Facts.declare context
     (Logic.Function (symbol, [ Facts.declare_sort context (make_sequence_type element) ], Logic.Int));
   Logic.Apply (symbol, [ term ])
@@ -49,9 +54,12 @@ let rec index_sequence (context : State.context) element term index =
       ~type_:sequence_path Path.standard_package
   with
   | impl :: _ ->
-      let path = Path.Method { owner = impl; name = "at"; receiver = Read } in
       let symbol =
-        Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type sequence ] }
+        Logic.Symbol.Function
+          {
+            callee = Well_known.make_impl_method_path Index_at ~impl;
+            type_arguments = [ Types.Type sequence ];
+          }
       in
       Facts.declare context
         (Logic.Function
@@ -87,22 +95,17 @@ and rank context ty term =
   | _ -> ());
   Logic.Apply (symbol, [ term ])
 
-let make_finite_function context (ty : Types.ty) name output inputs =
-  match ty with
-  | Types.Named { path; arguments } ->
-      let symbol =
-        Logic.Symbol.Function
-          {
-            callee = Path.Method { owner = path; name; receiver = Read };
-            type_arguments = arguments;
-          }
-      in
-      Facts.declare context
-        (Logic.Function (symbol, Facts.declare_sort context ty :: List.map snd inputs, output));
-      fun term -> Logic.Apply (symbol, term :: List.map fst inputs)
-  | _ -> fun term -> term
-
-let finite_set_path : Path.t = Well_known.make_path Finite_set
+let make_finite_function context method_ ~arguments output inputs =
+  let symbol =
+    Logic.Symbol.Function
+      { callee = Well_known.make_method_path method_; type_arguments = arguments }
+  in
+  let finite =
+    Types.Named { path = Well_known.make_path (Well_known.locate_method method_).owner; arguments }
+  in
+  Facts.declare context
+    (Logic.Function (symbol, Facts.declare_sort context finite :: List.map snd inputs, output));
+  fun term -> Logic.Apply (symbol, term :: List.map fst inputs)
 
 let substitute_value_term context (value : Types.value) =
   match value with
@@ -157,7 +160,7 @@ let find_model_impl (context : State.context) (ty : Types.ty) ~(model : Types.ty
   in
   let value =
     Interface.Impls.normalize interface ~list_bounds
-      (Projection { base = ty; trait = model_trait; name = "Value" })
+      (Projection { base = ty; trait = model_trait; name = Well_known.show_associated Model_value })
   in
   if value = model then
     match
@@ -170,10 +173,12 @@ let find_model_impl (context : State.context) (ty : Types.ty) ~(model : Types.ty
 let compute_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   match find_model_impl context ty ~model with
   | Some impl ->
-      let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
       let symbol =
         Logic.Symbol.Function
-          { callee = path; type_arguments = Facts.list_method_type_arguments ~self_type:ty [] }
+          {
+            callee = Well_known.make_impl_method_path Model_model ~impl;
+            type_arguments = Facts.list_method_type_arguments ~self_type:ty [];
+          }
       in
       Facts.declare context
         (Logic.Function (symbol, [ Facts.declare_sort context ty ], Facts.declare_sort context model));
@@ -208,8 +213,8 @@ let find_model context (ty : Types.ty) term ~element =
     (fun model_of -> model_of term)
     (find_model_function context ty ~model:(make_sequence_type element))
 
-let quantify_over (context : State.context) (frame : State.frame) (quantifier : Core.quantifier)
-    (range : quantified_range) ~bind ~read =
+let quantify_over (context : State.context) (frame : State.frame)
+    (quantifier : Language.Quantifier.t) (range : quantified_range) ~bind ~read =
   let make ?count bound_symbol sort premise body_frame bound_value =
     let mark = context.fresh in
     let body_frame, (after, body_value), with_facts =

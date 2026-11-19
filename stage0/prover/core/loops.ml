@@ -35,7 +35,7 @@ type while_loop = {
   test : State.frame -> (State.frame * Logic.term) option;
   run_body : State.frame -> State.frame list * State.frame list;
   on_failure : State.frame -> State.frame option;
-  measure_operands : (Core.comparison * (State.frame -> Logic.term * Logic.term)) option;
+  measure_operands : (Language.Comparison.t * (State.frame -> Logic.term * Logic.term)) option;
 }
 
 type iterable =
@@ -584,7 +584,6 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
        (exit_ :: left))
 
 let cursor_trait : Path.t = Well_known.make_path Cursor
-let option_path : Path.t = Well_known.make_path Option
 
 let declare_some_parts context frame element =
   let parts =
@@ -684,15 +683,21 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
         (impl, Types.substitute_substitution frame.substitution substitution)
     | _ -> Facts.raise_bug "a cursor's evidence is not an impl"
   in
+  let cursor_next = Well_known.locate_method Cursor_next in
   let contract =
-    match Contracts.find_method_contract context.lookups trait "next" Mut evidence with
+    match
+      Contracts.find_method_contract context.lookups trait cursor_next.name cursor_next.receiver
+        evidence
+    with
     | Some contract -> contract
     | None ->
         Facts.raise_unsupported location "a loop over `%s`, whose `next` the prover cannot read"
           (Types.show cursor_type)
   in
-  let path = Path.Method { owner = impl; name = "next"; receiver = Mut } in
-  let option_type = Types.Named { path = option_path; arguments = [ Types.Type element_type ] } in
+  let path = Well_known.make_impl_method_path Cursor_next ~impl in
+  let option_type =
+    Types.Named { path = Well_known.make_path Option; arguments = [ Types.Type element_type ] }
+  in
   let pulling : Invocation.site = { origin = for_loop.for_at; type_ = option_type } in
   let measures = find_measures clauses in
   if context.terminates && measures = None then
@@ -759,7 +764,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
           [
             {
               position = 0;
-              mode = Types.Mut;
+              mode = Language.Mode.Mut;
               shape = Other;
               origin = None;
               passed_place = Some cursor_access;
@@ -775,11 +780,13 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
                  (Types.Type cursor_type) Types.no_substitution))
           ~type_arguments:[ Types.Type cursor_type ]
       in
-      let has_another =
-        Logic.Is (Facts.make_constructor_symbol option_type (Some "Some"), pulled)
-      in
+      let some_variant = Some (Well_known.show_variant Option_some) in
+      let has_another = Logic.Is (Facts.make_constructor_symbol option_type some_variant, pulled) in
       let element =
-        Logic.Apply (Facts.make_selector_symbol option_type (Some "Some") "value", [ pulled ])
+        Logic.Apply
+          ( Facts.make_selector_symbol option_type some_variant
+              (Well_known.show_field Option_some_value),
+            [ pulled ] )
       in
       (match (find_model head, find_model after) with
       | Some model, Some model_after ->
@@ -950,7 +957,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
         let left, right = Validity.run_without_costs context (fun () -> read_operands at) in
         let distance from into = Logic.subtract into from in
         let through distance = Logic.add distance (Logic.int 1) in
-        match (comparison : Core.comparison) with
+        match (comparison : Language.Comparison.t) with
         | Less -> Some [ distance left right ]
         | Less_equal -> Some [ through (distance left right) ]
         | Greater -> Some [ distance right left ]

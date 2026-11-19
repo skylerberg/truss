@@ -74,7 +74,7 @@ let require_bounds state (span : Source.Definition_span.t) ?of_type generics sub
               with
               | Some trait ->
                   List.exists
-                    (fun (method_ : Types.trait_method) -> method_.method_receiver = Mut)
+                    (fun (method_ : Types.trait_method) -> method_.method_receiver = Instance Mut)
                     trait.methods
               | None -> false
             in

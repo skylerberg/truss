@@ -123,7 +123,7 @@ and show_clause (clause : Syntax.clause) =
 and show_cost { amortized; resource; bound } =
   let resource =
     match resource with
-    | Metric metric -> Metric.show metric
+    | Metric metric -> Language.Metric.show metric
     | Calls (Call_parameter name) -> make_form "calls" [ name.text ]
     | Calls (Call_capability capability) -> make_form "calls" [ show_path_type capability ]
     | Calls (Call_method (capability, name)) ->
@@ -269,8 +269,8 @@ and show_statement (statement : Syntax.statement) =
       make_form
         (match mode with
         | Sequential -> "for"
-        | Parallel_loop -> "parallel-for"
-        | Concurrent_loop -> "concurrent-for")
+        | Parallel -> "parallel-for"
+        | Concurrent -> "concurrent-for")
         ([
            show_pattern bound;
            show_optional (fun type_ -> ": " ^ show_type_expression type_) annotation;

@@ -1,5 +1,3 @@
-type mode = Read | Mut | Own
-
 type ty =
   | Named of { path : Path.t; arguments : argument list }
   | Function of function_type
@@ -7,7 +5,7 @@ type ty =
   | Never
 
 and argument = Type of ty | Value of Z.t
-and function_type = { parameters : (mode * ty) list; result : ty; uses : Path.t list }
+and function_type = { parameters : (Language.Mode.t * ty) list; result : ty; uses : Path.t list }
 
 type instantiation = {
   type_arguments : argument list;

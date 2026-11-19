@@ -30,7 +30,7 @@
   database_tests
   standard_package_loading_tests)
  (libraries
-  metric
+  language
   process
   lock_file
   harness
@@ -73,7 +73,9 @@
   infer
   syntax_walk
   manifest
-  registry)
+  registry
+  backend
+  c_compiler)
  (deps
   served_length/served_length.exe
   (glob_files %{workspace_root}/*.md)
