@@ -1901,10 +1901,13 @@ public trait Add[Right] {
   shifts in zeros. A shift amount is any unsigned integer type, proven
   smaller than the bit width of the value.
 - The traits `FixedWidthInteger`, `SignedInteger`, and `UnsignedInteger` are
-  sealed: only the built-in integer types implement them.
+  sealed: only the built-in integer types implement them. A method that every
+  integer type has is declared in one of them.
 
 ### Floats
 
+- The trait `FloatingPoint` is sealed: only `Float32` and `Float64`
+  implement it. A method that both float types have is declared in it.
 - Float arithmetic follows IEEE 754. NaN and infinity are values, so no
   float operation fails.
 - Float results are the same on every platform. The operations IEEE 754
