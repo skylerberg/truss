@@ -1,0 +1,21 @@
+type Loose(value: Int64)
+
+impl Equal for Loose {
+  fn equal(self, other: Loose) -> Bool
+    ensures result
+  {
+    true
+  }
+}
+
+fn make() -> Loose
+  ensures result == Loose(value: 1)
+{
+  Loose(value: 2)
+}
+
+fn reads_one() -> Bool
+  ensures result
+{
+  make().value == 1
+}

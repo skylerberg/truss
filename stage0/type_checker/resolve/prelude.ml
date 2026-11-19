@@ -46,25 +46,7 @@ let types =
         ([ "specification" ], [ "Sequence"; "FiniteSet"; "FiniteMap"; "Multiset" ]);
         ([ "map" ], [ "Map"; "FromEntries" ]);
         ([ "set" ], [ "Set" ]);
-        ( [ "capabilities" ],
-          [
-            "Console";
-            "FileRead";
-            "FileWrite";
-            "NetworkClient";
-            "NetworkServer";
-            "Handles";
-            "Clock";
-            "Random";
-            "Environment";
-            "Processes";
-            "Signals";
-            "Tasks";
-            "Log";
-            "Panic";
-            "RunForever";
-            "SystemError";
-          ] );
+        (Grant.prelude_capability_module.modules, Grant.prelude_capabilities @ [ "SystemError" ]);
         ([ "time" ], [ "Instant"; "Duration" ]);
         ([ "files" ], [ "Path" ]);
       ]

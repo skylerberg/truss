@@ -1,10 +1,20 @@
 type linkage = External | Internal
 type failure = Echo | Todo
 
+type helper =
+  | Lend
+  | Compare_bytes
+  | Float64_bits
+  | Float32_bits
+  | Float64_from_bits
+  | Float32_from_bits
+
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Emit_c" format
 
 let render_site_symbol (site : Lowered.site) =
   Printf.sprintf "t_Site_%s_%d" (Mangling.mangle_path site.definition) site.offset
+
+let render_capability_symbol capability = "t_Capability_" ^ Mangling.mangle_path capability
 
 let shared_structs =
   "struct t_site {\n\
@@ -18,8 +28,7 @@ let shared_structs =
   \  const struct t_trace *caller;\n\
    };\n\
    struct t_capability {\n\
-  \  const uint8_t *name;\n\
-  \  uint64_t length;\n\
+  \  const uint8_t *capability;\n\
   \  void *evidence;\n\
    };\n"
 
@@ -93,7 +102,7 @@ let runtime_declarations =
       "void t_runtime_echo(const uint8_t *text, uint64_t length, const struct t_site *site);\n";
       "_Noreturn void t_runtime_compiler_bug(void);\n";
       "void *t_runtime_find_capability(const struct t_capability *capabilities, const uint8_t \
-       *name, uint64_t length);\n";
+       *capability);\n";
       "struct t_evidence {\n\
       \  void *implementation;\n\
       \  const void *const *table;\n\
@@ -119,9 +128,17 @@ let runtime_declarations =
       lend_structs;
     ]
 
+let render_helper_name = function
+  | Lend -> "t_lend"
+  | Compare_bytes -> "t_compare_bytes"
+  | Float64_bits -> "t_float64_bits"
+  | Float32_bits -> "t_float32_bits"
+  | Float64_from_bits -> "t_float64_from_bits"
+  | Float32_from_bits -> "t_float32_from_bits"
+
 let helpers =
   [
-    ( "t_lend",
+    ( Lend,
       {|__attribute__((unused)) static inline void *t_lend_allocate(struct t_lend *lend, uint64_t size, uint64_t alignment) {
   uint64_t start = (lend->used + alignment - 1) & ~(alignment - 1);
   if (alignment <= 16 && start + size <= sizeof lend->storage) {
@@ -217,14 +234,14 @@ __attribute__((unused)) static inline void t_lend_transfer(struct t_lend *lend, 
 }
 |}
     );
-    ( "t_compare_bytes",
+    ( Compare_bytes,
       {|static inline int32_t t_compare_bytes(const void *first, const void *second, uint64_t count) {
   int order = __builtin_memcmp(first, second, count);
   return (order > 0) - (order < 0);
 }
 |}
     );
-    ( "t_float64_bits",
+    ( Float64_bits,
       {|static inline uint64_t t_float64_bits(double value) {
   uint64_t bits;
   if (value != value) return 0x7ff8000000000000ULL;
@@ -233,7 +250,7 @@ __attribute__((unused)) static inline void t_lend_transfer(struct t_lend *lend, 
 }
 |}
     );
-    ( "t_float32_bits",
+    ( Float32_bits,
       {|static inline uint32_t t_float32_bits(float value) {
   uint32_t bits;
   if (value != value) return 0x7fc00000U;
@@ -242,7 +259,7 @@ __attribute__((unused)) static inline void t_lend_transfer(struct t_lend *lend, 
 }
 |}
     );
-    ( "t_float64_from_bits",
+    ( Float64_from_bits,
       {|static inline double t_float64_from_bits(uint64_t bits) {
   double value;
   __builtin_memcpy(&value, &bits, 8);
@@ -250,7 +267,7 @@ __attribute__((unused)) static inline void t_lend_transfer(struct t_lend *lend, 
 }
 |}
     );
-    ( "t_float32_from_bits",
+    ( Float32_from_bits,
       {|static inline float t_float32_from_bits(uint32_t bits) {
   float value;
   __builtin_memcpy(&value, &bits, 4);

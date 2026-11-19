@@ -2,6 +2,7 @@
  (name monomorphic)
  (libraries
   storage
+  builtin_records
   compiler_bug
   path
   well_known
@@ -9,5 +10,4 @@
   types
   ground
   memory_layout
-  convention
   zarith))

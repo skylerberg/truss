@@ -10,7 +10,7 @@ type contract_part = {
 }
 
 type lookups = {
-  find_form_origin : Path.t -> (Infer.form_origin * Types.substitution) option;
+  find_form_origin : Path.t -> (Interface.form_origin * Types.substitution) option;
   read_body_part : Resolve.Names.key -> body_part;
   read_contract_part : Resolve.Names.key -> contract_part;
   read_generated_parts : Path.t -> body_part * contract_part;

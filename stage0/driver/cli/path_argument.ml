@@ -22,14 +22,14 @@ let is_visible packages (module_ : Path.module_) visibility =
   List.mem module_.package packages || Resolve.Names.is_public visibility
 
 let is_shown packages (declaration : Resolve.Names.declaration) =
-  is_visible packages declaration.module_ declaration.visibility
+  is_visible packages declaration.key.module_ declaration.visibility
 
 let list_shown_declarations (names : Resolve.Names.lookups) packages =
   List.sort_uniq Path.compare_package
     (packages @ List.concat_map (Resolve.Names.list_transitive_dependencies names) packages)
   |> List.concat_map names.list_package_declarations
   |> List.filter (fun (declaration : Resolve.Names.declaration) ->
-      declaration.ordinal = 0 && is_shown packages declaration)
+      declaration.key.ordinal = 0 && is_shown packages declaration)
 
 let find_module (names : Resolve.Names.lookups) written =
   match names.split_module written with
@@ -79,13 +79,13 @@ let resolve_by_suffix declarations written =
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       let is_named =
-        is_top_named written declaration.path
+        is_top_named written declaration.key.path
         ||
-        match (written, find_member declaration.path) with
+        match (written, find_member declaration.key.path) with
         | [ last ], Some (_, name) -> name = last
         | _ -> false
       in
-      if is_named then Some (Definition declaration.path) else None)
+      if is_named then Some (Definition declaration.key.path) else None)
     declarations
 
 let resolve_members declarations owners member =
@@ -96,9 +96,9 @@ let resolve_members declarations owners member =
   in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
-      match find_member declaration.path with
+      match find_member declaration.key.path with
       | Some (owner, name) when name = member && is_owner owner ->
-          Some (Definition declaration.path)
+          Some (Definition declaration.key.path)
       | Some _ | None -> None)
     declarations
 
@@ -114,7 +114,8 @@ let resolve names packages argument =
         | [] ->
             List.filter_map
               (fun (declaration : Resolve.Names.declaration) ->
-                if is_top_named written declaration.path then Some declaration.path else None)
+                if is_top_named written declaration.key.path then Some declaration.key.path
+                else None)
               (Lazy.force declarations)
         | owners -> owners
       in

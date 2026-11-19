@@ -4,7 +4,7 @@ val make_error_expression : Cursor.t -> int -> Syntax.expression
 val begins_expression : Token.kind -> bool
 val begins_statement : Token.kind -> bool
 val parse_mode : Cursor.t -> Syntax.mode option
-val make_name : Cursor.t -> Token.t -> string -> Syntax.name
+val make_name : Cursor.t -> Token.t -> Syntax.name
 val lower_name : Cursor.t -> string -> Syntax.name
 val parse_upper_name : Cursor.t -> string -> Syntax.name
 val parse_module_prefix : Cursor.t -> Syntax.name list

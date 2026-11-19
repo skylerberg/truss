@@ -1,0 +1,5 @@
+fn f(text: String) -> String {
+  let other = text
+  var held = own other
+  held
+}

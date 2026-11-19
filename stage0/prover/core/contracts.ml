@@ -7,7 +7,7 @@ let read_source_at_key (lookups : Lookups.t) key =
 
 let find_source (lookups : Lookups.t) (path : Path.t) =
   Option.map
-    (fun ((origin : Infer.form_origin), substitution) ->
+    (fun ((origin : Interface.form_origin), substitution) ->
       let source =
         match origin with
         | Written key | Inherited key -> make_source key
@@ -101,13 +101,14 @@ let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
   let is_logic_function =
     match signature with
     | Some (signature : Types.signature) -> (
-        List.for_all
-          (function
-            | Types.Capability_parameter _ -> true
-            | Types.Capability _ | Types.Capability_projection _ | Types.Capability_variable _
-            | Types.Capability_error _ ->
-                false)
-          (signature.uses :> Types.capability list)
+        (not
+           (Types.exists_capability
+              (function
+                | Types.Capability_parameter _ -> false
+                | Types.Capability _ | Types.Capability_projection _ | Types.Capability_variable _
+                | Types.Capability_error _ ->
+                    true)
+              signature.uses))
         && List.for_all
              (fun (info : Types.parameter_info) -> info.mode <> Types.Mut)
              signature.parameters
@@ -165,7 +166,7 @@ let find_method_contract lookups (trait : Types.trait_reference) name receiver
 
 let find_integer_literal (formula : Mir.formula) =
   match formula.value with
-  | { statements = []; value = Some (Constant { value = Integer number; _ }) } -> Some number
+  | { statements = []; value = Some (Immediate { value = Integer number; _ }) } -> Some number
   | _ -> None
 
 let deduplicate_counters counters =
@@ -182,28 +183,3 @@ let find_resource (cost : Mir.cost) ~locals : Costs.resource option =
         (Locals.find_opt (Core_local local) locals)
   | Calls (Capability path) -> Some (Calls (Capability path))
   | Calls (Capability_method (path, name)) -> Some (Calls (Capability_method (path, name)))
-
-let is_updating_helper (lookups : Lookups.t) (path : Path.t) =
-  match path with
-  | Method { receiver = Mut; _ } -> (
-      let names = lookups.interface.names in
-      match
-        Option.map
-          (fun key -> (names.read_declaration key, names.read_definition key))
-          (names.find_key path)
-      with
-      | Some
-          ( { visibility = Private; _ },
-            { kind = Function { signature = { name = Member_name _; _ }; _ }; _ } ) ->
-          true
-      | _ -> false)
-  | _ -> false
-
-let find_comparison_operator (comparison : Core.comparison) =
-  match comparison with
-  | Equal -> Some "="
-  | Less -> Some "<"
-  | Less_equal -> Some "<="
-  | Greater -> Some ">"
-  | Greater_equal -> Some ">="
-  | Not_equal -> None

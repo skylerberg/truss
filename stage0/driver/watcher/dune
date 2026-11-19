@@ -1,6 +1,6 @@
 (library
  (name watcher)
- (libraries unix)
+ (libraries unix file_system)
  (foreign_stubs
   (language c)
   (names watcher_stubs))

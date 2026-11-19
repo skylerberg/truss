@@ -266,9 +266,11 @@ end
 
 type 'span edit = { span : 'span; replacement : string }
 type 'span fix = { title : string; edits : 'span edit list }
+type severity = Error | Warning
 
 type 'span diagnostic = {
   code : Code.t;
+  severity : severity;
   message : string;
   span : 'span;
   notes : ('span * string) list;
@@ -279,6 +281,7 @@ type t = Source.span diagnostic
 type in_definition = Source.Definition_span.t diagnostic
 
 val make :
+  ?severity:severity ->
   ?notes:('span * string) list ->
   ?fixes:'span fix list ->
   code:Code.t ->
@@ -286,11 +289,12 @@ val make :
   string ->
   'span diagnostic
 
+val is_error : _ diagnostic -> bool
 val fix : string -> 'span edit list -> 'span fix
 val replace : 'span -> string -> 'span edit
 val insert : 'span -> string -> 'span edit
 val delete : 'span -> 'span edit
-val find_closest : string -> string list -> string option
+val list_spelling_fixes : 'span -> written:string -> string list -> 'span fix list
 val show_count : int -> string -> string -> string
 
 type reported
@@ -298,7 +302,6 @@ type reported
 val make_reported : _ diagnostic -> reported
 val reported_elsewhere : reported
 val map_spans : ('a -> 'b) -> 'a diagnostic -> 'b diagnostic
-val apply_fix : string -> Source.span fix -> string
 val apply_edits : string -> Source.span edit list -> string
 val list_machine_applicable : t list -> t list
 
@@ -313,12 +316,10 @@ end
 
 val select_shown : t list -> t list
 val render : Source.t -> t -> string
-val to_json : Source.t -> t list -> string
 val to_json_object : Source.t -> t -> string
 val encode_json_string : string -> string
 val quote : string -> string
 
 module For_testing : sig
   val limit : int
-  val is_unused_definition : Code.t -> bool
 end

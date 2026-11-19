@@ -1,6 +1,7 @@
 (executable
  (name digest_compiler)
- (modules digest_compiler))
+ (modules digest_compiler)
+ (libraries file_system))
 
 (rule
  (target compiler_version.ml)

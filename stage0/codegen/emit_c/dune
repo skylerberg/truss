@@ -3,6 +3,7 @@
  (libraries
   structural_key
   storage
+  builtin_records
   compiler_bug
   path
   ground

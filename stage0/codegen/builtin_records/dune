@@ -1,0 +1,3 @@
+(library
+ (name builtin_records)
+ (libraries intrinsic ground memory_layout lowered))

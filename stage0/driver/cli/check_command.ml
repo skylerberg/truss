@@ -81,4 +81,4 @@ let run ~fix:fixing ~proofs =
       Output.eprintf "Fixed %s.\n" (Diagnostic.show_count (List.length fixed) "error" "errors");
     Report.print report
   end;
-  if Report.clean report then 0 else 1
+  if Report.has_errors report then 1 else 0

@@ -75,11 +75,11 @@ and parse_constant_end cursor start : Syntax.range_end =
   let kind =
     match Cursor.peek_kind cursor with
     | Lower _ when modules = [] -> Cursor.fail cursor range_bound
-    | Lower text ->
+    | Lower _ ->
         Syntax.End_constant
-          (Module_constant { modules; last = Atoms.make_name cursor (Cursor.take cursor) text })
-    | Upper text ->
-        let path = { Syntax.modules; last = Atoms.make_name cursor (Cursor.take cursor) text } in
+          (Module_constant { modules; last = Atoms.make_name cursor (Cursor.take cursor) })
+    | Upper _ ->
+        let path = { Syntax.modules; last = Atoms.make_name cursor (Cursor.take cursor) } in
         Cursor.expect_punctuation cursor Dot;
         End_constant (Type_constant (path, Atoms.lower_name cursor "the name of a constant"))
     | _ -> Cursor.fail cursor "a constant"
@@ -105,15 +105,15 @@ and parse_name_pattern cursor start =
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
   | Lower _, Punctuation (Dot_dot | Dot_dot_equal) when modules = [] ->
       Cursor.fail cursor range_bound
-  | Lower text, _ when modules = [] ->
-      make_pattern_node cursor start (Binding (Atoms.make_name cursor (Cursor.take cursor) text))
-  | Lower text, _ ->
+  | Lower _, _ when modules = [] ->
+      make_pattern_node cursor start (Binding (Atoms.make_name cursor (Cursor.take cursor)))
+  | Lower _, _ ->
       let constant =
-        Syntax.Module_constant { modules; last = Atoms.make_name cursor (Cursor.take cursor) text }
+        Syntax.Module_constant { modules; last = Atoms.make_name cursor (Cursor.take cursor) }
       in
       parse_range_or_single cursor start (End_constant constant) (Qualified_constant constant)
-  | Upper text, _ ->
-      let path = { Syntax.modules; last = Atoms.make_name cursor (Cursor.take cursor) text } in
+  | Upper _, _ ->
+      let path = { Syntax.modules; last = Atoms.make_name cursor (Cursor.take cursor) } in
       parse_variant_or_constant cursor start (parse_unqualified_variant cursor start path)
   | String ({ tag = Some _; _ } as literal), _ ->
       let literal = Syntax.Literal_string (parse_string_literal cursor ~start ~modules literal) in
@@ -131,8 +131,8 @@ and parse_unqualified_variant cursor start (path : Syntax.path) =
   in
   let qualifier_start = (Cursor.lookup_token cursor start).span.start in
   match find_last_name None with
-  | Some ({ kind = Upper text; _ } as variant) ->
-      let variant = Atoms.make_name cursor variant text in
+  | Some ({ kind = Upper _; _ } as variant) ->
+      let variant = Atoms.make_name cursor variant in
       Habits.report_qualified_variant cursor ~qualifier_start ~variant;
       { modules = []; last = variant }
   | _ when path.modules <> [] && not (Cursor.is_punctuation cursor Dot) ->
@@ -148,8 +148,8 @@ and parse_pattern_fields cursor =
       | Punctuation Dot_dot, _ ->
           Cursor.advance cursor;
           Syntax.Rest
-      | Lower text, Punctuation Colon ->
-          let name = Atoms.make_name cursor (Cursor.take cursor) text in
+      | Lower _, Punctuation Colon ->
+          let name = Atoms.make_name cursor (Cursor.take cursor) in
           Cursor.advance cursor;
           Named_field (name, parse_pattern cursor)
       | _ -> Field (parse_pattern cursor)

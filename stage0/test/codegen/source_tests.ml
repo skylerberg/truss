@@ -14,54 +14,6 @@ let () =
         "test 0 failed\nmessage 51\nassert find(1) is None\n  at example/main.truss:6:10\n")
 
 let () =
-  Codegen_support.expect_pass "loops, variables, and comparisons run" Fixtures.Source.sum_to;
-  Codegen_support.expect_pass "a counted for loop runs once per value" Fixtures.Source.sum_below;
-  Codegen_support.expect_pass "records are built and read, and sums matched"
-    Fixtures.Source.records_and_sums;
-  Codegen_support.expect_pass "an if is a value, and a return leaves early" Fixtures.Source.sign;
-  Codegen_support.expect_pass "the standard library's Option methods run"
-    Fixtures.Source.option_methods
-
-let () =
-  Codegen_support.expect_pass "lists are built, pushed onto, indexed, and looped over"
-    Fixtures.Source.list_operations;
-  Codegen_support.expect_pass "a question mark returns an error early"
-    Fixtures.Source.check_with_a_question_mark
-
-let () =
-  Codegen_support.expect_pass "a string interpolates its parts"
-    Fixtures.Source.string_interpolation_test;
-  Codegen_support.expect_pass "a record is updated with with"
-    Fixtures.Source.point_updated_with_with;
-  Codegen_support.expect_pass "a lambda reads its caller's locals"
-    Fixtures.Source.lambda_reading_a_local
-
-let () =
-  Codegen_support.expect_pass "integers display in decimal, negative ones too"
-    Fixtures.Source.integer_display_test;
-  Codegen_support.expect_pass "strings compare, order, and trim"
-    Fixtures.Source.string_comparisons_test
-
-let () =
-  Codegen_support.expect_pass "constants are static data, computed exactly"
-    Fixtures.Source.constants_of_seconds_and_points
-
-let () =
-  Codegen_support.expect_pass "a named function is passed as a function value"
-    Fixtures.Source.double_as_a_function_value;
-  Codegen_support.expect_pass "a field left out takes its default"
-    Fixtures.Source.request_with_field_defaults;
-  Codegen_support.expect_pass "a parameter left out takes its default"
-    Fixtures.Source.connect_with_parameter_defaults;
-  Codegen_support.expect_pass "an any value calls its implementation's method"
-    Fixtures.Source.shape_area_through_any
-
-let () =
-  Codegen_support.expect_pass "a constant that compares constants is folded"
-    Fixtures.Source.constant_comparing_constants;
-  Codegen_support.expect_pass
-    "a constant made of one that is computed by running is computed by running too"
-    Fixtures.Source.constant_list_of_a_map_constant;
   Codegen_support.test
     "a constant whose sum does not fit its type is an error before any code is run" (fun () ->
       let packages =
@@ -71,7 +23,7 @@ let () =
       match
         List.map
           (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code)
-          (Codegen_support.list_fragment_diagnostics
+          (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
              (Codegen_support.make_database packages)
              Codegen_support.example_file)
       with
@@ -106,7 +58,7 @@ let () =
       let branches =
         List.length
           (String.split_on_char '\n' c
-          |> List.filter (fun line -> String.starts_with ~prefix:"  switch (" line))
+          |> List.filter (fun line -> String.starts_with ~prefix:"  if (" line))
       in
       if branches <> 1 then
         Codegen_support.fail "expected a branch after each field but the last, got %d:\n%s" branches

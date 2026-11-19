@@ -47,15 +47,27 @@ let () =
   Harness.test "a record pattern cannot fail" (fun () ->
       expect_fine Fixtures.Patterns.let_with_a_record_pattern);
   Harness.test "a constant in a pattern is its value" (fun () ->
-      expect_fine Fixtures.Patterns.constant_arm)
+      expect_fine Fixtures.Patterns.constant_arm);
+  Harness.test "an arm that a binding with a constant's name covers is fixed by the constant's path"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Patterns.arm_after_a_variant_binding_named_like_a_constant
+        "patterns.unreachable_arm"
+        ~says:
+          "`lucky` in an earlier arm binds a variable, which matches every value. To match the \
+           constant, write `app::main::lucky`."
+        ~fixed:Fixtures.Patterns.arm_after_a_variant_binding_named_like_a_constant_fixed);
+  Harness.test "an arm that the constant also covers is deleted" (fun () ->
+      expect_one_diagnostic Fixtures.Patterns.arm_that_the_constant_also_covers
+        "patterns.unreachable_arm" ~fixed:Fixtures.Patterns.arm_that_the_constant_also_covers_fixed);
+  Harness.test "a field bound by its own name is not read as a constant" (fun () ->
+      expect_one_diagnostic Fixtures.Patterns.arm_after_a_field_bound_by_its_name
+        "patterns.unreachable_arm"
+        ~fixed:Fixtures.Patterns.arm_after_a_field_bound_by_its_name_fixed)
 
 let () =
   let list_codes text =
     let packages = Support.setup [ ("app::main", text) ] in
-    (match Support.parse_errors packages (Support.parse_file "app::main") with
-    | [] -> ()
-    | errors -> Harness.fail "the test input does not parse: %s" (String.concat " " errors));
-    Support.list_codes (check packages (Support.parse_file "app::main"))
+    Support.list_codes (Support.run_check ~check packages "app::main")
   in
   let expect text expected =
     match list_codes text with
