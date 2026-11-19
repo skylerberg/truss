@@ -1281,36 +1281,42 @@ and bind_or_match ?matched ?owned builder (pattern : Core.pattern) place ~origin
 and lower_for_loop ?cursor_type ?(elements = ref None) ?matched builder ~origin
     ~(pattern : Core.pattern) ~iteration ~loop ~each =
   let part = Emitter.allocate_local builder Temporary pattern.type_ origin in
-  let binding_count = ref 0 in
+  let bindings = ref None in
   let body =
     Emitter.build_block builder (fun () ->
         Emitter.run_in_loop builder (fun () ->
             each (fun () ->
-                (match iteration with
-                | Tree.Pull { cursor; _ } ->
-                    ignore
-                      (Emitter.start_loan builder
-                         (Borrow
-                            {
-                              place = cursor;
-                              type_ = Option.value ~default:pattern.type_ cursor_type;
-                              mode = Read;
-                              origin;
-                            })
-                         Read Loop_body origin)
-                | Range _ -> ());
-                (match iteration with
-                | Range _ ->
-                    bind_or_match ?matched ~owned:true builder pattern
-                      (Emitter.make_local_place part) ~origin
-                | Pull _ ->
-                    bind_or_match ?matched builder pattern (Emitter.make_local_place part) ~origin);
-                binding_count := List.length (Emitter.emitted builder)));
+                bindings :=
+                  Some
+                    (Emitter.build_block builder (fun () ->
+                         (match iteration with
+                         | Tree.Pull { cursor; _ } ->
+                             ignore
+                               (Emitter.start_loan builder
+                                  (Borrow
+                                     {
+                                       place = cursor;
+                                       type_ = Option.value ~default:pattern.type_ cursor_type;
+                                       mode = Read;
+                                       origin;
+                                     })
+                                  Read Loop_body origin)
+                         | Range _ -> ());
+                         (match iteration with
+                         | Range _ ->
+                             bind_or_match ?matched ~owned:true builder pattern
+                               (Emitter.make_local_place part) ~origin
+                         | Pull _ ->
+                             bind_or_match ?matched builder pattern
+                               (Emitter.make_local_place part) ~origin);
+                         Some Emitter.unit_value))));
         if Emitter.reaches builder then Some Emitter.unit_value else None)
   in
-  let bindings : Tree.block =
-    { statements = List.take !binding_count body.statements; value = None }
-  and body = { body with statements = List.drop !binding_count body.statements } in
+  let bindings =
+    match !bindings with
+    | Some bindings -> bindings
+    | None -> raise_bug "a loop whose iterations bind no part"
+  in
   Emitter.start_group builder origin origin;
   Emitter.emit builder
     (For { loop = loop (); iteration; part; elements = !elements; bindings; body })
