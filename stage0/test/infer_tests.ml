@@ -1661,6 +1661,25 @@ let () =
         "types.signature_mismatch" ~at:("feed", 2))
 
 let () =
+  let declare literal = Printf.sprintf "fn f() {\n  let _: Float64 = %s\n}\n" literal in
+  Harness.test "a float literal far past every float is out of range, whatever its exponent"
+    (fun () ->
+      List.iter
+        (fun literal -> expect_one_diagnostic (declare literal) "types.literal_out_of_range")
+        [
+          "1.8e308";
+          "1e10000000000";
+          "1e999999999999";
+          "1e4611686018427387903";
+          "1e9999999999999999999";
+        ]);
+  Harness.test "a float literal far below every float rounds to zero, whatever its exponent"
+    (fun () ->
+      List.iter
+        (fun literal -> expect_no_diagnostics [ ("app::main", declare literal) ])
+        [ "2e-324"; "1e-99999999999"; "-1e-9999999999999999999" ])
+
+let () =
   Harness.test "the shorthand of with names its value, whatever the name resolves to" (fun () ->
       expect_one_diagnostic Fixtures.Infer.record_update_shorthand_naming_a_function
         "types.mismatch");
