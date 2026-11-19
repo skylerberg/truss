@@ -199,7 +199,7 @@ let walk_parameter visit (parameter : Core.parameter) =
     (fun (contract : Core.callback_contract) -> List.iter visit.expression contract.requires)
     parameter.callback_contract
 
-let walk_definition_children visit = function
+let walk_definition_children visit : Core.definition -> unit = function
   | Core.Function { parameters; contract; body } ->
       List.iter (walk_parameter visit) parameters;
       List.iter
@@ -289,7 +289,7 @@ let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Ty
     | Capability_parameter _ | Capability_projection _ ->
         if !usage = No_tasks then usage := Through_parameter
     | Capability_variable variable ->
-        List.iter mark_used (read_solved variable :> Types.capability list)
+        List.iter mark_used (Types.list_capabilities (read_solved variable))
     | Capability_error _ ->
         Compiler_bug.raise_bug ~stage:"Core_walk" "a core form uses a capability with an error"
   in
@@ -297,7 +297,7 @@ let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Ty
     (make_deep_visitor
        {
          ignore_all with
-         callee = (fun callee -> List.iter mark_used (callee.uses :> Types.capability list));
+         callee = (fun callee -> List.iter mark_used (Types.list_capabilities callee.uses));
          statement =
            (fun node ->
              match node.kind with

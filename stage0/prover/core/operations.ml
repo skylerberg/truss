@@ -1,21 +1,15 @@
-let make_float_operation name left right =
-  Logic.Operation (name, [ Logic.Operation ("RNE", []); left; right ])
+let is_nan value = Logic.Operation (Fp_is_nan, [ value ])
 
-let is_nan value = Logic.Operation ("fp.isNaN", [ value ])
-
-let round_toward_zero value =
-  Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTZ", []); value ])
-
-let make_float_of_integer (exponent, significand) rounding integer =
+let make_float_of_integer (exponent, significand) rounding_mode integer =
   Logic.Operation
-    ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
-      [ Logic.Operation (rounding, []); Logic.Operation ("to_real", [ integer ]) ] )
+    ( To_fp { exponent; significand; rounding_mode = Some rounding_mode },
+      [ Logic.Operation (To_real, [ integer ]) ] )
 
 let make_float_equal left right =
-  Logic.(Operation ("fp.eq", [ left; right ]) ||| (is_nan left &&& is_nan right))
+  Logic.(Operation (Fp_eq, [ left; right ]) ||| (is_nan left &&& is_nan right))
 
 let make_float_less left right =
-  Logic.(not_ (is_nan left) &&& is_nan right ||| Operation ("fp.lt", [ left; right ]))
+  Logic.(not_ (is_nan left) &&& is_nan right ||| Operation (Fp_lt, [ left; right ]))
 
 let compare_terms ty (compared : Core.comparison) left right =
   if Facts.find_float_format ty <> None then
@@ -27,10 +21,13 @@ let compare_terms ty (compared : Core.comparison) left right =
     | Greater -> make_float_less right left
     | Greater_equal -> Logic.( ||| ) (make_float_less right left) (make_float_equal left right)
   else
-    match Contracts.find_comparison_operator compared with
-    | Some _ when compared = Equal -> Logic.equal left right
-    | Some symbol -> Logic.Operation (symbol, [ left; right ])
-    | None -> Logic.not_ (Logic.equal left right)
+    match compared with
+    | Equal -> Logic.equal left right
+    | Not_equal -> Logic.not_ (Logic.equal left right)
+    | Less -> Logic.less left right
+    | Less_equal -> Logic.less_equal left right
+    | Greater -> Logic.greater left right
+    | Greater_equal -> Logic.greater_equal left right
 
 let check_widened location ~is_written actual expected =
   match (actual, expected) with
@@ -92,8 +89,7 @@ let spend (context : State.context) (frame : State.frame) (amount_of : Costs.cou
 
 let declare_unknown_amount context frame (counter : Costs.counter) =
   let amount = Facts.declare_fresh context frame "spent" Logic.Int in
-  Facts.assume context frame
-    (Logic.Operation ("<=", [ Costs.least_amount counter.resource; amount ]));
+  Facts.assume context frame (Logic.less_equal (Costs.least_amount counter.resource) amount);
   amount
 
 let convert_to_any context frame (site : Invocation.site) =
@@ -218,7 +214,7 @@ let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right 
                let selector = Facts.make_selector_symbol ty variant field in
                let left = Logic.Apply (selector, [ left ])
                and right = Logic.Apply (selector, [ right ]) in
-               if Facts.is_structural context field_type then Logic.equal left right
+               if Facts.is_equality_identity context field_type then Logic.equal left right
                else if Facts.find_float_format field_type <> None then make_float_equal left right
                else
                  match find_written_equal context field_type left right with
@@ -254,7 +250,7 @@ let make_derived_equal context (frame : State.frame) (ty : Types.ty) left right 
   equal
 
 let make_equality context frame (ty : Types.ty) left right =
-  if Facts.is_structural context ty then Logic.equal left right
+  if Facts.is_equality_identity context ty then Logic.equal left right
   else if Facts.find_float_format ty <> None then make_float_equal left right
   else
     match find_written_equal context ty left right with
@@ -344,9 +340,9 @@ let translate_arithmetic context (frame : State.frame) (site : Invocation.site) 
   let location = Facts.locate context frame.source site.origin in
   let exact, is_division =
     match operation with
-    | Add -> (Logic.Operation ("+", [ left; right ]), false)
-    | Subtract -> (Logic.Operation ("-", [ left; right ]), false)
-    | Multiply -> (Logic.Operation ("*", [ left; right ]), false)
+    | Add -> (Logic.add left right, false)
+    | Subtract -> (Logic.subtract left right, false)
+    | Multiply -> (Logic.multiply left right, false)
     | Divide -> (Logic.truncated_divide left right, true)
     | Remainder -> (Logic.truncated_remainder left right, true)
     | _ -> Facts.raise_bug "`%s` is not arithmetic" (Intrinsic.show_operation (Scalar operation))
@@ -380,8 +376,8 @@ let translate_arithmetic context (frame : State.frame) (site : Invocation.site) 
           Text (Printf.sprintf "` may overflow `%s`." (Types.show ty));
         ]
         (match operation with
-        | (Add | Multiply) when unsigned -> Logic.Operation ("<=", [ exact; Integer high ])
-        | Subtract when unsigned -> Logic.Operation ("<=", [ Integer low; exact ])
+        | (Add | Multiply) when unsigned -> Logic.less_equal exact (Integer high)
+        | Subtract when unsigned -> Logic.less_equal (Integer low) exact
         | _ -> Facts.make_in_range ty exact)
   | None -> ());
   exact
@@ -389,10 +385,10 @@ let translate_arithmetic context (frame : State.frame) (site : Invocation.site) 
 let make_float_fits source target value =
   match (Facts.find_float_format source, Facts.find_bounds target) with
   | Some format, Some (low, high) ->
-      let cut = round_toward_zero value in
+      let cut = Logic.Operation (Fp_round_to_integral Toward_zero, [ value ]) in
       Logic.(
-        Operation ("fp.leq", [ make_float_of_integer format "RTP" (Integer low); cut ])
-        &&& Operation ("fp.leq", [ cut; make_float_of_integer format "RTN" (Integer high) ]))
+        Operation (Fp_leq, [ make_float_of_integer format Toward_positive (Integer low); cut ])
+        &&& Operation (Fp_leq, [ cut; make_float_of_integer format Toward_negative (Integer high) ]))
   | _ ->
       Facts.raise_bug "a float check from `%s` to `%s` needs a float source and a bounded target"
         (Types.show source) (Types.show target)
@@ -417,29 +413,28 @@ let rec map_each_value context (frame : State.frame) value make =
 
 let make_power_facts base exponent =
   let power exponent = Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ]) in
-  let previous = Logic.Operation ("-", [ exponent; Logic.int 1 ]) in
+  let previous = Logic.subtract exponent (Logic.int 1) in
   ( Logic.
       [
         equal exponent (int 0) ==> equal (power exponent) (int 1);
-        Operation (">=", [ base; int 1 ])
-        &&& Operation (">=", [ exponent; int 0 ])
-        ==> Operation (">=", [ power exponent; int 1 ]);
-        Operation (">=", [ base; int 2 ])
-        &&& Operation (">=", [ exponent; int 0 ])
-        ==> Operation (">", [ power exponent; exponent ]);
+        greater_equal base (int 1)
+        &&& greater_equal exponent (int 0)
+        ==> greater_equal (power exponent) (int 1);
+        greater_equal base (int 2)
+        &&& greater_equal exponent (int 0)
+        ==> greater (power exponent) exponent;
       ],
     ( Logic.(
-        Operation (">=", [ exponent; int 1 ])
-        ==> equal (power exponent) (Operation ("*", [ base; power previous ]))),
+        greater_equal exponent (int 1) ==> equal (power exponent) (multiply base (power previous))),
       previous ) )
 
 let make_power_order base left right =
   let power exponent = Logic.Apply (Logic.Symbol.Cost_power, [ base; exponent ]) in
   Logic.(
-    Operation (">=", [ base; int 1 ])
-    ==> (Operation ("<=", [ left; right ])
-        ==> Operation ("<=", [ power left; power right ])
-        &&& (Operation ("<=", [ right; left ]) ==> Operation ("<=", [ power right; power left ]))))
+    greater_equal base (int 1)
+    ==> (less_equal left right
+        ==> less_equal (power left) (power right)
+        &&& (less_equal right left ==> less_equal (power right) (power left))))
 
 let declare_power context frame base exponent =
   Facts.declare context
@@ -488,26 +483,30 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
   let is_float = match types with ty :: _ -> Facts.find_float_format ty <> None | [] -> false in
   let exact operation left right =
     match (operation : Intrinsic.scalar) with
-    | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
-    | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
-    | Wrapping_multiply | Multiply_overflows -> Logic.Operation ("*", [ left; right ])
+    | Wrapping_add | Add_overflows -> Logic.add left right
+    | Wrapping_subtract | Subtract_overflows -> Logic.subtract left right
+    | Wrapping_multiply | Multiply_overflows -> Logic.multiply left right
     | _ ->
         Facts.raise_bug "`%s` has no exact integer result"
           (Intrinsic.show_operation (Scalar operation))
   in
   match (operation, types, operands) with
-  | Add, _ :: _, [ left; right ] when is_float -> make_float_operation "fp.add" left right
-  | Subtract, _ :: _, [ left; right ] when is_float -> make_float_operation "fp.sub" left right
-  | Multiply, _ :: _, [ left; right ] when is_float -> make_float_operation "fp.mul" left right
-  | Divide, _ :: _, [ left; right ] when is_float -> make_float_operation "fp.div" left right
-  | Negate, _ :: _, [ value ] when is_float -> Logic.Operation ("fp.neg", [ value ])
+  | Add, _ :: _, [ left; right ] when is_float ->
+      Logic.Operation (Fp_add Nearest_ties_to_even, [ left; right ])
+  | Subtract, _ :: _, [ left; right ] when is_float ->
+      Logic.Operation (Fp_sub Nearest_ties_to_even, [ left; right ])
+  | Multiply, _ :: _, [ left; right ] when is_float ->
+      Logic.Operation (Fp_mul Nearest_ties_to_even, [ left; right ])
+  | Divide, _ :: _, [ left; right ] when is_float ->
+      Logic.Operation (Fp_div Nearest_ties_to_even, [ left; right ])
+  | Negate, _ :: _, [ value ] when is_float -> Logic.Operation (Fp_neg, [ value ])
   | (Add | Subtract | Multiply | Divide | Remainder), ty :: _, [ left; right ] when not is_float ->
       let result = translate_arithmetic context frame site ty operation left right in
       if Facts.find_bounds ty <> None then
         Facts.assume context frame (Facts.make_in_range ty result);
       result
   | Negate, ty :: _, [ inner ] when not is_float ->
-      let negated = Logic.Operation ("-", [ inner ]) in
+      let negated = Logic.negate inner in
       if Facts.find_bounds ty <> None then
         Facts.oblige context frame Overflow location
           ~fixes:(make_negation_fix context frame ty inner)
@@ -528,7 +527,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
             match find_argument 1 with
             | Some amount ->
                 ( Facts.locate context frame.source amount,
-                  [ State.Text "The shift amount `"; Facts.quote source amount; Text "`" ],
+                  [ Obligation.Text "The shift amount `"; Facts.quote source amount; Text "`" ],
                   match find_parameter_spelling context frame right with
                   | Some text ->
                       Facts.add_requires context frame [ Text (Printf.sprintf "%s < %d" text bits) ]
@@ -540,7 +539,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
           in
           Facts.oblige context frame Shift at_amount ~fixes
             (text @ [ Text (Printf.sprintf " may not be less than %d." bits) ])
-            Logic.(Operation ("<", [ right; int bits ]))
+            Logic.(less right (int bits))
       | None -> Facts.raise_unsupported location "a shift of `%s`" (Types.show ty));
       let shifted = declare_opaque_operation context frame ty operation [ left; right ] in
       (match (Facts.find_bounds ty, find_width ty) with
@@ -549,16 +548,16 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
           let scale = declare_power context frame (Logic.int 2) right in
           Facts.assume context frame
             Logic.(
-              Operation ("<=", [ int 0; right ])
-              &&& Operation ("<", [ right; int bits ])
-              ==> (Operation ("<=", [ int 1; scale ])
-                  &&& Operation ("<=", [ scale; Integer (Z.shift_left Z.one (bits - 1)) ])));
+              less_equal (int 0) right
+              &&& less right (int bits)
+              ==> (less_equal (int 1) scale
+                  &&& less_equal scale (Integer (Z.shift_left Z.one (bits - 1)))));
           Facts.assume context frame
             (match operation with
             | Shift_left ->
                 Logic.(
-                  Operation ("<=", [ Operation ("*", [ left; scale ]); Integer high ])
-                  ==> equal shifted (Operation ("*", [ left; scale ])))
+                  less_equal (multiply left scale) (Integer high)
+                  ==> equal shifted (multiply left scale))
             | _ -> Logic.equal shifted (Logic.truncated_divide left scale))
       | _ -> ());
       shifted
@@ -568,58 +567,50 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
       | Some (low, _) when Z.sign low < 0 && operation = Bit_and ->
           let masked_by operand =
             Logic.(
-              Operation ("<=", [ int 0; operand ])
-              ==> (Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; operand ])))
+              less_equal (int 0) operand ==> (less_equal (int 0) term &&& less_equal term operand))
           in
           Facts.assume context frame Logic.(masked_by left &&& masked_by right)
       | Some (low, _) when Z.equal low Z.zero -> (
-          let at_most bound = Logic.Operation ("<=", [ term; bound ]) in
+          let at_most bound = Logic.less_equal term bound in
           match operation with
           | Bit_and -> Facts.assume context frame Logic.(at_most left &&& at_most right)
           | _ ->
-              let sum = Logic.Operation ("+", [ left; right ]) in
+              let sum = Logic.add left right in
               if operation = Bit_or then
-                Facts.assume context frame
-                  Logic.(Operation ("<=", [ left; term ]) &&& Operation ("<=", [ right; term ]));
+                Facts.assume context frame Logic.(less_equal left term &&& less_equal right term);
               Facts.assume context frame (at_most sum);
               Facts.declare context
                 (Logic.Function (Logic.Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
               let exponent = Logic.Symbol (Facts.make_variable "exponent") in
               let below value =
-                Logic.Operation
-                  ("<", [ value; Logic.Apply (Logic.Symbol.Cost_power, [ Logic.int 2; exponent ]) ])
+                Logic.less value (Logic.Apply (Logic.Symbol.Cost_power, [ Logic.int 2; exponent ]))
               in
               Facts.assume context frame
                 (Logic.forall
                    ( [ (Facts.make_variable "exponent", Logic.Int) ],
                      Logic.(
-                       Operation ("<=", [ int 0; exponent ])
-                       &&& below left &&& below right ==> below term) )))
+                       less_equal (int 0) exponent &&& below left &&& below right ==> below term) ))
+          )
       | _ -> ());
       term
   | (Wrapping_add | Wrapping_subtract | Wrapping_multiply), ty :: _, [ left; right ]
     when Facts.find_bounds ty <> None ->
       let low, high = Option.get (Facts.find_bounds ty) in
       let modulus = Z.succ (Z.sub high low) in
-      Logic.Operation
-        ( "+",
-          [
-            Logic.Integer low;
-            Logic.Operation
-              ( "mod",
-                [
-                  Logic.Operation ("-", [ exact operation left right; Logic.Integer low ]);
-                  Logic.Integer modulus;
-                ] );
-          ] )
+      Logic.add (Logic.Integer low)
+        (Logic.Operation
+           ( Mod,
+             [
+               Logic.subtract (exact operation left right) (Logic.Integer low);
+               Logic.Integer modulus;
+             ] ))
   | (Add_overflows | Subtract_overflows | Multiply_overflows), ty :: _, [ left; right ]
     when Facts.find_bounds ty <> None ->
       Logic.not_ (Facts.make_in_range ty (exact operation left right))
   | Equal, _ :: _, [ left; right ] when is_float -> make_float_equal left right
   | Less, _ :: _, [ left; right ] when is_float -> make_float_less left right
   | Equal, ty :: _, [ left; right ] when Facts.find_bounds ty <> None -> Logic.equal left right
-  | Less, ty :: _, [ left; right ] when Facts.find_bounds ty <> None ->
-      Logic.Operation ("<", [ left; right ])
+  | Less, ty :: _, [ left; right ] when Facts.find_bounds ty <> None -> Logic.less left right
   | Fits, [ source; target ], [ value ]
     when Facts.find_bounds source <> None && Facts.find_bounds target <> None ->
       Facts.make_in_range target value
@@ -645,8 +636,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
             Logic.Apply (symbol, [ value ])
           in
           let term = count operation value in
-          Facts.assume context frame
-            Logic.(Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; int bits ]));
+          Facts.assume context frame Logic.(less_equal (int 0) term &&& less_equal term (int bits));
           (if Z.equal low Z.zero then
              map_each_value context frame value @@ fun frame value ->
              let leading = count Leading_zeros value
@@ -655,27 +645,25 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
              let power exponent = declare_power context frame (Logic.int 2) exponent in
              let width = Logic.int bits in
              let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
-             let below_highest = Logic.Operation ("-", [ width; leading ]) in
+             let below_highest = Logic.subtract width leading in
              List.iter (Facts.assume context frame)
                Logic.
                  [
-                   Operation ("<=", [ int 0; leading ])
-                   &&& Operation ("<=", [ leading; width ])
-                   &&& Operation ("<=", [ int 0; trailing ])
-                   &&& Operation ("<=", [ trailing; width ])
-                   &&& Operation ("<=", [ int 0; ones ])
-                   &&& Operation ("<=", [ ones; width ]);
+                   less_equal (int 0) leading
+                   &&& less_equal leading width
+                   &&& less_equal (int 0) trailing
+                   &&& less_equal trailing width
+                   &&& less_equal (int 0) ones
+                   &&& less_equal ones width;
                    nonzero
-                   ==> (Operation
-                          ("<=", [ power (Operation ("-", [ int (bits - 1); leading ])); value ])
-                       &&& Operation ("<", [ value; power below_highest ]));
+                   ==> (less_equal (power (subtract (int (bits - 1)) leading)) value
+                       &&& less value (power below_highest));
                    equal (equal ones (int 0)) (equal value (int 0));
-                   nonzero ==> Operation ("<=", [ ones; below_highest ]);
+                   nonzero ==> less_equal ones below_highest;
                    nonzero
-                   &&& equal (Operation ("+", [ value; int 1 ])) (power below_highest)
+                   &&& equal (add value (int 1)) (power below_highest)
                    ==> equal ones below_highest;
-                   nonzero
-                   ==> Operation ("<=", [ Operation ("+", [ trailing; leading ]); int (bits - 1) ]);
+                   nonzero ==> less_equal (add trailing leading) (int (bits - 1));
                    equal value (int 0) ==> (equal trailing width &&& equal leading width);
                  ]);
           term
@@ -685,26 +673,23 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
       | (Ieee_equal | Ieee_less), ty :: _ when Facts.find_float_format ty <> None -> (
           match operands with
           | [ left; right ] ->
-              Logic.Operation
-                ((if operation = Ieee_equal then "fp.eq" else "fp.lt"), [ left; right ])
+              Logic.Operation ((if operation = Ieee_equal then Fp_eq else Fp_lt), [ left; right ])
           | _ -> fallback ())
       | (Square_root | Floor | Ceiling | Truncate | Round_to_even), ty :: _
         when Facts.find_float_format ty <> None -> (
           match operands with
           | [ value ] -> (
               match operation with
-              | Square_root -> Logic.Operation ("fp.sqrt", [ Logic.Operation ("RNE", []); value ])
-              | Floor ->
-                  Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTN", []); value ])
-              | Ceiling ->
-                  Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTP", []); value ])
-              | Truncate -> round_toward_zero value
-              | _ -> Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RNE", []); value ]))
+              | Square_root -> Logic.Operation (Fp_sqrt Nearest_ties_to_even, [ value ])
+              | Floor -> Logic.Operation (Fp_round_to_integral Toward_negative, [ value ])
+              | Ceiling -> Logic.Operation (Fp_round_to_integral Toward_positive, [ value ])
+              | Truncate -> Logic.Operation (Fp_round_to_integral Toward_zero, [ value ])
+              | _ -> Logic.Operation (Fp_round_to_integral Nearest_ties_to_even, [ value ]))
           | _ -> fallback ())
       | Fused_multiply_add, ty :: _ when Facts.find_float_format ty <> None -> (
           match operands with
           | [ value; multiplier; addend ] ->
-              Logic.Operation ("fp.fma", [ Logic.Operation ("RNE", []); value; multiplier; addend ])
+              Logic.Operation (Fp_fma Nearest_ties_to_even, [ value; multiplier; addend ])
           | _ -> fallback ())
       | Is_nan, ty :: _ when Facts.find_float_format ty <> None -> (
           match operands with [ value ] -> is_nan value | _ -> fallback ())
@@ -712,8 +697,8 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
           match (operands, Facts.find_float_format target, find_width bits) with
           | [ value ], Some (exponent, significand), Some width ->
               Logic.Operation
-                ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
-                  [ Logic.Operation (Printf.sprintf "(_ int2bv %d)" width, [ value ]) ] )
+                ( To_fp { exponent; significand; rounding_mode = None },
+                  [ Logic.Operation (Int2bv { width }, [ value ]) ] )
           | _ -> fallback ())
       | To_bits, [ source; bits ] when Facts.find_bounds bits <> None -> (
           match (operands, Facts.find_float_format source, find_width bits) with
@@ -723,9 +708,8 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
                   not_ (is_nan value)
                   ==> equal
                         (Operation
-                           ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
-                             [ Operation (Printf.sprintf "(_ int2bv %d)" width, [ fallback () ]) ]
-                           ))
+                           ( To_fp { exponent; significand; rounding_mode = None },
+                             [ Operation (Int2bv { width }, [ fallback () ]) ] ))
                         value);
               fallback ()
           | _ -> fallback ())
@@ -733,10 +717,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
           match (operands, find_width ty) with
           | [ left; right ], Some bits ->
               Logic.Operation
-                ( "div",
-                  [
-                    Logic.Operation ("*", [ left; right ]); Logic.Integer (Z.shift_left Z.one bits);
-                  ] )
+                (Div, [ Logic.multiply left right; Logic.Integer (Z.shift_left Z.one bits) ])
           | _ -> fallback ())
       | (Rotate_left | Rotate_right | Swap_bytes), ty :: _ when Facts.find_bounds ty <> None ->
           declare_opaque_operation context frame ty operation operands
@@ -761,22 +742,23 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
                   let is_signed = Z.lt low Z.zero in
                   Logic.integer_of_bits ~is_signed ~width
                     (Logic.Operation
-                       ( Printf.sprintf "(_ fp.to_%cbv %d)" (if is_signed then 's' else 'u') width,
-                         [ Logic.Operation ("RTZ", []); value ] ))
+                       ( (if is_signed then Fp_to_sbv { width; rounding_mode = Toward_zero }
+                          else Fp_to_ubv { width; rounding_mode = Toward_zero }),
+                         [ value ] ))
               | _ -> fallback ())
           | _ -> fallback ())
       | Convert, [ source; target ]
         when Facts.find_bounds source <> None && Facts.find_float_format target <> None -> (
           match (operands, Facts.find_float_format target) with
-          | [ value ], Some format -> make_float_of_integer format "RNE" value
+          | [ value ], Some format -> make_float_of_integer format Nearest_ties_to_even value
           | _ -> fallback ())
       | Convert, [ source; target ]
         when Facts.find_float_format source <> None && Facts.find_float_format target <> None -> (
           match (operands, Facts.find_float_format target) with
           | [ value ], Some (exponent, significand) ->
               Logic.Operation
-                ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
-                  [ Logic.Operation ("RNE", []); value ] )
+                ( To_fp { exponent; significand; rounding_mode = Some Nearest_ties_to_even },
+                  [ value ] )
           | _ -> fallback ())
       | Convert, [ _; target ] when Types.is_builtin Character target -> (
           match operands with

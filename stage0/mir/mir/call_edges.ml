@@ -295,7 +295,7 @@ let list_edges (lookups : lookups) instance (code : Tree.t) =
   and add_invariant_check (call : Tree.call) =
     match (call.callee.target, call.arguments) with
     | ( Intrinsic { operation = Runtime Holds_invariant; type_arguments = [ Type checked ] },
-        [ _; Passed { value = Constant { value = Integer index; _ }; _ } ] ) -> (
+        [ _; Passed { value = Immediate { value = Integer index; _ }; _ } ] ) -> (
         match
           (find_head checked, Option.bind (find_head checked) (Parts.read_type_clauses lookups.mir))
         with

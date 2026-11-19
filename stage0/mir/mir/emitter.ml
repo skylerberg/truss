@@ -5,7 +5,6 @@ end))
 let raise_bug format = Compiler_bug.raise_bug ~stage:"MIR" format
 
 type frame = Bindings | Statement | Condition
-type held = { names : Tree.local list; lent_parts : Tree.local list; receiver_loans : int list }
 
 type scope = {
   frame : frame;
@@ -19,7 +18,7 @@ type lowered_condition = {
   value : Tree.operand option;
   ended_if_true : scope;
   ended_if_false : scope;
-  held_if_true : held;
+  block_scope_if_true : scope;
 }
 
 type task_exit = Exit_return of Tree.operand option | Exit_break | Exit_continue
@@ -208,23 +207,18 @@ let end_scope builder scope origin =
     (fun (ended : Tree.statement) -> emit builder ended.kind ended.origin)
     (list_scope_ends scope origin)
 
-let nothing_held = { names = []; lent_parts = []; receiver_loans = [] }
+let make_block_scope ?(provides = false) () =
+  { frame = Bindings; bound = []; loans = []; temporaries = []; provides }
 
-let run_in_scope ?(provides = false) ?(held = nothing_held) builder origin f =
-  let scope =
-    {
-      frame = Bindings;
-      bound = held.names;
-      loans = held.receiver_loans;
-      temporaries = held.lent_parts;
-      provides;
-    }
-  in
+let run_in_block_scope builder scope origin f =
   builder.scopes <- scope :: builder.scopes;
   let result = f () in
   builder.scopes <- List.tl builder.scopes;
   end_scope builder scope origin;
   result
+
+let run_in_scope ?provides builder origin f =
+  run_in_block_scope builder (make_block_scope ?provides ()) origin f
 
 let leave_scopes builder ~depth origin =
   let rec leave scopes count =
@@ -251,14 +245,14 @@ let hold_past_scopes builder origin (value : Tree.operand) =
       let local = allocate_local builder Temporary type_ origin in
       assign builder (make_local_place local) (Operand value) origin;
       Tree.Use { place = make_local_place local; type_; origin }
-  | Constant _ | Borrow _ | Take _ -> value
+  | Immediate _ | Borrow _ | Take _ -> value
 
 let return_from_scopes builder value origin =
   let value = Option.map (hold_past_scopes builder origin) value in
   leave_scopes builder ~depth:0 origin;
   jump builder (Return value) origin
 
-let unit_value = Tree.Constant { value = Unit; type_ = Types.unit }
+let unit_value = Tree.Immediate { value = Unit; type_ = Types.unit }
 
 let group_key : Tree.task -> Core.origin = function
   | Branch { block; _ } -> block
@@ -266,7 +260,7 @@ let group_key : Tree.task -> Core.origin = function
 
 let hold_operand builder (value : Tree.operand) type_ origin =
   match value with
-  | Constant _ | Borrow { mode = Mut; _ } | Take _ -> value
+  | Immediate _ | Borrow { mode = Mut; _ } | Take _ -> value
   | Use { place = { root = Local local; projections = [] }; _ }
     when (Hashtbl.find builder.infos local).kind = Temporary ->
       value
@@ -320,12 +314,18 @@ let run_in_condition_scope ~binds_lent_part builder evaluate =
       value;
       ended_if_true = { scope with temporaries = others; loans = [] };
       ended_if_false = { scope with bound = names };
-      held_if_true = { names; lent_parts; receiver_loans = scope.loans };
+      block_scope_if_true =
+        { (make_block_scope ()) with bound = names; loans = scope.loans; temporaries = lent_parts };
     }
   end
   else
     let value, scope = run_in_condition_frame builder evaluate in
-    { value; ended_if_true = scope; ended_if_false = scope; held_if_true = nothing_held }
+    {
+      value;
+      ended_if_true = scope;
+      ended_if_false = scope;
+      block_scope_if_true = make_block_scope ();
+    }
 
 let run_in_guard_scope builder origin evaluate =
   let value, scope = run_in_condition_frame builder evaluate in
@@ -457,7 +457,7 @@ let start_group builder key origin =
   | Some { winner; exits = _ :: _ } ->
       add_temporary builder winner;
       assign builder (make_local_place winner)
-        (Operand (Constant { value = Integer Z.zero; type_ = Types.make_builtin UInt32 }))
+        (Operand (Immediate { value = Integer Z.zero; type_ = Types.make_builtin UInt32 }))
         origin
   | _ -> ()
 

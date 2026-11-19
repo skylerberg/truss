@@ -1,0 +1,4 @@
+fn f(log: UInt64)
+  cost time O(log(log))
+{
+}

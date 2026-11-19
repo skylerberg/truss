@@ -5,7 +5,7 @@ val translate_function :
   Lookups.t ->
   State.source ->
   path:Path.t ->
-  State.outcome
+  Obligation.outcome
 
 val translate_laws :
   Lookups.t ->
@@ -14,9 +14,9 @@ val translate_laws :
   trait:Types.trait_reference ->
   for_type:Types.ty ->
   proofs:(string * (State.source * Types.substitution)) list ->
-  at:State.location ->
-  State.outcome
+  at:Obligation.location ->
+  Obligation.outcome
 
-val translate_type : Lookups.t -> State.source -> path:Path.t -> State.outcome
-val translate_constant : Lookups.t -> State.source -> path:Path.t -> State.outcome
-val translate_theorem : Lookups.t -> State.source -> path:Path.t -> State.outcome
+val translate_type : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome
+val translate_constant : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome
+val translate_theorem : Lookups.t -> State.source -> path:Path.t -> Obligation.outcome

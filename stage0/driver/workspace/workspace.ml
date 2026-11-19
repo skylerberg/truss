@@ -211,14 +211,6 @@ let find_project_root directory =
   in
   find_upward directory None
 
-let make_relative_to root directory =
-  let directory = try Unix.realpath directory with Unix.Unix_error _ -> directory in
-  if directory = root then ""
-  else
-    let prefix = root ^ "/" in
-    if String.starts_with ~prefix directory then String.drop_first (String.length prefix) directory
-    else ""
-
 let list_packages snapshot =
   List.map
     (fun (directory, (package : Manifest.package)) -> (directory, package.name))
@@ -226,11 +218,11 @@ let list_packages snapshot =
 
 let list_target_packages snapshot requested =
   let packages = list_packages snapshot in
-  let is_under (directory, _) =
-    requested = "" || directory = requested
-    || String.starts_with ~prefix:(requested ^ "/") directory
-  in
-  match List.filter is_under packages with
+  match
+    List.filter
+      (fun (directory, _) -> File_system.is_inside ~directory:requested directory)
+      packages
+  with
   | [] -> (
       match
         Project.find_package_directory
@@ -354,20 +346,14 @@ let build_cold_database snapshot =
   Database.create ~loaded:(extract_package_databases loaded) packages
 
 let database_directory = ".truss"
-let compiler_line = "compiler " ^ Compiler_version.digest
 
-let make_header loaded =
-  compiler_line :: List.map (fun (loaded : loaded) -> "loaded " ^ Blake3.to_hex loaded.key) loaded
-
-let decode_hex hex =
-  if String.length hex mod 2 <> 0 || not (String.for_all Char.Ascii.is_hex_digit hex) then None
-  else
-    let read_byte_at index =
-      Char.chr
-        ((Char.Ascii.hex_digit_to_int hex.[2 * index] * 16)
-        + Char.Ascii.hex_digit_to_int hex.[(2 * index) + 1])
-    in
-    Some (String.init (String.length hex / 2) read_byte_at)
+let encode_header loaded =
+  Cbor.encode
+    (Cbor.Array
+       [
+         Cbor.Text Compiler_version.digest;
+         Cbor.Array (List.map (fun (loaded : loaded) -> Cbor.Bytes loaded.key) loaded);
+       ])
 
 let find_saved_package_database ~(current : loaded list) key =
   match List.find_opt (fun (loaded : loaded) -> loaded.key = key) current with
@@ -381,18 +367,11 @@ let find_saved_package_database ~(current : loaded list) key =
             (Cache.find_result (open_cache ()) ~kind:Package_database ~key))
 
 let find_saved_package_databases segments ~current =
-  match Segments.header segments with
-  | Some (line :: loaded_lines) when line = compiler_line ->
-      List.fold_right
-        (fun line package_databases ->
-          Option.bind package_databases (fun package_databases ->
-              match String.split_on_char ' ' line with
-              | [ "loaded"; hex ] ->
-                  Option.map
-                    (fun package_database -> package_database :: package_databases)
-                    (Option.bind (decode_hex hex) (find_saved_package_database ~current))
-              | _ -> None))
-        loaded_lines (Some [])
+  match Option.bind (Segments.header segments) Cbor.decode with
+  | Some (Cbor.Array [ Cbor.Text compiler; keys ]) when compiler = Compiler_version.digest ->
+      Cbor.find_list
+        (function Cbor.Bytes key -> find_saved_package_database ~current key | _ -> None)
+        keys
   | Some _ | None -> None
 
 let make_text_lookup snapshot =
@@ -440,7 +419,7 @@ let log_bug bug = prerr_endline (Compiler_bug.to_string bug)
 let commit worktree =
   match Database.list_unsaved worktree.database with
   | entries -> (
-      match Segments.commit worktree.segments ~header:(make_header worktree.loaded) entries with
+      match Segments.commit worktree.segments ~header:(encode_header worktree.loaded) entries with
       | () -> Database.mark_saved worktree.database
       | exception ((Unix.Unix_error _ | Sys_error _) as failure) ->
           prerr_endline
@@ -519,21 +498,22 @@ let open_database snapshot =
       | Some _ | None -> copy_database root snapshot)
   | Trial { database; _ } -> Lazy.force database
 
-let is_under prefix path =
-  prefix = "" || path = prefix || String.starts_with ~prefix:(prefix ^ "/") path
-
 let list_changed_files root files paths =
   let prefixes =
     List.filter
-      (fun path -> not (List.exists (fun other -> other <> path && is_under other path) paths))
+      (fun path ->
+        not
+          (List.exists
+             (fun other -> other <> path && File_system.is_inside ~directory:other path)
+             paths))
       (List.sort_uniq compare paths)
   in
   let list_with_prefix prefix =
-    let absolute = if prefix = "" then root else Filename.concat root prefix in
+    let absolute = File_system.join_path root prefix in
     match (Unix.lstat absolute).st_kind with
     | S_DIR ->
         List.map
-          (fun (path, text) -> ((if prefix = "" then path else prefix ^ "/" ^ path), text))
+          (fun (path, text) -> (File_system.join_path prefix path, text))
           (Registry.Content.list_input_files absolute)
     | S_REG when Registry.Content.is_input (Filename.basename prefix) ->
         [ (prefix, File_system.read absolute) ]
@@ -541,7 +521,8 @@ let list_changed_files root files paths =
     | exception Unix.Unix_error _ -> []
   in
   List.filter
-    (fun (path, _) -> not (List.exists (fun prefix -> is_under prefix path) prefixes))
+    (fun (path, _) ->
+      not (List.exists (fun prefix -> File_system.is_inside ~directory:prefix path) prefixes))
     files
   @ List.concat_map list_with_prefix prefixes
 
@@ -611,16 +592,25 @@ let rec load_worktree_snapshot root =
 let take_snapshot directory =
   if not (Sys.file_exists directory) then Error (directory ^ ": no such directory.")
   else
-    match find_project_root directory with
-    | None ->
-        Error
-          (Printf.sprintf "No `truss.toml` in %s or any directory above it, so it is in no project."
-             directory)
-    | Some root ->
-        Result.map
-          (fun snapshot ->
-            (snapshot, list_target_packages snapshot (make_relative_to root directory)))
-          (load_worktree_snapshot root)
+    match Unix.realpath directory with
+    | exception Unix.Unix_error (error, _, _) ->
+        Error (Printf.sprintf "%s: %s." directory (Unix.error_message error))
+    | resolved -> (
+        match find_project_root resolved with
+        | None ->
+            Error
+              (Printf.sprintf
+                 "No `truss.toml` in %s or any directory above it, so it is in no project."
+                 directory)
+        | Some root -> (
+            match File_system.find_relative_path ~root resolved with
+            | Some requested ->
+                Result.map
+                  (fun snapshot -> (snapshot, list_target_packages snapshot requested))
+                  (load_worktree_snapshot root)
+            | None ->
+                Compiler_bug.raise_bug ~stage:"Workspace" "the project root %s does not contain %s"
+                  root resolved))
 
 let retake snapshot =
   match snapshot.kind with Worktree root -> load_worktree_snapshot root | Trial _ -> Ok snapshot
@@ -791,8 +781,10 @@ module For_testing = struct
     match Hashtbl.find_opt worktrees root with
     | Some worktree ->
         Segments.For_testing.interrupt_commit worktree.segments
-          ~header:(make_header worktree.loaded)
+          ~header:(encode_header worktree.loaded)
           (Database.list_unsaved worktree.database);
         close worktree
     | None -> Compiler_bug.raise_bug ~stage:"Workspace" "%s has no open database" root
+
+  let compiler_digest = Compiler_version.digest
 end

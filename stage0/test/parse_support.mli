@@ -2,7 +2,6 @@ val read_document : string -> string
 val make_source : string -> Source.t
 val parse : string -> Syntax.file * Diagnostic.t list
 val list_items : Syntax.file -> Syntax.definition Syntax.item list
-val list_codes : Diagnostic.t list -> string list
 val expect_no_diagnostics : string -> Diagnostic.t list -> unit
 val expect_definitions : string -> string list -> unit
 val expect_definition : string -> string -> unit

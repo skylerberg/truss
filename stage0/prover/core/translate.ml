@@ -71,7 +71,7 @@ let make_context ?node (lookups : Lookups.t) ~home ~current ~terminates ~measure
   context
 
 let make_outcome (context : State.context) =
-  { State.obligations = List.rev context.obligations; holes = List.rev context.holes }
+  { Obligation.obligations = List.rev context.obligations; holes = List.rev context.holes }
 
 let make_empty_frame source =
   {
@@ -147,9 +147,9 @@ let keep_promise context (frame : State.frame) (promise : promise) ~(at : State.
   in
   let goal =
     match promise.counter.counting with
-    | Units -> Costs.at_most spent (Costs.bound amount)
+    | Units -> Logic.less_equal spent (Costs.bound amount)
     | Exactly -> Logic.equal spent amount
-    | At_most -> Costs.at_most spent amount
+    | At_most -> Logic.less_equal spent amount
   in
   let difference, verb =
     match promise.counter.counting with
@@ -657,7 +657,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
                    "The potential of `%s` may be below zero for a value that meets its invariants."
                    (Types.show ty));
             ]
-            (Logic.Operation ("<=", [ Logic.int 0; potential_term ])))
+            (Logic.less_equal (Logic.int 0) potential_term))
         potential
   | None -> ());
   make_outcome context

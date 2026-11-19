@@ -129,19 +129,12 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
                   @@ State.make_error_type state Unknown_variant
                        (State.read_span state variant_name.id)
                        ~fixes:
-                         (match
-                            Diagnostic.find_closest variant_name.text
-                              (List.map
-                                 (fun (variant : Types.variant) -> variant.variant_name)
-                                 variants)
-                          with
-                         | Some candidate ->
-                             [
-                               State.fix
-                                 (Printf.sprintf "Write `%s`." candidate)
-                                 [ State.replace (State.read_span state variant_name.id) candidate ];
-                             ]
-                         | None -> [])
+                         (Diagnostic.list_spelling_fixes
+                            (State.read_span state variant_name.id)
+                            ~written:variant_name.text
+                            (List.map
+                               (fun (variant : Types.variant) -> variant.variant_name)
+                               variants))
                        (Printf.sprintf "`%s` has no variant `%s`." (Types.show type_)
                           variant_name.text))
           | None ->
@@ -244,17 +237,9 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
               check_pattern_with state env inner ~is_var ~mode
               @@ State.make_error_type state Unknown_member (State.read_span state name.id)
                    ~fixes:
-                     (match
-                        Diagnostic.find_closest name.text
-                          (List.map (fun (declared : Types.field) -> declared.field_name) fields)
-                      with
-                     | Some candidate ->
-                         [
-                           State.fix
-                             (Printf.sprintf "Write `%s`." candidate)
-                             [ State.replace (State.read_span state name.id) candidate ];
-                         ]
-                     | None -> [])
+                     (Diagnostic.list_spelling_fixes (State.read_span state name.id)
+                        ~written:name.text
+                        (List.map (fun (declared : Types.field) -> declared.field_name) fields))
                    (Printf.sprintf "There is no field `%s` here." name.text);
               None)
       | Field inner -> (
@@ -304,10 +289,11 @@ and check_constant_pattern (state : State.state) id span path type_ =
       else if not (is_structural state (State.resolve state constant_type)) then
         State.report state Not_structural span
           (Printf.sprintf
-             "A constant in a pattern needs a type with structural equality, so that matching it \
-              and `==` agree, and `%s` does not have it: its equality is hand-written, or it holds \
-              a float, whose `==` treats `-0.0` and `0.0` as equal. Match with a guard instead, as \
-              in `value if value == %s`."
+             "A constant in a pattern needs a type with structural equality, whose `==` compares \
+              contents, because the checks that a `match` covers every case and that every arm is \
+              reachable compare constants by their contents. `%s` does not have it: its equality \
+              is hand-written, or it holds a float, whose `==` treats `-0.0` and `0.0` as equal. \
+              Match with a guard instead, as in `value if value == %s`."
              (State.show state constant_type)
              (match path with
              | Top { name; _ } | Member_constant { name; _ } | Method { name; _ } -> name

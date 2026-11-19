@@ -13,8 +13,23 @@ val make_database : Project.package list -> Database.t
 val extend_standard_library : Project.package list -> Database.t
 val make_names : Project.package list -> Resolve.Names.lookups
 val list_declarations : Project.package list -> Path.module_ -> Resolve.Names.declaration list
-val list_fragment_diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val list_codes : Diagnostic.t list -> string list
+
+val expect_error :
+  list_diagnostics:(string -> Diagnostic.t list) ->
+  ?fixed:string ->
+  ?alternatives:string list ->
+  ?occurrence:int ->
+  string ->
+  code:Diagnostic.Code.t ->
+  at:string ->
+  unit
+
+val run_check :
+  check:(Project.package list -> Path.file -> Diagnostic.t list) ->
+  Project.package list ->
+  string ->
+  Diagnostic.t list
 
 type core_nodes = {
   expressions : Core.expression list;

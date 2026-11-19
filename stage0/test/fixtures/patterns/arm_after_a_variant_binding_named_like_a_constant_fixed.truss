@@ -1,0 +1,9 @@
+let lucky: Int64 = 7
+
+fn f(drawn: Option[Int64]) -> Int64 {
+  match drawn {
+    Some(app::main::lucky) => 2
+    Some(_) => 1
+    None => 0
+  }
+}

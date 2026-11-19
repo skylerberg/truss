@@ -1,4 +1,7 @@
-let check packages = Support.list_fragment_diagnostics (Support.make_database packages)
+let check packages =
+  Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
+    (Support.make_database packages)
+
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
 
@@ -338,13 +341,21 @@ let () =
 let check_package packages = Database.list_file_diagnostics (Support.make_database packages)
 let expect_unused = Support.expect_one_diagnostic ~check:check_package
 
+let expect_severity text (severity : Diagnostic.severity) =
+  match check_package (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main") with
+  | [ diagnostic ] ->
+      if diagnostic.severity <> severity then
+        Harness.fail "the unused definition has the other severity"
+  | found -> Harness.fail "found [%s]" (String.concat "; " (Support.list_codes found))
+
 let expect_used ?(others = []) ?(file = "app::main") text =
   Support.expect_no_diagnostics ~check:check_package ((file, text) :: others)
 
 let () =
-  Harness.test "an internal function that nothing in its package uses is rejected" (fun () ->
+  Harness.test "an internal function that nothing in its package uses is an error" (fun () ->
       expect_unused Fixtures.Package_checks.unused_internal_function "usage.unused_function"
-        ~says:"Nothing in `app` uses the internal function `app::main::double`");
+        ~says:"Nothing in `app` uses the internal function `app::main::double`";
+      expect_severity Fixtures.Package_checks.unused_internal_function Error);
   Harness.test "an internal constant that nothing in its package uses is rejected" (fun () ->
       expect_unused Fixtures.Package_checks.unused_internal_constant "usage.unused_constant");
   Harness.test "an internal function that only calls itself is rejected" (fun () ->
@@ -382,9 +393,10 @@ let () =
   Harness.test "an internal constant named only in a pattern is used" (fun () ->
       expect_used Fixtures.Package_checks.internal_constant_named_only_in_a_pattern
         ~others:[ ("app::limits", Fixtures.Package_checks.internal_limit) ]);
-  Harness.test "a private function that nothing in its package uses is rejected" (fun () ->
+  Harness.test "a private function that nothing in its package uses is a warning" (fun () ->
       expect_unused Fixtures.Package_checks.unused_private_function "usage.unused_function"
-        ~says:"Nothing in `app` uses the private function `app::main::double`");
+        ~says:"Nothing in `app` uses the private function `app::main::double`";
+      expect_severity Fixtures.Package_checks.unused_private_function Warning);
   Harness.test "a private function that a test calls is used" (fun () ->
       expect_used Fixtures.Package_checks.private_function_called_by_a_test);
   Harness.test "the `main` of a package's root module is used" (fun () ->

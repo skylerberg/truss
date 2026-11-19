@@ -1,7 +1,6 @@
 let () =
   Codegen_support.test
     "a passing test's result is kept by its key, and only a changed test runs again" (fun () ->
-      incr Codegen_support.counter;
       let table = Hashtbl.create 4 in
       let results : Backend.results =
         { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
@@ -159,18 +158,11 @@ let () =
   Codegen_support.test
     "a release build stops a function that declares `uses Panic` at an operation that fails"
     (fun () ->
-      let _, backend =
-        Codegen_support.load ~profile:Release Fixtures.Program.operations_that_stop_the_program
+      let program =
+        Codegen_support.build_main ~profile:Release
+          Fixtures.Program.operations_that_stop_the_program
       in
-      let run operation =
-        match
-          Backend.For_testing.run_program backend
-            ~main:(Top { module_ = Codegen_support.example; name = "main" })
-            ~arguments:[ operation ]
-        with
-        | Ok result -> result
-        | Error message -> failwith message
-      in
+      let run operation = Process.run program [ operation ] in
       List.iter
         (fun (operation, failure) ->
           let status, _, errors = run operation in
@@ -379,15 +371,7 @@ let () =
   Codegen_support.test
     "a program finds its terminal, makes it raw, and restores it, or finds it has none" (fun () ->
       let directory = Lazy.force Codegen_support.scratch in
-      let program = Filename.concat directory "terminal-program" in
-      let _, backend = Codegen_support.load Fixtures.Program.raw_terminal in
-      (match
-         Backend.build_program backend
-           ~main:(Top { module_ = Codegen_support.example; name = "main" })
-           ~output:program
-       with
-      | Ok () -> ()
-      | Error message -> failwith message);
+      let program = Codegen_support.build_main Fixtures.Program.raw_terminal in
       let report name =
         let path = Filename.concat directory name in
         (path, fun () -> In_channel.with_open_text path In_channel.input_all)
@@ -650,7 +634,7 @@ let () =
       let _, backend = Codegen_support.load Fixtures.Program.main_using_the_console in
       let fragment =
         Backend.For_testing.compile_fragment backend
-          (Generated (Program_main (Top { module_ = Codegen_support.example; name = "main" })))
+          (Generated (Program_main Codegen_support.example_main))
       in
       let is_console_drop : Lowered.Item.t -> bool = function
         | Drop (Named { path = Top { name = "SystemConsole"; _ }; _ }) -> true
@@ -678,7 +662,7 @@ let () =
             Codegen_support.make_example_package [ (Codegen_support.example_file, text) ]
           in
           if
-            Codegen_support.list_fragment_diagnostics
+            Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
               (Codegen_support.make_database packages)
               Codegen_support.example_file
             = []
@@ -692,8 +676,9 @@ let () =
                   List.filter_map
                     (fun (declaration : Resolve.Names.declaration) ->
                       match
-                        ( declaration.path,
-                          Interface.Definition.find_declared_signature interface declaration.path )
+                        ( declaration.key.path,
+                          Interface.Definition.find_declared_signature interface
+                            declaration.key.path )
                       with
                       | ( Top _,
                           Some
@@ -705,7 +690,10 @@ let () =
                             } ) ->
                           Some
                             (Lowered.Item.Code
-                               { path = declaration.path; instantiation = Ground.no_instantiation })
+                               {
+                                 path = declaration.key.path;
+                                 instantiation = Ground.no_instantiation;
+                               })
                       | _ -> None)
                     ((Database.make_name_lookups checked).list_declarations Codegen_support.example)
                 in
@@ -730,11 +718,11 @@ let () =
 let () =
   Codegen_support.test "a function value whose type uses Panic is called without evidence for Panic"
     (fun () ->
-      let source = Fixtures.Program.function_value_using_panic in
-      (match Codegen_support.run_main source with
+      let program = Codegen_support.build_main Fixtures.Program.function_value_using_panic in
+      (match Process.run program [] with
       | 0, output, _ -> Codegen_support.expect_string ~expected:"counted 1\ndone 3\n" output
       | status, _, errors -> Codegen_support.fail "ended with status %d: %s" status errors);
-      match Codegen_support.run_main ~arguments:[ "a"; "b"; "c"; "d" ] source with
+      match Process.run program [ "a"; "b"; "c"; "d" ] with
       | 101, output, errors ->
           Codegen_support.expect_string ~expected:"counted 5\n" output;
           if not (String.includes ~affix:"many arguments" errors) then
@@ -744,12 +732,8 @@ let () =
 let () =
   Codegen_support.test "a program whose capability method lends is not built yet" (fun () ->
       let _, backend = Codegen_support.load Fixtures.Program.store_lending_its_value in
-      match
-        Backend.For_testing.run_program backend
-          ~main:(Top { module_ = Codegen_support.example; name = "main" })
-          ~arguments:[]
-      with
-      | Ok _ -> Codegen_support.fail "the program ran"
+      match Codegen_support.build_program backend ~main:Codegen_support.example_main with
+      | Ok _ -> Codegen_support.fail "the program was built"
       | Error message ->
           if
             not

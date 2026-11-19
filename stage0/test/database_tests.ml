@@ -1,17 +1,45 @@
-let () =
-  match Sys.argv with
-  | [| _; "__serve"; key |] ->
-      Workspace.serve ~key ~handle:(fun ~report_progress (request : string) ->
-          report_progress "working";
-          String.length request);
-      Unix._exit 0
-  | _ -> ()
+let app : Path.package = { owner = None; name = "app" }
+let make_main_path name = Support.make_top_path "app::main" name
+
+let make_key path : Resolve.Names.key =
+  { module_ = Support.parse_module "app::main"; path; ordinal = 0 }
+
+let make_main_key name = make_key (make_main_path name)
+let make_method owner name receiver : Path.t = Method { owner; name; receiver }
+
+let make_impl_method ?(module_ = "app::main") ~trait ~for_type name receiver =
+  make_method
+    (Impl
+       {
+         module_ = Support.parse_module module_;
+         trait = { path = trait; arguments = []; associated = [] };
+         for_type;
+       })
+    name receiver
+
+let make_code_item name : Lowered.Item.t =
+  Code
+    {
+      path = make_main_path name;
+      instantiation = { type_arguments = []; capability_arguments = [] };
+    }
+
+let make_lowered name : Database.Part.any = Any (Lowered (make_code_item name))
+let make_test_key name : Database.Part.any = Any (Test_key (make_code_item name))
+let show_part part = Database.Part.show (Stored part)
+let show_parts parts = String.concat ", " (List.map show_part parts)
+
+let is_part_of definitions part =
+  match Database.Part.find_definition (Stored part) with
+  | Some path -> List.exists (Path.equal path) definitions
+  | None -> false
 
 let check_text text =
   let database = Support.make_database (Support.setup [ ("app::main", text) ]) in
   (match
      Support.list_codes
-       (Support.list_fragment_diagnostics database (Support.parse_file "app::main"))
+       (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database
+          (Support.parse_file "app::main"))
    with
   | [] -> ()
   | codes -> Harness.fail "the program has diagnostics: %s" (String.concat ", " codes));
@@ -22,24 +50,18 @@ let expect_reads database part ~includes ~excludes =
   List.iter
     (fun read ->
       if not (List.mem read reads) then
-        Harness.fail "%s does not read %s; it reads %s" part read (String.concat ", " reads))
+        Harness.fail "%s does not read %s; it reads %s" (show_part part) (Database.Part.show read)
+          (String.concat ", " (List.map Database.Part.show reads)))
     includes;
-  List.iter (fun read -> if List.mem read reads then Harness.fail "%s reads %s" part read) excludes
-
-let show_lowered name = "lowered app::main::" ^ name
-let test_key name = "test key app::main::" ^ name
+  List.iter
+    (fun read ->
+      if List.mem read reads then
+        Harness.fail "%s reads %s" (show_part part) (Database.Part.show read))
+    excludes
 
 let build ?(roots = []) files =
   let database = Support.make_database (Support.setup files) in
-  List.iter
-    (fun name ->
-      Database.For_testing.add_root database
-        (Code
-           {
-             path = Top { module_ = Support.parse_module "app::main"; name };
-             instantiation = { type_arguments = []; capability_arguments = [] };
-           }))
-    roots;
+  List.iter (fun name -> Database.For_testing.add_root database (make_code_item name)) roots;
   Database.For_testing.propagate database;
   database
 
@@ -64,8 +86,7 @@ let propagate ?roots hot ~before ~after =
   (match Database.For_testing.list_differences hot (build ?roots after) with
   | [] -> ()
   | parts ->
-      Harness.fail "the propagated database differs from a cold build in %s"
-        (String.concat ", " parts));
+      Harness.fail "the propagated database differs from a cold build in %s" (show_parts parts));
   observed
 
 let list_propagated ~before ~after = (propagate (build before) ~before ~after).recomputed
@@ -74,22 +95,22 @@ let list_propagated_with_roots ~roots ~before ~after =
   (propagate ~roots (build ~roots before) ~before ~after).recomputed
 
 let expect_recomputed recomputed ~exactly =
-  if recomputed <> exactly then
-    Harness.fail "recomputed %s, not %s" (String.concat ", " recomputed)
-      (String.concat ", " exactly)
+  if recomputed <> List.sort_uniq compare exactly then
+    Harness.fail "recomputed %s, not %s" (show_parts recomputed) (show_parts exactly)
 
-let expect_untouched recomputed ~names =
+let expect_untouched recomputed ~is_excluded =
   List.iter
     (fun part ->
-      if List.exists (fun name -> String.includes ~affix:name part) names then
-        Harness.fail "recomputed %s; it recomputed %s" part (String.concat ", " recomputed))
+      if is_excluded part then
+        Harness.fail "recomputed %s; it recomputed %s" (show_part part) (show_parts recomputed))
     recomputed
 
 let expect_included recomputed ~parts =
   List.iter
     (fun part ->
       if not (List.mem part recomputed) then
-        Harness.fail "did not recompute %s; it recomputed %s" part (String.concat ", " recomputed))
+        Harness.fail "did not recompute %s; it recomputed %s" (show_part part)
+          (show_parts recomputed))
     parts
 
 let standard = lazy (Workspace.For_testing.load_standard_package_database ())
@@ -108,8 +129,7 @@ let lay_out_again ?(loaded = ([], [])) ~before ~after () =
   in
   (match Database.For_testing.list_differences hot (settle (snd loaded) after) with
   | [] -> ()
-  | parts ->
-      Harness.fail "the relaid database differs from a cold build in %s" (String.concat ", " parts));
+  | parts -> Harness.fail "the relaid database differs from a cold build in %s" (show_parts parts));
   observed.recomputed
 
 let load_package files =
@@ -143,17 +163,11 @@ let reopen log files =
 let expect_cold ?roots database files =
   match Database.For_testing.list_differences database (build ?roots files) with
   | [] -> ()
-  | parts ->
-      Harness.fail "the reopened database differs from a cold build in %s"
-        (String.concat ", " parts)
+  | parts -> Harness.fail "the reopened database differs from a cold build in %s" (show_parts parts)
 
 let remove_rebuilt_on_reopen recomputed =
   List.filter
-    (fun shown ->
-      not
-        (List.exists
-           (fun prefix -> String.starts_with ~prefix shown)
-           [ "namespace "; "recursion group " ]))
+    (function Database.Part.Any (Namespace _ | Recursion_group _) -> false | _ -> true)
     recomputed
 
 let observe_reopen ?roots log files =
@@ -242,18 +256,18 @@ let version_with_a_written_default =
     \  }\n\
      }\n"
 
-let derived_version_default = "derived standard::core::Default for app::main::Version.default"
+let default_trait = Support.make_top_path "standard::core" "Default"
+
+let derived_version_default =
+  make_method (Derived { type_ = make_main_path "Version"; trait = default_trait }) "default" Static
 
 let expect_recursion_group text ~of_:name ~expected =
   let database = build [ ("app::main", text) ] in
-  let group =
-    List.map Path.show
-      ((Database.make_proof_lookups database).list_recursion_group
-         (Support.make_top_path "app::main" name))
-  in
-  if group <> expected then
-    Harness.fail "the recursion group of %s is [%s], not [%s]" name (String.concat "; " group)
-      (String.concat "; " expected)
+  let group = (Database.make_proof_lookups database).list_recursion_group (make_main_path name) in
+  let show_paths paths = String.concat "; " (List.map Path.show paths) in
+  if not (List.equal Path.equal group expected) then
+    Harness.fail "the recursion group of %s is [%s], not [%s]" name (show_paths group)
+      (show_paths expected)
 
 let make_level_source ~height =
   Printf.sprintf
@@ -274,7 +288,10 @@ let make_level_source ~height =
      }\n"
     height
 
-let raised_of_shelf = "app::main::impl app::main::Level for app::main::Shelf.raised"
+let make_shelf_method name =
+  make_impl_method ~trait:(make_main_path "Level") ~for_type:(make_main_path "Shelf") name Read
+
+let raised_of_shelf = make_shelf_method "raised"
 
 let propagate_with_lib ~before ~after =
   let settle files =
@@ -291,8 +308,7 @@ let propagate_with_lib ~before ~after =
   (match Database.For_testing.list_differences hot (settle after) with
   | [] -> ()
   | parts ->
-      Harness.fail "the propagated database differs from a cold build in %s"
-        (String.concat ", " parts));
+      Harness.fail "the propagated database differs from a cold build in %s" (show_parts parts));
   observed.recomputed
 
 let make_level_library ~provided =
@@ -314,7 +330,11 @@ let make_level_library ~provided =
 let level_user =
   "use lib::tools\nfn caller(shelf: tools::Shelf) -> Int64 { tools::measure(shelf) }\n"
 
-let raised_of_library_shelf = "lib::tools::impl lib::tools::Level for lib::tools::Shelf.raised"
+let raised_of_library_shelf =
+  make_impl_method ~module_:"lib::tools"
+    ~trait:(Support.make_top_path "lib::tools" "Level")
+    ~for_type:(Support.make_top_path "lib::tools" "Shelf")
+    "raised" Read
 
 let make_step_library ~follow =
   Printf.sprintf
@@ -336,32 +356,40 @@ let hop_stepping_through_a_library =
   \  }\n\
    }\n"
 
-let step_of_hop = "app::main::impl lib::tools::Step for app::main::Hop.step"
+let step_of_hop =
+  make_impl_method
+    ~trait:(Support.make_top_path "lib::tools" "Step")
+    ~for_type:(make_main_path "Hop") "step" Read
 
-let count_termination_obligations database ~of_:shown =
-  let file = Support.parse_file "app::main" in
-  let declaration =
-    List.find
-      (fun (declaration : Resolve.Names.declaration) -> Path.show declaration.path = shown)
-      ((Database.make_name_lookups database).list_declarations_in file)
-  in
+let count_termination_obligations database ~of_:path =
   match
-    Database.For_testing.find_proof (Support.prove database file)
-      (Resolve.Names.make_key declaration)
+    Database.For_testing.find_proof
+      (Support.prove database (Support.parse_file "app::main"))
+      (make_key path)
   with
   | Some (Value (Obligations outcome)) ->
       List.length
         (List.filter
-           (fun (obligation : Prover.State.obligation) -> obligation.code = Termination)
+           (fun (obligation : Prover.Obligation.t) -> obligation.code = Termination)
            outcome.obligations)
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None ->
-      failwith ("the proof of " ^ shown ^ " makes no obligations")
+      failwith ("the proof of " ^ Path.show path ^ " makes no obligations")
 
 let callee_and_caller =
   "fn callee(x: Int64) -> Int64 { x + 1 }\npublic fn caller() -> Int64 { callee(1) }\n"
 
 let with_helper =
   [ ("app::main", callee_and_caller); ("app::extra", "fn helper() -> Int64 { 1 }\n") ]
+
+let served_length_program =
+  Filename.concat (Filename.dirname Sys.executable_name) "served_length/served_length.exe"
+
+let request_served_length ~key request =
+  match Process.run served_length_program [ key; request ] with
+  | 0, output, _ -> String.split_on_char '\n' (String.trim output)
+  | status, _, errors ->
+      Harness.fail "served_length exited with status %d: %s" status (String.trim errors);
+      []
 
 let () =
   Harness.test "a client whose background process exits without serving gets an error at once"
@@ -396,19 +424,11 @@ let () =
       let cache = Harness.make_scratch_directory "ended-servers-cache" in
       Unix.putenv "TRUSS_CACHE" cache;
       let key = Harness.make_scratch_directory "still-served" in
-      let program = Unix.realpath Sys.executable_name in
-      let measure_served request =
-        match Workspace.For_testing.call_starting ~program ~key ~report_progress:ignore request with
-        | Ok (length : int) -> length
-        | Error message ->
-            Harness.fail "%s" message;
-            -1
-      in
-      let wait_for_first_periodic_work () = ignore (measure_served "two") in
+      let wait_for_first_periodic_work () = ignore (request_served_length ~key "two") in
       Fun.protect
         ~finally:(fun () -> ignore (Workspace.stop_servers ()))
         (fun () ->
-          ignore (measure_served "one");
+          ignore (request_served_length ~key "one");
           wait_for_first_periodic_work ();
           let servers = Filename.concat cache "servers" in
           let list_files () =
@@ -426,75 +446,87 @@ let () =
           if remaining <> running then
             Harness.fail "kept %s, where the running process has %s" (String.concat ", " remaining)
               (String.concat ", " running);
-          if measure_served "three" <> 5 then Harness.fail "the running process stopped answering"));
+          if request_served_length ~key "three" <> [ "progress working"; "length 5" ] then
+            Harness.fail "the running process stopped answering"));
+  Harness.test "a test executable given an argument exits at once instead of running its tests"
+    (fun () ->
+      Unix.putenv "TRUSS_TEST" "a name that no test has";
+      match Process.run Sys.executable_name [ "--help" ] with
+      | 2, output, errors ->
+          if output <> "" then Harness.fail "printed %S" output;
+          if not (String.includes ~affix:"takes no arguments, and was given `--help`" errors) then
+            Harness.fail "reported %S" errors
+      | status, _, _ -> Harness.fail "exited with status %d" status);
   Harness.test "the background process answers each request and sends its progress" (fun () ->
       Unix.putenv "TRUSS_CACHE" (Harness.make_scratch_directory "served-cache");
       let key = Harness.make_scratch_directory "served" in
-      let program = Unix.realpath Sys.executable_name in
-      let progressed = ref false in
-      let measure_served request =
-        match
-          Workspace.For_testing.call_starting ~program ~key
-            ~report_progress:(fun text -> if text = "working" then progressed := true)
-            request
-        with
-        | Ok (length : int) -> length
-        | Error message ->
-            Harness.fail "%s" message;
-            -1
-      in
       Fun.protect
         ~finally:(fun () -> ignore (Workspace.stop_servers ()))
         (fun () ->
-          let lengths = List.map measure_served [ "one"; "three"; "four" ] in
-          if lengths <> [ 3; 5; 4 ] then
-            Harness.fail "answered %s" (String.concat ", " (List.map string_of_int lengths));
-          if not !progressed then Harness.fail "sent no progress"))
+          let answers = List.map (request_served_length ~key) [ "one"; "three"; "four" ] in
+          let expected =
+            List.map
+              (fun length -> [ "progress working"; Printf.sprintf "length %d" length ])
+              [ 3; 5; 4 ]
+          in
+          if answers <> expected then
+            Harness.fail "answered %s" (String.concat "; " (List.map (String.concat ", ") answers))))
 
 let () =
   Harness.test "a caller's checked body reads the callee's interface and not its body" (fun () ->
       expect_reads
         (check_text
            "fn callee(x: Int64) -> Int64 { x + 1 }\npublic fn caller() -> Int64 { callee(1) }\n")
-        "checked body app::main::caller" ~includes:[ "interface app::main::callee" ]
+        (Any (Checked_body (make_main_key "caller")))
+        ~includes:[ Stored (Any (Interface (make_main_key "callee"))) ]
         ~excludes:
           [
-            "checked body app::main::callee";
-            "tree app::main::callee";
-            "resolved body app::main::callee";
+            Stored (Any (Checked_body (make_main_key "callee")));
+            Name (Tree (make_main_key "callee"));
+            Stored (Any (Resolved (make_main_key "callee", Body)));
           ]);
   Harness.test "a contract reads no resolved names of its body" (fun () ->
       expect_reads
         (check_text "fn f(x: Int64) -> Int64 requires x > 0 { x + 1 }\n")
-        "contract app::main::f"
-        ~includes:[ "resolved contract app::main::f" ]
-        ~excludes:[ "resolved body app::main::f" ]);
+        (Any (Contract (make_main_key "f")))
+        ~includes:[ Stored (Any (Resolved (make_main_key "f", Contract))) ]
+        ~excludes:[ Stored (Any (Resolved (make_main_key "f", Body))) ]);
   Harness.test "a checked body reads its callee's signature check" (fun () ->
       expect_reads
         (check_text
            "fn callee(x: Int64) -> Int64 { x + 1 }\npublic fn caller() -> Int64 { callee(1) }\n")
-        "checked body app::main::caller"
-        ~includes:[ "signature check app::main::callee" ]
+        (Any (Checked_body (make_main_key "caller")))
+        ~includes:[ Stored (Any (Signature_check (make_main_key "callee"))) ]
         ~excludes:[]);
   Harness.test "a type's facts read interfaces and type facts, and no signature check" (fun () ->
       expect_reads
         (check_text "type Inner(value: Int64)\ntype Outer(inner: Inner)\n")
-        "type facts app::main::Outer"
-        ~includes:[ "interface app::main::Outer"; "type facts app::main::Inner" ]
-        ~excludes:[ "signature check app::main::Outer"; "signature check app::main::Inner" ]);
+        (Any (Type_facts (make_main_path "Outer")))
+        ~includes:
+          [
+            Stored (Any (Interface (make_main_key "Outer")));
+            Stored (Any (Type_facts (make_main_path "Inner")));
+          ]
+        ~excludes:
+          [
+            Stored (Any (Signature_check (make_main_key "Outer")));
+            Stored (Any (Signature_check (make_main_key "Inner")));
+          ]);
   Harness.test "a caller's checked body and proof read no place or text of the callee" (fun () ->
       let database = check_text callee_and_caller in
       ignore (Database.prove database [ Support.parse_file "app::main" ]);
       List.iter
         (fun part ->
           expect_reads database part ~includes:[]
-            ~excludes:[ "place app::main::callee"; "text app::main::callee" ])
-        [ "checked body app::main::caller"; "proof app::main::caller" ]);
+            ~excludes:
+              [ Name (Place (make_main_key "callee")); Name (Text (make_main_key "callee")) ])
+        [ Any (Checked_body (make_main_key "caller")); Any (Proof (make_main_key "caller")) ]);
   Harness.test "a package check reads no place" (fun () ->
       expect_reads
         (check_text "type Inner(value: Int64)\ntype Outer(inner: Inner)\n")
-        "package check app type app::main::Outer" ~includes:[ "tree app::main::Outer" ]
-        ~excludes:[ "place app::main::Outer"; "place app::main::Inner" ]);
+        (Any (Package_check (app, Type (make_main_key "Outer"))))
+        ~includes:[ Name (Tree (make_main_key "Outer")) ]
+        ~excludes:[ Name (Place (make_main_key "Outer")); Name (Place (make_main_key "Inner")) ]);
   Harness.test "a reformat inside a definition recomputes only that definition's proof" (fun () ->
       expect_recomputed
         (list_propagated
@@ -509,10 +541,10 @@ let () =
              ])
         ~exactly:
           [
-            "import check app/main/main.truss";
-            "namespace app";
-            "parsed app/main/main.truss";
-            "proof app::main::callee";
+            Any (Import_check (Support.parse_file "app::main"));
+            Any (Namespace app);
+            Any (Parsed (Support.parse_file "app::main"));
+            Any (Proof (make_main_key "callee"));
           ]);
   Harness.test "moving a definition to another file of its module recomputes no definition's part"
     (fun () ->
@@ -526,11 +558,11 @@ let () =
              ])
         ~exactly:
           [
-            "import check app/main/main.truss";
-            "import check app/main/other.truss";
-            "namespace app";
-            "parsed app/main/main.truss";
-            "parsed app/main/other.truss";
+            Any (Import_check (Support.parse_file "app::main"));
+            Any (Import_check (Support.parse_file "app::main/other"));
+            Any (Namespace app);
+            Any (Parsed (Support.parse_file "app::main"));
+            Any (Parsed (Support.parse_file "app::main/other"));
           ]);
   Harness.test "an edit to a body recomputes no part of a caller" (fun () ->
       expect_untouched
@@ -542,7 +574,7 @@ let () =
                  "fn callee(x: Int64) -> Int64 { x + 2 }\n\
                   public fn caller() -> Int64 { callee(1) }\n" );
              ])
-        ~names:[ "caller" ]);
+        ~is_excluded:(is_part_of [ make_main_path "caller" ]));
   Harness.test "an edit to a signature recomputes the callers" (fun () ->
       let recomputed =
         list_propagated
@@ -553,8 +585,8 @@ let () =
                 "fn callee(x: Int32) -> Int64 { 1 }\npublic fn caller() -> Int64 { callee(1) }\n" );
             ]
       in
-      if not (List.mem "checked body app::main::caller" recomputed) then
-        Harness.fail "recomputed only %s" (String.concat ", " recomputed));
+      if not (List.mem (Database.Part.Any (Checked_body (make_main_key "caller"))) recomputed) then
+        Harness.fail "recomputed only %s" (show_parts recomputed));
   Harness.test "an edit to an ensures recomputes the callers' proofs and not their checks"
     (fun () ->
       let recomputed =
@@ -567,9 +599,10 @@ let () =
                  public fn caller() -> Int64 { callee(1) }\n" );
             ]
       in
-      if not (List.mem "proof app::main::caller" recomputed) then
-        Harness.fail "recomputed only %s" (String.concat ", " recomputed);
-      expect_untouched recomputed ~names:[ "checked body app::main::caller" ]);
+      if not (List.mem (Database.Part.Any (Proof (make_main_key "caller"))) recomputed) then
+        Harness.fail "recomputed only %s" (show_parts recomputed);
+      expect_untouched recomputed
+        ~is_excluded:(( = ) (Database.Part.Any (Checked_body (make_main_key "caller")))));
   Harness.test "adding the definition that a call names fixes the call" (fun () ->
       ignore
         (list_propagated
@@ -580,23 +613,23 @@ let () =
         (list_propagated
            ~before:[ ("app::main", callee_and_caller) ]
            ~after:[ ("app::main", "public fn caller() -> Int64 { callee(1) }\n") ])
-        ~names:[ "app::main::callee" ]);
+        ~is_excluded:(is_part_of [ make_main_path "callee" ]));
   Harness.test "a field that makes a type not plain recomputes the types that hold it" (fun () ->
       let recomputed =
         list_propagated
           ~before:[ ("app::main", "type Inner(value: Int64)\ntype Outer(inner: Inner)\n") ]
           ~after:[ ("app::main", "type Inner(value: String)\ntype Outer(inner: Inner)\n") ]
       in
-      if not (List.mem "type facts app::main::Outer" recomputed) then
-        Harness.fail "recomputed only %s" (String.concat ", " recomputed));
+      if not (List.mem (Database.Part.Any (Type_facts (make_main_path "Outer"))) recomputed) then
+        Harness.fail "recomputed only %s" (show_parts recomputed));
   Harness.test "a body that compares a type reads its impls and not the impl index" (fun () ->
       expect_reads
         (check_text
            "type Box(value: Int64) derives Equal\n\
             fn same(left: Box, right: Box) -> Bool { left == right }\n")
-        "checked body app::main::same"
-        ~includes:[ "impls of type app app::main::Box" ]
-        ~excludes:[ "impl index app"; "impl index standard" ]);
+        (Any (Checked_body (make_main_key "same")))
+        ~includes:[ Name (Impls_of_type (app, make_main_path "Box")) ]
+        ~excludes:[ Name (Impl_index app); Name (Impl_index Path.standard_package) ]);
   Harness.test
     "a call that closes a cycle recomputes the proofs of the cycle's members and no other"
     (fun () ->
@@ -606,18 +639,21 @@ let () =
       expect_included recomputed
         ~parts:
           [
-            "recursion group app::main::f";
-            "recursion group app::main::g";
-            "proof app::main::f";
-            "proof app::main::g";
+            Any (Recursion_group (make_main_path "f"));
+            Any (Recursion_group (make_main_path "g"));
+            Any (Proof (make_main_key "f"));
+            Any (Proof (make_main_key "g"));
           ];
-      expect_untouched recomputed ~names:[ "app::main::h"; "checked body app::main::f" ]);
+      expect_untouched recomputed ~is_excluded:(fun part ->
+          is_part_of [ make_main_path "h" ] part || part = Any (Checked_body (make_main_key "f"))));
   Harness.test "removing the call that closes a cycle splits its recursion group" (fun () ->
       let recomputed =
         list_propagated ~before:[ ("app::main", cyclic) ] ~after:[ ("app::main", acyclic) ]
       in
-      expect_included recomputed ~parts:[ "proof app::main::f"; "proof app::main::g" ];
-      expect_untouched recomputed ~names:[ "app::main::h"; "checked body app::main::f" ]);
+      expect_included recomputed
+        ~parts:[ Any (Proof (make_main_key "f")); Any (Proof (make_main_key "g")) ];
+      expect_untouched recomputed ~is_excluded:(fun part ->
+          is_part_of [ make_main_path "h" ] part || part = Any (Checked_body (make_main_key "f"))));
   Harness.test
     "an impl that closes a cycle through a trait method recomputes the proofs on the cycle"
     (fun () ->
@@ -625,14 +661,23 @@ let () =
         (list_propagated
            ~before:[ ("app::main", stepper) ]
            ~after:[ ("app::main", stepper_that_runs) ])
-        ~parts:[ "call edges app app::main::Step.step(own self)"; "proof app::main::run" ]);
+        ~parts:
+          [
+            Any (Call_edges (make_method (make_main_path "Step") "step" Own, app));
+            Any (Proof (make_main_key "run"));
+          ]);
   Harness.test "only a trait method's call edges read the dependencies of the calling package"
     (fun () ->
       let database = build [ ("app::main", stepper_that_runs) ] in
-      let dependencies = [ "dependencies app"; "dependencies standard" ] in
-      expect_reads database "call edges app app::main::Step.step(own self)" ~includes:dependencies
-        ~excludes:[];
-      expect_reads database "call edges app app::main::run" ~includes:[] ~excludes:dependencies);
+      let dependencies : Database.Part.t list =
+        [ Input (Dependencies app); Input (Dependencies Path.standard_package) ]
+      in
+      expect_reads database
+        (Any (Call_edges (make_method (make_main_path "Step") "step" Own, app)))
+        ~includes:dependencies ~excludes:[];
+      expect_reads database
+        (Any (Call_edges (make_main_path "run", app)))
+        ~includes:[] ~excludes:dependencies);
   Harness.test
     "a construction that runs a field default that fails adds no call edge to the default's callee"
     (fun () ->
@@ -641,13 +686,15 @@ let () =
           ~before:[ ("app::main", make_configured_source "Config(size: 1)") ]
           ~after:[ ("app::main", make_configured_source "Config()") ]
       in
-      expect_included recomputed ~parts:[ "MIR call edges app::main::make" ];
-      expect_untouched recomputed ~names:[ "recursion group" ]);
+      expect_included recomputed ~parts:[ Any (Mir_call_edges (make_main_path "make")) ];
+      expect_untouched recomputed ~is_excluded:(function
+        | Any (Recursion_group _) -> true
+        | _ -> false));
   Harness.test "a derived method's MIR call edges read its generated MIR" (fun () ->
       expect_reads
         (build [ ("app::main", version_deriving_over_a_key) ])
-        ("MIR call edges " ^ derived_version_default)
-        ~includes:[ "generated mir " ^ derived_version_default ]
+        (Any (Mir_call_edges derived_version_default))
+        ~includes:[ Stored (Any (Generated_mir derived_version_default)) ]
         ~excludes:[]);
   Harness.test "a function that passes a derived impl where a bound needs one has a proof"
     (fun () ->
@@ -655,13 +702,10 @@ let () =
       let file = Support.parse_file "app::main" in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          match
-            Database.For_testing.find_proof (Support.prove database file)
-              (Resolve.Names.make_key declaration)
-          with
+          match Database.For_testing.find_proof (Support.prove database file) declaration.key with
           | Some (Value _) -> ()
           | Some (Failed _ | Blocked) | None ->
-              Harness.fail "%s has no proof" (Path.show declaration.path))
+              Harness.fail "%s has no proof" (Path.show declaration.key.path))
         ((Database.make_name_lookups database).list_declarations_in file));
   Harness.test
     "a field's type whose impl calls back joins the recursion group of a function that passes the \
@@ -670,8 +714,8 @@ let () =
       expect_recursion_group version_deriving_over_a_loop ~of_:"check"
         ~expected:
           [
-            "app::main::check";
-            "app::main::impl standard::core::Default for app::main::Loop.default";
+            make_main_path "check";
+            make_impl_method ~trait:default_trait ~for_type:(make_main_path "Loop") "default" Static;
             derived_version_default;
           ];
       expect_included
@@ -680,9 +724,9 @@ let () =
            ~after:[ ("app::main", version_deriving_over_a_loop) ])
         ~parts:
           [
-            "MIR call edges " ^ derived_version_default;
-            "recursion group app::main::check";
-            "proof app::main::check";
+            Any (Mir_call_edges derived_version_default);
+            Any (Recursion_group (make_main_path "check"));
+            Any (Proof (make_main_key "check"));
           ]);
   Harness.test
     "a trait leaving a type's `derives` list takes the derived method out of the call graph"
@@ -690,30 +734,35 @@ let () =
       expect_recursion_group version_with_a_written_default ~of_:"check"
         ~expected:
           [
-            "app::main::check";
-            "app::main::impl standard::core::Default for app::main::Version.default";
+            make_main_path "check";
+            make_impl_method ~trait:default_trait ~for_type:(make_main_path "Version") "default"
+              Static;
           ];
       expect_included
         (list_propagated
            ~before:[ ("app::main", version_deriving_over_a_key) ]
            ~after:[ ("app::main", version_with_a_written_default) ])
-        ~parts:[ "recursion group app::main::check"; "proof app::main::check" ];
+        ~parts:
+          [ Any (Recursion_group (make_main_path "check")); Any (Proof (make_main_key "check")) ];
       expect_included
         (list_propagated
            ~before:[ ("app::main", version_with_a_written_default) ]
            ~after:[ ("app::main", version_deriving_over_a_key) ])
         ~parts:
           [
-            "MIR call edges " ^ derived_version_default;
-            "call edges app " ^ derived_version_default;
-            "proof app::main::check";
+            Any (Mir_call_edges derived_version_default);
+            Any (Call_edges (derived_version_default, app));
+            Any (Proof (make_main_key "check"));
           ]);
   Harness.test "an inherited method's MIR call edges read the MIR of its trait's provided body"
     (fun () ->
       expect_reads
         (build [ ("app::main", make_level_source ~height:"self.height") ])
-        ("MIR call edges " ^ raised_of_shelf)
-        ~includes:[ "body mir app::main::Level.raised" ]
+        (Any (Mir_call_edges raised_of_shelf))
+        ~includes:
+          [
+            Stored (Any (Body_mir (make_key (make_method (make_main_path "Level") "raised" Read))));
+          ]
         ~excludes:[]);
   Harness.test
     "an impl's method that calls the caller of a method the impl inherits joins their recursion \
@@ -722,17 +771,12 @@ let () =
       expect_recursion_group
         (make_level_source ~height:"floor(self)")
         ~of_:"floor"
-        ~expected:
-          [
-            "app::main::floor";
-            "app::main::impl app::main::Level for app::main::Shelf.height";
-            raised_of_shelf;
-          ];
+        ~expected:[ make_main_path "floor"; make_shelf_method "height"; raised_of_shelf ];
       expect_included
         (list_propagated
            ~before:[ ("app::main", make_level_source ~height:"self.height") ]
            ~after:[ ("app::main", make_level_source ~height:"floor(self)") ])
-        ~parts:[ "recursion group " ^ raised_of_shelf; "proof app::main::floor" ]);
+        ~parts:[ Any (Recursion_group raised_of_shelf); Any (Proof (make_main_key "floor")) ]);
   Harness.test "removing a function that a function of its package calls matches a cold build"
     (fun () ->
       ignore
@@ -758,10 +802,10 @@ let () =
       in
       expect_included
         (propagate_with_lib ~before:without_raised ~after:with_raised)
-        ~parts:[ "call edges app " ^ raised_of_library_shelf ];
+        ~parts:[ Any (Call_edges (raised_of_library_shelf, app)) ];
       expect_included
         (propagate_with_lib ~before:with_raised ~after:without_raised)
-        ~parts:[ "call edges app " ^ raised_of_library_shelf ]);
+        ~parts:[ Any (Call_edges (raised_of_library_shelf, app)) ]);
   Harness.test
     "a dependency's body that fails reports its error and hides a recursion through it only until \
      the body is fixed" (fun () ->
@@ -784,7 +828,11 @@ let () =
         Harness.fail "the proof makes a termination obligation while the body fails";
       expect_included
         (propagate_with_lib ~before:failing ~after:fixed)
-        ~parts:[ "call edges app lib::tools::follow"; "proof " ^ step_of_hop ];
+        ~parts:
+          [
+            Any (Call_edges (Support.make_top_path "lib::tools" "follow", app));
+            Any (Proof (make_key step_of_hop));
+          ];
       if count_termination_obligations (settle fixed) ~of_:step_of_hop <> 1 then
         Harness.fail "the proof makes no termination obligation for the recursion");
   Harness.test
@@ -794,7 +842,8 @@ let () =
       let hot = build without_helper in
       List.iter
         (fun (before, after) ->
-          expect_untouched (propagate hot ~before ~after).recomputed ~names:[ "app::main::" ])
+          expect_untouched (propagate hot ~before ~after).recomputed
+            ~is_excluded:(is_part_of [ make_main_path "callee"; make_main_path "caller" ]))
         [ (without_helper, with_helper); (with_helper, without_helper) ]);
   Harness.test "reformatting a callee recomputes no caller's proof" (fun () ->
       expect_recomputed
@@ -816,7 +865,11 @@ let () =
                   public fn caller() -> Int64 { callee(1) }\n" );
              ])
         ~exactly:
-          [ "import check app/main/main.truss"; "namespace app"; "parsed app/main/main.truss" ]);
+          [
+            Any (Import_check (Support.parse_file "app::main"));
+            Any (Namespace app);
+            Any (Parsed (Support.parse_file "app::main"));
+          ]);
   Harness.test "an edit to a callee's body recomputes its lowered code and not its caller's"
     (fun () ->
       let recomputed =
@@ -830,15 +883,15 @@ let () =
             ]
       in
       expect_included recomputed
-        ~parts:[ show_lowered "callee"; test_key "callee"; test_key "caller" ];
-      expect_untouched recomputed ~names:[ show_lowered "caller" ]);
+        ~parts:[ make_lowered "callee"; make_test_key "callee"; make_test_key "caller" ];
+      expect_untouched recomputed ~is_excluded:(( = ) (make_lowered "caller")));
   Harness.test "a call that is removed with its callee collects the callee's lowered code"
     (fun () ->
       expect_untouched
         (list_propagated_with_roots ~roots:[ "caller" ]
            ~before:[ ("app::main", callee_and_caller) ]
            ~after:[ ("app::main", "fn caller() -> Int64 { 1 }\n") ])
-        ~names:[ show_lowered "callee" ]);
+        ~is_excluded:(( = ) (make_lowered "callee")));
   Harness.test "a removed reference collects exactly the items that only it reached" (fun () ->
       let make_program test =
         [
@@ -853,9 +906,10 @@ let () =
       let before = make_program "kept() + only() == 3" in
       let after = make_program "kept() == 1" in
       let observed = propagate (build before) ~before ~after in
-      if observed.collected <> [ show_lowered "only"; test_key "only" ] then
-        Harness.fail "collected %s" (String.concat ", " observed.collected);
-      expect_untouched observed.recomputed ~names:[ show_lowered "shared"; show_lowered "kept" ]);
+      if observed.collected <> List.sort compare [ make_lowered "only"; make_test_key "only" ] then
+        Harness.fail "collected %s" (show_parts observed.collected);
+      expect_untouched observed.recomputed ~is_excluded:(fun part ->
+          List.mem part [ make_lowered "shared"; make_lowered "kept" ]));
   Harness.test "removing a type collects the items at that type without computing them" (fun () ->
       let make_program shape =
         [
@@ -871,7 +925,10 @@ let () =
         (list_propagated
            ~before:(make_program "type Shape(size: Int64)\n")
            ~after:(make_program ""))
-        ~names:[ "[Shape]" ]);
+        ~is_excluded:(function
+          | Any (Lowered item | Test_key item) ->
+              String.includes ~affix:"[Shape]" (Lowered.Item.to_string item)
+          | _ -> false));
   Harness.test "a test that reaches a type defined as todo is blocked until the type is defined"
     (fun () ->
       let make_program definition =
@@ -887,7 +944,7 @@ let () =
       in
       expect_included
         (list_propagated ~before:(make_program " = todo") ~after:(make_program "(id: Int64)"))
-        ~parts:[ show_lowered "none" ]);
+        ~parts:[ make_lowered "none" ]);
   Harness.test
     "a type that comes to contain itself in place fails the lowered code that lays it out"
     (fun () ->
@@ -897,7 +954,7 @@ let () =
       expect_included
         (list_propagated_with_roots ~roots:[ "size" ] ~before:(make_program "List[Chain]")
            ~after:(make_program "Option[Chain]"))
-        ~parts:[ show_lowered "size" ]);
+        ~parts:[ make_lowered "size" ]);
   Harness.test
     "an edit to a constant recomputes the constants that fold it, which lower no copy of it"
     (fun () ->
@@ -912,23 +969,21 @@ let () =
         list_propagated_with_roots ~roots:[ "read" ] ~before:(make_constants "1")
           ~after:(make_constants "2")
       in
-      expect_included recomputed ~parts:[ show_lowered "second" ];
-      expect_untouched recomputed ~names:[ show_lowered "first" ]);
+      expect_included recomputed ~parts:[ Any (Lowered (Constant (make_main_path "second"))) ];
+      expect_untouched recomputed
+        ~is_excluded:(( = ) (Database.Part.Any (Lowered (Constant (make_main_path "first"))))));
   Harness.test "adding a dependency to a manifest fixes the dependent's use of it" (fun () ->
       expect_included
         (lay_out_again ~before:(Support.setup tool_user)
            ~after:(Support.setup ~dependencies:[ ("app", "lib") ] tool_user)
            ())
-        ~parts:[ "namespace app"; "checked body app::main::caller" ]);
+        ~parts:[ Any (Namespace app); Any (Checked_body (make_main_key "caller")) ]);
   Harness.test "adding a package and then removing it matches a cold build each time" (fun () ->
       let alone = Support.setup [ ("app::main", "fn caller() -> Int64 { 1 }\n") ] in
       let with_lib = Support.setup ~dependencies:[ ("app", "lib") ] tool_user in
       ignore (lay_out_again ~before:alone ~after:with_lib ());
-      expect_untouched
-        (List.filter
-           (fun part -> not (String.starts_with ~prefix:"call edges app " part))
-           (lay_out_again ~before:with_lib ~after:alone ()))
-        ~names:[ "lib::" ]);
+      expect_untouched (lay_out_again ~before:with_lib ~after:alone ()) ~is_excluded:(fun part ->
+          Database.For_testing.locate_package part = { Path.owner = None; name = "lib" }));
   Harness.test "a new version of a loaded package recomputes only the readers of what changed"
     (fun () ->
       let make_version second =
@@ -954,8 +1009,9 @@ let () =
           ~loaded:([ make_version "Int64" ], [ make_version "Int32" ])
           ~before:app ~after:app ()
       in
-      expect_included recomputed ~parts:[ "checked body app::main::calls_second" ];
-      expect_untouched recomputed ~names:[ "app::main::uses_first"; "app::main::uses_second" ]);
+      expect_included recomputed ~parts:[ Any (Checked_body (make_main_key "calls_second")) ];
+      expect_untouched recomputed
+        ~is_excluded:(is_part_of [ make_main_path "uses_first"; make_main_path "uses_second" ]));
   Harness.test
     "reformatting an invariant recomputes the derived Deserialize and none of its readers"
     (fun () ->
@@ -970,12 +1026,19 @@ let () =
         (list_propagated ~before:(make_signup "age >= 13") ~after:(make_signup "age  >=\t13"))
         ~exactly:
           [
-            "generated mir derived standard::serialization::Deserialize for \
-             app::main::Signup.deserialize";
-            "import check app/main/main.truss";
-            "namespace app";
-            "package check app type app::main::Signup";
-            "parsed app/main/main.truss";
+            Any
+              (Generated_mir
+                 (make_method
+                    (Derived
+                       {
+                         type_ = make_main_path "Signup";
+                         trait = Support.make_top_path "standard::serialization" "Deserialize";
+                       })
+                    "deserialize" Static));
+            Any (Import_check (Support.parse_file "app::main"));
+            Any (Namespace app);
+            Any (Package_check (app, Type (make_main_key "Signup")));
+            Any (Parsed (Support.parse_file "app::main"));
           ])
 
 let make_lowered_program test =
@@ -1068,8 +1131,7 @@ let settle_on_disk root =
   (match Database.For_testing.list_differences database cold with
   | [] -> ()
   | parts ->
-      Harness.fail "the database in .truss differs from a cold build in %s"
-        (String.concat ", " parts));
+      Harness.fail "the database in .truss differs from a cold build in %s" (show_parts parts));
   remove_rebuilt_on_reopen observed.recomputed
 
 let edited_body =
@@ -1114,14 +1176,21 @@ let () =
       ignore (settle_on_disk root);
       Workspace.flush ();
       let list = Filename.concat root ".truss/list" in
-      File_system.write list
-        (String.concat "\n"
-           (List.map
-              (fun line ->
-                if String.starts_with ~prefix:"header compiler " line then "header compiler other"
-                else line)
-              (String.split_on_char '\n' (File_system.read list))));
-      expect_included (settle_on_disk root) ~parts:[ "checked body app::main::caller" ];
+      let digest = Workspace.For_testing.compiler_digest in
+      (match String.split_first ~sep:digest (File_system.read list) with
+      | Some (before, after) ->
+          File_system.write list (before ^ String.make (String.length digest) '0' ^ after)
+      | None -> Harness.fail "the list does not name the compiler");
+      expect_included (settle_on_disk root) ~parts:[ Any (Checked_body (make_main_key "caller")) ];
+      Workspace.flush ());
+  Harness.test "a database whose list is in the earlier text format is rebuilt" (fun () ->
+      let root = project [ ("main/main", callee_and_caller) ] in
+      ignore (settle_on_disk root);
+      Workspace.flush ();
+      File_system.write
+        (Filename.concat root ".truss/list")
+        ("truss database\nheader compiler " ^ Workspace.For_testing.compiler_digest ^ "\n");
+      expect_included (settle_on_disk root) ~parts:[ Any (Checked_body (make_main_key "caller")) ];
       Workspace.flush ())
 
 let expect_cold database snapshot =
@@ -1129,7 +1198,7 @@ let expect_cold database snapshot =
   Database.For_testing.propagate cold;
   match Database.For_testing.list_differences database cold with
   | [] -> ()
-  | parts -> Harness.fail "the database differs from a cold build in %s" (String.concat ", " parts)
+  | parts -> Harness.fail "the database differs from a cold build in %s" (show_parts parts)
 
 let () =
   Harness.test "a trial is a copy of the database, propagated with the files that differ" (fun () ->
@@ -1145,8 +1214,8 @@ let () =
             database)
       in
       let recomputed = observed.recomputed in
-      expect_included recomputed ~parts:[ "checked body app::main::callee" ];
-      expect_untouched recomputed ~names:[ "app::main::caller" ];
+      expect_included recomputed ~parts:[ Any (Checked_body (make_main_key "callee")) ];
+      expect_untouched recomputed ~is_excluded:(is_part_of [ make_main_path "caller" ]);
       expect_cold database trial;
       expect_cold worktree snapshot;
       Workspace.flush ());
@@ -1295,7 +1364,7 @@ let () =
                ("app::main", "fn first() -> Int64 { 1 }\n");
                ("app::main/second", "fn second() -> Int64 { first() }\n");
              ])
-        ~parts:[ "namespace app"; "checked body app::main::second" ]);
+        ~parts:[ Any (Namespace app); Any (Checked_body (make_main_key "second")) ]);
   Harness.test "adding the module that a use names matches a cold build" (fun () ->
       let user =
         ("app::main", "use app::tools\n\nfn caller() -> Int64 {\n  tools::helper()\n}\n")
@@ -1303,19 +1372,15 @@ let () =
       expect_included
         (list_propagated ~before:[ user ]
            ~after:[ user; ("app::tools", "public fn helper() -> Int64 { 1 }\n") ])
-        ~parts:[ "checked body app::main::caller" ]);
+        ~parts:[ Any (Checked_body (make_main_key "caller")) ]);
   let read_callee_ownership database =
-    let file = Support.parse_file "app::main" in
-    Database.For_testing.read_ownership database
-      (Resolve.Names.make_key
-         (List.find
-            (fun (declaration : Resolve.Names.declaration) ->
-              Path.show declaration.path = "app::main::callee")
-            ((Database.make_name_lookups database).list_declarations_in file)))
+    Database.For_testing.read_ownership database (make_main_key "callee")
   in
   let propagate_with_failing_callee () =
     let database = build [ ("app::main", callee_and_caller) ] in
-    Database.For_testing.with_failing_part "ownership app::main::callee" (fun () ->
+    Database.For_testing.with_failing_part
+      (Any (Ownership (make_main_key "callee")))
+      (fun () ->
         Database.update ~on_bug:ignore database
           [
             ( Support.parse_file "app::main",

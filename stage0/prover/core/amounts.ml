@@ -35,13 +35,11 @@ let assume_typed context frame term =
 
 let rec compare_lexicographically before after =
   match (before, after) with
-  | [ right ], [ left ] ->
-      Logic.(Operation ("<=", [ int 0; right ]) &&& Operation ("<", [ left; right ]))
+  | [ right ], [ left ] -> Logic.(less_equal (int 0) right &&& less left right)
   | right :: before, left :: after ->
       Logic.(
-        Operation ("<=", [ int 0; right ])
-        &&& (Operation ("<", [ left; right ])
-            ||| (equal left right &&& compare_lexicographically before after)))
+        less_equal (int 0) right
+        &&& (less left right ||| (equal left right &&& compare_lexicographically before after)))
   | _ -> Logic.Boolean true
 
 let covers ~(clause : Costs.target) ~(counter : Costs.target) =
@@ -64,8 +62,7 @@ let is_same_resource (cost : Mir.cost) ~locals (counter : Costs.counter) =
 
 let declare_bounded_amount context frame bound =
   let amount = Facts.declare_fresh context frame "spent" Logic.Int in
-  Facts.assume context frame
-    Logic.(Operation ("<=", [ int 0; amount ]) &&& Operation ("<=", [ amount; bound ]));
+  Facts.assume context frame Logic.(less_equal (int 0) amount &&& less_equal amount bound);
   amount
 
 let compute_amount_within context frame (counter : Costs.counter) bound =
@@ -116,7 +113,8 @@ let lambda_captures_target (context : State.context) lambda target =
   | Some captured, Some local -> List.mem local captured
   | _ -> false
 
-let make_reach_formula context frame uses (values : State.passed list) (target : Costs.target) =
+let make_reach_formula context frame (uses : Types.capability_set) (values : State.passed list)
+    (target : Costs.target) =
   match target with
   | Through term ->
       Logic.disjunction
@@ -127,7 +125,7 @@ let make_reach_formula context frame uses (values : State.passed list) (target :
            values)
   | Capability path | Capability_method (path, _) ->
       Logic.Boolean
-        (List.exists
+        (Types.exists_capability
            (function
              | Types.Capability used -> Path.equal used path
              | Types.Capability_parameter _ | Types.Capability_projection _
@@ -279,9 +277,7 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
               in
               match amount_term with
               | Some amount_term when resource = Metric Allocations || counting = Units ->
-                  Logic.ite
-                    (Logic.Operation (">", [ amount_term; Logic.int 0 ]))
-                    (Logic.int 1) (Logic.int 0)
+                  Logic.ite (Logic.greater amount_term (Logic.int 0)) (Logic.int 1) (Logic.int 0)
               | _ -> Operations.declare_unknown_amount context frame counter)
           | Unknown_allocations, _, _ -> Operations.declare_unknown_amount context frame counter)
       | Calls _ -> Costs.zero)
@@ -306,16 +302,13 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
               compute_callee_amount context frame ~is_recursive:false
                 ~clauses:[ capability_clauses ]
                 ~bind_frame:(fun _ -> inside)
-                ~uses:(invocation.uses :> Types.capability list)
-                ~values ~change:None counter
+                ~uses:invocation.uses ~values ~change:None counter
           | None -> Operations.declare_unknown_amount context frame counter))
   | Function _ | Trait_method _ | Indirect () -> (
       match counter.resource with
       | Calls target ->
           make_conditional_amount
-            (make_reach_formula context frame
-               (invocation.uses :> Types.capability list)
-               values target)
+            (make_reach_formula context frame invocation.uses values target)
             (Operations.declare_unknown_amount context frame counter)
       | Metric _ -> Operations.declare_unknown_amount context frame counter)
 
@@ -463,8 +456,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
       context.potentials <- held :: context.potentials;
       Facts.add_frame_fact context frame
         Logic.(
-          Validity.make_validity context frame ~assuming:true ty term
-          ==> Operation ("<=", [ int 0; held ]));
+          Validity.make_validity context frame ~assuming:true ty term ==> less_equal (int 0) held);
       match (find_potential_clause context ty, Facts.find_constructors context ty) with
       | None, None when Option.is_some (find_buffer_elements context ty) -> (
           match find_buffer_elements context ty with
@@ -473,24 +465,17 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
               let slack = declare_buffer_slack context ty term in
               let length = Models.make_sequence_length context element sequence in
               Facts.add_frame_fact context frame
-                Logic.(
-                  Operation ("<=", [ int 0; slack ])
-                  &&& Operation ("<=", [ slack; Operation ("*", [ int 2; length ]) ]));
+                Logic.(less_equal (int 0) slack &&& less_equal slack (multiply (int 2) length));
               (match ty with
               | Types.Named { path; _ } when Intrinsic.find_builtin path = Some Storage ->
                   let saved =
-                    Logic.Operation
-                      ( "-",
-                        [
-                          Logic.Operation ("*", [ Logic.int 2; length ]);
-                          Intrinsics.make_buffer_capacity context element term;
-                        ] )
+                    Logic.subtract
+                      (Logic.multiply (Logic.int 2) length)
+                      (Intrinsics.make_buffer_capacity context element term)
                   in
                   Facts.add_frame_fact context frame
                     (Logic.equal slack
-                       (Logic.ite
-                          (Logic.Operation (">=", [ saved; Logic.int 0 ]))
-                          saved (Logic.int 0)))
+                       (Logic.ite (Logic.greater_equal saved (Logic.int 0)) saved (Logic.int 0)))
               | Types.Named { path; _ }
                 when Intrinsic.find_builtin path = Some View
                      || Intrinsic.find_builtin path = Some Array ->
@@ -627,11 +612,11 @@ let declare_method_cost context frame (metric : Metric.t) (method_ : Path.t) ~tr
   let symbol = Logic.Symbol.Method_cost { metric; method_; trait_arguments; self_type } in
   Facts.declare context (Logic.Constant (symbol, Logic.Int));
   let least = Costs.least_amount (Metric metric) in
-  Facts.add_frame_fact context frame (Logic.Operation ("<=", [ least; Logic.Symbol symbol ]));
+  Facts.add_frame_fact context frame (Logic.less_equal least (Logic.Symbol symbol));
   (match find_method_cost_bound context metric method_ ~trait_arguments self_type with
   | Some limit ->
       Facts.add_frame_fact context frame
-        (Logic.Operation ("<=", [ Logic.Symbol symbol; Costs.larger limit least ]))
+        (Logic.less_equal (Logic.Symbol symbol) (Costs.larger limit least))
   | None -> ());
   Logic.Symbol symbol
 

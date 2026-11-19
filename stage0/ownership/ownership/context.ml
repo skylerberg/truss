@@ -12,6 +12,7 @@ type context = {
   names : string Local_table.t;
   origins : Core.origin Local_table.t;
   binding_modes : Types.mode Local_table.t;
+  literal_views : unit Local_table.t;
   types : Types.ty Local_table.t;
   mutable parameters : Core.local list;
   implements_capability : bool;
@@ -102,6 +103,11 @@ let classify_binding_mode context (root : Place.root) : Types.mode =
   | Local local ->
       Option.value ~default:Types.Own (Local_table.find_opt context.binding_modes local)
 
+let views_literal context (root : Place.root) =
+  match root with
+  | Local local -> Local_table.mem context.literal_views local
+  | Temporary _ | Constant _ | Environment -> false
+
 let show_root context (root : Place.root) =
   match root with
   | Local Self -> "self"
@@ -146,7 +152,24 @@ let collect context (mir : Mir.Graph.t) ~mode_keywords =
             Local_table.replace context.types core info.type_;
             if is_var then context.mutable_locals <- core :: context.mutable_locals
         | Source _ | Temporary | Lent _ -> ())
-      body.locals
+      body.locals;
+    Array.iter
+      (fun (basic : Mir.Graph.basic_block) ->
+        List.iter
+          (fun (statement : Mir.Graph.statement) ->
+            match statement.kind with
+            | Assign
+                {
+                  target = { root = Local local; projections = [] };
+                  value = Operand (Borrow { place = { root = Literal _; _ }; _ });
+                } -> (
+                match body.locals.(local).kind with
+                | Source { local = core; is_binding = true; _ } ->
+                    Local_table.replace context.literal_views core ()
+                | Source { is_binding = false; _ } | Temporary | Lent _ -> ())
+            | _ -> ())
+          basic.statements)
+      body.blocks
   in
   visit_body mir.body;
   Array.iter visit_body mir.lambdas;

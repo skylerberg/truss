@@ -1,4 +1,10 @@
-type entry = { name : Path.package; version : Version.t; hash : string; holds : string list }
+type entry = {
+  name : Path.package;
+  version : Version.t;
+  hash : string;
+  holds : Grant.capability list;
+}
+
 type t = entry list
 
 exception Malformed of { line : int; message : string }

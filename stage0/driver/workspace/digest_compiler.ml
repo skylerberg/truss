@@ -10,7 +10,7 @@ let rec list_files directory relative sources =
   Array.fold_left
     (fun sources entry ->
       let path = Filename.concat directory entry in
-      let relative = if relative = "" then entry else relative ^ "/" ^ entry in
+      let relative = File_system.join_path relative entry in
       if Sys.is_directory path then
         if List.mem entry skipped_directories || entry.[0] = '.' then sources
         else list_files path relative sources

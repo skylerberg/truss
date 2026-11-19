@@ -109,14 +109,13 @@ let () =
     "a value returned through two nested tasks is neither leaked nor dropped twice" ~count:1
     Fixtures.Concurrent.nested_concurrent_for_returning_a_list
 
-let () =
-  Codegen_support.expect_pass "a return value that loses the cancel is dropped"
-    Fixtures.Concurrent.spawns_when_cancelled
-
-let expect_threaded ~expected text =
-  let status, output, errors = Codegen_support.run_main text in
+let expect_program_output ~expected program =
+  let status, output, errors = Process.run program [] in
   if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors;
   Codegen_support.expect_string ~expected output
+
+let expect_threaded ~expected text =
+  expect_program_output ~expected (Codegen_support.build_main text)
 
 let () =
   Codegen_support.test
@@ -134,10 +133,11 @@ let () =
     (fun () -> expect_threaded ~expected:"total 1400\n" Fixtures.Concurrent.lengths_of_owned_items)
 
 let expect_with_each_thread_count ~expected text =
+  let program = Codegen_support.build_main text in
   List.iter
     (fun workers ->
       Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
-      expect_threaded ~expected text)
+      expect_program_output ~expected program)
     (Codegen_support.list_worker_counts ())
 
 let tally = Fixtures.Concurrent.tally

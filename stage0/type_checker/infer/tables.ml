@@ -103,7 +103,7 @@ let create size =
     lend_modes = Array.make size None;
   }
 
-let copy tables =
+let copy (tables : t) : t =
   {
     types = Array.copy tables.types;
     local_types = Array.copy tables.local_types;
