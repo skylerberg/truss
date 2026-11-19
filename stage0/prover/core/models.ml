@@ -175,7 +175,10 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
   match find_model_impl context ty ~model with
   | Some impl ->
       let path = Path.Method { owner = impl; name = "model"; receiver = Read } in
-      let symbol = Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type ty ] } in
+      let symbol =
+        Logic.Symbol.Function
+          { callee = path; type_arguments = Facts.list_method_type_arguments ~self_type:ty [] }
+      in
       Facts.declare context
         (Logic.Function (symbol, [ Facts.declare_sort context ty ], Facts.declare_sort context model));
       rank_model context ty ~model ~impl symbol;
