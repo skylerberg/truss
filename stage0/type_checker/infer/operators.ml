@@ -114,13 +114,6 @@ and check_operator_call state call ~method_ ~output ~left:(left, left_type) ~rig
       (Well_known.make_path owner)
   in
   let result = State.make_fresh_type state in
-  if
-    State.is_within state left_type Types.float_types
-    && List.for_all
-         (fun (_, right_type) ->
-           Types.equal (State.resolve state right_type) (State.resolve state left_type))
-         (Option.to_list right)
-  then ignore (State.unify state result left_type);
   let make_operand index expression =
     { Tables.expression; core_argument_index = index; mode = Language.Mode.Read }
   in

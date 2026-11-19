@@ -121,18 +121,26 @@ let find_view = function
 let signed_integer_types : Language.Builtin_type.t list = [ Int8; Int16; Int32; Int64 ]
 let unsigned_integer_types : Language.Builtin_type.t list = [ UInt8; UInt16; UInt32; UInt64 ]
 let integer_types = signed_integer_types @ unsigned_integer_types
+let float_types : Language.Builtin_type.t list = [ Float32; Float64 ]
 
 let sealed_traits : (Well_known.t * Language.Builtin_type.t list) list =
   [
     (Fixed_width_integer, integer_types);
     (Signed_integer, signed_integer_types);
     (Unsigned_integer, unsigned_integer_types);
+    (Floating_point, float_types);
   ]
 
-let find_integer_implementors trait =
+let find_sealed_implementors trait =
   List.find_map
     (fun (sealed, implementors) -> if Well_known.is sealed trait then Some implementors else None)
     sealed_traits
+
+let find_integer_implementors trait =
+  Option.bind (find_sealed_implementors trait) (fun implementors ->
+      if List.for_all (fun builtin -> List.mem builtin integer_types) implementors then
+        Some implementors
+      else None)
 
 let find_bound_integer_implementors bounds =
   List.fold_left
@@ -142,11 +150,6 @@ let find_bound_integer_implementors bounds =
           Some (List.filter (fun builtin -> List.mem builtin these) implementors)
       | None, these | these, None -> these)
     None bounds
-
-let float_types : Language.Builtin_type.t list = [ Float32; Float64 ]
-
-let find_sealed_implementors trait =
-  if Well_known.is Floating_point trait then Some float_types else find_integer_implementors trait
 
 let is_integer_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin integer_types | None -> false

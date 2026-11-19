@@ -1960,6 +1960,26 @@ let () =
       expect_type Fixtures.Infer.negation_of_a_literal_local "-count" "Int64";
       expect_fine Fixtures.Infer.negation_of_a_float_literal_local;
       expect_type Fixtures.Infer.negation_of_a_float_literal_local "-ratio" "Float64");
+  Harness.test "a product of a float literal local takes the type a later annotation decides"
+    (fun () ->
+      let text = Fixtures.Infer.float32_let_of_a_product_of_a_literal_local in
+      expect_fine text;
+      expect_type text "0.5" "Float32";
+      expect_type text "2.0" "Float32");
+  Harness.test "a negated float literal local takes the type a later annotation decides" (fun () ->
+      let text = Fixtures.Infer.float32_let_of_a_negated_literal_local in
+      expect_fine text;
+      expect_type text "0.5" "Float32");
+  Harness.test "a literal under a sealed bound that fixes an associated type takes its default type"
+    (fun () ->
+      let float_text = Fixtures.Infer.float_literal_passed_where_floating_point_fixes_its_bits in
+      expect_fine float_text;
+      expect_type float_text "1.5" "Float64";
+      let integer_text =
+        Fixtures.Infer.integer_literal_passed_where_signed_integer_fixes_its_unsigned
+      in
+      expect_fine integer_text;
+      expect_type integer_text "-5" "Int64");
   Harness.test "a loop over a range of literals in a local lets its body decide them" (fun () ->
       expect_fine Fixtures.Infer.loop_over_a_literal_range_local;
       expect_type Fixtures.Infer.loop_over_a_literal_range_local "range" ~occurrence:2

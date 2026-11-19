@@ -252,7 +252,7 @@ and solve_number state goal trait ~subject ~wanted domain =
               else [])
             Types.sealed_traits))
   in
-  match (covering_bounds, Types.find_integer_implementors wanted.trait) with
+  match (covering_bounds, Types.find_sealed_implementors wanted.trait) with
   | [ bound ], _
     when List.length bound.trait_arguments = List.length wanted.trait_arguments
          && List.for_all2 joins_without_narrowing bound.trait_arguments wanted.trait_arguments
@@ -262,7 +262,9 @@ and solve_number state goal trait ~subject ~wanted domain =
       if Unify.unify_arguments state.unifier bound.trait_arguments wanted.trait_arguments then
         unify_associated_types state goal trait (fun name -> List.assoc_opt name bound.associated)
       else fail_unification state goal
-  | _, Some implementors when List.exists (fun member -> List.mem member implementors) domain -> (
+  | _, Some implementors
+    when List.exists (fun member -> List.mem member implementors) domain
+         && List.exists (fun member -> not (List.mem member implementors)) domain -> (
       match narrow state goal subject implementors with
       | Solved -> solve_implements state goal trait
       | outcome -> outcome)
