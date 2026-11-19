@@ -203,7 +203,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
         clauses;
       State.register_statement state written (fun () ->
           let pattern = State.build_pattern state written_pattern in
-          let clauses = List.map (Form.build_loop_clause state) clauses in
+          let clauses = build_loop_clauses state clauses in
           Form.build_for_loop state written inner ~pattern ~clauses
             ~body:(State.build_block state body) ~mode:running);
       check_loop_body state env body
@@ -214,7 +214,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       List.iter (check_loop_clause state env) clauses;
       State.register_statement state written (fun () ->
           let condition = State.build_expression state test in
-          let clauses = List.map (Form.build_loop_clause state) clauses in
+          let clauses = build_loop_clauses state clauses in
           While
             {
               condition;
@@ -317,10 +317,18 @@ and check_loop_body state env (body : Syntax.block) =
     body.statements
 
 and check_loop_clause state env (clause : Syntax.loop_clause) =
-  match clause.kind with
-  | Invariant value -> Clauses.check_condition state env value
-  | Loop_decreases measures -> Clauses.check_measures state env measures
-  | Loop_cost cost -> Clauses.check_cost state env cost
+  Clauses.check_under_condition state ~id:clause.id clause.condition (fun () ->
+      match clause.kind with
+      | Invariant value -> Clauses.check_condition state env value
+      | Loop_decreases measures -> Clauses.check_measures state env measures
+      | Loop_cost cost -> Clauses.check_cost state env cost)
+
+and build_loop_clauses state (clauses : Syntax.loop_clause list) =
+  List.filter_map
+    (fun (clause : Syntax.loop_clause) ->
+      Clauses.build_under_condition state ~id:clause.id clause.condition (fun () ->
+          Form.build_loop_clause state clause))
+    clauses
 
 and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression)
     =

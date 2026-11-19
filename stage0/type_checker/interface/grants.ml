@@ -59,8 +59,10 @@ let list_missing (lookups : Lookups.t) ~package ~of_ (uses : Types.capability_se
            | Capability path -> Some path
            | Capability_parameter _ | Capability_projection _ | Capability_variable _
            | Capability_error _ ->
-               None)
-         (Types.list_capabilities uses))
+               None
+           | Capability_unless _ ->
+               Compiler_bug.raise_bug ~stage:"Interface" "a capability's base has a condition")
+         (List.map Types.find_base (Types.list_capabilities uses)))
 
 let describe_missing ~subject ~of_ capability =
   let of_ = Path.show_package of_ in

@@ -162,7 +162,10 @@ let check_main state resolved (clauses : Syntax.clause list) (signature : Types.
     Checking.report state Main_signature span main_message;
   check_real_implementations state resolved ~recipient:"`main`"
     (List.concat_map
-       (fun (clause : Syntax.clause) -> match clause.kind with Uses written -> written | _ -> [])
+       (fun (clause : Syntax.clause) ->
+         match clause.kind with
+         | Uses uses -> List.map (fun (use : Syntax.capability_use) -> use.capability) uses
+         | _ -> [])
        clauses)
 
 let make_element_removal (spans : Source.Definition_span.t array)

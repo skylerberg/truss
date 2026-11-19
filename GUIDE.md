@@ -3883,6 +3883,7 @@ written for this:
 | A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` | The distance between the two sides |
 | A recursive call on a part of a parameter, such as `Expression.evaluate` in [Chapter 5](#recursive-types) | The parameter, which gets smaller |
 | A loop or a function with a `decreases` clause | The clause |
+| A loop or a function with `decreases m when C`, such as `decreases cursor.remaining() when Items: FiniteCursor` | `m` where `C` holds; elsewhere it uses `RunForever unless C` |
 
 A `decreases` clause names a measure: an integer that every iteration, or
 every recursive call, makes smaller, and that never goes below zero.
@@ -4321,7 +4322,7 @@ test "a cursor" {
   assert seen == [2, 1, 0]
 }
 
-test "a cursor's provided methods" uses RunForever {
+test "a cursor's provided methods" {
   assert Countdown(left: 5).to_list() == [4, 3, 2, 1, 0]
   assert Countdown(left: 5).take(2).to_list() == [4, 3]
   assert Countdown(left: 5).skip(3).to_list() == [1, 0]
@@ -4355,11 +4356,19 @@ test "a cursor's provided methods" uses RunForever {
 - `Cursor` provides `to_list`, `count`, `last`, `fold`, and `find`, and the
   adapters `skip`, `take`, `step_by`, `chain`, `zip`, `enumerate`, and
   `peekable`. Each adapter returns a new cursor, so they chain.
-- **The provided methods that pull a cursor to its end use `RunForever`,**
-  since the trait cannot know that every cursor ends. Of the adapters, only
-  `take` gives a `FiniteCursor`, so a loop over another adapter's cursor
-  uses `RunForever` too. The second test declares `uses RunForever` for
-  both.
+- **The provided methods that pull a cursor to its end use `RunForever`
+  unless the cursor is a `FiniteCursor`.** `to_list` declares
+  `uses Self.Uses, RunForever unless Self: FiniteCursor`, so the second
+  test, over a `Countdown`, needs no `RunForever`. A call over a channel's
+  `Messages`, which may never end, uses it.
+- `take` gives a `FiniteCursor` over any cursor, and `skip`, `step_by`,
+  `enumerate`, and `zip` give one where their source does, `zip` where its
+  first cursor does. `chain` and `peekable` give a plain `Cursor`: their
+  count of remaining values could overflow a `UInt64`.
+- A function generic over a cursor writes the same condition. One that
+  collects `own items` of type `Items: Cursor` declares
+  `uses Items.Uses, RunForever unless Items: FiniteCursor`, and its caller
+  passes on the condition or meets it.
 - `capability Uses` is an *associated capability set*: the capabilities
   `next` uses. A cursor that reads lines from a file has `Uses = FileRead,
   Handles`, and a function that pulls a generic cursor declares `uses

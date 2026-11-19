@@ -233,6 +233,20 @@ and parse_function_type cursor ~clauses:with_clauses =
       gather []
     else []
   in
+  List.iter
+    (fun (clause : Syntax.clause) ->
+      let has_unless =
+        match clause.kind with
+        | Uses uses ->
+            List.exists (fun (use : Syntax.capability_use) -> Option.is_some use.unless) uses
+        | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> false
+      in
+      if Option.is_some clause.condition || has_unless then
+        Cursor.report cursor Misplaced_condition
+          (Cursor.read_span cursor clause.id |> Cursor.make_file_span cursor)
+          "A function type's clauses take no condition: a call through a function value has no \
+           type arguments to decide one.")
+    clauses;
   let is_named (input : Syntax.function_input) = Option.is_some input.name in
   let has_requires =
     List.exists (fun (clause : Syntax.clause) ->
@@ -344,6 +358,22 @@ and parse_capability_reference cursor : Syntax.capability_reference =
 and parse_capability_list cursor =
   Cursor.parse_separated cursor ~separator:Comma parse_capability_reference
 
+and parse_capability_uses cursor =
+  Cursor.parse_separated cursor ~separator:Comma (fun cursor : Syntax.capability_use ->
+      let capability = parse_capability_reference cursor in
+      { capability; unless = parse_condition_after cursor Unless })
+
+and parse_condition_after cursor (keyword : Token.keyword) =
+  if Cursor.accept_keyword cursor keyword then Some (parse_condition cursor) else None
+
+and parse_condition cursor : Syntax.condition =
+  Cursor.parse_separated cursor ~separator:And_and (fun cursor : Syntax.bound_condition ->
+      let start = Cursor.index cursor in
+      let subject = parse_type_expression cursor in
+      Cursor.expect_punctuation cursor Colon;
+      let bounds = parse_bounds cursor in
+      { subject; bounds; id = Cursor.allocate_id_from cursor start })
+
 and parse_expression_list cursor =
   Cursor.parse_separated cursor ~separator:Comma (fun cursor -> parse_expression cursor)
 
@@ -352,14 +382,25 @@ and parse_clause cursor : Syntax.clause =
   let keyword = Cursor.take cursor in
   let kind =
     match keyword.kind with
-    | Keyword Uses -> Syntax.Uses (parse_capability_list cursor)
+    | Keyword Uses -> Syntax.Uses (parse_capability_uses cursor)
     | Keyword Requires -> Requires (parse_expression cursor)
     | Keyword Ensures -> Ensures (parse_expression cursor)
     | Keyword Decreases -> Decreases (parse_expression_list cursor)
     | Keyword Cost -> Cost (parse_cost cursor)
     | _ -> Cursor.fail cursor "a clause"
   in
-  { kind; id = Cursor.allocate_id_from cursor start }
+  let condition =
+    match kind with
+    | Uses _ ->
+        if Cursor.is_keyword cursor When then
+          Cursor.fail cursor
+            "`,` or the end of the `uses` clause; a capability's condition follows `unless`, as in \
+             `uses RunForever unless Source: FiniteCursor`"
+        else None
+    | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error ->
+        parse_condition_after cursor When
+  in
+  { kind; condition; id = Cursor.allocate_id_from cursor start }
 
 and parse_cost cursor =
   let amortized =
@@ -1297,14 +1338,22 @@ and parse_loop_clauses cursor =
             "A loop's `cost` bounds the loop's cost so far, so it is never `amortized`. Potential \
              belongs to the values the loop mutates, which the function's own `cost` accounts for.";
         gather
-          (({ kind = Loop_cost cost; id = Cursor.allocate_id_from cursor start }
+          (({
+              kind = Loop_cost cost;
+              condition = parse_condition_after cursor When;
+              id = Cursor.allocate_id_from cursor start;
+            }
              : Syntax.loop_clause)
           :: clauses)
     | Keyword Invariant ->
         Cursor.advance cursor;
         let value = parse_expression cursor in
         gather
-          (({ kind = Invariant value; id = Cursor.allocate_id_from cursor start }
+          (({
+              kind = Invariant value;
+              condition = parse_condition_after cursor When;
+              id = Cursor.allocate_id_from cursor start;
+            }
              : Syntax.loop_clause)
           :: clauses)
     | Keyword Decreases ->
@@ -1320,7 +1369,11 @@ and parse_loop_clauses cursor =
              commas.";
         let measures = parse_expression_list cursor in
         gather
-          (({ kind = Loop_decreases measures; id = Cursor.allocate_id_from cursor start }
+          (({
+              kind = Loop_decreases measures;
+              condition = parse_condition_after cursor When;
+              id = Cursor.allocate_id_from cursor start;
+            }
              : Syntax.loop_clause)
           :: clauses)
     | _ -> List.rev clauses

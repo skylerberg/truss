@@ -1,0 +1,5 @@
+fn gather[Items: Cursor](items: own Items) -> List[Items.Element]
+  uses Items.Uses
+{
+  List.collect(own items)
+}

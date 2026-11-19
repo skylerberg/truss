@@ -1,0 +1,11 @@
+fn gather[Items: Cursor](items: own Items) -> List[Items.Element]
+  uses Items.Uses, RunForever unless Items: FiniteCursor + Display
+{
+  List.collect(own items)
+}
+
+fn gather_finite[Items: FiniteCursor](items: own Items) -> List[Items.Element]
+  uses Items.Uses
+{
+  List.collect(own items)
+}

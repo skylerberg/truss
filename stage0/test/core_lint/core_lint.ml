@@ -427,7 +427,14 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
             check_trait subject reference
         | Types.Capability_variable _ ->
             report "%s contains a capability inference variable" subject
-        | Types.Capability_error _ -> report "%s contains a capability with an error" subject)
+        | Types.Capability_error _ -> report "%s contains a capability with an error" subject
+        | Types.Capability_unless { capability; unless } ->
+            check_capabilities subject (Types.make_capability_set [ capability ]);
+            List.iter
+              (fun (bound : Types.bound_condition) ->
+                check_type subject bound.subject;
+                check_trait subject bound.bound)
+              unless)
       (Types.list_capabilities set)
   and check_type subject (ty : Types.ty) =
     match ty with

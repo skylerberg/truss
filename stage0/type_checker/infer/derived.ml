@@ -966,7 +966,17 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 Function
                   {
                     parameters;
-                    contract = { requires = []; ensures; decreases = []; costs = [] };
+                    contract =
+                      {
+                        requires = [];
+                        ensures =
+                          List.map
+                            (fun clause : Core.expression Core.conditional ->
+                              { holds_when = []; clause })
+                            ensures;
+                        decreases = [];
+                        costs = [];
+                      };
                     body = Some body;
                   };
             }

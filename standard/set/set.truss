@@ -133,7 +133,7 @@ public fn Set[Element: Hash + Ordered].seeded() -> Set[Element]
 }
 
 public fn Set[Element: Hash + Ordered].collect[Source: Cursor[Element = Element]](source: own Source) -> Set[Element]
-  uses Source.Uses, RunForever
+  uses Source.Uses, RunForever unless Source: FiniteCursor
 {
   var set: Set[Element] = []
   mut set.extend(own source)
@@ -228,12 +228,13 @@ public fn Set[Element: Hash + Ordered].retain(mut self, keep: fn(Element) -> Boo
 }
 
 public fn Set[Element: Hash + Ordered].extend[Source: Cursor[Element = Element]](mut self, elements: own Source)
-  uses Source.Uses, RunForever
+  uses Source.Uses, RunForever unless Source: FiniteCursor
 {
   var cursor = own elements
   while mut cursor.next() is Some(element)
     invariant forall i in 0..self.elements.length() => forall j in 0..self.elements.length() =>
       i < j ==> !(self.elements.model()[i] == self.elements.model()[j])
+    decreases cursor.remaining() when Source: FiniteCursor
   {
     mut self.insert(own element)
   }

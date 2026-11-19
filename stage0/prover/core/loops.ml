@@ -58,6 +58,15 @@ type for_loop = {
   bind_parts : State.frame -> State.frame;
 }
 
+let find_clause_condition : Mir.loop_clause -> Types.condition = function
+  | Invariant invariant -> invariant.holds_when
+  | Decreases (measure :: _) -> measure.holds_when
+  | Decreases [] -> []
+  | Cost cost -> cost.holds_when
+
+let keep_holding_clauses context (clauses : Mir.loop_clause list) =
+  List.filter (fun clause -> Conditions.holds_here context (find_clause_condition clause)) clauses
+
 let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause list) ~held_gains =
   List.map
     (fun (counter : Costs.counter) ->
@@ -429,8 +438,11 @@ let check_preserved_validity context end_ location preserved =
 let check_invariants context frame clauses ~when_ =
   List.iter
     (fun (invariant : Mir.formula) ->
-      let _, term = Validity.read_specification context frame invariant in
-      Facts.oblige context frame Invariant
+      let _, term =
+        Conditions.with_obligation_condition context invariant.holds_when (fun () ->
+            Validity.read_specification context frame invariant)
+      in
+      Facts.oblige context frame Invariant ~holds_when:invariant.holds_when
         (Facts.locate context frame.source invariant.origin)
         [
           Text "The loop invariant `";

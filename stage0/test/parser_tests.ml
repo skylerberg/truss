@@ -495,6 +495,30 @@ let () =
   Harness.test "ensures in a function type" (fun () ->
       Parse_support.expect_error "fn f(value: (fn(item: Item) ensures true)) {}"
         ~code:Unexpected_token ~at:"ensures");
+  Harness.test "a clause takes a condition after when, on the next line too" (fun () ->
+      Parse_support.expect_definition
+        "fn f[Source: Cursor](source: Source)\n\
+        \  ensures true when Source: FiniteCursor && Source: Display\n\
+        \  cost time O(1)\n\
+        \    when Source: FiniteCursor\n\
+         {}"
+        "(fn f[Source: Cursor] ((source: Source)) (when (ensures true) Source: FiniteCursor && \
+         Source: Display) (when (cost time (O 1)) Source: FiniteCursor) (block))");
+  Harness.test "a capability in uses takes a condition after unless" (fun () ->
+      Parse_support.expect_definition
+        "fn f[Source: Cursor](source: Source)\n\
+        \  uses Source.Uses, RunForever unless Source: FiniteCursor + Display\n\
+         {}"
+        "(fn f[Source: Cursor] ((source: Source)) (uses Source.Uses (unless RunForever Source: \
+         FiniteCursor + Display)) (block))");
+  Harness.test "a uses clause takes no condition after when" (fun () ->
+      Parse_support.expect_error
+        "fn f[Source: Cursor](source: Source)\n  uses RunForever when Source: FiniteCursor\n{}"
+        ~code:Unexpected_token ~at:"when");
+  Harness.test "a function type's clauses take no condition" (fun () ->
+      Parse_support.expect_error
+        "fn f[Source: Cursor](visit: (fn() uses RunForever unless Source: FiniteCursor)) {}"
+        ~code:Misplaced_condition ~at:"uses");
   Harness.test "requires on a function type that is not a parameter's" (fun () ->
       Parse_support.expect_error "type T(visit: (fn(index: UInt64) requires index < 3))"
         ~code:Misplaced_requires ~at:"requires";
@@ -704,6 +728,13 @@ let () =
         "(for index : UInt8 (.. 0 10) (block))";
       Parse_support.expect_statement "for (index, element): Indexed[UInt8] in data.enumerate() {}"
         "(for (record index element) : Indexed[UInt8] (call (. data enumerate)) (block))");
+  Harness.test "a loop clause takes a condition after when" (fun () ->
+      Parse_support.expect_statement
+        "while mut cursor.next() is Some(item)\n\
+        \  decreases cursor.remaining() when Source: FiniteCursor\n\
+         {}"
+        "(while (is (mut (call (. cursor next))) (Some item)) (when (decreases (call (. cursor \
+         remaining))) Source: FiniteCursor) (block))");
   Harness.test "a loop has at most one decreases" (fun () ->
       Parse_support.expect_body_error "while a\n  decreases b\n  decreases c\n{}"
         ~code:Repeated_clause ~at:"decreases c");

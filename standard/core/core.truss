@@ -352,33 +352,39 @@ public trait Cursor {
     uses Self.Uses
 
   fn to_list(own self) -> List[Self.Element]
-    uses Self.Uses, RunForever
+    uses Self.Uses, RunForever unless Self: FiniteCursor
   {
     var cursor = own self
     var items: List[Self.Element] = []
-    while mut cursor.next() is Some(item) {
+    while mut cursor.next() is Some(item)
+      decreases cursor.remaining() when Self: FiniteCursor
+    {
       mut items.push(own item)
     }
     items
   }
 
   fn count(own self) -> UInt64
-    uses Self.Uses, RunForever
+    uses Self.Uses, RunForever unless Self: FiniteCursor
   {
     var cursor = own self
     var count: UInt64 = 0
-    while mut cursor.next() is Some(_) {
+    while mut cursor.next() is Some(_)
+      decreases cursor.remaining() when Self: FiniteCursor
+    {
       count = count.saturating_add(1)
     }
     count
   }
 
   fn last(own self) -> Option[Self.Element]
-    uses Self.Uses, RunForever
+    uses Self.Uses, RunForever unless Self: FiniteCursor
   {
     var cursor = own self
     var last: Option[Self.Element] = None
-    while mut cursor.next() is Some(item) {
+    while mut cursor.next() is Some(item)
+      decreases cursor.remaining() when Self: FiniteCursor
+    {
       last = Some(own item)
     }
     last
@@ -389,20 +395,24 @@ public trait Cursor {
     initial: own Total,
     combine: (fn(own Total, own Self.Element) -> Total uses generic Granted),
   ) -> Total
-    uses Self.Uses, generic Granted, RunForever
+    uses Self.Uses, generic Granted, RunForever unless Self: FiniteCursor
   {
     var cursor = own self
     var total = own initial
-    while mut cursor.next() is Some(item) {
+    while mut cursor.next() is Some(item)
+      decreases cursor.remaining() when Self: FiniteCursor
+    {
       total = combine(own total, own item)
     }
     total
   }
 
   fn find(mut self, predicate: fn(Self.Element) -> Bool) -> Option[Self.Element]
-    uses Self.Uses, RunForever
+    uses Self.Uses, RunForever unless Self: FiniteCursor
   {
-    while mut self.next() is Some(item) {
+    while mut self.next() is Some(item)
+      decreases self.remaining() when Self: FiniteCursor
+    {
       if predicate(item) {
         return Some(own item)
       }
