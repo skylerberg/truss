@@ -174,8 +174,13 @@ let rec read_resolved context frame run (place : Mir.place) =
 
 and read_index context frame run (index : Mir.operand) =
   match index with
-  | Use { place; _ } | Borrow { place; _ } | Take { place; _ } ->
-      read_resolved context frame run place
+  | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> (
+      match (read_resolved context frame run place, frame.bound) with
+      | ((Logic.Symbol _ | Logic.Integer _) as term), _ | term, _ :: _ -> term
+      | computed, [] ->
+          let named = Facts.declare_fresh context frame "index" Logic.Int in
+          Facts.assume context frame (Logic.equal named computed);
+          named)
   | Immediate { value = Integer number; _ } -> Logic.Integer number
   | Immediate { value = Unit | Float _ | Boolean _; _ } ->
       Facts.raise_bug "an index that is not an integer"

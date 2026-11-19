@@ -549,14 +549,17 @@ let compute_elements_potential context (ty : Types.ty) term =
 let assume_element_potential_change context frame (sequence : Types.ty) ~before ~after ~replaced
     ~written =
   match find_buffer_elements context sequence with
-  | Some (element, model_of) when has_potential context element ->
-      let sum term = sum_element_potentials context element (model_of term) in
-      Facts.assume context frame
-        (Logic.equal (sum after)
-           (Costs.plus
-              (Costs.minus (sum before) (compute_potential context frame element replaced))
-              (compute_potential context frame element written)))
-  | Some _ | None -> ()
+  | Some (element, model_of) -> (
+      try
+        if has_potential context element then
+          let sum term = sum_element_potentials context element (model_of term) in
+          Facts.assume context frame
+            (Logic.equal (sum after)
+               (Costs.plus
+                  (Costs.minus (sum before) (compute_potential context frame element replaced))
+                  (compute_potential context frame element written)))
+      with Facts.Unsupported _ -> ())
+  | None -> ()
 
 let find_literal_bound (metric : Language.Metric.t) (costs : Mir.cost list) =
   let counter = Costs.make_operand_counter metric in

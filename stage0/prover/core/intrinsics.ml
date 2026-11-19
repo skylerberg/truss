@@ -760,15 +760,7 @@ let read_sequence_element context frame (sequence : Types.ty) term index ~origin
     Logic.(
       less_equal (int 0) index &&& less index (Models.make_sequence_length context element model));
   Validity.note_place context frame origin (One index);
-  let indexed = index_element context element model index in
-  let read =
-    match frame.bound with
-    | [] ->
-        let named = Facts.arrive context frame "element" element in
-        Facts.assume context frame (Logic.equal named indexed);
-        named
-    | _ :: _ -> indexed
-  in
+  let read = index_element context element model index in
   Facts.assume context frame (Facts.make_in_range element read);
   Validity.assume_valid context frame element read;
   read
@@ -803,7 +795,11 @@ let write_sequence context frame (sequence : Types.ty) before ~write_model =
             (Logic.equal
                (make_buffer_capacity context element written)
                (make_buffer_capacity context element buffer));
-        Logic.Apply (Facts.make_constructor_symbol sequence None, [ written ])
+        let after = Logic.Apply (Facts.make_constructor_symbol sequence None, [ written ]) in
+        write_model
+          ~before:(find_sequence_model context frame sequence before)
+          ~after:(find_sequence_model context frame sequence after);
+        after
     | _, None ->
         let after = Facts.arrive context frame "changed" sequence in
         write_model
