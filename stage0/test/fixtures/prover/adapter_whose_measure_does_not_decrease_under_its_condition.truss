@@ -1,0 +1,17 @@
+type Spinner[Source](source: Source, spins: UInt64)
+
+impl Cursor for Spinner[Source: Cursor[Element = Int64]] {
+  type Element = Int64
+  capability Uses = Source.Uses, RunForever unless Source: FiniteCursor
+
+  fn next(mut self) -> Option[Int64]
+    uses Self.Uses
+  {
+    while self.spins < 10
+      decreases self.source.remaining() when Source: FiniteCursor
+    {
+      self.spins += 1
+    }
+    None
+  }
+}

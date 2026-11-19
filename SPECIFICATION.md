@@ -849,7 +849,10 @@ condition holds for the instantiations that meet it.
   `T: First + Second` where it implements both. `&&` joins conditions that
   all hold.
 - A condition names a type parameter of its definition or of the
-  definition's type or `impl`, or `Self` in a trait or an `impl`.
+  definition's type or `impl`, or `Self` in a trait or an `impl`, as a bound
+  does. An associated type is named through a type parameter bound to it:
+  `[Element, Items: Cursor[Element = Element]]`, and then
+  `when Element: Display`.
 - A clause holds where its `when` condition holds, and a capability in
   `uses` is used only where its `unless` condition does not hold. Every
   clause of a function and of a loop takes a condition: `requires`,
@@ -878,7 +881,9 @@ condition holds for the instantiations that meet it.
   does, by `impl FiniteCursor for Skip[Source: FiniteCursor]`.
 - A capability that code uses `unless` a condition is available where the
   function's `uses` names it with no condition, or `unless` a condition that
-  implies the code's.
+  implies the code's. A trait implies the traits it requires, so
+  `RunForever unless Items: Short`, where `Short: FiniteCursor`, covers
+  `RunForever unless Items: FiniteCursor`.
 - A written function type takes no condition. The type of a function named
   as a value keeps each condition that its type arguments do not decide.
 - A condition that names neither a type parameter nor `Self` is an error,
@@ -2337,7 +2342,7 @@ impl            = "impl" path_type "for" type_head [ "uses" capability_list ]
                   "{" lines(impl_member) "}" ;
 impl_member     = function_member
                 | "type" UPPER_NAME "=" type
-                | "capability" UPPER_NAME "=" capability_list ;
+                | "capability" UPPER_NAME "=" capability_use { "," capability_use } ;
 function_member = signature body ;
 ```
 
@@ -2461,6 +2466,11 @@ fn count[Source: Cursor](source: own Source) -> UInt64
 - `Self.Uses` and `Source.Uses` name the set in a `uses` clause. A call needs
   the set's capabilities for its type arguments. A function generic over a
   `Cursor` that advances it declares `uses Source.Uses`.
+- A capability in a set takes `unless`, as in `uses`. A cursor whose `next`
+  pulls its source until a value matches defines
+  `capability Uses = Source.Uses, RunForever unless Source: FiniteCursor`,
+  and a call of its `next` uses `RunForever` only where the source is not a
+  `FiniteCursor`.
 - A bound cannot constrain a set, and `calls(...)` cannot count one.
 
 ### Equality

@@ -1,0 +1,6 @@
+fn count_all[Source: Cursor](source: own Source) -> UInt64
+  uses Source.Uses, RunForever unless Source: FiniteCursor
+  cost time O(1) when Source: Display
+{
+  0
+}

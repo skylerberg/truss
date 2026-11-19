@@ -825,7 +825,7 @@ let () =
         ]);
   Harness.test "a function that uses RunForever unless C states its time clause when C" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.time_of_a_function_that_runs_forever_unless_finite
-        "types.unbounded_time" ~says:"a `time` clause bounds it only `when Source: FiniteCursor`"
+        "types.unbounded_time" ~says:"`when` a condition that implies `Source: FiniteCursor`"
         ~fixed:Fixtures.Capabilities.time_when_a_function_terminates;
       expect_fine Fixtures.Capabilities.time_when_a_function_terminates);
   Harness.test "a loop over a cursor that may not end uses RunForever unless it is finite"
@@ -850,6 +850,33 @@ let () =
       expect_one_diagnostic
         Fixtures.Capabilities.loop_that_runs_forever_under_a_condition_on_another_capability
         "capabilities.not_available" ~says:"This loop has no measure");
+  Harness.test "a function value keeps the condition its type arguments decide" (fun () ->
+      expect_fine Fixtures.Capabilities.function_value_of_a_function_with_a_condition;
+      expect_one_diagnostic
+        Fixtures.Capabilities.function_value_of_a_function_with_a_condition_that_may_run_forever
+        "capabilities.not_available"
+        ~says:"This call uses `RunForever unless Source: FiniteCursor`, which");
+  Harness.test "an associated capability set takes a condition" (fun () ->
+      expect_fine Fixtures.Capabilities.adapter_whose_capability_set_has_a_condition;
+      expect_one_diagnostic Fixtures.Capabilities.adapter_called_where_its_source_may_not_end
+        "capabilities.not_available"
+        ~says:"This call uses `RunForever unless Source: FiniteCursor`, which";
+      expect_one_diagnostic Fixtures.Capabilities.adapter_whose_capability_set_lacks_the_condition
+        "capabilities.not_available"
+        ~says:
+          "Declare it with `RunForever unless Source: FiniteCursor` in the `impl`'s `capability \
+           Uses`.");
+  Harness.test "RunForever unless a subtrait covers RunForever unless its supertrait" (fun () ->
+      expect_fine Fixtures.Capabilities.run_forever_unless_a_subtrait_covers_its_supertrait;
+      expect_one_diagnostic
+        Fixtures.Capabilities.run_forever_unless_a_supertrait_does_not_cover_its_subtrait
+        "capabilities.not_available" ~says:"This call uses `RunForever unless Items: Short`");
+  Harness.test "a time clause's condition implies RunForever's through a supertrait" (fun () ->
+      expect_fine Fixtures.Capabilities.time_when_a_subtrait;
+      expect_one_diagnostic Fixtures.Capabilities.time_when_an_unrelated_condition
+        "types.unbounded_time" ~says:"`when` a condition that implies `Source: FiniteCursor`"
+        ~fixed:Fixtures.Capabilities.time_when_an_unrelated_condition_fixed;
+      expect_fine Fixtures.Capabilities.time_when_an_unrelated_condition_fixed);
   Harness.test "a bound names the time of no callback that may run forever" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.time_of_a_callback_that_runs_forever
         "types.unbounded_time"

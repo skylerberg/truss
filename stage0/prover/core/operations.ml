@@ -104,24 +104,6 @@ let convert_to_any context frame (site : Invocation.site) =
   in
   (frame, Facts.arrive context frame "any" (Facts.substitute_type context frame site.type_))
 
-let compute_bounds_with_self ?(bounds : Interface.Impls.bounds option) (context : State.context) :
-    Interface.Impls.bounds =
-  let list_current_bounds = Option.value bounds ~default:context.bounds in
-  fun parameter ->
-    match
-      if Types.is_self_parameter parameter then
-        Interface.Definition.find_trait_interface context.lookups.interface parameter.owner
-      else None
-    with
-    | Some interface ->
-        {
-          Types.trait = parameter.owner;
-          trait_arguments = Types.list_generic_arguments interface.trait_generics;
-          associated = [];
-        }
-        :: list_current_bounds parameter
-    | None -> list_current_bounds parameter
-
 let list_impl_packages (context : State.context) (ty : Types.ty) =
   List.sort_uniq compare
     ((match ty with Types.Named { path; _ } -> [ Path.locate_package path ] | _ -> [])

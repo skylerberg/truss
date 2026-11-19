@@ -254,7 +254,7 @@ type trait_member =
 
 type impl_member =
   | Associated_definition of name * type_expression
-  | Capability_definition of name * capability_reference list
+  | Capability_definition of name * capability_use list
   | Impl_member_error
 
 type capability_member = Capability_member_error

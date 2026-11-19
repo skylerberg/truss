@@ -520,7 +520,16 @@ and finalize_capabilities state capabilities =
                        Types.Capability_projection { base = finalize_type state base; trait; name };
                      ])
             | _ -> None)
-          capabilities))
+          (Types.map_conditions
+             (Types.map_condition_types (finalize_type state) (finalize_trait state))
+             capabilities)))
+
+and finalize_trait state (trait : Types.trait_reference) : Types.trait_reference =
+  {
+    trait with
+    trait_arguments = List.map (finalize_argument state) trait.trait_arguments;
+    associated = List.map (fun (name, type_) -> (name, finalize_type state type_)) trait.associated;
+  }
 
 and finalize_argument state = function
   | Types.Type type_ -> Types.Type (finalize_type state type_)

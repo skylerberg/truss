@@ -652,14 +652,25 @@ let list_definition_bounds (lookups : Lookups.t) ~(current : Path.t) ~(condition
         | Some signature -> signature.generics
         | None -> list_impl_generics current)
   in
-  fun parameter ->
-    Types.list_bounds generics parameter
-    @ List.filter_map
-        (fun (bound : Types.bound_condition) ->
-          match bound.subject with
-          | Types.Parameter subject when subject = parameter -> Some bound.bound
-          | _ -> None)
-        condition
+  let list_self_bounds (parameter : Types.parameter) =
+    match
+      if Types.is_self_parameter parameter then
+        Interface.Definition.find_trait_interface lookups.interface parameter.owner
+      else None
+    with
+    | Some interface ->
+        [
+          {
+            Types.trait = parameter.owner;
+            trait_arguments = Types.list_generic_arguments interface.trait_generics;
+            associated = [];
+          };
+        ]
+    | None -> []
+  in
+  Interface.Impls.add_condition_bounds
+    (fun parameter -> list_self_bounds parameter @ Types.list_bounds generics parameter)
+    condition
 
 let substitute_type (context : State.context) (frame : State.frame) ty =
   (Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)

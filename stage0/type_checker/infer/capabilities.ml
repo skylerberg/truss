@@ -22,6 +22,9 @@ type scope_kind =
 
 and scope = { allowed : Types.capability_set; provided : Types.capability_set; kind : scope_kind }
 
+let implies (state : State.state) =
+  Interface.Impls.implies_condition state.lookups.interface ~list_bounds:(State.lookup_bounds state)
+
 let make_scope ~allowed kind = { allowed; provided = Types.no_capabilities; kind }
 let compute_available scope = Types.union_capabilities scope.allowed scope.provided
 
@@ -193,23 +196,25 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
         require_available checking enclosing origin ~subject ?alternative ~indirect_call
           ~restriction:
             (match restriction with
-            | Some restriction -> Types.intersect_capabilities [ restriction; passed ]
+            | Some restriction ->
+                Types.intersect_capabilities ~implies:(implies state) [ restriction; passed ]
             | None -> passed)
           required
     | None -> ()
   end
 
-let compute_required_uses scope (callee : Core.callee) =
+let compute_required_uses state scope (callee : Core.callee) =
   match (callee.target, find_implemented_capability scope) with
   | Intrinsic _, Some _ ->
-      Types.subtract_capabilities callee.uses (Types.make_capability_set [ tasks ])
+      Types.subtract_capabilities ~implies:(implies state) callee.uses
+        (Types.make_capability_set [ tasks ])
   | (Function _ | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _), _ -> callee.uses
 
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
   check_callee_grants checking origin callee.target;
   require_available checking scope origin
     ~indirect_call:(match callee.target with Indirect _ -> true | _ -> false)
-    (compute_required_uses scope callee)
+    (compute_required_uses checking.state scope callee)
 
 let require_run_forever_of_unmeasured_loop checking scope (origin : Core.origin) ~alternative =
   require_available checking scope origin ~subject:"This loop has no measure, so it" ~alternative
@@ -408,11 +413,12 @@ let solve (state : State.state) =
   in
   let compute_missing (constraint_ : State.subset_constraint) =
     let missing =
-      Types.compute_missing_capabilities ~required:(substitute constraint_.subset)
-        ~available:(substitute constraint_.superset)
+      Types.compute_missing_capabilities ~implies:(implies state)
+        ~required:(substitute constraint_.subset) ~available:(substitute constraint_.superset)
     in
     match constraint_.restriction with
-    | Some restriction -> Types.intersect_capabilities [ missing; substitute restriction ]
+    | Some restriction ->
+        Types.intersect_capabilities ~implies:(implies state) [ missing; substitute restriction ]
     | None -> missing
   in
   let add_to_variables (constraint_ : State.subset_constraint) missing =
