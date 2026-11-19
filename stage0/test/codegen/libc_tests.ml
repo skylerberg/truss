@@ -401,7 +401,7 @@ let () =
                   Place (Lowered.make_local_place seconds);
                   Place (Lowered.make_local_place nanoseconds);
                 ];
-              let emit_bool rvalue = Emit_c.Ir_builder.emit_temporary builder (Raw Bool) rvalue in
+              let emit_bool rvalue = Emit_c.Ir_builder.emit_value builder (Raw Bool) rvalue in
               let is_recent =
                 emit_bool
                   (Compare
@@ -533,7 +533,7 @@ let () =
               let first = draw () in
               let second = draw () in
               let differ =
-                Emit_c.Ir_builder.emit_temporary builder (Raw Bool)
+                Emit_c.Ir_builder.emit_value builder (Raw Bool)
                   (Compare
                      ( Not_equal,
                        Copy (Lowered.make_local_place first),
@@ -711,12 +711,12 @@ let () =
         Emit_c.Ir_builder.emit builder (Drop (Lowered.make_local_place handle));
         let second = open_test_file () in
         let same =
-          Emit_c.Ir_builder.emit_temporary builder (Raw Bool)
+          Emit_c.Ir_builder.emit_value builder (Raw Bool)
             (Compare
                (Equal, Copy (Lowered.make_local_place first), Copy (Lowered.make_local_place second)))
         in
         let status =
-          Emit_c.Ir_builder.emit_temporary builder (Codegen_support.value int32)
+          Emit_c.Ir_builder.emit_value builder (Codegen_support.value int32)
             (Convert (same, Integer Int32))
         in
         Emit_c.Ir_builder.finish builder (Return (Some status));

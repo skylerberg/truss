@@ -13,7 +13,7 @@ val start : t -> Lowered.block -> unit
 val emit : t -> Lowered.statement -> unit
 val finish : t -> Lowered.terminator -> unit
 val run_in_block : t -> Lowered.block -> (unit -> unit) -> unit
-val emit_temporary : t -> Lowered.ty -> Lowered.rvalue -> Lowered.operand
+val emit_value : t -> Lowered.ty -> Lowered.rvalue -> Lowered.operand
 
 type condition =
   | Test of Lowered.test

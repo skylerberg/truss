@@ -1043,12 +1043,12 @@ let () =
                          (Scalar Fits)
                          [ Value (Constant (Float64 (Int64.bits_of_float float))) ]);
                     let emit_int32 rvalue =
-                      Emit_c.Ir_builder.emit_temporary builder
+                      Emit_c.Ir_builder.emit_value builder
                         (Codegen_support.value Codegen_support.int32)
                         rvalue
                     in
                     let is_right =
-                      Emit_c.Ir_builder.emit_temporary builder (Raw Bool)
+                      Emit_c.Ir_builder.emit_value builder (Raw Bool)
                         (Compare
                            (Equal, Copy (Lowered.make_local_place fits), Constant (Bool expected)))
                     in
