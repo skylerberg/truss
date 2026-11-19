@@ -762,7 +762,6 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       undecided = [];
       decisions = Hashtbl.create 4;
       annotatable = Hashtbl.create 8;
-      elaborations = [];
     }
   in
   state.unifier.find_integer_range <-

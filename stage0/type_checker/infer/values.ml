@@ -152,22 +152,22 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
               part_type := Some part;
               List.iteri
                 (fun index ((part_expression : Syntax.expression), part_type) ->
-                  let part_type = State.normalize state part_type in
-                  if not (Types.equal part_type part) then
-                    let from =
-                      State.make_trait_reference ~arguments:[ Types.Type part_type ]
-                        (Well_known.make_path From)
-                    in
-                    match State.find_evidence state part from with
-                    | Some evidence ->
-                        set_part index
-                          (trait_call ~mode:Own from "from" Path.Static part evidence
-                             [ part_expression ] part)
-                    | None ->
-                        State.report state No_impl
-                          (State.read_span state part_expression.id)
-                          (Printf.sprintf "`%s` cannot become a `%s`, the part type of `%s`."
-                             (Types.show part_type) (Types.show part) (Types.show tag_type)))
+                  Solver.check_solved state part_type (fun part_type ->
+                      if not (Types.equal part_type part) then
+                        let from =
+                          State.make_trait_reference ~arguments:[ Types.Type part_type ]
+                            (Well_known.make_path From)
+                        in
+                        Solver.require state part from
+                          ~on_met:(fun evidence ->
+                            set_part index
+                              (trait_call ~mode:Own from "from" Path.Static part evidence
+                                 [ part_expression ] part))
+                          ~on_unmet:(fun _ _ ->
+                            State.add_diagnostic state No_impl
+                              (State.read_span state part_expression.id)
+                              (Printf.sprintf "`%s` cannot become a `%s`, the part type of `%s`."
+                                 (Types.show part_type) (Types.show part) (Types.show tag_type)))))
                 parts)
             ~on_unmet:(fun tag_type _ ->
               State.add_diagnostic state No_impl

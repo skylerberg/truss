@@ -104,7 +104,6 @@ type state = {
   mutable undecided : undecided_literal list;
   decisions : (int, literal_decision) Hashtbl.t;
   annotatable : (Syntax.id, unit) Hashtbl.t;
-  mutable elaborations : (unit -> unit) list;
 }
 
 let add_diagnostic state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =

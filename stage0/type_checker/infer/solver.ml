@@ -1,13 +1,3 @@
-let elaborate (state : State.state) elaboration =
-  match state.frames with
-  | [] -> elaboration ()
-  | _ :: _ -> state.elaborations <- elaboration :: state.elaborations
-
-let run_elaborations (state : State.state) =
-  let elaborations = List.rev state.elaborations in
-  state.elaborations <- [];
-  List.iter (fun elaboration -> elaboration ()) elaborations
-
 let list_argument_types (trait : Types.trait_reference) =
   List.filter_map
     (function Types.Type type_ -> Some type_ | Types.Value _ -> None)
@@ -75,7 +65,7 @@ let decide (state : State.state) (obligation : State.obligation) =
                         ignore (implements.on_unmet subject (Some (name, actual)))
                     | _ -> ())
                   trait.associated;
-                elaborate state (fun () -> implements.on_met evidence);
+                implements.on_met evidence;
                 Met))
   | Satisfies satisfies -> (
       if list_obligation_unknowns state obligation <> [] then Pending
@@ -84,7 +74,7 @@ let decide (state : State.state) (obligation : State.obligation) =
         | Some _ -> Vacuous
         | None ->
             if satisfies.holds subject then begin
-              elaborate state (fun () -> satisfies.on_met (State.normalize state subject));
+              satisfies.on_met subject;
               Met
             end
             else Unmet (satisfies.on_unmet subject))
@@ -107,12 +97,12 @@ let is_met_by_trial (state : State.state) (obligation : State.obligation) =
 let is_pending state obligation =
   match decide state obligation with Pending -> true | Met | Unmet _ | Vacuous -> false
 
-let solve (state : State.state) (frame : State.frame) =
-  let rec loop pending =
-    let remaining = List.filter (is_pending state) pending in
-    if List.length remaining < List.length pending then loop remaining else remaining
-  in
-  frame.obligations <- List.rev (loop (List.rev frame.obligations))
+let rec solve (state : State.state) (frame : State.frame) =
+  let pending = List.rev frame.obligations in
+  frame.obligations <- [];
+  let remaining = List.filter (is_pending state) pending in
+  frame.obligations <- frame.obligations @ List.rev remaining;
+  if List.length remaining < List.length pending then solve state frame
 
 let add (state : State.state) (obligation : State.obligation) =
   let outcome = decide state obligation in
@@ -130,12 +120,12 @@ let require_type state subject ~holds ?(on_met = ignore) ~on_unmet () =
   | Pending | Met | Vacuous -> subject
 
 let check_solved state type_ check =
-  elaborate state (fun () ->
-      let solved = State.normalize state type_ in
-      if
-        Unify.list_unknowns state.unifier solved = []
-        && not (Types.exists ~resolve:(State.resolve state) Types.is_error solved)
-      then check solved)
+  ignore
+    (require_type state type_
+       ~holds:(fun _ -> true)
+       ~on_met:check
+       ~on_unmet:(fun _ -> State.raise_bug "a check that always holds is unmet")
+       ())
 
 let list_default_types ~specification (kind : Types.literal_kind) =
   match kind with
@@ -146,15 +136,9 @@ let list_default_types ~specification (kind : Types.literal_kind) =
 
 let choose_default (state : State.state) ~specification ~obligations (kind, root) =
   let specification = specification && not (Hashtbl.mem state.unifier.code_literals root) in
-  let mentions obligation =
-    List.exists
-      (function Unify.Unknown_literal (_, index) -> index = root | _ -> false)
-      (list_obligation_unknowns state obligation)
-  in
-  let relevant = List.filter mentions obligations in
   let is_met_by default =
     Hashtbl.replace state.unifier.type_solutions root default;
-    let is_met = List.for_all (is_met_by_trial state) relevant in
+    let is_met = List.for_all (is_met_by_trial state) obligations in
     Hashtbl.remove state.unifier.type_solutions root;
     is_met
   in
@@ -187,6 +171,7 @@ let record_decisions (state : State.state) ~(at : Source.Definition_span.t) ~is_
 let decide_for_method_call (state : State.state) ~at type_ =
   match (State.resolve state type_, State.find_current_frame state) with
   | Types.Literal (kind, root), Some frame ->
+      List.iter (solve state) state.frames;
       record_decisions state ~at:frame.span ~is_default:false;
       let default =
         choose_default state ~specification:false
@@ -465,5 +450,4 @@ let run_in_statement ?escaping (state : State.state) (env : State.env)
   let result = body () in
   settle state frame;
   state.frames <- List.tl state.frames;
-  (match state.frames with [] -> run_elaborations state | _ :: _ -> ());
   result
