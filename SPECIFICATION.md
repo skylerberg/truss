@@ -40,8 +40,6 @@ has a body, except a method declared in a trait or a capability.
   character, and is ignored.
 - Tab and space are whitespace. A carriage return followed by a line feed is
   one line break; a carriage return on its own is an error.
-- Each language version names one Unicode version, which every rule here
-  that uses a Unicode property follows.
 
 These characters are an error anywhere in a file, including inside string
 literals, because they can make code display differently from how it
@@ -152,13 +150,12 @@ octal_digit   = "0" ... "7" ;
 A number literal is never directly followed by a name character, so `3u8`
 is an error.
 
-A literal takes its type from its context, as in `let small: UInt8 = 3`. A
-local declared from literals alone takes its type from its first use that
-decides it: after `let limit = 10`, `count < limit` with a `UInt8` count makes
-`limit` a `UInt8`, and so does `let digit: UInt8 = index` in the body of
-`for index in 0..10`. When nothing decides it, a literal has the first of
-`Int64`, `UInt64`, and `Float64` that its value fits and its uses allow, so
-`9223372036854775808` is a `UInt64`.
+Literal's types are inferred, as in `let small: UInt8 = 3`. A local declared
+from literals alone takes its type from its first use that decides it: after
+`let limit = 10`, `count < limit` with a `UInt8` count makes `limit` a `UInt8`,
+and so does `let digit: UInt8 = index` in the body of `for index in 0..10`. When
+nothing decides it, a literal has the first of `Int64`, `UInt64`, and `Float64`
+that its value fits and its uses allow, so `9223372036854775808` is a `UInt64`.
 
 - A literal operand of an arithmetic operator, a comparison, or a range takes
   the other operand's type when its value fits that type: in `count + 1` with
@@ -168,9 +165,8 @@ decides it: after `let limit = 10`, `count < limit` with a `UInt8` count makes
   of literals waits for the same decision. In a specification, a literal that
   fits neither operand's type is an `Integer`, and `Integer` is its default,
   so `span * 2` there needs a literal with a type.
-- A shift amount is an unsigned integer, and a literal one is a `UInt64` when
-  nothing else decides it.
-- An integer literal is never a float.
+- A shift amount is an unsigned integer, and a literal one is a `UInt64` by
+  default.
 - A literal that does not fit its type is an error. A negated literal is
   checked after the negation, so `-128` fits an `Int8`.
 - A literal whose type is a type parameter bounded by an integer trait fits
