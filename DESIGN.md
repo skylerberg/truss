@@ -1831,6 +1831,7 @@ contract, so a typo in a body blocks no caller.
 |---|---|
 | The database keeps no earlier version of a failing part. | An earlier version would make the database depend on the order of the edits. A caller checked against an earlier signature would also report errors that the files do not hold. |
 | A build, a test run, or a template check requires that no definition it reaches has errors. | No run executes code that the files do not hold, and a test whose code is correct runs while unrelated code is broken. |
+| A constant's value belongs to its contract. | A pattern that names a constant covers the constant's value, and a contract can hold a pattern. The check of that contract reads the value, as a caller's proof reads a callee's contract. |
 
 ### Caches
 

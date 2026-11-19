@@ -1,4 +1,4 @@
-module Lookups = Lookups
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
 
 type constructor =
   | Variant of string
@@ -118,15 +118,16 @@ and evaluate_pattern_constant context (value : Core.pattern_constant) : space =
 and evaluate_named_constant ?(seen = []) context path : space option =
   if List.exists (Path.equal path) seen then None
   else
-    match context.lookups.interface.find_constant_value path with
-    | Some value -> Some (Constructed (Interval (value, value), []))
-    | None -> (
+    match context.lookups.interface.names.find_key path with
+    | None -> raise_bug "the constant `%s` in a pattern has no declaration" (Path.show path)
+    | Some key -> (
         match
-          Option.map context.lookups.read_core (context.lookups.interface.names.find_key path)
+          ( (context.lookups.read_contract key).definition,
+            context.lookups.interface.find_constant_value path )
         with
-        | Some { definition = Constant (Some value); _ } ->
-            evaluate_constant_expression context (path :: seen) value
-        | _ -> None)
+        | Constant (Some _), Some folded -> Some (Constructed (Interval (folded, folded), []))
+        | Constant (Some value), None -> evaluate_constant_expression context (path :: seen) value
+        | _ -> raise_bug "the contract of the constant `%s` holds no value" (Path.show path))
 
 and evaluate_constant_expression context seen (value : Core.expression) : space option =
   match value.kind with
@@ -627,6 +628,7 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
              (show_row context types first)
              (match List.length all with
              | 1 -> ""
+             | 2 -> ", nor 1 other"
              | count when count >= witness_limit -> ", nor others"
              | count -> Printf.sprintf ", nor %d others" (count - 1)))
   end
@@ -665,7 +667,7 @@ let check_definition context (definition : Core.definition) =
     }
     definition
 
-let check (lookups : Lookups.t) (key : Resolve.Names.key) =
+let check (lookups : Lookups.t) (key : Resolve.Names.key) (form : Core.t) =
   let context =
     {
       lookups;
@@ -675,7 +677,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) =
       diagnostics = [];
     }
   in
-  check_definition context (lookups.read_core key).definition;
+  check_definition context form.definition;
   List.sort
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare left.span right.span)

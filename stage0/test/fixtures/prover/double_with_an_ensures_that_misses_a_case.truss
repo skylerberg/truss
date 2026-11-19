@@ -1,0 +1,8 @@
+fn double(value: Int64) -> Int64
+  requires value < 1000 && value > -1000
+  ensures match value {
+    0 => result == 0
+  }
+{
+  value * 2
+}

@@ -1,0 +1,15 @@
+type Color =
+  | Red
+  | Green
+  derives Equal
+
+fn pick() -> Color
+  ensures match result {
+    app::main::favorite => true
+    Green => true
+  }
+{
+  Color.Red
+}
+
+let favorite: Color = Color.Red
