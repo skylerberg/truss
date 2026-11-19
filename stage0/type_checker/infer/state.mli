@@ -38,8 +38,7 @@ type goal = {
   requirement : requirement;
   outputs : (string * Types.ty) list;
   cause : cause;
-  is_specification : bool;
-  condition : Types.condition;
+  mode : Unify.mode;
 }
 
 type frame = {
@@ -72,7 +71,6 @@ type state = {
   package : Path.package;
   definition : Syntax.definition;
   resolved : Resolve.resolved;
-  context : Interface.Elaborator.t;
   text : string Lazy.t;
   mutable tables : Tables.t;
   form : form;
@@ -161,8 +159,9 @@ val check_compiled_expression : state -> Syntax.id -> unit
 val reduce_condition : state -> Types.condition -> Types.condition option
 val record_condition : state -> Syntax.id -> Syntax.condition option -> Types.condition option
 val find_condition : state -> Syntax.id -> Types.condition option
-val with_condition : state -> Types.condition -> (unit -> 'a) -> 'a
+val with_mode : state -> Unify.mode -> (unit -> 'a) -> 'a
 val with_added_condition : state -> Types.condition -> (unit -> 'a) -> 'a
+val with_specification : state -> bool -> (unit -> 'a) -> 'a
 val read_context : state -> Interface.Elaborator.t
 val check_when_final : state -> (unit -> unit) -> unit
 val resolve : state -> Types.ty -> Types.ty

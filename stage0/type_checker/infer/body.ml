@@ -702,7 +702,6 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       package = module_.package;
       definition;
       resolved;
-      context;
       text;
       tables = Tables.create (definition.id + 1);
       form =
@@ -717,13 +716,11 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
         };
       diagnostics = [];
       unifier =
-        Unify.create ~list_rigid_members:(fun condition rigid ->
+        Unify.create ~context ~list_rigid_members:(fun context rigid ->
             Option.value ~default:[]
               (Types.find_bound_integer_implementors
                  (Interface.Properties.list_known_bounds lookups.interface
-                    ~list_bounds:
-                      (Interface.Elaborator.list_bounds
-                         (Interface.Elaborator.with_condition context condition))
+                    ~list_bounds:(Interface.Elaborator.list_bounds context)
                     rigid)));
       locals = Hashtbl.create 32;
       law_parameters = [];

@@ -44,16 +44,23 @@ let create lookups resolved ~spans (scope : Environment.scope) =
 let read_span context id = context.spans.(id)
 
 let list_bounds context parameter =
-  Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter)
-  @ List.filter_map
+  let declared = Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter) in
+  match
+    List.filter_map
       (fun (bound : Types.bound_condition) ->
         match bound.subject with
         | Types.Parameter subject when subject = parameter -> Some bound.bound
         | _ -> None)
       context.condition
+  with
+  | [] -> declared
+  | conditional -> declared @ conditional
 
 let find_self_type context = context.self_type
-let with_condition context condition = { context with condition }
+
+let add_condition context condition =
+  { context with condition = Types.make_condition (context.condition @ condition) }
+
 let list_diagnostics context = !(context.diagnostics)
 let list_named_types context = !(context.named)
 

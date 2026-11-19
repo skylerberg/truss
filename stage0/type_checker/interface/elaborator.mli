@@ -46,7 +46,7 @@ val list_cost_operands : t -> Syntax.expression -> cost_operand list
 val show_path : Syntax.path -> string
 val elaborate_type : t -> Syntax.type_expression -> Types.ty
 val elaborate_condition : t -> Syntax.condition -> Types.condition
-val with_condition : t -> Types.condition -> t
+val add_condition : t -> Types.condition -> t
 
 val elaborate_header :
   Lookups.t -> Resolve.Names.key -> (Environment.header, Diagnostic.in_definition list) result

@@ -39,8 +39,7 @@ type goal = {
   requirement : requirement;
   outputs : (string * Types.ty) list;
   cause : cause;
-  is_specification : bool;
-  condition : Types.condition;
+  mode : Unify.mode;
 }
 
 type frame = {
@@ -91,7 +90,6 @@ type state = {
   package : Path.package;
   definition : Syntax.definition;
   resolved : Resolve.resolved;
-  context : Interface.Elaborator.t;
   text : string Lazy.t;
   mutable tables : Tables.t;
   form : form;
@@ -133,7 +131,8 @@ let reject_in_formula state env span what =
           the prover reads as formulas: they are built from `let`, `if`, `match`, and calls."
          what)
 
-let read_span state id = Interface.Elaborator.read_span state.context id
+let read_context state = state.unifier.mode.context
+let read_span state id = Interface.Elaborator.read_span (read_context state) id
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
 
 let make_error_type state ?fixes code span message =
@@ -377,22 +376,26 @@ let check_compiled_expression state (id : Syntax.id) =
       ignore (reject_specification_only_type state ~subject:"This value" (read_span state id) type_))
     state.tables.types.(id)
 
-let with_condition (state : state) condition run =
-  let enclosing = state.unifier.condition in
-  state.unifier.condition <- condition;
-  Fun.protect ~finally:(fun () -> state.unifier.condition <- enclosing) run
+let with_mode (state : state) mode run =
+  let enclosing = state.unifier.mode in
+  state.unifier.mode <- mode;
+  Fun.protect ~finally:(fun () -> state.unifier.mode <- enclosing) run
 
-let with_added_condition state condition run =
-  with_condition state (Types.make_condition (state.unifier.condition @ condition)) run
+let with_added_condition (state : state) condition run =
+  let mode = state.unifier.mode in
+  with_mode state
+    { mode with context = Interface.Elaborator.add_condition mode.context condition }
+    run
 
-let keep_condition (state : state) run =
-  let condition = state.unifier.condition in
-  fun argument -> with_condition state condition (fun () -> run argument)
+let with_specification (state : state) checks_specification run =
+  with_mode state { state.unifier.mode with checks_specification } run
 
-let read_context state = Interface.Elaborator.with_condition state.context state.unifier.condition
+let keep_mode (state : state) run =
+  let mode = state.unifier.mode in
+  fun argument -> with_mode state mode (fun () -> run argument)
 
 let check_when_final state check =
-  state.final_type_checks <- keep_condition state check :: state.final_type_checks
+  state.final_type_checks <- keep_mode state check :: state.final_type_checks
 
 let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
@@ -460,12 +463,12 @@ let record_in_log state member entry = state.log <- { member; entry } :: state.l
 let make_literal_type state (value : Syntax.expression) allowed ~report_excluded =
   let literal = Unify.make_fresh_number state.unifier allowed in
   record_in_log state state.unifier.next
-    (Literal { allowed; report_excluded = keep_condition state report_excluded; literal = value.id });
+    (Literal { allowed; report_excluded = keep_mode state report_excluded; literal = value.id });
   literal
 
 let record_narrowing state member ~allowed ~report_excluded =
   record_in_log state member
-    (Narrowing { allowed; report_excluded = keep_condition state report_excluded })
+    (Narrowing { allowed; report_excluded = keep_mode state report_excluded })
 
 let record_decided state member ~site ~decided_type ~at =
   record_in_log state member (Decided { site; decided_type; decided_at = at })

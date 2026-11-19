@@ -64,7 +64,9 @@ let instantiate_type state span path =
 let rec find_static state (value : Syntax.expression) : static_ option =
   match (value.kind, State.find_head state value) with
   | Self_type_value, _ ->
-      Option.map (fun self -> Static_type self) (Interface.Elaborator.find_self_type state.context)
+      Option.map
+        (fun self -> Static_type self)
+        (Interface.Elaborator.find_self_type (State.read_context state))
   | _, Some { target = Definition (Type, path); type_arguments; _ } ->
       Some (Static_type (check_named_type state value path type_arguments))
   | _, Some { target = Type_parameter parameter; name; type_arguments } -> (

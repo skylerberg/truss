@@ -140,14 +140,7 @@ let fail_unification (state : State.state) =
   | None -> Fails Unmet
 
 let make_goal (state : State.state) subject requirement ~outputs ~cause : State.goal =
-  {
-    subject;
-    requirement;
-    outputs;
-    cause;
-    is_specification = state.unifier.checks_specification;
-    condition = state.unifier.condition;
-  }
+  { subject; requirement; outputs; cause; mode = state.unifier.mode }
 
 let has_unknowns (state : State.state) arguments =
   List.exists (fun argument -> Unify.list_argument_unknowns state.unifier argument <> []) arguments
@@ -417,7 +410,6 @@ let require_within state subject set ~reason =
   | None -> subject
 
 let solve (state : State.state) ~selects =
-  let enclosing = state.unifier.checks_specification in
   let rec loop () =
     let pending = state.goals and through = state.unifier.next in
     let count = Unify.count_solutions state.unifier ~through in
@@ -426,16 +418,13 @@ let solve (state : State.state) ~selects =
       List.filter
         (fun (goal : State.goal) ->
           (not (selects goal))
-          || begin
-            state.unifier.checks_specification <- goal.is_specification;
-            State.with_condition state goal.condition (fun () ->
-                match decide state ~depth:0 goal with
-                | Waits -> true
-                | Holds -> false
-                | Fails failure ->
-                    ignore (fail state goal failure);
-                    false)
-          end)
+          || State.with_mode state goal.mode (fun () ->
+              match decide state ~depth:0 goal with
+              | Waits -> true
+              | Holds -> false
+              | Fails failure ->
+                  ignore (fail state goal failure);
+                  false))
         pending
     in
     state.goals <- retained @ state.goals;
@@ -444,8 +433,7 @@ let solve (state : State.state) ~selects =
       || Unify.count_solutions state.unifier ~through <> count
     then loop ()
   in
-  loop ();
-  state.unifier.checks_specification <- enclosing
+  loop ()
 
 let solve_all state = solve state ~selects:(fun _ -> true)
 
@@ -716,11 +704,12 @@ let run_in_statement (state : State.state) (env : State.env) span body =
       span;
     }
   in
-  let enclosing_checks_specification = state.unifier.checks_specification in
   state.frames <- frame :: state.frames;
-  state.unifier.checks_specification <- env.specification;
-  let result = body () in
-  settle state frame;
+  let result =
+    State.with_specification state env.specification (fun () ->
+        let result = body () in
+        settle state frame;
+        result)
+  in
   state.frames <- List.tl state.frames;
-  state.unifier.checks_specification <- enclosing_checks_specification;
   result

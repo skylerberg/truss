@@ -1,3 +1,5 @@
+type mode = { context : Interface.Elaborator.t; checks_specification : bool }
+
 type t = {
   mutable next : int;
   type_solutions : (int, Types.ty) Hashtbl.t;
@@ -5,15 +7,18 @@ type t = {
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
   domains : (int, Language.Builtin_type.t list) Hashtbl.t;
-  list_rigid_members : Types.condition -> Types.ty -> Language.Builtin_type.t list;
-  mutable condition : Types.condition;
+  list_rigid_members : Interface.Elaborator.t -> Types.ty -> Language.Builtin_type.t list;
+  mutable mode : mode;
   specification_unknowns : (int, unit) Hashtbl.t;
-  mutable checks_specification : bool;
   mutable refused_code_unknown : int option;
   mutable decided_numbers : int list;
 }
 
-val create : list_rigid_members:(Types.condition -> Types.ty -> Language.Builtin_type.t list) -> t
+val create :
+  context:Interface.Elaborator.t ->
+  list_rigid_members:(Interface.Elaborator.t -> Types.ty -> Language.Builtin_type.t list) ->
+  t
+
 val make_fresh_type : t -> Types.ty
 val make_fresh_number : t -> Language.Builtin_type.t list -> Types.ty
 val make_fresh_value : t -> Types.value
