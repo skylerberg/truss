@@ -105,8 +105,8 @@ let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
            (Types.exists_capability
               (function
                 | Types.Capability_parameter _ -> false
-                | Types.Capability _ | Types.Capability_projection _ | Types.Capability_variable _
-                | Types.Capability_error _ ->
+                | Types.Built_in _ | Types.Capability _ | Types.Capability_projection _
+                | Types.Capability_variable _ | Types.Capability_error _ ->
                     true)
               signature.uses))
         && List.for_all

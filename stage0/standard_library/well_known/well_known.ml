@@ -53,9 +53,6 @@ type t =
   | Instant
   | Duration
   | File_path
-  | Panic
-  | Run_forever
-  | System
   | Tasks
   | System_error
   | Serialize
@@ -228,9 +225,6 @@ let items =
     (Instant, [ "time" ], "Instant");
     (Duration, [ "time" ], "Duration");
     (File_path, [ "files" ], "Path");
-    (Panic, [ "capabilities" ], "Panic");
-    (Run_forever, [ "capabilities" ], "RunForever");
-    (System, [ "capabilities" ], "System");
     (Tasks, [ "capabilities" ], "Tasks");
     (System_error, [ "capabilities" ], "SystemError");
     (Serialize, [ "serialization" ], "Serialize");
@@ -418,6 +412,19 @@ let builtin_types_by_path =
           Language.Builtin_type.all))
 
 let find_builtin_type path = Path.Map.find_opt path builtin_types_by_path
+
+let make_builtin_capability_path builtin_capability =
+  Path.make_standard_path [ "capabilities" ] (Language.Builtin_capability.show builtin_capability)
+
+let builtin_capabilities_by_path =
+  Path.Map.of_seq
+    (List.to_seq
+       (List.map
+          (fun builtin_capability ->
+            (make_builtin_capability_path builtin_capability, builtin_capability))
+          Language.Builtin_capability.all))
+
+let find_builtin_capability path = Path.Map.find_opt path builtin_capabilities_by_path
 
 let is_system_module (module_ : Path.module_) =
   module_.package = Path.standard_package

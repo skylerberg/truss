@@ -376,7 +376,7 @@ and elaborate_capability_path context (path : Syntax.path_type) : Types.capabili
            "`%s` is a type parameter, not a capability. A capability parameter is written `generic \
             %s` at each use."
            shown shown)
-  | Some (Definition (Capability, path_)) -> [ Types.Capability path_ ]
+  | Some (Definition (Capability, path_)) -> [ Types.make_capability path_ ]
   | Some (Definition _) ->
       report_error_capability context Not_a_capability context.spans.(path.id)
         (Printf.sprintf "`%s` is not a capability." shown)

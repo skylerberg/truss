@@ -144,7 +144,7 @@ let make_code context (path : Path.t) (instantiation : Ground.instantiation) : c
   | Member_constant _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ ->
       raise_bug "%s is not code" (Path.show path)
 
-let panic_path = Well_known.make_path Panic
+let panic_path = Well_known.make_builtin_capability_path Panic
 let list_evidence context = Monomorphic.list_capabilities context.monomorphic
 
 let classify_result context substitution (result : Types.result) =
