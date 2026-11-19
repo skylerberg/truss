@@ -1921,7 +1921,8 @@ test "reading elements" {
   the index is in bounds, `get` returns an `Option` instead.
 - `numbers[1..3]` is a slice of the elements at 1 and 2. A slice's bounds are
   proven too. `numbers[..2]` and `numbers[1..]` leave out an end.
-- `truss show List` and `truss show Slice` list every method.
+- `truss show List` lists every method of a list, including those of its
+  view `Slice`.
 
 #### Changing elements
 

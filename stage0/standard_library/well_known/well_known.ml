@@ -417,6 +417,11 @@ let builtin_types_by_path =
 
 let find_builtin_type path = Path.Map.find_opt path builtin_types_by_path
 
+let find_view path =
+  if is List path || find_builtin_type path = Some Array then Some (make_path Slice)
+  else if is String path then Some (make_path String_slice)
+  else None
+
 let make_builtin_capability_path builtin_capability =
   Path.make_standard_path [ "capabilities" ] (Language.Builtin_capability.show builtin_capability)
 
