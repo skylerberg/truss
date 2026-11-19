@@ -33,15 +33,17 @@ The executable is `_build/default/stage0/driver/truss/truss.exe`.
 ## Building the documentation
 
 The documentation is odoc's pages for the stage0 libraries, with graphs of
-the libraries' dependencies. It needs odoc, dune-deps, and Graphviz:
+the libraries' dependencies. The page of each library also lists the names
+it uses from other libraries and the names other libraries use from it. It
+needs odoc, dune-deps, Graphviz, and jq:
 
 ```sh
 opam install odoc dune-deps
-brew install graphviz
+brew install graphviz jq
 ```
 
-On Linux, install Graphviz from the system's package manager instead, such
-as `apt install graphviz`.
+macOS 15 and later include jq. On Linux, install Graphviz and jq from the
+system's package manager instead, such as `apt install graphviz jq`.
 
 Build it:
 
