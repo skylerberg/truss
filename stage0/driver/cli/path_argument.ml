@@ -88,19 +88,47 @@ let resolve_by_suffix declarations written =
       if is_named then Some (Definition declaration.key.path) else None)
     declarations
 
+let is_member_of type_ (declaration : Resolve.Names.declaration) =
+  match find_member declaration.key.path with
+  | Some (Impl { for_type = owner; _ }, _) | Some (owner, _) -> Path.equal owner type_
+  | None -> false
+
+let list_view_methods declarations type_ =
+  match Well_known.find_view type_ with
+  | None -> []
+  | Some view ->
+      let own_overloads =
+        List.filter_map
+          (fun (declaration : Resolve.Names.declaration) ->
+            match declaration.key.path with
+            | Method { name; receiver; _ } when is_member_of type_ declaration ->
+                Some (name, receiver)
+            | _ -> None)
+          declarations
+      in
+      List.filter
+        (fun (declaration : Resolve.Names.declaration) ->
+          match declaration.key.path with
+          | Method { owner; name; receiver = Instance _ as receiver } ->
+              Path.equal owner view && not (List.mem (name, receiver) own_overloads)
+          | _ -> false)
+        declarations
+
 let resolve_members declarations owners member =
-  let is_owner (owner : Path.t) =
-    List.exists
-      (Path.equal (match owner with Impl { for_type; _ } -> for_type | _ -> owner))
-      owners
+  let candidates =
+    List.filter
+      (fun (declaration : Resolve.Names.declaration) ->
+        match find_member declaration.key.path with
+        | Some (_, name) -> name = member
+        | None -> false)
+      declarations
   in
-  List.filter_map
-    (fun (declaration : Resolve.Names.declaration) ->
-      match find_member declaration.key.path with
-      | Some (owner, name) when name = member && is_owner owner ->
-          Some (Definition declaration.key.path)
-      | Some _ | None -> None)
-    declarations
+  List.concat_map
+    (fun owner ->
+      List.map
+        (fun (declaration : Resolve.Names.declaration) -> Definition declaration.key.path)
+        (List.filter (is_member_of owner) candidates @ list_view_methods candidates owner))
+    owners
 
 let resolve names packages argument =
   let written = argument.prefix @ [ argument.last ] in

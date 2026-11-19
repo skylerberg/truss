@@ -187,6 +187,7 @@ val specification : Path.module_
 val intrinsic_module : Path.module_
 val make_builtin_type_path : Language.Builtin_type.t -> Path.t
 val find_builtin_type : Path.t -> Language.Builtin_type.t option
+val find_view : Path.t -> Path.t option
 val make_builtin_capability_path : Language.Builtin_capability.t -> Path.t
 val find_builtin_capability : Path.t -> Language.Builtin_capability.t option
 val is_system_module : Path.module_ -> bool

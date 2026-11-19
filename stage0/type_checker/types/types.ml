@@ -112,12 +112,10 @@ let is_builtin wanted type_ = find_builtin type_ = Some wanted
 let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
 
 let find_view = function
-  | Named { path; arguments } when Well_known.is List path ->
-      Some (Named { path = Well_known.make_path Slice; arguments })
-  | Named { path; arguments = [] } when Well_known.is String path ->
-      Some (Named { path = Well_known.make_path String_slice; arguments = [] })
-  | Named { arguments = element :: _; _ } as array when is_builtin Array array ->
-      Some (Named { path = Well_known.make_path Slice; arguments = [ element ] })
+  | Named { path; arguments } ->
+      Option.map
+        (fun view -> Named { path = view; arguments = List.take 1 arguments })
+        (Well_known.find_view path)
   | _ -> None
 
 let signed_integer_types : Language.Builtin_type.t list = [ Int8; Int16; Int32; Int64 ]
