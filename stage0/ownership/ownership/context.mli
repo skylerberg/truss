@@ -10,6 +10,7 @@ type context = {
   names : string Local_table.t;
   origins : Core.origin Local_table.t;
   binding_modes : Types.mode Local_table.t;
+  literal_views : unit Local_table.t;
   types : Types.ty Local_table.t;
   mutable parameters : Core.local list;
   implements_capability : bool;
@@ -35,6 +36,7 @@ val report :
   unit
 
 val classify_binding_mode : context -> Place.root -> Types.mode
+val views_literal : context -> Place.root -> bool
 val show_root : context -> Place.root -> string
 val show : context -> Place.t -> string
 val collect : context -> Mir.Graph.t -> mode_keywords:Core.mode_keyword list -> unit
