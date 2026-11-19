@@ -24,14 +24,10 @@ type place = { file : Path.file; base : int }
 val show_key : key -> string
 val extract_signature_name : Syntax.signature -> Syntax.name
 val classify_receiver : Syntax.parameter list -> Path.receiver
-val extract_last_name : Path.module_ -> string
 
 type entry = { name : string; kind : named; visibility : visibility; generic : bool }
 
-val is_type_kind : named -> bool
-val is_value_kind : named -> bool
 val is_public : visibility -> bool
-val is_visible : from:Path.module_ -> Path.module_ -> visibility -> bool
 
 type law_proof_name = { trait : Path.t; law : string; type_head : Path.t }
 
@@ -64,30 +60,10 @@ type lookups = {
   list_law_proofs : Path.package -> law_proof_name -> key list;
 }
 
-val is_restricted_module : from:Path.module_ -> Path.module_ -> bool
-val restricted_module_message : string
-
-type module_lookup =
-  | Found_module of Path.module_
-  | Restricted_module
-  | Ambiguous_module of Path.module_ * Path.module_
-  | No_module of string
-
 val resolve_used_module : lookups -> from:Path.module_ -> Syntax.path -> Path.module_
 val list_transitive_dependencies : lookups -> Path.package -> Path.package list
 val is_visible_module : lookups -> from:Path.module_ -> Path.module_ -> bool
-
-val lookup_module :
-  lookups ->
-  from:Path.module_ ->
-  imports:(string * Path.module_) list ->
-  string ->
-  string list ->
-  module_lookup
-
-val make_top_path : Path.module_ -> string -> Path.t
 val find_definition : lookups -> Path.t -> (key * Syntax.definition) option
-val find_law_parameters : lookups -> Path.t -> string -> string list option
 
 type generic_kind = Type_kind | Value_kind
 
@@ -97,13 +73,40 @@ val find_generics : lookups -> Path.t -> (string * generic_kind) list option
 
 type 'visible lookup = Visible of 'visible | Hidden of (Path.t * visibility) | Absent
 
-val lookup_in :
-  lookups ->
-  from:Path.module_ ->
-  Path.module_ ->
-  string ->
-  is_kind:(named -> bool) ->
-  (entry * Path.t) lookup
+module Scope : sig
+  val extract_last_name : Path.module_ -> string
+  val is_type_kind : named -> bool
+  val is_value_kind : named -> bool
+  val is_visible : from:Path.module_ -> Path.module_ -> visibility -> bool
+  val is_restricted_module : from:Path.module_ -> Path.module_ -> bool
+  val restricted_module_message : string
+
+  type module_lookup =
+    | Found_module of Path.module_
+    | Restricted_module
+    | Ambiguous_module of Path.module_ * Path.module_
+    | No_module of string
+
+  val lookup_module :
+    lookups ->
+    from:Path.module_ ->
+    imports:(string * Path.module_) list ->
+    string ->
+    string list ->
+    module_lookup
+
+  val make_top_path : Path.module_ -> string -> Path.t
+
+  val lookup_in :
+    lookups ->
+    from:Path.module_ ->
+    Path.module_ ->
+    string ->
+    is_kind:(named -> bool) ->
+    (entry * Path.t) lookup
+
+  val find_bare_type : lookups -> from:Path.module_ -> string -> (entry * Path.t) option
+end
 
 val lookup_member : lookups -> from:Path.module_ -> Path.t -> Path.t lookup
 val choose_visible : 'visible lookup list -> 'visible lookup
@@ -114,5 +117,4 @@ val list_visible_traits_declaring : lookups -> from:Path.module_ -> string -> Pa
 val list_members_visible_to_package :
   lookups -> package:Path.package -> Path.t -> string -> key list
 
-val find_bare_type : lookups -> from:Path.module_ -> string -> (entry * Path.t) option
 val find_kind : lookups -> Path.t -> named option

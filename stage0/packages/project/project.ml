@@ -15,36 +15,32 @@ type files = {
 }
 
 let lock_file = "truss.lock"
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Project" format
+let make_manifest_path directory = File_system.join_path directory "truss.toml"
 
-let make_manifest_path directory =
-  if directory = "" then "truss.toml" else directory ^ "/truss.toml"
-
-let compute_parent path =
-  match String.split_last ~sep:"/" path with Some (parent, _) -> parent | None -> ""
-
-let split_segments path = if path = "" then [] else String.split_on_char '/' path
+let read_parent path =
+  match File_system.find_parent path with
+  | Some parent -> parent
+  | None -> raise_bug "the file %S has no parent directory" path
 
 let rec find_package_directory ~is_package directory =
   if is_package directory then Some directory
-  else if directory = "" then None
-  else find_package_directory ~is_package (compute_parent directory)
+  else Option.bind (File_system.find_parent directory) (find_package_directory ~is_package)
 
 let make_file ~package ~directory path : Path.file =
-  let inside =
-    if directory = "" then path
-    else
-      String.sub path
-        (String.length directory + 1)
-        (String.length path - String.length directory - 1)
-  in
-  {
-    module_ = { package; modules = split_segments (compute_parent inside) };
-    name = Filename.chop_suffix (Filename.basename inside) ".truss";
-  }
+  match File_system.find_relative_path ~root:directory path with
+  | Some inside ->
+      let modules =
+        match read_parent inside with "" -> [] | parent -> String.split_on_char '/' parent
+      in
+      {
+        module_ = { package; modules };
+        name = Filename.chop_suffix (Filename.basename inside) ".truss";
+      }
+  | None -> raise_bug "%s is not in its package's directory %s" path directory
 
 let make_file_path ~directory (file : Path.file) =
-  let path = String.concat "/" (Path.list_file_names file) in
-  if directory = "" then path else directory ^ "/" ^ path
+  File_system.join_path directory (String.concat "/" (Path.list_file_names file))
 
 type package = {
   name : Path.package;
@@ -83,7 +79,7 @@ let lay_out (files_in : files) root =
     List.filter_map
       (fun path ->
         if Filename.basename path <> "truss.toml" then None
-        else Option.map (fun text -> (compute_parent path, text)) (files_in.find_text root path))
+        else Option.map (fun text -> (read_parent path, text)) (files_in.find_text root path))
       files
   in
   let directories = Hashtbl.create 8 in
@@ -95,9 +91,11 @@ let lay_out (files_in : files) root =
   in
   let root_is_project = is_project "" in
   let rec is_in_another_project directory =
-    directory <> ""
-    && ((Hashtbl.mem directories directory && ((not root_is_project) || is_project directory))
-       || is_in_another_project (compute_parent directory))
+    match File_system.find_parent directory with
+    | None -> false
+    | Some parent ->
+        (Hashtbl.mem directories directory && ((not root_is_project) || is_project directory))
+        || is_in_another_project parent
   in
   let parsed =
     List.filter_map
@@ -151,7 +149,7 @@ let lay_out (files_in : files) root =
         if not (Filename.check_suffix path ".truss") then None
         else
           Option.bind
-            (find_package_directory ~is_package:(Hashtbl.mem directories) (compute_parent path))
+            (find_package_directory ~is_package:(Hashtbl.mem directories) (read_parent path))
             (fun directory ->
               Option.map
                 (fun (package : Manifest.package) ->

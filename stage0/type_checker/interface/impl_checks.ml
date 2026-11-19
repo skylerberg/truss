@@ -78,7 +78,7 @@ let find_conformance lookups ~list_bounds ~(trait_span : Source.Definition_span.
         {
           implementation;
           shown_trait;
-          list_impl_bounds = Impls.list_impl_bounds impl ~list_bounds;
+          list_impl_bounds = Impls.Conformance.list_impl_bounds impl ~list_bounds;
           missing_associated =
             List.filter_map
               (fun (associated : Types.associated_type) ->
@@ -90,7 +90,7 @@ let find_conformance lookups ~list_bounds ~(trait_span : Source.Definition_span.
                           associated.associated_name shown_trait)))
               implementation.trait.associated_types;
         })
-      (Impls.find_implementation_of lookups impl)
+      (Impls.Conformance.find_implementation_of lookups impl)
 
 let check_impl (state : Checking.state) (written_members : Syntax.impl_member Syntax.node list)
     (impl : Types.impl_interface) (trait_path : Syntax.path_type) =
@@ -120,8 +120,8 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
           state.diagnostics :=
             List.map
               (Diagnostic.make ~code:(Capabilities Not_granted) span)
-              (Grants.describe_missing_in_evidence lookups ~package:state.key.module_.package
-                 ~list_bounds:list_impl_bounds evidence)
+              (Grants.describe_missing_in_impls lookups ~package:state.key.module_.package
+                 (Grants.list_evidence_uses lookups ~list_bounds:list_impl_bounds evidence))
             @ !(state.diagnostics)
         in
         state.diagnostics := missing_associated @ !(state.diagnostics);
@@ -145,7 +145,7 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
                 (Printf.sprintf "This `impl` must give `%s%s`, which `%s` declares."
                    method_.method_name
                    (show_signature
-                      (Impls.normalize_signature_in_impl lookups
+                      (Impls.Conformance.normalize_signature_in_impl lookups
                          ~list_bounds:(Checking.list_bounds state) implementation
                          (Definition.read_method_signature lookups ~owner:impl.implements.trait
                             method_)))
@@ -236,14 +236,16 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                state."
           else
             let normalize_capabilities =
-              Impls.normalize_capabilities_in_impl state.lookups ~list_bounds impl
+              Impls.Conformance.normalize_capabilities_in_impl state.lookups ~list_bounds impl
             in
-            let expected = Impls.make_expected_signature state.lookups ~written implemented in
+            let expected =
+              Impls.Conformance.make_expected_signature state.lookups ~written implemented
+            in
             if
               not
                 (signatures_agree expected
-                   (Impls.normalize_signature_in_impl state.lookups ~list_bounds implementation
-                      written))
+                   (Impls.Conformance.normalize_signature_in_impl state.lookups ~list_bounds
+                      implementation written))
             then
               Checking.report state Signature_mismatch state.spans.(name.id)
                 (Printf.sprintf "`%s` must have the signature `%s%s` that `%s` declares." name.text

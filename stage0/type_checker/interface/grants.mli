@@ -19,6 +19,3 @@ val describe_missing_in_impls :
   package:Path.package ->
   (Path.t * Types.impl_interface * Types.capability_set) list ->
   string list
-
-val describe_missing_in_evidence :
-  Lookups.t -> package:Path.package -> list_bounds:Impls.bounds -> Impls.evidence -> string list

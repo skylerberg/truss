@@ -3,11 +3,11 @@ type segment = { number : int; size : int; digest : string }
 type t = {
   directory : string;
   lock : Lock_file.t;
-  mutable header : string list option;
+  mutable header : string option;
   mutable segments : segment list;
 }
 
-let list_magic = "truss database"
+let list_format = "truss database"
 let segment_magic = "truss segment\n"
 let make_list_path t = Filename.concat t.directory "list"
 let make_next_list_path t = Filename.concat t.directory "list.new"
@@ -16,7 +16,7 @@ let make_segments_directory t = Filename.concat t.directory "segments"
 let make_segment_path t number =
   Filename.concat (make_segments_directory t) (Printf.sprintf "%08d.segment" number)
 
-let compute_digest text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
+let compute_digest text = Digest.BLAKE128.string text
 
 let write_durably path text =
   let descriptor = Unix.openfile path [ O_WRONLY; O_CREAT; O_TRUNC; O_CLOEXEC ] 0o644 in
@@ -26,29 +26,31 @@ let write_durably path text =
       File_system.write_all descriptor text;
       Unix.fsync descriptor)
 
-let header_prefix = "header "
+let encode_list ~header segments =
+  Cbor.encode
+    (Cbor.Array
+       [
+         Cbor.Text list_format;
+         Cbor.Bytes header;
+         Cbor.Array
+           (List.map
+              (fun { number; size; digest } ->
+                Cbor.Array [ Cbor.int number; Cbor.int size; Cbor.Bytes digest ])
+              segments);
+       ])
 
-let parse_list text =
-  let parse_line parsed line =
-    Option.bind parsed (fun (header, segments) ->
-        if String.starts_with ~prefix:header_prefix line then
-          let length = String.length header_prefix in
-          Some (String.drop_first length line :: header, segments)
-        else
-          match String.split_on_char ' ' line with
-          | [ "segment"; number; size; digest ] -> (
-              match (int_of_string_opt number, int_of_string_opt size) with
-              | Some number, Some size -> Some (header, { number; size; digest } :: segments)
-              | None, _ | _, None -> None)
-          | [ "" ] -> Some (header, segments)
-          | _ -> None)
-  in
-  match String.split_on_char '\n' text with
-  | magic :: lines when magic = list_magic ->
-      Option.map
-        (fun (header, segments) -> (List.rev header, List.rev segments))
-        (List.fold_left parse_line (Some ([], [])) lines)
+let decode_segment = function
+  | Cbor.Array [ number; size; Cbor.Bytes digest ] -> (
+      match (Cbor.find_int number, Cbor.find_int size) with
+      | Some number, Some size -> Some { number; size; digest }
+      | None, _ | _, None -> None)
   | _ -> None
+
+let decode_list text =
+  match Cbor.decode text with
+  | Some (Cbor.Array [ Cbor.Text format; Cbor.Bytes header; segments ]) when format = list_format ->
+      Option.map (fun segments -> (header, segments)) (Cbor.find_list decode_segment segments)
+  | Some _ | None -> None
 
 let open_ directory ~stop_holder =
   (try Unix.mkdir directory 0o755 with Unix.Unix_error (EEXIST, _, _) -> ());
@@ -65,7 +67,7 @@ let open_ directory ~stop_holder =
   | None -> Error `Open_elsewhere
   | Some lock ->
       let t = { directory; lock; header = None; segments = [] } in
-      (match parse_list (File_system.read (make_list_path t)) with
+      (match decode_list (File_system.read (make_list_path t)) with
       | Some (header, segments) ->
           t.header <- Some header;
           t.segments <- segments
@@ -162,18 +164,9 @@ let write_segment t entries =
   write_durably (make_segment_path t number) text;
   { number; size = String.length text; digest = compute_digest text }
 
-let make_list_text ~header segments =
-  String.concat "\n"
-    ((list_magic :: List.map (fun line -> header_prefix ^ line) header)
-    @ List.map
-        (fun segment ->
-          Printf.sprintf "segment %d %d %s" segment.number segment.size segment.digest)
-        segments)
-  ^ "\n"
-
 let prepare_commit t ~header entries =
   let segments = if entries = [] then t.segments else t.segments @ [ write_segment t entries ] in
-  write_durably (make_next_list_path t) (make_list_text ~header segments);
+  write_durably (make_next_list_path t) (encode_list ~header segments);
   segments
 
 let remove_unlisted t =
@@ -200,7 +193,7 @@ let compact t ~header =
   match list_live t with
   | entries ->
       let compacted = write_segment t (List.map (fun (key, value) -> (key, Some value)) entries) in
-      write_durably (make_next_list_path t) (make_list_text ~header [ compacted ]);
+      write_durably (make_next_list_path t) (encode_list ~header [ compacted ]);
       rename_list t ~header [ compacted ]
   | exception Damaged -> ()
 

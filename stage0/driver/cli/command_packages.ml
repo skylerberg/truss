@@ -37,8 +37,7 @@ let require_one = function
 let locate_directory snapshot name =
   let root = Workspace.locate_root snapshot in
   match List.find_opt (fun (_, other) -> other = name) (Workspace.list_packages snapshot) with
-  | Some ("", _) -> root
-  | Some (relative, _) -> Filename.concat root relative
+  | Some (relative, _) -> File_system.join_path root relative
   | None ->
       Compiler_bug.raise_bug ~stage:"Command" "%s is not a package of the project"
         (Path.show_package name)
@@ -96,9 +95,7 @@ let select_files snapshot packages paths =
       List.filter
         (fun file ->
           let written = locate_file snapshot file in
-          List.exists
-            (fun path -> written = path || String.starts_with ~prefix:(path ^ "/") written)
-            wanted)
+          List.exists (fun path -> File_system.is_inside ~directory:path written) wanted)
         (list_files snapshot packages)
 
 let show_file snapshot packages (file : Path.file) =

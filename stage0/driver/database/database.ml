@@ -131,13 +131,13 @@ let is_saved_part database (Part.Any typed as part) =
   match typed with
   | Namespace _ -> false
   | Lowered _ | Test_key _ -> true
-  | _ -> List.mem (Part.locate_package part) database.project
+  | _ -> List.mem (Part.Storage.locate_package part) database.project
 
 let mark_package_database_unsaved database (package_database : package_database) =
   mark_unsaved database (Package package_database.name);
   List.iter (fun file -> mark_unsaved database (File file)) package_database.files
 
-let locate_stale_parts part = (Part.locate_package part, Stage.of_part part)
+let locate_stale_parts part = (Part.Storage.locate_package part, Stage.of_part part)
 
 let mark_stale database part =
   let slot = locate_stale_parts part in
@@ -350,14 +350,14 @@ let obtain_call_graph database package =
 let locate_values database (Part.Any typed as part) =
   match typed with
   | Lowered _ | Test_key _ -> database.item_values
-  | _ -> (obtain_owner database (Part.locate_package part)).values
+  | _ -> (obtain_owner database (Part.Storage.locate_package part)).values
 
 let find_stored (type a) database (typed : a Part.stored) : a part option =
   let part = Part.Any typed in
   match Stored_table.find_opt (locate_values database part) part with
   | None -> None
   | Some (Binding (stored, value)) -> (
-      match Part.find_type_equality typed stored with
+      match Part.Storage.find_type_equality typed stored with
       | Some Equal -> Some value
       | None ->
           Compiler_bug.raise_bug ~stage:"Database" "%s holds a value of another kind"
@@ -378,7 +378,7 @@ let list_call_edges = function
 
 let list_lowered_references = function
   | Some (Value (Ok lowered)) ->
-      List.sort_uniq Lowered.Item.compare (Backend.list_references lowered)
+      List.sort_uniq Lowered.Item.compare (Lowering.list_references lowered)
   | Some (Value (Error _) | Failed _ | Blocked) | None -> []
 
 let update_indexes (type a) database (part : a Part.stored) ~(before : a part option)
@@ -431,7 +431,7 @@ let note_untracked_read database (part : Part.t) =
   !observer (Untracked_read part);
   match part with
   | Name name ->
-      let namespace = Part.Any (Namespace (Part.locate_name_package name)) in
+      let namespace = Part.Any (Namespace (Part.Storage.locate_name_package name)) in
       if is_stale database namespace then
         raise_stale_read database namespace
           (Part.show part ^ " is read while its namespace is stale")
@@ -726,7 +726,7 @@ let type_check run lookups key =
   | exception Reads_failed_part -> Blocked
 
 let make_form_origin database note =
-  Infer.find_form_origin (make_recording_interface_lookups database note ~is_checked:true)
+  Interface.find_form_origin (make_recording_interface_lookups database note ~is_checked:true)
     ~is_derived:(fun path -> Option.is_some (find_part database note (Generated_mir path)))
 
 let read_body_mir database note key = read_value database note (Body_mir key)
@@ -834,13 +834,13 @@ let make_recording_proof_lookups database note : Prover.Lookups.t =
     list_recursion_group = read_recursion_group database note;
   }
 
-let make_recording_lowering_lookups database note : Backend.Lookups.t =
+let make_recording_lowering_lookups database note : Lowering.Lookups.t =
   {
     interface = make_recording_interface_lookups database note ~is_checked:true;
     mir = make_recording_mir_lookups database note;
   }
 
-exception Reaches_unsupported of Backend.unsupported
+exception Reaches_unsupported of Lowering.unsupported
 
 let compute_test_keys database items =
   let outcome =
@@ -852,7 +852,7 @@ let compute_test_keys database items =
           | Error unsupported -> raise (Reaches_unsupported unsupported)
         in
         match
-          Backend.derive_test_keys
+          Lowering.derive_test_keys
             ~read_lowered:(fun item -> require_supported (read_value database note (Lowered item)))
             ~read_known_key:(fun item ->
               require_supported (read_value database note (Test_key item)))
@@ -1047,7 +1047,7 @@ let find_entry_point (names : Resolve.Names.lookups) package =
 let claim_lowering_roots database (names : Resolve.Names.lookups) package =
   if Result.is_ok Libc.host then
     claim_roots database (Stored (Any (Namespace package)))
-      (Backend.list_roots
+      (Lowering.list_roots
          ~tests:
            (List.filter_map
               (fun (declaration : Resolve.Names.declaration) ->
@@ -1088,7 +1088,7 @@ let mark_change database package (change : Resolve.Namespace.change) =
 
 let is_package_namespace_part package (part : Part.t) =
   match part with
-  | Name part -> Part.locate_name_package part = package
+  | Name part -> Part.Storage.locate_name_package part = package
   | Stored (Any (Namespace namespace_package)) -> namespace_package = package
   | Input _ | Stored _ -> false
 
@@ -1171,7 +1171,7 @@ let compute_type_facts database paths =
     paths
 
 let compute_part database (Part.Any typed as part) =
-  let package_database = obtain_owner database (Part.locate_package part) in
+  let package_database = obtain_owner database (Part.Storage.locate_package part) in
   let compute_into slot compute = compute_into database part slot compute in
   let compute_value typed compute =
     compute_into (make_value_slot database typed) (fun note -> Some (compute note))
@@ -1369,11 +1369,11 @@ let compute_part database (Part.Any typed as part) =
   | Lowered key ->
       compute_value (Lowered key) (fun note ->
           match
-            Backend.lower (read_host_system ()) (make_recording_lowering_lookups database note) key
+            Lowering.lower (read_host_system ()) (make_recording_lowering_lookups database note) key
           with
           | lowered -> Value lowered
           | exception Reads_failed_part -> Blocked
-          | exception (Backend.Todo_type _ | Backend.Infinite_size _) -> Failed []);
+          | exception (Lowering.Todo_type _ | Lowering.Infinite_size _) -> Failed []);
       settle_references database
   | Test_key key -> compute_test_keys database [ key ]
 
@@ -1508,7 +1508,7 @@ let drain_stage database ~is_drained ~on_raise (stage : Stage.t) packages =
             (Stored_table.iter (fun reader () ->
                  if
                    Stage.of_part reader = stage
-                   && List.mem (Part.locate_package reader) packages
+                   && List.mem (Part.Storage.locate_package reader) packages
                    && is_drained reader
                  then close reader))
             (Part_table.find_opt database.readers (Stored part))
@@ -1548,7 +1548,7 @@ let drain_stage database ~is_drained ~on_raise (stage : Stage.t) packages =
             (fun package ->
               compute_components
                 (list_components database stage package
-                   (list_parts_where (fun part -> Part.locate_package part = package))))
+                   (list_parts_where (fun part -> Part.Storage.locate_package part = package))))
             packages)
 
 let drain_where ?on_bug database ~drains requested =
@@ -1751,7 +1751,7 @@ let retire database (package_database : package_database) =
       | Part.Any (Proof _) as claimant -> claim_roots database (Stored claimant) [] | _ -> ())
     (list_stored_parts package_database);
   let is_package_part part =
-    (not (Stage.is_lowering (Stage.of_part part))) && Part.locate_package part = package
+    (not (Stage.is_lowering (Stage.of_part part))) && Part.Storage.locate_package part = package
   in
   mark_package_database_unsaved database package_database;
   List.iter (fun part -> mark_unsaved database (Value part)) (list_stored_parts package_database);
@@ -2295,7 +2295,7 @@ let check_calls database interface viewers key = function
       List.iter
         (fun calling_package ->
           if Package_table.mem database.graphs calling_package then
-            Backend.check_calls interface
+            Lowering.check_calls interface
               ~find_call_edges:(fun path ->
                 match
                   find_part database (note_untracked_read database)
@@ -2347,7 +2347,7 @@ let list_reached_todo_types database key =
   in
   List.sort_uniq Path.compare (visit [] (Stored (Any (Test_key key))))
 
-let find_lowered_lookups database packages : (Backend.lowered_lookups, string) result =
+let find_lowered_lookups database packages : (Lowering.lowered_lookups, string) result =
   match Libc.host with
   | Error message -> Error message
   | Ok system ->
@@ -2415,7 +2415,7 @@ module For_testing = struct
         Option.map
           (fun form -> (form, substitution))
           (match origin with
-          | Infer.Written key | Inherited key ->
+          | Interface.Written key | Inherited key ->
               Option.map
                 (fun (checked : Infer.checked) -> checked.form)
                 (read_checked_body database key)

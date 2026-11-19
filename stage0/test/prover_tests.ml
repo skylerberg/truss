@@ -929,6 +929,10 @@ let () =
       expect_proven Fixtures.Prover.quantifier_over_counted_elements_in_a_body);
   Harness.test "a quantifier in a specification reads the collection's `count` and `element`"
     (fun () -> expect_proven Fixtures.Prover.specification_quantifier_over_counted_elements);
+  Harness.test "a postcondition that fixes a call's result is the call's value" (fun () ->
+      expect_proven Fixtures.Prover.specification_quantifier_over_twins_read_through_a_field);
+  Harness.test "a postcondition through a type's own `==` does not fix a call's value" (fun () ->
+      expect_not_proven Fixtures.Prover.postcondition_through_a_hand_written_equal "prover.ensures");
   Harness.test "a quantifier's pattern leaves out the elements it does not match" (fun () ->
       expect_proven Fixtures.Prover.specification_quantifier_with_a_refutable_pattern);
   Harness.test "a quantifier over a range value reads the range's `count` and `element`" (fun () ->
@@ -2050,7 +2054,9 @@ let () =
       let cache =
         {
           Solver.find =
-            (fun key -> if key = Solver.For_testing.hash_query query then Some "proven\n" else None);
+            (fun key ->
+              if key = Solver.For_testing.hash_query query then Some Solver.For_testing.proven_entry
+              else None);
           add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
         }
       in
@@ -2071,7 +2077,9 @@ let () =
       let cache =
         {
           Solver.find =
-            (fun key -> if key = Solver.For_testing.hash_query query then Some "proven\n" else None);
+            (fun key ->
+              if key = Solver.For_testing.hash_query query then Some Solver.For_testing.proven_entry
+              else None);
           add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
         }
       in
@@ -2106,7 +2114,8 @@ let () =
           if Solver.For_testing.count_queries_run solver <> 1 then
             Harness.fail "did not run the solver";
           if
-            Hashtbl.find_opt cached_answers (Solver.For_testing.hash_query query) <> Some "proven\n"
+            Hashtbl.find_opt cached_answers (Solver.For_testing.hash_query query)
+            <> Some Solver.For_testing.proven_entry
           then Harness.fail "the cache does not have the answer");
   let find_obligation_query text code =
     let packages = Support.setup [ ("app::main", text) ] in
@@ -2173,11 +2182,34 @@ let () =
           if Solver.For_testing.count_queries_run second <> 0 then
             Harness.fail "ran the solver again"
       | Error message, _ | _, Error message -> Harness.fail "%s" message);
+  Harness.test "a counterexample's values are read back from the cache" (fun () ->
+      let query = make_self_comparison "<" in
+      let request =
+        Solver.make_request
+          ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ]
+          ~terms:[ (Logic.Symbol.Reached 0, Logic.int (-1)) ]
+          query
+      in
+      let cached_answers = Hashtbl.create 2 in
+      let cache =
+        { Solver.find = Hashtbl.find_opt cached_answers; add = Hashtbl.replace cached_answers }
+      in
+      match (Solver.find ~cache (), Solver.find ~cache ()) with
+      | Ok first, Ok second -> (
+          match Solver.solve_all first [ (request, query) ] with
+          | [ Counterexample (_ :: _ :: _) ] as solved ->
+              if Solver.solve_all second [ (request, query) ] <> solved then
+                Harness.fail "the cache gave other values";
+              if Solver.For_testing.count_queries_run second <> 0 then
+                Harness.fail "ran the solver again"
+          | _ -> Harness.fail "expected a counterexample with both values")
+      | Error message, _ | _, Error message -> Harness.fail "%s" message);
   Harness.test "an obligation that the solver stops on before the step limit names Z3's reason"
     (fun () ->
       let cache =
         {
-          Solver.find = (fun _ -> Some "incomplete \"(incomplete quantifiers)\"\n");
+          Solver.find =
+            (fun _ -> Some (Solver.For_testing.make_incomplete_entry "(incomplete quantifiers)"));
           add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
         }
       in

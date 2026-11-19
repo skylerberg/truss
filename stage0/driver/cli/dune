@@ -16,12 +16,12 @@
   package_checks
   manifest
   registry
-  libc
   c_compiler
   process
   emit_c
   unicode
   backend
+  lowering
   database
   solver
   prover

@@ -7,7 +7,7 @@ let read_source_at_key (lookups : Lookups.t) key =
 
 let find_source (lookups : Lookups.t) (path : Path.t) =
   Option.map
-    (fun ((origin : Infer.form_origin), substitution) ->
+    (fun ((origin : Interface.form_origin), substitution) ->
       let source =
         match origin with
         | Written key | Inherited key -> make_source key
