@@ -1,0 +1,12 @@
+type Chain =
+  | End
+  | indirect Link(value: Int64, rest: Chain)
+
+fn first(chain: Chain) -> Int64
+  cost time O(chain)
+{
+  match chain {
+    End => 0
+    Link(value, ..) => value
+  }
+}

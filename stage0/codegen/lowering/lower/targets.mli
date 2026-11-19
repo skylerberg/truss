@@ -24,10 +24,19 @@ val lookup_capability_method : Definitions.context -> Path.t -> string -> int * 
 val make_entry_signature :
   Definitions.context -> Types.signature -> Lowered.signature * Convention.result
 
-val list_any_methods : Definitions.context -> Path.t -> Types.trait_method list
+val list_any_slots :
+  Definitions.context ->
+  self:Types.ty ->
+  Types.trait_reference ->
+  (Types.trait_reference * Types.trait_method) list
 
 val lookup_dynamic_method :
-  Definitions.context -> Path.t -> string -> Path.receiver -> int * Types.signature
+  Definitions.context ->
+  any:Types.trait_reference ->
+  Path.t ->
+  string ->
+  Path.receiver ->
+  int * Types.signature
 
 val is_copyable_any : Definitions.context -> Types.trait_reference -> bool
 

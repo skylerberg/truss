@@ -38,3 +38,23 @@ and evaluate_path (lookups : Lookups.t) ~visiting path =
     | _ -> None
 
 let evaluate_constant lookups path = evaluate_path lookups ~visiting:[] path
+
+let is_uint64 (lookups : Lookups.t) path =
+  match Resolve.Names.find_definition lookups.names path with
+  | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) ->
+      (lookups.read_resolved Interface key).names.(written.path.last.id)
+      = Some (Definition (Type, Well_known.make_builtin_type_path UInt64))
+  | _ -> false
+
+let evaluate_count (lookups : Lookups.t) path ~written =
+  if not (is_uint64 lookups path) then
+    Error (Printf.sprintf "`%s` in a type argument must be a constant of type `UInt64`." written)
+  else
+    match lookups.find_constant_value path with
+    | Some value -> Ok value
+    | None ->
+        Error
+          (Printf.sprintf
+             "The value of `%s` cannot be computed: a constant used in a type cannot refer to \
+              itself, and is made of literals, arithmetic, and other such constants."
+             written)

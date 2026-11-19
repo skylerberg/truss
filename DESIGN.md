@@ -264,6 +264,16 @@ Rules: [Generic parameters](SPECIFICATION.md#generic-parameters).
 Generic code is monomorphized, so a generic function costs nothing at run
 time. Monomorphization rules out polymorphic recursion.
 
+**A value parameter is a `UInt64`.** A type depends on a value only where
+the value fixes the type's layout or identity, as the length of
+`Array[UInt8, 32]` does. Each such value is a count, and the body compares
+it with lengths, which are `UInt64`. A choice among a few cases is a type
+parameter over marker types, which can carry an impl for each case. A
+signed value parameter would serve only arithmetic on type arguments, such
+as the exponents of units of measure, and a type argument holds no
+arithmetic. The parameter's type is still written, as `count: UInt64`, so
+the declaration states the type that the body sees.
+
 ### Invariants
 
 Rules: [Invariants](SPECIFICATION.md#invariants).
@@ -509,6 +519,7 @@ be stored, passed, and returned.
 |---|---|
 | A cursor never holds `mut` access. | `mut` access is never stored. A `mut` loop mutates elements in place, by position. |
 | A tree is visited by recursion, by `fold`, or by a cursor that holds an explicit stack. | *Nothing hidden.* The stack's allocations are written. C# and Python allocate the same stack behind a recursive generator. |
+| A cursor whose values run out implements `FiniteCursor`, which adds `remaining()` and promises that each `next` that returns `Some` makes it smaller. | A loop over it terminates with no measure written, and generic code reaches the measure through a bound. A method found by its name, the alternative, cannot be named in a bound, so neither generic code nor an adapter such as `Take` could use it. |
 
 ### Lambdas
 
@@ -695,8 +706,8 @@ not.
 | Structural recursion needs no annotation, and other recursion states `decreases`. | Lean accepts structural recursion in the same way. Dafny infers a measure. A structural check with an explicit clause is more predictable than an inference that may fail. |
 | Code that supplies other code to a callee answers for the calls made to the supplied code. The suppliers are a type argument's `impl` given to a bound, a function named as a value, a value converted to `any`, and a provided `impl`. A recursion through supplied code is rejected. | A generic callee is checked once, for every type argument, so it cannot know the code that it is given, and a call through a bound passes the supplier no arguments to compare with a measure. If neither side answered, an `impl`'s method could call a generic function that calls the method back, and each termination proof would assume the other: a function without `RunForever` would never return. |
 | A recursion through a method that an `impl` derives or inherits is rejected. | A derived method is generated, and an inherited method is the trait's provided body, which is checked once for every `impl`. Neither states a measure for the `impl`, so a caller on the cycle has nothing to compare, and accepting the call would assume that the cycle ends. A method written in the `impl` states the measure. The alternative is to check each provided body again for each `impl` that inherits it, which proves the same code once per `impl` and gives a trait's author errors in code that the author did not write. |
-| A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` has the distance between them as its default measure, and a `for` loop over a cursor has the cursor's `remaining()`. | Most loops count toward a bound that their condition names, so `decreases high - low` would only repeat the condition. The default is one measure read from the loop's own code, never chosen by a search among candidates, so a reader knows the measure that the proof uses. Dafny takes the same default for a loop. A cursor's `remaining()` states its measure once, in its type, for every loop over it. |
-| A written measure holds in every function, including one that uses `RunForever`. | A reader takes a written `decreases` as a fact. If `RunForever` switched measures off, a function that declares it for one loop would leave the measures of its other loops unchecked. A cursor's `remaining()` is written too, in the cursor's type, and no loop body can change the cursor. |
+| A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` has the distance between them as its default measure, and a `for` loop over a `FiniteCursor` has the cursor's `remaining()`. | Most loops count toward a bound that their condition names, so `decreases high - low` would only repeat the condition. The default is one measure read from the loop's own code, never chosen by a search among candidates, so a reader knows the measure that the proof uses. Dafny takes the same default for a loop. A cursor's `remaining()` states its measure once, in its `impl` of `FiniteCursor`, for every loop over it. |
+| A written measure holds in every function, including one that uses `RunForever`. | A reader takes a written `decreases` as a fact. If `RunForever` switched measures off, a function that declares it for one loop would leave the measures of its other loops unchecked. A cursor's `remaining()` is written too, in its `impl` of `FiniteCursor`, and no loop body can change the cursor. |
 | A `while` loop's default measure and structural recursion are checked only in a function without `RunForever`. | Both are inferred from code that may not be meant to end. A loop that draws samples until it has accepted enough, as `sample_ntt` does, compares toward a bound that an iteration may not approach. |
 | A loop without a measure uses `RunForever`. | The capability check then covers the loop in every body, as it covers a call. A lambda's loop needs no rule of its own: the lambda's capabilities are inferred from its body. |
 | Nothing implements `RunForever`. | A `provide` of it would let a function that does not declare `RunForever` run forever. |
@@ -1299,8 +1310,17 @@ stronger postcondition, which is behavioral subtyping. `Index` can then say
 nothing about the lent part, while the `impl` for `List` says which element
 it is.
 
+**A trait can promise more about a method of a trait it requires.**
+`FiniteCursor` restates `Cursor.next` with an `ensures` that `remaining()`
+decreases. The author of `Cursor` did not anticipate it and need not: any
+package can define a trait that strengthens the contract of another
+package's trait. This is behavioral subtyping between traits, as an `impl`'s
+added clauses are between an `impl` and its trait.
+
 | Rule | Reason |
 |---|---|
+| Each `impl` proves a restated method's added clauses from the contract of its type's method, not from the method's body. | Laws are proven the same way, and proofs stay modular. A release may change a body within its contract ([Versions](#versions)), so a proof that read another package's body could break with a compatible release. |
+| A restated method adds only `ensures` and `cost`, and has no body. | A caller through the required trait keeps every obligation it had. A weaker `requires` cannot be proven from a contract, which states the `impl`'s own `requires`, and a body would give one method two implementations. |
 | A trait can require other traits. | A law can then span traits. `Ordered` requires `Equal`, so its law `agrees_with_equal` states that `compare` returns `Ordering.Equal` exactly when `==` holds. Rust's `Ord` requires `Eq` too, but that agreement is only documentation. |
 | `Hash` has no law relating it to `Equal`. | A law is a specification, and a specification cannot call `hash`, which mutates its `Hasher`. Stating the law would take a `hash` that returns its hash, which gives up a keyed hasher provided through a capability, or a specification form for the state a mutating call leaves. A derived `Hash` agrees with a derived `Equal` by construction. |
 | A type has one `impl` of each trait. | Two traits that both require `Equal` share that `impl`, so there is no diamond problem. |

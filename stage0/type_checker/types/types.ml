@@ -112,12 +112,10 @@ let is_builtin wanted type_ = find_builtin type_ = Some wanted
 let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
 
 let find_view = function
-  | Named { path; arguments } when Well_known.is List path ->
-      Some (Named { path = Well_known.make_path Slice; arguments })
-  | Named { path; arguments = [] } when Well_known.is String path ->
-      Some (Named { path = Well_known.make_path String_slice; arguments = [] })
-  | Named { arguments = element :: _; _ } as array when is_builtin Array array ->
-      Some (Named { path = Well_known.make_path Slice; arguments = [ element ] })
+  | Named { path; arguments } ->
+      Option.map
+        (fun view -> Named { path = view; arguments = List.take 1 arguments })
+        (Well_known.find_view path)
   | _ -> None
 
 let signed_integer_types : Language.Builtin_type.t list = [ Int8; Int16; Int32; Int64 ]
@@ -703,12 +701,19 @@ let list_field_types interface =
 type associated_type = { associated_name : string; associated_bounds : trait_reference list }
 type trait_method = { method_name : string; method_receiver : Path.receiver; provided : bool }
 
+type restated_method = {
+  restated_name : string;
+  restated_receiver : Path.receiver;
+  declared_by : Path.t;
+}
+
 type trait_interface = {
   trait_generics : generic list;
   requires : trait_reference list;
   associated_types : associated_type list;
   associated_capabilities : string list;
   methods : trait_method list;
+  restated : restated_method list;
   laws : (string * (string * ty) list) list;
   is_capability : bool;
 }

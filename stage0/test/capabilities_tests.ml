@@ -721,7 +721,7 @@ let () =
         "capabilities.not_available" ~says:(loop_needs_run_forever ^ ".") ~at:("while", 1);
       expect_one_diagnostic Fixtures.Capabilities.cursor_loop_without_a_measure
         "capabilities.not_available"
-        ~says:(loop_needs_run_forever ^ ", or `Countdown` a `remaining(self) -> UInt64` method.")
+        ~says:(loop_needs_run_forever ^ ", or implement `FiniteCursor` for `Countdown`.")
         ~at:("for value", 1));
   Harness.test "a function that uses RunForever holds a loop without a measure" (fun () ->
       expect_fine Fixtures.Capabilities.while_loop_without_a_measure_using_run_forever);
