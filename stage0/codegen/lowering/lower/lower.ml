@@ -61,10 +61,7 @@ let begin_body (state : Lowering.state) ~(body : Mir.Graph.body) ~defaults =
 
 let make_code_state context ~item path =
   let code = Definitions.make_code context path Ground.no_instantiation in
-  ( Lowering.enter context
-      ~builder:(Emit_c.Ir_builder.create context.env ~item)
-      (Lowering.make_frame code),
-    code )
+  (Lowering.enter_item context ~item code, code)
 
 let lower_template_check context ~from_template ~literals ~clauses : Emit_c.fragment =
   let item = Lowered.Item.Template_check { from_template; literals; clauses } in
@@ -142,11 +139,7 @@ let lower_source_code context ~path ~instantiation : Emit_c.fragment =
   let item = Lowered.Item.Code { path; instantiation } in
   let code = Definitions.make_code context path instantiation in
   let body = (Mir_places.read_mir_graph context path).body in
-  let state =
-    Lowering.enter context
-      ~builder:(Emit_c.Ir_builder.create context.env ~item)
-      (Lowering.make_frame code)
-  in
+  let state = Lowering.enter_item context ~item code in
   let convention, returns = Definitions.classify_result context code.substitution code.result in
   Lowering.set_result_slot state convention;
   let parameter_locals, places =

@@ -5,11 +5,17 @@ type kind =
   | Static_data
   | Table_entries of Path.t option
 
-type function_text = { symbol : string; header : string; body : string }
+type function_text = {
+  symbol : string;
+  header : string;
+  opening : Lowered.site option;
+  body : C_text.segment list;
+}
 
 type function_pieces = {
   symbol : C_text.reference;
   header : C_text.t;
+  opening : Lowered.site option;
   body : C_text.t;
   name_local : Lowered.local -> string;
 }
@@ -131,7 +137,8 @@ let make (emission : Emission.t) ~kind ~references ~functions ~definition =
           {
             symbol = resolve pieces.symbol;
             header = C_text.render pieces.header ~resolve;
-            body = C_text.render pieces.body ~resolve;
+            opening = pieces.opening;
+            body = C_text.render_segments pieces.body ~site:pieces.opening ~resolve;
           })
         functions;
     definition = render_outside resolve_linked definition;

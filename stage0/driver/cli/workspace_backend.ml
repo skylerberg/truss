@@ -19,7 +19,7 @@ let create snapshot packages lookups (profile : Backend.profile) =
   let show_file =
     match profile with
     | Development -> Command_packages.show_file snapshot packages
-    | Release -> Path.show_file
+    | Release -> Workspace.locate_file snapshot
   in
   let own = List.map snd (Workspace.list_packages snapshot) in
   Backend.create ~show_file ~results:(make_results cache)

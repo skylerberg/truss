@@ -3,11 +3,17 @@ type kind =
   | Static_data
   | Table_entries of Path.t option
 
-type function_text = { symbol : string; header : string; body : string }
+type function_text = {
+  symbol : string;
+  header : string;
+  opening : Lowered.site option;
+  body : C_text.segment list;
+}
 
 type function_pieces = {
   symbol : C_text.reference;
   header : C_text.t;
+  opening : Lowered.site option;
   body : C_text.t;
   name_local : Lowered.local -> string;
 }

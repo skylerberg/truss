@@ -68,7 +68,7 @@ let refuse_unshippable snapshot packages lookups main proofs =
           refusals;
       raise (Outcome.Stop 1)
 
-let build_program ?output snapshot packages (profile : Backend.profile) =
+let build_program ?output snapshot packages (profile : Backend.profile) ~is_kept =
   let database = Workspace.open_database snapshot in
   let report = Report.gather ~proofs:(profile = Release) database snapshot packages in
   Report.require_no_errors report;
@@ -77,20 +77,22 @@ let build_program ?output snapshot packages (profile : Backend.profile) =
   Option.iter (refuse_unshippable snapshot packages lookups main) (Report.force_proofs report);
   let backend = Workspace_backend.create snapshot packages lookups profile in
   let output = Option.value output ~default:(Backend.make_program_path backend) in
-  match Backend.build_program backend ~main ~output with
+  match Backend.build_program backend ~main ~output ~is_kept with
   | Error message -> Outcome.raise_cannot_run "%s" message
   | Ok () -> (output, report)
 
 let run ~release ~arguments =
   let snapshot, packages = Command_packages.load_current () in
-  let program, _ = build_program snapshot packages (if release then Release else Development) in
+  let program, _ =
+    build_program snapshot packages (if release then Release else Development) ~is_kept:false
+  in
   Outcome.Run_program { program; arguments }
 
 let build ~output =
   let snapshot, packages = Command_packages.load_current () in
   let package = Command_packages.require_one packages in
   let output = Shown_path.normalize (Option.value output ~default:(Path.show_package package)) in
-  let _, report = build_program snapshot packages Release ~output in
+  let _, report = build_program snapshot packages Release ~output ~is_kept:true in
   if Output.json () then
     Json.print
       (Report.make_document report [ ("output", Json.String (Shown_path.show_path output)) ])

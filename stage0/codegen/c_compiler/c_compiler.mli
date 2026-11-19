@@ -1,14 +1,14 @@
 type t
-type optimization = O1 | O2_lto
 
 val variables : string list
 val find : objects:string -> (t, string) result
-val make_fingerprint : t -> optimization -> string
+val make_fingerprint : t -> Profile.t -> string
 
 val build_executable :
   ?report_progress:(int -> int -> unit) ->
+  ?dsym_bundle:string ->
   t ->
-  optimization ->
+  Profile.t ->
   units:(string * string) list ->
   output:string ->
   (unit, string) result
@@ -16,6 +16,6 @@ val build_executable :
 module For_testing : sig
   val reject_warnings : t -> t
   val has_sanitizer : t -> bool
-  val compile : t -> optimization -> source:string -> output:string -> (unit, string) result
-  val compile_objects : t -> optimization -> (string * string) list -> (string list, string) result
+  val compile : t -> Profile.t -> text:string -> output:string -> (unit, string) result
+  val compile_objects : t -> Profile.t -> (string * string) list -> (string list, string) result
 end
