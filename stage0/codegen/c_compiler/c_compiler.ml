@@ -51,14 +51,13 @@ let required_flags =
 
 let list_link_flags compiler : Profile.t -> string list = function
   | Development -> compiler.added_flags
-  | Release -> (if is_clang compiler then "-flto=thin" else "-flto") :: compiler.added_flags
+  | Release ->
+      "-O3" :: (if is_clang compiler then "-flto=thin" else "-flto") :: compiler.added_flags
 
 let list_profile_flags : Profile.t -> string list = function
   | Development -> [ "-O1" ]
   | Release ->
-      [
-        "-O2"; "-g1"; "-gno-column-info"; "-fno-omit-frame-pointer"; "-mno-omit-leaf-frame-pointer";
-      ]
+      [ "-g1"; "-gno-column-info"; "-fno-omit-frame-pointer"; "-mno-omit-leaf-frame-pointer" ]
 
 let list_compile_flags compiler profile =
   list_profile_flags profile @ required_flags @ list_link_flags compiler profile
