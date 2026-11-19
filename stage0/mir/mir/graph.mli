@@ -6,7 +6,7 @@ type statement = { kind : Tree.basic; origin : Core.origin }
 type loop_head = {
   iteration : Tree.iteration;
   part : Tree.local;
-  lent : Tree.lent_element option;
+  elements : Tree.elements option;
   body : block;
   blocks : block list;
   after : block;

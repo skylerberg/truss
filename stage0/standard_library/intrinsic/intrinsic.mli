@@ -96,7 +96,7 @@ type buffer =
   | Array_model
   | View_address
 
-type lend = Storage_at | Storage_at_mut | View_at | View_at_mut | Array_at_mut
+type lend = Storage_at | View_at
 
 type runtime =
   | Crash

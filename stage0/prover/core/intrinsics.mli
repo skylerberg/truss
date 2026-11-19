@@ -1,3 +1,32 @@
+val declare_buffer_slack : State.context -> Types.ty -> Logic.term -> Logic.term
+
+val assume_same_length :
+  State.context -> State.frame -> Types.ty -> before:Logic.term -> after:Logic.term -> unit
+
+val find_sequence_element : State.context -> State.frame -> Types.ty -> Types.ty
+
+val read_sequence_element :
+  State.context ->
+  State.frame ->
+  Types.ty ->
+  Logic.term ->
+  Logic.term ->
+  origin:Core.origin ->
+  Logic.term
+
+val write_sequence_element :
+  State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term -> Logic.term
+
+val write_sequence_range :
+  State.context ->
+  State.frame ->
+  Types.ty ->
+  Logic.term ->
+  start:Logic.term ->
+  stop:Logic.term ->
+  Logic.term ->
+  Logic.term
+
 val apply_slice :
   State.context ->
   State.frame ->
@@ -7,15 +36,6 @@ val apply_slice :
   low:Logic.term ->
   high:Logic.term option ->
   State.frame * Logic.term * Logic.term * Logic.term
-
-val slice_place :
-  State.context ->
-  Invocation.site ->
-  owner:State.passed_place ->
-  owner_type:(State.frame -> Types.ty) ->
-  low:Logic.term ->
-  high:Logic.term ->
-  State.passed_place
 
 val make_buffer_capacity : State.context -> Types.ty -> Logic.term -> Logic.term
 val make_buffer_model : State.context -> Intrinsic.builtin -> Types.ty -> Logic.term -> Logic.term
@@ -33,14 +53,3 @@ val translate_intrinsic :
   changed:Logic.term list ->
   Types.ty ->
   Logic.term
-
-val write_element_back :
-  State.context ->
-  State.frame ->
-  lend:Intrinsic.lend ->
-  type_arguments:Types.argument list ->
-  receiver:State.passed_place ->
-  receiver_type:Types.ty ->
-  Logic.term ->
-  Logic.term ->
-  State.frame

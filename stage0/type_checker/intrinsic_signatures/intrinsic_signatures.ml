@@ -144,13 +144,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
       make_array_signature
         ~make_output:(fun _ -> Returns (make_view_type element))
         (fun array -> [ input "array" array ])
-  | Lend Array_at_mut ->
-      make_array_signature
-        ~make_output:(fun _ -> Lends (Mut, element))
-        (fun array -> [ input ~mode:Mut "array" array; input "index" uint64 ])
   | Lend Storage_at -> with_storage ~output:(Lends (Read, element)) [ input "index" uint64 ]
-  | Lend Storage_at_mut ->
-      with_storage ~mode:Mut ~output:(Lends (Mut, element)) [ input "index" uint64 ]
   | Buffer Storage_view -> with_storage ~output:(Returns (make_view_type element)) []
   | Buffer View_length ->
       make ~generics:[ "Element" ] ~output:(Returns uint64)
@@ -159,10 +153,6 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
       make ~generics:[ "Element" ]
         ~output:(Lends (Read, element))
         [ input "view" (make_view_type element); input "index" uint64 ]
-  | Lend View_at_mut ->
-      make ~generics:[ "Element" ]
-        ~output:(Lends (Mut, element))
-        [ input ~mode:Mut "view" (make_view_type element); input "index" uint64 ]
   | Buffer View_swap ->
       make ~generics:[ "Element" ]
         [
@@ -323,7 +313,7 @@ let classify_cost (operation : Intrinsic.operation) =
       | Storage_view | View_length | View_swap | View_slice | View_address | Array_view
       | Array_from_storage | Storage_model | View_model | Array_model | Storage_lengthen
       | Storage_shorten | Storage_push )
-  | Lend (Storage_at | Storage_at_mut | View_at | View_at_mut | Array_at_mut)
+  | Lend (Storage_at | View_at)
   | Runtime
       ( Crash | Handle_from | Handle_descriptor | Handle_release | Report_tests_to | Live_blocks
       | Libc_number _ | System_is_os _ | System_is_architecture _ ) ->

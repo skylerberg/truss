@@ -800,7 +800,7 @@ and lend_block state mode (body : Core.block) : Core.block =
 let rec is_fixed_place : Core.place -> bool = function
   | Local _ | Constant _ -> true
   | Field { base; _ } -> is_fixed_place base
-  | Lent _ | Temporary _ -> false
+  | Element _ | Range _ | Lent _ | Temporary _ -> false
 
 let build_collection_place state (iterable : Syntax.expression) (mode : Types.mode) :
     Core.place * (type_:Types.ty -> Core.block -> Core.kind) option =
@@ -857,16 +857,21 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
         kind = Bind { local; is_var = false; mode = Own };
       };
     element =
-      Lent
-        (State.make_synthetic_expression state ~origin element.callee_result
-           (Call
-              (State.make_call state ~callee:(convert_callee element.callee)
-                 ~arguments:
-                   [
-                     make_receiver lends;
-                     Passed { mode = Read; value = Operands.build Read position };
-                   ]
-                 ~lends:(Some lends))));
+      (match State.find_sequence_element (Core_walk.compute_place_type collection) with
+      | Some element_type ->
+          Element { base = collection; index = position; type_ = element_type; origin }
+      | None ->
+          Lent
+            (State.make_synthetic_expression state ~origin element.callee_result
+               (Call
+                  (State.make_call state ~callee:(convert_callee element.callee)
+                     ~arguments:
+                       [
+                         make_receiver lends;
+                         Passed { mode = Read; value = Operands.build Read position };
+                       ]
+                     ~lends:(Some lends)))));
+    lends;
   }
 
 let quantify_over_elements state (collection : Syntax.expression) ~count ~element ~lends ~origin

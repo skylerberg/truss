@@ -343,6 +343,18 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         | _ -> None)
       values
   in
+  List.iteri
+    (fun position (parameter : Mir.parameter) ->
+      match
+        ( parameter.mode,
+          List.find_opt (fun (passed : State.passed) -> passed.position = position) values,
+          List.assoc_opt position changed )
+      with
+      | Types.Mut, Some passed, Some after_term when Types.is_well_known Slice parameter.type_ ->
+          Intrinsics.assume_same_length context after passed.type_ ~before:passed.term
+            ~after:after_term
+      | _ -> ())
+    callee_clauses.parameters;
   let callee_bindings = list_bindings callee_clauses in
   let callee_arguments = List.filter_map snd callee_bindings in
   let is_on_bound_values = List.exists (Logic.mentions after.bound) callee_arguments in

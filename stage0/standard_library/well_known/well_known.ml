@@ -214,6 +214,7 @@ let make_path known =
 let by_path = Path.Map.of_seq (List.to_seq (List.map (fun known -> (make_path known, known)) all))
 let of_path path = Path.Map.find_opt path by_path
 let is known path = of_path path = Some known
+let is_buffer_sequence path = is List path || is Slice path
 let specification = Path.make_standard_module [ "specification" ]
 
 let is_system_module (module_ : Path.module_) =

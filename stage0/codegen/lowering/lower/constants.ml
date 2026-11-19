@@ -293,7 +293,7 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
     | Assert condition -> (
         match fold_operand condition with Some (Static_scalar (Bool true)) -> Some () | _ -> None)
     | Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ | Ghost_assert _ | Proof _ -> Some ()
-    | Assign _ | Lend _ | Slice _ | Template _ | Echo _ | Provide _ | Provide_end -> None
+    | Assign _ | Lend _ | Template _ | Echo _ | Provide _ | Provide_end -> None
   in
   let rec run block =
     if !steps <= 0 then None

@@ -42,6 +42,14 @@ and place =
   | Local of { local : local; type_ : Types.ty; origin : origin }
   | Constant of { path : Path.t; type_ : Types.ty; origin : origin }
   | Field of { base : place; field : string; type_ : Types.ty; origin : origin }
+  | Element of { base : place; index : expression; type_ : Types.ty; origin : origin }
+  | Range of {
+      base : place;
+      start : expression;
+      stop : expression option;
+      type_ : Types.ty;
+      origin : origin;
+    }
   | Lent of expression
   | Temporary of expression
 
@@ -67,7 +75,6 @@ and kind =
   | Collection_literal of { elements : expression list; construction : construction }
   | Map_literal of { entries : (expression * expression) list }
   | Record_update of { base : expression; updates : (string list * expression) list }
-  | Slice of { base : place; callee : callee; bounds : argument list }
   | Call of call
   | Operator of { operation : Intrinsic.scalar; arguments : expression list }
   | Compare of { comparison : comparison; left : expression; right : expression }
@@ -151,7 +158,7 @@ and iteration =
   | Elements of elements
   | Cursor of { cursor : place; next : callee }
 
-and elements = { count : expression; position : pattern; element : place }
+and elements = { count : expression; position : pattern; element : place; lends : Types.mode }
 and loop_clause = Invariant of expression | Decreases of expression list | Cost of cost
 and cost = { origin : origin; amortized : bool; resource : resource; bound : bound }
 and resource = Metric of Metric.t | Calls of calls_target

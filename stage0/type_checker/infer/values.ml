@@ -303,7 +303,8 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
     | Some (Types.Function function_type)
       when List.length function_type.inputs = List.length parameters ->
         List.iter2
-          (fun written (mode, input) -> Pattern_typing.check_pattern state env written input ~mode)
+          (fun written (mode, input) ->
+            Pattern_typing.check_parameter_pattern state env written input ~mode)
           parameters function_type.inputs;
         let output = function_type.output in
         let lambda_env = { env with output = Some (Returns output) } in

@@ -45,7 +45,7 @@ public fn Decoder.remaining(self) -> Slice[UInt8]
   ensures result.length() == self.bytes.length() - self.position
   cost time O(1)
 {
-  self.bytes.slice_range(self.position, stop: self.bytes.length())
+  self.bytes[self.position..]
 }
 
 public fn Decoder.is_at_end(self) -> Bool
@@ -78,7 +78,7 @@ public fn Decoder.bytes(mut self, count: UInt64) -> Result[Slice[UInt8], DecodeE
   }
   let start = self.position
   self.position += count
-  Ok(self.bytes.slice_range(start, stop: start + count))
+  Ok(self.bytes[start..start + count])
 }
 
 internal fn Decoder.take_2(mut self) -> Result[Array[UInt8, 2], DecodeError]
@@ -356,7 +356,7 @@ public fn Encoder.variable_uint64(mut self, value: UInt64)
     groups[count] = intrinsic::convert(if more { group + 128 } else { group })
     count += 1
   }
-  mut self.bytes(groups.slice_range(0, stop: count))
+  mut self.bytes(groups[..count])
 }
 
 public fn Encoder.variable_int64(mut self, value: Int64)

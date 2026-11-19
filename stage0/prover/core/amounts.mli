@@ -39,6 +39,16 @@ val compute_potential :
 
 val compute_elements_potential : State.context -> Types.ty -> Logic.term -> Logic.term
 
+val assume_element_potential_change :
+  State.context ->
+  State.frame ->
+  Types.ty ->
+  before:Logic.term ->
+  after:Logic.term ->
+  replaced:Logic.term ->
+  written:Logic.term ->
+  unit
+
 val declare_method_cost :
   State.context ->
   State.frame ->

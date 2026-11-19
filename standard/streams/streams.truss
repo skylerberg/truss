@@ -107,7 +107,7 @@ public trait Writer {
     while written < bytes.length()
       invariant written <= bytes.length()
     {
-      let count = mut self.write(bytes.slice_range(written, stop: bytes.length()))?
+      let count = mut self.write(bytes[written..])?
       if count == 0 {
         return Err(SystemError.NothingWritten)
       }
@@ -143,7 +143,7 @@ public trait Duplex {
     while sent < bytes.length()
       invariant sent <= bytes.length()
     {
-      let count = self.send(bytes.slice_range(sent, stop: bytes.length()))?
+      let count = self.send(bytes[sent..])?
       if count == 0 {
         return Err(SystemError.NothingWritten)
       }
@@ -207,14 +207,14 @@ public fn ByteReader.remaining(self) -> Slice[UInt8]
   ensures result.length() == self.bytes.length() - self.position
   cost time O(1)
 {
-  self.bytes.slice_range(self.position, stop: self.bytes.length())
+  self.bytes[self.position..]
 }
 
 impl Reader for ByteReader {
   fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
     let left = self.bytes.length() - self.position
     let count = if limit < left { limit } else { left }
-    mut buffer.append_slice(self.bytes.slice_range(self.position, stop: self.position + count))
+    mut buffer.append_slice(self.bytes[self.position..self.position + count])
     self.position += count
     Ok(count)
   }
@@ -298,7 +298,7 @@ public fn BufferedReader[Source: Reader].read_until(
       at_delimiter = self.pending[index] == delimiter
       index += 1
     }
-    mut buffer.append_slice(self.pending.slice_range(self.start, stop: index))
+    mut buffer.append_slice(self.pending[self.start..index])
     consumed += index - self.start
     self.start = index
     if at_delimiter || consumed == limit {
@@ -345,7 +345,7 @@ public fn BufferedReader[Source: Reader].peek(mut self, count: UInt64) -> Result
   }
   let available = self.pending.length() - self.start
   let shown = if available < count { available } else { count }
-  Ok(self.pending.slice_range(self.start, stop: self.start + shown))
+  Ok(self.pending[self.start..self.start + shown])
 }
 
 public fn BufferedReader[Source: Reader].buffered(self) -> UInt64 {
@@ -376,7 +376,7 @@ impl Reader for BufferedReader[Source: Reader] {
     }
     let available = self.pending.length() - self.start
     let count = if limit < available { limit } else { available }
-    mut buffer.append_slice(self.pending.slice_range(self.start, stop: self.start + count))
+    mut buffer.append_slice(self.pending[self.start..self.start + count])
     self.start += count
     Ok(count)
   }
