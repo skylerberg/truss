@@ -137,9 +137,11 @@ let rec has_application_of symbol (term : Logic.term) =
 
 let find_definition ~symbol result (term : Logic.term) =
   match term with
-  | Operation ("=", [ left; right ]) when left = result && not (has_application_of symbol right) ->
+  | Operation (Equal, [ left; right ]) when left = result && not (has_application_of symbol right)
+    ->
       Some right
-  | Operation ("=", [ left; right ]) when right = result && not (has_application_of symbol left) ->
+  | Operation (Equal, [ left; right ]) when right = result && not (has_application_of symbol left)
+    ->
       Some left
   | _ -> None
 
