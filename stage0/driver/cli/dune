@@ -15,7 +15,6 @@
   package_checks
   manifest
   registry
-  libc
   c_compiler
   process
   emit_c

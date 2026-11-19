@@ -9,7 +9,6 @@
   core
   core_walk
   intrinsic
-  well_known
   resolve
   infer
   interface
