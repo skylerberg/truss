@@ -136,3 +136,12 @@ let () =
       expect_fine Fixtures.Usage.comparisons_in_specifications);
   Harness.test "comparisons of different places and of calls are not reported" (fun () ->
       expect_fine Fixtures.Usage.comparisons_of_different_places)
+
+let () =
+  Harness.test "a var that is assigned and never read is unused, with no fix" (fun () ->
+      expect_one_diagnostic Fixtures.Usage.var_only_assigned "usage.unused_variable"
+        ~says:"`other` is assigned but never read. Delete it and its assignments, or read it.");
+  Harness.test "a compound assignment reads its var" (fun () ->
+      expect_fine Fixtures.Usage.var_assigned_and_read);
+  Harness.test "writing through a mut binding changes the place it is bound to" (fun () ->
+      expect_fine Fixtures.Usage.mut_bindings_written_through)

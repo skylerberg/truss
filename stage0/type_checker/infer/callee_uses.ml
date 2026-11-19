@@ -42,7 +42,13 @@ let instantiate (interface : Interface.Lookups.t) (target : Core.operand Core.ta
       let type_ =
         match function_value with
         | Value value | Place (Lent value | Temporary value) -> value.type_
-        | Place (Local { type_; _ } | Constant { type_; _ } | Field { type_; _ }) -> type_
+        | Place
+            ( Local { type_; _ }
+            | Constant { type_; _ }
+            | Field { type_; _ }
+            | Element { type_; _ }
+            | Range { type_; _ } ) ->
+            type_
       in
       match type_ with
       | Types.Function { uses; _ } -> uses

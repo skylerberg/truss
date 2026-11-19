@@ -22,5 +22,6 @@ type t = Text of string | Name of reference | Concat of t list
 val empty : t
 val ( ++ ) : t -> t -> t
 val join : string -> t list -> t
+val render_braces : t list -> t
 val render_key_name : key -> string
 val render : t -> resolve:(reference -> string) -> string

@@ -1,4 +1,4 @@
-val compare_terms : Types.ty -> Core.comparison -> Logic.term -> Logic.term -> Logic.term
+val compare_terms : Types.ty -> Language.Comparison.t -> Logic.term -> Logic.term -> Logic.term
 val check_widened : Obligation.location -> is_written:bool -> Types.ty -> Types.ty -> unit
 
 val convert_from_integer :

@@ -18,15 +18,6 @@ type contract = {
   result_kind : [ `Returns | `Lends ];
 }
 
-type slice = {
-  made_at : Invocation.site;
-  collection : Mir.place;
-  start : Logic.term;
-  stop : Logic.term;
-}
-
-type held_slice = Slices of (Logic.term * slice) list | Unknown_slice
-
 type frame = {
   source : source;
   locals : Logic.term Locals.t;
@@ -37,6 +28,7 @@ type frame = {
   result : Logic.term option;
   condition : Logic.term;
   makes_obligations : bool;
+  is_ghost : bool;
   bound : Logic.symbol list;
   binders : (Logic.symbol * Logic.sort * Logic.term) list;
   substitution : Types.substitution;
@@ -45,7 +37,6 @@ type frame = {
   yielded_so_far : Logic.term option;
   spent : (Costs.counter * Logic.term) list;
   aliases : (Logic.term * Mir.place) list Locals.t;
-  slices : held_slice Locals.t;
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
 }
 
@@ -65,7 +56,7 @@ type passed_place = {
 
 type passed = {
   position : int;
-  mode : Types.mode;
+  mode : Language.Mode.t;
   shape : Invocation.shape;
   origin : Core.origin option;
   passed_place : passed_place option;
@@ -79,7 +70,7 @@ type call_argument =
   | Value_argument of passed
   | Lambda_argument of {
       position : int;
-      mode : Types.mode;
+      mode : Language.Mode.t;
       site : Invocation.site;
       lambda : lambda_code;
     }
@@ -131,7 +122,7 @@ type context = {
   fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;
-  mutable lambda_costs : ((Logic.term * Metric.t) * (Logic.term * Obligation.t list)) list;
+  mutable lambda_costs : ((Logic.term * Language.Metric.t) * (Logic.term * Obligation.t list)) list;
   mutable lambda_captures : (Logic.term * Core.local list) list;
   lambda_definitions : Logic.term Tables.Symbol_table.t;
   mutable potentials : Logic.term list;
@@ -141,7 +132,6 @@ type context = {
   mutable equalities : Logic.term list;
   mutable decisions : (string * string option * Logic.term * Logic.term) list;
   mutable entry : Logic.symbol list;
-  mutable proving : bool;
   inherits_precondition : bool;
   mutable holes : (Resolve.Names.key * Obligation.location) list;
   mutable unfinished : Logic.term list;

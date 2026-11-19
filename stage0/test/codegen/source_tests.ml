@@ -36,17 +36,13 @@ let () =
         Code
           {
             path =
-              Method
-                {
-                  owner =
-                    Derived
-                      {
-                        type_ = Top { module_ = Codegen_support.example; name = "Both" };
-                        trait = Well_known.make_path Equal;
-                      };
-                  name = "equal";
-                  receiver = Read;
-                };
+              Well_known.make_impl_method_path Equal_equal
+                ~impl:
+                  (Derived
+                     {
+                       type_ = Top { module_ = Codegen_support.example; name = "Both" };
+                       trait = Well_known.make_path Equal;
+                     });
             instantiation = Ground.no_instantiation;
           }
       in

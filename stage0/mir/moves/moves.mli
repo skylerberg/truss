@@ -6,7 +6,7 @@ val is_inside : outer:path -> path -> bool
 type t
 
 val analyse :
-  ?find_passed:(Mir.local -> Types.mode option) ->
+  ?find_passed:(Mir.local -> Language.Mode.t option) ->
   ?is_moving:(Types.ty -> bool) ->
   tracks:(path -> bool) ->
   Mir.Graph.body ->
@@ -20,7 +20,7 @@ type use = {
   origin : Core.origin;
   moves : bool;
   operand : Mir.operand option;
-  passed : Types.mode option;
+  passed : Language.Mode.t option;
 }
 
 val list_statement_uses : t -> Mir.Graph.statement -> use list

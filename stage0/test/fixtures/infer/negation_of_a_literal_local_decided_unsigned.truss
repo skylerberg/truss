@@ -1,0 +1,5 @@
+fn f() -> UInt8 {
+  let count = 3
+  let negated = -count
+  negated
+}

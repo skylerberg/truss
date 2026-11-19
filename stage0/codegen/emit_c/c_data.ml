@@ -1,5 +1,4 @@
 let ( ++ ) = C_text.( ++ )
-let render_braces parts = Text "{ " ++ C_text.join ", " parts ++ Text " }"
 
 let render_static ~c_type ~name ~dimension value =
   Text "static const " ++ c_type ++ Text " " ++ name
@@ -32,7 +31,7 @@ let rec render_initializer (emission : Emission.t) ty (value : Lowered.static_va
     let block_value = render_fields block_fields fields "" in
     let name =
       Emission.add_static emission (fun name ->
-          render_static ~c_type:key ~name ~dimension:"" (render_braces block_value))
+          render_static ~c_type:key ~name ~dimension:"" (C_text.render_braces block_value))
     in
     Text "((" ++ key ++ Text " *)&" ++ name ++ Text ")"
   in
@@ -49,22 +48,23 @@ let rec render_initializer (emission : Emission.t) ty (value : Lowered.static_va
           let name =
             Emission.add_static emission (fun name ->
                 render_static ~c_type:element_c ~name ~dimension:(Printf.sprintf "[%d]" count)
-                  (render_braces values))
+                  (C_text.render_braces values))
           in
           C_values.render_cast (element_c ++ Text " *") name
         end
       in
       Some
-        (render_braces
+        (C_text.render_braces
            (List.map
               (fun (field, value) -> Text (".f_" ^ field ^ " = ") ++ value)
               (Storage.list_borrowed_fields ~buffer ~length:(Text (string_of_int count)))))
   | Scalar _, Static_scalar constant -> Some (fst (C_values.render_constant emission constant))
-  | Struct fields, Static_record values -> Some (render_braces (render_fields fields values ""))
+  | Struct fields, Static_record values ->
+      Some (C_text.render_braces (render_fields fields values ""))
   | Array { element; _ }, Static_array values ->
       Some
         (Text "{ .items = "
-        ++ render_braces (List.filter_map (render_initializer emission element) values)
+        ++ C_text.render_braces (List.filter_map (render_initializer emission element) values)
         ++ Text " }")
   | Tag_only { variants; _ }, Static_variant (name, _) -> (
       match List.find_index (String.equal name) variants with
@@ -78,18 +78,19 @@ let rec render_initializer (emission : Emission.t) ty (value : Lowered.static_va
       | Some variant -> (
           let tag = C_text.Text (Printf.sprintf ".tag = %d" variant.index) in
           match variant.payload.form with
-          | Zero_size -> Some (render_braces [ tag ])
+          | Zero_size -> Some (C_text.render_braces [ tag ])
           | Struct fields ->
-              Some (render_braces (tag :: render_fields fields values (".payload.v_" ^ name)))
+              Some
+                (C_text.render_braces (tag :: render_fields fields values (".payload.v_" ^ name)))
           | Scalar (Pointer (Block _)) ->
               Some
-                (render_braces
+                (C_text.render_braces
                    [ tag; Text (".payload.v_" ^ name ^ " = ") ++ render_block name values ])
           | _ -> C_runtime.raise_bug "a payload"))
   | Niche_encoded { dataful; dataless }, Static_variant (name, values) ->
       if dataful.name = name then
         match dataful.payload.form with
-        | Struct fields -> Some (render_braces (render_fields fields values ""))
+        | Struct fields -> Some (C_text.render_braces (render_fields fields values ""))
         | Scalar (Pointer (Block _)) -> Some (render_block name values)
         | _ -> C_runtime.raise_bug "a payload"
       else
@@ -102,7 +103,9 @@ let rec render_initializer (emission : Emission.t) ty (value : Lowered.static_va
                 match niche.path with
                 | [] -> Some stored
                 | path ->
-                    Some (render_braces [ Text (C_values.render_path path ^ " = ") ++ stored ])))
+                    Some
+                      (C_text.render_braces [ Text (C_values.render_path path ^ " = ") ++ stored ]))
+            )
         | None -> C_runtime.raise_bug "no variant %s" name
         end
   | _ -> C_runtime.raise_bug "static data that does not fit %s" (Ground.to_string ty)
@@ -120,7 +123,7 @@ let render_table (emission : Emission.t) (table : Lowered.table) =
   Text "const void *const "
   ++ Emission.render_item emission table.table_item
   ++ Text (Printf.sprintf "[%d] = " (max 1 (List.length entries)))
-  ++ (match entries with [] -> Text "{ 0 }" | _ -> render_braces entries)
+  ++ (match entries with [] -> Text "{ 0 }" | _ -> C_text.render_braces entries)
   ++ Text ";\n"
 
 let render_data (emission : Emission.t) (data : Lowered.data) =

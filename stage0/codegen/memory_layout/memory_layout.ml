@@ -262,7 +262,10 @@ let lay_out_block env ty name =
   match env.compute_shape ty with
   | Sum variants -> (
       match List.find_opt (fun (variant : variant_shape) -> variant.name = name) variants with
-      | Some { indirect = true; fields = fields'; _ } -> lay_out_fields env fields'
+      | Some { indirect = true; fields = fields'; _ } -> (
+          match lay_out_fields env fields' with
+          | { form = Zero_size; _ } -> lay_out_fields env [ ("_filler", Raw (Integer UInt8)) ]
+          | layout -> layout)
       | Some _ -> raise_bug "variant %s is not indirect" name
       | None -> raise_bug "no variant %s" name)
   | _ -> raise_bug "a block of a type that is not a sum type"

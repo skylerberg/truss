@@ -123,10 +123,10 @@ let expand_body (body : Tree.body) : Graph.body =
             | None -> ());
             close (expand_block targets (failing, []) failed) (Goto after) origin;
             emit_rest after
-        | For { loop; iteration; part; lent; body; _ } ->
+        | For { loop; iteration; part; elements; body; _ } ->
             let index, emitted =
-              match lent with
-              | Some lent -> expand_block targets current lent.count.statements
+              match elements with
+              | Some elements -> expand_block targets current elements.count.statements
               | None -> current
             in
             let after = take_fresh_number () in
@@ -140,10 +140,10 @@ let expand_body (body : Tree.body) : Graph.body =
                 loop_provides = targets.provides;
                 task_provides =
                   (match loop.schedule with
-                  | Concurrent_loop ->
+                  | Concurrent ->
                       (Tree.Iteration { loop = loop.origin }, targets.provides)
                       :: targets.task_provides
-                  | Sequential | Parallel_loop -> targets.task_provides);
+                  | Sequential | Parallel -> targets.task_provides);
               }
             in
             (match emit in_loop (inside, []) body.statements with
@@ -173,11 +173,11 @@ let expand_body (body : Tree.body) : Graph.body =
                  {
                    iteration;
                    part;
-                   lent =
+                   elements =
                      Option.map
-                       (fun (lent : Tree.lent_element) ->
-                         { lent with count = { lent.count with statements = [] } })
-                       lent;
+                       (fun (elements : Tree.elements) ->
+                         { elements with count = { elements.count with statements = [] } })
+                       elements;
                    body = inside;
                    blocks = inside :: list_blocks_since first;
                    after;

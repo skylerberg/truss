@@ -616,7 +616,7 @@ let build_formula builder ~origin ~type_ (build : unit -> Tree.local list * Tree
         {
           Tree.parameters;
           locals = [||];
-          value = { statements = statements builder; value = Some value };
+          value = { statements = statements builder; value };
           type_;
           origin;
           lambdas = [||];
@@ -628,9 +628,9 @@ let build_formula builder ~origin ~type_ (build : unit -> Tree.local list * Tree
           let parameters, value = build () in
           match value with
           | Some value when reaches builder ->
-              if is_specification builder then record_formula parameters value
-              else held := Some (parameters, hold_past_scopes builder origin value)
-          | _ -> raise_bug "a formula that jumps or gives no value"));
+              if is_specification builder then record_formula parameters (Some value)
+              else held := Some (parameters, Some (hold_past_scopes builder origin value))
+          | Some _ | None -> held := Some (parameters, None)));
   Option.iter (fun (parameters, value) -> record_formula parameters value) !held;
   match !built with
   | Some formula -> { formula with locals = collect_locals builder; lambdas = lambdas builder }

@@ -380,7 +380,9 @@ and parse_cost cursor =
         ~expected:
           (Printf.sprintf "a resource: %s, or `calls(...)`"
              (String.concat ", "
-                (List.map (fun metric -> "`" ^ Metric.show metric ^ "`") Metric.all)))
+                (List.map
+                   (fun metric -> "`" ^ Language.Metric.show metric ^ "`")
+                   Language.Metric.all)))
     with
     | Metric metric -> Syntax.Metric metric
     | _ -> Calls (parse_call_target cursor)
@@ -595,7 +597,9 @@ and parse_prefix_operator cursor start operator =
 
 and parse_quantified cursor =
   let start = Cursor.index cursor in
-  let quantifier = if (Cursor.take cursor).kind = Keyword Forall then Syntax.Forall else Exists in
+  let quantifier =
+    if (Cursor.take cursor).kind = Keyword Forall then Language.Quantifier.Forall else Exists
+  in
   let binder =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
     | Lower _, Punctuation Colon ->
@@ -1051,7 +1055,8 @@ and parse_arm cursor : Syntax.arm =
   let body = parse_statement cursor in
   (match Cursor.peek cursor with
   | { kind = Punctuation Comma; _ } as comma ->
-      Habits.match_arm_comma cursor ~comma;
+      Habits.match_arm_comma cursor ~comma
+        ~next:(Cursor.lookup_token cursor (Cursor.index cursor + 1));
       Cursor.advance cursor
   | _ -> ());
   { patterns; guard; body; id = Cursor.allocate_id_from cursor start }
@@ -1180,7 +1185,7 @@ and parse_statement cursor : Syntax.statement =
       make_statement_node (parse_binding cursor ~is_var:true)
   | Keyword For ->
       Cursor.advance cursor;
-      make_statement_node (parse_for_loop cursor ~mode:Syntax.Sequential)
+      make_statement_node (parse_for_loop cursor ~mode:Language.Loop_mode.Sequential)
   | Keyword While ->
       Cursor.advance cursor;
       let condition = parse_expression cursor in
@@ -1189,12 +1194,12 @@ and parse_statement cursor : Syntax.statement =
   | Keyword Parallel ->
       Cursor.advance cursor;
       if Cursor.accept_keyword cursor For then
-        make_statement_node (parse_for_loop cursor ~mode:Parallel_loop)
+        make_statement_node (parse_for_loop cursor ~mode:Parallel)
       else make_statement_node (Parallel (parse_body cursor))
   | Keyword Concurrent ->
       Cursor.advance cursor;
       if Cursor.accept_keyword cursor For then
-        make_statement_node (parse_for_loop cursor ~mode:Concurrent_loop)
+        make_statement_node (parse_for_loop cursor ~mode:Concurrent)
       else make_statement_node (Concurrent (parse_body cursor))
   | Keyword Proof ->
       Cursor.advance cursor;

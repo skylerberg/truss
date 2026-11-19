@@ -1,4 +1,4 @@
-let build (mode : Types.mode) (node : Core.expression) : Core.operand =
+let build (mode : Language.Mode.t) (node : Core.expression) : Core.operand =
   match (mode, node.kind) with
   | (Read | Mut), Use place -> Place place
   | Read, String _ -> Place (Temporary node)

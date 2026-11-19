@@ -8,5 +8,5 @@
   lexer
   syntax
   syntax_walk
-  metric
+  language
   zarith))

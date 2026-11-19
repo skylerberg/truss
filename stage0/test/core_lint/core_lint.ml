@@ -87,9 +87,7 @@ let instantiate context (target : Core.operand Core.target) =
   let of_signature ?(has_receiver = true) substitution (signature : Types.signature) =
     let signature = Types.substitute_signature substitution signature in
     let receiver =
-      match signature.receiver with
-      | Some ((Read | Mut | Own), receiver) when has_receiver -> [ receiver ]
-      | _ -> []
+      match signature.receiver with Some (_, receiver) when has_receiver -> [ receiver ] | _ -> []
     in
     Some
       ( receiver
@@ -345,22 +343,6 @@ let check_semantics context (form : Core.t) =
                      "a lambda captures %d locals, and its body reads %d of the enclosing \
                       function's"
                      (List.length captures) (List.length free)
-             | Slice { callee; bounds; _ } ->
-                 let name = show_target callee.target in
-                 let ends suffix =
-                   String.length name >= String.length suffix
-                   && String.sub name
-                        (String.length name - String.length suffix)
-                        (String.length suffix)
-                      = suffix
-                 in
-                 if
-                   not
-                     (match List.length bounds with
-                     | 2 -> ends ".slice_range"
-                     | 1 -> ends ".slice_from"
-                     | _ -> false)
-                 then context.report "a `Slice` with %d bounds calls `%s`" (List.length bounds) name
              | _ -> ());
        })
     form.definition
@@ -479,7 +461,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let task_origins = Hashtbl.create 4 in
   let check_unique_task_origin (node : Core.statement) =
     match node.kind with
-    | Concurrent _ | For { mode = Concurrent_loop; _ } ->
+    | Concurrent _ | For { mode = Concurrent; _ } ->
         if Hashtbl.mem task_origins node.origin then
           report
             "two `concurrent` statements have the origin %d, so an early exit of a task of one \
@@ -511,14 +493,11 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         List.iter (check_argument "an intrinsic's type argument") type_arguments
     | Capability_method _ | Indirect _ -> ()
   in
-  let find_parameters (target : Core.operand Core.target) : (Types.mode * bool) list option =
+  let find_parameters (target : Core.operand Core.target) : (Language.Mode.t * bool) list option =
     let of_signature ~has_receiver (signature : Types.signature) =
       let receiver =
         match signature.receiver with
-        | Some (((Read | Mut | Own) as receiver), _) when has_receiver ->
-            [
-              ((match receiver with Read -> Types.Read | Mut -> Mut | Own | Static -> Own), false);
-            ]
+        | Some (mode, _) when has_receiver -> [ (mode, false) ]
         | _ -> []
       in
       receiver
@@ -561,7 +540,9 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
             match argument with
             | Passed { mode = passed; _ } when passed <> mode ->
                 report "argument %d of a call of `%s` has the mode `%s`, and its parameter `%s`"
-                  position callee (Types.show_mode passed) (Types.show_mode mode)
+                  position callee
+                  (Language.Mode.show_prefix passed)
+                  (Language.Mode.show_prefix mode)
             | Default when not has_default ->
                 report "a call of `%s` omits argument %d, whose parameter has no default" callee
                   position
@@ -610,6 +591,12 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     | Field { base; type_ = field; _ } ->
         check_type "a field" field;
         check_place base
+    | Element { base; type_ = element; _ } ->
+        check_type "an element" element;
+        check_place base
+    | Range { base; type_ = range; _ } ->
+        check_type "a range" range;
+        check_place base
   in
   let check_operand (core_operand : Core.operand) =
     match core_operand with Place core_place -> check_place core_place | Value _ -> ()
@@ -619,12 +606,13 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     match core_place with
     | Local _ | Temporary _ -> ()
     | Constant { path; _ } -> report "%s mutates the constant `%s`" subject (Path.show path)
-    | Field { base; _ } -> check_mutable_place subject base
+    | Field { base; _ } | Element { base; _ } | Range { base; _ } ->
+        check_mutable_place subject base
     | Lent { kind = Call { lends = Some Mut; _ }; _ } -> ()
     | Lent _ -> report "%s mutates a place that is lent read-only" subject
   in
   let yielded = Hashtbl.create 8 in
-  let rec check_yielded_operand (mode : Types.mode) (part : Core.operand) =
+  let rec check_yielded_operand (mode : Language.Mode.t) (part : Core.operand) =
     match part with
     | Place core_place ->
         if mode = Mut then check_mutable_place "a `Yield` with the mode `mut`" core_place
@@ -645,7 +633,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
              | _ -> ());
        })
     form.definition;
-  let rec list_bindings (pattern : Core.pattern) : (Core.local * Types.ty * Types.mode) list =
+  let rec list_bindings (pattern : Core.pattern) : (Core.local * Types.ty * Language.Mode.t) list =
     match pattern.kind with
     | Bind { local; mode; _ } -> [ (local, pattern.type_, mode) ]
     | Variant { fields; _ } | Record fields ->
@@ -657,7 +645,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     check_operand value;
     match value with
     | Value _ ->
-        if List.exists (fun (_, _, mode) -> mode <> Types.Own) (list_bindings pattern) then
+        if List.exists (fun (_, _, mode) -> mode <> Language.Mode.Own) (list_bindings pattern) then
           report "%s on a value binds a name that is not `own`" subject
     | Place _ -> ()
   in
@@ -678,14 +666,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                          report "a construct that no `Yield` lends has a field that is a place"
                      | _ -> ())
                    fields
-             | Slice { base; callee; bounds } ->
-                 check_place base;
-                 check_arguments_fit
-                   {
-                     callee;
-                     arguments = Passed { mode = Read; value = Place base } :: bounds;
-                     lends = None;
-                   }
              | Matches { value; pattern } -> check_binds_own "an `is`" value pattern
              | Match { scrutinees; arms; _ } ->
                  List.iter
@@ -721,9 +701,9 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  | _ -> ());
                  List.iter
                    (function
-                     | Core.Passed { mode = Mut; value = Value { kind = Slice { base; _ }; _ }; _ }
-                       ->
-                         check_mutable_place "a slice passed `mut`" base
+                     | Core.Passed
+                         { mode = Mut; value = Value { kind = Use (Range { base; _ }); _ }; _ } ->
+                         check_mutable_place "a range passed `mut`" base
                      | Core.Passed { mode = Mut; value = Value _; _ } ->
                          report "a `mut` parameter receives a value that is not a slice"
                      | Passed { mode = Mut; value = Place core_place; _ } ->
@@ -767,16 +747,26 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  | _ -> ())
              | For { iteration = Cursor { cursor; _ }; _ } ->
                  check_mutable_place "a `for` loop" cursor
-             | For { iteration = Elements { count; position; element }; _ } -> (
+             | For { iteration = Elements { count; position; element; lends }; _ } -> (
                  (match count.kind with
                  | Call _ -> ()
                  | _ -> report "the count of an `Elements` loop is not a call");
-                 (match position.kind with
-                 | Bind _ -> ()
-                 | _ -> report "the position of an `Elements` loop is not a `Bind`");
+                 let position =
+                   match position.kind with
+                   | Bind { local; _ } -> Some local
+                   | _ ->
+                       report "the position of an `Elements` loop is not a `Bind`";
+                       None
+                 in
                  match element with
-                 | Lent { kind = Call _; _ } -> ()
-                 | _ -> report "the element of an `Elements` loop is not the lent place of a call")
+                 | Lent { kind = Call { lends = Some mode; _ }; _ } when mode = lends -> ()
+                 | Element { index = { kind = Use (Local { local; _ }); _ }; _ }
+                   when Some local = position ->
+                     ()
+                 | _ ->
+                     report
+                       "the element of an `Elements` loop is neither lent by a call in the loop's \
+                        mode nor the element at the loop's position")
              | _ -> ());
          pattern =
            (fun (node : Core.pattern) ->

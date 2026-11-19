@@ -79,16 +79,18 @@ let is_view : Core.argument -> bool = function
   | Passed
       {
         value =
-          Value
-            {
-              kind =
-                Call
-                  {
-                    callee = { target = Function { path = Method { name = "slice"; _ }; _ }; _ };
-                    _;
-                  };
-              _;
-            };
+          ( Value
+              {
+                kind =
+                  ( Call
+                      {
+                        callee = { target = Function { path = Method { name = "slice"; _ }; _ }; _ };
+                        _;
+                      }
+                  | Use (Range { stop = None; _ }) );
+                _;
+              }
+          | Place (Range { stop = None; _ }) );
         _;
       } ->
       true
@@ -359,7 +361,13 @@ let () =
   Harness.test "an `Array` receiver passed `mut` to a method of `Slice` is sliced whole" (fun () ->
       let text = Fixtures.Infer.sort_of_a_mut_array in
       match locate_core_call text "values.sort()" 1 with
-      | { arguments = [ Passed { mode = Mut; value = Value { kind = Slice _; _ } } ]; _ }, _ -> ()
+      | ( {
+            arguments =
+              [ Passed { mode = Mut; value = Value { kind = Use (Range _); _ } | Place (Range _) } ];
+            _;
+          },
+          _ ) ->
+          ()
       | _ -> Harness.fail "the receiver is not a slice of the whole array");
   Harness.test
     "a type argument of a view's method is counted after the view's parameters, not the array's"
@@ -389,21 +397,8 @@ let () =
                   {
                     mode = Mut;
                     value =
-                      Value
-                        {
-                          kind =
-                            Slice
-                              {
-                                callee =
-                                  {
-                                    target =
-                                      Function { path = Method { name = "slice_from"; _ }; _ };
-                                    _;
-                                  };
-                                _;
-                              };
-                          _;
-                        };
+                      ( Value { kind = Use (Range { stop = None; _ }); _ }
+                      | Place (Range { stop = None; _ }) );
                   };
               ];
             _;
@@ -442,9 +437,9 @@ let () =
             (Well_known.of_path owner, receiver)
         | _ -> failwith "the callee is not a method"
       in
-      if find_owner 1 <> (Some String_slice, Read) then
+      if find_owner 1 <> (Some String_slice, Instance Read) then
         Harness.fail "a read-only receiver does not call the view's overload";
-      if find_owner 2 <> (Some String, Own) then
+      if find_owner 2 <> (Some String, Instance Own) then
         Harness.fail "an `own` receiver does not call the `String`'s own overload");
   Harness.test "a method of a view takes no `mut` receiver" (fun () ->
       expect_one_diagnostic Fixtures.Infer.to_string_of_a_string_passed_mut "types.wrong_receiver");
@@ -585,7 +580,7 @@ let () =
       | [ Trait_method { name = "part"; _ } ] -> ()
       | _ -> Harness.fail "the call in `app` does not reach `Parted.part`");
       match list_callees "tools::kits" "measure" with
-      | [ Function { path = Method { name = "part"; receiver = Read; _ }; _ } ] -> ()
+      | [ Function { path = Method { name = "part"; receiver = Instance Read; _ }; _ } ] -> ()
       | _ -> Harness.fail "the call in `tools` does not reach `Kit.part`")
 
 let () =
@@ -603,6 +598,74 @@ let () =
         ~says:"so the base is passed `own`, not `mut`");
   Harness.test "a let cannot be assigned" (fun () ->
       expect_one_diagnostic Fixtures.Infer.assignment_to_a_let "types.not_assignable");
+  List.iter
+    (fun (written, text, code) ->
+      Harness.test
+        ("a slice that is not a `mut Slice` parameter cannot be written through: " ^ written)
+        (fun () ->
+          expect_one_diagnostic text code ~says:"so its elements cannot be written through it"))
+    [
+      ( "a `var` copied into",
+        Fixtures.Infer.slice_variable_copied_into_from_an_overlapping_slice,
+        "types.wrong_mode" );
+      ( "a `var` of a read-only parameter",
+        Fixtures.Infer.slice_of_a_read_only_parameter_bumped,
+        "types.wrong_mode" );
+      ("a `var` of a constant", Fixtures.Infer.slice_of_a_constant_list, "types.wrong_mode");
+      ("a `var` of a `let`", Fixtures.Infer.slice_of_a_let_list_assigned, "types.not_assignable");
+      ("a field", Fixtures.Infer.window_rest_bumped, "types.wrong_mode");
+      ( "the variable of a `mut` loop over a list of slices",
+        Fixtures.Infer.element_of_a_slice_in_a_list_assigned,
+        "types.not_assignable" );
+      ( "a range of a `var`",
+        Fixtures.Infer.range_of_a_view_of_a_read_only_list_sorted,
+        "types.wrong_mode" );
+      ( "a range of a range of a `var`",
+        Fixtures.Infer.range_of_a_range_of_a_view_of_a_read_only_list_sorted,
+        "types.wrong_mode" );
+      ( "an assigned element of a range of a `var`",
+        Fixtures.Infer.element_of_a_range_of_a_view_of_a_read_only_list_assigned,
+        "types.not_assignable" );
+      ( "an element of a range of a `var` passed `mut`",
+        Fixtures.Infer.element_of_a_range_of_a_view_of_a_read_only_list_passed_mut,
+        "types.wrong_mode" );
+      ( "an assigned element of an element of a `var`",
+        Fixtures.Infer.element_of_an_element_of_a_view_of_a_read_only_list_assigned,
+        "types.not_assignable" );
+      ( "an element of an element of a `var` passed `mut`",
+        Fixtures.Infer.element_of_an_element_of_a_view_of_a_read_only_list_passed_mut,
+        "types.wrong_mode" );
+      ( "a range of an element of a `var`",
+        Fixtures.Infer.range_of_an_element_of_a_view_of_a_read_only_list_sorted,
+        "types.wrong_mode" );
+      ( "a `mut` loop over a `var`",
+        Fixtures.Infer.loop_variable_over_a_view_of_a_read_only_list_passed_mut,
+        "types.wrong_mode" );
+      ( "an assigned variable of a `mut` loop over a `var`",
+        Fixtures.Infer.loop_variable_over_a_view_of_a_read_only_list_assigned,
+        "types.wrong_mode" );
+      ( "a `mut` loop over a range of a `var`",
+        Fixtures.Infer.loop_variable_over_a_range_of_a_view_of_a_read_only_list_passed_mut,
+        "types.wrong_mode" );
+      ( "a `match` on an element of a `var`",
+        Fixtures.Infer.match_binding_of_an_element_of_a_view_of_a_read_only_list_passed_mut,
+        "types.wrong_mode" );
+    ];
+  Harness.test "a `mut Slice` parameter and a range of a mutable place can be written through"
+    (fun () -> expect_fine Fixtures.Infer.slices_written_through_parameters_and_ranges);
+  Harness.test "a `mut Slice` parameter cannot be assigned" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.slice_parameter_assigned "types.not_assignable"
+        ~says:"is a `mut` slice parameter, so it cannot be assigned");
+  Harness.test "a slice cannot be passed `mut` to a parameter whose type is a type parameter"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.slice_reset_through_a_type_parameter "types.wrong_mode"
+        ~says:"A slice is passed `mut` only to a `mut Slice` parameter");
+  Harness.test "a slice satisfies no bound whose trait has a `mut self` method" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.slice_written_through_a_copy_in_generic_code
+        "types.unsatisfied_bound" ~says:"a slice implements no trait with a `mut self` method");
+  Harness.test "a trait with a `mut self` method cannot be implemented for a slice" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.trait_with_a_mut_self_method_for_a_slice
+        "types.mut_self_for_slice");
   List.iter
     (fun (construct, text) ->
       Harness.test (construct ^ " cannot be passed `mut`") (fun () ->
@@ -1033,7 +1096,7 @@ let () =
             .patterns
       in
       List.iter
-        (fun (name, (expected : Types.mode)) ->
+        (fun (name, (expected : Language.Mode.t)) ->
           match List.assoc_opt name modes with
           | Some mode when mode = expected -> ()
           | Some _ -> Harness.fail "`%s` is bound in another mode" name
@@ -1180,6 +1243,8 @@ let () =
       expect_one_diagnostic Fixtures.Infer.proof_block_assigning_a_var "types.not_in_specification");
   Harness.test "a proof block cannot return" (fun () ->
       expect_one_diagnostic Fixtures.Infer.proof_block_returning "types.not_in_specification");
+  Harness.test "unreachable is not part of a formula" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.requires_unreachable "types.not_in_specification");
   Harness.test "a quantifier's body in code cannot return" (fun () ->
       expect_one_diagnostic Fixtures.Infer.quantifier_returning_in_a_body
         "types.not_in_specification");
@@ -1659,6 +1724,38 @@ let () =
       expect_one_diagnostic
         Fixtures.Infer.meters_fed_to_an_impl_bounding_its_item_by_another_trait_argument
         "types.signature_mismatch" ~at:("feed", 2))
+
+let () =
+  Harness.test "a negated local of literals waits for the same decision" (fun () ->
+      expect_type Fixtures.Infer.negation_of_a_literal_local "-count" "Int64";
+      expect_type Fixtures.Infer.negation_of_a_float_literal_local "-ratio" "Float64");
+  Harness.test "a negated local of literals decided unsigned is an error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.negation_of_a_literal_local_decided_unsigned
+        "types.no_impl");
+  Harness.test "a loop over a range of literals in a local lets its body decide them" (fun () ->
+      expect_type Fixtures.Infer.loop_over_a_literal_range_local "range" ~occurrence:2
+        "Range[UInt8]");
+  Harness.test "a loop over a reversed range of literals" (fun () ->
+      expect_fine Fixtures.Infer.loop_over_a_reversed_literal_range)
+
+let () =
+  let declare literal = Printf.sprintf "fn f() {\n  let _: Float64 = %s\n}\n" literal in
+  Harness.test "a float literal far past every float is out of range, whatever its exponent"
+    (fun () ->
+      List.iter
+        (fun literal -> expect_one_diagnostic (declare literal) "types.literal_out_of_range")
+        [
+          "1.8e308";
+          "1e10000000000";
+          "1e999999999999";
+          "1e4611686018427387903";
+          "1e9999999999999999999";
+        ]);
+  Harness.test "a float literal far below every float rounds to zero, whatever its exponent"
+    (fun () ->
+      List.iter
+        (fun literal -> expect_no_diagnostics [ ("app::main", declare literal) ])
+        [ "2e-324"; "1e-99999999999"; "-1e-9999999999999999999" ])
 
 let () =
   Harness.test "the shorthand of with names its value, whatever the name resolves to" (fun () ->

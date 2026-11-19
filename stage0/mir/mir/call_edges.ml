@@ -232,7 +232,7 @@ let list_statement_edges interface instance (statement : Tree.statement) =
               | Convert _ | Copy _ | Lambda _ | Value_parameter _ | Specification _ );
             _;
           }
-      | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
+      | Call _ | Lend _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
       | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ )
   | For _
   | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
@@ -254,8 +254,7 @@ let list_edges (lookups : lookups) instance (code : Tree.t) =
       (function Calls target -> add [ target ] | Supplies { code; _ } -> add code)
       (list_statement_edges lookups.interface instance statement);
     match statement.kind with
-    | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ } | Slice { call; _ }) ->
-        add_invariant_check call
+    | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ }) -> add_invariant_check call
     | Basic (Assign { value = Construct { variant; fields; type_ }; _ }) -> (
         match find_head type_ with
         | Some head ->

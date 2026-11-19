@@ -2,10 +2,18 @@ let make_mir_parts packages = Database.For_testing.make_mir_lookups (Support.mak
 let find_graph (parts : Mir.lookups) key = Mir.find_graph (parts.read_body_part key)
 let find_code (parts : Mir.lookups) key = Mir.find_code (parts.read_body_part key)
 
-let list_place_locals (place : Mir.place) =
-  match place.root with Local local -> [ local ] | Constant _ | Literal _ -> []
+let rec list_place_locals (place : Mir.place) =
+  (match place.root with Local local -> [ local ] | Constant _ | Literal _ -> [])
+  @ List.concat_map
+      (fun (projection : Mir.projection) ->
+        match projection with
+        | Element { index; _ } -> list_operand_locals index
+        | Range { start; stop; _ } ->
+            list_operand_locals start @ Option.fold ~none:[] ~some:list_operand_locals stop
+        | Field _ | Variant_field _ -> [])
+      place.projections
 
-let list_operand_locals : Mir.operand -> Mir.local list = function
+and list_operand_locals : Mir.operand -> Mir.local list = function
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> list_place_locals place
   | Immediate _ -> []
 
@@ -96,9 +104,6 @@ and collect_effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local l
       let read, given = Option.fold ~none:([], []) ~some:list_written destination in
       (list_call_locals call @ read, given, [])
   | Lend { part; call } -> (list_call_locals call, [ part ], [])
-  | Slice { destination; base; call; _ } ->
-      let read, given = list_written destination in
-      (list_call_locals call @ list_place_locals base @ read, given, [])
   | Template { destination; call; _ } ->
       let read, given = list_written destination in
       (list_call_locals call @ read, given, [])
@@ -602,6 +607,46 @@ let () =
               blocks
           in
           if List.length ends < 2 then Harness.fail "the continue does not end the iteration");
+  Harness.test "a loop over a list binds each element place and calls no `element`" (fun () ->
+      let body = (lower_graph Fixtures.Mir.for_loop_with_a_break).body in
+      (match
+         List.find_map
+           (fun (_, (terminator : Mir.Graph.terminator)) ->
+             match terminator with For { elements; _ } -> elements | _ -> None)
+           (list_terminators body)
+       with
+      | Some
+          {
+            element = Sequence_element { place = { projections = [ Element _ ]; _ }; mode = Read };
+            _;
+          } ->
+          ()
+      | _ -> Harness.fail "the loop's element is not the place of the list's element");
+      if
+        List.exists
+          (fun (statement : Mir.Graph.statement) ->
+            match statement.kind with Basic (Lend _) -> true | _ -> false)
+          (list_statements body)
+      then Harness.fail "the loop lends its element through a call");
+  Harness.test "a loop over another collection is lent each element by its `element`" (fun () ->
+      let body = (lower_graph Fixtures.Mir.for_loop_over_a_row_with_its_own_element).body in
+      match
+        List.find_map
+          (fun (_, (terminator : Mir.Graph.terminator)) ->
+            match terminator with For { elements; _ } -> elements | _ -> None)
+          (list_terminators body)
+      with
+      | Some { element = Lent_by_call part; _ } ->
+          if
+            not
+              (List.exists
+                 (fun (statement : Mir.Graph.statement) ->
+                   match statement.kind with
+                   | Basic (Lend { part = lent; _ }) -> lent = part
+                   | _ -> false)
+                 (list_statements body))
+          then Harness.fail "no call lends the loop's element"
+      | _ -> Harness.fail "the loop's element is not lent by a call");
   Harness.test "a loop over a collection runs its body for each element, and a break exits it"
     (fun () ->
       let mir = lower_graph Fixtures.Mir.for_loop_with_a_break in
@@ -610,7 +655,8 @@ let () =
         List.find_map
           (fun (_, terminator) ->
             match (terminator : Mir.Graph.terminator) with
-            | For { iteration = Range _; lent = Some _; blocks; after; _ } -> Some (blocks, after)
+            | For { iteration = Range _; elements = Some _; blocks; after; _ } ->
+                Some (blocks, after)
             | _ -> None)
           (list_terminators body)
       with
@@ -625,7 +671,7 @@ let () =
                         (Mir.Graph.For_testing.list_successors body.blocks.(block).terminator))
                  blocks)
           then Harness.fail "the break does not leave the loop");
-  let check_slice_base_ends body name compare =
+  let check_range_base_ends body name compare =
     let all = list_statements body in
     let rec read_base_root (local : Mir.local) =
       match
@@ -653,31 +699,44 @@ let () =
           match statement.kind with Basic (Dead locals) -> List.mem local locals | _ -> false)
         all
     in
+    let find_ranged_root : Mir.operand -> Mir.local option = function
+      | Use { place = { root = Local base; projections = Range _ :: _ }; _ }
+      | Borrow { place = { root = Local base; projections = Range _ :: _ }; _ } ->
+          Some (read_base_root base)
+      | _ -> None
+    in
     match
       List.find_map
         (fun (statement : Mir.Graph.statement) ->
           match statement.kind with
-          | Basic (Slice { base = { root = Local base; _ }; _ }) -> Some (read_base_root base)
+          | Basic (Assign { value = Operand operand; _ }) -> find_ranged_root operand
+          | Basic (Call { call; _ }) ->
+              List.find_map
+                (fun (argument : Mir.argument) ->
+                  match argument with
+                  | Passed { value; _ } -> find_ranged_root value
+                  | Default -> None)
+                call.arguments
           | _ -> None)
         all
     with
-    | None -> Harness.fail "no slice"
+    | None -> Harness.fail "no range"
     | Some base -> (
         if body.locals.(base).kind <> Temporary then
-          Harness.fail "the slice's base is not a temporary";
+          Harness.fail "the range's base is not a temporary";
         match (find_end base, find_end (locate_named body name)) with
         | Some base_end, Some named_end -> compare base_end named_end
         | _ -> Harness.fail "the base or %s is never ended" name)
   in
-  Harness.test "a let keeps the temporary that the slice it binds views until its bindings end"
+  Harness.test "a let keeps the base temporary of a range it binds until its bindings end"
     (fun () ->
       let mir = lower_graph Fixtures.Mir.let_of_a_slice_of_a_temporary in
-      check_slice_base_ends mir.body "middle" (fun base_end middle_end ->
-          if base_end < middle_end then Harness.fail "the slice's base ends before middle"));
+      check_range_base_ends mir.body "middle" (fun base_end middle_end ->
+          if base_end < middle_end then Harness.fail "the range's base ends before middle"));
   Harness.test "a let ends a temporary that its bindings do not view with its statement" (fun () ->
       let mir = lower_graph Fixtures.Mir.let_of_a_temporary_slices_length in
-      check_slice_base_ends mir.body "count" (fun base_end count_end ->
-          if base_end > count_end then Harness.fail "the slice's base outlives its statement"));
+      check_range_base_ends mir.body "count" (fun base_end count_end ->
+          if base_end > count_end then Harness.fail "the range's base outlives its statement"));
   Harness.test "a let with an else binds its pattern only where it matches" (fun () ->
       let mir = lower_graph Fixtures.Mir.let_else_on_an_option in
       let body = mir.body in
@@ -948,7 +1007,7 @@ let () =
         Support.setup [ ("app::main", Fixtures.Mir.impls_inheriting_a_default_method) ]
       in
       let module_ = Support.parse_module "app::main" in
-      let make_method_path owner name : Path.t = Method { owner; name; receiver = Read } in
+      let make_method_path owner name : Path.t = Method { owner; name; receiver = Instance Read } in
       let make_impl_path type_name : Path.t =
         Impl
           {
@@ -1016,7 +1075,7 @@ let () =
       if list_positions (read_defaults add) <> [ (0, Some 5) ] then
         Harness.fail "`Tally.add` does not have its default at position 0";
       let advance : Path.t =
-        Method { owner = make_top_path "Counter"; name = "advance"; receiver = Mut }
+        Method { owner = make_top_path "Counter"; name = "advance"; receiver = Instance Mut }
       in
       if list_positions (read_defaults advance) <> [ (1, Some 3) ] then
         Harness.fail "`Counter.advance` does not have its default at position 1";
@@ -1342,10 +1401,10 @@ let () =
   let expect_edges path ~expected =
     expect_paths ~expected (Mir.Call_edges.list_path_edges (Lazy.force lookups) path)
   in
-  let equal_of type_name : Path.t =
-    Method { owner = make_derived_impl type_name Equal; name = "equal"; receiver = Read }
-  and default_of type_name : Path.t =
-    Method { owner = make_derived_impl type_name Default; name = "default"; receiver = Static }
+  let equal_of type_name =
+    Well_known.make_impl_method_path Equal_equal ~impl:(make_derived_impl type_name Equal)
+  and default_of type_name =
+    Well_known.make_impl_method_path Default_default ~impl:(make_derived_impl type_name Default)
   in
   let meters_equal = "app::main::impl standard::core::Equal for app::main::Meters.equal" in
   Harness.test "a derived method of a record calls the method of each field's impl" (fun () ->
@@ -1354,7 +1413,7 @@ let () =
     (fun () ->
       expect_edges (equal_of "Shape") ~expected:[ meters_equal ];
       expect_edges
-        (Method { owner = make_derived_impl "Shape" Hash; name = "hash"; receiver = Read })
+        (Method { owner = make_derived_impl "Shape" Hash; name = "hash"; receiver = Instance Read })
         ~expected:
           [
             "app::main::impl standard::core::Hash for app::main::Meters.hash";
@@ -1393,7 +1452,7 @@ let () =
         List.map Path.show
           (Mir.Call_edges.list_implementations (Lazy.force lookups)
              ~calling_package:(Support.parse_module "app::main").package
-             (Method { owner = Well_known.make_path Equal; name = "equal"; receiver = Read }))
+             (Well_known.make_method_path Equal_equal))
       in
       List.iter
         (fun expected ->
@@ -1444,14 +1503,14 @@ let () =
       expect_paths ~expected:[ "app::main::Level.height" ]
         (List.filter
            (fun edge -> Path.locate_package edge <> Path.standard_package)
-           (list_edges (Method { owner = level; name = "raised"; receiver = Read }))));
+           (list_edges (Method { owner = level; name = "raised"; receiver = Instance Read }))));
   Harness.test "a trait's method reaches the method of every impl, written or inherited" (fun () ->
       expect_paths
         ~expected:
           [ method_of "Shelf" "raised"; method_of "Stair" "raised"; method_of "Pot" "raised" ]
         (Mir.Call_edges.list_implementations (Lazy.force lookups)
            ~calling_package:(Support.parse_module "app::main").package
-           (Method { owner = level; name = "raised"; receiver = Read })));
+           (Method { owner = level; name = "raised"; receiver = Instance Read })));
   Harness.test "a call of a generic impl's method has edges to the impl of the type argument"
     (fun () ->
       expect_paths
@@ -1485,7 +1544,7 @@ let () =
             "app::main::Level.raised";
             "app::main::Level.picked";
           ]
-        (list_edges (Method { owner = level; name = "picked"; receiver = Read })));
+        (list_edges (Method { owner = level; name = "picked"; receiver = Instance Read })));
   Harness.test
     "an inherited method that gives its receiver to a bound has edges to its own impl's methods"
     (fun () ->
@@ -1520,15 +1579,13 @@ let () =
         (String.concat "; " actual)
   in
   Harness.test
-    "a slice's call, the call of a pattern's `equal`, and a pulled `next` carry the capability set \
-     of Core's callee" (fun () ->
+    "the call of a pattern's `equal` and a pulled `next` carry the capability set of Core's callee"
+    (fun () ->
       let built, _ = lower_tree_and_graph program in
       let carried = ref [] in
       Mir.iter_code
         (fun (statement : Mir.statement) ->
           match statement.kind with
-          | Basic (Slice { call; _ }) ->
-              carried := ("a slice carries " ^ show_callee call.callee) :: !carried
           | Basic
               (Call
                  {
@@ -1544,11 +1601,9 @@ let () =
         ~expected:
           [
             "a loop carries standard::core::Cursor.next uses {Meter}";
-            "a slice carries standard::list::List.slice_from uses {}";
             "a pattern carries standard::core::Equal.equal uses {}";
           ]);
-  Harness.test "the callee that a statement invokes is found for a call, a slice, and a pull"
-    (fun () ->
+  Harness.test "the callee that a statement invokes is found for a call and a pull" (fun () ->
       let built, _ = lower_tree_and_graph program in
       let invoked = ref [] in
       Mir.iter_code
@@ -1561,7 +1616,6 @@ let () =
         ~expected:
           [
             "standard::core::Cursor.next uses {Meter}";
-            "standard::list::List.slice_from uses {}";
             "standard::core::Equal.equal uses {}";
             "standard::list::Slice.length uses {}";
           ]);

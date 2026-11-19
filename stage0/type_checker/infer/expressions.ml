@@ -76,6 +76,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       State.register_expression state value (fun () -> Todo);
       match expected with Some expected -> expected | None -> Types.Hole)
   | Unreachable ->
+      State.reject_in_formula state env (State.read_span state value.id) "`unreachable`";
       State.register_expression state value (fun () -> Unreachable);
       Types.Never
   | Break | Continue ->
@@ -112,7 +113,8 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       (match State.find_keyword_operation state inner with
       | Some (call_id, _) ->
           state.keyword_modes <-
-            (call_id, match mode with Mut -> Types.Mut | Own -> Types.Own) :: state.keyword_modes
+            (call_id, match mode with Mut -> Language.Mode.Mut | Own -> Language.Mode.Own)
+            :: state.keyword_modes
       | None -> ());
       let type_ = check_expression state env ?expected inner in
       if mode = Mut && Option.is_none (State.find_keyword_operation state inner) then
@@ -157,7 +159,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       (match binder with
       | Binder_in (written, collection) ->
           let element = Values.check_collection_element state env ~quantifier:value collection in
-          Pattern_typing.check_pattern state env written element ~mode:Types.Read
+          Pattern_typing.check_pattern state env written element ~mode:Language.Mode.Read
       | Binder_type (bound, written) ->
           if not env.specification then
             State.report state Specification_only (State.read_span state value.id)
@@ -165,12 +167,9 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
                bodies of functions for specifications only. Quantify over a range or a collection.";
           State.declare state bound
             (Interface.Elaborator.elaborate_type state.context written)
-            ~is_var:false ~mode:Types.Read);
+            ~binding:Let ~mode:Language.Mode.Read);
       check state { env with in_quantifier = true } body Types.bool;
       State.register_expression state value (fun () ->
-          let quantifier : Core.quantifier =
-            match quantifier with Forall -> Forall | Exists -> Exists
-          in
           let make_quantified binder : Core.kind =
             Quantified { quantifier; binder; body = State.build_expression state body }
           in
@@ -330,18 +329,17 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
           let base = State.make_place (State.build_expression state base) in
           let start = Option.map (State.build_expression state) start in
           let stop = Option.map (State.build_expression state) stop in
-          State.make_slice state ~origin:value.id base ~start ~stop
+          State.make_range state ~origin:value.id base ~start ~stop
             ~inclusive:(match range.kind with Range { inclusive; _ } -> inclusive | _ -> false));
-      match base_type with
-      | Types.Named { path; arguments = Types.Type element :: _ }
-        when Well_known.is List path || Well_known.is Slice path
-             || Intrinsic.find_builtin path = Some Array ->
+      match (State.find_sequence_element base_type, base_type) with
+      | Some element, _ ->
           Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] }
-      | Types.Named { path; _ } when Well_known.is String path || Well_known.is String_slice path ->
+      | None, Types.Named { path; _ }
+        when Well_known.is String path || Well_known.is String_slice path ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
             "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
-      | Types.Error _ | Types.Hole -> base_type
-      | _ ->
+      | None, (Types.Error _ | Types.Hole) -> base_type
+      | None, _ ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
             (Printf.sprintf "%s cannot be sliced."
                (String.capitalize_ascii (State.describe state base_type))))
@@ -351,21 +349,37 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
           "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
       end
       else
-        match base_type with
-        | Types.Error _ | Types.Hole ->
+        match (State.find_sequence_element base_type, base_type) with
+        | _, (Types.Error _ | Types.Hole) ->
             ignore (check_expression state env key);
             base_type
-        | _ -> (
+        | Some element, _ ->
+            let uint64 = Types.make_builtin UInt64 in
+            let actual = check_expression state env ~expected:uint64 key in
+            Name_lookup.coerce state env ~argument:Read key ~actual ~expected:uint64;
+            State.register_expression state value (fun () ->
+                Use
+                  (Element
+                     {
+                       base = State.make_place (State.build_expression state base);
+                       index = State.build_expression state key;
+                       type_ = State.finalize_type state element;
+                       origin = value.id;
+                     }));
+            element
+        | None, _ -> (
+            let { Well_known.owner; name; receiver } = Well_known.locate_method Index_at in
             let index_trait =
-              State.make_trait_reference ~arguments:[] (Well_known.make_path Index)
+              State.make_trait_reference ~arguments:[] (Well_known.make_path owner)
             in
             match State.find_evidence state base_type index_trait with
             | Some evidence ->
-                let resolve_associated name =
-                  State.resolve_associated_type state base_type index_trait name
+                let resolve_associated associated =
+                  State.resolve_associated_type state base_type index_trait associated
                     ~at:(State.read_span state value.id)
                 in
-                let key_type = resolve_associated "Key" and output = resolve_associated "Output" in
+                let key_type = resolve_associated Index_key
+                and output = resolve_associated Index_output in
                 let actual = check_expression state env ~expected:key_type key in
                 Name_lookup.coerce state env ~argument:Read ~takes_view_as_owner:true key ~actual
                   ~expected:key_type;
@@ -376,8 +390,8 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                         Trait_method
                           {
                             trait = index_trait;
-                            name = "at";
-                            receiver = Read;
+                            name;
+                            receiver;
                             self_type = base_type;
                             instantiation = Types.no_instantiation;
                             evidence = State.convert_evidence evidence;

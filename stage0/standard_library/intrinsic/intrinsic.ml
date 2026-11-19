@@ -1,81 +1,4 @@
-let module_ = Path.make_standard_module [ "intrinsic" ]
-
-type builtin =
-  | Int8
-  | Int16
-  | Int32
-  | Int64
-  | UInt8
-  | UInt16
-  | UInt32
-  | UInt64
-  | Float32
-  | Float64
-  | Bool
-  | Character
-  | Unit
-  | Never
-  | Integer
-  | Array
-  | Storage
-  | View
-  | Handle
-  | Shared
-
-let builtins =
-  [
-    Int8;
-    Int16;
-    Int32;
-    Int64;
-    UInt8;
-    UInt16;
-    UInt32;
-    UInt64;
-    Float32;
-    Float64;
-    Bool;
-    Character;
-    Unit;
-    Never;
-    Integer;
-    Array;
-    Storage;
-    View;
-    Handle;
-    Shared;
-  ]
-
-let show_builtin = function
-  | Int8 -> "Int8"
-  | Int16 -> "Int16"
-  | Int32 -> "Int32"
-  | Int64 -> "Int64"
-  | UInt8 -> "UInt8"
-  | UInt16 -> "UInt16"
-  | UInt32 -> "UInt32"
-  | UInt64 -> "UInt64"
-  | Float32 -> "Float32"
-  | Float64 -> "Float64"
-  | Bool -> "Bool"
-  | Character -> "Character"
-  | Unit -> "Unit"
-  | Never -> "Never"
-  | Integer -> "Integer"
-  | Array -> "Array"
-  | Storage -> "Storage"
-  | View -> "View"
-  | Handle -> "Handle"
-  | Shared -> "Shared"
-
-let make_builtin_path builtin = Path.Top { module_; name = show_builtin builtin }
-
-let find_builtin = function
-  | Path.Top { module_ = path_module; name } when path_module = module_ ->
-      List.find_opt (fun builtin -> show_builtin builtin = name) builtins
-  | _ -> None
-
-let convert_libc_scalar : Libc.scalar -> builtin = function
+let convert_libc_scalar : Libc.scalar -> Language.Builtin_type.t = function
   | UInt8 -> UInt8
   | Int32 -> Int32
   | UInt32 -> UInt32
@@ -152,7 +75,7 @@ type buffer =
   | Array_model
   | View_address
 
-type lend = Storage_at | Storage_at_mut | View_at | View_at_mut | Array_at_mut
+type lend = Storage_at | View_at
 
 type runtime =
   | Crash
@@ -250,7 +173,7 @@ let list_buffer_operations =
     View_address;
   ]
 
-let list_lend_operations = [ Storage_at; Storage_at_mut; View_at; View_at_mut; Array_at_mut ]
+let list_lend_operations = [ Storage_at; View_at ]
 
 let list_runtime_operations =
   [
@@ -350,12 +273,7 @@ let show_buffer : buffer -> string = function
   | Array_model -> "array_model"
   | View_address -> "view_address"
 
-let show_lend : lend -> string = function
-  | Storage_at -> "storage_at"
-  | Storage_at_mut -> "storage_at_mut"
-  | View_at -> "view_at"
-  | View_at_mut -> "view_at_mut"
-  | Array_at_mut -> "array_at_mut"
+let show_lend : lend -> string = function Storage_at -> "storage_at" | View_at -> "view_at"
 
 let show_runtime : runtime -> string = function
   | Crash -> "crash"
@@ -394,13 +312,16 @@ let show_operation = function
   | Lend operation -> show_lend operation
   | Runtime operation -> show_runtime operation
 
-let make_operation_path operation = Path.Top { module_; name = show_operation operation }
+let make_operation_path operation =
+  Path.Top { module_ = Well_known.intrinsic_module; name = show_operation operation }
 
 let list_uses : operation -> Path.t list = function
   | Runtime (Shared_update | Shared_key) -> [ Well_known.make_path Tasks ]
   | Scalar _ | Buffer _ | Lend _ | Runtime _ -> []
 
-let find_operation = function
-  | Path.Top { module_ = path_module; name } when path_module = module_ ->
-      List.find_opt (fun operation -> show_operation operation = name) operations
-  | _ -> None
+let operations_by_path =
+  Path.Map.of_seq
+    (List.to_seq
+       (List.map (fun operation -> (make_operation_path operation, operation)) operations))
+
+let find_operation path = Path.Map.find_opt path operations_by_path

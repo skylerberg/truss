@@ -4,10 +4,15 @@ module Place_table = Hashtbl.Make (Structural_key.Make (struct
   type t = path
 end))
 
+let rec take_selected_projections : Mir.projection list -> Mir.projection list = function
+  | ((Field _ | Variant_field _) as projection) :: rest ->
+      projection :: take_selected_projections rest
+  | (Element _ | Range _) :: _ | [] -> []
+
 let find_place_path (place : Mir.place) =
   match place.root with
   | Constant _ | Literal _ -> None
-  | Local local -> Some { local; projections = place.projections }
+  | Local local -> Some { local; projections = take_selected_projections place.projections }
 
 let rec is_prefix prefix projections =
   match (prefix, projections) with
@@ -25,17 +30,30 @@ type use = {
   origin : Core.origin;
   moves : bool;
   operand : Mir.operand option;
-  passed : Types.mode option;
+  passed : Language.Mode.t option;
 }
 
-let list_operand_uses ?passed ~is_moving ~by_value (operand : Mir.operand) =
+let rec list_operand_uses ?passed ~is_moving ~by_value (operand : Mir.operand) =
   match operand with
   | Use { place; type_; origin; _ } | Take { place; type_; origin } ->
-      [ { place; origin; moves = by_value && is_moving type_; operand = Some operand; passed } ]
+      { place; origin; moves = by_value && is_moving type_; operand = Some operand; passed }
+      :: list_index_uses ~is_moving place
   | Borrow { place; type_; origin; _ } ->
       let moves = by_value && Option.is_some passed && is_moving type_ in
-      [ { place; origin; moves; operand = Some operand; passed } ]
+      { place; origin; moves; operand = Some operand; passed } :: list_index_uses ~is_moving place
   | Immediate _ -> []
+
+and list_index_uses ~is_moving (place : Mir.place) =
+  List.concat_map
+    (fun (projection : Mir.projection) ->
+      match projection with
+      | Element { index; _ } -> list_operand_uses ~is_moving ~by_value:false index
+      | Range { start; stop; _ } ->
+          List.concat_map
+            (list_operand_uses ~is_moving ~by_value:false)
+            (start :: Option.to_list stop)
+      | Field _ | Variant_field _ -> [])
+    place.projections
 
 let read ~origin place = { place; origin; moves = false; operand = None; passed = None }
 
@@ -67,9 +85,12 @@ let list_call_uses ~is_moving (call : Mir.call) =
 let list_uses ~is_moving (statement : Mir.Graph.statement) =
   let origin = statement.origin in
   match statement.kind with
-  | Basic (Assign { value; _ }) -> list_rvalue_uses ~is_moving ~origin value
-  | Basic (Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ }) ->
+  | Basic (Assign { target; value }) ->
+      list_rvalue_uses ~is_moving ~origin value @ list_index_uses ~is_moving target
+  | Basic (Call { destination; call }) ->
       list_call_uses ~is_moving call
+      @ Option.fold ~none:[] ~some:(list_index_uses ~is_moving) destination
+  | Basic (Lend { call; _ } | Template { call; _ }) -> list_call_uses ~is_moving call
   | Basic (Assert operand | Echo operand) -> list_operand_uses ~is_moving ~by_value:false operand
   | Provide_start { provided; _ } ->
       List.concat_map
@@ -110,16 +131,21 @@ let list_terminator_uses ~is_moving ~owns (basic : Mir.Graph.basic_block) =
       []
 
 let list_moved uses =
-  List.filter_map (fun use -> if use.moves then Some (use.place, use.origin) else None) uses
+  List.filter_map
+    (fun use ->
+      if use.moves && not (Mir.is_in_sequence use.place) then Some (use.place, use.origin) else None)
+    uses
 
 let list_moves ~is_moving statement = list_moved (list_uses ~is_moving statement)
 
 let list_inits (statement : Mir.Graph.statement) : Mir.place list =
+  List.filter (fun place -> not (Mir.is_in_sequence place))
+  @@
   match statement.kind with
   | Basic (Assign { target; _ }) -> [ target ]
   | Basic (Call { destination; _ }) -> Option.to_list destination
   | Basic (Lend { part; _ }) -> [ { root = Local part; projections = [] } ]
-  | Basic (Slice { destination; _ } | Template { destination; _ }) -> [ destination ]
+  | Basic (Template { destination; _ }) -> [ destination ]
   | Basic
       ( Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _
       | Proof _ )
@@ -328,7 +354,7 @@ let make_owner_test ?(find_passed = fun _ -> None) (body : Mir.Graph.body) =
     (not (List.mem local body.captures))
     &&
     match (find_passed local, body.locals.(local).kind) with
-    | Some mode, _ -> mode = Types.Own
+    | Some mode, _ -> mode = Language.Mode.Own
     | None, (Temporary | Source { mode = Own; _ }) -> true
     | None, (Source { mode = Read | Mut; _ } | Lent _) -> false
   in
@@ -338,7 +364,7 @@ let make_owner_test ?(find_passed = fun _ -> None) (body : Mir.Graph.body) =
     && (not (List.mem local body.captures))
     &&
     match (find_passed local, body.locals.(local).kind) with
-    | Some mode, _ -> mode = Types.Mut
+    | Some mode, _ -> mode = Language.Mode.Mut
     | None, (Source { mode = Mut; _ } | Lent Mut) -> true
     | None, (Source { mode = Read | Own; _ } | Lent (Read | Own) | Temporary) -> false
   in

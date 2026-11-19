@@ -68,7 +68,7 @@ let lookup_local_place state local : Lowered.place =
   | Some place -> place
   | None -> locate_local state local
 
-let convert_comparison : Core.comparison -> Lowered.comparison = function
+let convert_comparison : Language.Comparison.t -> Lowered.comparison = function
   | Equal -> Equal
   | Not_equal -> Not_equal
   | Less -> Less
@@ -84,7 +84,101 @@ let split_arguments state type_arguments =
   ( List.filter_map (function Ground.Type ty -> Some ty | _ -> None) ground_arguments,
     List.filter_map (function Ground.Value value -> Some value | _ -> None) ground_arguments )
 
-let lower_place state (written : Mir.place) : Lowered.place =
+let fail_out_of_bounds state ~origin condition message =
+  let failed = Emit_c.Ir_builder.allocate_block state.Lowering.builder
+  and after = Emit_c.Ir_builder.allocate_block state.builder in
+  Emit_c.Ir_builder.branch state.builder condition ~yes:failed ~no:after;
+  Emit_c.Ir_builder.start state.builder failed;
+  Emit_c.Ir_builder.finish state.builder
+    (Fail
+       {
+         failure = Obligation;
+         message = Constant (Bytes message);
+         length = Lowered.make_uint64_constant (String.length message);
+         site = locate_site state origin;
+         reported = find_reported_site state;
+         trace = None;
+       });
+  Emit_c.Ir_builder.start state.builder after
+
+type sequence =
+  | Buffer of { buffer : Lowered.place; element : Ground.ty }
+  | Inline_array of { array : Lowered.place; element : Ground.ty; count : Z.t; is_empty : bool }
+
+let find_sequence state (place : Lowered.place) (sequence : Types.ty) =
+  match Lowering.ground state sequence with
+  | Named { path; arguments = [ Type element; Value count ] } as ty
+    when Well_known.find_builtin_type path = Some Array ->
+      Inline_array
+        {
+          array = place;
+          element;
+          count;
+          is_empty = Memory_layout.has_zero_size state.context.env ty;
+        }
+  | Named { path; arguments = Type element :: _ } as ty when Well_known.is_buffer_sequence path -> (
+      match (Memory_layout.of_type state.context.env ty).form with
+      | Struct [ field ] -> Buffer { buffer = Lowered.project place (Field field.name); element }
+      | _ ->
+          Definitions.raise_bug "the sequence `%s` holds more than one built-in buffer"
+            (Ground.to_string ty))
+  | ty ->
+      Definitions.raise_bug "an element or a range of `%s`, which is not a sequence"
+        (Ground.to_string ty)
+
+let lower_element state place index ~sequence ~origin =
+  match find_sequence state place sequence with
+  | Buffer { buffer; _ } ->
+      fail_out_of_bounds state ~origin
+        (Test (Greater_equal, index, Copy (Storage.project_length buffer)))
+        "index out of bounds";
+      Storage.index_element buffer index
+  | Inline_array { array; count; is_empty; _ } ->
+      fail_out_of_bounds state ~origin
+        (Test (Greater_equal, index, Lowered.make_uint64_constant (Z.to_int count)))
+        "index out of bounds";
+      if is_empty then array else Lowered.project array (Index index)
+
+let lower_range state place start stop ~sequence ~origin =
+  let first_element, length, element =
+    match find_sequence state place sequence with
+    | Buffer { buffer; element } ->
+        ( (if Memory_layout.has_zero_size state.context.env element then
+             Lowered.Constant Storage.empty_buffer
+           else Address { place = Storage.index_element buffer start; writable = false }),
+          Lowered.Copy (Storage.project_length buffer),
+          element )
+    | Inline_array { array; element; count; is_empty } ->
+        ( (if is_empty then Lowered.Constant Storage.empty_buffer
+           else Address { place = Lowered.project array (Index start); writable = false }),
+          Lowered.make_uint64_constant (Z.to_int count),
+          element )
+  in
+  Option.iter
+    (fun stop ->
+      fail_out_of_bounds state ~origin (Test (Greater, stop, length)) "slice out of bounds")
+    stop;
+  let stop = Option.value stop ~default:length in
+  fail_out_of_bounds state ~origin (Test (Greater, start, stop)) "slice out of bounds";
+  let view_type = Storage.make_view_type element in
+  let view = Lowering.allocate_temporary state view_type in
+  let count = Lowering.allocate_temporary state (Ground.make_builtin UInt64) in
+  Emit_c.Ir_builder.emit state.builder (Assign (count, Binary (Subtract, stop, start)));
+  Emit_c.Ir_builder.emit state.builder
+    (Assign (view, Storage.build_view view_type ~buffer:first_element ~length:(Copy count)));
+  let slice_type : Ground.ty =
+    Named { path = Well_known.make_path Slice; arguments = [ Type element ] }
+  in
+  let slice = Lowering.allocate_temporary state slice_type in
+  (match (Memory_layout.of_type state.context.env slice_type).form with
+  | Struct [ field ] ->
+      Emit_c.Ir_builder.emit state.builder
+        (Assign
+           (slice, Build { ty = slice_type; variant = None; fields = [ (field.name, Copy view) ] }))
+  | _ -> Definitions.raise_bug "a `Slice` that is not one view");
+  slice
+
+let rec lower_place state (written : Mir.place) : Lowered.place =
   let root =
     match written.root with
     | Local local -> lookup_local_place state local
@@ -96,8 +190,21 @@ let lower_place state (written : Mir.place) : Lowered.place =
     (fun place (projection : Mir.projection) ->
       match projection with
       | Field field -> Lowered.project place (Field field)
-      | Variant_field { variant; field } -> Lowered.project place (Variant_field { variant; field }))
+      | Variant_field { variant; field } -> Lowered.project place (Variant_field { variant; field })
+      | Element { index; sequence; origin } ->
+          lower_element state place (lower_index state index) ~sequence ~origin
+      | Range { start; stop; sequence; origin } ->
+          lower_range state place (lower_index state start)
+            (Option.map (lower_index state) stop)
+            ~sequence ~origin)
     root written.projections
+
+and lower_index state (index : Mir.operand) : Lowered.operand =
+  match index with
+  | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> Copy (lower_place state place)
+  | Immediate { value = Integer number; _ } -> Lowered.make_uint64_constant (Z.to_int number)
+  | Immediate { value = Unit | Float _ | Boolean _; _ } ->
+      Definitions.raise_bug "an index that is not an integer"
 
 let list_variants (state : Lowering.state) (ty : Ground.ty) :
     (string option * (string * Ground.ty) list) list =
@@ -122,13 +229,10 @@ let list_variants (state : Lowering.state) (ty : Ground.ty) :
       Definitions.raise_bug "the fields of %s, which has none" (Ground.to_string ty)
 
 let make_body_frame (state : Lowering.state) ?owner ?returns_into ?lending
-    ?(passed : Ground.mode list option) ~lambdas (body : Mir.Graph.body) : Lowering.mir_frame =
-  let find_passed_mode local : Types.mode option =
+    ?(passed : Language.Mode.t list option) ~lambdas (body : Mir.Graph.body) : Lowering.mir_frame =
+  let find_passed_mode local : Language.Mode.t option =
     Option.bind passed (fun modes ->
-        Option.map
-          (fun position : Types.mode ->
-            match List.nth modes position with Ground.Read -> Read | Mut -> Mut | Own -> Own)
-          (List.find_index (Int.equal local) body.parameters))
+        Option.map (List.nth modes) (List.find_index (Int.equal local) body.parameters))
   in
   let needs_drop (path : Moves.path) =
     let rec find_path_type ty = function

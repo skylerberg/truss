@@ -236,8 +236,10 @@ let show_truss_value context term =
         Option.map
           (fun printed -> parenthesize level 1 (String.concat " - " printed))
           (collect_printed [ show_arithmetic 1 left; show_arithmetic 2 right ])
+    | Logic.Operation (Negate, [ Logic.Operation (Negate, [ inner ]) ]) ->
+        show_arithmetic level inner
     | Logic.Operation (Negate, [ inner ]) ->
-        Option.map (fun printed -> parenthesize level 3 ("-" ^ printed)) (show_arithmetic 3 inner)
+        Option.map (fun printed -> parenthesize level 3 ("-" ^ printed)) (show_arithmetic 4 inner)
     | Logic.Integer value when Z.sign value < 0 && level > 0 -> Some ("(" ^ Z.to_string value ^ ")")
     | Logic.Apply (Logic.Symbol.Field { field; variant = None; _ }, [ receiver ]) ->
         Option.map (fun receiver -> receiver ^ "." ^ field) (show_arithmetic 4 receiver)
@@ -500,7 +502,6 @@ let make_constructor_symbol (ty : Types.ty) variant =
 
 let make_selector_symbol ty variant field = Logic.Symbol.Field { type_ = ty; variant; field }
 let is_standard_equal = Well_known.is Equal
-let equal_trait = Well_known.make_path Equal
 
 let find_visible_type (context : State.context) (ty : Types.ty) =
   match ty with
@@ -685,26 +686,8 @@ let merge_known_on_paths (paths : (Logic.term * State.frame) list) =
       each
   in
   let aliases = merge_known (fun frame -> frame.aliases) ~is_same:( = ) ~on_differing:guard_each in
-  let slices =
-    merge_known
-      (fun frame -> frame.slices)
-      ~is_same:( = )
-      ~on_differing:(fun each ->
-        if
-          List.exists
-            (function _, (None | Some State.Unknown_slice) -> true | _, Some (Slices _) -> false)
-            each
-        then Unknown_slice
-        else
-          Slices
-            (List.concat_map
-               (function
-                 | condition, Some (State.Slices slices) -> guard condition slices
-                 | _, (Some Unknown_slice | None) -> [])
-               each))
-  in
   let lends = merge_known (fun frame -> frame.lends) ~is_same:( == ) ~on_differing:guard_each in
-  (aliases, slices, lends)
+  (aliases, lends)
 
 let name_path_condition context (frame : State.frame) condition =
   match condition with
@@ -719,10 +702,8 @@ let merge context ?value_type ~condition
     (paths : (Logic.term * State.frame * Logic.term option) list) =
   let first = match paths with (_, first, _) :: _ -> first | [] -> raise_bug "no paths meet" in
   let is_expression = not first.makes_obligations in
-  let aliases, slices, lends =
-    merge_known_on_paths (List.map (fun (on, frame, _) -> (on, frame)) paths)
-  in
-  let merged = { first with condition; aliases; slices; lends } in
+  let aliases, lends = merge_known_on_paths (List.map (fun (on, frame, _) -> (on, frame)) paths) in
+  let merged = { first with condition; aliases; lends } in
   let choose values =
     match List.rev values with
     | (_, _, last) :: earlier ->

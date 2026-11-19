@@ -29,7 +29,7 @@ let () =
       let packages =
         Support.setup [ ("app::main", Fixtures.Interface.method_head_with_generics) ]
       in
-      let path : Path.t = Method { owner = app "Box"; name = "get"; receiver = Read } in
+      let path : Path.t = Method { owner = app "Box"; name = "get"; receiver = Instance Read } in
       match Interface.Definition.find_declared_signature (make_interface packages) path with
       | Some { receiver = Some (Read, self); _ } ->
           if Types.show self <> "Box[Value]" then Harness.fail "self: %s" (Types.show self)
@@ -480,7 +480,7 @@ let () =
         feeds
     with
     | Some (From_impl { impl; _ }) ->
-        (interface, Path.Method { owner = impl; name = "feed"; receiver = Read })
+        (interface, Path.Method { owner = impl; name = "feed"; receiver = Instance Read })
     | _ -> failwith "no impl"
   in
   let show_bounds bounds = String.concat " + " (List.map Types.show_trait bounds) in
@@ -763,7 +763,7 @@ let () =
     let owner = read_impl packages type_ wanted in
     match
       Interface.Impls.read_signature (make_interface packages)
-        (Method { owner; name; receiver = Read })
+        (Method { owner; name; receiver = Instance Read })
     with
     | Some signature -> signature
     | None -> failwith "no signature"
@@ -966,9 +966,69 @@ let () =
           if not (List.exists (Path.equal path) declared) then
             Harness.fail "the standard library has no `%s`" (Path.show path))
         Well_known.For_testing.all);
+  Harness.test "every member the compiler names is in the standard library" (fun () ->
+      let interface = make_interface (Support.setup []) in
+      let find_shape path =
+        Option.map
+          (fun (type_interface : Types.type_interface) -> type_interface.shape)
+          (Interface.Definition.find_type_interface interface path)
+      in
+      let find_variant_fields variant =
+        match find_shape (Well_known.make_variant_type_path variant) with
+        | Some (Sum variants) ->
+            Option.map
+              (fun (declared : Types.variant) -> Option.value declared.fields ~default:[])
+              (List.find_opt
+                 (fun (declared : Types.variant) ->
+                   declared.variant_name = Well_known.show_variant variant)
+                 variants)
+        | _ -> None
+      in
+      List.iter
+        (fun method_ ->
+          let path = Well_known.make_method_path method_ in
+          if Option.is_none (Interface.Definition.find_declared_signature interface path) then
+            Harness.fail "the standard library has no `%s`" (Path.show path))
+        Well_known.For_testing.all_methods;
+      List.iter
+        (fun (associated, owner) ->
+          let trait = Well_known.make_path owner and name = Well_known.show_associated associated in
+          let is_declared (declared : Types.associated_type) = declared.associated_name = name in
+          match Interface.Definition.find_trait_interface interface trait with
+          | Some declared when List.exists is_declared declared.associated_types -> ()
+          | _ -> Harness.fail "`%s` has no associated type `%s`" (Path.show trait) name)
+        Well_known.For_testing.all_associated_types;
+      List.iter
+        (fun variant ->
+          if Option.is_none (find_variant_fields variant) then
+            Harness.fail "`%s` has no variant `%s`"
+              (Path.show (Well_known.make_variant_type_path variant))
+              (Well_known.show_variant variant))
+        Well_known.For_testing.all_variants;
+      List.iter
+        (fun (field, (owner : Well_known.For_testing.field_owner)) ->
+          let name = Well_known.show_field field in
+          let fields =
+            match owner with
+            | Record record -> (
+                match find_shape (Well_known.make_path record) with
+                | Some (Record fields) -> Some fields
+                | _ -> None)
+            | Variant variant -> find_variant_fields variant
+          in
+          let is_declared (declared : Types.field) = declared.field_name = name in
+          if not (Option.fold ~none:false ~some:(List.exists is_declared) fields) then
+            Harness.fail "the standard library has no field `%s`" name)
+        Well_known.For_testing.all_fields);
   Harness.test "a well-known definition is found by its path" (fun () ->
       List.iter
         (fun known ->
           if Well_known.of_path (Well_known.make_path known) <> Some known then
             Harness.fail "`%s` is not found by its path" (Path.show (Well_known.make_path known)))
-        Well_known.For_testing.all)
+        Well_known.For_testing.all;
+      List.iter
+        (fun method_ ->
+          if Well_known.find_method (Well_known.make_method_path method_) <> Some method_ then
+            Harness.fail "`%s` is not found by its path"
+              (Path.show (Well_known.make_method_path method_)))
+        Well_known.For_testing.all_methods)

@@ -100,7 +100,7 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
 
 let is_in_the_logic (function_type : Types.function_type) =
   function_type.uses = Types.no_capabilities
-  && List.for_all (fun (mode, _) -> mode <> Types.Mut) function_type.inputs
+  && List.for_all (fun (mode, _) -> mode <> Language.Mode.Mut) function_type.inputs
 
 let make_parameter_symbols context (frame : State.frame) (function_type : Types.function_type) =
   let depth = List.length frame.bound in
@@ -376,7 +376,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         if is_counted && Option.is_none (Costs.find_stated_operand function_type.costs metric) then
           Some (metric, counter)
         else None)
-      Metric.all
+      Language.Metric.all
   in
   let saved_counters = context.counters in
   context.counters <-
@@ -434,7 +434,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
             List.iter2
               (fun parameter (mode, input) ->
                 match (mode, written.code.locals.(parameter).kind) with
-                | Types.Mut, Source { local; _ } -> (
+                | Language.Mode.Mut, Source { local; _ } -> (
                     match Locals.find_opt (Core_local local) exit_.locals with
                     | Some term ->
                         check_valid context exit_ location
@@ -478,7 +478,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
           @ List.map (fun (exit_ : State.frame) -> exit_.condition) exits
         in
         List.filter_map
-          (fun ((metric : Metric.t), counter) ->
+          (fun ((metric : Language.Metric.t), counter) ->
             let spent = List.map (fun exit_ -> compute_spent exit_ counter) exits in
             let most =
               match spent with

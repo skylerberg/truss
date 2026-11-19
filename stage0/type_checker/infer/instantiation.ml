@@ -65,8 +65,26 @@ let require_bounds state (span : Source.Definition_span.t) ?of_type generics sub
                 | None -> "This")
                 (Types.show argument) (Types.show_trait bound)
             in
+            let is_slice =
+              Types.is_well_known Slice argument || Types.is_well_known String_slice argument
+            in
+            let has_mut_self_method =
+              match
+                Interface.Definition.find_trait_interface state.lookups.interface bound.trait
+              with
+              | Some trait ->
+                  List.exists
+                    (fun (method_ : Types.trait_method) -> method_.method_receiver = Instance Mut)
+                    trait.methods
+              | None -> false
+            in
             State.report state Unsatisfied_bound span
               (match other with
+              | None when is_slice && has_mut_self_method ->
+                  needs
+                  ^ ", which does not hold: a slice implements no trait with a `mut self` method. \
+                     Generic code could call the method on a copy of the slice, and a copy views \
+                     the same elements."
               | None -> needs ^ ", which does not hold."
               | Some (name, associated_type) ->
                   Printf.sprintf "%s, and its `%s` is `%s`." needs name
@@ -132,7 +150,7 @@ let rec find_static state (value : Syntax.expression) : static_ option =
 
 and check_named_type state (value : Syntax.expression) path type_arguments =
   let make_type arguments =
-    match Intrinsic.find_builtin path with
+    match Well_known.find_builtin_type path with
     | Some Never -> Types.Never
     | Some Integer -> Types.Integer
     | _ -> Types.Named { path; arguments }

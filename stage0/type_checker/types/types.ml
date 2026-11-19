@@ -1,4 +1,3 @@
-type mode = Read | Mut | Own
 type parameter = { owner : Path.t; name : string }
 type literal_kind = Integer_literal | Float_literal
 
@@ -25,13 +24,13 @@ and trait_reference = {
 }
 
 and function_type = {
-  inputs : (mode * ty) list;
+  inputs : (Language.Mode.t * ty) list;
   output : ty;
   uses : capability_set;
   costs : cost list;
 }
 
-and result = Returns of ty | Lends of mode * ty
+and result = Returns of ty | Lends of Language.Mode.t * ty
 
 and capability =
   | Capability of Path.t
@@ -42,7 +41,11 @@ and capability =
 
 and capability_set = capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
-and resource = Metric of Metric.t | Calls of { capability : Path.t; method_ : string option }
+
+and resource =
+  | Metric of Language.Metric.t
+  | Calls of { capability : Path.t; method_ : string option }
+
 and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
 let panic : capability = Capability (Well_known.make_path Panic)
@@ -87,7 +90,7 @@ let replace_capabilities find_replacement (set : capability_set) =
        set)
 
 let make_builtin ?(arguments = []) builtin =
-  Named { path = Intrinsic.make_builtin_path builtin; arguments }
+  Named { path = Well_known.make_builtin_type_path builtin; arguments }
 
 let unit = make_builtin Unit
 let bool = make_builtin Bool
@@ -98,9 +101,9 @@ let make_named path arguments =
   Named { path; arguments = List.map (fun type_ -> Type type_) arguments }
 
 let find_builtin = function
-  | Named { path; arguments = [] } -> Intrinsic.find_builtin path
+  | Named { path; arguments = [] } -> Well_known.find_builtin_type path
   | Named { path; _ } -> (
-      match Intrinsic.find_builtin path with
+      match Well_known.find_builtin_type path with
       | Some (Array | Storage | View | Shared) as builtin -> builtin
       | _ -> None)
   | _ -> None
@@ -117,8 +120,8 @@ let find_view = function
       Some (Named { path = Well_known.make_path Slice; arguments = [ element ] })
   | _ -> None
 
-let signed_integer_types : Intrinsic.builtin list = [ Int8; Int16; Int32; Int64 ]
-let unsigned_integer_types : Intrinsic.builtin list = [ UInt8; UInt16; UInt32; UInt64 ]
+let signed_integer_types : Language.Builtin_type.t list = [ Int8; Int16; Int32; Int64 ]
+let unsigned_integer_types : Language.Builtin_type.t list = [ UInt8; UInt16; UInt32; UInt64 ]
 let integer_types = signed_integer_types @ unsigned_integer_types
 
 let find_integer_implementors trait =
@@ -136,7 +139,7 @@ let find_bound_integer_implementors bounds =
       | None, these | these, None -> these)
     None bounds
 
-let float_types : Intrinsic.builtin list = [ Float32; Float64 ]
+let float_types : Language.Builtin_type.t list = [ Float32; Float64 ]
 
 let is_integer_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin integer_types | None -> false
@@ -162,6 +165,10 @@ let find_integer_range type_ =
 
 let is_signed type_ =
   match find_integer_bits type_ with Some (_, signed) -> signed | None -> false
+
+let list_literal_types (kind : literal_kind) =
+  List.map make_builtin
+    (match kind with Integer_literal -> integer_types | Float_literal -> float_types)
 
 let is_float_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin float_types | None -> false
@@ -266,7 +273,6 @@ let substitute_substitution outer =
     ~capabilities:(substitute_capabilities outer)
 
 let extract_result_type = function Returns type_ | Lends (_, type_) -> type_
-let show_mode = function Read -> "" | Mut -> "mut " | Own -> "own "
 
 let rec map ?(map_capabilities = Fun.id) transform type_ =
   match transform type_ with
@@ -385,7 +391,7 @@ let costs_imply ~(provided : cost list) ~(required : cost list) =
     required
 
 let show_resource = function
-  | Metric metric -> Metric.show metric
+  | Metric metric -> Language.Metric.show metric
   | Calls { capability; method_ } ->
       Printf.sprintf "calls(%s%s)" (Path.show_name capability)
         (match method_ with Some method_ -> "." ^ method_ | None -> "")
@@ -434,12 +440,14 @@ and show_trait trait =
 and show_output = function
   | Returns type_ when type_ = unit -> ""
   | Returns type_ -> " -> " ^ show type_
-  | Lends (written, type_) -> " lends " ^ show_mode written ^ show type_
+  | Lends (written, type_) -> " lends " ^ Language.Mode.show_prefix written ^ show type_
 
 and show_function (function_type : function_type) =
   let inputs =
     String.concat ", "
-      (List.map (fun (written, type_) -> show_mode written ^ show type_) function_type.inputs)
+      (List.map
+         (fun (written, type_) -> Language.Mode.show_prefix written ^ show type_)
+         function_type.inputs)
   in
   let base = Printf.sprintf "fn(%s)%s" inputs (show_output (Returns function_type.output)) in
   let uses = List.map show_capability function_type.uses in
@@ -517,7 +525,7 @@ let make_capability_substitution (parameters : parameter list) arguments : subst
         parameters;
   }
 
-type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
+type parameter_info = { name : string; mode : Language.Mode.t; type_ : ty; has_default : bool }
 
 let list_capture_free_parameters parameters =
   List.filter_map
@@ -535,7 +543,7 @@ let mentions_specification_only_type parameters output =
 type signature = {
   generics : generic list;
   capability_parameters : parameter list;
-  receiver : (Path.receiver * ty) option;
+  receiver : (Language.Mode.t * ty) option;
   parameters : parameter_info list;
   output : result;
   uses : capability_set;
@@ -622,20 +630,13 @@ let add_impl_generics_and_uses ~impl_generics ~impl_uses (signature : signature)
   }
 
 let make_function_type (signature : signature) =
-  let receiver =
-    match signature.receiver with
-    | Some (Static, _) | None -> []
-    | Some (Read, type_) -> [ (Read, type_) ]
-    | Some (Mut, type_) -> [ (Mut, type_) ]
-    | Some (Own, type_) -> [ (Own, type_) ]
-  in
   match signature.output with
   | Lends _ -> None
   | Returns output ->
       Some
         {
           inputs =
-            receiver
+            Option.to_list signature.receiver
             @ List.map (fun parameter -> (parameter.mode, parameter.type_)) signature.parameters;
           output;
           uses = signature.uses;
@@ -649,7 +650,7 @@ type shape =
   | Record of field list
   | Sum of variant list
   | Todo_type
-  | Builtin_type of Intrinsic.builtin
+  | Builtin_type of Language.Builtin_type.t
 
 type type_interface = {
   type_generics : generic list;

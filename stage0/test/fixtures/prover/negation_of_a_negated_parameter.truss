@@ -1,0 +1,6 @@
+fn negative(value: Int64) -> Int64
+  requires value != Int64.minimum
+{
+  let negated = -value
+  -negated - -1
+}

@@ -25,7 +25,6 @@ val assume_laws :
   Types.ty ->
   unit
 
-val template_trait : Path.t
 val has_method_cost : State.context -> Invocation.callee -> Path.t -> bool
 
 val check_named_callback :

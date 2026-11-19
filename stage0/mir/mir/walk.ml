@@ -14,8 +14,9 @@ let list_nested_blocks_of_kind (kind : Tree.statement_kind) : Tree.block list =
   | Choose { choice; _ } -> list_choice_blocks choice
   | While { condition; body; failed; _ } ->
       [ condition; body; { statements = failed; value = None } ]
-  | For { lent; body; _ } ->
-      Option.to_list (Option.map (fun (lent : Tree.lent_element) -> lent.count) lent) @ [ body ]
+  | For { elements; body; _ } ->
+      Option.to_list (Option.map (fun (elements : Tree.elements) -> elements.count) elements)
+      @ [ body ]
   | Fork { branches; _ } -> branches
   | Provide { body; _ } -> [ body ]
   | Resume { exits; _ } -> List.map (fun (exit : Tree.early_exit) -> exit.resumed) exits
@@ -29,7 +30,7 @@ let list_nested_blocks_of_kind (kind : Tree.statement_kind) : Tree.block list =
                   (Result | Entry _ | Yielded | Identical _ | Applied _ | Method_cost _ | Map _) );
             _;
           }
-      | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
+      | Call _ | Lend _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
       | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ )
   | Yield _
   | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo) ->
@@ -37,8 +38,20 @@ let list_nested_blocks_of_kind (kind : Tree.statement_kind) : Tree.block list =
 
 let list_nested_blocks (statement : Tree.statement) = list_nested_blocks_of_kind statement.kind
 
-let visit_operand_places visit = function
-  | Tree.Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> visit place
+let rec visit_place visit (place : Tree.place) =
+  visit place;
+  List.iter
+    (fun (projection : Tree.projection) ->
+      match projection with
+      | Element { index; _ } -> visit_operand_places visit index
+      | Range { start; stop; _ } ->
+          visit_operand_places visit start;
+          Option.iter (visit_operand_places visit) stop
+      | Field _ | Variant_field _ -> ())
+    place.projections
+
+and visit_operand_places visit = function
+  | Tree.Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> visit_place visit place
   | Immediate _ -> ()
 
 let visit_target_places visit : Tree.operand Core.target -> unit = function
@@ -51,12 +64,13 @@ let visit_call_places visit (call : Tree.call) =
     (function Tree.Passed { value; _ } -> visit_operand_places visit value | Default -> ())
     call.arguments
 
-let visit_iteration_places visit = function
-  | Tree.Range { start; stop; _ } ->
+let visit_iteration_places visit (iteration : Tree.iteration) =
+  match iteration with
+  | Range { start; stop; _ } ->
       visit_operand_places visit start;
       visit_operand_places visit stop
   | Pull { cursor; next } ->
-      visit cursor;
+      visit_place visit cursor;
       visit_target_places visit next.target
 
 let rec visit_yielded_places visit = function
@@ -112,9 +126,6 @@ and visit_statement_places visit (kind : Tree.statement_kind) =
   | Basic (Assign { value; _ }) -> visit_rvalue_places visit value
   | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ }) ->
       visit_call_places visit call
-  | Basic (Slice { base; call; _ }) ->
-      visit base;
-      visit_call_places visit call
   | Basic (Assert value | Echo value | Loan_start { borrowed = value; _ })
   | Assert_by_bit_vector { condition = value; _ } ->
       visit_operand_places visit value
@@ -143,7 +154,7 @@ let rec visit_block visit (block : Tree.block) =
       | Basic (Proof code) -> visit_code visit code
       | While { loop; _ } | For { loop; _ } -> visit_loop visit loop
       | Basic
-          ( Assign _ | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
+          ( Assign _ | Call _ | Lend _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
           | Loan_start _ | Loan_end _ | Matched _ )
       | Choose _ | Assert_by_bit_vector _ | Fork _ | Provide _ | Resume _ | Yield _ | Jump _ ->
           ());
@@ -174,8 +185,7 @@ let iter_formula = visit_formula
 
 let find_callee (statement : Tree.statement) : Tree.callee option =
   match statement.kind with
-  | Basic (Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ }) ->
-      Some call.callee
+  | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ }) -> Some call.callee
   | For { iteration = Pull { next; _ }; _ } -> Some next
   | Basic
       ( Assign _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
@@ -184,6 +194,12 @@ let find_callee (statement : Tree.statement) : Tree.callee option =
   | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Provide _ | Resume _ | Yield _ | Jump _
     ->
       None
+
+let is_in_sequence (place : Tree.place) =
+  List.exists
+    (fun (projection : Tree.projection) ->
+      match projection with Element _ | Range _ -> true | Field _ | Variant_field _ -> false)
+    place.projections
 
 let extract_operand_type : Tree.operand -> Types.ty = function
   | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Immediate { type_; _ } -> type_

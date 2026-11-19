@@ -396,9 +396,25 @@ let () =
             Harness.fail "no %s for %S" (Diagnostic.Code.name (Parser code)) text;
             []
       in
-      if list_fixes "count :=== 0" Short_declaration <> [] then Harness.fail "offered the `let` fix";
-      if list_fixes "match a {\n  A => 0,e(b) => 1\n}" Match_arm_comma <> [] then
-        Harness.fail "offered the comma fix");
+      if list_fixes "count :=== 0" Short_declaration <> [] then Harness.fail "offered the `let` fix");
+  Harness.test "a comma between arms on one line becomes a line break" (fun () ->
+      List.iter
+        (fun (written, expected) ->
+          let text = "fn example() {\n" ^ written ^ "\n}" in
+          match
+            List.find_opt
+              (fun (diagnostic : Diagnostic.t) -> diagnostic.code = Parser Match_arm_comma)
+              (snd (Parse_support.parse text))
+          with
+          | Some { fixes = [ fix ]; _ } ->
+              let fixed = Diagnostic.apply_edits text fix.edits in
+              if fixed <> "fn example() {\n" ^ expected ^ "\n}" then Harness.fail "fixed %S" fixed;
+              if snd (Parse_support.parse fixed) <> [] then Harness.fail "%S does not parse" fixed
+          | _ -> Harness.fail "no single comma fix for %S" written)
+        [
+          ("match a { A => 1, B => 2 }", "match a { A => 1\nB => 2 }");
+          ("match a {\n  A => 0,B(b) => 1\n}", "match a {\n  A => 0\nB(b) => 1\n}");
+        ]);
   Harness.test "a comma after a match arm" (fun () ->
       Parse_support.expect_body_error "match a {\n  A => 1,\n  B => 2\n}" ~code:Match_arm_comma
         ~at:"," ~fixed:"match a {\n  A => 1\n  B => 2\n}");

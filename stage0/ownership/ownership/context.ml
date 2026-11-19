@@ -8,10 +8,10 @@ type context = {
   spans : Source.Definition_span.t array Lazy.t;
   text : string Lazy.t;
   mode_keywords : (Core.origin, Core.mode_keyword) Hashtbl.t;
-  places_without_keyword : (Core.origin, Types.mode) Hashtbl.t;
+  places_without_keyword : (Core.origin, Language.Mode.t) Hashtbl.t;
   names : string Local_table.t;
   origins : Core.origin Local_table.t;
-  binding_modes : Types.mode Local_table.t;
+  binding_modes : Language.Mode.t Local_table.t;
   literal_views : unit Local_table.t;
   types : Types.ty Local_table.t;
   mutable parameters : Core.local list;
@@ -96,12 +96,12 @@ let report context ?(fixes = []) ?(notes = []) code (at : Source.Definition_span
     context.diagnostics <-
       Diagnostic.make ~fixes ~notes ~code:(Ownership code) at message :: context.diagnostics
 
-let classify_binding_mode context (root : Place.root) : Types.mode =
+let classify_binding_mode context (root : Place.root) : Language.Mode.t =
   match root with
   | Constant _ -> Read
   | Environment | Temporary _ -> Own
   | Local local ->
-      Option.value ~default:Types.Own (Local_table.find_opt context.binding_modes local)
+      Option.value ~default:Language.Mode.Own (Local_table.find_opt context.binding_modes local)
 
 let views_literal context (root : Place.root) =
   match root with

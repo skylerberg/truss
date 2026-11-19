@@ -1,10 +1,11 @@
-type local = { name : string; type_ : Types.ty; is_var : bool; mode : Types.mode }
+type binding = Parameter | Var | Let
+type local = { name : string; type_ : Types.ty; binding : binding; mode : Language.Mode.t }
 
 type env = {
   output : Types.result option;
   specification : bool;
   self : Types.ty option;
-  self_mode : Types.mode;
+  self_mode : Language.Mode.t;
   loop_element : Types.ty option;
   compile_time : bool;
   in_quantifier : bool;
@@ -75,10 +76,10 @@ type state = {
   mutable law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
   mutable locals_read : Syntax.id list;
-  mutable keyword_modes : (Syntax.id * Types.mode) list;
-  mutable places_without_keyword : (Syntax.id * Types.mode) list;
+  mutable keyword_modes : (Syntax.id * Language.Mode.t) list;
+  mutable places_without_keyword : (Syntax.id * Language.Mode.t) list;
   mutable mode_keywords : Core.mode_keyword list;
-  yielded : (Syntax.id, Types.mode) Hashtbl.t;
+  yielded : (Syntax.id, Language.Mode.t) Hashtbl.t;
   lent_tails : (Syntax.id, unit) Hashtbl.t;
   mutable lambdas : Source.Definition_span.t list;
   mutable unsolved : Diagnostic.reported option;
@@ -162,10 +163,15 @@ val decide_property :
 
 val is_plain : state -> Types.ty -> bool
 val is_view : state -> Types.ty -> bool
-val decide_binding_mode : state -> Types.mode -> Types.ty -> Types.mode
+val decide_binding_mode : state -> Language.Mode.t -> Types.ty -> Language.Mode.t
 
 val resolve_associated_type :
-  state -> Types.ty -> Types.trait_reference -> string -> at:Source.Definition_span.t -> Types.ty
+  state ->
+  Types.ty ->
+  Types.trait_reference ->
+  Well_known.associated ->
+  at:Source.Definition_span.t ->
+  Types.ty
 
 val make_callee : state -> Core.operand Core.target -> Core.callee
 
@@ -173,7 +179,7 @@ val make_call :
   state ->
   callee:Core.operand Core.target ->
   arguments:Core.argument list ->
-  lends:Types.mode option ->
+  lends:Language.Mode.t option ->
   Core.call
 
 val convert_evidence : Interface.Impls.evidence -> Tables.evidence
@@ -183,10 +189,10 @@ val run_in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) 
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
 val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
-val declare : state -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> unit
+val declare : state -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
 val declare_compiled :
-  state -> env -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> unit
+  state -> env -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
 val find_target : state -> Syntax.name -> Resolve.target option
 val decide_default_literal : state -> at:Source.Definition_span.t -> Types.ty -> Types.ty
@@ -214,8 +220,9 @@ val find_keyword_operation : state -> Syntax.expression -> (Syntax.id * Syntax.e
 val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val find_local_type : state -> Syntax.name -> Types.ty option
 val check_cost : state -> Syntax.cost -> unit
+val find_sequence_element : Types.ty -> Types.ty option
 
-val make_slice :
+val make_range :
   state ->
   origin:Core.origin ->
   Core.place ->
@@ -229,7 +236,7 @@ val find_view_as : state -> owned:Types.ty -> view:Types.ty -> Types.ty option
 val convert :
   state ->
   env ->
-  ?argument:Types.mode ->
+  ?argument:Language.Mode.t ->
   ?takes_view_as_owner:bool ->
   ?expression:Core.origin ->
   Source.Definition_span.t ->

@@ -16,7 +16,7 @@ val add_source : t -> Core.local -> Tree.local -> unit
 val obtain_free_source : t -> Core.local -> type_:Types.ty -> origin:Core.origin -> Tree.local
 
 val bind_source :
-  ?is_var:bool -> t -> Core.local -> Types.mode -> Types.ty -> Core.origin -> Tree.local
+  ?is_var:bool -> t -> Core.local -> Language.Mode.t -> Types.ty -> Core.origin -> Tree.local
 
 val register_binding : t -> Tree.local -> unit
 val note_bound_to_place : t -> Tree.local -> unit
@@ -39,7 +39,7 @@ type suspended
 val suspend_block : t -> suspended
 val resume_block : t -> suspended -> Tree.statement list
 val emitted : t -> Tree.statement list
-val start_loan : t -> Tree.operand -> Types.mode -> Tree.loan_duration -> Core.origin -> int
+val start_loan : t -> Tree.operand -> Language.Mode.t -> Tree.loan_duration -> Core.origin -> int
 val end_loans : t -> int list -> Core.origin -> unit
 
 type scope

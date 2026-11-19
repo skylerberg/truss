@@ -1,6 +1,6 @@
 val increment : Cursor.t -> target:Syntax.expression -> operator:Token.t -> unit
 val report_double_negation : Cursor.t -> operator:Token.t -> operand:Syntax.expression -> unit
-val match_arm_comma : Cursor.t -> comma:Token.t -> unit
+val match_arm_comma : Cursor.t -> comma:Token.t -> next:Token.t -> unit
 
 val report_conditional :
   Cursor.t ->

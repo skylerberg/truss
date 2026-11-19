@@ -20,7 +20,7 @@ let plain =
 let enter_specification context = { context with is_specification = true }
 let enter_proof context = { context with is_specification = true; allows_assert = true }
 let may_be_specification context = context.is_specification || context.is_function_body
-let show_quantifier = function Syntax.Forall -> "forall" | Exists -> "exists"
+let show_quantifier = function Language.Quantifier.Forall -> "forall" | Exists -> "exists"
 
 let report cursor code id message =
   Cursor.report cursor code (Cursor.read_file_span cursor id) message
@@ -139,9 +139,9 @@ and check_statement cursor context (statement : Syntax.statement) =
       check_loop_clauses cursor context clauses;
       let body_context =
         match mode with
-        | Parallel_loop -> { context with enclosing_loop = In_parallel_for; is_in_parallel = true }
+        | Parallel -> { context with enclosing_loop = In_parallel_for; is_in_parallel = true }
         | Sequential -> { context with enclosing_loop = In_loop }
-        | Concurrent_loop -> { context with enclosing_loop = In_loop }
+        | Concurrent -> { context with enclosing_loop = In_loop }
       in
       check_block cursor body_context body
   | While { condition; clauses; body } ->

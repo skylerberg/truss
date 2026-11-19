@@ -1,7 +1,7 @@
 let zero = Logic.Integer Z.zero
 
 type target = Through of Logic.term | Capability of Path.t | Capability_method of Path.t * string
-type resource = Metric of Metric.t | Calls of target
+type resource = Metric of Language.Metric.t | Calls of target
 type counting = Units | At_most | Exactly
 type counter = { resource : resource; counting : counting; amortized : bool }
 
@@ -9,14 +9,14 @@ let least_amount = function
   | Metric Time -> Logic.Integer Z.one
   | Metric (Allocations | Allocated_bytes) | Calls _ -> zero
 
-let make_operand_counter (metric : Metric.t) =
+let make_operand_counter (metric : Language.Metric.t) =
   {
     resource = Metric metric;
     counting = (match metric with Time -> Units | Allocations | Allocated_bytes -> At_most);
     amortized = false;
   }
 
-let list_stated_bounds (costs : Types.cost list) (metric : Metric.t) =
+let list_stated_bounds (costs : Types.cost list) (metric : Language.Metric.t) =
   List.filter_map
     (fun (cost : Types.cost) ->
       if cost.resource = Types.Metric metric && not cost.amortized then Some cost.bound else None)

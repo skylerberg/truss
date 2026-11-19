@@ -1,0 +1,9 @@
+fn waits(value: Int64) -> Int64
+  uses Tasks
+  cost allocations == 0
+{
+  concurrent {
+    let _ = value
+  }
+  value
+}

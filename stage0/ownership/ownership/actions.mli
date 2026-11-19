@@ -2,11 +2,11 @@ type view = Borrow_of of Place.t | Copy_of_view_in of Place.t
 
 val extract_viewed_place : view -> Place.t
 
-type loan = { borrowed : Place.t; mode : Types.mode; duration : Mir.loan_duration }
+type loan = { borrowed : Place.t; mode : Language.Mode.t; duration : Mir.loan_duration }
 
 type borrowed_argument = {
   place : Place.t;
-  mode : Types.mode;
+  mode : Language.Mode.t;
   origin : Core.origin;
   position : int;
 }
@@ -30,7 +30,6 @@ type action =
   | Pass_owned_function of view list
   | Start_loan of { loan : int; loans : loan list }
   | End_loans of int list
-  | Write_through of Place.t
   | Arguments of {
       borrowed_arguments : borrowed_argument list;
       view_arguments : view_argument list;

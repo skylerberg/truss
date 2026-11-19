@@ -14,11 +14,7 @@ let allocate_parameters (state : Lowering.state) substitution
   List.map
     (fun (info : Types.parameter_info) ->
       let ty = Monomorphic.ground state.context.monomorphic substitution info.type_ in
-      ( Lowering.allocate_parameter state ~owned:(info.mode = Own)
-          (Monomorphic.ground_mode info.mode)
-          ty,
-        info.mode,
-        ty ))
+      (Lowering.allocate_parameter state ~owned:(info.mode = Own) info.mode ty, info.mode, ty))
     parameters
 
 let load_outer_evidence builder ~evidence index : Lowered.operand =
@@ -70,9 +66,7 @@ let build_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl
     List.mapi
       (fun position capability -> (capability, load_outer_evidence builder ~evidence position))
       captured;
-  let self_mode : Types.mode =
-    match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read
-  in
+  let self_mode : Language.Mode.t = match receiver with Instance mode -> mode | Static -> Read in
   let result_ty =
     Monomorphic.ground context.monomorphic Types.no_substitution
       (Types.extract_result_type capability_signature.output)
@@ -121,10 +115,10 @@ let build_locked_entry context (item : Lowered.Item.t) ~capability ~name : Emit_
   in
   Emit_c.Ir_builder.emit builder
     (Assign (mutex, Convert (Copy (Lowered.make_local_place address), Integer UInt64)));
-  let call_tasks name =
-    let slot, signature =
-      Targets.lookup_capability_method context (Well_known.make_path Tasks) name
-    in
+  let call_tasks method_ =
+    let { Well_known.owner; name; _ } = Well_known.locate_method method_ in
+    let tasks_capability = Well_known.make_path owner in
+    let slot, signature = Targets.lookup_capability_method context tasks_capability name in
     Emit_c.Ir_builder.emit builder
       (Call
          {
@@ -132,7 +126,7 @@ let build_locked_entry context (item : Lowered.Item.t) ~capability ~name : Emit_
              Evidence_call
                {
                  evidence = tasks;
-                 capability = Well_known.make_path Tasks;
+                 capability = tasks_capability;
                  slot;
                  signature = fst (Targets.make_entry_signature context signature);
                };
@@ -144,7 +138,7 @@ let build_locked_entry context (item : Lowered.Item.t) ~capability ~name : Emit_
     Monomorphic.ground context.monomorphic Types.no_substitution
       (Types.extract_result_type capability_signature.output)
   in
-  call_tasks "lock";
+  call_tasks Tasks_lock;
   Emit_c.Ir_builder.emit builder
     (Call
        {
@@ -156,7 +150,7 @@ let build_locked_entry context (item : Lowered.Item.t) ~capability ~name : Emit_
              parameter_places;
          result = Convention.make_destination result (choose_result_place state result_ty);
        });
-  call_tasks "unlock";
+  call_tasks Tasks_unlock;
   Emit_c.Ir_builder.build state.builder
     (Lowering.finish_function state
        ~returns:(capability_signature.output <> Returns Never)
@@ -226,7 +220,7 @@ let build_real_implementation (state : Lowering.state) ~user capability =
             { trait = Well_known.make_path Default; trait_arguments = []; associated = [] }
         with
         | Some (From_impl { impl = default_impl; _ }) ->
-            Path.Method { owner = default_impl; name = "default"; receiver = Static }
+            Well_known.make_impl_method_path Default_default ~impl:default_impl
         | _ ->
             Definitions.raise_bug "%s implements %s and has no impl of Default"
               (Types.show for_type) (Path.show capability)
@@ -373,9 +367,8 @@ let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instant
   Lowering.set_result_slot state (Convention.classify_result context.env ty.result);
   let parameter_places =
     List.map
-      (fun ((mode : Ground.mode), ty) ->
-        let types_mode : Types.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
-        (Lowering.allocate_parameter state ~owned:(mode = Own) mode ty, types_mode, ty))
+      (fun ((mode : Language.Mode.t), ty) ->
+        (Lowering.allocate_parameter state ~owned:(mode = Own) mode ty, mode, ty))
       ty.parameters
   in
   let capabilities = Emit_c.Ir_builder.allocate_local builder Convention.capabilities in
@@ -425,9 +418,7 @@ let build_any_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.
   if not (Lowering.is_zero_size state self_ty) then
     Emit_c.Ir_builder.emit builder
       (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place value))));
-  let self_mode : Types.mode =
-    match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read
-  in
+  let self_mode : Language.Mode.t = match receiver with Instance mode -> mode | Static -> Read in
   let destination =
     match (method_signature.output, Lowering.find_result_place state) with
     | _, Some place -> place

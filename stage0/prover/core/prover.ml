@@ -67,7 +67,7 @@ let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
                   ( shown
                     @ [
                         Printf.sprintf "`%s` is `%s`" parameter.name
-                          (Intrinsic.show_builtin builtin);
+                          (Language.Builtin_type.show builtin);
                       ],
                     Types.bind_argument parameter
                       (Types.Type (Types.make_builtin builtin))
@@ -87,12 +87,8 @@ let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
     | _ -> Facts.raise_bug "%s is not a type" (Path.show key.path)
   in
   let path =
-    Path.Method
-      {
-        owner = Derived { type_ = key.path; trait = Well_known.make_path Default };
-        name = "default";
-        receiver = Static;
-      }
+    Well_known.make_impl_method_path Default_default
+      ~impl:(Derived { type_ = key.path; trait = Well_known.make_path Default })
   in
   if derives_default && Option.is_some (Mir.read_code lookups.mir path) then
     let outcome = Translate.translate_function lookups source ~path in

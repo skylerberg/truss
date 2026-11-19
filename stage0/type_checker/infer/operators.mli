@@ -1,4 +1,4 @@
-val select_arithmetic_trait : Syntax.arithmetic -> Path.t * string
+val select_arithmetic_method : Syntax.arithmetic -> Well_known.method_ * Well_known.associated
 val infer_bitwise_result : State.state -> Source.Definition_span.t -> Types.ty -> Types.ty
 
 val infer_shift_result :
@@ -22,8 +22,8 @@ val check_operator_call :
   operands:Tables.argument list ->
   State.state ->
   Syntax.expression ->
-  trait:Path.t ->
-  method_:string ->
+  method_:Well_known.method_ ->
+  output:Well_known.associated ->
   left:Types.ty ->
   right:Types.ty option ->
   Types.ty

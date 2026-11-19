@@ -27,9 +27,9 @@ module Symbol : sig
     | Potential of Types.ty
     | Potential_measure of Types.ty
     | Block_bytes of { type_ : Types.ty; variant : string option }
-    | Callback_cost of { metric : Metric.t; sort : sort }
+    | Callback_cost of { metric : Language.Metric.t; sort : sort }
     | Method_cost of {
-        metric : Metric.t;
+        metric : Language.Metric.t;
         method_ : Path.t;
         trait_arguments : Types.argument list;
         self_type : Types.ty;
