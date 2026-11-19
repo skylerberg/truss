@@ -83,7 +83,7 @@ and kind =
   | Convert of { conversion : conversion; value : expression }
   | To_any of { value : expression; trait : Types.trait_reference; evidence : evidence }
   | If of { condition : expression; then_ : block; else_ : block option; binds_lent_part : bool }
-  | Match of { scrutinees : operand list; arms : arm list }
+  | Match of { scrutinees : operand list; arms : arm list; is_written : bool }
   | Block of block
   | Provide of { implementations : implementation list; body : block }
   | Return of expression option

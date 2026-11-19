@@ -1966,7 +1966,22 @@ let () =
   Harness.test "a counterexample says which arm of a match its path takes" (fun () ->
       let actual = read_message Fixtures.Prover.bump_of_an_option in
       if not (String.includes ~affix:"On that path, the arm `Some(count)` is taken." actual) then
-        Harness.fail "message %S" actual)
+        Harness.fail "message %S" actual);
+  let expect_overflow_naming_no_path text =
+    let actual = read_message text in
+    if
+      (not (String.includes ~affix:"may overflow" actual))
+      || String.includes ~affix:"On that path" actual
+    then Harness.fail "message %S" actual
+  in
+  Harness.test "a counterexample names no arm of a match with one arm" (fun () ->
+      expect_overflow_naming_no_path Fixtures.Prover.sum_of_a_pair);
+  Harness.test "a counterexample names no arm for a `for` loop over a call's result" (fun () ->
+      expect_overflow_naming_no_path Fixtures.Prover.sum_over_an_enumeration);
+  Harness.test "a counterexample names no arm for a `for` loop that moves each element out"
+    (fun () -> expect_overflow_naming_no_path Fixtures.Prover.sum_over_an_owned_list);
+  Harness.test "a counterexample names no arm for a `?`" (fun () ->
+      expect_overflow_naming_no_path Fixtures.Prover.question_mark_on_an_option)
 
 let () =
   Harness.test "a pure call's result is in its type's range for every bound value" (fun () ->
