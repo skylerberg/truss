@@ -1588,11 +1588,11 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 - A `while` whose condition is the literal `true`, and that no `break`
   exits, has type `Never`.
 - `invariant` holds at the start of every iteration and when the loop ends.
-- `decreases` names a measure that every iteration makes smaller and that
-  never goes below zero. It holds in every function, including one that
-  uses `RunForever`. A `while` compares its measure before each evaluation
-  of its condition, so a change that the condition makes counts toward the
-  iteration.
+- `decreases` names an integer measure that every iteration makes smaller
+  and that never goes below zero. It holds in every function, including
+  one that uses `RunForever`. A `while` compares its measure before each
+  evaluation of its condition, so a change that the condition makes counts
+  toward the iteration.
 - Where a `for` loop over a cursor states no measure, and the cursor's type
   has a `remaining(self) -> UInt64` method, that method's value is the
   loop's measure, and it holds as a written one does.
