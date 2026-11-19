@@ -332,7 +332,7 @@ let copy context ty =
   | Storage element ->
       let layout = Memory_layout.of_type context.env element in
       let multiply_by_size count =
-        Emit_c.Ir_builder.emit_temporary builder (Raw (Integer UInt64))
+        Emit_c.Ir_builder.emit_value builder (Raw (Integer UInt64))
           (Binary (Multiply, count, Lowered.make_uint64_constant layout.size))
       in
       Emit_c.Ir_builder.emit_if builder

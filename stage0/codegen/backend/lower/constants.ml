@@ -13,20 +13,20 @@ let make_static_integer (kind : Memory_layout.integer) value =
   if Z.leq low value && Z.leq value high then Some (Lowered.Static_scalar (Integer (kind, value)))
   else None
 
-let find_integer_kind (st : Lowering.state) ty =
-  match (Memory_layout.of_type st.context.env ty).form with
+let find_integer_kind (state : Lowering.state) ty =
+  match (Memory_layout.of_type state.context.env ty).form with
   | Scalar (Integer kind) -> Some kind
   | _ -> None
 
 let make_static_bool value = Some (Lowered.Static_scalar (Bool value))
 
-let fold_arithmetic st ty (operation : Intrinsic.scalar) (left : Lowered.static_value)
+let fold_arithmetic state ty (operation : Intrinsic.scalar) (left : Lowered.static_value)
     (right : Lowered.static_value) =
   match (left, right) with
   | Static_scalar (Integer (kind, x)), Static_scalar (Integer (_, y)) -> (
       let bits = 8 * Memory_layout.compute_integer_size kind in
       let fold_number value =
-        let* kind = find_integer_kind st ty in
+        let* kind = find_integer_kind state ty in
         make_static_integer kind value
       in
       let fold_shift apply_shift =
@@ -109,9 +109,9 @@ let rec project_static_value (value : Lowered.static_value) (projections : Mir.p
       project_static_value field rest
   | _ -> None
 
-let fold_literal st ty (constant : Mir.constant) =
+let fold_literal state ty (constant : Mir.constant) =
   let fold_number literal =
-    match Targets.lower_literal st ty literal with
+    match Targets.lower_literal state ty literal with
     | Constant scalar -> Some (Lowered.Static_scalar scalar)
     | _ -> None
   in
@@ -121,8 +121,8 @@ let fold_literal st ty (constant : Mir.constant) =
   | Boolean boolean -> make_static_bool boolean
   | Unit -> None
 
-let fold_literal_value (st : Lowering.state) ty text =
-  match Monomorphic.compute_shape st.context.monomorphic ty with
+let fold_literal_value (state : Lowering.state) ty text =
+  match Monomorphic.compute_shape state.context.monomorphic ty with
   | Record [ (field, Typed storage) ] when Option.is_some (Storage.find_storage_element storage) ->
       let bytes =
         List.init (String.length text) (fun index ->
@@ -151,19 +151,19 @@ let make_constant_state (context : Definitions.context) path =
       written = Some (Definitions.read_written context source);
     }
   in
-  let st =
+  let state =
     Lowering.enter context
       ~builder:(Emit_c.Ir_builder.create context.env ~item:(Evaluator path))
       (Lowering.make_frame code)
   in
-  (st, mir, ty)
+  (state, mir, ty)
 
 let rec fold_initializer context ~visiting path =
-  let st, mir, ty = make_constant_state context path in
-  (ty, fold_body ~visiting:(path :: visiting) ~depth:call_depth ~steps:(ref step_limit) st mir [])
+  let state, mir, ty = make_constant_state context path in
+  (ty, fold_body ~visiting:(path :: visiting) ~depth:call_depth ~steps:(ref step_limit) state mir [])
 
-and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowered.static_value list)
-    =
+and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
+    (arguments : Lowered.static_value list) =
   let body = mir.body in
   let locals = Hashtbl.create 16 in
   let* () =
@@ -173,21 +173,21 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
     end
     else None
   in
-  let ground_local_type local = Lowering.ground st body.locals.(local).type_ in
+  let ground_local_type local = Lowering.ground state body.locals.(local).type_ in
   let read (place : Mir.place) =
     let* whole =
       match place.root with
       | Local local -> Hashtbl.find_opt locals local
       | Constant path ->
           if List.exists (Path.equal path) visiting then None
-          else snd (fold_initializer st.context ~visiting path)
-      | Literal { text; type_ } -> fold_literal_value st (Lowering.ground st type_) text
+          else snd (fold_initializer state.context ~visiting path)
+      | Literal { text; type_ } -> fold_literal_value state (Lowering.ground state type_) text
     in
     project_static_value whole place.projections
   in
   let fold_operand : Mir.operand -> Lowered.static_value option = function
     | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read place
-    | Immediate { value; type_ } -> fold_literal st (Lowering.ground st type_) value
+    | Immediate { value; type_ } -> fold_literal state (Lowering.ground state type_) value
   in
   let fold_rvalue target : Mir.rvalue -> Lowered.static_value option = function
     | Operand value | Copy value -> fold_operand value
@@ -197,7 +197,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
     | Operation { operation; operands = [ left; right ]; _ } ->
         let* left = fold_operand left in
         let* right = fold_operand right in
-        fold_arithmetic st (ground_local_type target) operation left right
+        fold_arithmetic state (ground_local_type target) operation left right
     | Compare { comparison; left; right } ->
         let* left = fold_operand left in
         let* right = fold_operand right in
@@ -238,7 +238,7 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
     | Intrinsic { operation = Buffer Storage_with_capacity; type_arguments = [ Type element ] }, _
       ->
         assign destination
-          (Lowered.Static_storage { element = Lowering.ground st element; elements = [] })
+          (Lowered.Static_storage { element = Lowering.ground state element; elements = [] })
     | ( Intrinsic { operation = Buffer Storage_push; _ },
         [
           Passed { value = Borrow { place = { root = Local storage; projections = [] }; _ }; _ };
@@ -257,18 +257,18 @@ and fold_body ~visiting ~depth ~steps st (mir : Mir.Graph.t) (arguments : Lowere
         match array with
         | Static_array elements ->
             assign destination
-              (Lowered.Static_storage { element = Lowering.ground st element; elements })
+              (Lowered.Static_storage { element = Lowering.ground state element; elements })
         | _ -> None)
     | Function { path; instantiation }, arguments when depth > 0 ->
-        let* { form = callee_mir; _ } = Mir.read_graph st.context.lookups.mir path in
+        let* { form = callee_mir; _ } = Mir.read_graph state.context.lookups.mir path in
         let callee =
-          Lowering.enter st.context ~builder:st.builder
+          Lowering.enter state.context ~builder:state.builder
             (Lowering.make_frame
-               (Definitions.make_code st.context path
-                  (Monomorphic.ground_instantiation st.context.monomorphic
-                     st.frame.code.substitution instantiation)))
+               (Definitions.make_code state.context path
+                  (Monomorphic.ground_instantiation state.context.monomorphic
+                     state.frame.code.substitution instantiation)))
         in
-        let defaults = (Mir_form.read_parameter_defaults st.context path).form in
+        let defaults = (Mir_places.read_parameter_defaults state.context path).form in
         let* values =
           collect_all
             (List.mapi
@@ -326,12 +326,12 @@ let compile_constant context path =
 
 let write_fully = Well_known.make_path Write_fully
 
-let write_output (st : Lowering.state) output =
-  let builder = st.builder in
+let write_output (state : Lowering.state) output =
+  let builder = state.builder in
   let int32 = Ground.make_builtin Int32 in
   let view_ty = Storage.make_view_type (Ground.make_builtin UInt8) in
-  let descriptor = Lowering.allocate_temporary st int32
-  and view = Lowering.allocate_temporary st view_ty in
+  let descriptor = Lowering.allocate_temporary state int32
+  and view = Lowering.allocate_temporary state view_ty in
   Emit_c.Ir_builder.emit builder (Assign (descriptor, Use (Constant (Integer (Int32, Z.one)))));
   Emit_c.Ir_builder.emit builder
     (Assign
@@ -339,28 +339,28 @@ let write_output (st : Lowering.state) output =
          Storage.build_view view_ty
            ~buffer:(Copy (Storage.project_buffer output))
            ~length:(Copy (Storage.project_length output)) ));
-  let signature = Definitions.read_signature st.context write_fully in
+  let signature = Definitions.read_signature state.context write_fully in
   let result =
     match signature.output with
-    | Returns ty -> Monomorphic.ground st.context.monomorphic Types.no_substitution ty
+    | Returns ty -> Monomorphic.ground state.context.monomorphic Types.no_substitution ty
     | Lends _ -> Definitions.raise_bug "write_fully does not return"
   in
-  Targets.lower_item_call st
+  Targets.lower_item_call state
     (Code { path = write_fully; instantiation = Ground.no_instantiation })
     ~signature ~substitution:Types.no_substitution
     ~arguments:[ (Read, int32, descriptor); (Read, view_ty, view) ]
-    ~destination:(Lowering.allocate_temporary st result)
+    ~destination:(Lowering.allocate_temporary state result)
     ~site:None ()
 
 let build_evaluator context path : Emit_c.fragment =
-  let st, mir, ty = make_constant_state context path in
-  Emit_c.Ir_builder.start st.builder (Emit_c.Ir_builder.allocate_block st.builder);
-  Lowering.run_in_scope st (fun () ->
-      let place = Lowering.allocate_temporary st ty in
-      Mir_form.lower_mir_into st mir place;
-      let output = Targets.begin_output st in
-      Encoding.encode_call context.env st.builder
+  let state, mir, ty = make_constant_state context path in
+  Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder);
+  Lowering.run_in_scope state (fun () ->
+      let place = Lowering.allocate_temporary state ty in
+      Mir_form.lower_mir_into state mir place;
+      let output = Targets.begin_output state in
+      Encoding.encode_call context.env state.builder
         ~output:(Address { place = output; writable = true })
         ty place;
-      write_output st output);
-  Lowering.finish_item st ~rest:[] ()
+      write_output state output);
+  Lowering.finish_item state ~rest:[] ()

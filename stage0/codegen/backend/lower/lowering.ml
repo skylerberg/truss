@@ -41,7 +41,7 @@ and mir_frame = {
   mutable taken : Mir.place list;
   moves : Moves.t;
   flags : (Moves.path * Lowered.place) list;
-  mutable state : Moves.state;
+  mutable move_state : Moves.state;
   lending : lending option;
   called_parts : Mir.local list;
   lent_calls : (Mir.local, lent_call) Hashtbl.t;
@@ -95,26 +95,26 @@ let enter context ?(nested = ref 0) ~builder frame =
     lend_record = None;
   }
 
-let may_fork st = st.frame.exit = None
+let may_fork state = state.frame.exit = None
 
-let allocate_local st ?name ty : Lowered.place =
-  Lowered.make_local_place (Emit_c.Ir_builder.allocate_local st.builder ?name ty)
+let allocate_local state ?name ty : Lowered.place =
+  Lowered.make_local_place (Emit_c.Ir_builder.allocate_local state.builder ?name ty)
 
-let outline st ~parts body =
-  let nested = !(st.nested) in
-  incr st.nested;
-  let enclosing = st.lend_record in
-  st.lend_record <- None;
-  let holder = Emit_c.Ir_builder.outline st.builder ~index:nested ~parts body in
-  st.lend_record <- enclosing;
+let outline state ~parts body =
+  let nested = !(state.nested) in
+  incr state.nested;
+  let enclosing = state.lend_record in
+  state.lend_record <- None;
+  let holder = Emit_c.Ir_builder.outline state.builder ~index:nested ~parts body in
+  state.lend_record <- enclosing;
   (nested, Lowered.Address { place = Lowered.make_local_place holder; writable = false })
 
-let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
-let is_trivial st ty = Drop_and_copy.is_trivial st.context.drop_and_copy ty
-let is_zero_size st = Memory_layout.has_zero_size st.context.env
+let ground state ty = Monomorphic.ground state.context.monomorphic state.frame.code.substitution ty
+let is_trivial state ty = Drop_and_copy.is_trivial state.context.drop_and_copy ty
+let is_zero_size state = Memory_layout.has_zero_size state.context.env
 
-let make_site st (span : Source.Definition_span.t) : Lowered.site =
-  { definition = st.frame.code.definition; offset = span.start }
+let make_site state (span : Source.Definition_span.t) : Lowered.site =
+  { definition = state.frame.code.definition; offset = span.start }
 
 type unsupported = { construct : string; at : Lowered.site option }
 
@@ -123,82 +123,86 @@ exception Unsupported of unsupported
 let raise_unsupported ?at format =
   Printf.ksprintf (fun construct -> raise (Unsupported { construct; at })) format
 
-let require_written st =
-  match st.frame.code.written with
+let require_written state =
+  match state.frame.code.written with
   | Some written -> written
   | None ->
       Definitions.raise_bug "%s is generated code, which has no source"
-        (Path.show st.frame.code.definition)
+        (Path.show state.frame.code.definition)
 
-let quote_span st span = Source.Definition_span.quote (require_written st).text span
+let quote_span state span = Source.Definition_span.quote (require_written state).text span
 
 let rec lookup_binding_scope = function
   | ({ kind = Bindings; _ } as scope) :: _ -> scope
   | { kind = Statement; _ } :: rest -> lookup_binding_scope rest
   | [] -> Definitions.raise_bug "no scope"
 
-let lookup_innermost_scope st =
-  match st.scopes with scope :: _ -> scope | [] -> Definitions.raise_bug "no scope"
+let lookup_innermost_scope state =
+  match state.scopes with scope :: _ -> scope | [] -> Definitions.raise_bug "no scope"
 
-let move_place st place =
-  if not (List.mem place st.moved) then st.moved <- place :: st.moved;
+let move_place state place =
+  if not (List.mem place state.moved) then state.moved <- place :: state.moved;
   Lowered.Move place
 
-let own_in_scope st place =
-  let scope = lookup_binding_scope st.scopes in
+let own_in_scope state place =
+  let scope = lookup_binding_scope state.scopes in
   scope.owned <- Drop_value place :: scope.owned
 
-let allocate_owned_local st (scope : scope) ty =
-  let place = Lowered.make_local_place (Emit_c.Ir_builder.allocate_local st.builder (Value ty)) in
-  if not (is_trivial st ty) then scope.owned <- Drop_value place :: scope.owned;
+let allocate_owned_local state (scope : scope) ty =
+  let place =
+    Lowered.make_local_place (Emit_c.Ir_builder.allocate_local state.builder (Value ty))
+  in
+  if not (is_trivial state ty) then scope.owned <- Drop_value place :: scope.owned;
   place
 
-let allocate_temporary st ty = allocate_owned_local st (lookup_innermost_scope st) ty
-let allocate_binding st ty = allocate_owned_local st (lookup_binding_scope st.scopes) ty
+let allocate_temporary state ty = allocate_owned_local state (lookup_innermost_scope state) ty
+let allocate_binding state ty = allocate_owned_local state (lookup_binding_scope state.scopes) ty
 
-let allocate_flagged_binding st ty ~flag =
-  let place = Lowered.make_local_place (Emit_c.Ir_builder.allocate_local st.builder (Value ty)) in
-  if not (is_trivial st ty) then begin
-    let scope = lookup_binding_scope st.scopes in
+let allocate_flagged_binding state ty ~flag =
+  let place =
+    Lowered.make_local_place (Emit_c.Ir_builder.allocate_local state.builder (Value ty))
+  in
+  if not (is_trivial state ty) then begin
+    let scope = lookup_binding_scope state.scopes in
     scope.owned <- Drop_flagged { place; flag } :: scope.owned
   end;
   place
 
-let allocate_parameter st ?(in_scope = true) ?name ~owned (mode : Ground.mode) ty =
-  let own place = if in_scope && owned && not (is_trivial st ty) then own_in_scope st place in
-  match Convention.classify_parameter st.context.env mode ty with
-  | None -> (None, allocate_temporary st ty)
+let allocate_parameter state ?(in_scope = true) ?name ~owned (mode : Ground.mode) ty =
+  let own place = if in_scope && owned && not (is_trivial state ty) then own_in_scope state place in
+  match Convention.classify_parameter state.context.env mode ty with
+  | None -> (None, allocate_temporary state ty)
   | Some (Lowered.Pointer _ as pointer) ->
-      let arrives = Emit_c.Ir_builder.allocate_local st.builder ?name pointer in
+      let arrives = Emit_c.Ir_builder.allocate_local state.builder ?name pointer in
       let place : Lowered.place = { root = Local arrives; projections = [ Deref ] } in
       own place;
       (Some arrives, place)
   | Some passed ->
-      let arrives = Emit_c.Ir_builder.allocate_local st.builder ?name passed in
+      let arrives = Emit_c.Ir_builder.allocate_local state.builder ?name passed in
       own (Lowered.make_local_place arrives);
       (Some arrives, Lowered.make_local_place arrives)
 
-let list_evidence_parameters st capabilities =
+let list_evidence_parameters state capabilities =
   let arriving =
     List.map
       (fun capability ->
-        (capability, Emit_c.Ir_builder.allocate_local st.builder Convention.evidence))
+        (capability, Emit_c.Ir_builder.allocate_local state.builder Convention.evidence))
       capabilities
   in
-  st.evidence <-
+  state.evidence <-
     List.map
       (fun (capability, evidence_local) ->
         (capability, Lowered.Copy (Lowered.make_local_place evidence_local)))
       arriving;
   List.map snd arriving
 
-let look_up_capabilities st ~table capabilities =
-  st.evidence <-
+let look_up_capabilities state ~table capabilities =
+  state.evidence <-
     List.map
       (fun capability ->
-        let evidence = Emit_c.Ir_builder.allocate_local st.builder Convention.evidence in
+        let evidence = Emit_c.Ir_builder.allocate_local state.builder Convention.evidence in
         let name = Path.show capability in
-        Emit_c.Ir_builder.emit st.builder
+        Emit_c.Ir_builder.emit state.builder
           (Call
              {
                target = Intrinsic Capability_find;
@@ -209,124 +213,127 @@ let look_up_capabilities st ~table capabilities =
         (capability, Lowered.Copy (Lowered.make_local_place evidence)))
       capabilities
 
-let find_panic_trace st =
+let find_panic_trace state =
   Option.map snd
     (List.find_opt
        (fun (capability, _) -> Path.equal capability Definitions.panic_path)
-       st.evidence)
+       state.evidence)
 
-let set_result_slot st (convention : Convention.result) =
-  st.result <-
+let set_result_slot state (convention : Convention.result) =
+  state.result <-
     (match convention with
-    | Through_pointer pointer -> Through (Emit_c.Ir_builder.allocate_local st.builder pointer)
-    | Returned ty -> Returned_in (Emit_c.Ir_builder.allocate_local st.builder ty)
+    | Through_pointer pointer -> Through (Emit_c.Ir_builder.allocate_local state.builder pointer)
+    | Returned ty -> Returned_in (Emit_c.Ir_builder.allocate_local state.builder ty)
     | Nothing -> No_result)
 
-let find_result_place st : Lowered.place option =
-  match st.result with
+let find_result_place state : Lowered.place option =
+  match state.result with
   | Through pointer -> Some { root = Local pointer; projections = [ Deref ] }
   | Returned_in local -> Some (Lowered.make_local_place local)
   | No_result -> None
 
-let return_result st : Lowered.terminator =
+let return_result state : Lowered.terminator =
   Return
-    (match st.result with
+    (match state.result with
     | Returned_in local -> Some (Move (Lowered.make_local_place local))
     | _ -> None)
 
-let drop_scope st (scope : scope) =
+let drop_scope state (scope : scope) =
   List.iter
     (function
       | Drop_value place ->
-          if not (List.mem place st.moved) then Emit_c.Ir_builder.emit st.builder (Drop place)
+          if not (List.mem place state.moved) then Emit_c.Ir_builder.emit state.builder (Drop place)
       | Drop_flagged { place; flag } ->
-          if not (List.mem place st.moved) then
-            Emit_c.Ir_builder.emit_when st.builder (Holds (Copy flag)) (fun () ->
-                Emit_c.Ir_builder.emit st.builder (Drop place))
+          if not (List.mem place state.moved) then
+            Emit_c.Ir_builder.emit_when state.builder (Holds (Copy flag)) (fun () ->
+                Emit_c.Ir_builder.emit state.builder (Drop place))
       | Free_pointed pointer ->
-          Emit_c.Ir_builder.emit st.builder
+          Emit_c.Ir_builder.emit state.builder
             (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded })
-      | Join_group join -> Emit_c.Ir_builder.emit st.builder join)
+      | Join_group join -> Emit_c.Ir_builder.emit state.builder join)
     scope.owned
 
-let leave_to st depth =
+let leave_to state depth =
   List.iteri
-    (fun position scope -> if List.length st.scopes - position > depth then drop_scope st scope)
-    st.scopes
+    (fun position scope ->
+      if List.length state.scopes - position > depth then drop_scope state scope)
+    state.scopes
 
-let open_scope st kind =
+let open_scope state kind =
   let scope = { kind; owned = [] } in
-  st.scopes <- scope :: st.scopes;
+  state.scopes <- scope :: state.scopes;
   scope
 
-let pop_scope st scope =
-  match st.scopes with
-  | top :: rest when top == scope -> st.scopes <- rest
+let pop_scope state scope =
+  match state.scopes with
+  | top :: rest when top == scope -> state.scopes <- rest
   | _ -> Definitions.raise_bug "a scope closed out of order"
 
-let close_scope st scope =
-  drop_scope st scope;
-  pop_scope st scope
+let close_scope state scope =
+  drop_scope state scope;
+  pop_scope state scope
 
-let with_scope st kind body =
-  let scope = open_scope st kind in
+let with_scope state kind body =
+  let scope = open_scope state kind in
   let result = body () in
-  close_scope st scope;
+  close_scope state scope;
   result
 
-let run_in_scope st body = with_scope st Bindings body
-let run_in_statement st body = with_scope st Statement body
+let run_in_scope state body = with_scope state Bindings body
+let run_in_statement state body = with_scope state Statement body
 
-let finish_function st ?(returns = true) ~first ~rest () : Emit_c.Ir_builder.prototype =
-  (match st.scopes with
-  | [ scope ] -> drop_scope st scope
+let finish_function state ?(returns = true) ~first ~rest () : Emit_c.Ir_builder.prototype =
+  (match state.scopes with
+  | [ scope ] -> drop_scope state scope
   | _ -> Definitions.raise_bug "a function ended in a scope");
-  Emit_c.Ir_builder.finish st.builder (if returns then return_result st else Unreachable);
-  let pointer = match st.result with Through pointer -> Some pointer | _ -> None in
+  Emit_c.Ir_builder.finish state.builder (if returns then return_result state else Unreachable);
+  let pointer = match state.result with Through pointer -> Some pointer | _ -> None in
   let result =
-    match st.result with
-    | Returned_in local -> Some (Emit_c.Ir_builder.lookup_local_type st.builder local)
+    match state.result with
+    | Returned_in local -> Some (Emit_c.Ir_builder.lookup_local_type state.builder local)
     | _ -> None
   in
   { parameters = first @ Option.to_list pointer @ rest; result; returns }
 
-let finish_item st ?returns ~rest () =
-  Emit_c.Ir_builder.build st.builder (finish_function st ?returns ~first:[] ~rest ())
+let finish_item state ?returns ~rest () =
+  Emit_c.Ir_builder.build state.builder (finish_function state ?returns ~first:[] ~rest ())
 
-let emit_unreachable_block st =
-  Emit_c.Ir_builder.finish st.builder Unreachable;
-  Emit_c.Ir_builder.start st.builder (Emit_c.Ir_builder.allocate_block st.builder)
+let emit_unreachable_block state =
+  Emit_c.Ir_builder.finish state.builder Unreachable;
+  Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder)
 
-let make_owned_operand st place ty =
-  if is_trivial st ty then Lowered.Copy place else move_place st place
+let make_owned_operand state place ty =
+  if is_trivial state ty then Lowered.Copy place else move_place state place
 
-let take st (place : Lowered.place) ty ~destination =
+let take state (place : Lowered.place) ty ~destination =
   match place.root with
-  | Static _ when not (is_trivial st ty) ->
-      Drop_and_copy.copy_into st.context.drop_and_copy st.builder ~destination ~source:place ty
+  | Static _ when not (is_trivial state ty) ->
+      Drop_and_copy.copy_into state.context.drop_and_copy state.builder ~destination ~source:place
+        ty
   | Static _ | Local _ ->
-      Emit_c.Ir_builder.emit st.builder (Assign (destination, Use (make_owned_operand st place ty)))
+      Emit_c.Ir_builder.emit state.builder
+        (Assign (destination, Use (make_owned_operand state place ty)))
 
-let snapshot st (place : Lowered.place) =
+let snapshot state (place : Lowered.place) =
   {
     place with
     projections =
       List.map
         (function
           | Lowered.Index (Copy index_place) ->
-              let fixed = allocate_binding st st.context.types.uint64 in
-              Emit_c.Ir_builder.emit st.builder (Assign (fixed, Use (Copy index_place)));
+              let fixed = allocate_binding state state.context.types.uint64 in
+              Emit_c.Ir_builder.emit state.builder (Assign (fixed, Use (Copy index_place)));
               Lowered.Index (Copy fixed)
           | projection -> projection)
         place.projections;
   }
 
-let run_in_loop st ~continue_ ~break_ ~depth body =
-  st.loops <- { continue_; continue_depth = depth; break_; break_depth = depth } :: st.loops;
+let run_in_loop state ~continue_ ~break_ ~depth body =
+  state.loops <- { continue_; continue_depth = depth; break_; break_depth = depth } :: state.loops;
   body ();
-  st.loops <- List.tl st.loops
+  state.loops <- List.tl state.loops
 
-let find_place_type st (place : Lowered.place) =
+let find_place_type state (place : Lowered.place) =
   let raise_environment_place _ =
     Definitions.raise_bug "a place in an environment, whose type lowering does not track"
   in
@@ -335,22 +342,22 @@ let find_place_type st (place : Lowered.place) =
     | _ :: _ when match ty with Environment _ | Evidence _ -> true | _ -> false -> None
     | projection :: rest ->
         Option.bind
-          (Lowered.find_projection_type st.context.env ~list_environment:raise_environment_place ty
-             projection) (fun ty -> find_projected_type ty rest)
+          (Lowered.find_projection_type state.context.env ~list_environment:raise_environment_place
+             ty projection) (fun ty -> find_projected_type ty rest)
   in
   match place with
   | _ ->
       let root : Lowered.ty =
         match place.root with
-        | Local local -> Emit_c.Ir_builder.lookup_local_type st.builder local
+        | Local local -> Emit_c.Ir_builder.lookup_local_type state.builder local
         | Static { ty; _ } -> Value ty
       in
-      if Lowered.is_erased st.context.env root then None
+      if Lowered.is_erased state.context.env root then None
       else find_projected_type root place.projections
 
 let make_int_constant integer value = Lowered.Constant (Integer (integer, value))
 
-let classify_scalar st ty =
-  match (Memory_layout.of_type st.context.env ty).form with
+let classify_scalar state ty =
+  match (Memory_layout.of_type state.context.env ty).form with
   | Scalar scalar -> scalar
   | _ -> Definitions.raise_bug "%s is not a number" (Ground.to_string ty)

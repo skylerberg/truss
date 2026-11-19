@@ -54,9 +54,9 @@ let allocate_uint64_local context =
   Emit_c.Ir_builder.allocate_local context.builder (Value context.types.uint64)
 
 let emit_uint64 context rvalue =
-  Emit_c.Ir_builder.emit_temporary context.builder (Value context.types.uint64) rvalue
+  Emit_c.Ir_builder.emit_value context.builder (Value context.types.uint64) rvalue
 
-let emit_bool context rvalue = Emit_c.Ir_builder.emit_temporary context.builder (Raw Bool) rvalue
+let emit_bool context rvalue = Emit_c.Ir_builder.emit_value context.builder (Raw Bool) rvalue
 let copy_length sequence = Lowered.Copy (Storage.project_length sequence)
 
 let fail_with_message context failure ~message ~length =

@@ -41,7 +41,7 @@ and mir_frame = {
   mutable taken : Mir.place list;
   moves : Moves.t;
   flags : (Moves.path * Lowered.place) list;
-  mutable state : Moves.state;
+  mutable move_state : Moves.state;
   lending : lending option;
   called_parts : Mir.local list;
   lent_calls : (Mir.local, lent_call) Hashtbl.t;

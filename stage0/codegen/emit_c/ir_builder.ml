@@ -132,7 +132,7 @@ let run_in_block builder block body =
   body ();
   builder.current <- current
 
-let emit_temporary builder ty (rvalue : Lowered.rvalue) : Lowered.operand =
+let emit_value builder ty (rvalue : Lowered.rvalue) : Lowered.operand =
   let temporary = allocate_local builder ty in
   emit builder (Assign (Lowered.make_local_place temporary, rvalue));
   Copy (Lowered.make_local_place temporary)
@@ -181,7 +181,7 @@ let rec evaluate builder condition : Lowered.rvalue =
 and evaluate_operand builder condition =
   match evaluate builder condition with
   | Use operand -> operand
-  | rvalue -> emit_temporary builder (Raw Bool) rvalue
+  | rvalue -> emit_value builder (Raw Bool) rvalue
 
 let emit_when builder condition then_ =
   let inside = allocate_block builder in

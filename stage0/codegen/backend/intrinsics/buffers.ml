@@ -82,7 +82,7 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
         (Test (Equal, Copy (Lowered.make_local_place order), Constant (Integer (Int32, Z.zero))))
         (fun () ->
           let emit_int32 rvalue =
-            Emit_c.Ir_builder.emit_temporary builder (Raw (Integer Int32)) rvalue
+            Emit_c.Ir_builder.emit_value builder (Raw (Integer Int32)) rvalue
           in
           let longer =
             Context.emit_bool context
