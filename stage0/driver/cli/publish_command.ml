@@ -112,16 +112,6 @@ let list_failed_tests database snapshot packages =
        tests
        (Test_command.run_tests database snapshot packages tests))
 
-let make_next_name (package : Path.package) =
-  let major = Registry.Version.parse_major package in
-  let base =
-    let suffix = Printf.sprintf "_v%d" major in
-    if major > 1 && String.ends_with ~suffix package.name then
-      String.sub package.name 0 (String.length package.name - String.length suffix)
-    else package.name
-  in
-  { package with name = Printf.sprintf "%s_v%d" base (major + 1) }
-
 let run ~version =
   let json = Output.json () in
   let version = Upgrade_command.read_version version in
@@ -138,7 +128,7 @@ let run ~version =
        without one. A release with another first number is published under another name, such as \
        `%s`."
       (Path.show_package name) name_major
-      (Path.show_package (make_next_name name));
+      (Path.show_package (Registry.Version.make_next_major_name name));
   let registry =
     match Registry.Index.find_current_registry () with
     | Some registry -> registry

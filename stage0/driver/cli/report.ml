@@ -49,8 +49,8 @@ let gather ?(proofs = false) database snapshot packages =
               line = None;
               message =
                 (match problem with
-                | Not_a_capability { dependency; name } ->
-                    Interface.Grants.describe_not_a_capability ~dependency name
+                | Not_a_capability { dependency; capability } ->
+                    Interface.Grants.describe_not_a_capability ~dependency capability
                 | Unused_dependency dependency ->
                     Package_checks.describe_unused_dependency ~package dependency);
             })

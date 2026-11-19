@@ -27,7 +27,7 @@ type change =
   | Entered of Registry.Lock.entry
   | Left of Registry.Lock.entry
   | Moved of { name : Path.package; from : Registry.Version.t; to_ : Registry.Version.t }
-  | Holds of { name : Path.package; gained : string list }
+  | Holds of { name : Path.package; gained : Grant.capability list }
 
 let lock_changes ~(before : Registry.Lock.t) ~(after : Registry.Lock.t) =
   List.concat_map
@@ -47,7 +47,8 @@ let lock_changes ~(before : Registry.Lock.t) ~(after : Registry.Lock.t) =
         if Registry.Lock.find after entry.name = None then Some (Left entry) else None)
       before
 
-let describe_held = function [] -> "" | held -> ", which holds " ^ String.concat ", " held
+let show_capabilities held = String.concat ", " (List.map Grant.show_capability held)
+let describe_held = function [] -> "" | held -> ", which holds " ^ show_capabilities held
 
 let describe_change = function
   | Entered entry ->
@@ -62,7 +63,10 @@ let describe_change = function
         (Registry.Version.show from) (Registry.Version.show to_)
   | Holds { name; gained } ->
       Printf.sprintf "`%s` would hold %s, which it did not." (Path.show_package name)
-        (String.concat ", " gained)
+        (show_capabilities gained)
+
+let encode_capabilities held =
+  Json.List (List.map (fun capability -> Json.String (Grant.show_capability capability)) held)
 
 let encode_change = function
   | Entered entry ->
@@ -71,7 +75,7 @@ let encode_change = function
           ("kind", Json.String "entered");
           ("package", Json.String (Path.show_package entry.name));
           ("version", Json.String (Registry.Version.show entry.version));
-          ("holds", Json.List (List.map (fun held -> Json.String held) entry.holds));
+          ("holds", encode_capabilities entry.holds);
         ]
   | Left entry ->
       Json.Object
@@ -93,7 +97,7 @@ let encode_change = function
         [
           ("kind", Json.String "holds");
           ("package", Json.String (Path.show_package name));
-          ("gained", Json.List (List.map (fun held -> Json.String held) gained));
+          ("gained", encode_capabilities gained);
         ]
 
 type signature = {

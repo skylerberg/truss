@@ -119,7 +119,7 @@ let substitute_value_term context (value : Types.value) =
 
 let is_model_built_from_contents : Path.t -> bool = function
   | Impl { module_; trait; for_type } ->
-      Path.compare_package module_.package Path.standard_package = 0
+      module_.package = Path.standard_package
       && Path.equal trait.path (Well_known.make_path Model)
       && (Intrinsic.find_builtin for_type = Some Array
          || List.exists

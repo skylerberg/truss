@@ -1823,6 +1823,13 @@ let () =
       if status <> 0 then fail "status %d: %s" status output;
       expect_published registry angles [];
       expect_published registry { Path.owner = Some "acme"; name = "angles_v2" } [ "2.0.0" ]);
+  test "the name suggested for the next major version replaces the number at the end of the name"
+    (fun () ->
+      let _ = make_registry () in
+      expect_cannot_publish
+        (make_directory
+           [ ("truss.toml", make_manifest "acme::angles_v02"); ("degrees/degrees.truss", turn) ])
+        ~version:"1.0.0" "published under another name, such as `acme::angles_v3`");
   test "a release needs a version higher than the newest release's" (fun () ->
       let registry = make_registry () in
       let root = make_angles_package turn in

@@ -63,7 +63,7 @@ let () =
           {
             name = { Path.owner = Some "truss"; name = "postgres" };
             version = 1, 12, 0;
-            holds = [ "Clock"; "Handles"; "NetworkClient" ];
+            holds = [ Prelude "Clock"; Prelude "Handles"; Prelude "NetworkClient" ];
             _;
           };
         ] as entries ->
@@ -91,6 +91,24 @@ let () =
       expect_malformed_at 2 "format 1\nacme::geometry 1.0.0 abc\n";
       expect_malformed_at 3
         (Printf.sprintf "format 1\nacme::geometry 1.0.0 %s\nacme::geometry 1.1.0 %s\n" hash hash));
+  Harness.test "a prelude capability that a lock file holds by its full path is written by its name"
+    (fun () ->
+      let line = Printf.sprintf "acme::geometry 1.0.0 %s holds" hash in
+      let written =
+        Registry.Lock.print
+          (Registry.Lock.parse
+             (Printf.sprintf "format 1\n%s standard::capabilities::Clock, Handles\n" line))
+      in
+      if written <> Printf.sprintf "format 1\n%s Clock, Handles\n" line then
+        Harness.fail "written as %S" written);
+  Harness.test "a capability that a lock file holds is a name or a full path" (fun () ->
+      expect_malformed_at 2 (Printf.sprintf "format 1\nacme::geometry 1.0.0 %s holds a:b\n" hash);
+      expect_malformed_at 2 (Printf.sprintf "format 1\nacme::geometry 1.0.0 %s holds Clock,\n" hash));
+  Harness.test "a lock file's lines are in order of owner, and then of name" (fun () ->
+      let first = Printf.sprintf "a::y 1.0.0 %s\n" hash
+      and second = Printf.sprintf "a1::x 1.0.0 %s\n" hash in
+      let written = Registry.Lock.print (Registry.Lock.parse ("format 1\n" ^ second ^ first)) in
+      if written <> "format 1\n" ^ first ^ second then Harness.fail "written as %S" written);
   Harness.test "a version must start with the number its package's name ends in" (fun () ->
       expect_malformed_at 2 (Printf.sprintf "format 1\nacme::geometry_v2 1.0.0 %s\n" hash);
       expect_malformed_at 2 (Printf.sprintf "format 1\nacme::geometry 2.0.0 %s\n" hash))
@@ -341,49 +359,106 @@ let () =
       let held =
         Registry.Selection.For_testing.list_holds
           ~project:
-            [ make_grant { Path.owner = Some "truss"; name = "http" } [ "NetworkClient"; "Clock" ] ]
+            [
+              make_grant
+                { Path.owner = Some "truss"; name = "http" }
+                [ Prelude "NetworkClient"; Prelude "Clock" ];
+            ]
           [ make_package { Path.owner = Some "truss"; name = "http" } [] ]
       in
-      if held <> [ ({ Path.owner = Some "truss"; name = "http" }, [ "Clock"; "NetworkClient" ]) ]
+      if
+        held
+        <> [
+             ( { Path.owner = Some "truss"; name = "http" },
+               [ Prelude "Clock"; Prelude "NetworkClient" ] );
+           ]
       then Harness.fail "holds another");
   Harness.test "a package holds only the granted capabilities that its user holds itself" (fun () ->
       let held =
         Registry.Selection.For_testing.list_holds
-          ~project:[ make_grant { Path.owner = Some "truss"; name = "http" } [ "NetworkClient" ] ]
+          ~project:
+            [ make_grant { Path.owner = Some "truss"; name = "http" } [ Prelude "NetworkClient" ] ]
           [
             make_package
               { Path.owner = Some "truss"; name = "http" }
-              [ ({ Path.owner = Some "truss"; name = "tls" }, [ "NetworkClient"; "Clock" ]) ];
+              [
+                ( { Path.owner = Some "truss"; name = "tls" },
+                  [ Prelude "NetworkClient"; Prelude "Clock" ] );
+              ];
             make_package { Path.owner = Some "truss"; name = "tls" } [];
           ]
       in
-      if List.assoc { Path.owner = Some "truss"; name = "tls" } held <> [ "NetworkClient" ] then
+      if List.assoc { Path.owner = Some "truss"; name = "tls" } held <> [ Prelude "NetworkClient" ]
+      then
         Harness.fail "holds [%s]"
-          (String.concat "; " (List.assoc { Path.owner = Some "truss"; name = "tls" } held)));
+          (String.concat "; "
+             (List.map Grant.show_capability
+                (List.assoc { Path.owner = Some "truss"; name = "tls" } held))));
   Harness.test "a package holds every capability any of its users grants it" (fun () ->
       let held =
         Registry.Selection.For_testing.list_holds
           ~project:
             [
-              make_grant { Path.owner = Some "truss"; name = "http" } [ "NetworkClient" ];
-              make_grant { Path.owner = Some "truss"; name = "tls" } [ "Random" ];
+              make_grant { Path.owner = Some "truss"; name = "http" } [ Prelude "NetworkClient" ];
+              make_grant { Path.owner = Some "truss"; name = "tls" } [ Prelude "Random" ];
             ]
           [
             make_package
               { Path.owner = Some "truss"; name = "http" }
-              [ ({ Path.owner = Some "truss"; name = "tls" }, [ "NetworkClient" ]) ];
+              [ ({ Path.owner = Some "truss"; name = "tls" }, [ Prelude "NetworkClient" ]) ];
             make_package { Path.owner = Some "truss"; name = "tls" } [];
           ]
       in
       if
-        List.assoc { Path.owner = Some "truss"; name = "tls" } held <> [ "NetworkClient"; "Random" ]
+        List.assoc { Path.owner = Some "truss"; name = "tls" } held
+        <> [ Prelude "NetworkClient"; Prelude "Random" ]
       then Harness.fail "holds another");
+  Harness.test
+    "a package holds a capability that its user holds, whether each manifest writes it by its name \
+     or by its full path" (fun () ->
+      let read_dependencies text =
+        match Manifest.parse text with
+        | { package = Some package; _ } -> package.dependencies
+        | { package = None; _ } -> failwith "the manifest has no package"
+      in
+      let http = { Path.owner = Some "truss"; name = "http" }
+      and tls = { Path.owner = Some "truss"; name = "tls" } in
+      let http_package = make_package http [] in
+      let lock =
+        Registry.Lock.print
+          (Registry.Selection.lock
+             ~project:
+               (read_dependencies
+                  "[package]\nname = \"app\"\n[dependencies]\n\"truss::http\" = [\"Clock\"]\n")
+             [
+               {
+                 http_package with
+                 manifest =
+                   {
+                     http_package.manifest with
+                     dependencies =
+                       read_dependencies
+                         "[package]\n\
+                          name = \"truss::http\"\n\
+                          [dependencies]\n\
+                          \"truss::tls\" = [\"standard::capabilities::Clock\"]\n";
+                   };
+               };
+               make_package tls [];
+             ])
+      in
+      match String.split_on_char '\n' lock with
+      | [ "format 1"; http_line; tls_line; "" ]
+        when String.ends_with ~suffix:" holds Clock" http_line
+             && String.ends_with ~suffix:" holds Clock" tls_line ->
+          ()
+      | _ -> Harness.fail "locked as %S" lock);
   Harness.test "where a lock file differs from the one a build gives is told for each package"
     (fun () ->
       let written =
         [
           make_entry "acme::units" (1, 0, 0);
-          { (make_entry "truss::http" (1, 0, 0)) with holds = [ "Clock" ] };
+          { (make_entry "truss::http" (1, 0, 0)) with holds = [ Prelude "Clock" ] };
         ]
       and current = [ make_entry "acme::geometry" (1, 0, 0); make_entry "truss::http" (1, 0, 0) ] in
       let actual = String.concat " " (Registry.Selection.list_differences ~written ~current) in

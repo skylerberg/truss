@@ -4,6 +4,7 @@
   metric
   structural_key
   path
+  grant
   intrinsic
   well_known
   types

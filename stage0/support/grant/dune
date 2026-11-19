@@ -1,0 +1,3 @@
+(library
+ (name grant)
+ (libraries compiler_bug path))

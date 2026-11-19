@@ -37,7 +37,7 @@ val list_file_diagnostics : t -> Path.file -> Diagnostic.t list
 val list_dependency_diagnostics : t -> Path.package -> (Source.t * Diagnostic.t list) list
 
 type manifest_problem =
-  | Not_a_capability of { dependency : Path.package; name : string }
+  | Not_a_capability of { dependency : Path.package; capability : Grant.capability }
   | Unused_dependency of Path.package
 
 val list_manifest_problems : t -> Path.package -> manifest_problem list
@@ -91,21 +91,22 @@ module For_testing : sig
 
   val list_diagnostics : checker list -> t -> Path.file -> Diagnostic.t list
   val fragment_checkers : checker list
+  val locate_package : Part.any -> Path.package
   val make_unchecked_interface_lookups : t -> Interface.Lookups.t
   val read_derived_form : t -> Path.t -> Core.t option
   val read_core : t -> Path.t -> (Core.t * Types.substitution) option
   val make_mir_lookups : t -> Mir.lookups
   val read_ownership : t -> Resolve.Names.key -> (Core.origin list * Core.origin list) list part
   val find_proof : proofs -> Resolve.Names.key -> Prover.proof part option
-  val list_reads : t -> string -> string list
+  val list_reads : t -> Part.any -> Part.t list
   val list_unread_parts : t -> Path.package list -> Part.any list
-  val list_differences : t -> t -> string list
+  val list_differences : t -> t -> Part.any list
 
-  type observed = { recomputed : string list; collected : string list }
+  type observed = { recomputed : Part.any list; collected : Part.any list }
 
   val observe : (unit -> 'a) -> 'a * observed
   val add_root : t -> Lowered.Item.t -> unit
-  val with_failing_part : string -> (unit -> 'a) -> 'a
+  val with_failing_part : Part.any -> (unit -> 'a) -> 'a
   val propagate : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit
 
   val extend_package :
