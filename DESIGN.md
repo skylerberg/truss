@@ -745,7 +745,7 @@ order they have in a definition, and the parentheses mark where they end.
 
 | Rule | Reason |
 |---|---|
-| A call of a function value passes the caller's capabilities as one table, and the function finds each capability it uses in the table by name. | A value of `fn()` can be passed where `(fn() uses Clock)` is allowed, and stored or returned there, with no wrapper and no change to how it is called. A wrapper would need storage that lives as long as the value, which a function value that captures nothing does not have. |
+| A call of a function value passes the caller's capabilities as one table, and the function finds each capability it uses in the table by the address of the capability's symbol. | A value of `fn()` can be passed where `(fn() uses Clock)` is allowed, and stored or returned there, with no wrapper and no change to how it is called. A wrapper would need storage that lives as long as the value, which a function value that captures nothing does not have. |
 
 ## Methods
 
@@ -820,7 +820,9 @@ module then silently changes the semantics of a pattern in another file, and
 every binding in a pattern depends on the names of the module. In Truss, a
 constant written as the bare name `limit` still compiles, as in Python, but
 the binding matches every value. It therefore makes a later arm unreachable
-or is itself unused, and both are errors.
+or is itself unused, and both are errors. When a constant of the module has
+the binding's name and type, both errors name it, and their fixes write its
+path.
 
 | Rule | Reason |
 |---|---|
@@ -1490,6 +1492,7 @@ only, to state the definition.
 | Rule | Reason |
 |---|---|
 | A method of a trait or of an `impl` is known by its contract too. | An `impl` states what it adds to the trait's contract in its own `ensures`: `Int64.compare` ensures the order of the integers. An edit to a provided body then changes no fact that callers know. An edit to an `impl`'s body re-proves that method and the `impl`'s laws alone. |
+| An `ensures` that fixes a pure function's result is the call's value: `identical(result, e)`, or `result == e` where `==` is identity, as on integers. An `e` that calls the function itself is not used. | A fact about a call then needs no term of the call to take effect. `List.element` ensures `identical(result, self.model()[position])`, so a quantifier over a list's elements is a quantifier over its model, which code that indexes the list instantiates. A hand-written `Equal` is not identity, and neither is a structural equality such as `String`'s, under which two equal strings can differ in `capacity()`, so neither fixes a value. A recursive definition is not unfolded. |
 | A clause applies only where every name it mentions is visible. | An `ensures` that reads the fields of an opaque type is a fact inside the type's package and no fact elsewhere, so `opaque` hides the representation from proofs too. |
 | A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The proofs of callers in other packages read a `requires` and a `cost`, and a clause applies only where every name it mentions is visible. The `ensures` lets callers inside the package know a result in terms of private helpers. |
 | A bit-level fact is requested with `assert ... by bit_vector`. | Bit-blasting is slow on most queries, so only the assertion that asks for it is proven that way, as with Verus's `by (bit_vector)`. Every other query knows a bitwise operation by a few facts, and no query falls back to bit-blasting. |
@@ -1630,9 +1633,11 @@ in review, because the fields are written in the public declaration. The
 fields of an opaque type are accessible throughout its package, not only in
 one file, because the methods of a type can live in any file of the package.
 
-**A private or `internal` definition that nothing in its package uses is an
-error,** as an unused variable is. No other package can call it, so it is
-dead code, and it keeps alive the code it calls.
+**An `internal` definition that nothing in its package uses is an error,**
+as an unused variable is. No other package can call it, so it is dead code,
+and it keeps alive the code it calls. **A private definition that nothing
+uses is a warning.** A private helper is often written before its first
+caller, and an error would fail the check while that caller is unwritten.
 
 **There is no level between `internal` and `public`.** Swift's `package`
 level works because the code it spans is versioned as one unit. Truss

@@ -44,7 +44,7 @@ let encode_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
   Json.Object
     [
       ("range", encode_range encoding source diagnostic.span);
-      ("severity", Json.Int 1);
+      ("severity", Json.Int (match diagnostic.severity with Error -> 1 | Warning -> 2));
       ("code", Json.String (Diagnostic.Code.name diagnostic.code));
       ("source", Json.String "truss");
       ("message", Json.String diagnostic.message);

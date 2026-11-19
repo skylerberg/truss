@@ -892,10 +892,6 @@ let decide_default_literal state ~at type_ =
   | _ -> type_
 
 let find_head state (value : Syntax.expression) = Resolve.find_head state.resolved value
-
-let is_variant_name (member : Syntax.name) =
-  member.text <> "" && member.text.[0] >= 'A' && member.text.[0] <= 'Z'
-
 let show state type_ = Types.show (zonk state type_)
 let describe state type_ = Types.describe (zonk state type_)
 

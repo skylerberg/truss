@@ -10,14 +10,8 @@ let standard =
   ]
 
 let setup ?dependencies files = Support.setup ?dependencies (standard @ files)
-
-let list_diagnostics packages name =
-  let file = parse_file name in
-  (match Support.parse_errors packages file with
-  | [] -> ()
-  | errors -> Harness.fail "the test input does not parse: %s" (String.concat " " errors));
-  Database.For_testing.list_diagnostics [ Resolve ] (Database.create packages) file
-
+let check packages = Database.For_testing.list_diagnostics [ Resolve ] (Database.create packages)
+let list_diagnostics packages name = Support.run_check ~check packages name
 let list_codes = Support.list_codes
 
 let expect_no_diagnostics files =
@@ -32,7 +26,6 @@ let expect_no_diagnostics files =
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) reported)))
     files
 
-let check packages = Database.For_testing.list_diagnostics [ Resolve ] (Database.create packages)
 let expect_one_diagnostic = Support.expect_one_diagnostic ~setup:(fun files -> setup files) ~check
 
 let locate_name packages name text occurrence =
@@ -346,6 +339,46 @@ let () =
   Harness.test "log in a cost bound is the specification function" (fun () ->
       expect_reference Fixtures.Resolve.cost_logarithmic_in_a_count ~name:("log", 1)
         "specification function");
+  Harness.test "a call of log in a cost bound is the specification function despite a local"
+    (fun () ->
+      expect_reference Fixtures.Resolve.cost_calling_log_on_a_parameter_named_log ~name:("log", 2)
+        "specification function";
+      expect_binding_reference Fixtures.Resolve.cost_calling_log_on_a_parameter_named_log
+        ~use:("log", 3) ~binding:("log", 1));
+  Harness.test "a cost function's name in a cost bound is a local where it is not called" (fun () ->
+      expect_binding_reference Fixtures.Resolve.cost_bound_reading_a_parameter_named_time
+        ~use:("time", 3) ~binding:("time", 1));
+  Harness.test "a local named log takes precedence over log in a specification" (fun () ->
+      expect_binding_reference Fixtures.Resolve.requires_calling_a_parameter_named_log
+        ~use:("log", 2) ~binding:("log", 1));
+  Harness.test "a function of the module named log takes precedence over log in a specification"
+    (fun () ->
+      expect_reference Fixtures.Resolve.requires_calling_a_function_named_log ~name:("log", 2)
+        "app::main::log");
+  Harness.test "log in a specification is the specification function where it is not called"
+    (fun () ->
+      expect_reference Fixtures.Resolve.requires_naming_log_without_arguments ~name:("log", 1)
+        "specification function");
+  Harness.test "visited in a for loop's clauses is the values of the iterations before" (fun () ->
+      expect_reference Fixtures.Resolve.loop_clause_reading_visited ~name:("visited", 1) "visited");
+  Harness.test "a local named visited shadows the word in a for loop's clauses" (fun () ->
+      expect_binding_reference Fixtures.Resolve.loop_clause_reading_a_local_named_visited
+        ~use:("visited", 2) ~binding:("visited", 1));
+  Harness.test "a quantifier's binding named result shadows the return value in ensures" (fun () ->
+      expect_binding_reference Fixtures.Resolve.ensures_binding_result_in_a_quantifier
+        ~use:("result", 2) ~binding:("result", 1));
+  Harness.test "a function type's requires in an ensures does not name the return value" (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.function_type_requires_naming_result_in_an_ensures
+        "resolve.unknown_name" ~at:("result", 1));
+  Harness.test "a function type's requires in a loop invariant does not name visited" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Resolve.function_type_requires_naming_visited_in_a_loop_invariant
+        "resolve.unknown_name" ~at:("visited", 1));
+  Harness.test "a function type's input named log shadows log in its requires in a cost bound"
+    (fun () ->
+      expect_binding_reference
+        Fixtures.Resolve.function_type_requires_calling_its_input_log_in_a_cost_bound
+        ~use:("log", 2) ~binding:("log", 1));
   Harness.test "a record's fields are in scope in its invariant" (fun () ->
       expect_reference "type Range(low: Int64, high: Int64)\n  invariant low <= high\n"
         ~name:("low", 2) "field low")
@@ -381,12 +414,38 @@ let () =
           @ [ ("app::main", "use app::shapes\n\nfn f() -> Int64 {\n  let = shapes::area()\n}\n") ])
       in
       let file = parse_file "app::main" in
-      if Support.parse_errors packages file = [] then Harness.fail "parsed";
-      match Database.For_testing.list_diagnostics [ Resolve ] (Database.create packages) file with
+      let database = Database.create packages in
+      if Database.For_testing.list_diagnostics [ Parse ] database file = [] then
+        Harness.fail "parsed";
+      match Database.For_testing.list_diagnostics [ Resolve ] database file with
       | [] -> ()
       | reported -> Harness.fail "reported %s" (String.concat "; " (list_codes reported)));
   Harness.test "an import of a module that does not exist is an error" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.import_of_a_missing_module "resolve.unknown_module");
+  Harness.test "a path that starts with no package or import names the file's module" (fun () ->
+      expect_one_diagnostic "fn f() -> Int64 {\n  main::lucky\n}\n" "resolve.unknown_module"
+        ~says:
+          "No module `main` is imported or exists. Every path starts with a package name, even \
+           inside the package. This file's module is `app::main`.");
+  Harness.test "an import that starts with no package names the file's module" (fun () ->
+      expect_one_diagnostic "use shapes\n\nfn f() {}\n" "resolve.unknown_module"
+        ~says:
+          "No module `shapes` exists. Every path starts with a package name, even inside the \
+           package. This file's module is `app::main`.");
+  Harness.test "a missing module under an import or a package says only that it is missing"
+    (fun () ->
+      List.iter
+        (fun (text, expected) ->
+          match list_diagnostics (setup (("app::main", text) :: others)) "app::main" with
+          | [ diagnostic ] -> Harness.expect_string ~expected diagnostic.message
+          | reported -> Harness.fail "found [%s]" (String.concat "; " (list_codes reported)))
+        [
+          ( "use app::shapes\n\nfn f() -> Int64 {\n  shapes::missing::area()\n}\n",
+            "No module `shapes::missing` is imported or exists." );
+          ( "fn f() -> Int64 {\n  app::missing::area()\n}\n",
+            "No module `app::missing` is imported or exists." );
+          ("use app::missing\n\nfn f() {}\n", "No module `app::missing` exists.");
+        ]);
   Harness.test "two imports with one last name are an error at the second" (fun () ->
       Support.expect_one_diagnostic ~check
         ~setup:(setup ~dependencies:[ ("app", "other") ])
@@ -424,8 +483,10 @@ let () =
   Harness.test "a body the parser could not read is not resolved" (fun () ->
       let packages = setup [ ("app::main", Fixtures.Resolve.body_with_a_broken_let) ] in
       let file = parse_file "app::main" in
-      if Support.parse_errors packages file = [] then Harness.fail "parsed";
-      match Database.For_testing.list_diagnostics [ Resolve ] (Database.create packages) file with
+      let database = Database.create packages in
+      if Database.For_testing.list_diagnostics [ Parse ] database file = [] then
+        Harness.fail "parsed";
+      match Database.For_testing.list_diagnostics [ Resolve ] database file with
       | [] -> ()
       | reported ->
           Harness.fail "resolved the broken body: %s" (String.concat "; " (list_codes reported)))
@@ -555,8 +616,10 @@ let () =
           [ ("app::main", Fixtures.Resolve.impls_rejected_for_different_function_type_arguments) ]
       in
       let file = parse_file "app::main" in
-      if Support.parse_errors packages file = [] then Harness.fail "parsed";
-      match list_codes (check packages file) with
+      let database = Database.create packages in
+      if Database.For_testing.list_diagnostics [ Parse ] database file = [] then
+        Harness.fail "parsed";
+      match list_codes (Database.For_testing.list_diagnostics [ Resolve ] database file) with
       | [] -> ()
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported));
   Harness.test "impls rejected for different function type arguments have distinct keys" (fun () ->

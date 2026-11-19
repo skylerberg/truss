@@ -106,7 +106,7 @@ let list_holds ~project packages =
       | Some holder ->
           List.filter (fun capability -> List.mem capability (of_ holder)) dependency.capabilities
     in
-    let now = List.sort_uniq String.compare (offered @ of_ dependency.package) in
+    let now = List.sort_uniq Grant.compare_capability (offered @ of_ dependency.package) in
     now <> of_ dependency.package
     && begin
       Package_table.replace held dependency.package now;
@@ -145,7 +145,10 @@ let lock ~project packages : Lock.t =
     packages
 
 let list_differences ~(written : Lock.t) ~(current : Lock.t) =
-  let show_capabilities = function [] -> "nothing" | held -> String.concat ", " held in
+  let show_capabilities = function
+    | [] -> "nothing"
+    | held -> String.concat ", " (List.map Grant.show_capability held)
+  in
   List.filter_map
     (fun (entry : Lock.entry) ->
       match Lock.find written entry.name with
@@ -162,7 +165,7 @@ let list_differences ~(written : Lock.t) ~(current : Lock.t) =
           Some
             (Printf.sprintf "`%s` %s has another hash." (Path.show_package entry.name)
                (Version.show entry.version))
-      | Some line when List.sort String.compare line.holds <> entry.holds ->
+      | Some line when line.holds <> entry.holds ->
           Some
             (Printf.sprintf "`%s` is said to hold %s, and the manifests grant it %s."
                (Path.show_package entry.name) (show_capabilities line.holds)

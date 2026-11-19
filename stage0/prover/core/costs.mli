@@ -13,7 +13,6 @@ val bound : Logic.term -> Logic.term
 val plus : Logic.term -> Logic.term -> Logic.term
 val minus : Logic.term -> Logic.term -> Logic.term
 val times : Logic.term -> Logic.term -> Logic.term
-val at_most : Logic.term -> Logic.term -> Logic.term
 val at_least_zero : Logic.term -> Logic.term
 val larger : Logic.term -> Logic.term -> Logic.term
 val units : Logic.term -> Logic.term

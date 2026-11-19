@@ -123,9 +123,13 @@ let () =
           ]
       in
       let file = Support.parse_file "app::main" in
-      if List.length (Support.parse_errors packages file) <> 2 then
+      let database = Support.make_database packages in
+      if List.length (Database.For_testing.list_diagnostics [ Parse ] database file) <> 2 then
         Harness.fail "expected two syntax errors";
-      match Support.list_codes (check packages file) with
+      match
+        Support.list_codes
+          (Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ] database file)
+      with
       | [ "types.mismatch" ] -> ()
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported));
   Harness.test "a literal takes the type of the other operand" (fun () ->
@@ -1126,6 +1130,9 @@ let () =
   Harness.test "a quantifier over a type in a compiled body" (fun () ->
       expect_one_diagnostic Fixtures.Infer.quantifier_over_int64_in_a_body
         "types.specification_only");
+  Harness.test "a quantifier's range is of integers or characters, as a `for` loop's is" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.quantifier_over_a_float_range "types.not_indexable";
+      expect_fine Fixtures.Infer.quantifier_over_a_character_range);
   Harness.test "a local of type Integer in a compiled body" (fun () ->
       expect_one_diagnostic Fixtures.Infer.integer_local_in_a_body "types.specification_only"
         ~says:"`big` has the type `Integer`");

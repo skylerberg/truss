@@ -22,6 +22,7 @@ let run_in_source (context : State.context) (source : State.source) read =
     raise (Unsupported { unsupported with foreign_definition = Some source.name })
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
+let list_method_type_arguments ~self_type arguments = Types.Type self_type :: arguments
 
 let read_parameter_name (parameter : Mir.parameter) =
   match Mir.find_local_name parameter.local with
@@ -158,12 +159,12 @@ let add_quantifier_facts ~binders (context : State.context) term =
         Logic.Exists
           ( symbols,
             match facts with [] -> body | facts -> Logic.( &&& ) (Logic.conjunction facts) body )
-    | Logic.Operation ((("and" | "or") as operator), parts) ->
+    | Logic.Operation (((And | Or) as operator), parts) ->
         Logic.Operation (operator, List.map (walk positive bound) parts)
-    | Logic.Operation ("=>", [ premise; conclusion ]) ->
-        Logic.Operation ("=>", [ walk (not positive) bound premise; walk positive bound conclusion ])
-    | Logic.Operation ("not", [ inner ]) ->
-        Logic.Operation ("not", [ walk (not positive) bound inner ])
+    | Logic.Operation (Implies, [ premise; conclusion ]) ->
+        Logic.Operation
+          (Implies, [ walk (not positive) bound premise; walk positive bound conclusion ])
+    | Logic.Operation (Not, [ inner ]) -> Logic.Operation (Not, [ walk (not positive) bound inner ])
     | term -> term
   in
   walk true binders term
@@ -229,16 +230,13 @@ let collect_printed printed =
 let show_truss_value context term =
   let parenthesize level inner text = if inner < level then "(" ^ text ^ ")" else text in
   let rec show_arithmetic level = function
-    | Logic.Operation ((("+" | "*") as operator), (_ :: _ :: _ as parts)) ->
-        let inner = if operator = "+" then 1 else 2 in
-        Option.map
-          (fun printed -> parenthesize level inner (String.concat (" " ^ operator ^ " ") printed))
-          (collect_printed (List.map (show_arithmetic inner) parts))
-    | Logic.Operation ("-", [ left; right ]) ->
+    | Logic.Operation (Add, (_ :: _ :: _ as parts)) -> show_infix level 1 " + " parts
+    | Logic.Operation (Multiply, (_ :: _ :: _ as parts)) -> show_infix level 2 " * " parts
+    | Logic.Operation (Subtract, [ left; right ]) ->
         Option.map
           (fun printed -> parenthesize level 1 (String.concat " - " printed))
           (collect_printed [ show_arithmetic 1 left; show_arithmetic 2 right ])
-    | Logic.Operation ("-", [ inner ]) ->
+    | Logic.Operation (Negate, [ inner ]) ->
         Option.map (fun printed -> parenthesize level 3 ("-" ^ printed)) (show_arithmetic 3 inner)
     | Logic.Integer value when Z.sign value < 0 && level > 0 -> Some ("(" ^ Z.to_string value ^ ")")
     | Logic.Apply (Logic.Symbol.Field { field; variant = None; _ }, [ receiver ]) ->
@@ -247,25 +245,33 @@ let show_truss_value context term =
     | Logic.Integer value -> Some (Z.to_string value)
     | Logic.Boolean value -> Some (if value then "true" else "false")
     | _ -> None
+  and show_infix level inner separator parts =
+    Option.map
+      (fun printed -> parenthesize level inner (String.concat separator printed))
+      (collect_printed (List.map (show_arithmetic inner) parts))
   in
   show_arithmetic 0 term
 
 let show_truss_goal context term =
   let show_value = show_truss_value context in
   let rec print = function
-    | Logic.Operation ((("<" | "<=" | ">" | ">=" | "=") as operator), [ left; right ]) -> (
-        match (show_value left, show_value right) with
-        | Some left, Some right ->
-            Some (Printf.sprintf "%s %s %s" left (if operator = "=" then "==" else operator) right)
-        | _ -> None)
-    | Logic.Operation ("and", parts) -> join_parts " && " parts
-    | Logic.Operation ("or", parts) -> join_parts " || " parts
-    | Logic.Operation ("not", [ inner ]) -> Option.map (Printf.sprintf "!(%s)") (print inner)
-    | Logic.Operation ("=>", [ premise; conclusion ]) -> (
+    | Logic.Operation (Less, [ left; right ]) -> show_comparison left "<" right
+    | Logic.Operation (Less_equal, [ left; right ]) -> show_comparison left "<=" right
+    | Logic.Operation (Greater, [ left; right ]) -> show_comparison left ">" right
+    | Logic.Operation (Greater_equal, [ left; right ]) -> show_comparison left ">=" right
+    | Logic.Operation (Equal, [ left; right ]) -> show_comparison left "==" right
+    | Logic.Operation (And, parts) -> join_parts " && " parts
+    | Logic.Operation (Or, parts) -> join_parts " || " parts
+    | Logic.Operation (Not, [ inner ]) -> Option.map (Printf.sprintf "!(%s)") (print inner)
+    | Logic.Operation (Implies, [ premise; conclusion ]) -> (
         match (print premise, print conclusion) with
         | Some premise, Some conclusion -> Some (Printf.sprintf "(%s) ==> (%s)" premise conclusion)
         | _ -> None)
     | term -> show_value term
+  and show_comparison left spelling right =
+    match (show_value left, show_value right) with
+    | Some left, Some right -> Some (Printf.sprintf "%s %s %s" left spelling right)
+    | _ -> None
   and join_parts separator parts =
     Option.map
       (fun printed -> "(" ^ String.concat separator printed ^ ")")
@@ -273,9 +279,9 @@ let show_truss_goal context term =
   in
   let printed =
     match term with
-    | Logic.Operation ("and", parts) ->
+    | Logic.Operation (And, parts) ->
         Option.map (String.concat " && ") (collect_printed (List.map print parts))
-    | Logic.Operation ("or", parts) ->
+    | Logic.Operation (Or, parts) ->
         Option.map (String.concat " || ") (collect_printed (List.map print parts))
     | term -> print term
   in
@@ -586,14 +592,9 @@ let rec is_equality_identity context ?(seen = []) (ty : Types.ty) =
 let make_in_range ty term =
   match find_bounds ty with
   | Some (low, high) ->
-      let in_bounds =
-        Logic.(Operation ("<=", [ Integer low; term ]) &&& Operation ("<=", [ term; Integer high ]))
-      in
+      let in_bounds = Logic.(less_equal (Integer low) term &&& less_equal term (Integer high)) in
       if Types.is_builtin Character ty then
-        Logic.(
-          in_bounds
-          &&& not_
-                (Operation ("<=", [ int 0xD800; term ]) &&& Operation ("<=", [ term; int 0xDFFF ])))
+        Logic.(in_bounds &&& not_ (less_equal (int 0xD800) term &&& less_equal term (int 0xDFFF)))
       else in_bounds
   | None -> Logic.Boolean true
 

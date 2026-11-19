@@ -1,75 +1,83 @@
 type t = {
   types : C_types.t;
-  prefix : string;
+  item : Lowered.Item.t;
   bytes : (string, int) Hashtbl.t;
-  mutable prototypes : (string * string) list;
+  mutable references : Lowered.Item.t list;
   mutable sites : Lowered.site list;
-  mutable statics : string list;
-  mutable helpers_used : string list;
-  mutable referenced_items : Lowered.Item.t list;
+  mutable capabilities : Path.t list;
+  mutable prototypes : (C_text.t * C_text.t) list;
+  mutable statics : C_text.t list;
+  mutable helpers_used : C_runtime.helper list;
   mutable called : Lowered.Item.t list;
   mutable calls : (Path.t * int) list;
   mutable failures : (C_runtime.failure * Lowered.site) list;
 }
 
-let create env ~prefix =
+let create env ~item =
   {
-    types = C_types.create env;
-    prefix;
+    types = C_types.create env ~owner:(Some item);
+    item;
     bytes = Hashtbl.create 16;
-    prototypes = [];
+    references = [];
     sites = [];
+    capabilities = [];
+    prototypes = [];
     statics = [];
     helpers_used = [];
-    referenced_items = [];
     called = [];
     calls = [];
     failures = [];
   }
 
-let add_item item items =
-  if List.exists (Lowered.Item.equal item) items then items else item :: items
+let add_once ~equal value values =
+  if List.exists (equal value) values then values else value :: values
 
-let refer emission item = emission.referenced_items <- add_item item emission.referenced_items
+let render_item emission item : C_text.t =
+  if not (Lowered.Item.equal item emission.item) then
+    emission.references <- add_once ~equal:Lowered.Item.equal item emission.references;
+  Name (Item item)
 
-let record_call emission item =
-  refer emission item;
-  emission.called <- add_item item emission.called
+let render_called_item emission item =
+  emission.called <- add_once ~equal:Lowered.Item.equal item emission.called;
+  render_item emission item
+
+let render_site emission site : C_text.t =
+  emission.sites <- site :: emission.sites;
+  Concat [ Text "&"; Name (Site site) ]
+
+let render_capability emission capability : C_text.t =
+  emission.capabilities <- add_once ~equal:Path.equal capability emission.capabilities;
+  Name (Capability capability)
 
 let record_capability_call emission ~capability ~slot =
   emission.calls <- (capability, slot) :: emission.calls
 
 let record_failure emission failure site = emission.failures <- (failure, site) :: emission.failures
 
-let list_referenced_items emission ~referrer =
-  List.filter
-    (fun item -> not (Lowered.Item.equal item referrer))
-    (List.rev emission.referenced_items)
-
 let declare_prototype emission symbol declaration =
   if not (List.mem_assoc symbol emission.prototypes) then
     emission.prototypes <- (symbol, declaration) :: emission.prototypes
 
-let render_site emission site =
-  emission.sites <- site :: emission.sites;
-  "&" ^ C_runtime.render_site_symbol site
-
-let render_bytes_symbol emission index = Printf.sprintf "%s_bytes_%d" emission.prefix index
-
-let render_bytes_name emission text =
+let render_bytes_name emission text : C_text.t =
   match Hashtbl.find_opt emission.bytes text with
-  | Some index -> render_bytes_symbol emission index
+  | Some index -> Name (Byte_constant index)
   | None ->
       let index = Hashtbl.length emission.bytes in
       Hashtbl.replace emission.bytes text index;
-      render_bytes_symbol emission index
+      Name (Byte_constant index)
 
-let use_helper emission name =
-  if not (List.mem name emission.helpers_used) then
-    emission.helpers_used <- name :: emission.helpers_used;
-  name
+let use_helper emission helper : C_text.t =
+  emission.helpers_used <- add_once ~equal:( = ) helper emission.helpers_used;
+  Name (Helper helper)
 
-let add_static emission render =
-  let name = Printf.sprintf "%s_static_%d" emission.prefix (List.length emission.statics) in
+let add_static emission render : C_text.t =
+  let name : C_text.t = Name (Static (List.length emission.statics)) in
   emission.statics <- render name :: emission.statics;
   name
+
+let list_references emission = List.rev emission.references
+
+let list_bytes emission =
+  List.sort
+    (fun (first, _) (second, _) -> Int.compare first second)
+    (Hashtbl.fold (fun text index entries -> (index, text) :: entries) emission.bytes [])

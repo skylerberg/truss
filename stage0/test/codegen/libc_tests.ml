@@ -1,12 +1,12 @@
 let view_ty = Storage.make_view_type Codegen_support.uint8
 let bytes_ty = Storage.make_storage_type Codegen_support.uint8
 
-let intrinsic_types : Backend.For_testing.Intrinsics.types =
+let intrinsic_types : Lowering.For_testing.Intrinsics.types =
   { uint64 = Codegen_support.uint64; string_slice = Codegen_support.named "StringSlice" }
 
 let operate builder ?destination ?(type_arguments = []) operation arguments =
   ignore
-    (Backend.For_testing.Intrinsics.lower
+    (Lowering.For_testing.Intrinsics.lower
        (Codegen_support.make_shape_env ())
        builder intrinsic_types operation ~type_arguments arguments ~destination
        ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
@@ -105,7 +105,7 @@ let () =
       in
       let path = Emit_c.Ir_builder.allocate_local builder (Codegen_support.value bytes_ty) in
       ignore
-        (Backend.For_testing.Intrinsics.lower env builder intrinsic_types
+        (Lowering.For_testing.Intrinsics.lower env builder intrinsic_types
            (Runtime (Libc Proc_pidpath)) ~type_arguments:[]
            [
              Value (Codegen_support.constant_int32 1);
@@ -401,17 +401,17 @@ let () =
                   Place (Lowered.make_local_place seconds);
                   Place (Lowered.make_local_place nanoseconds);
                 ];
-              let emit_bool rvalue = Emit_c.Ir_builder.emit_temporary builder (Raw Bool) rvalue in
+              let emit_bool rvalue = Emit_c.Ir_builder.emit_value builder (Raw Bool) rvalue in
               let is_recent =
                 emit_bool
-                  (Binary
+                  (Compare
                      ( Greater,
                        Copy (Lowered.make_local_place seconds),
                        Codegen_support.constant_int64 1_700_000_000 ))
               in
               let is_whole =
                 emit_bool
-                  (Binary
+                  (Compare
                      ( Less,
                        Copy (Lowered.make_local_place nanoseconds),
                        Codegen_support.constant_int64 1_000_000_000 ))
@@ -437,7 +437,7 @@ let () =
       let uint32 = Ground.make_builtin UInt32 in
       let operate builder ~destination operation arguments =
         ignore
-          (Backend.For_testing.Intrinsics.lower
+          (Lowering.For_testing.Intrinsics.lower
              (Codegen_support.make_shape_env ())
              builder intrinsic_types operation ~type_arguments:[] arguments
              ~destination:(Some destination)
@@ -464,7 +464,7 @@ let () =
               in
               let operate_on_bytes ?destination operation arguments =
                 ignore
-                  (Backend.For_testing.Intrinsics.lower
+                  (Lowering.For_testing.Intrinsics.lower
                      (Codegen_support.make_shape_env ())
                      builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ]
                      arguments ~destination
@@ -533,8 +533,8 @@ let () =
               let first = draw () in
               let second = draw () in
               let differ =
-                Emit_c.Ir_builder.emit_temporary builder (Raw Bool)
-                  (Binary
+                Emit_c.Ir_builder.emit_value builder (Raw Bool)
+                  (Compare
                      ( Not_equal,
                        Copy (Lowered.make_local_place first),
                        Copy (Lowered.make_local_place second) ))
@@ -660,11 +660,11 @@ let () =
         Memory_layout.create Codegen_support.host
           ~compute_shape:(Monomorphic.compute_shape Codegen_support.standard_context)
       in
-      let drop_and_copy = Backend.For_testing.drop_and_copy env in
+      let drop_and_copy = Lowering.For_testing.drop_and_copy env in
       let int32 = Ground.make_builtin Int32 in
       let view_ty = Storage.make_view_type (Ground.make_builtin UInt8) in
       let handle_ty = Ground.make_builtin Handle in
-      let types : Backend.For_testing.Intrinsics.types =
+      let types : Lowering.For_testing.Intrinsics.types =
         {
           uint64 = Ground.make_builtin UInt64;
           string_slice = Codegen_support.make_standard_type "text" "StringSlice" ();
@@ -683,7 +683,7 @@ let () =
         let open_test_file () =
           let descriptor = Emit_c.Ir_builder.allocate_local builder (Codegen_support.value int32) in
           ignore
-            (Backend.For_testing.Intrinsics.lower env builder types (Runtime (Libc Open))
+            (Lowering.For_testing.Intrinsics.lower env builder types (Runtime (Libc Open))
                ~type_arguments:[]
                [
                  Place (Lowered.make_local_place name);
@@ -702,21 +702,16 @@ let () =
         Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place handle,
-               Build
-                 {
-                   ty = handle_ty;
-                   variant = None;
-                   fields = [ ("descriptor", Copy (Lowered.make_local_place first)) ];
-                 } ));
+               Builtin_records.Handle.build ~descriptor:(Copy (Lowered.make_local_place first)) ));
         Emit_c.Ir_builder.emit builder (Drop (Lowered.make_local_place handle));
         let second = open_test_file () in
         let same =
-          Emit_c.Ir_builder.emit_temporary builder (Raw Bool)
-            (Binary
+          Emit_c.Ir_builder.emit_value builder (Raw Bool)
+            (Compare
                (Equal, Copy (Lowered.make_local_place first), Copy (Lowered.make_local_place second)))
         in
         let status =
-          Emit_c.Ir_builder.emit_temporary builder (Codegen_support.value int32)
+          Emit_c.Ir_builder.emit_value builder (Codegen_support.value int32)
             (Convert (same, Integer Int32))
         in
         Emit_c.Ir_builder.finish builder (Return (Some status));
@@ -727,7 +722,8 @@ let () =
         Codegen_support.run_program ~env
           [
             Codegen_support.make_program_fragment entry;
-            Codegen_support.make_program_fragment (Backend.For_testing.drop drop_and_copy handle_ty);
+            Codegen_support.make_program_fragment
+              (Lowering.For_testing.drop drop_and_copy handle_ty);
           ]
       in
       if status <> 1 then
@@ -823,7 +819,7 @@ let () =
           Emit_c.Ir_builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
         in
         ignore
-          (Backend.For_testing.Intrinsics.lower
+          (Lowering.For_testing.Intrinsics.lower
              (Codegen_support.make_shape_env ())
              builder intrinsic_types (Scalar Convert)
              ~type_arguments:[ float64; Codegen_support.int32 ]

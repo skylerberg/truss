@@ -16,7 +16,6 @@ let () =
             [
               Codegen_support.local ~name:"total" (Codegen_support.value Codegen_support.int32);
               Codegen_support.local ~name:"i" (Codegen_support.value Codegen_support.int32);
-              Codegen_support.local (Raw Bool);
             ]
             [
               Codegen_support.block
@@ -25,14 +24,13 @@ let () =
                   Assign (Codegen_support.at 1, Use (Codegen_support.constant_int32 1));
                 ]
                 (Goto 1);
-              Codegen_support.block
-                [
-                  Assign
-                    ( Codegen_support.at 2,
-                      Binary (Less_equal, Codegen_support.copy 1, Codegen_support.constant_int32 10)
-                    );
-                ]
-                (Switch { value = Codegen_support.copy 2; cases = [ (Z.one, 2) ]; default = 3 });
+              Codegen_support.block []
+                (Branch
+                   {
+                     test = (Less_equal, Codegen_support.copy 1, Codegen_support.constant_int32 10);
+                     yes = 2;
+                     no = 3;
+                   });
               Codegen_support.block
                 [
                   Assign
@@ -353,7 +351,18 @@ let () =
                         } );
                   Call
                     {
-                      target = Indirect { value = Codegen_support.copy 2; signature };
+                      target =
+                        Indirect
+                          {
+                            code =
+                              Copy
+                                (Builtin_records.Function_value.project_code (Codegen_support.at 2));
+                            environment =
+                              Copy
+                                (Builtin_records.Function_value.project_environment
+                                   (Codegen_support.at 2));
+                            signature;
+                          };
                       arguments = [ Codegen_support.constant_int32 1; Constant Null ];
                       result = Returned (Codegen_support.at 3);
                     };
@@ -370,7 +379,7 @@ let () =
             [
               Assign
                 ( Codegen_support.at 0,
-                  Binary (Equal, float64_constant Float.nan, float64_constant Float.nan) );
+                  Compare (Equal, float64_constant Float.nan, float64_constant Float.nan) );
             ];
         ]);
   Codegen_support.test "IEEE float equality does not" (fun () ->
@@ -381,7 +390,7 @@ let () =
             [
               Assign
                 ( Codegen_support.at 0,
-                  Binary (Ieee_equal, float64_constant Float.nan, float64_constant Float.nan) );
+                  Compare (Ieee_equal, float64_constant Float.nan, float64_constant Float.nan) );
             ];
         ]);
   Codegen_support.test "NaN is ordered after every number" (fun () ->
@@ -392,7 +401,7 @@ let () =
             [
               Assign
                 ( Codegen_support.at 0,
-                  Binary (Less, float64_constant Float.infinity, float64_constant Float.nan) );
+                  Compare (Less, float64_constant Float.infinity, float64_constant Float.nan) );
             ];
         ]);
   Codegen_support.test "negative zero equals zero" (fun () ->
@@ -402,7 +411,8 @@ let () =
             [ Codegen_support.local (Raw Bool) ]
             [
               Assign
-                (Codegen_support.at 0, Binary (Equal, float64_constant (-0.0), float64_constant 0.0));
+                ( Codegen_support.at 0,
+                  Compare (Equal, float64_constant (-0.0), float64_constant 0.0) );
             ];
         ]);
   Codegen_support.test "a shift amount is masked to the width of the value" (fun () ->
@@ -623,7 +633,7 @@ let () =
       Codegen_support.expect_int ~expected:(180 + 6 + 32) (String.length left);
       if left = right then Codegen_support.fail "two long names give one symbol")
 
-let intrinsic_types : Backend.For_testing.Intrinsics.types =
+let intrinsic_types : Lowering.For_testing.Intrinsics.types =
   { uint64 = Codegen_support.uint64; string_slice = Codegen_support.named "StringSlice" }
 
 let build_entry build_body : Codegen_support.program_fragment =
@@ -637,7 +647,7 @@ let build_entry build_body : Codegen_support.program_fragment =
 
 let operate builder ?destination ?(type_arguments = [ Codegen_support.int32 ]) ?value_arguments
     operation arguments =
-  Backend.For_testing.Intrinsics.lower ?value_arguments
+  Lowering.For_testing.Intrinsics.lower ?value_arguments
     (Codegen_support.make_shape_env ())
     builder intrinsic_types operation ~type_arguments arguments ~destination
     ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
@@ -875,7 +885,7 @@ let () =
       in
       let view_ty = Storage.make_view_type Codegen_support.int32 in
       let operate builder ?destination operation arguments =
-        Backend.For_testing.Intrinsics.lower
+        Lowering.For_testing.Intrinsics.lower
           ~value_arguments:[ Z.of_int 3 ]
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
@@ -961,7 +971,7 @@ let () =
         Ground.make_builtin Array ~arguments:[ Type Codegen_support.int32; Value (Z.of_int 3) ]
       in
       let operate builder ?destination operation arguments =
-        Backend.For_testing.Intrinsics.lower
+        Lowering.For_testing.Intrinsics.lower
           ~value_arguments:[ Z.of_int 3 ]
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
@@ -1044,13 +1054,13 @@ let () =
                          (Scalar Fits)
                          [ Value (Constant (Float64 (Int64.bits_of_float float))) ]);
                     let emit_int32 rvalue =
-                      Emit_c.Ir_builder.emit_temporary builder
+                      Emit_c.Ir_builder.emit_value builder
                         (Codegen_support.value Codegen_support.int32)
                         rvalue
                     in
                     let is_right =
-                      Emit_c.Ir_builder.emit_temporary builder (Raw Bool)
-                        (Binary
+                      Emit_c.Ir_builder.emit_value builder (Raw Bool)
+                        (Compare
                            (Equal, Copy (Lowered.make_local_place fits), Constant (Bool expected)))
                     in
                     let bit = emit_int32 (Convert (is_right, Integer Int32)) in
@@ -1086,7 +1096,7 @@ let () =
   Codegen_support.test "a storage is shortened in place and keeps its room" (fun () ->
       let storage_ty = Storage.make_storage_type Codegen_support.uint8 in
       let operate_checked builder ?destination operation arguments =
-        Backend.For_testing.Intrinsics.lower
+        Lowering.For_testing.Intrinsics.lower
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
           ~destination
@@ -1160,7 +1170,7 @@ let () =
       let view_ty = Storage.make_view_type Codegen_support.uint8 in
       let operate_checked builder ?destination operation arguments =
         ignore
-          (Backend.For_testing.Intrinsics.lower
+          (Lowering.For_testing.Intrinsics.lower
              (Codegen_support.make_shape_env ())
              builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
              ~destination

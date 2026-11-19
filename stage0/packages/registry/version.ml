@@ -13,8 +13,17 @@ let parse text =
 let show (major, minor, patch) = Printf.sprintf "%d.%d.%d" major minor patch
 let compare : t -> t -> int = Stdlib.compare
 
-let parse_major (package : Path.package) =
+let find_major_suffix (package : Path.package) =
   match String.split_last ~sep:"_v" package.name with
-  | Some (_, digits) when digits <> "" && String.for_all Char.Ascii.is_digit digits -> (
-      match int_of_string_opt digits with Some major when major >= 1 -> major | _ -> 1)
-  | _ -> 1
+  | Some (base, digits) when digits <> "" && String.for_all Char.Ascii.is_digit digits -> (
+      match int_of_string_opt digits with
+      | Some major when major >= 2 -> Some (base, major)
+      | _ -> None)
+  | _ -> None
+
+let parse_major package =
+  match find_major_suffix package with Some (_, major) -> major | None -> 1
+
+let make_next_major_name (package : Path.package) =
+  let base, major = Option.value (find_major_suffix package) ~default:(package.name, 1) in
+  { package with name = Printf.sprintf "%s_v%d" base (major + 1) }

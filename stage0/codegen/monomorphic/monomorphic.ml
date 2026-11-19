@@ -155,16 +155,16 @@ let compute_named_builtin_shape ty (builtin : Intrinsic.builtin) (arguments : Gr
   | Array, [ Type element; Value count ] -> Array (element, Z.to_int count)
   | Storage, [ Type element ] -> Storage.make_storage_shape element
   | View, [ Type element ] -> Storage.make_view_shape element
-  | Handle, [] -> Record [ ("descriptor", Raw (Integer Int32)) ]
-  | Shared, [ Type _ ] -> Record [ ("value", Raw (Pointer Opaque)) ]
+  | Handle, [] -> Builtin_records.Handle.shape
+  | Shared, [ Type _ ] -> Builtin_records.Shared.shape
   | Integer, _ -> raise_bug "Integer exists only in specifications"
   | _, _ -> raise_bug "a built-in type with the wrong arguments: %s" (Ground.to_string ty)
 
 let find_builtin_shape (ty : Ground.ty) : Memory_layout.shape option =
   match ty with
   | Never -> Some (Sum [])
-  | Function function_type -> Some (Convention.make_function_value_shape function_type)
-  | Any _ -> Some (Record [ ("value", Raw (Pointer Opaque)); ("vtable", Raw (Pointer Opaque)) ])
+  | Function function_type -> Some (Builtin_records.Function_value.make_shape function_type)
+  | Any _ -> Some Builtin_records.Any.shape
   | Named { path; arguments } ->
       Option.map
         (fun builtin -> compute_named_builtin_shape ty builtin arguments)

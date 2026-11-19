@@ -88,13 +88,13 @@ type rvalue =
 
 and choice =
   | Conditional of {
-      condition : operand;
+      condition : block;
       then_ : block;
       else_ : block;
       if_condition : Core.origin option;
     }
   | Cases of case list
-  | Connective of { connective : connective; left : operand; right : block }
+  | Connective of { connective : connective; left : block; right : block }
 
 and specification =
   | Result

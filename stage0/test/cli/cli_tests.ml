@@ -391,7 +391,7 @@ let () =
       in
       let project = Cli.Command_packages.load (Filename.concat root "one") in
       expect_strings ~expected:[ "one" ] (list_names project);
-      if not (Cli.Report.clean (gather project)) then fail "has diagnostics");
+      if Cli.Report.has_errors (gather project) then fail "has errors");
   test "a dependency's failed proof is the program's" (fun () ->
       let root =
         make_directory
@@ -620,7 +620,7 @@ let () =
       let root = make_directory owned in
       let project = Cli.Command_packages.load root in
       expect_strings ~expected:[ "acme::geometry"; "app" ] (list_names project);
-      if not (Cli.Report.clean (gather ~proofs:true project)) then fail "has diagnostics");
+      if Cli.Report.has_errors (gather ~proofs:true project) then fail "has errors");
   test "show finds a definition of a package with an owner by its full path" (fun () ->
       match run_show (make_directory owned) "acme::geometry::vector::double" with
       | [ text ] ->
@@ -725,11 +725,47 @@ let () =
       if not (String.includes ~affix:"main.truss:3:5: `todo` in a proof can be reached" output) then
         fail "%s" output)
 
+let encode_report_record kind fields =
+  let payload = Buffer.create 32 in
+  List.iter
+    (function
+      | `Unsigned_8 value -> Buffer.add_uint8 payload value
+      | `Unsigned_32 value -> Buffer.add_int32_le payload (Int32.of_int value)
+      | `Unsigned_64 value -> Buffer.add_int64_le payload (Int64.of_int value)
+      | `Counted text ->
+          Buffer.add_int32_le payload (Int32.of_int (String.length text));
+          Buffer.add_string payload text)
+    fields;
+  let record = Buffer.create 64 in
+  Buffer.add_uint8 record kind;
+  Buffer.add_int32_le record (Int32.of_int (Buffer.length payload));
+  Buffer.add_buffer record payload;
+  Buffer.contents record
+
+let encode_started number = encode_report_record 0 [ `Unsigned_32 number ]
+
+let encode_ended number ~outcome ~microseconds ~message =
+  encode_report_record 1
+    [
+      `Unsigned_32 number;
+      `Unsigned_8 outcome;
+      `Unsigned_64 microseconds;
+      `Counted message;
+      `Counted "";
+      `Counted "";
+    ]
+
 let () =
   test "a report's records come back in the order of the tests, however they ended" (fun () ->
       let records =
         Backend.Test_report.For_testing.parse ~tests:2
-          "start 0\nstart 1\nmessage 4\nboom\ntest 1 panicked 30\ntest 0 passed 12\n"
+          (String.concat ""
+             [
+               encode_started 0;
+               encode_started 1;
+               encode_ended 1 ~outcome:2 ~microseconds:30 ~message:"boom";
+               encode_ended 0 ~outcome:0 ~microseconds:12 ~message:"";
+             ])
       in
       match records with
       | Ok
@@ -740,6 +776,17 @@ let () =
           ()
       | Ok records -> fail "read %d records differently" (List.length records)
       | Error message -> fail "%s" message);
+  test "a report record split across reads is read once, when it is whole" (fun () ->
+      let record = encode_ended 0 ~outcome:1 ~microseconds:7 ~message:"values differ" in
+      let bytes = List.init (String.length record) (fun index -> String.sub record index 1) in
+      match Backend.Test_report.For_testing.list_records_by_piece ~tests:1 bytes with
+      | [ (pieces_fed, { message = Some "values differ"; _ }) ]
+        when pieces_fed = String.length record ->
+          ()
+      | [ (pieces_fed, _) ] when pieces_fed <> String.length record ->
+          fail "read the record after %d of its %d bytes" pieces_fed (String.length record)
+      | [ _ ] -> fail "read the record with a different message"
+      | records -> fail "read %d records" (List.length records));
   test "a duration is shown in the largest unit under its size" (fun () ->
       expect_strings ~expected:[ "2.31s"; "42ms"; "87µs" ]
         (List.map Cli.Test_command.For_testing.show_duration [ 2_310_000; 42_000; 87 ]));
@@ -764,7 +811,17 @@ let () =
       expect_strings ~expected:[ "elsewhere" ]
         (List.map
            (fun (test : Cli.Test_command.test) -> test.name)
-           (select project ~paths:[ Filename.concat root "other.truss" ] ~match_:None)))
+           (select project ~paths:[ Filename.concat root "other.truss" ] ~match_:None)));
+  test "the file-system root as a path keeps every test" (fun () ->
+      let root =
+        make_package [ ("main.truss", suite); ("other.truss", "test \"elsewhere\" {\n}\n") ]
+      in
+      let project = Cli.Command_packages.load root in
+      expect_strings
+        ~expected:[ "doubles two"; "doubles three"; "halves"; "elsewhere" ]
+        (List.map
+           (fun (test : Cli.Test_command.test) -> test.name)
+           (select project ~paths:[ "/" ] ~match_:None)))
 
 let () =
   test "a function's signature is its text without its body" (fun () ->
@@ -971,7 +1028,7 @@ let () =
         Cli.Command_packages.load
           (make_package [ ("menu/menu.truss", Fixtures.Cli.menu_main_of_a_course) ])
       in
-      if not (Cli.Report.clean (gather project)) then fail "has diagnostics");
+      if Cli.Report.has_errors (gather project) then fail "has errors");
   test "an echo main can reach is refused" (fun () ->
       let project =
         Cli.Command_packages.load (make_package [ ("main.truss", Fixtures.Cli.main_with_an_echo) ])
@@ -1459,7 +1516,7 @@ let expect_versions root expected =
     fail "the lock file has [%s]"
       (String.concat "; " (List.map (fun (name, version) -> name ^ " " ^ version) listed))
 
-let clean root = Cli.Report.clean (gather (Cli.Command_packages.load root))
+let clean root = not (Cli.Report.has_errors (gather (Cli.Command_packages.load root)))
 
 let () =
   test "adding a package writes its entry, and a line for it and for each package it brings"
@@ -1470,7 +1527,7 @@ let () =
       if not (String.includes ~affix:"\"acme::geometry\" = []" (read root "truss.toml")) then
         fail "the manifest is %s" (read root "truss.toml");
       expect_versions root [ ("acme::geometry", "1.0.0"); ("acme::units", "1.0.0") ];
-      if not (clean root) then fail "has diagnostics");
+      if not (clean root) then fail "has errors");
   test "a package is added at the version it was published with, and nothing newer" (fun () ->
       let registry = make_stocked_registry () in
       let root = make_package [ uses_geometry ] in
@@ -1483,7 +1540,7 @@ let () =
       if add root [ "acme::shapes" ] <> 0 then fail "not added";
       expect_versions root
         [ ("acme::geometry", "1.0.0"); ("acme::shapes", "1.0.0"); ("acme::units", "1.1.0") ];
-      if not (clean root) then fail "has diagnostics");
+      if not (clean root) then fail "has errors");
   test "a package is added at the version written after @" (fun () ->
       let _ = make_stocked_registry () in
       let root = make_package [ ("main.truss", Fixtures.Cli.meter_through_lengths) ] in
@@ -1626,7 +1683,7 @@ let () =
       let app = Filename.concat root "app" in
       if add app [ "acme::geometry" ] <> 0 then fail "not added";
       expect_versions root [ ("acme::geometry", "1.0.0") ];
-      if not (clean root) then fail "has diagnostics";
+      if not (clean root) then fail "has errors";
       let project = Cli.Command_packages.load root in
       if
         not
@@ -1766,6 +1823,13 @@ let () =
       if status <> 0 then fail "status %d: %s" status output;
       expect_published registry angles [];
       expect_published registry { Path.owner = Some "acme"; name = "angles_v2" } [ "2.0.0" ]);
+  test "the name suggested for the next major version replaces the number at the end of the name"
+    (fun () ->
+      let _ = make_registry () in
+      expect_cannot_publish
+        (make_directory
+           [ ("truss.toml", make_manifest "acme::angles_v02"); ("degrees/degrees.truss", turn) ])
+        ~version:"1.0.0" "published under another name, such as `acme::angles_v3`");
   test "a release needs a version higher than the newest release's" (fun () ->
       let registry = make_registry () in
       let root = make_angles_package turn in
@@ -1853,7 +1917,7 @@ let () =
       if add root [ "acme::walls" ] <> 0 then fail "not added";
       expect_versions root
         [ ("acme::geometry", "1.0.0"); ("acme::units", "1.0.0"); ("acme::walls", "1.0.0") ];
-      if not (clean root) then fail "has diagnostics");
+      if not (clean root) then fail "has errors");
   test "a dependency that only a package's tests use is left out of its published lock file"
     (fun () ->
       let _ = make_stocked_registry () in
@@ -1876,7 +1940,7 @@ let () =
       let user = make_package [ ("main.truss", Fixtures.Cli.tall_through_walls) ] in
       ignore (add user [ "acme::walls" ]);
       expect_versions user [ ("acme::walls", "1.0.0") ];
-      if not (Cli.Report.clean (gather ~proofs:true (Cli.Command_packages.load user))) then
+      if Cli.Report.has_errors (gather ~proofs:true (Cli.Command_packages.load user)) then
         fail "has diagnostics");
   test "a package that depends on one of its project's that is not published is refused" (fun () ->
       let _ = make_registry () in
@@ -1964,12 +2028,12 @@ let () =
       if run_quietly [ "new"; "-C"; root; "acme::weather" ] <> 0 then fail "not made";
       let project = Cli.Command_packages.load (Filename.concat root "weather") in
       expect_strings ~expected:[ "acme::weather" ] (list_names project);
-      if not (Cli.Report.clean (gather ~proofs:true project)) then fail "has diagnostics");
+      if Cli.Report.has_errors (gather ~proofs:true project) then fail "has errors");
   test "a new package checks cleanly" (fun () ->
       let root = make_directory [] in
       if run_quietly [ "new"; "-C"; root; "weather" ] <> 0 then fail "not made";
       let project = Cli.Command_packages.load (Filename.concat root "weather") in
-      if not (Cli.Report.clean (gather ~proofs:true project)) then fail "has diagnostics")
+      if Cli.Report.has_errors (gather ~proofs:true project) then fail "has errors")
 
 let () =
   test "JSON with escapes and a surrogate pair is read" (fun () ->
@@ -2078,3 +2142,29 @@ let () =
           {|"params":{"uri":"file:///project/a%20b.truss","diagnostics":[]}|};
         ];
       if List.length !asked <> 1 then fail "a check with no open file")
+
+let () =
+  test "check reports an unused private function as a warning, and passes" (fun () ->
+      let root =
+        make_package
+          [
+            ( "main.truss",
+              "fn main(arguments: List[String]) -> ExitCode {\n\
+              \  ExitCode.success\n\
+               }\n\n\
+               fn helper() -> Int64 {\n\
+              \  1\n\
+               }\n" );
+          ]
+      in
+      let status, output = run_truss [ "check"; "-C"; root ] in
+      if status <> 0 then fail "check exited %d:\n%s" status output;
+      if not (String.includes ~affix:"warning[usage.unused_function]" output) then
+        fail "output %S" output;
+      if not (String.includes ~affix:"1 warning" output) then fail "output %S" output;
+      match
+        list_objects (Cli.Json.lookup_field "diagnostics" (run_json [ "check"; "-C"; root ]))
+      with
+      | [ diagnostic ] ->
+          expect_string ~expected:"warning" (read_string_field "severity" diagnostic)
+      | found -> fail "found %d diagnostics" (List.length found))

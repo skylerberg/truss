@@ -540,9 +540,11 @@ end
 
 type 'span edit = { span : 'span; replacement : string }
 type 'span fix = { title : string; edits : 'span edit list }
+type severity = Error | Warning
 
 type 'span diagnostic = {
   code : Code.t;
+  severity : severity;
   message : string;
   span : 'span;
   notes : ('span * string) list;
@@ -552,7 +554,11 @@ type 'span diagnostic = {
 type t = Source.span diagnostic
 type in_definition = Source.Definition_span.t diagnostic
 
-let make ?(notes = []) ?(fixes = []) ~code span message = { code; message; span; notes; fixes }
+let make ?(severity : severity = Error) ?(notes = []) ?(fixes = []) ~code span message =
+  { code; severity; message; span; notes; fixes }
+
+let is_error (diagnostic : _ diagnostic) = diagnostic.severity = Error
+let show_severity : severity -> string = function Error -> "error" | Warning -> "warning"
 
 type reported = Reported
 
@@ -682,8 +688,10 @@ let select_shown diagnostics =
     | [] -> []
     | rest when count = limit ->
         [
-          make ~code:Too_many_diagnostics (Source.make_zero_width last)
-            (Printf.sprintf "%d more errors are not shown." (List.length rest));
+          make
+            ~severity:(if List.exists is_error rest then (Error : severity) else Warning)
+            ~code:Too_many_diagnostics (Source.make_zero_width last)
+            (Printf.sprintf "%d more diagnostics are not shown." (List.length rest));
         ]
     | (first : t) :: rest -> first :: take (count + 1) first.span.stop rest
   in
@@ -732,8 +740,9 @@ let quote text =
 let render source (diagnostic : t) =
   let buffer = Buffer.create 256 in
   let text = Source.text source in
-  Printf.bprintf buffer "%s: error[%s]: %s\n"
+  Printf.bprintf buffer "%s: %s[%s]: %s\n"
     (show_location source diagnostic.span.start)
+    (show_severity diagnostic.severity)
     (Code.name diagnostic.code) diagnostic.message;
   let start = diagnostic.span.start in
   let line_start = Source.compute_line_start source start in
@@ -829,8 +838,10 @@ let to_json_object source diagnostic =
           (String.concat "," edits))
       diagnostic.fixes
   in
-  Printf.sprintf {|{"path":%s,"code":%s,"message":%s,"span":%s,"notes":[%s],"fixes":[%s]}|} path
+  Printf.sprintf
+    {|{"path":%s,"code":%s,"severity":%s,"message":%s,"span":%s,"notes":[%s],"fixes":[%s]}|} path
     (encode_json_string (Code.name diagnostic.code))
+    (encode_json_string (show_severity diagnostic.severity))
     (encode_json_string diagnostic.message)
     (encode_json_span source diagnostic.span)
     (String.concat "," notes) (String.concat "," fixes)

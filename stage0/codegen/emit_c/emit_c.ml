@@ -1,5 +1,5 @@
 module Key_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = C_types.key
+  type t = C_text.key
 end))
 
 module Path_table = Hashtbl.Make (Path)
@@ -17,6 +17,7 @@ let item (fragment : fragment) = fragment.item
 let references (fragment : fragment) = fragment.references
 let called (fragment : fragment) = fragment.called
 let failures (fragment : fragment) = fragment.failures
+let hash (fragment : fragment) = fragment.hash
 
 module Item_table = Hashtbl.Make (Lowered.Item)
 
@@ -78,73 +79,36 @@ let is_small (fragment : fragment) =
   | Functions { nested; weight } -> nested = 0 && weight <= small
   | Static_data | Table_entries _ -> false
 
-let render_fragment (fragment : fragment) =
-  let names = Hashtbl.create 64 in
-  let number prefix list =
-    List.iteri
-      (fun position name ->
-        if not (Hashtbl.mem names name) then
-          Hashtbl.replace names name (Printf.sprintf "%s%d" prefix position))
-      list
-  in
-  let self = Mangling.make_symbol fragment.item in
-  number "@item_" (List.map Mangling.make_symbol fragment.references);
-  number "@type_"
-    (List.map C_types.render_key_name
-       (fragment.types
-       @ List.concat_map
-           (fun (_, (defined : C_types.defined)) -> defined.references)
-           fragment.environments));
-  number "@site_" (List.map C_runtime.render_site_symbol fragment.sites);
-  let rename identifier =
-    if String.starts_with ~prefix:self identifier then
-      "@self" ^ String.drop_first (String.length self) identifier
-    else Option.value (Hashtbl.find_opt names identifier) ~default:identifier
-  in
-  let whole =
-    String.concat "\n"
-      (List.concat_map (fun (header, body) -> [ header; body ]) fragment.functions
-      @ [ fragment.definition ]
-      @ List.map
-          (fun (key, (defined : C_types.defined)) ->
-            C_types.render_key_name key
-            ^
-            match defined.definition with
-            | Struct { body; _ } -> body
-            | Typedef text | Code_typedef text -> text)
-          fragment.environments
-      @ List.map snd fragment.prototypes @ fragment.statics @ fragment.helpers)
-  in
-  let buffer = Buffer.create (String.length whole) in
-  Fragment.iter_identifiers whole
-    ~on_identifier:(fun identifier -> Buffer.add_string buffer (rename identifier))
-    ~on_other:(Buffer.add_char buffer);
-  Buffer.contents buffer
-
 module Ir_builder = Ir_builder
 
 let make_symbol = Mangling.make_symbol
 
 let make_data_fragment env (data : Lowered.data) =
-  let emission = Emission.create env ~prefix:(Mangling.make_symbol data.data_item) in
+  let emission = Emission.create env ~item:data.data_item in
   let definition = C_data.render_data emission data in
-  Fragment.make emission ~item:data.data_item ~kind:Static_data ~functions:[] ~definition
-    ~references:(Emission.list_referenced_items emission ~referrer:data.data_item)
+  Fragment.make emission ~kind:Static_data
+    ~references:(Emission.list_references emission)
+    ~functions:[] ~definition
 
 let make_table_fragment env (table : Lowered.table) =
-  let emission = Emission.create env ~prefix:(Mangling.make_symbol table.table_item) in
+  let emission = Emission.create env ~item:table.table_item in
   let definition = C_data.render_table emission table in
-  Fragment.make emission ~item:table.table_item ~kind:(Table_entries table.capability) ~functions:[]
-    ~definition ~references:(List.map fst table.entries)
+  Fragment.make emission ~kind:(Table_entries table.capability)
+    ~references:(List.map fst table.entries) ~functions:[] ~definition
+
+let render_type_text text =
+  C_text.render text ~resolve:(function
+    | Type_name key -> C_text.render_key_name key
+    | _ -> C_runtime.raise_bug "a type definition that names something other than a type")
 
 let render_file env profile (fragments : (fragment * linkage) list) =
-  let types = C_types.create env in
+  let types = C_types.create env ~owner:None in
   let local_types = Key_table.create 16 in
   List.iter
     (fun ((fragment : fragment), _) ->
       List.iter (C_types.register types) fragment.types;
       List.iter
-        (fun (key, (defined : C_types.defined)) ->
+        (fun (key, (defined : string C_types.defined)) ->
           Key_table.replace local_types key defined;
           C_types.register types key;
           List.iter (C_types.register types) defined.references)
@@ -156,22 +120,18 @@ let render_file env profile (fragments : (fragment * linkage) list) =
       (fun ((fragment : fragment), linkage) ->
         let count = List.length fragment.functions in
         List.mapi
-          (fun position (header, body) ->
+          (fun position (text : Fragment.function_text) ->
             let linkage = if position < count - 1 then Internal else linkage in
-            (render_linkage linkage ^ header, body))
+            { text with header = render_linkage linkage ^ text.header })
           fragment.functions)
       fragments
-  in
-  let render_symbol header =
-    let before = String.sub header 0 (String.index header '(') in
-    match String.split_last ~sep:" " before with Some (_, symbol) -> symbol | None -> before
   in
   let declared = Hashtbl.create 64 in
   let declarations = Buffer.create 4096 in
   List.iter
-    (fun (header, _) ->
-      Hashtbl.replace declared (render_symbol header) ();
-      Buffer.add_string declarations (header ^ ";\n"))
+    (fun (text : Fragment.function_text) ->
+      Hashtbl.replace declared text.symbol ();
+      Buffer.add_string declarations (text.header ^ ";\n"))
     function_texts;
   List.iter
     (fun ((fragment : fragment), _) ->
@@ -187,11 +147,11 @@ let render_file env profile (fragments : (fragment * linkage) list) =
   let define_key key =
     match Key_table.find_opt local_types key with
     | Some defined -> defined
-    | None -> C_types.define types key
+    | None -> C_types.map_defined render_type_text (C_types.define types key)
   in
   let rec close () =
     let pending =
-      List.filter (fun key -> not (C_types.Keys.mem key !definitions)) (List.rev types.order)
+      List.filter (fun key -> not (C_types.Keys.mem key !definitions)) (C_types.list_keys types)
     in
     if pending <> [] then begin
       List.iter
@@ -201,7 +161,7 @@ let render_file env profile (fragments : (fragment * linkage) list) =
     end
   in
   close ();
-  let keys = List.rev types.order in
+  let keys = C_types.list_keys types in
   let read_defined key = C_types.Keys.find key !definitions in
   let buffer = Buffer.create 4096 in
   Buffer.add_string buffer C_runtime.runtime_declarations;
@@ -219,15 +179,15 @@ let render_file env profile (fragments : (fragment * linkage) list) =
     List.concat_map (fun ((fragment : fragment), _) -> fragment.helpers) fragments
   in
   List.iter
-    (fun (name, text) -> if List.mem name helpers_used then Buffer.add_string buffer text)
+    (fun (helper, text) -> if List.mem helper helpers_used then Buffer.add_string buffer text)
     C_runtime.helpers;
   List.iter
     (fun key ->
       match (read_defined key).definition with
       | Struct _ ->
           Buffer.add_string buffer
-            (Printf.sprintf "typedef struct %s %s;\n" (C_types.render_key_name key)
-               (C_types.render_key_name key))
+            (Printf.sprintf "typedef struct %s %s;\n" (C_text.render_key_name key)
+               (C_text.render_key_name key))
       | Typedef _ | Code_typedef _ -> ())
     keys;
   let emitted = ref C_types.Keys.empty in
@@ -241,7 +201,7 @@ let render_file env profile (fragments : (fragment * linkage) list) =
           Buffer.add_string buffer
             (match definition with
             | Typedef c_type ->
-                Printf.sprintf "typedef %s %s;\n" c_type (C_types.render_key_name key)
+                Printf.sprintf "typedef %s %s;\n" c_type (C_text.render_key_name key)
             | Code_typedef text -> text
             | Struct _ -> "")
   in
@@ -253,7 +213,7 @@ let render_file env profile (fragments : (fragment * linkage) list) =
       | Struct { body; holds } ->
           List.iter emit holds;
           Buffer.add_string buffer
-            (Printf.sprintf "struct %s {\n%s};\n" (C_types.render_key_name key) body)
+            (Printf.sprintf "struct %s {\n%s};\n" (C_text.render_key_name key) body)
       | Typedef _ | Code_typedef _ -> ()
     end
   in
@@ -262,7 +222,7 @@ let render_file env profile (fragments : (fragment * linkage) list) =
     (fun key ->
       let layout =
         match key with
-        | C_types.Type ty -> Some (Memory_layout.of_type env ty)
+        | C_text.Type ty -> Some (Memory_layout.of_type env ty)
         | Block (ty, variant) -> Some (Memory_layout.lay_out_block env ty variant)
         | Code _ | Environment _ | Evidence _ | Capabilities _ -> None
       in
@@ -270,7 +230,7 @@ let render_file env profile (fragments : (fragment * linkage) list) =
         (fun (layout : Memory_layout.t) ->
           Buffer.add_string buffer
             (Printf.sprintf "_Static_assert(sizeof(%s) == %d && _Alignof(%s) == %d, \"layout\");\n"
-               (C_types.render_key_name key) layout.size (C_types.render_key_name key)
+               (C_text.render_key_name key) layout.size (C_text.render_key_name key)
                layout.alignment))
         layout)
     keys;
@@ -280,6 +240,13 @@ let render_file env profile (fragments : (fragment * linkage) list) =
         (Printf.sprintf "extern const struct t_site %s;\n" (C_runtime.render_site_symbol site)))
     (List.sort_uniq compare
        (List.concat_map (fun ((fragment : fragment), _) -> fragment.sites) fragments));
+  List.iter
+    (fun capability ->
+      Buffer.add_string buffer
+        (Printf.sprintf "extern const uint8_t %s;\n"
+           (C_runtime.render_capability_symbol capability)))
+    (List.sort_uniq Path.compare
+       (List.concat_map (fun ((fragment : fragment), _) -> fragment.capabilities) fragments));
   Buffer.add_buffer buffer declarations;
   List.iter
     (fun ((fragment : fragment), _) -> List.iter (Buffer.add_string buffer) fragment.statics)
@@ -287,7 +254,9 @@ let render_file env profile (fragments : (fragment * linkage) list) =
   List.iter
     (fun ((fragment : fragment), _) -> Buffer.add_string buffer fragment.definition)
     fragments;
-  List.iter (fun (header, body) -> Buffer.add_string buffer (header ^ body)) function_texts;
+  List.iter
+    (fun (text : Fragment.function_text) -> Buffer.add_string buffer (text.header ^ text.body))
+    function_texts;
   Buffer.contents buffer
 
 type position = { file : string; line : int; column : int }
@@ -306,7 +275,12 @@ let render_sites_file ~resolve_position:resolve fragments =
          (List.map (fun (_, (position : position)) -> position.file) positions))
   in
   String.concat ""
-    ((C_runtime.runtime_declarations :: List.map C_values.render_bytes_definition file_symbols)
+    (C_runtime.runtime_declarations
+     :: List.map
+          (fun (file, symbol) ->
+            Printf.sprintf "static const uint8_t %s%s;\n" symbol
+              (C_values.render_bytes_initializer file))
+          file_symbols
     @ List.map
         (fun (site, (position : position)) ->
           Printf.sprintf "const struct t_site %s = { %s, %d, %d, %d };\n"
@@ -315,8 +289,18 @@ let render_sites_file ~resolve_position:resolve fragments =
             (String.length position.file) position.line position.column)
         positions)
 
+let render_capabilities_file fragments =
+  String.concat ""
+    (C_runtime.runtime_declarations
+    :: List.map
+         (fun capability ->
+           Printf.sprintf "const uint8_t %s = 0;\n" (C_runtime.render_capability_symbol capability))
+         (List.sort_uniq Path.compare
+            (List.concat_map (fun (fragment : fragment) -> fragment.capabilities) fragments)))
+
 module For_testing = struct
   let render_c (fragment : fragment) =
     String.concat ""
-      (List.map (fun (header, body) -> header ^ body) fragment.functions @ [ fragment.definition ])
+      (List.map (fun (text : Fragment.function_text) -> text.header ^ text.body) fragment.functions
+      @ [ fragment.definition ])
 end

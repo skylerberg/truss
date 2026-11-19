@@ -2623,13 +2623,15 @@ and the prelude changes only with a language version.
   use call no private or `internal` function and name no such constant. An
   `ensures` may name any function the definition can, so that callers in its
   package can know its result in terms of private helpers.
-- A private or `internal` function, method, or constant that no definition
-  of its package uses is an error. A method or constant written in a trait,
-  a capability, or an impl is not checked. A use counts when the user is
+- An `internal` function, method, or constant that no definition of its
+  package uses is an error, and a private one is a warning. A warning is
+  reported as an error is, but it does not make `truss check`, a build, a
+  test run, or a publish fail. A method or constant written in a trait, a
+  capability, or an impl is not checked. A use counts when the user is
   public, is a test, an `impl`, or another definition the rule does not
-  check, or is itself used, so definitions that use only each other are an
-  error together. The `main` of a package's root module is exempt, and so
-  is a definition the compiler calls by name.
+  check, or is itself used, so definitions that use only each other are
+  reported together. The `main` of a package's root module is exempt, and
+  so is a definition the compiler calls by name.
 
 ## No foreign code
 

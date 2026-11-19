@@ -266,9 +266,11 @@ end
 
 type 'span edit = { span : 'span; replacement : string }
 type 'span fix = { title : string; edits : 'span edit list }
+type severity = Error | Warning
 
 type 'span diagnostic = {
   code : Code.t;
+  severity : severity;
   message : string;
   span : 'span;
   notes : ('span * string) list;
@@ -279,6 +281,7 @@ type t = Source.span diagnostic
 type in_definition = Source.Definition_span.t diagnostic
 
 val make :
+  ?severity:severity ->
   ?notes:('span * string) list ->
   ?fixes:'span fix list ->
   code:Code.t ->
@@ -286,6 +289,7 @@ val make :
   string ->
   'span diagnostic
 
+val is_error : _ diagnostic -> bool
 val fix : string -> 'span edit list -> 'span fix
 val replace : 'span -> string -> 'span edit
 val insert : 'span -> string -> 'span edit

@@ -429,6 +429,8 @@ let () =
       expect_proven (tree ^ Fixtures.Prover.leftmost));
   Harness.test "recursion on the parameter itself does not end" (fun () ->
       expect_not_proven (tree ^ Fixtures.Prover.spin_on_its_tree) "prover.termination");
+  Harness.test "a user's model is not known to be smaller than its value" (fun () ->
+      expect_not_proven Fixtures.Prover.spin_on_a_knot_whose_model_holds_it "prover.termination");
   Harness.test "a match with guards ends in an unreachable that is proven" (fun () ->
       expect_proven Fixtures.Prover.match_with_exhaustive_guards;
       expect_not_proven Fixtures.Prover.match_with_guards_missing_zero "prover.unreachable")
@@ -564,6 +566,8 @@ let () =
   Harness.test
     "the elements that a loop has read meet the postcondition of the collection's `element`"
     (fun () -> expect_proven (couple ^ Fixtures.Prover.couple_loop_with_known_elements));
+  Harness.test "a loop over a user's collection has visited the collection's model when it ends"
+    (fun () -> expect_proven Fixtures.Prover.couple_with_a_model_totaled_by_a_loop);
   Harness.test "the elements that a loop has read are not known beyond that postcondition"
     (fun () ->
       expect_not_proven
@@ -947,6 +951,10 @@ let () =
       expect_proven Fixtures.Prover.quantifier_over_counted_elements_in_a_body);
   Harness.test "a quantifier in a specification reads the collection's `count` and `element`"
     (fun () -> expect_proven Fixtures.Prover.specification_quantifier_over_counted_elements);
+  Harness.test "a postcondition that fixes a call's result is the call's value" (fun () ->
+      expect_proven Fixtures.Prover.specification_quantifier_over_twins_read_through_a_field);
+  Harness.test "a postcondition through a type's own `==` does not fix a call's value" (fun () ->
+      expect_not_proven Fixtures.Prover.postcondition_through_a_hand_written_equal "prover.ensures");
   Harness.test "a quantifier's pattern leaves out the elements it does not match" (fun () ->
       expect_proven Fixtures.Prover.specification_quantifier_with_a_refutable_pattern);
   Harness.test "a quantifier over a range value reads the range's `count` and `element`" (fun () ->
@@ -2063,12 +2071,14 @@ let () =
     }
   in
   Harness.test "an answer in the cache is read, and the solver is not run" (fun () ->
-      let query = make_self_comparison ">=" in
+      let query = make_self_comparison Logic.Greater_equal in
       let request = Solver.make_request query in
       let cache =
         {
           Solver.find =
-            (fun key -> if key = Solver.For_testing.hash_query query then Some "proven\n" else None);
+            (fun key ->
+              if key = Solver.For_testing.hash_query query then Some Solver.For_testing.proven_entry
+              else None);
           add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
         }
       in
@@ -2080,7 +2090,7 @@ let () =
           if Solver.For_testing.count_queries_run solver <> 0 then Harness.fail "ran the solver");
   Harness.test "a proven answer in the cache is read whatever values the request asks for"
     (fun () ->
-      let query = make_self_comparison ">=" in
+      let query = make_self_comparison Logic.Greater_equal in
       let request =
         Solver.make_request
           ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ]
@@ -2089,7 +2099,9 @@ let () =
       let cache =
         {
           Solver.find =
-            (fun key -> if key = Solver.For_testing.hash_query query then Some "proven\n" else None);
+            (fun key ->
+              if key = Solver.For_testing.hash_query query then Some Solver.For_testing.proven_entry
+              else None);
           add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
         }
       in
@@ -2100,7 +2112,7 @@ let () =
             Harness.fail "expected the cached answer";
           if Solver.For_testing.count_queries_run solver <> 0 then Harness.fail "ran the solver");
   Harness.test "each solver keeps its own answers" (fun () ->
-      let query = make_self_comparison "<" in
+      let query = make_self_comparison Logic.Less in
       let request = Solver.make_request query in
       match (Solver.find (), Solver.find ()) with
       | Ok first, Ok second ->
@@ -2111,7 +2123,7 @@ let () =
               (Solver.For_testing.count_queries_run second)
       | Error message, _ | _, Error message -> Harness.fail "%s" message);
   Harness.test "a solved answer is added to the cache under its query's key" (fun () ->
-      let query = make_self_comparison "<=" in
+      let query = make_self_comparison Logic.Less_equal in
       let request = Solver.make_request query in
       let cached_answers = Hashtbl.create 1 in
       let cache =
@@ -2124,7 +2136,8 @@ let () =
           if Solver.For_testing.count_queries_run solver <> 1 then
             Harness.fail "did not run the solver";
           if
-            Hashtbl.find_opt cached_answers (Solver.For_testing.hash_query query) <> Some "proven\n"
+            Hashtbl.find_opt cached_answers (Solver.For_testing.hash_query query)
+            <> Some Solver.For_testing.proven_entry
           then Harness.fail "the cache does not have the answer");
   let find_obligation_query text code =
     let packages = Support.setup [ ("app::main", text) ] in
@@ -2155,15 +2168,10 @@ let () =
       Logic.declarations = [ Logic.Constant (symbol, Logic.Int) ];
       facts = [];
       goal =
-        Logic.Operation
-          ( "not",
-            [
-              Logic.Operation
-                ( "=",
-                  [
-                    Logic.Operation ("^", [ Logic.Symbol symbol; Logic.Symbol symbol ]); Logic.int 3;
-                  ] );
-            ] );
+        Logic.not_
+          (Logic.equal
+             (Logic.Operation (Power, [ Logic.Symbol symbol; Logic.Symbol symbol ]))
+             (Logic.int 3));
     }
   in
   Harness.test "an unknown answer before the step limit carries Z3's reason" (fun () ->
@@ -2191,11 +2199,34 @@ let () =
           if Solver.For_testing.count_queries_run second <> 0 then
             Harness.fail "ran the solver again"
       | Error message, _ | _, Error message -> Harness.fail "%s" message);
+  Harness.test "a counterexample's values are read back from the cache" (fun () ->
+      let query = make_self_comparison Logic.Less in
+      let request =
+        Solver.make_request
+          ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ]
+          ~terms:[ (Logic.Symbol.Reached 0, Logic.int (-1)) ]
+          query
+      in
+      let cached_answers = Hashtbl.create 2 in
+      let cache =
+        { Solver.find = Hashtbl.find_opt cached_answers; add = Hashtbl.replace cached_answers }
+      in
+      match (Solver.find ~cache (), Solver.find ~cache ()) with
+      | Ok first, Ok second -> (
+          match Solver.solve_all first [ (request, query) ] with
+          | [ Counterexample (_ :: _ :: _) ] as solved ->
+              if Solver.solve_all second [ (request, query) ] <> solved then
+                Harness.fail "the cache gave other values";
+              if Solver.For_testing.count_queries_run second <> 0 then
+                Harness.fail "ran the solver again"
+          | _ -> Harness.fail "expected a counterexample with both values")
+      | Error message, _ | _, Error message -> Harness.fail "%s" message);
   Harness.test "an obligation that the solver stops on before the step limit names Z3's reason"
     (fun () ->
       let cache =
         {
-          Solver.find = (fun _ -> Some "incomplete \"(incomplete quantifiers)\"\n");
+          Solver.find =
+            (fun _ -> Some (Solver.For_testing.make_incomplete_entry "(incomplete quantifiers)"));
           add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
         }
       in
@@ -2357,7 +2388,7 @@ let render_triggered fact =
           Constant (variable "n", Int);
         ];
       facts = [ fact ];
-      goal = Operation (">", [ Apply (variable "f", [ Symbol (variable "n") ]); int 0 ]);
+      goal = greater (Apply (variable "f", [ Symbol (variable "n") ])) (int 0);
     }
 
 let () =
@@ -2365,7 +2396,7 @@ let () =
   let i_term = Symbol (variable "i") and j_term = Symbol (variable "j") in
   let applied_f term = Apply (variable "f", [ term ])
   and applied_g term = Apply (variable "g", [ term ]) in
-  let positive term = Operation (">", [ term; int 0 ]) in
+  let positive term = greater term (int 0) in
   let expect fact fragment =
     let text = render_triggered fact in
     if not (String.includes ~affix:fragment text) then
@@ -2374,29 +2405,26 @@ let () =
   Harness.test "a quantified fact triggers on an application of its variable" (fun () ->
       expect
         (forall
-           ( [ (variable "i", Int) ],
-             Operation (">=", [ i_term; int 0 ]) ==> positive (applied_f i_term) ))
+           ([ (variable "i", Int) ], greater_equal i_term (int 0) ==> positive (applied_f i_term)))
         ":pattern ((x0 b0))");
   Harness.test "a trigger has no arithmetic on a bound variable" (fun () ->
       let text =
         render_triggered
-          (forall
-             ([ (variable "i", Int) ], positive (applied_f (Operation ("+", [ i_term; int 1 ])))))
+          (forall ([ (variable "i", Int) ], positive (applied_f (add i_term (int 1)))))
       in
       if String.includes ~affix:":pattern" text then Harness.fail "%s" text);
   Harness.test "a trigger that would match its own body's larger term is passed over" (fun () ->
       expect
         (forall
            ( [ (variable "i", Int) ],
-             Operation ("<", [ applied_f i_term; applied_f (Operation ("+", [ i_term; int 1 ])) ])
+             less (applied_f i_term) (applied_f (add i_term (int 1)))
              &&& positive (applied_g i_term) ))
         ":pattern ((x2 b0)))");
   Harness.test "a definition triggers on the term it defines" (fun () ->
       let text =
         render_triggered
           (forall
-             ( [ (variable "i", Int) ],
-               equal (applied_f i_term) (Operation ("+", [ applied_g i_term; int 1 ])) ))
+             ([ (variable "i", Int) ], equal (applied_f i_term) (add (applied_g i_term) (int 1))))
       in
       if
         (not (String.includes ~affix:":pattern ((x0 b0)))" text))
@@ -2411,7 +2439,7 @@ let () =
           Constant (variable "n", Int);
         ];
       facts = [ fact ];
-      goal = Operation (">", [ Apply (variable "f", [ Symbol (variable "n") ]); int 0 ]);
+      goal = greater (Apply (variable "f", [ Symbol (variable "n") ])) (int 0);
     }
   in
   Harness.test "a quantified fact with no trigger is told apart" (fun () ->
@@ -2419,9 +2447,7 @@ let () =
         not
           (has_untriggered_fact
              (make_query
-                (forall
-                   ( [ (variable "i", Int) ],
-                     positive (applied_f (Operation ("+", [ i_term; int 1 ]))) ))))
+                (forall ([ (variable "i", Int) ], positive (applied_f (add i_term (int 1)))))))
       then Harness.fail "a fact on f(i + 1) alone has no trigger";
       if
         has_untriggered_fact
@@ -2430,17 +2456,14 @@ let () =
   Harness.test "variables named by no one application share a trigger" (fun () ->
       expect
         (forall
-           ( [ (variable "i", Int); (variable "j", Int) ],
-             Operation ("<", [ applied_f i_term; applied_g j_term ]) ))
+           ([ (variable "i", Int); (variable "j", Int) ], less (applied_f i_term) (applied_g j_term)))
         ":pattern ((x0 b0) (x2 b1))");
   let count_patterns text = String.find_all ~sub:":pattern" (fun _ matches -> matches + 1) text 0 in
   Harness.test
     "transitivity triggers on all three of its applications, so it makes no matching loop"
     (fun () ->
       let k_term = Symbol (variable "k") in
-      let at_most first second =
-        Operation ("<=", [ Apply (variable "h", [ first; second ]); int 0 ])
-      in
+      let at_most first second = less_equal (Apply (variable "h", [ first; second ])) (int 0) in
       let text =
         render_triggered
           (forall

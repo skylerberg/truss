@@ -16,15 +16,12 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
     match high with
     | Some high -> high
     | None ->
-        Facts.assume context frame (Operation ("<=", [ Logic.int 0; length ]));
+        Facts.assume context frame (Logic.less_equal (Logic.int 0) length);
         length
   in
   Facts.oblige context frame Requires location
     [ Text "`"; Facts.quote frame.source site.origin; Text "` may not be within the collection." ]
-    Logic.(
-      Operation ("<=", [ int 0; low ])
-      &&& Operation ("<=", [ low; high ])
-      &&& Operation ("<=", [ high; length ]));
+    Logic.(less_equal (int 0) low &&& less_equal low high &&& less_equal high length);
   Validity.note_place context frame site.origin (Run (low, high));
   let slice_type = Facts.substitute_type context frame site.type_ in
   let viewed = Facts.arrive context frame "slice" slice_type in
@@ -43,9 +40,8 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
             (Logic.forall
                ( [ (position, Logic.Int) ],
                  Logic.(
-                   Operation ("<=", [ int 0; Symbol position ])
-                   &&& Operation ("<", [ Symbol position; count ])
-                   ==> equal inside outside) ))
+                   less_equal (int 0) (Symbol position)
+                   &&& less (Symbol position) count ==> equal inside outside) ))
       | _ -> ())
   | None -> ());
   (frame, viewed, low, high)
@@ -65,10 +61,9 @@ let assume_unchanged_outside context frame element ~before ~after ~start ~stop =
     (Logic.forall
        ( [ (limit, Logic.Int) ],
          Logic.(
-           Operation ("<=", [ int 0; index ])
-           &&& Operation ("<", [ index; length before ])
-           ==> (Operation ("<=", [ start; index ])
-               &&& Operation ("<", [ index; stop ])
+           less_equal (int 0) index
+           &&& less index (length before)
+           ==> (less_equal start index &&& less index stop
                ||| equal (at after index) (at before index))) ))
 
 let write_sliced_owner context frame ~(owner : State.passed_place) ~owner_type ~start ~stop =
@@ -163,8 +158,7 @@ let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function
     match extent with
     | Counted { by; each } ->
         Option.map
-          (fun value ->
-            if each = 1 then value else Logic.Operation ("*", [ Logic.int each; value ]))
+          (fun value -> if each = 1 then value else Logic.multiply (Logic.int each) value)
           (find_value by)
     | Exactly elements -> Some (Logic.int elements)
     | Number number -> Some (declare_libc_number context frame number)
@@ -201,16 +195,13 @@ let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function
               Option.iter
                 (fun counted ->
                   require "have the room it writes into"
-                    (Logic.Operation
-                       ( "<=",
-                         [
-                           Logic.Operation ("+", [ length element (model before); counted ]);
-                           capacity before;
-                         ] )))
+                    (Logic.less_equal
+                       (Logic.add (length element (model before)) counted)
+                       (capacity before)))
                 counted
           | _, Some counted ->
               require "have the elements it mutates"
-                (Logic.Operation ("<=", [ counted; length element (model before) ]))
+                (Logic.less_equal counted (length element (model before)))
           | _, None -> ())
       | Some (Libc.Elements (scalar, extent)), Some view, _ -> (
           let element = make_element_type scalar in
@@ -218,12 +209,12 @@ let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function
           match count extent with
           | Some counted ->
               require "have the elements it reads"
-                (Logic.Operation ("<=", [ counted; length element elements ]))
+                (Logic.less_equal counted (length element elements))
           | None ->
-              let last = Logic.Operation ("-", [ length element elements; Logic.int 1 ]) in
+              let last = Logic.subtract (length element elements) (Logic.int 1) in
               require "end with a zero, which it reads up to"
                 Logic.(
-                  Operation (">=", [ length element elements; int 1 ])
+                  greater_equal (length element elements) (int 1)
                   &&&
                   match Models.index_sequence context element elements last with
                   | Some last_element -> equal last_element (int 0)
@@ -232,8 +223,7 @@ let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function
     arguments;
   (match Option.bind at_most find_value with
   | Some bound ->
-      Facts.assume context frame
-        Logic.(Operation (">=", [ known; int 0 ]) ==> Operation ("<=", [ known; bound ]))
+      Facts.assume context frame Logic.(greater_equal known (int 0) ==> less_equal known bound)
   | None -> ());
   known
 
@@ -266,10 +256,8 @@ let append_part context frame element parts part =
   let length = Models.make_sequence_length context element parts in
   Facts.assume context frame
     Logic.(
-      Operation (">=", [ length; int 0 ])
-      &&& equal
-            (Models.make_sequence_length context element longer)
-            (Operation ("+", [ length; int 1 ])));
+      greater_equal length (int 0)
+      &&& equal (Models.make_sequence_length context element longer) (add length (int 1)));
   (match (Models.index_sequence context element longer length, frame.bound) with
   | Some last, _ -> Facts.assume context frame (Logic.equal last part)
   | None, _ -> ());
@@ -283,9 +271,8 @@ let append_part context frame element parts part =
         (Logic.forall
            ( [ (index, Logic.Int) ],
              Logic.(
-               Operation ("<=", [ int 0; Symbol index ])
-               &&& Operation ("<", [ Symbol index; length ])
-               ==> equal after before) ))
+               less_equal (int 0) (Symbol index)
+               &&& less (Symbol index) length ==> equal after before) ))
   | _ -> ());
   let measure = Facts.make_fresh_name context "measure" in
   Facts.assume context frame
@@ -293,13 +280,10 @@ let append_part context frame element parts part =
        ( [ (measure, Facts.declare_sort context (Types.Function (measure_type element))) ],
          Logic.equal
            (make_sequence_sum context element longer (Logic.Symbol measure))
-           (Logic.Operation
-              ( "+",
-                [
-                  make_sequence_sum context element parts (Logic.Symbol measure);
-                  Lambdas.apply_function context (measure_type element) (Logic.Symbol measure)
-                    [ part ];
-                ] )) ));
+           (Logic.add
+              (make_sequence_sum context element parts (Logic.Symbol measure))
+              (Lambdas.apply_function context (measure_type element) (Logic.Symbol measure) [ part ]))
+       ));
   longer
 
 let make_byte_order context left right =
@@ -321,11 +305,10 @@ let make_byte_order context left right =
            over
              [ Facts.make_variable "bytes.first"; Facts.make_variable "bytes.second" ]
              Logic.(
-               Operation ("<=", [ int (-1); order first_term second_term ])
-               &&& Operation ("<=", [ order first_term second_term; int 1 ])
+               less_equal (int (-1)) (order first_term second_term)
+               &&& less_equal (order first_term second_term) (int 1)
                &&& (equal (order first_term second_term) (int 0) ==> equal first_term second_term)
-               &&& equal (order second_term first_term)
-                     (Operation ("-", [ order first_term second_term ])));
+               &&& equal (order second_term first_term) (negate (order first_term second_term)));
            over
              [ Facts.make_variable "bytes.first" ]
              (Logic.equal (order first_term first_term) (Logic.int 0));
@@ -336,9 +319,9 @@ let make_byte_order context left right =
                Facts.make_variable "bytes.third";
              ]
              Logic.(
-               Operation ("<", [ order first_term second_term; int 0 ])
-               &&& Operation ("<", [ order second_term third_term; int 0 ])
-               ==> Operation ("<", [ order first_term third_term; int 0 ]));
+               less (order first_term second_term) (int 0)
+               &&& less (order second_term third_term) (int 0)
+               ==> less (order first_term third_term) (int 0));
          ])
   end;
   order left right
@@ -352,8 +335,7 @@ let find_scalar_bytes element : int option =
   | _ -> None
 
 let make_length_in_range value =
-  Logic.(
-    Operation ("<=", [ int 0; value ]) &&& Facts.make_in_range (Types.make_builtin Int64) value)
+  Logic.(less_equal (int 0) value &&& Facts.make_in_range (Types.make_builtin Int64) value)
 
 let model_buffer context frame (builtin : Intrinsic.builtin) element term =
   let sequence = make_buffer_model context builtin element term in
@@ -366,7 +348,7 @@ let model_storage context frame element term =
   let capacity = make_buffer_capacity context element term in
   Facts.assume context frame
     Logic.(
-      Operation ("<=", [ Models.make_sequence_length context element sequence; capacity ])
+      less_equal (Models.make_sequence_length context element sequence) capacity
       &&& make_length_in_range capacity);
   sequence
 
@@ -386,8 +368,7 @@ let require_precondition context (frame : State.frame) (site : Invocation.site) 
 let require_element context frame site element index sequence =
   require_precondition context frame site "have an element at its index"
     Logic.(
-      Operation ("<=", [ int 0; index ])
-      &&& Operation ("<", [ index; Models.make_sequence_length context element sequence ]))
+      less_equal (int 0) index &&& less index (Models.make_sequence_length context element sequence))
 
 let translate_buffer_operation context frame ~(site : Invocation.site)
     (operation : Intrinsic.buffer) element (values : State.passed list) ~changed result_type known =
@@ -422,9 +403,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
   in
   let at = index_element context element in
   let make_index_name () = Facts.make_fresh_name context "index" in
-  let in_interval index low high =
-    Logic.(Operation ("<=", [ low; index ]) &&& Operation ("<", [ index; high ]))
-  in
+  let in_interval index low high = Logic.(less_equal low index &&& less index high) in
   let all name low high body =
     Logic.forall ([ (name, Logic.Int) ], Logic.(in_interval (Symbol name) low high ==> body))
   in
@@ -482,19 +461,17 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       capacity buffer
   | Storage_set_capacity ->
       let buffer = read_operand 0 and room = read_operand 1 in
-      require (Logic.Operation (">=", [ room; length (storage buffer) ]));
+      require (Logic.greater_equal room (length (storage buffer)));
       Facts.assume context frame (Logic.equal (read_changed_storage ()) (storage buffer));
       Facts.assume context frame (Logic.equal (capacity (List.hd changed)) room);
       known
   | Storage_lengthen ->
       let buffer = read_operand 0 and by = read_operand 1 in
       let before = storage buffer and after = read_changed_storage () in
-      require
-        (Logic.Operation ("<=", [ Logic.Operation ("+", [ length before; by ]); capacity buffer ]));
+      require (Logic.less_equal (Logic.add (length before) by) (capacity buffer));
       assume_capacity_kept ();
       let limit = make_index_name () in
-      Facts.assume context frame
-        (Logic.equal (length after) (Logic.Operation ("+", [ length before; by ])));
+      Facts.assume context frame (Logic.equal (length after) (Logic.add (length before) by));
       Facts.assume context frame
         (all limit (Logic.int 0) (length before)
            (Logic.equal (at after (Logic.Symbol limit)) (at before (Logic.Symbol limit))));
@@ -503,7 +480,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       let shorter = read_operand 1 in
       let before = storage (read_operand 0) and after = read_changed_storage () in
       require ~requirement:"be given a length at most the storage's"
-        (Logic.Operation ("<=", [ shorter; length before ]));
+        (Logic.less_equal shorter (length before));
       assume_capacity_kept ();
       let limit = make_index_name () in
       Facts.assume context frame (Logic.equal (length after) shorter);
@@ -513,7 +490,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       known
   | Storage_push ->
       let buffer = read_operand 0 in
-      require (Logic.Operation ("<", [ length (storage buffer); capacity buffer ]));
+      require (Logic.less (length (storage buffer)) (capacity buffer));
       assume_capacity_kept ();
       let longer = append_part context frame element (storage buffer) (read_operand 1) in
       Facts.assume context frame (Logic.equal (read_changed_storage ()) longer);
@@ -521,7 +498,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
   | Storage_pop ->
       let buffer = read_operand 0 in
       require ~requirement:"have an element to pop"
-        (Logic.Operation (">", [ length (storage buffer); Logic.int 0 ]));
+        (Logic.greater (length (storage buffer)) (Logic.int 0));
       assume_capacity_kept ();
       let longer = append_part context frame element (read_changed_storage ()) known in
       Facts.assume context frame (Logic.equal (storage buffer) longer);
@@ -530,14 +507,14 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       let buffer = read_operand 0 and index = read_operand 1 and value = read_operand 2 in
       let before = storage buffer and after = read_changed_storage () in
       require ~requirement:"be given an index at most the storage's length"
-        Logic.(Operation ("<=", [ int 0; index ]) &&& Operation ("<=", [ index; length before ]));
-      require (Logic.Operation ("<", [ length before; capacity buffer ]));
+        Logic.(less_equal (int 0) index &&& less_equal index (length before));
+      require (Logic.less (length before) (capacity buffer));
       assume_capacity_kept ();
       let limit = make_index_name () in
       Facts.assume context frame
         (Logic.conjunction
            [
-             Logic.equal (length after) (Logic.Operation ("+", [ length before; Logic.int 1 ]));
+             Logic.equal (length after) (Logic.add (length before) (Logic.int 1));
              Logic.equal (at after index) value;
            ]);
       Facts.assume context frame
@@ -547,18 +524,18 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       Facts.assume context frame
         (all limit index (length before)
            (Logic.equal
-              (at after (Logic.Operation ("+", [ Logic.Symbol limit; Logic.int 1 ])))
+              (at after (Logic.add (Logic.Symbol limit) (Logic.int 1)))
               (at before (Logic.Symbol limit))));
       let limit = make_index_name () in
       Facts.assume context frame
         (all limit
-           (Logic.Operation ("+", [ index; Logic.int 1 ]))
+           (Logic.add index (Logic.int 1))
            (length after)
            (Logic.equal (at after (Logic.Symbol limit))
-              (at before (Logic.Operation ("-", [ Logic.Symbol limit; Logic.int 1 ])))));
+              (at before (Logic.subtract (Logic.Symbol limit) (Logic.int 1)))));
       Facts.assume context frame
         (each_sum (fun sum measure ->
-             Logic.equal (sum after) (Logic.Operation ("+", [ sum before; measure value ]))));
+             Logic.equal (sum after) (Logic.add (sum before) (measure value))));
       known
   | Storage_remove ->
       let index = read_operand 1 in
@@ -569,7 +546,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       Facts.assume context frame
         (Logic.conjunction
            [
-             Logic.equal (length after) (Logic.Operation ("-", [ length before; Logic.int 1 ]));
+             Logic.equal (length after) (Logic.subtract (length before) (Logic.int 1));
              Logic.equal known (at before index);
            ]);
       Facts.assume context frame
@@ -579,10 +556,10 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       Facts.assume context frame
         (all limit index (length after)
            (Logic.equal (at after (Logic.Symbol limit))
-              (at before (Logic.Operation ("+", [ Logic.Symbol limit; Logic.int 1 ])))));
+              (at before (Logic.add (Logic.Symbol limit) (Logic.int 1)))));
       Facts.assume context frame
         (each_sum (fun sum measure ->
-             Logic.equal (sum before) (Logic.Operation ("+", [ sum after; measure known ]))));
+             Logic.equal (sum before) (Logic.add (sum after) (measure known))));
       known
   | Storage_swap ->
       assume_capacity_kept ();
@@ -597,16 +574,13 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       let whole = view (read_operand 0) and part = view known in
       require ~requirement:"be given a range within the view"
         Logic.(
-          Operation ("<=", [ int 0; start ])
-          &&& Operation ("<=", [ start; stop ])
-          &&& Operation ("<=", [ stop; length whole ]));
+          less_equal (int 0) start &&& less_equal start stop &&& less_equal stop (length whole));
       let limit = make_index_name () in
-      Facts.assume context frame
-        (Logic.equal (length part) (Logic.Operation ("-", [ stop; start ])));
+      Facts.assume context frame (Logic.equal (length part) (Logic.subtract stop start));
       Facts.assume context frame
         (all limit (Logic.int 0) (length part)
            (Logic.equal (at part (Logic.Symbol limit))
-              (at whole (Logic.Operation ("+", [ start; Logic.Symbol limit ])))));
+              (at whole (Logic.add start (Logic.Symbol limit)))));
       known
   | View_address -> (
       match find_scalar_bytes element with
@@ -617,13 +591,8 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
           in
           Facts.assume context frame
             Logic.(
-              Operation
-                ( "<=",
-                  [
-                    Operation ("+", [ known; Operation ("*", [ int bytes; length ]) ]);
-                    Integer (Z.shift_left Z.one 64);
-                  ] )
-              &&& (Operation (">", [ length; int 0 ]) ==> Operation (">=", [ known; int 1 ])));
+              less_equal (add known (multiply (int bytes) length)) (Integer (Z.shift_left Z.one 64))
+              &&& (greater length (int 0) ==> greater_equal known (int 1)));
           known
       | None -> known)
   | Array_view ->
@@ -731,8 +700,8 @@ let translate_runtime context frame ~(site : Invocation.site) (runtime : Intrins
             (Logic.forall
                ( [ (Facts.make_variable "entry.index", Logic.Int) ],
                  Logic.(
-                   Operation ("<=", [ int 0; Symbol (Facts.make_variable "entry.index") ])
-                   &&& Operation ("<", [ Symbol (Facts.make_variable "entry.index"); length ])
+                   less_equal (int 0) (Symbol (Facts.make_variable "entry.index"))
+                   &&& less (Symbol (Facts.make_variable "entry.index")) length
                    ==> not_ (equal at (int 0))) ))
       | None -> ());
       Lazy.force known
@@ -787,8 +756,8 @@ let replace_element context frame element ~before ~after index part =
     (Logic.forall
        ( [ (limit, Logic.Int) ],
          Logic.(
-           Operation ("<=", [ int 0; Symbol limit ])
-           &&& Operation ("<", [ Symbol limit; length before ])
+           less_equal (int 0) (Symbol limit)
+           &&& less (Symbol limit) (length before)
            &&& not_ (equal (Symbol limit) index)
            ==> equal (at after (Symbol limit)) (at before (Symbol limit))) ))
 
