@@ -857,19 +857,9 @@ let compute_function_value_amount context frame ~location (function_type : Types
         Amounts.make_conditional_amount
           (Amounts.make_may_be_target context frame callee_term (Types.Function function_type) term)
           (Logic.int 1)
-  | Calls (Capability path | Capability_method (path, _)) ->
-      if
-        Types.exists_capability
-          (function
-            | Types.Capability used -> Path.equal used path
-            | Types.Capability_parameter _ | Types.Capability_projection _
-            | Types.Capability_variable _ ->
-                true
-            | Types.Capability_error _ ->
-                Facts.raise_bug "the prover reads a capability with an error")
-          function_type.uses
-      then Operations.declare_unknown_amount context frame counter
-      else Costs.zero
+  | Calls (Capability capability | Capability_method (capability, _)) ->
+      Amounts.compute_capability_amount context frame ~uses:function_type.uses capability counter
+        ~direct:(fun () -> Operations.declare_unknown_amount context frame counter)
 
 type modelled =
   | By_contract of (State.frame * Logic.term)

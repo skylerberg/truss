@@ -113,27 +113,76 @@ let lambda_captures_target (context : State.context) lambda target =
   | Some captured, Some local -> List.mem local captured
   | _ -> false
 
-let make_reach_formula context frame (uses : Types.capability_set) (values : State.passed list)
-    (target : Costs.target) =
-  match target with
-  | Through term ->
-      Logic.disjunction
-        (List.map
-           (fun (passed : State.passed) ->
-             if lambda_captures_target context passed.term term then Logic.Boolean true
-             else make_may_be_target context frame passed.term passed.type_ term)
-           values)
-  | Capability path | Capability_method (path, _) ->
-      Logic.Boolean
-        (Types.exists_capability
-           (function
-             | Types.Capability used -> Path.equal used path
-             | Types.Capability_parameter _ | Types.Capability_projection _
-             | Types.Capability_variable _ ->
-                 true
-             | Types.Capability_error _ ->
-                 Facts.raise_bug "the prover reads a capability with an error")
-           uses)
+let make_reach_formula context frame (values : State.passed list) term =
+  Logic.disjunction
+    (List.map
+       (fun (passed : State.passed) ->
+         if lambda_captures_target context passed.term term then Logic.Boolean true
+         else make_may_be_target context frame passed.term passed.type_ term)
+       values)
+
+type capability_reach = Not_reached | Reached_directly | Reached_through_providers
+
+let join_reach first second =
+  match (first, second) with
+  | Reached_through_providers, _ | _, Reached_through_providers -> Reached_through_providers
+  | Reached_directly, _ | _, Reached_directly -> Reached_directly
+  | Not_reached, Not_reached -> Not_reached
+
+let list_providers (enclosing : Mir.provided list list) =
+  let rec list = function
+    | [] -> []
+    | block :: outer ->
+        List.map
+          (fun provider -> (provider, outer))
+          (List.concat_map (fun (provided : Mir.provided) -> provided.provides) block)
+        @ list outer
+  in
+  list enclosing
+
+let find_capability_reach (context : State.context) ~(uses : Types.capability_set) capability =
+  let rec reach enclosing uses =
+    let providers = list_providers enclosing in
+    let find_provider used =
+      List.find_opt
+        (fun ((provider : Core.provided), _) -> Path.equal provider.capability used)
+        providers
+    in
+    let reach_through ((provider : Core.provided), outer) =
+      match Interface.Definition.find_impl_interface context.lookups.interface provider.impl with
+      | Some impl ->
+          if
+            reach outer (Types.substitute_capabilities provider.arguments impl.impl_uses)
+            = Not_reached
+          then Not_reached
+          else Reached_through_providers
+      | None -> Facts.raise_bug "the provided `%s` has no interface" (Path.show provider.impl)
+    in
+    List.fold_left
+      (fun reached (used : Types.capability) ->
+        join_reach reached
+          (match used with
+          | Capability path -> (
+              match find_provider path with
+              | Some found -> reach_through found
+              | None -> if Path.equal path capability then Reached_directly else Not_reached)
+          | Capability_parameter _ | Capability_projection _ | Capability_variable _ ->
+              List.fold_left
+                (fun reached found -> join_reach reached (reach_through found))
+                (match find_provider capability with
+                | Some _ -> Not_reached
+                | None -> Reached_directly)
+                providers
+          | Capability_error _ -> Facts.raise_bug "the prover reads a capability with an error"))
+      Not_reached (Types.list_capabilities uses)
+  in
+  reach context.enclosing_provides uses
+
+let compute_capability_amount context frame ~uses capability counter ~direct =
+  match find_capability_reach context ~uses capability with
+  | Not_reached -> Costs.zero
+  | Reached_through_providers -> Operations.declare_unknown_amount context frame counter
+  | Reached_directly -> direct ()
 
 let make_conditional_amount condition amount =
   match condition with
@@ -187,10 +236,15 @@ let compute_callee_amount ?(method_cost : (Language.Metric.t -> Logic.term) opti
       declared_clauses
   in
   match counter.resource with
-  | Calls target when make_reach_formula context after uses values target = Logic.Boolean false ->
+  | Calls (Capability capability | Capability_method (capability, _)) ->
+      compute_capability_amount context after ~uses capability counter ~direct:(fun () ->
+          match find_first_clauses () with
+          | Some (clause :: _) -> compute_amount clause
+          | Some [] | None -> Operations.declare_unknown_amount context after counter)
+  | Calls (Through term) when make_reach_formula context after values term = Logic.Boolean false ->
       Costs.zero
   | Calls (Through term) -> (
-      let reaches = make_reach_formula context after uses values (Through term) in
+      let reaches = make_reach_formula context after values term in
       let receiving =
         List.filter_map
           (fun (passed : State.passed) -> if passed.term = term then Some passed.position else None)
@@ -209,7 +263,7 @@ let compute_callee_amount ?(method_cost : (Language.Metric.t -> Logic.term) opti
             Costs.zero clauses
       | _ ->
           make_conditional_amount reaches (Operations.declare_unknown_amount context after counter))
-  | _ -> (
+  | Metric _ -> (
       let compute_method_amount () =
         match (method_cost, counter.resource, counter.counting) with
         | Some compute_cost, Metric Time, Units ->
@@ -283,11 +337,15 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
       | Calls _ -> Costs.zero)
   | Capability_method { capability; name } -> (
       match counter.resource with
-      | Calls (Capability path) when Path.equal path capability -> Logic.int 1
-      | Calls (Capability_method (path, method_)) when Path.equal path capability && method_ = name
-        ->
-          Logic.int 1
-      | Calls (Capability _ | Capability_method _ | Through _) -> Costs.zero
+      | Calls (Capability counted | Capability_method (counted, _)) ->
+          compute_capability_amount context frame ~uses:invocation.uses counted counter
+            ~direct:(fun () ->
+              match counter.resource with
+              | _ when not (Path.equal counted capability) ->
+                  Operations.declare_unknown_amount context frame counter
+              | Calls (Capability_method (_, method_)) when method_ <> name -> Costs.zero
+              | Calls _ | Metric _ -> Logic.int 1)
+      | Calls (Through _) -> Costs.zero
       | Metric _ -> (
           match Contracts.find_capability_clauses context.lookups capability name with
           | Some capability_clauses ->
@@ -306,9 +364,12 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
           | None -> Operations.declare_unknown_amount context frame counter))
   | Function _ | Trait_method _ | Indirect () -> (
       match counter.resource with
-      | Calls target ->
+      | Calls (Capability capability | Capability_method (capability, _)) ->
+          compute_capability_amount context frame ~uses:invocation.uses capability counter
+            ~direct:(fun () -> Operations.declare_unknown_amount context frame counter)
+      | Calls (Through term) ->
           make_conditional_amount
-            (make_reach_formula context frame invocation.uses values target)
+            (make_reach_formula context frame values term)
             (Operations.declare_unknown_amount context frame counter)
       | Metric _ -> Operations.declare_unknown_amount context frame counter)
 

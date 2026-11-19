@@ -1,0 +1,15 @@
+capability Journal {
+  fn write(line: UInt64)
+}
+
+capability Fetch {
+  fn get() -> UInt64
+    uses Journal
+}
+
+fn fetched() -> UInt64
+  uses Fetch, Journal
+  cost calls(Journal.write) == 0
+{
+  Fetch.get()
+}

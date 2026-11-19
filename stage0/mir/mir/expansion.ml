@@ -3,7 +3,10 @@ let raise_bug format = Compiler_bug.raise_bug ~stage:"MIR" format
 type jump_targets = {
   break_ : Graph.block option;
   continue_ : Graph.terminator option;
+  loop_provides : int;
   task_ends : (Tree.task * Graph.block) list;
+  task_provides : (Tree.task * int) list;
+  provides : int;
 }
 
 let expand_body (body : Tree.body) : Graph.body =
@@ -20,7 +23,7 @@ let expand_body (body : Tree.body) : Graph.body =
       { statements = List.rev emitted; terminator; terminator_origin = origin }
   in
   let make_assignment target value origin : Graph.statement =
-    { kind = Assign { target; value = Operand value }; origin }
+    { kind = Basic (Assign { target; value = Operand value }); origin }
   in
   let find_place_local : Tree.place -> Tree.local option = function
     | { root = Local local; projections = [] } -> Some local
@@ -98,7 +101,7 @@ let expand_body (body : Tree.body) : Graph.body =
             if reaches then emit_rest joined else None
         | Assert_by_bit_vector { condition; code; _ } ->
             let index, emitted = expand_block targets current code.statements in
-            emit targets (index, { kind = Assert condition; origin } :: emitted) rest
+            emit targets (index, { kind = Basic (Assert condition); origin } :: emitted) rest
         | While { condition; body; failed; _ } ->
             let header = take_fresh_number ()
             and inside = take_fresh_number ()
@@ -107,7 +110,14 @@ let expand_body (body : Tree.body) : Graph.body =
             close current (Goto header) origin;
             branch targets (header, []) condition.statements condition.value ~yes:inside ~no:failing
               origin;
-            let in_loop = { targets with break_ = Some after; continue_ = Some (Goto header) } in
+            let in_loop =
+              {
+                targets with
+                break_ = Some after;
+                continue_ = Some (Goto header);
+                loop_provides = targets.provides;
+              }
+            in
             (match emit in_loop (inside, []) body.statements with
             | Some ended -> close ended (Goto header) origin
             | None -> ());
@@ -127,6 +137,13 @@ let expand_body (body : Tree.body) : Graph.body =
                 targets with
                 break_ = Some after;
                 continue_ = Some (Iteration_end { loop = index });
+                loop_provides = targets.provides;
+                task_provides =
+                  (match loop.schedule with
+                  | Concurrent ->
+                      (Tree.Iteration { loop = loop.origin }, targets.provides)
+                      :: targets.task_provides
+                  | Sequential | Parallel -> targets.task_provides);
               }
             in
             (match emit in_loop (inside, []) body.statements with
@@ -187,6 +204,9 @@ let expand_body (body : Tree.body) : Graph.body =
                           targets with
                           task_ends =
                             (Tree.Branch { block = fork; index }, branch_end) :: targets.task_ends;
+                          task_provides =
+                            (Tree.Branch { block = fork; index }, targets.provides)
+                            :: targets.task_provides;
                         }
                     | None -> targets
                   in
@@ -202,6 +222,24 @@ let expand_body (body : Tree.body) : Graph.body =
             in
             close current (Fork { fork; concurrent; branches; join = Some join }) origin;
             emit_rest join
+        | Provide { target; provided; can_use_tasks; body } -> (
+            let index, emitted = current in
+            let started =
+              (index, { Graph.kind = Provide_start { provided; can_use_tasks }; origin } :: emitted)
+            in
+            match
+              ( emit { targets with provides = targets.provides + 1 } started body.statements,
+                body.value )
+            with
+            | Some (index, emitted), Some value ->
+                emit targets
+                  ( index,
+                    { kind = Provide_end; origin } :: make_assignment target value origin :: emitted
+                  )
+                  rest
+            | None, None -> None
+            | Some _, None | None, Some _ ->
+                raise_bug "a `provide` block whose value and whose end disagree")
         | Resume { winner; exits } ->
             let next = take_fresh_number () in
             let exits =
@@ -221,35 +259,44 @@ let expand_body (body : Tree.body) : Graph.body =
             close current (Yield { mode; part; resume }) origin;
             emit_rest resume
         | Jump jump ->
-            let terminator : Graph.terminator =
+            let terminator, left_provides =
               match jump with
-              | Return returned -> Return returned
+              | Return returned -> (Graph.Return returned, targets.provides)
               | Break -> (
                   match targets.break_ with
-                  | Some after -> Goto after
+                  | Some after -> (Goto after, targets.provides - targets.loop_provides)
                   | None -> raise_bug "a `break` outside a loop")
               | Continue -> (
                   match targets.continue_ with
-                  | Some continue_ -> continue_
+                  | Some continue_ -> (continue_, targets.provides - targets.loop_provides)
                   | None -> raise_bug "a `continue` outside a loop")
-              | Cancel { task; winner; number; returned } ->
-                  Cancel
-                    {
-                      task;
-                      task_end = List.assoc_opt task targets.task_ends;
-                      winner;
-                      number;
-                      returned;
-                    }
-              | Unreachable -> Unreachable
-              | Written_unreachable -> Written_unreachable
-              | Todo -> Todo
+              | Cancel { task; winner; number; returned } -> (
+                  match List.assoc_opt task targets.task_provides with
+                  | Some task_provides ->
+                      ( Cancel
+                          {
+                            task;
+                            task_end = List.assoc_opt task targets.task_ends;
+                            winner;
+                            number;
+                            returned;
+                          },
+                        targets.provides - task_provides )
+                  | None -> raise_bug "a cancellation outside its task")
+              | Unreachable -> (Unreachable, 0)
+              | Written_unreachable -> (Written_unreachable, 0)
+              | Todo -> (Todo, 0)
             in
-            close current terminator origin;
+            let index, emitted = current in
+            close
+              ( index,
+                List.init left_provides (fun _ : Graph.statement -> { kind = Provide_end; origin })
+                @ emitted )
+              terminator origin;
             None
         | Basic basic ->
             let index, emitted = current in
-            emit targets (index, { kind = basic; origin } :: emitted) rest)
+            emit targets (index, { kind = Basic basic; origin } :: emitted) rest)
   and expand_block targets current (statements : Tree.statement list) =
     match emit targets current statements with
     | Some current -> current
@@ -290,7 +337,16 @@ let expand_body (body : Tree.body) : Graph.body =
   in
   let entry = take_fresh_number () in
   (match
-     emit { break_ = None; continue_ = None; task_ends = [] } (entry, []) body.code.statements
+     emit
+       {
+         break_ = None;
+         continue_ = None;
+         loop_provides = 0;
+         task_ends = [];
+         task_provides = [];
+         provides = 0;
+       }
+       (entry, []) body.code.statements
    with
   | None -> ()
   | Some _ -> raise_bug "a body whose end control reaches");

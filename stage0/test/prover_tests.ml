@@ -1030,7 +1030,15 @@ let () =
   Harness.test "a loop forgets self when it mutates it" (fun () ->
       expect_not_proven Fixtures.Prover.box_fill_loop "prover.assertion");
   Harness.test "a loop forgets a place that it provides `mut`" (fun () ->
-      expect_not_proven Fixtures.Prover.marker_provided_mut_in_a_loop "prover.assertion")
+      expect_not_proven Fixtures.Prover.marker_provided_mut_in_a_loop "prover.assertion");
+  Harness.test "a `return` from a `provide mut` forgets the provided place" (fun () ->
+      expect_not_proven Fixtures.Prover.provider_state_after_a_return_inside_provide
+        "prover.ensures");
+  Harness.test
+    "an early exit from a `concurrent` block in a `provide mut` forgets the provided place"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.provider_state_after_a_concurrent_early_exit
+        "prover.ensures")
 
 let constant_step = Fixtures.Prover.constant_step
 
@@ -1101,6 +1109,22 @@ let () =
       expect_not_proven Fixtures.Prover.while_loop_with_a_small_cost_clause "prover.cost");
   Harness.test "calls of a capability's method are counted" (fun () ->
       expect_proven Fixtures.Prover.meter_ticks_counted);
+  Harness.test
+    "a call inside a `provide` whose implementation uses the capability has no known count"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.calls_through_a_provider_that_uses_the_capability
+        "prover.cost");
+  Harness.test "a call inside a `provide` whose implementation uses nothing reaches no caller"
+    (fun () -> expect_proven Fixtures.Prover.calls_through_a_provider_that_uses_nothing);
+  Harness.test
+    "a call to a provider of another capability that uses the counted one has no known count"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.calls_through_a_provider_of_another_capability "prover.cost");
+  Harness.test "a `provide` that `break` leaves takes no calls after the loop" (fun () ->
+      expect_proven Fixtures.Prover.calls_after_a_provide_left_by_break);
+  Harness.test "a capability method that uses another capability may call it any number of times"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.calls_of_a_capability_method_that_uses_another "prover.cost");
   Harness.test "a callee's allocations add up" (fun () ->
       expect_proven Fixtures.Prover.tree_built_by_callees);
   Harness.test "a lambda's time is bounded where it is written" (fun () ->

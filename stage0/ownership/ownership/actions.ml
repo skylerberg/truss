@@ -513,18 +513,19 @@ let list_returned_temporaries (body : Mir.Graph.body) =
         List.iter
           (fun (statement : Mir.Graph.statement) ->
             match statement.kind with
-            | Assign
-                {
-                  target = { root = Local target; projections = [] };
-                  value = Operand (Use { place = { root = Local source; projections = [] }; _ });
-                  _;
-                }
+            | Basic
+                (Assign
+                   {
+                     target = { root = Local target; projections = [] };
+                     value = Operand (Use { place = { root = Local source; projections = [] }; _ });
+                     _;
+                   })
               when List.mem target !returned
                    && body.locals.(source).kind = Temporary
                    && not (List.mem source !returned) ->
                 returned := source :: !returned;
                 changed := true
-            | _ -> ())
+            | Basic _ | Provide_start _ | Provide_end -> ())
           block.statements)
       body.blocks
   done;
@@ -545,116 +546,123 @@ let emit_statement builder (statement : Mir.Graph.statement) =
   let origin = statement.origin in
   let uses = Moves.list_statement_uses builder.moves statement in
   match statement.kind with
-  | Live locals ->
-      builder.unassigned_locals <- locals @ builder.unassigned_locals;
-      let core = List.filter_map (find_core_local builder) locals in
-      if core <> [] then emit builder (Bind core) origin
-  | Dead locals ->
-      List.iter
-        (fun (bound : lent_part_binding) ->
-          if List.mem bound.part locals && not (List.mem bound.binding locals) then
-            emit builder
-              (Bind_lent_part
-                 {
-                   scrutinee = bound.scrutinee;
-                   lent_part_type = (lookup_local_info builder bound.part).type_;
-                 })
-              bound.origin)
-        builder.lent_part_bindings;
-      let dropped =
-        List.filter_map
-          (fun local ->
-            let info = lookup_local_info builder local in
-            match info.kind with
-            | Temporary -> Some { owner = Place.Temporary local; origin = info.origin }
-            | Source { local = core; mode = Own; _ } ->
-                Some { owner = Place.Local core; origin = info.origin }
-            | Source _ | Lent _ -> None)
-          locals
-      in
-      if dropped <> [] then emit builder (Drop dropped) origin;
-      builder.lent_part_bindings <-
-        List.filter
-          (fun (bound : lent_part_binding) ->
-            not (List.mem bound.binding locals || List.mem bound.part locals))
-          builder.lent_part_bindings
-  | Assign { target = { root = Local local; projections = [] } as target; value; _ }
-    when List.mem local builder.unassigned_locals
-         ||
-         match (lookup_local_info builder local).kind with
-         | Temporary -> true
-         | Lent _ -> not (Hashtbl.mem builder.held local)
-         | Source _ -> false -> (
-      builder.unassigned_locals <-
-        List.filter (fun unassigned -> unassigned <> local) builder.unassigned_locals;
-      match (lookup_local_info builder local).kind with
-      | Temporary -> (
-          match value with
-          | Operand (Use { place; _ })
-            when List.mem local builder.returned_temporaries
-                 && Option.is_some (track_place builder place) ->
-              read_uses builder ~is_returned:(fun _ -> true) uses;
-              hold builder target (make_value (list_copy_views builder place))
-          | Operand (Borrow _) -> raise_bug "a temporary assigned a borrow"
-          | _ ->
-              read_uses builder uses;
-              hold builder target (compute_rvalue_held builder value))
-      | Lent _ -> (
-          read_uses builder uses;
-          match value with
-          | Operand (Borrow { place; _ }) -> hold builder target (Alias place)
-          | Convert { conversion = View_to_owned; _ } ->
-              hold builder target (compute_rvalue_held builder value)
-          | _ -> raise_bug "a lent local that holds neither a borrow nor the owner of a view")
-      | Source { local = core; _ } ->
-          read_uses builder uses;
-          emit_bound_value builder local core value origin
-            ~is_var:(List.mem core builder.context.mutable_locals))
-  | Assign { target; value; _ } -> (
-      read_uses builder uses;
-      let target = resolve_alias builder target in
-      let result = compute_rvalue_held builder value in
-      match track_place builder target with
-      | Some place -> (
-          emit builder (Assign place) origin;
-          match value with
-          | Operand operand when is_view_operand builder operand ->
-              emit builder
-                (Store { place; views = list_held_views result; replaces_root = place.steps = [] })
-                origin
-          | _ -> ())
-      | None -> hold builder { target with projections = [] } result)
-  | Call { destination; call = called } ->
-      read_uses builder uses;
-      emit_call builder called origin;
-      Option.iter
-        (fun destination ->
-          hold builder destination (make_value (list_result_views builder called)))
-        destination
-  | Template { destination; call = called; _ } ->
-      read_uses builder uses;
-      emit_call builder called origin;
-      hold builder destination (make_value (list_result_views builder called))
-  | Lend { part; call = called } ->
-      read_uses builder uses;
-      emit_call builder called origin;
-      hold builder
-        { Mir.root = Local part; projections = [] }
-        (make_lent_part builder called ~part_type:(lookup_local_info builder part).type_
-           ~is_loop_part:(List.mem part builder.loop_elements))
-  | Assert _ | Echo _ -> read_uses builder uses
-  | Provide { provided; _ } ->
+  | Provide_start { provided; _ } ->
       read_uses builder uses;
       List.iter
         (fun (provided : Mir.provided) ->
           if provided.mode = Mut then borrow_mut builder provided.value)
         provided
-  | Loan_start { loan; borrowed; mode; duration } ->
-      emit builder (Start_loan { loan; loans = list_loans builder borrowed mode duration }) origin;
-      if duration = Loop_body then
-        Hashtbl.replace builder.loop_body_starts builder.position.block (builder.position.index + 1)
-  | Loan_end loans -> emit builder (End_loans loans) origin
-  | Provide_end | Ghost_assert _ | Matched _ | Proof _ -> ()
+  | Provide_end -> ()
+  | Basic basic -> (
+      match basic with
+      | Live locals ->
+          builder.unassigned_locals <- locals @ builder.unassigned_locals;
+          let core = List.filter_map (find_core_local builder) locals in
+          if core <> [] then emit builder (Bind core) origin
+      | Dead locals ->
+          List.iter
+            (fun (bound : lent_part_binding) ->
+              if List.mem bound.part locals && not (List.mem bound.binding locals) then
+                emit builder
+                  (Bind_lent_part
+                     {
+                       scrutinee = bound.scrutinee;
+                       lent_part_type = (lookup_local_info builder bound.part).type_;
+                     })
+                  bound.origin)
+            builder.lent_part_bindings;
+          let dropped =
+            List.filter_map
+              (fun local ->
+                let info = lookup_local_info builder local in
+                match info.kind with
+                | Temporary -> Some { owner = Place.Temporary local; origin = info.origin }
+                | Source { local = core; mode = Own; _ } ->
+                    Some { owner = Place.Local core; origin = info.origin }
+                | Source _ | Lent _ -> None)
+              locals
+          in
+          if dropped <> [] then emit builder (Drop dropped) origin;
+          builder.lent_part_bindings <-
+            List.filter
+              (fun (bound : lent_part_binding) ->
+                not (List.mem bound.binding locals || List.mem bound.part locals))
+              builder.lent_part_bindings
+      | Assign { target = { root = Local local; projections = [] } as target; value; _ }
+        when List.mem local builder.unassigned_locals
+             ||
+             match (lookup_local_info builder local).kind with
+             | Temporary -> true
+             | Lent _ -> not (Hashtbl.mem builder.held local)
+             | Source _ -> false -> (
+          builder.unassigned_locals <-
+            List.filter (fun unassigned -> unassigned <> local) builder.unassigned_locals;
+          match (lookup_local_info builder local).kind with
+          | Temporary -> (
+              match value with
+              | Operand (Use { place; _ })
+                when List.mem local builder.returned_temporaries
+                     && Option.is_some (track_place builder place) ->
+                  read_uses builder ~is_returned:(fun _ -> true) uses;
+                  hold builder target (make_value (list_copy_views builder place))
+              | Operand (Borrow _) -> raise_bug "a temporary assigned a borrow"
+              | _ ->
+                  read_uses builder uses;
+                  hold builder target (compute_rvalue_held builder value))
+          | Lent _ -> (
+              read_uses builder uses;
+              match value with
+              | Operand (Borrow { place; _ }) -> hold builder target (Alias place)
+              | Convert { conversion = View_to_owned; _ } ->
+                  hold builder target (compute_rvalue_held builder value)
+              | _ -> raise_bug "a lent local that holds neither a borrow nor the owner of a view")
+          | Source { local = core; _ } ->
+              read_uses builder uses;
+              emit_bound_value builder local core value origin
+                ~is_var:(List.mem core builder.context.mutable_locals))
+      | Assign { target; value; _ } -> (
+          read_uses builder uses;
+          let target = resolve_alias builder target in
+          let result = compute_rvalue_held builder value in
+          match track_place builder target with
+          | Some place -> (
+              emit builder (Assign place) origin;
+              match value with
+              | Operand operand when is_view_operand builder operand ->
+                  emit builder
+                    (Store
+                       { place; views = list_held_views result; replaces_root = place.steps = [] })
+                    origin
+              | _ -> ())
+          | None -> hold builder { target with projections = [] } result)
+      | Call { destination; call = called } ->
+          read_uses builder uses;
+          emit_call builder called origin;
+          Option.iter
+            (fun destination ->
+              hold builder destination (make_value (list_result_views builder called)))
+            destination
+      | Template { destination; call = called; _ } ->
+          read_uses builder uses;
+          emit_call builder called origin;
+          hold builder destination (make_value (list_result_views builder called))
+      | Lend { part; call = called } ->
+          read_uses builder uses;
+          emit_call builder called origin;
+          hold builder
+            { Mir.root = Local part; projections = [] }
+            (make_lent_part builder called ~part_type:(lookup_local_info builder part).type_
+               ~is_loop_part:(List.mem part builder.loop_elements))
+      | Assert _ | Echo _ -> read_uses builder uses
+      | Loan_start { loan; borrowed; mode; duration } ->
+          emit builder
+            (Start_loan { loan; loans = list_loans builder borrowed mode duration })
+            origin;
+          if duration = Loop_body then
+            Hashtbl.replace builder.loop_body_starts builder.position.block
+              (builder.position.index + 1)
+      | Loan_end loans -> emit builder (End_loans loans) origin
+      | Ghost_assert _ | Matched _ | Proof _ -> ())
 
 let pull builder (iteration : Mir.iteration) origin =
   match iteration with
@@ -845,8 +853,8 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
                   List.concat_map
                     (fun (statement : Mir.Graph.statement) ->
                       match statement.kind with
-                      | Live locals -> List.filter_map (find_core_local builder) locals
-                      | _ -> [])
+                      | Basic (Live locals) -> List.filter_map (find_core_local builder) locals
+                      | Basic _ | Provide_start _ | Provide_end -> [])
                     body.blocks.(inside).statements;
                 temporaries =
                   List.concat_map

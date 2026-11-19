@@ -6,7 +6,7 @@ let rec holds_break (block : Tree.block) =
       match statement.kind with
       | Jump Break -> true
       | While _ | For _ -> false
-      | Basic _ | Choose _ | Assert_by_bit_vector _ | Fork _ | Resume _ | Yield _
+      | Basic _ | Choose _ | Assert_by_bit_vector _ | Fork _ | Provide _ | Resume _ | Yield _
       | Jump (Return _ | Continue | Cancel _ | Unreachable | Written_unreachable | Todo) ->
           List.exists holds_break (Walk.list_nested_blocks statement))
     block.statements
@@ -306,21 +306,33 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
                          implementation.type_ implementation.origin))
                   implementations))
         in
-        Emitter.emit builder
-          (Basic (Provide { provided; can_use_tasks = Core_walk.can_use_tasks body }))
-          origin;
-        Emitter.run_in_value_scope ~provides:true builder origin (fun () ->
-            List.iter
-              (fun (provided : Tree.provided) ->
-                match provided.value with
-                | Borrow _ ->
-                    ignore
-                      (Emitter.start_loan builder provided.value
-                         (if provided.mode = Mut then Mut else Read)
-                         Provide_body provided.origin)
-                | _ -> ())
-              provided;
-            lower_block builder body)
+        let block =
+          Emitter.build_block builder (fun () ->
+              Emitter.run_in_value_scope builder origin (fun () ->
+                  List.iter
+                    (fun (provided : Tree.provided) ->
+                      match provided.value with
+                      | Borrow _ ->
+                          ignore
+                            (Emitter.start_loan builder provided.value
+                               (if provided.mode = Mut then Mut else Read)
+                               Provide_body provided.origin)
+                      | _ -> ())
+                    provided;
+                  lower_block builder body))
+        in
+        let held =
+          Emitter.hold_in_temporary builder node.type_ origin (fun target ->
+              Emitter.emit builder
+                (Provide
+                   { target; provided; can_use_tasks = Core_walk.can_use_tasks body; body = block })
+                origin)
+        in
+        if Option.is_none block.value then begin
+          Emitter.mark_unreachable builder;
+          None
+        end
+        else held
     | Return returned ->
         (match returned with
         | None -> Emitter.return_ builder None origin

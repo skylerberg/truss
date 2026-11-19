@@ -310,9 +310,9 @@ let make_body_frame (state : Lowering.state) ?owner ?returns_into ?lending
         (fun _ -> true)
         (fun (statement : Mir.Graph.statement) ->
           match statement.kind with
-          | Lend { call = { callee = { target = Intrinsic _; _ }; _ }; _ } -> []
-          | Lend { part; _ } -> [ part ]
-          | _ -> []);
+          | Basic (Lend { call = { callee = { target = Intrinsic _; _ }; _ }; _ }) -> []
+          | Basic (Lend { part; _ }) -> [ part ]
+          | Basic _ | Provide_start _ | Provide_end -> []);
     lent_calls = Hashtbl.create 4;
     placed_parts = Hashtbl.create 4;
     forwarded_locals = 0;

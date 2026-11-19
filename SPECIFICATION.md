@@ -931,6 +931,14 @@ public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
 
 - The target of `calls` is a function parameter, a capability method, or a
   whole capability, never an associated capability set.
+- **`calls` of a capability counts the calls that reach the caller's
+  provider.** A call inside a `provide` goes to the provided
+  implementation, which calls the next provider out only if its `impl`
+  uses that capability. No clause bounds those calls, so a call to an
+  implementation that uses the counted capability has no known count, and
+  a call to one that does not counts as none. A capability method whose
+  declaration uses another capability may call that one any number of
+  times.
 - `O(f)` means that the cost is at most `c * f + d` for every input, for
   some constants `c` and `d`.
 - `time` counts abstract steps: each primitive operation and each call is one.
@@ -1968,7 +1976,8 @@ let rolled = provide LoadedDie(face: 5) {
   default in before the call reaches an implementation.
 - `provide implementation, ... { body }` runs the body with the given
   implementations, passed as arguments are: a place is written with `mut`
-  when its methods mutate it, and it holds the mutations afterward.
+  when its methods mutate it, and it holds the mutations afterward, on
+  every path out of the body, a `return` or a `break` among them.
 - Providing a type provides every capability it implements.
 - An `impl` with a `uses` clause can use those capabilities, and providing
   it requires them. Otherwise an `impl`'s methods use only the capabilities

@@ -1,0 +1,30 @@
+capability Fetch {
+  fn get() -> UInt64
+}
+
+capability Source {
+  fn next() -> UInt64
+}
+
+type Relay()
+
+impl Source for Relay uses Fetch {
+  fn next(self) -> UInt64 {
+    Fetch.get()
+  }
+}
+
+fn read_source() -> UInt64
+  uses Source
+{
+  Source.next()
+}
+
+fn wrapped() -> UInt64
+  uses Fetch
+  cost calls(Fetch.get) == 0
+{
+  provide Relay() {
+    read_source()
+  }
+}

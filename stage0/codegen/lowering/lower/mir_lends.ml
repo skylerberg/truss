@@ -118,7 +118,7 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
     let is_local (target : Mir.place) = target = { root = Local local; projections = [] } in
     let list_passed_places (statement : Mir.Graph.statement) =
       match statement.kind with
-      | Assign { target; value; _ } when is_local target -> (
+      | Basic (Assign { target; value; _ }) when is_local target -> (
           match value with
           | Operand (Borrow { place; _ }) -> [ (place, holds_view) ]
           | Operand ((Use _ | Take _) as operand) when holds_view ->
@@ -134,14 +134,16 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
                   | None -> None)
                 fields
           | _ -> raise Made)
-      | Lend { part; call } when part = local ->
+      | Basic (Lend { part; call }) when part = local ->
           if holds_view then list_receiver_places call @ list_viewed_by call
           else list_receiver_places call
-      | (Call { destination = Some target; call } | Template { destination = target; call; _ })
+      | Basic (Call { destination = Some target; call } | Template { destination = target; call; _ })
         when is_local target ->
           if holds_view then list_viewed_by call else raise Made
-      | Assign _ | Lend _ | Call _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Provide _
-      | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ ->
+      | Basic
+          ( Assign _ | Lend _ | Call _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
+          | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ )
+      | Provide_start _ | Provide_end ->
           []
     in
     try
