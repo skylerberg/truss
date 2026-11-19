@@ -869,8 +869,8 @@ fn serve(listener: mut Listener)
 - The parameters whose types are declared with `type` are compared in the
   order they are declared, as a list of measures is. The first of them that
   a recursive call does not pass unchanged must be passed a part of itself,
-  and the parameters after it may be any value. This call needs nothing
-  written because `chain` is declared before `reversed`. Declared in the
+  and the parameters after it may be any value. The recursive call below
+  needs nothing written because `chain` is declared before `reversed`. Declared in the
   other order, the function would have to state `decreases`:
 
   ```truss
