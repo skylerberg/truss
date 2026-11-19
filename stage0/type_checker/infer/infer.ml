@@ -49,23 +49,3 @@ let show_resolution = Tables.show_resolution
 let statement_diverges (tables : tables) =
   State.diverges ~is_never:(fun (value : Syntax.expression) ->
       match tables.types.(value.id) with Some Types.Never -> true | _ -> false)
-
-type form_origin =
-  | Written of Resolve.Names.key
-  | Derived of Resolve.Names.key
-  | Inherited of Resolve.Names.key
-
-let find_form_origin (interface : Interface.Lookups.t) ~is_derived (path : Path.t) =
-  match (interface.names.find_key path, path) with
-  | Some key, _ -> Some (Written key, Types.no_substitution)
-  | None, Method { owner = Derived { type_; _ }; _ } when is_derived path ->
-      Option.map
-        (fun type_key -> (Derived type_key, Types.no_substitution))
-        (interface.names.find_key type_)
-  | None, Method { owner = Impl _ | Derived _; _ } ->
-      Option.bind (Interface.Impls.find_implemented_method interface path)
-        (fun (implemented : Interface.Impls.implemented_method) ->
-          Option.map
-            (fun key -> (Inherited key, implemented.implementation.substitution))
-            (interface.names.find_key implemented.declaration))
-  | None, _ -> None
