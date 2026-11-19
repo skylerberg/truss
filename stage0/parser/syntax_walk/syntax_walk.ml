@@ -71,9 +71,7 @@ let visit_expression_parts ~on_expression ~on_statement (value : Syntax.expressi
       on_expression base;
       List.iter
         (fun (update : Syntax.update) ->
-          match update.kind with
-          | Update { value; _ } -> Option.iter on_expression value
-          | Update_error -> ())
+          match update.kind with Update { value; _ } -> on_expression value | Update_error -> ())
         updates
   | Binary { left; right; _ } ->
       on_expression left;
@@ -352,10 +350,9 @@ let walk_names ~on_name (definition : Syntax.definition) =
         List.iter
           (fun (update : Syntax.update) ->
             match update.kind with
-            | Update { field; path = rest; value } ->
-                on_name field;
-                List.iter on_name rest;
-                Option.iter walk_expression value
+            | Update { path; value } ->
+                List.iter on_name path;
+                walk_expression value
             | Update_error -> ())
           updates
     | Is { value = tested; pattern; _ } ->

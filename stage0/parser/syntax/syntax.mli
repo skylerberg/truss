@@ -130,11 +130,7 @@ and text = { value : string; id : id }
 and argument = { label : name option; value : expression }
 and bracket_item = Item of expression | Item_constraint of name * type_expression
 and update = update_kind node
-
-and update_kind =
-  | Update of { field : name; path : name list; value : expression option }
-  | Update_error
-
+and update_kind = Update of { path : name list; value : expression } | Update_error
 and binder = Binder_in of pattern * expression | Binder_type of name * type_expression
 and else_branch = Else of block | Else_if of expression
 and block = { statements : statement list; id : id }
