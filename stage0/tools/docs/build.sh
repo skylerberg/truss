@@ -5,16 +5,16 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 cd "$root"
 
-for tool in odoc dune-deps dot tred neato; do
+for tool in odoc dune-deps dot tred neato jq; do
   if ! command -v "$tool" > /dev/null; then
     echo "$tool is not on the path. Install the documentation tools with" >&2
     echo "  opam install odoc dune-deps" >&2
-    echo "  brew install graphviz" >&2
+    echo "  brew install graphviz jq" >&2
     exit 1
   fi
 done
 
-dune build @doc-new
+dune build @check @doc-new ./stage0/tools/docs/library_uses.exe
 
 odoc_html=_build/default/_doc_new/html/docs
 docs=_build/docs
@@ -55,9 +55,10 @@ dune-deps stage0 --no-exe --no-ext > "$work/dependencies.dot"
 {
   cut -d ' ' -f 3 "$work/libraries_without_test_and_tools" | sort -u
   cut -d ' ' -f 3 "$work/libraries" | sort -u
-} | awk '
-  !seen[$0]++ { areas = areas (areas == "" ? "" : ", ") "\"" $0 "\"" }
-  END { print "const AREAS = [" areas "];" }' > "$docs/graph_data.js"
+} | awk '!seen[$0]++' > "$work/areas"
+awk '
+  { areas = areas (NR == 1 ? "" : ", ") "\"" $0 "\"" }
+  END { print "const AREAS = [" areas "];" }' "$work/areas" > "$docs/graph_data.js"
 awk '
   FNR == NR { dir[$1] = $2; area[$1] = $3; page[$1] = $4; next }
   /->/ {
@@ -154,12 +155,25 @@ insert_after() {
   printf '%s%s%s%s\n' "${content%%"$2"*}" "$2" "$3" "${content#*"$2"}" > "$1"
 }
 
-cp "$here/graph.html" "$here/graph.css" "$here/graph.js" "$here/areas.html" "$here/areas.js" "$docs/"
+find _build/default/_doc_new/odoc -name '*.odocl' > "$work/odocl_files"
+odoc compile-index --json --file-list="$work/odocl_files" -o "$work/index.json"
+jq -r '.[] | select(.kind.kind != "Doc")
+  | [.kind.kind, (.display.url | ltrimstr("docs/"))] + (.id | map(.name)) | @tsv' \
+  "$work/index.json" > "$work/index"
+mkdir "$work/uses"
+_build/default/stage0/tools/docs/library_uses.exe \
+  "$work/libraries" "$work/areas" "$work/index" _build/default "$work/uses"
+
+cp "$here/graph.html" "$here/graph.css" "$here/graph.js" "$here/areas.html" "$here/areas.js" \
+  "$here/area_colors.css" "$here/library_uses.css" "$docs/"
 insert_after "$docs/graph.html" '<div id="canvas">' "$(cat "$work/graph.svg")"
 insert_after "$docs/areas.html" '<div id="canvas">' "$(cat "$work/areas.svg")"
 insert_after "$docs/index.html" '<nav class="odoc-toc odoc-local-toc"><ul>' \
   '<li><a href="#dependency-graph">Dependency graph</a></li>'
 insert_after "$docs/index.html" '<div class="odoc-content">' \
-  '<h2 id="dependency-graph"><a href="#dependency-graph" class="anchor"></a>Dependency graph</h2><p><a href="graph.html">The library dependency graph</a> shows which library depends on which. Each library in it links to its documentation. <a href="areas.html">The area graph</a> shows how many dependencies each area of stage0 has on each other area. Both leave out the libraries of stage0/test and stage0/tools until you show them.</p>'
+  '<h2 id="dependency-graph"><a href="#dependency-graph" class="anchor"></a>Dependency graph</h2><p><a href="graph.html">The library dependency graph</a> shows which library depends on which. Each library in it links to its documentation. <a href="areas.html">The area graph</a> shows how many dependencies each area of stage0 has on each other area. Both leave out the libraries of stage0/test and stage0/tools until you show them.</p><p>The page of each library lists the names it uses from other libraries and the names other libraries use from it.</p>'
+while read -r library _ _ page; do
+  [ -z "$page" ] || insert_after "$docs/$page" '<div class="odoc-content">' "$(cat "$work/uses/$library.html")"
+done < "$work/libraries"
 
 echo "$root/$docs/index.html"

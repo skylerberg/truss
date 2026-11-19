@@ -44,9 +44,13 @@ develop as well as make it easier to bootstrap the compiler in parts.
   with the ocamlformat version that `.ocamlformat` pins.
 - **`stage0/tools/docs/build.sh`** builds the odoc documentation of every
   library, a page of the library dependency graph, and a page of the
-  dependencies between areas into `_build/docs`. It
-  needs odoc and dune-deps from opam and Graphviz from Homebrew, which
-  `dune-project` does not list because CI never builds the documentation.
+  dependencies between areas into `_build/docs`. On the page of each
+  library, `stage0/tools/docs/library_uses` lists the names that the
+  library's `.cmt` and `.cmti` files reference in other libraries and the
+  names that other libraries reference in it, each linked to its entry in
+  odoc's index. The script needs odoc and dune-deps from opam and Graphviz
+  and jq from Homebrew, which `dune-project` does not list because CI never
+  builds the documentation.
 - **CI** (`.github/workflows/ci.yml`) builds, checks formatting, checks that
   `truss.opam` matches `dune-project`, rejects comments, runs every test
   suite, and proves the standard library, on every pull request and every
