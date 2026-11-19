@@ -24,8 +24,6 @@ public fn Sequence[Element].append(self, value: Element) -> Sequence[Element]
 
 public fn Sequence[Element].sum(self, measure: fn(Element) -> Integer) -> Integer
   ensures self.length() == 0 ==> result == 0
-  ensures self.length() > 0 ==>
-    result == self[..self.length() - 1].sum(measure) + measure(self[self.length() - 1])
   ensures (forall i in 0..self.length() => measure(self[i]) >= 0) ==> result >= 0
   decreases self.length()
 {
@@ -42,21 +40,13 @@ theorem sum_of_no_elements[Element](items: Sequence[Element])
 {
 }
 
-theorem sum_with_one_more_element[Element](longer: Sequence[Element], items: Sequence[Element], value: Element)
-  requires longer.length() == items.length() + 1
-  requires identical(longer[items.length()], value)
-  requires forall i in 0..items.length() => identical(longer[i], items[i])
-  ensures forall measure: fn(Element) -> Integer => longer.sum(measure) == items.sum(measure) + measure(value)
-{
-  assert identical(longer[..items.length()], items)
-}
-
 public theorem sum_is_at_most_zero[Element](items: Sequence[Element], measure: fn(Element) -> Integer)
   requires forall i in 0..items.length() => measure(items[i]) <= 0
   ensures items.sum(measure) <= 0
   decreases items.length()
 {
   if items.length() > 0 {
+    assert identical(items, items[..items.length() - 1].append(items[items.length() - 1]))
     sum_is_at_most_zero(items[..items.length() - 1], measure: measure)
   }
 }
@@ -68,6 +58,7 @@ public theorem sum_is_positive[Element](items: Sequence[Element], measure: fn(El
   ensures items.sum(measure) > 0
   decreases items.length()
 {
+  assert identical(items, items[..items.length() - 1].append(items[items.length() - 1]))
   if index < items.length() - 1 {
     sum_is_positive(items[..items.length() - 1], measure: measure, index: index)
   } else {
@@ -85,7 +76,11 @@ public fn Sequence[Element].concatenate(self, other: Sequence[Element]) -> Seque
   if other.length() == 0 {
     self
   } else {
-    self.concatenate(other[..other.length() - 1]).append(other[other.length() - 1])
+    let last = other.length() - 1
+    proof {
+      assert identical(other, other[..last].append(other[last]))
+    }
+    self.concatenate(other[..last]).append(other[last])
   }
 }
 
