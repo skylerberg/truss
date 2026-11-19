@@ -5,7 +5,8 @@ type t = {
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
   domains : (int, Language.Builtin_type.t list) Hashtbl.t;
-  list_rigid_members : Types.ty -> Language.Builtin_type.t list;
+  list_rigid_members : Types.condition -> Types.ty -> Language.Builtin_type.t list;
+  mutable condition : Types.condition;
   specification_unknowns : (int, unit) Hashtbl.t;
   mutable checks_specification : bool;
   mutable refused_code_unknown : int option;
@@ -21,6 +22,7 @@ let create ~list_rigid_members =
     deferred_capability_equalities = [];
     domains = Hashtbl.create 8;
     list_rigid_members;
+    condition = [];
     specification_unknowns = Hashtbl.create 8;
     checks_specification = false;
     refused_code_unknown = None;
@@ -127,7 +129,7 @@ let find_domain unifier index = Hashtbl.find_opt unifier.domains index
 let list_possible_members unifier type_ =
   match resolve unifier type_ with
   | Types.Variable index -> Option.value ~default:[] (find_domain unifier index)
-  | (Parameter _ | Projection _) as rigid -> unifier.list_rigid_members rigid
+  | (Parameter _ | Projection _) as rigid -> unifier.list_rigid_members unifier.condition rigid
   | type_ -> Types.list_scalar_members type_
 
 let is_within unifier type_ set =

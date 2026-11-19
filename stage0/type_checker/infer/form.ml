@@ -943,7 +943,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
               {
                 holds_when;
                 clause =
-                  State.apply_condition_bounds state holds_when (fun () ->
+                  State.with_added_condition state holds_when (fun () ->
                       Core.Decreases
                         [
                           State.make_synthetic_expression state ~origin:iterable.id

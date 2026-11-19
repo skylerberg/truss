@@ -165,7 +165,7 @@ and check_callee_cost state env (value : Syntax.expression) (metric : Language.M
   in
   match arguments with
   | [ { value = { kind = Member (base, member); _ }; _ } ] -> (
-      match Interface.Elaborator.find_bounded_type state.context base with
+      match Interface.Elaborator.find_bounded_type (State.read_context state) base with
       | Some type_ -> check_method_cost state value metric type_ member
       | None -> report_not_a_callee "its operand is neither")
   | [ { value = { kind = Name { modules = []; last }; _ } as operand; _ } ] -> (
@@ -185,7 +185,9 @@ and check_callee_cost state env (value : Syntax.expression) (metric : Language.M
 
 and check_method_cost state (value : Syntax.expression) (metric : Language.Metric.t)
     (type_ : Types.ty) (member : Syntax.name) =
-  let overloads = Interface.Elaborator.list_bound_methods state.context type_ member.text in
+  let overloads =
+    Interface.Elaborator.list_bound_methods (State.read_context state) type_ member.text
+  in
   match (Interface.Elaborator.find_operand_method overloads, overloads) with
   | Some { self_type; trait; name; receiver }, _ ->
       State.register_expression state value (fun () ->

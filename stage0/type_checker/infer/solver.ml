@@ -146,7 +146,7 @@ let make_goal (state : State.state) subject requirement ~outputs ~cause : State.
     outputs;
     cause;
     is_specification = state.unifier.checks_specification;
-    condition_bounds = state.condition_bounds;
+    condition = state.unifier.condition;
   }
 
 let has_unknowns (state : State.state) arguments =
@@ -416,9 +416,6 @@ let require_within state subject set ~reason =
   | Some report -> Types.Error report
   | None -> subject
 
-let has_active_bounds (state : State.state) (goal : State.goal) =
-  Types.implies_condition goal.condition_bounds state.condition_bounds
-
 let solve (state : State.state) ~selects =
   let enclosing = state.unifier.checks_specification in
   let rec loop () =
@@ -428,10 +425,10 @@ let solve (state : State.state) ~selects =
     let retained =
       List.filter
         (fun (goal : State.goal) ->
-          (not (selects goal && has_active_bounds state goal))
+          (not (selects goal))
           || begin
             state.unifier.checks_specification <- goal.is_specification;
-            State.apply_condition_bounds state goal.condition_bounds (fun () ->
+            State.with_condition state goal.condition (fun () ->
                 match decide state ~depth:0 goal with
                 | Waits -> true
                 | Holds -> false

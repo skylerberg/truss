@@ -631,5 +631,5 @@ and find_remaining_call state (span : Source.Definition_span.t) cursor =
   | None -> (
       match State.reduce_condition state [ { subject = cursor; bound = finite_cursor } ] with
       | Some (_ :: _ as condition) when List.for_all is_on_a_parameter condition ->
-          Some (condition, State.apply_condition_bounds state condition make_call)
+          Some (condition, State.with_added_condition state condition make_call)
       | Some _ | None -> None)

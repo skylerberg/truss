@@ -80,7 +80,9 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       let type_ =
         match annotation with
         | Some annotation ->
-            let annotated = Interface.Elaborator.elaborate_type state.context annotation in
+            let annotated =
+              Interface.Elaborator.elaborate_type (State.read_context state) annotation
+            in
             Hooks.check state env value annotated;
             annotated
         | None -> (
@@ -174,7 +176,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
           (match annotation with
           | Some written_annotation ->
               let annotated =
-                Interface.Elaborator.elaborate_type state.context written_annotation
+                Interface.Elaborator.elaborate_type (State.read_context state) written_annotation
               in
               if not (State.unify state element annotated) then
                 ignore

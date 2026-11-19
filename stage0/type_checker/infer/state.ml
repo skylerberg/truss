@@ -40,7 +40,7 @@ type goal = {
   outputs : (string * Types.ty) list;
   cause : cause;
   is_specification : bool;
-  condition_bounds : Types.condition;
+  condition : Types.condition;
 }
 
 type frame = {
@@ -114,7 +114,6 @@ type state = {
   mutable evidence_packages : Path.package list;
   mutable final_type_checks : (unit -> unit) list;
   mutable log : logged list;
-  mutable condition_bounds : Types.condition;
   annotatable : (Syntax.id, unit) Hashtbl.t;
 }
 
@@ -378,22 +377,22 @@ let check_compiled_expression state (id : Syntax.id) =
       ignore (reject_specification_only_type state ~subject:"This value" (read_span state id) type_))
     state.tables.types.(id)
 
-let apply_condition_bounds (state : state) (condition : Types.condition) run =
-  let active = state.condition_bounds in
-  match List.filter (fun bound -> not (List.mem bound active)) condition with
-  | [] -> run ()
-  | added ->
-      state.condition_bounds <- Types.make_condition (active @ added);
-      Fun.protect
-        ~finally:(fun () -> state.condition_bounds <- active)
-        (fun () -> Interface.Elaborator.with_added_bounds state.context added run)
+let with_condition (state : state) condition run =
+  let enclosing = state.unifier.condition in
+  state.unifier.condition <- condition;
+  Fun.protect ~finally:(fun () -> state.unifier.condition <- enclosing) run
 
-let keep_condition_bounds (state : state) run =
-  let active = state.condition_bounds in
-  fun argument -> apply_condition_bounds state active (fun () -> run argument)
+let with_added_condition state condition run =
+  with_condition state (Types.make_condition (state.unifier.condition @ condition)) run
+
+let keep_condition (state : state) run =
+  let condition = state.unifier.condition in
+  fun argument -> with_condition state condition (fun () -> run argument)
+
+let read_context state = Interface.Elaborator.with_condition state.context state.unifier.condition
 
 let check_when_final state check =
-  state.final_type_checks <- keep_condition_bounds state check :: state.final_type_checks
+  state.final_type_checks <- keep_condition state check :: state.final_type_checks
 
 let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
@@ -407,7 +406,7 @@ let make_fresh_generic_arguments state (generics : Types.generic list) =
       | Type_generic _ -> Types.Type (make_fresh_type state))
     generics
 
-let lookup_bounds state parameter = Interface.Elaborator.list_bounds state.context parameter
+let lookup_bounds state parameter = Interface.Elaborator.list_bounds (read_context state) parameter
 
 let reduce_condition state (condition : Types.condition) =
   Interface.Impls.decide_condition state.lookups.interface ~list_bounds:(lookup_bounds state)
@@ -416,7 +415,9 @@ let reduce_condition state (condition : Types.condition) =
 let record_condition state id (written : Syntax.condition option) =
   let condition =
     reduce_condition state
-      (Option.fold ~none:[] ~some:(Interface.Elaborator.elaborate_condition state.context) written)
+      (Option.fold ~none:[]
+         ~some:(Interface.Elaborator.elaborate_condition (read_context state))
+         written)
   in
   state.tables.conditions.(id) <- condition;
   condition
@@ -459,17 +460,12 @@ let record_in_log state member entry = state.log <- { member; entry } :: state.l
 let make_literal_type state (value : Syntax.expression) allowed ~report_excluded =
   let literal = Unify.make_fresh_number state.unifier allowed in
   record_in_log state state.unifier.next
-    (Literal
-       {
-         allowed;
-         report_excluded = keep_condition_bounds state report_excluded;
-         literal = value.id;
-       });
+    (Literal { allowed; report_excluded = keep_condition state report_excluded; literal = value.id });
   literal
 
 let record_narrowing state member ~allowed ~report_excluded =
   record_in_log state member
-    (Narrowing { allowed; report_excluded = keep_condition_bounds state report_excluded })
+    (Narrowing { allowed; report_excluded = keep_condition state report_excluded })
 
 let record_decided state member ~site ~decided_type ~at =
   record_in_log state member (Decided { site; decided_type; decided_at = at })

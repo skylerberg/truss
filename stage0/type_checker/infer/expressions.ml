@@ -174,7 +174,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
               "A quantifier over a whole type cannot run, so it is only for specifications and the \
                bodies of functions for specifications only. Quantify over a range or a collection.";
           State.declare state bound
-            (Interface.Elaborator.elaborate_type state.context written)
+            (Interface.Elaborator.elaborate_type (State.read_context state) written)
             ~binding:Let ~mode:Language.Mode.Read);
       check state { env with in_quantifier = true } body Types.bool;
       State.register_expression state value (fun () ->

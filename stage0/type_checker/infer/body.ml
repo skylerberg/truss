@@ -461,7 +461,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       match parameter.kind with
                       | Named_parameter { name; type_; _ } ->
                           State.declare state name
-                            (Interface.Elaborator.elaborate_type state.context type_)
+                            (Interface.Elaborator.elaborate_type (State.read_context state) type_)
                             ~binding:Let ~mode:Language.Mode.Read
                       | _ -> ())
                     law.parameters;
@@ -717,11 +717,13 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
         };
       diagnostics = [];
       unifier =
-        Unify.create ~list_rigid_members:(fun rigid ->
+        Unify.create ~list_rigid_members:(fun condition rigid ->
             Option.value ~default:[]
               (Types.find_bound_integer_implementors
                  (Interface.Properties.list_known_bounds lookups.interface
-                    ~list_bounds:(Interface.Elaborator.list_bounds context)
+                    ~list_bounds:
+                      (Interface.Elaborator.list_bounds
+                         (Interface.Elaborator.with_condition context condition))
                     rigid)));
       locals = Hashtbl.create 32;
       law_parameters = [];
@@ -739,7 +741,6 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       evidence_packages = [];
       final_type_checks = [];
       log = [];
-      condition_bounds = [];
       annotatable = Hashtbl.create 8;
       goals = [];
     }
