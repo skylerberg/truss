@@ -737,6 +737,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       capability_constraints = [];
       capability_solution = None;
       evidence_packages = [];
+      final_type_checks = [];
       undecided = [];
       decisions = Hashtbl.create 4;
       annotatable = Hashtbl.create 8;
@@ -748,6 +749,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
         (Interface.Properties.list_known_bounds lookups.interface
            ~list_bounds:(State.lookup_bounds state) type_));
   check_definition state elaborated ~checks_body;
+  List.iter (fun check -> check ()) (List.rev state.final_type_checks);
   state.diagnostics <- Interface.Elaborator.list_diagnostics context @ state.diagnostics;
   state.diagnostics <-
     Interface.Check.list_bound_diagnostics lookups.interface ~package:state.package

@@ -87,6 +87,7 @@ type state = {
   mutable capability_constraints : subset_constraint list;
   mutable capability_solution : (int, Types.capability_set) Hashtbl.t option;
   mutable evidence_packages : Path.package list;
+  mutable final_type_checks : (unit -> unit) list;
   mutable undecided : undecided_literal list;
   decisions : (int, literal_decision) Hashtbl.t;
   annotatable : (Syntax.id, unit) Hashtbl.t;
@@ -367,6 +368,7 @@ let defer state check =
   | Some frame -> if not (check ()) then frame.deferred_checks <- check :: frame.deferred_checks
   | None -> ignore (check ())
 
+let check_when_final state check = state.final_type_checks <- check :: state.final_type_checks
 let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
 let make_fresh_type state = Unify.make_fresh_type state.unifier

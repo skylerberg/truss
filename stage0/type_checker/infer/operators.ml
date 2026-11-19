@@ -502,43 +502,39 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
                 Printf.sprintf "`%s` is expected, and the `%s` of `%s` is `%s`."
                   (Types.show any_type) name (Types.show inner_type)
                   (State.show state associated_type)));
-      State.defer state (fun () ->
-          let inner_type = State.normalize state inner_type in
-          Unify.list_unknowns state.unifier inner_type = []
-          && begin
-            if Option.is_some (State.find_evidence state inner_type trait) then
-              List.iter
-                (fun (bound : Types.trait_reference) ->
-                  match
-                    Interface.Definition.find_trait_interface state.lookups.interface bound.trait
-                  with
-                  | Some interface ->
-                      List.iter
-                        (fun name ->
-                          match
-                            Types.list_capabilities
-                              (Interface.Impls.project_capability_set state.lookups.interface
-                                 ~list_bounds:(State.lookup_bounds state) inner_type
-                                 { bound with associated = [] } name)
-                          with
-                          | [] -> ()
-                          | set ->
-                              State.report state No_impl (State.read_span state value.id)
-                                (Printf.sprintf
-                                   "`%s` cannot be an `%s`: its `%s` is %s, and code that holds an \
-                                    `any` value has no capability to give to its methods."
-                                   (Types.show inner_type) (Types.show any_type) name
-                                   (String.concat ", "
-                                      (List.map
-                                         (fun capability ->
-                                           "`" ^ Types.show_capability capability ^ "`")
-                                         set))))
-                        interface.associated_capabilities
-                  | None -> ())
-                (Interface.Properties.list_bound_closure state.lookups.interface ~self:inner_type
-                   trait);
-            true
-          end);
+      State.check_when_final state (fun () ->
+          let inner_type = State.finalize_type state inner_type in
+          if Option.is_some (State.find_evidence state inner_type trait) then
+            List.iter
+              (fun (bound : Types.trait_reference) ->
+                match
+                  Interface.Definition.find_trait_interface state.lookups.interface bound.trait
+                with
+                | Some interface ->
+                    List.iter
+                      (fun name ->
+                        match
+                          Types.list_capabilities
+                            (Interface.Impls.project_capability_set state.lookups.interface
+                               ~list_bounds:(State.lookup_bounds state) inner_type
+                               { bound with associated = [] } name)
+                        with
+                        | [] -> ()
+                        | set ->
+                            State.report state No_impl (State.read_span state value.id)
+                              (Printf.sprintf
+                                 "`%s` cannot be an `%s`: its `%s` is %s, and code that holds an \
+                                  `any` value has no capability to give to its methods."
+                                 (Types.show inner_type) (Types.show any_type) name
+                                 (String.concat ", "
+                                    (List.map
+                                       (fun capability ->
+                                         "`" ^ Types.show_capability capability ^ "`")
+                                       set))))
+                      interface.associated_capabilities
+                | None -> ())
+              (Interface.Properties.list_bound_closure state.lookups.interface ~self:inner_type
+                 trait));
       any_type
   | _ ->
       ignore (Hooks.check_expression state env inner);
