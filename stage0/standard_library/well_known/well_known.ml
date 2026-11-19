@@ -36,6 +36,10 @@ type t =
   | From_template
   | From_elements
   | Map
+  | Set
+  | Sorted_set
+  | Sorted_map
+  | List_cursor
   | Entry
   | From_entries
   | Sequence
@@ -102,6 +106,10 @@ let all =
     From_template;
     From_elements;
     Map;
+    Set;
+    Sorted_set;
+    Sorted_map;
+    List_cursor;
     Entry;
     From_entries;
     Sequence;
@@ -168,6 +176,10 @@ let locate_known = function
   | From_template -> ([ "text" ], "FromTemplate")
   | From_elements -> ([ "list" ], "FromElements")
   | Map -> ([ "map" ], "Map")
+  | Set -> ([ "set" ], "Set")
+  | Sorted_set -> ([ "collections" ], "SortedSet")
+  | Sorted_map -> ([ "collections" ], "SortedMap")
+  | List_cursor -> ([ "list" ], "ListCursor")
   | Entry -> ([ "map" ], "Entry")
   | From_entries -> ([ "map" ], "FromEntries")
   | Sequence -> ([ "specification" ], "Sequence")

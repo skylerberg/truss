@@ -429,6 +429,8 @@ let () =
       expect_proven (tree ^ Fixtures.Prover.leftmost));
   Harness.test "recursion on the parameter itself does not end" (fun () ->
       expect_not_proven (tree ^ Fixtures.Prover.spin_on_its_tree) "prover.termination");
+  Harness.test "a user's model is not known to be smaller than its value" (fun () ->
+      expect_not_proven Fixtures.Prover.spin_on_a_knot_whose_model_holds_it "prover.termination");
   Harness.test "a match with guards ends in an unreachable that is proven" (fun () ->
       expect_proven Fixtures.Prover.match_with_exhaustive_guards;
       expect_not_proven Fixtures.Prover.match_with_guards_missing_zero "prover.unreachable")

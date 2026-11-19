@@ -117,8 +117,29 @@ let substitute_value_term context (value : Types.value) =
       Logic.Symbol symbol
   | Value_variable _ -> Facts.raise_unsupported Whole_definition "an unsolved size"
 
-let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) symbol =
-  if context.ranking then
+let is_model_built_from_contents : Path.t -> bool = function
+  | Impl { module_; trait; for_type } ->
+      Path.compare_package module_.package Path.standard_package = 0
+      && Path.equal trait.path (Well_known.make_path Model)
+      && (Intrinsic.find_builtin for_type = Some Array
+         || List.exists
+              (fun name -> Path.equal for_type (Well_known.make_path name))
+              [
+                List;
+                Slice;
+                List_cursor;
+                String;
+                String_slice;
+                Literal;
+                Set;
+                Sorted_set;
+                Map;
+                Sorted_map;
+              ])
+  | Top _ | Method _ | Member_constant _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> false
+
+let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) ~impl symbol =
+  if context.ranking && is_model_built_from_contents impl then
     Facts.run_once context (Ranked_model symbol) (fun () ->
         let each = Logic.Symbol.Variable { label = "ranked.value"; numbers = [] } in
         let fact =
@@ -157,7 +178,7 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
       let symbol = Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type ty ] } in
       Facts.declare context
         (Logic.Function (symbol, [ Facts.declare_sort context ty ], Facts.declare_sort context model));
-      rank_model context ty ~model symbol;
+      rank_model context ty ~model ~impl symbol;
       (match ty with
       | Types.Named { path; arguments = [ Types.Type element; Types.Value count ] }
         when Intrinsic.find_builtin path = Some Array ->

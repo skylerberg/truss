@@ -352,12 +352,12 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       let result_sort = Facts.declare_sort context result_type in
       Facts.declare context (Logic.Function (function_symbol, sorts, result_sort));
       (match (path, callee_bindings) with
-      | Method { name = "model"; receiver = Read; _ }, [ (self, _) ] when self.local = Self ->
+      | Method { owner; name = "model"; receiver = Read }, [ (self, _) ] when self.local = Self ->
           Models.rank_model context
             ((Interface.Impls.normalize context.lookups.interface
                 ~list_bounds:Interface.Impls.list_no_bounds)
                (Types.substitute (substitution_of callee_clauses) self.type_))
-            ~model:result_type function_symbol
+            ~model:result_type ~impl:owner function_symbol
       | _ -> ());
       let symbol =
         if List.mem function_symbol context.axiomatizing then begin
