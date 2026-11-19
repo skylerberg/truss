@@ -2167,10 +2167,12 @@ let list_package_diagnostics (package_database : package_database) = package_dat
 
 type proofs = { database : t; keys : Resolve.Names.key list }
 
-let has_diagnostics database package =
+let has_errors database package =
   match find_package database package with
   | Some package_database when List.mem package database.project ->
-      List.exists (fun file -> list_file_diagnostics database file <> []) package_database.files
+      List.exists
+        (fun file -> List.exists Diagnostic.is_error (list_file_diagnostics database file))
+        package_database.files
   | Some package_database -> package_database.diagnostics <> []
   | None -> true
 
@@ -2180,8 +2182,7 @@ let require_diagnostics_for_blocked_proofs database packages keys =
   in
   match List.find_opt is_blocked keys with
   | Some key
-    when not (List.exists (has_diagnostics database) (sort_in_dependency_order database packages))
-    ->
+    when not (List.exists (has_errors database) (sort_in_dependency_order database packages)) ->
       Compiler_bug.raise_bug ~stage:"Database"
         "the proof of %s is blocked, and no code of its package or of a package it depends on has \
          a diagnostic"

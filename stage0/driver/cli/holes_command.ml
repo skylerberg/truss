@@ -128,4 +128,4 @@ let run ~paths =
     List.iter print holes;
     if holes = [] then Output.print_line "No holes."
   end;
-  if Report.clean report then 0 else 1
+  if Report.has_errors report then 1 else 0
