@@ -1130,6 +1130,9 @@ let () =
   Harness.test "a quantifier over a type in a compiled body" (fun () ->
       expect_one_diagnostic Fixtures.Infer.quantifier_over_int64_in_a_body
         "types.specification_only");
+  Harness.test "a quantifier's range is of integers or characters, as a `for` loop's is" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.quantifier_over_a_float_range "types.not_indexable";
+      expect_fine Fixtures.Infer.quantifier_over_a_character_range);
   Harness.test "a local of type Integer in a compiled body" (fun () ->
       expect_one_diagnostic Fixtures.Infer.integer_local_in_a_body "types.specification_only"
         ~says:"`big` has the type `Integer`");

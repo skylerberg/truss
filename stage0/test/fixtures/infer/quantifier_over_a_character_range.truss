@@ -1,0 +1,3 @@
+fn all_letters() -> Bool {
+  forall letter in Character"a"..=Character"z" => letter != Character" "
+}
