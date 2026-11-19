@@ -66,7 +66,8 @@ let declare_parameters state (written : Syntax.parameter list) (signature : Type
               (fun (info : Types.parameter_info) -> info.name = name.text)
               signature.parameters
           with
-          | Some info -> State.declare state name info.type_ ~is_var:false ~mode:info.mode
+          | Some info ->
+              State.declare state name info.type_ ~is_var:false ~mode:info.mode ~is_parameter:true
           | None -> ())
       | Self_parameter _ | Parameter_error -> ())
     written
@@ -120,7 +121,8 @@ let check_function_type_requires state env (written : Syntax.parameter list)
               List.iter2
                 (fun (input : Syntax.function_input) (mode, type_) ->
                   Option.iter
-                    (fun input_name -> State.declare state input_name type_ ~is_var:false ~mode)
+                    (fun input_name ->
+                      State.declare state input_name type_ ~is_var:false ~mode ~is_parameter:false)
                     input.name)
                 inputs elaborated.inputs;
               List.iter
@@ -470,7 +472,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       | Named_parameter { name; type_; _ } ->
                           State.declare state name
                             (Interface.Elaborator.elaborate_type state.context type_)
-                            ~is_var:false ~mode:Types.Read
+                            ~is_var:false ~mode:Types.Read ~is_parameter:false
                       | _ -> ())
                     law.parameters;
                   List.iter

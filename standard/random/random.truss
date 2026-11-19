@@ -169,7 +169,6 @@ public fn Generator.chance(mut self, probability: Float64) -> Bool
 }
 
 public fn Generator.fill(mut self, buffer: mut Slice[UInt8])
-  ensures buffer.length() == old(buffer.length())
   cost time O(buffer.length())
 {
   var word: UInt64 = 0
@@ -185,7 +184,6 @@ public fn Generator.fill(mut self, buffer: mut Slice[UInt8])
 }
 
 public fn Generator.shuffle[Element](mut self, items: mut Slice[Element])
-  ensures items.length() == old(items.length())
   cost time O(items.length())
 {
   var remaining = items.length()

@@ -65,8 +65,26 @@ let require_bounds state (span : Source.Definition_span.t) ?of_type generics sub
                 | None -> "This")
                 (Types.show argument) (Types.show_trait bound)
             in
+            let is_slice =
+              Types.is_well_known Slice argument || Types.is_well_known String_slice argument
+            in
+            let has_mut_self_method =
+              match
+                Interface.Definition.find_trait_interface state.lookups.interface bound.trait
+              with
+              | Some trait ->
+                  List.exists
+                    (fun (method_ : Types.trait_method) -> method_.method_receiver = Mut)
+                    trait.methods
+              | None -> false
+            in
             State.report state Unsatisfied_bound span
               (match other with
+              | None when is_slice && has_mut_self_method ->
+                  needs
+                  ^ ", which does not hold: a slice implements no trait with a `mut self` method. \
+                     Generic code could call the method on a copy of the slice, and a copy views \
+                     the same elements."
               | None -> needs ^ ", which does not hold."
               | Some (name, associated_type) ->
                   Printf.sprintf "%s, and its `%s` is `%s`." needs name
@@ -233,3 +251,14 @@ let find_function_signature (state : State.state) (path : Path.t) =
   match find_intrinsic_signature path with
   | Some signature -> Some signature
   | None -> Interface.Impls.read_signature state.lookups.interface path
+
+let instantiate_method state span method_path ~self_type =
+  Option.map
+    (fun signature ->
+      let instance = instantiate state span signature in
+      (match instance.signature.receiver with
+      | Some (_, receiver_type) -> ignore (State.unify state receiver_type self_type)
+      | None -> ());
+      ( Tables.Function { path = method_path; instantiation = instance.instantiation },
+        instance.signature ))
+    (find_function_signature state method_path)

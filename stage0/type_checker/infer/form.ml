@@ -156,9 +156,13 @@ let register_call ?function_value state (value : Syntax.expression) =
 
 let register_index state (value : Syntax.expression) =
   State.register_expression state value (fun () ->
-      match (read_call state value.id).callee with
-      | Trait_method { receiver = Mut; _ } -> build_call_kind ~lends:Mut state value
-      | _ -> build_call_kind ~lends:Read state value)
+      match
+        List.find_opt
+          (fun (argument : Tables.argument) -> argument.core_argument_index = 0)
+          (read_call state value.id).arguments
+      with
+      | Some { mode = Mut; _ } -> build_call_kind ~lends:Mut state value
+      | Some _ | None -> build_call_kind ~lends:Read state value)
 
 let build_numeric_literal (state : State.state) (id : Syntax.id) : Core.kind =
   match state.tables.literals.(id) with

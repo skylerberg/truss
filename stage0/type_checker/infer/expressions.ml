@@ -165,7 +165,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
                bodies of functions for specifications only. Quantify over a range or a collection.";
           State.declare state bound
             (Interface.Elaborator.elaborate_type state.context written)
-            ~is_var:false ~mode:Types.Read);
+            ~is_var:false ~mode:Types.Read ~is_parameter:false);
       check state { env with in_quantifier = true } body Types.bool;
       State.register_expression state value (fun () ->
           let quantifier : Core.quantifier =

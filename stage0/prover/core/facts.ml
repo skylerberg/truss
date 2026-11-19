@@ -686,22 +686,16 @@ let merge_known_on_paths (paths : (Logic.term * State.frame) list) =
   in
   let aliases = merge_known (fun frame -> frame.aliases) ~is_same:( = ) ~on_differing:guard_each in
   let slices =
-    merge_known
-      (fun frame -> frame.slices)
-      ~is_same:( = )
-      ~on_differing:(fun each ->
-        if
-          List.exists
-            (function _, (None | Some State.Unknown_slice) -> true | _, Some (Slices _) -> false)
-            each
-        then Unknown_slice
-        else
-          Slices
-            (List.concat_map
-               (function
-                 | condition, Some (State.Slices slices) -> guard condition slices
-                 | _, (Some Unknown_slice | None) -> [])
-               each))
+    match paths with
+    | (_, first) :: rest ->
+        Locals.filter
+          (fun key slice ->
+            List.for_all
+              (fun ((_, frame) : Logic.term * State.frame) ->
+                Locals.find_opt key frame.slices = Some slice)
+              rest)
+          first.slices
+    | [] -> Locals.empty
   in
   let lends = merge_known (fun frame -> frame.lends) ~is_same:( == ) ~on_differing:guard_each in
   (aliases, slices, lends)

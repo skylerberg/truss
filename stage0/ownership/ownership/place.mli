@@ -5,5 +5,4 @@ type t = { root : root; steps : step list }
 type overlap = Disjoint | Overlapping | Maybe_disjoint of Core.origin list * Core.origin list
 
 val classify_overlap : t -> t -> overlap
-val is_slice_type : Types.ty -> bool
 val is_storage_type : Types.ty -> bool

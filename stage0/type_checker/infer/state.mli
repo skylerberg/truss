@@ -1,4 +1,10 @@
-type local = { name : string; type_ : Types.ty; is_var : bool; mode : Types.mode }
+type local = {
+  name : string;
+  type_ : Types.ty;
+  is_var : bool;
+  mode : Types.mode;
+  is_parameter : bool;
+}
 
 type env = {
   output : Types.result option;
@@ -183,7 +189,11 @@ val run_in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) 
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
 val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
-val declare : state -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> unit
+
+val declare :
+  state -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> is_parameter:bool -> unit
+
+val mark_parameter : state -> Syntax.name -> unit
 
 val declare_compiled :
   state -> env -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> unit

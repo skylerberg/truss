@@ -33,7 +33,5 @@ let classify_overlap left right =
     in
     classify_steps left.steps right.steps
 
-let is_slice_type type_ = Types.is_well_known Slice type_ || Types.is_well_known String_slice type_
-
 let is_storage_type type_ =
   Types.is_well_known List type_ || Types.is_well_known Slice type_ || Types.is_builtin Array type_

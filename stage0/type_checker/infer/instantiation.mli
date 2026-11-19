@@ -38,3 +38,10 @@ val instantiate :
   instance
 
 val find_function_signature : State.state -> Path.t -> Types.signature option
+
+val instantiate_method :
+  State.state ->
+  Source.Definition_span.t ->
+  Path.t ->
+  self_type:Types.ty ->
+  (Tables.callee * Types.signature) option

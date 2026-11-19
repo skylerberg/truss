@@ -30,7 +30,6 @@ type action =
   | Pass_owned_function of view list
   | Start_loan of { loan : int; loans : loan list }
   | End_loans of int list
-  | Write_through of Place.t
   | Arguments of {
       borrowed_arguments : borrowed_argument list;
       view_arguments : view_argument list;
@@ -57,16 +56,14 @@ type t = {
 
 type held =
   | Alias of Mir.place
-  | Element of { place : Place.t; written_slices : Place.t list }
-  | Range of { elements : view; written_slices : Place.t list }
-  | Value of { views : view list; lent : Place.t list; written_slices : Place.t list }
+  | Element of Place.t
+  | Range of view
+  | Value of { views : view list; lent : Place.t list }
   | Lent_part of { views : view list; is_loop_part : bool }
-  | Bound_part of { written_slices : Place.t list }
 
-let make_value views = Value { views; lent = []; written_slices = [] }
+let make_value views = Value { views; lent = [] }
 
 type reach = Place_of of view | Elements_of of view | Views of view list
-type access = { reach : reach; written_slices : Place.t list }
 
 let list_reach_views = function
   | Place_of view | Elements_of view -> [ view ]
@@ -112,30 +109,23 @@ let map_viewed_place select = function
 
 let list_held_views (held : held) =
   match held with
-  | Range { elements; _ } -> [ elements ]
+  | Range elements -> [ elements ]
   | Value { views; _ } | Lent_part { views; _ } -> views
-  | Alias _ | Element _ | Bound_part _ -> raise_bug "the views of a local that stands for a place"
+  | Alias _ | Element _ -> raise_bug "the views of a local that stands for a place"
 
 let untrack_elements (held : held) =
   match held with
-  | Range { elements; written_slices } -> Value { views = [ elements ]; lent = []; written_slices }
-  | Alias _ | Element _ | Value _ | Lent_part _ | Bound_part _ -> held
+  | Range elements -> Value { views = [ elements ]; lent = [] }
+  | Alias _ | Element _ | Value _ | Lent_part _ -> held
 
 let merge_held (known : held) (value : held) : held =
   if known = value then value
   else
     match (untrack_elements known, untrack_elements value) with
     | Value known, Value value ->
-        Value
-          {
-            views = union known.views value.views;
-            lent = union known.lent value.lent;
-            written_slices = union known.written_slices value.written_slices;
-          }
+        Value { views = union known.views value.views; lent = union known.lent value.lent }
     | Lent_part part, Value value -> Lent_part { part with views = union part.views value.views }
-    | Bound_part known, Bound_part value ->
-        Bound_part { written_slices = union known.written_slices value.written_slices }
-    | (Alias _ | Element _ | Range _ | Value _ | Lent_part _ | Bound_part _), _ ->
+    | (Alias _ | Element _ | Range _ | Value _ | Lent_part _), _ ->
         raise_bug "a local assigned values of two kinds"
 
 let hold builder (place : Mir.place) (value : held) =
@@ -174,7 +164,7 @@ let track_place builder (place : Mir.place) : Place.t option =
     | Local local -> (
         match (find_core_local builder local, Hashtbl.find_opt builder.held local) with
         | Some local, _ -> Some { Place.root = Local local; steps = [] }
-        | None, Some (Element { place; _ }) -> Some place
+        | None, Some (Element place) -> Some place
         | None, _ -> None)
   in
   Option.map
@@ -186,17 +176,6 @@ let track_place builder (place : Mir.place) : Place.t option =
           | Variant_field _ -> place)
         base place.projections)
     base
-
-let list_written_slices builder (place : Mir.place) =
-  match find_held_root builder place with
-  | Some
-      ( _,
-        ( Element { written_slices; _ }
-        | Range { written_slices; _ }
-        | Value { written_slices; _ }
-        | Bound_part { written_slices } ) ) ->
-      written_slices
-  | Some (_, (Alias _ | Lent_part _)) | None -> []
 
 let find_untracked_lent_part builder (place : Mir.place) =
   match find_held_root builder place with Some (local, Lent_part _) -> Some local | _ -> None
@@ -213,20 +192,15 @@ let is_temporary builder (place : Mir.place) =
 
 let access_place builder (place : Mir.place) ~(borrowed_as : Types.ty option) =
   let place = resolve_alias builder place in
-  let written_slices = list_written_slices builder place in
   match (track_place builder place, borrowed_as) with
-  | Some tracked, None -> { reach = Views [ Copy_of_view_in tracked ]; written_slices }
+  | Some tracked, None -> Views [ Copy_of_view_in tracked ]
   | Some tracked, Some type_ ->
-      {
-        reach =
-          Place_of
-            (if Context.lends_nothing builder.context type_ then Copy_of_view_in tracked
-             else Borrow_of tracked);
-        written_slices = (if Place.is_slice_type type_ then [ tracked ] else written_slices);
-      }
+      Place_of
+        (if Context.lends_nothing builder.context type_ then Copy_of_view_in tracked
+         else Borrow_of tracked)
   | None, _ -> (
       match place.root with
-      | Constant _ | Literal _ -> { reach = Views []; written_slices }
+      | Constant _ | Literal _ -> Views []
       | Local local -> (
           let is_owned_temporary =
             (lookup_local_info builder local).kind = Temporary
@@ -238,17 +212,14 @@ let access_place builder (place : Mir.place) ~(borrowed_as : Types.ty option) =
             | None -> false
           in
           match Hashtbl.find_opt builder.held local with
-          | Some (Range { elements; _ }) -> { reach = Elements_of elements; written_slices }
+          | Some (Range elements) -> Elements_of elements
           | (Some (Value _) | None) when is_owned_temporary ->
-              { reach = Views [ Borrow_of { root = Temporary local; steps = [] } ]; written_slices }
-          | Some (Value { views; _ } | Lent_part { views; _ }) ->
-              { reach = Views views; written_slices }
-          | None -> { reach = Views []; written_slices }
-          | Some (Alias _ | Element _ | Bound_part _) ->
-              raise_bug "an untracked local that names a place"))
+              Views [ Borrow_of { root = Temporary local; steps = [] } ]
+          | Some (Value { views; _ } | Lent_part { views; _ }) -> Views views
+          | None -> Views []
+          | Some (Alias _ | Element _) -> raise_bug "an untracked local that names a place"))
 
-let list_copy_views builder place =
-  list_reach_views (access_place builder place ~borrowed_as:None).reach
+let list_copy_views builder place = list_reach_views (access_place builder place ~borrowed_as:None)
 
 let access_operand builder ~is_use_by_reference (operand : Mir.operand) =
   match operand with
@@ -256,7 +227,7 @@ let access_operand builder ~is_use_by_reference (operand : Mir.operand) =
   | Use { place; type_; _ } ->
       access_place builder place ~borrowed_as:(if is_use_by_reference then Some type_ else None)
   | Take { place; _ } -> access_place builder place ~borrowed_as:None
-  | Immediate _ -> { reach = Views []; written_slices = [] }
+  | Immediate _ -> Views []
 
 let access_value builder operand = access_operand builder ~is_use_by_reference:false operand
 
@@ -284,10 +255,10 @@ let is_view_operand builder operand =
   | Some type_ -> Context.is_view builder.context type_
   | None -> false
 
-let list_operand_views builder operand = list_reach_views (access_value builder operand).reach
+let list_operand_views builder operand = list_reach_views (access_value builder operand)
 
 let list_argument_views builder mode operand =
-  list_reach_views (access_argument builder mode operand).reach
+  list_reach_views (access_argument builder mode operand)
 
 let list_given_views builder (operand : Mir.operand) =
   match operand with
@@ -295,18 +266,18 @@ let list_given_views builder (operand : Mir.operand) =
   | Use _ | Take _ | Borrow _ | Immediate _ -> list_operand_views builder operand
 
 let find_lent_place builder (mode : Types.mode) operand =
-  match ((access_argument builder mode operand).reach, mode) with
+  match (access_argument builder mode operand, mode) with
   | Place_of view, _ | Elements_of view, Mut -> Some (extract_viewed_place view)
   | Elements_of _, (Read | Own) | Views _, _ -> None
 
 let find_stored_type builder (mode : Types.mode) operand =
-  match ((access_argument builder mode operand).reach, find_operand_type operand) with
+  match (access_argument builder mode operand, find_operand_type operand) with
   | Place_of _, type_ -> type_
   | Elements_of _, Some (Named { arguments = Type element :: _; _ }) -> Some element
   | Elements_of _, _ | Views _, _ -> None
 
 let list_lent_places builder (operand : Mir.operand) =
-  match ((access_value builder operand).reach, operand) with
+  match (access_value builder operand, operand) with
   | Place_of view, _ -> [ extract_viewed_place view ]
   | (Elements_of _ | Views _), Use { place = { root = Local local; projections = [] }; _ } -> (
       match Hashtbl.find_opt builder.held local with Some (Value { lent; _ }) -> lent | _ -> [])
@@ -326,9 +297,6 @@ let find_viewable_argument builder (argument : Mir.argument) =
 
 let list_viewable_arguments builder (call : Mir.call) =
   List.filter_map (find_viewable_argument builder) call.arguments
-
-let emit_write_through builder written_slices origin =
-  List.iter (fun slice -> emit builder (Write_through slice) origin) written_slices
 
 let is_captured builder (place : Place.t) =
   match place.root with
@@ -358,11 +326,9 @@ let evaluate builder ~is_returned (use : Moves.use) =
 let borrow_mut builder (operand : Mir.operand) =
   Option.iter
     (fun origin ->
-      let access = access_argument builder Mut operand in
-      emit_write_through builder access.written_slices origin;
       Option.iter
         (fun place -> emit builder (Mutate place) origin)
-        (find_reached_place access.reach))
+        (find_reached_place (access_argument builder Mut operand)))
     (find_operand_origin operand)
 
 let emit_call builder (call : Mir.call) origin =
@@ -477,7 +443,6 @@ let compute_rvalue_held builder (value : Mir.rvalue) : held =
         {
           views = List.concat_map (list_given_views builder) supplied;
           lent = List.concat_map (list_lent_places builder) supplied;
-          written_slices = [];
         }
   | Array elements -> make_value (List.concat_map (list_given_views builder) elements)
   | Lambda { captures = []; _ } -> make_value []
@@ -504,10 +469,6 @@ let emit_bound_value builder (local : Mir.local) (core : Core.local) (value : Mi
             builder.lent_part_bindings <-
               { binding = local; part; origin; scrutinee } :: builder.lent_part_bindings
         | _ -> ());
-        (match list_written_slices builder place with
-        | [] -> ()
-        | written_slices ->
-            hold builder { root = Local local; projections = [] } (Bound_part { written_slices }));
         if
           holds_views || is_temporary builder place || is_loop_part
           || Option.is_some (track_place builder place)
@@ -654,7 +615,6 @@ let emit_statement builder (statement : Mir.Graph.statement) =
       let result = compute_rvalue_held builder value in
       match track_place builder target with
       | Some place -> (
-          emit_write_through builder (list_written_slices builder target) origin;
           emit builder (Assign place) origin;
           match value with
           | Operand operand when is_view_operand builder operand ->
@@ -683,8 +643,6 @@ let emit_statement builder (statement : Mir.Graph.statement) =
             && Place.is_storage_type self_type
         | Trait_method { name = "element"; _ }
         | Function { path = Method { name = "element"; _ }; _ } -> (
-            is_loop_element
-            &&
             match find_operand_type receiver with
             | Some type_ -> Place.is_storage_type type_
             | None -> false)
@@ -693,8 +651,10 @@ let emit_statement builder (statement : Mir.Graph.statement) =
       let element =
         match called.arguments with
         | Passed { mode; value = receiver; _ } :: _ when selects_element receiver -> (
-            let access = access_argument builder mode receiver in
-            match (find_reached_place access.reach, find_operand_origin receiver) with
+            match
+              ( find_reached_place (access_argument builder mode receiver),
+                find_operand_origin receiver )
+            with
             | Some (collection : Place.t), Some receiver_origin ->
                 let place =
                   {
@@ -702,7 +662,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
                     steps = collection.steps @ [ Element { node = called.node; origin } ];
                   }
                 in
-                Some (Element { place; written_slices = access.written_slices }, receiver_origin)
+                Some (Element place, receiver_origin)
             | _ -> None)
         | _ -> None
       in
@@ -725,14 +685,9 @@ let emit_statement builder (statement : Mir.Graph.statement) =
         { place with steps = place.steps @ [ Range { node = called.node; origin } ] }
       in
       hold builder destination
-        (match base.reach with
-        | Place_of elements | Elements_of elements ->
-            Range
-              {
-                elements = map_viewed_place select_range elements;
-                written_slices = base.written_slices;
-              }
-        | Views views -> Value { views; lent = []; written_slices = base.written_slices })
+        (match base with
+        | Place_of elements | Elements_of elements -> Range (map_viewed_place select_range elements)
+        | Views views -> Value { views; lent = [] })
   | Assert _ | Echo _ -> read_uses builder uses
   | Provide { provided; _ } ->
       read_uses builder uses;

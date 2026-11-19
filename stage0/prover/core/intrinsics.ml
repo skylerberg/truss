@@ -50,6 +50,21 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
   | None -> ());
   (frame, viewed, low, high)
 
+let assume_same_length context frame slice_type ~before ~after =
+  match slice_type with
+  | Types.Named { arguments = Types.Type element :: _; _ } -> (
+      match
+        ( Models.find_model context slice_type before ~element,
+          Models.find_model context slice_type after ~element )
+      with
+      | Some before, Some after ->
+          Facts.assume context frame
+            (Logic.equal
+               (Models.make_sequence_length context element after)
+               (Models.make_sequence_length context element before))
+      | _ -> Facts.raise_unsupported Whole_definition "a slice of `%s`" (Types.show slice_type))
+  | _ -> Facts.raise_bug "a slice type `%s` with no element type" (Types.show slice_type)
+
 let index_element context element term index =
   match Models.index_sequence context element term index with
   | Some term -> term

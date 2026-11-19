@@ -8,6 +8,9 @@ val apply_slice :
   high:Logic.term option ->
   State.frame * Logic.term * Logic.term * Logic.term
 
+val assume_same_length :
+  State.context -> State.frame -> Types.ty -> before:Logic.term -> after:Logic.term -> unit
+
 val slice_place :
   State.context ->
   Invocation.site ->

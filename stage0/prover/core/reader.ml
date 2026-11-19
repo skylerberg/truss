@@ -374,59 +374,40 @@ let classify_shape run ?function_ (value : Mir.operand) : Invocation.shape =
       | Temporary | Lent _ -> Other)
   | (Some (Lambda_expression _) | None), None -> Other
 
-let merge_places context (places : (Logic.term * State.passed_place) list) : State.passed_place =
-  match List.rev places with
-  | [] -> Facts.raise_bug "a place that is none"
-  | [ (_, place) ] -> place
-  | (_, last) :: before ->
-      {
-        read =
-          (fun frame ->
-            List.fold_left
-              (fun otherwise ((condition, place) : Logic.term * State.passed_place) ->
-                Logic.ite condition (place.read frame) otherwise)
-              (last.read frame) before);
-        write =
-          (fun frame term ->
-            Option.value ~default:frame
-              (Facts.join_frames context
-                 (List.map
-                    (fun ((condition, place) : Logic.term * State.passed_place) ->
-                      place.write (Facts.restrict frame condition) term)
-                    places)));
-      }
-
 let find_argument_place context (frame : State.frame) run (mode : Types.mode) (value : Mir.operand)
     =
-  let held =
-    Option.bind (find_whole_local value) (fun local ->
-        Locals.find_opt (Locals.make_key run.infos local) frame.slices)
+  let find_place () =
+    match
+      ( Option.bind (find_whole_local value) (fun local ->
+            Locals.find_opt (Locals.make_key run.infos local) frame.slices),
+        value )
+    with
+    | Some (slice : State.slice), _ ->
+        Some
+          (Intrinsics.slice_place context slice.made_at
+             ~owner:(make_passed_place context run slice.collection)
+             ~owner_type:(fun frame -> compute_place_type context frame run slice.collection)
+             ~low:slice.start ~high:slice.stop)
+    | None, Borrow { place; _ } -> Some (make_passed_place context run place)
+    | None, (Use _ | Take _ | Immediate _) -> None
   in
-  match (mode, held) with
-  | Types.Mut, Some (Slices slices) ->
-      Some
-        (merge_places context
-           (List.map
-              (fun (condition, (slice : State.slice)) ->
-                ( condition,
-                  Intrinsics.slice_place context slice.made_at
-                    ~owner:(make_passed_place context run slice.collection)
-                    ~owner_type:(fun frame -> compute_place_type context frame run slice.collection)
-                    ~low:slice.start ~high:slice.stop ))
-              slices))
-  | Types.Mut, Some Unknown_slice when Types.is_well_known Slice (Mir.extract_operand_type value) ->
-      Facts.raise_unsupported
-        (Facts.locate context frame.source
-           (match find_operand_origin value with
-           | Some origin -> origin
-           | None -> Facts.raise_bug "a constant is passed `mut`"))
-        "a slice passed `mut` whose collection the prover does not know: a loop assigns the slice, \
-         a call returns it, or it is a copy of a parameter"
-  | Types.Mut, (Some Unknown_slice | None) -> (
-      match value with
-      | Borrow { place; _ } -> Some (make_passed_place context run place)
-      | _ -> None)
-  | _ -> None
+  match mode with
+  | Types.Read | Types.Own -> None
+  | Types.Mut ->
+      let slice_type = Facts.substitute_type context frame (Mir.extract_operand_type value) in
+      Option.map
+        (fun (place : State.passed_place) ->
+          if Types.is_well_known Slice slice_type then
+            {
+              place with
+              write =
+                (fun frame term ->
+                  Intrinsics.assume_same_length context frame slice_type ~before:(place.read frame)
+                    ~after:term;
+                  place.write frame term);
+            }
+          else place)
+        (find_place ())
 
 let evaluate_call_values context frame run (invocation : Invocation.t)
     (arguments : Mir.argument list) =
@@ -1258,14 +1239,12 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       match read_call context frame run call ~result_type with
       | Some (after, term) -> (
           match destination with
-          | Some ({ root = Local local; projections = [] } as destination)
-            when Types.is_well_known Slice run.infos.(local).type_ ->
+          | Some ({ root = Local local; projections = [] } as destination) ->
               let written = write_place context after run destination term in
               Some
                 {
                   written with
-                  slices =
-                    Locals.add (Locals.make_key run.infos local) State.Unknown_slice written.slices;
+                  slices = Locals.remove (Locals.make_key run.infos local) written.slices;
                 }
           | Some destination -> Some (write_place context after run destination term)
           | None -> Some after)
@@ -1380,10 +1359,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
               written with
               slices =
                 Locals.add (Locals.make_key run.infos local)
-                  (State.Slices
-                     [
-                       (Logic.Boolean true, { made_at = site; collection; start = low; stop = high });
-                     ])
+                  { State.made_at = site; collection; start = low; stop = high }
                   written.slices;
             }
         | _ -> written)
@@ -1452,9 +1428,7 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
           written with
           slices =
             (match copied_slice with
-            | Some held -> Locals.add key held written.slices
-            | None when Types.is_well_known Slice run.infos.(local).type_ ->
-                Locals.add key State.Unknown_slice written.slices
+            | Some slice -> Locals.add key slice written.slices
             | None -> Locals.remove key written.slices);
         }
     | _ -> written)

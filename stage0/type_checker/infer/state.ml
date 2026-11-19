@@ -1,4 +1,10 @@
-type local = { name : string; type_ : Types.ty; is_var : bool; mode : Types.mode }
+type local = {
+  name : string;
+  type_ : Types.ty;
+  is_var : bool;
+  mode : Types.mode;
+  is_parameter : bool;
+}
 
 type env = {
   output : Types.result option;
@@ -858,8 +864,8 @@ let build_block state (written : Syntax.block) : Core.block =
   let statements, value = build_statements written.statements in
   { statements; value }
 
-let declare state (name : Syntax.name) type_ ~is_var ~mode =
-  Hashtbl.replace state.locals name.id { name = name.text; type_; is_var; mode };
+let declare state (name : Syntax.name) type_ ~is_var ~mode ~is_parameter =
+  Hashtbl.replace state.locals name.id { name = name.text; type_; is_var; mode; is_parameter };
   state.tables.local_types.(name.id) <- Some type_;
   match find_current_frame state with
   | Some frame ->
@@ -867,8 +873,13 @@ let declare state (name : Syntax.name) type_ ~is_var ~mode =
       frame.declared <- name.id :: frame.declared
   | None -> ()
 
+let mark_parameter state (name : Syntax.name) =
+  match Hashtbl.find_opt state.locals name.id with
+  | Some local -> Hashtbl.replace state.locals name.id { local with is_parameter = true }
+  | None -> ()
+
 let declare_compiled state env (name : Syntax.name) type_ ~is_var ~mode =
-  declare state name type_ ~is_var ~mode;
+  declare state name type_ ~is_var ~mode ~is_parameter:false;
   match find_current_frame state with
   | Some frame when is_compiled env ->
       frame.compiled_bindings <- name.id :: frame.compiled_bindings;

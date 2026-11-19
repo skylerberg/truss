@@ -372,7 +372,7 @@ let havoc context frame (changed : State.changed) =
       frame with
       slices =
         List.fold_left
-          (fun slices local -> Locals.add local State.Unknown_slice slices)
+          (fun slices local -> Locals.remove local slices)
           frame.slices changed.reassigned;
     }
   in

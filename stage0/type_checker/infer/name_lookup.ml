@@ -530,15 +530,8 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
   | Ok (Visible overloads) -> (
       match List.assoc_opt receiver overloads with
       | Some (Type_overload method_path) -> (
-          match Instantiation.find_function_signature state method_path with
-          | Some signature ->
-              let instance = Instantiation.instantiate state span signature in
-              (match instance.signature.receiver with
-              | Some (_, self_type) -> ignore (State.unify state self_type type_)
-              | None -> ());
-              Visible
-                ( Function { path = method_path; instantiation = instance.instantiation },
-                  instance.signature )
+          match Instantiation.instantiate_method state span method_path ~self_type:type_ with
+          | Some found -> Visible found
           | None -> Absent)
       | Some (Trait_overload (trait, method_)) ->
           let instance, callee =

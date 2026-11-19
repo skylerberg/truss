@@ -606,6 +606,21 @@ it.
   `Slice`, or `Array` can be passed `mut` side by side, as in
   `sort(mut items[..middle])` and `sort(mut items[middle..])`, when the
   prover shows that they do not overlap.
+- **A slice's elements are written only through a `mut Slice` parameter or
+  a range of a mutable place.** `mut self` of a `Slice` method is such a
+  parameter, and `mut items[1..]` such a range. A slice held in a variable,
+  a field, an element, or a pattern's binding is read-only, so two stored
+  slices that alias cannot both write. Assigning a slice held in a
+  variable makes it view other elements and changes none.
+- **A `mut Slice` parameter cannot be assigned,** whole or by field, so its
+  length is fixed for the call. A slice is passed `mut` only to a parameter
+  declared as a slice. A callee that took it as a type parameter could
+  assign it another slice, and the caller would read the callee's contract
+  as a write to elements that did not change.
+- **A slice implements no trait with a `mut self` method,** and so
+  satisfies no bound of one. Generic code could call the method on a copy,
+  and a copy of a slice views the same elements, so the write would reach
+  elements lent read-only.
 - **A temporary is dropped at the end of its statement,** except where a
   `let` keeps it until the end of the block that holds the `let`. A `let`
   keeps the base of a slice that it binds, directly or through fields. It
@@ -1692,6 +1707,10 @@ let pending: Stack[Int64] = [1, 2, 3]
 - A type whose elements are mutated in place also implements `IndexMut`, whose
   `at(mut self, key)` lends an element `mut`. `items[i].name = text`,
   `items[i] += 1`, and `mut items[i]` need it.
+- A type without `IndexMut` mutates an element in place through its own
+  `element(mut self, position: UInt64)` method, which lends the element
+  `mut`. A `Slice` does: a slice implements no trait with a `mut self`
+  method ([Views](#views)).
 - `collection[key] = value` calls `assign` when the type implements
   `IndexAssign`. The collection must accept the key, by its `accepts_key`:
   a `Map` accepts every key and inserts a missing one. For any other type,
