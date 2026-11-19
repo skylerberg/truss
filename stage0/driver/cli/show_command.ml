@@ -47,7 +47,7 @@ let show_definition snapshot database (names : Resolve.Names.lookups) packages ~
     declaration.visibility = Public_opaque && not (List.mem key.module_.package packages)
   in
   let ({ file = written; base } : Resolve.Names.place) = names.read_place key in
-  let source = Command_packages.read_source snapshot database packages written in
+  let source = Command_packages.read_source snapshot database written in
   {
     declaration;
     file = Source.path source;
