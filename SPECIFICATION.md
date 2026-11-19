@@ -866,6 +866,22 @@ fn serve(listener: mut Listener)
   }
   ```
 
+- The parameters whose types are declared with `type` are compared in the
+  order they are declared, as a list of measures is. The first of them that
+  a recursive call does not pass unchanged must be passed a part of itself,
+  and the parameters after it may be any value. This call needs nothing
+  written because `chain` is declared before `reversed`. Declared in the
+  other order, the function would have to state `decreases`:
+
+  ```truss
+  fn reverse_onto(chain: Chain, reversed: own Chain) -> Chain {
+    match chain {
+      End => reversed
+      Link(value, rest) => reverse_onto(rest, reversed: Chain.Link(value, rest: own reversed))
+    }
+  }
+  ```
+
 - Other recursion in a function without `RunForever` states `decreases`: an
   integer measure over the parameters that stays at or above zero and that
   every recursive call makes smaller. A list of measures is compared in

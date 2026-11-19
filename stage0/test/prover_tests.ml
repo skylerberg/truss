@@ -434,6 +434,19 @@ let () =
       expect_proven (tree ^ Fixtures.Prover.leftmost));
   Harness.test "recursion on the parameter itself does not end" (fun () ->
       expect_not_proven (tree ^ Fixtures.Prover.spin_on_its_tree) "prover.termination");
+  Harness.test "recursion on a part of the first parameter ends while a second one grows" (fun () ->
+      expect_proven Fixtures.Prover.chain_reversed_onto_a_growing_chain);
+  Harness.test "recursion on a part of a parameter ends while a later one is unchanged" (fun () ->
+      expect_proven Fixtures.Prover.chain_searched_beside_an_unchanged_chain);
+  Harness.test "recursion on a part of a parameter ends while an earlier one is unchanged"
+    (fun () -> expect_proven Fixtures.Prover.chain_searched_after_an_unchanged_chain);
+  Harness.test "recursion on a part of a parameter does not end while an earlier one grows"
+    (fun () ->
+      expect_one_termination_failure
+        ~says:
+          "This recursive call may not be on a part of the first of `grown` and `chain` that it \
+           changes: give the function a `decreases` clause."
+        Fixtures.Prover.chain_counted_while_the_first_chain_grows);
   Harness.test "a user's model is not known to be smaller than its value" (fun () ->
       expect_not_proven Fixtures.Prover.spin_on_a_knot_whose_model_holds_it "prover.termination");
   Harness.test "a match with guards ends in an unreachable that is proven" (fun () ->

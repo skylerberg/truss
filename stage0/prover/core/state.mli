@@ -84,6 +84,7 @@ type stated = Tables.stated =
   | Array_length of Logic.symbol
   | Ranked_model of Logic.symbol
   | Ranked_elements of Types.ty
+  | Non_negative_rank of Types.ty
 
 type context = {
   lookups : Lookups.t;
