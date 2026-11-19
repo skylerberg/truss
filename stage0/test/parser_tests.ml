@@ -574,6 +574,10 @@ let () =
   Harness.test "postfix operators" (fun () ->
       expect_expression "a.b[0](c, label: d)?.e with (f.g: 1, h)"
         "(with (. (? (call ([] (. a b) 0) c (label: d))) e) (f.g: 1) h)");
+  Harness.test "the shorthand of with takes a mode keyword" (fun () ->
+      expect_expression "a with (own b)" "(with a (own b))");
+  Harness.test "the label of an update is a path of fields" (fun () ->
+      Parse_support.expect_error "fn f() { p with (g(x): 1) }" ~code:Unexpected_token ~at:"g(x)");
   Harness.test "modes and any take a postfix expression" (fun () ->
       Parse_support.expect_statement "mut config.servers.sort()"
         "(mut (call (. (. config servers) sort)))";
@@ -618,7 +622,7 @@ let () =
   Harness.test "a field and an update that do not parse are errors in the tree" (fun () ->
       Parse_support.expect_recovered_definitions "type T(x: Int64, 1)"
         [ "(type T ((x: Int64) error))" ];
-      Parse_support.expect_recovered_statements "let y = x with (1)" [ "(let y (with x error))" ]);
+      Parse_support.expect_recovered_statements "let y = x with (1: 2)" [ "(let y (with x error))" ]);
   Harness.test "lists and maps" (fun () ->
       expect_expression "[1, 2,]" "(list 1 2)";
       expect_expression "[]" "(list)";

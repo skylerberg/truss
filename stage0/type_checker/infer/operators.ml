@@ -83,94 +83,6 @@ let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
         "`?` works on a `Result` in a function that returns a `Result`, and on an `Option` in a \
          function that returns an `Option`. Convert between them with `ok_or` or `ok`."
 
-and check_record_update state env (value : Syntax.expression) (base : Syntax.expression) updates =
-  let base_type = State.normalize state (Hooks.check_expression state env base) in
-  (match List.assoc_opt value.id state.keyword_modes with
-  | None -> Modes.note_owned_value state env base
-  | Some Own -> ()
-  | Some Mut ->
-      State.report state Wrong_mode (State.read_span state base.id)
-        "`with` takes ownership of its base, so the base is passed `own`, not `mut`."
-  | Some Read -> State.raise_bug "a mode keyword recorded as `Read`");
-  (match base_type with
-  | Types.Named { path; _ }
-    when not (Members.are_fields_visible state.lookups ~package:state.package path) ->
-      State.report state Private_field (State.read_span state value.id)
-        (Printf.sprintf "`%s` is opaque, so only its own package can update its fields."
-           (Types.show base_type))
-  | _ -> ());
-  List.iter
-    (fun (update : Syntax.update) ->
-      match update.kind with
-      | Update { field = first; path = rest; value = new_value } -> (
-          let rec find_field_type type_ (names : Syntax.name list) =
-            match (names, State.normalize state type_) with
-            | [], type_ -> Some type_
-            | (name : Syntax.name) :: rest, (Types.Named { path; arguments } as record_type) -> (
-                match Members.find_fields state.lookups path arguments with
-                | Some fields -> (
-                    match
-                      List.find_opt
-                        (fun (written : Types.field) -> written.field_name = name.text)
-                        fields
-                    with
-                    | Some written -> find_field_type written.field_type rest
-                    | None ->
-                        State.report state Unknown_member (State.read_span state name.id)
-                          (Printf.sprintf "`%s` has no field `%s`." (State.show state record_type)
-                             name.text);
-                        None)
-                | None ->
-                    State.report state Not_a_record (State.read_span state name.id)
-                      (Printf.sprintf "`with` works on records, and `%s` is not one."
-                         (State.show state record_type));
-                    None)
-            | _, _ -> None
-          in
-          match find_field_type base_type (first :: rest) with
-          | Some type_ -> (
-              match new_value with
-              | Some new_value -> Hooks.check state env new_value type_
-              | None -> (
-                  match State.find_target state first with
-                  | Some (Local id) -> (
-                      match Hashtbl.find_opt state.locals id with
-                      | Some local ->
-                          if not (State.unify state type_ local.type_) then
-                            State.report_mismatch state (State.read_span state first.id)
-                              ~expected:type_ ~actual:local.type_
-                      | None -> ())
-                  | _ -> ()))
-          | None ->
-              Option.iter
-                (fun new_value -> ignore (Hooks.check_expression state env new_value))
-                new_value)
-      | Update_error -> ())
-    updates;
-  State.register_expression state value (fun () ->
-      let base = State.build_expression state base in
-      Record_update
-        {
-          base;
-          updates =
-            List.filter_map
-              (fun (update : Syntax.update) ->
-                match update.kind with
-                | Update { field = first; path = rest; value = new_value } ->
-                    Some
-                      ( List.map (fun (name : Syntax.name) -> name.text) (first :: rest),
-                        match (new_value, State.find_target state first) with
-                        | Some new_value, _ -> State.build_expression state new_value
-                        | None, Some (Local id) ->
-                            State.make_synthetic_expression state ~origin:update.id
-                              (Form.read_local_type state id)
-                              (Form.build_local_use state ~origin:update.id id)
-                        | None, _ -> State.raise_bug "`with (%s)` names no local" first.text )
-                | Update_error -> None)
-              updates;
-        });
-  base_type
-
 and check_prefix state env ?expected (value : Syntax.expression) operator
     (inner : Syntax.expression) =
   match operator with
@@ -247,6 +159,15 @@ and check_operator_call ~operands state (value : Syntax.expression) ~method_ ~ou
   let arguments = match right with Some right -> [ Types.Type right ] | None -> [] in
   let reference = State.make_trait_reference ~arguments (Well_known.make_path owner) in
   let result = State.make_fresh_type state in
+  let is_one_built_in_number =
+    match (State.resolve state left, Option.map (State.resolve state) right) with
+    | Types.Literal (left_kind, _), Some (Types.Literal (right_kind, _)) -> left_kind = right_kind
+    | Types.Literal _, None -> true
+    | resolved, operand ->
+        (State.is_integer_type state resolved || Types.is_float_type resolved)
+        && Option.fold ~none:true ~some:(Types.equal resolved) operand
+  in
+  if is_one_built_in_number then ignore (State.unify state result left);
   state.tables.calls.(value.id) <-
     Some
       {
@@ -512,13 +433,6 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           Types.Integer
         end
         else
-          let same_builtin =
-            match (State.resolve state left_type, State.resolve state right_type) with
-            | Types.Literal (left_kind, _), Types.Literal (right_kind, _) -> left_kind = right_kind
-            | left_resolved, right_resolved ->
-                (State.is_integer_type state left_resolved || Types.is_float_type left_resolved)
-                && Types.equal left_resolved right_resolved
-          in
           let method_, output = select_arithmetic_method arithmetic in
           if
             (State.is_integer_type state (State.normalize state left_type)
@@ -528,20 +442,13 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           then Types.Error (add_operand_mismatch state value left right ~left_type ~right_type)
           else begin
             Form.register_call state value;
-            let result =
-              check_operator_call
-                ~operands:
-                  [
-                    { Tables.expression = left.id; core_argument_index = 0; mode = Types.Read };
-                    { Tables.expression = right.id; core_argument_index = 1; mode = Types.Read };
-                  ]
-                state value ~method_ ~output ~left:left_type ~right:(Some right_type)
-            in
-            if same_builtin then begin
-              ignore (State.unify state result left_type);
-              left_type
-            end
-            else result
+            check_operator_call
+              ~operands:
+                [
+                  { Tables.expression = left.id; core_argument_index = 0; mode = Types.Read };
+                  { Tables.expression = right.id; core_argument_index = 1; mode = Types.Read };
+                ]
+              state value ~method_ ~output ~left:left_type ~right:(Some right_type)
           end
         end
 

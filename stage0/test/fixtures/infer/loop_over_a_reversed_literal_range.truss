@@ -1,0 +1,7 @@
+fn f() -> Int64 {
+  var total = 0
+  for index in (0..3).reversed() {
+    total = index
+  }
+  total
+}

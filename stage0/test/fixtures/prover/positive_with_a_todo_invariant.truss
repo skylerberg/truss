@@ -1,0 +1,6 @@
+type Positive(value: Int64)
+  invariant todo
+
+fn make() -> Positive {
+  Positive(value: 1)
+}

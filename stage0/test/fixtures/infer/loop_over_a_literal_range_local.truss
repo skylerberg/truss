@@ -1,0 +1,8 @@
+fn f() -> UInt8 {
+  let range = 0..3
+  var last: UInt8 = 0
+  for index in range {
+    last = index
+  }
+  last
+}

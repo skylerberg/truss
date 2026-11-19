@@ -1,0 +1,13 @@
+fn raise(value: mut Int64)
+  requires value < 1000
+{
+  value = value + 1
+}
+
+fn f(high: Int64) -> Int64
+  requires 0 <= high && high < 1000
+{
+  var range = Span(low: high, high: high)
+  raise(mut range.low)
+  range.low
+}

@@ -9,14 +9,6 @@ val infer_shift_result :
 
 val try_ : State.state -> State.env -> Syntax.expression -> Syntax.expression -> Types.ty
 
-val check_record_update :
-  State.state ->
-  State.env ->
-  Syntax.expression ->
-  Syntax.expression ->
-  Syntax.update list ->
-  Types.ty
-
 val check_prefix :
   State.state ->
   State.env ->

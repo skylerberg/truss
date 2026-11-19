@@ -33,10 +33,19 @@ let report_double_negation cursor ~(operator : Token.t) ~(operand : Syntax.expre
       Diagnostic.insert (Source.make_zero_width operand_span.stop) ")";
     ]
 
-let match_arm_comma cursor ~(comma : Token.t) =
+let match_arm_comma cursor ~(comma : Token.t) ~(next : Token.t) =
+  let is_arm_end =
+    next.line_break_before
+    || match next.kind with Newline | Punctuation (Close Curly) -> true | _ -> false
+  in
+  let title, edit =
+    if is_arm_end then ("Remove the comma", Diagnostic.delete comma.span)
+    else
+      ( "Put the next arm on its own line",
+        Diagnostic.replace (Source.make_span comma.span.start next.span.start) "\n" )
+  in
   report cursor Match_arm_comma comma.span "`match` arms are separated by line breaks, not commas."
-    "Remove the comma"
-    [ Diagnostic.delete comma.span ]
+    title [ edit ]
 
 let report_conditional cursor ~(condition : Syntax.expression) ~(then_ : Syntax.expression)
     ~(else_ : Syntax.expression) ~(question : Token.t) =

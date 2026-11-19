@@ -537,9 +537,8 @@ and resolve_expression state scope (value : Syntax.expression) =
       List.iter
         (fun (update : Syntax.update) ->
           match update.kind with
-          | Update { field; value = None; path = [] } -> resolve_local_value state scope field
-          | Update { value = Some value; _ } -> resolve_expression state scope value
-          | Update { value = None; _ } | Update_error -> ())
+          | Update { value; _ } -> resolve_expression state scope value
+          | Update_error -> ())
         updates
   | Binary { operator = Connective And; _ } | Is _ -> ignore (resolve_condition state scope value)
   | Binary { left; right; _ } ->

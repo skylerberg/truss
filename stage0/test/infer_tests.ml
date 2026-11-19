@@ -1180,6 +1180,8 @@ let () =
       expect_one_diagnostic Fixtures.Infer.proof_block_assigning_a_var "types.not_in_specification");
   Harness.test "a proof block cannot return" (fun () ->
       expect_one_diagnostic Fixtures.Infer.proof_block_returning "types.not_in_specification");
+  Harness.test "unreachable is not part of a formula" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.requires_unreachable "types.not_in_specification");
   Harness.test "a quantifier's body in code cannot return" (fun () ->
       expect_one_diagnostic Fixtures.Infer.quantifier_returning_in_a_body
         "types.not_in_specification");
@@ -1659,3 +1661,47 @@ let () =
       expect_one_diagnostic
         Fixtures.Infer.meters_fed_to_an_impl_bounding_its_item_by_another_trait_argument
         "types.signature_mismatch" ~at:("feed", 2))
+
+let () =
+  Harness.test "a negated local of literals waits for the same decision" (fun () ->
+      expect_type Fixtures.Infer.negation_of_a_literal_local "-count" "Int64";
+      expect_type Fixtures.Infer.negation_of_a_float_literal_local "-ratio" "Float64");
+  Harness.test "a negated local of literals decided unsigned is an error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.negation_of_a_literal_local_decided_unsigned
+        "types.no_impl");
+  Harness.test "a loop over a range of literals in a local lets its body decide them" (fun () ->
+      expect_type Fixtures.Infer.loop_over_a_literal_range_local "range" ~occurrence:2
+        "Range[UInt8]");
+  Harness.test "a loop over a reversed range of literals" (fun () ->
+      expect_fine Fixtures.Infer.loop_over_a_reversed_literal_range)
+
+let () =
+  let declare literal = Printf.sprintf "fn f() {\n  let _: Float64 = %s\n}\n" literal in
+  Harness.test "a float literal far past every float is out of range, whatever its exponent"
+    (fun () ->
+      List.iter
+        (fun literal -> expect_one_diagnostic (declare literal) "types.literal_out_of_range")
+        [
+          "1.8e308";
+          "1e10000000000";
+          "1e999999999999";
+          "1e4611686018427387903";
+          "1e9999999999999999999";
+        ]);
+  Harness.test "a float literal far below every float rounds to zero, whatever its exponent"
+    (fun () ->
+      List.iter
+        (fun literal -> expect_no_diagnostics [ ("app::main", declare literal) ])
+        [ "2e-324"; "1e-99999999999"; "-1e-9999999999999999999" ])
+
+let () =
+  Harness.test "the shorthand of with names its value, whatever the name resolves to" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_shorthand_naming_a_function
+        "types.mismatch");
+  Harness.test "with names fields as a construction does" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_of_an_unknown_field "types.unknown_label"
+        ~says:"`Config` has no field `nme`.");
+  Harness.test "with updates a field once" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_of_a_field_twice "types.repeated_argument";
+      expect_one_diagnostic Fixtures.Infer.record_update_of_a_field_and_its_part
+        "types.repeated_argument")
