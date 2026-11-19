@@ -1,4 +1,5 @@
 module Names = Names
+module Namespace = Namespace
 module Parts = Parts
 module Prelude = Prelude
 
