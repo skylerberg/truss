@@ -80,6 +80,7 @@ type state = {
 
 val make_frame : Definitions.code -> frame
 val enter : Definitions.context -> ?nested:int ref -> builder:Emit_c.Ir_builder.t -> frame -> state
+val enter_item : Definitions.context -> item:Lowered.Item.t -> Definitions.code -> state
 val may_fork : state -> bool
 val allocate_local : state -> ?name:string -> Lowered.ty -> Lowered.place
 val outline : state -> parts:Lowered.local list -> (unit -> unit) -> int * Lowered.operand

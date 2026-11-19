@@ -2045,9 +2045,12 @@ const t_test *t_runtime_tests;
 void t_runtime_run_test(uint32_t index) { t_runtime_tests[index](); }
 |}
 
+let runtime_line_control = "#line 1 \"<runtime>\"\n"
+
 let render_runtime ~tests =
   String.concat ""
     [
+      runtime_line_control;
       (if tests then "#define TRUSS_TESTS 1\n" else "");
       headers;
       Emit_c.shared_structs;
@@ -2060,7 +2063,7 @@ let render_runtime ~tests =
 
 let render_start ?(before_start = "") ~declarations ~requested_workers root_call =
   Printf.sprintf
-    "typedef __INT32_TYPE__ int32_t;\n\
+    "%stypedef __INT32_TYPE__ int32_t;\n\
      typedef __UINT32_TYPE__ uint32_t;\n\
      typedef __UINT64_TYPE__ uint64_t;\n\
      void t_runtime_main(void (*code)(void *environment, uint64_t item, void *capabilities), void \
@@ -2082,7 +2085,7 @@ let render_start ?(before_start = "") ~declarations ~requested_workers root_call
      %s  t_runtime_main(t_program_run, &program, %d);\n\
     \  return (int)program.status;\n\
      }\n"
-    declarations root_call before_start requested_workers
+    runtime_line_control declarations root_call before_start requested_workers
 
 let render_main_start entry =
   render_start

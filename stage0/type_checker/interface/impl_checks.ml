@@ -102,6 +102,10 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
     Checking.report state Implements_built_in_capability state.spans.(trait_path.id)
       "Nothing can implement `RunForever`, since a `provide` of it would let a function that does \
        not declare `RunForever` run forever."
+  else if Well_known.is System impl.implements.trait then
+    Checking.report state Implements_built_in_capability state.spans.(trait_path.id)
+      "Nothing can implement `System`: the runtime grants it to the real implementations, and a \
+       `provide` of it would let code that does not declare it reach the operating system."
   else if compiler_implements impl then
     Checking.report state Implements_built_in state.spans.(trait_path.id)
       (Printf.sprintf

@@ -1151,8 +1151,8 @@ and read_statement context frame run (statement : Mir.statement) =
         iteration;
         part;
         elements;
+        bindings;
         body;
-        _;
       } ->
       let frame =
         match elements with
@@ -1186,10 +1186,10 @@ and read_statement context frame run (statement : Mir.statement) =
               statements = [];
               value = Some (Immediate { value = Boolean true; type_ = Types.bool });
             }
-          ~body:{ body with value = Some decision }
+          ~body:{ statements = bindings.statements @ body.statements; value = Some decision }
       in
       Some (write_place context after run { root = Local decides; projections = [] } term)
-  | For { loop; iteration; part; elements; binding_count; body } ->
+  | For { loop; iteration; part; elements; bindings = loop_bindings; body } ->
       let frame =
         match elements with
         | Some elements -> fst (read_value context frame run elements.count)
@@ -1221,12 +1221,14 @@ and read_statement context frame run (statement : Mir.statement) =
         in
         let exits = { loop = loop.origin; breaks = []; ends = [] } in
         run.loops <- exits :: run.loops;
-        let ended = read_statements context inside run body.statements in
+        let ended =
+          read_statements context inside run (loop_bindings.statements @ body.statements)
+        in
         run.loops <- List.tl run.loops;
         let breaks =
           match loop.schedule with
           | Concurrent ->
-              let changed = compute_changes run inside [ body ] in
+              let changed = compute_changes run inside [ loop_bindings; body ] in
               List.map
                 (fun exited ->
                   let forgotten = Loops.havoc context exited changed in
@@ -1241,8 +1243,7 @@ and read_statement context frame run (statement : Mir.statement) =
         in
         (List.rev exits.ends @ Option.to_list ended, List.rev breaks)
       in
-      let bindings = List.take binding_count body.statements
-      and after_bindings = List.drop binding_count body.statements in
+      let bindings = loop_bindings.statements and after_bindings = body.statements in
       let bind_element frame element =
         let frame =
           Facts.bind frame (Locals.make_key run.infos part)
@@ -1319,8 +1320,9 @@ and read_statement context frame run (statement : Mir.statement) =
                             read_place context (lend at after_bindings) run
                               { root = Local lent; projections = [] })));
           bind_element;
-          compute_changed_in = (fun frame -> compute_changes ~also:iterated run frame [ body ]);
-          compute_changed_by_body = (fun frame -> compute_changes run frame [ body ]);
+          compute_changed_in =
+            (fun frame -> compute_changes ~also:iterated run frame [ loop_bindings; body ]);
+          compute_changed_by_body = (fun frame -> compute_changes run frame [ loop_bindings; body ]);
           run_body;
           bind_parts = (fun frame -> bind_parts context frame run);
         }

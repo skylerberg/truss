@@ -92,19 +92,22 @@ and lower_from state (region : Mir_drops.region) block index =
       (Moves.list_given_on_entry frame.moves block);
   List.iteri
     (fun position (statement : Mir.Graph.statement) ->
-      if position >= index then begin
-        let before = Moves.copy frame.move_state in
-        Moves.apply_moves frame.moves frame.move_state statement;
-        Lowering.run_in_statement state (fun () -> lower_statement state statement);
-        Moves.apply frame.moves frame.move_state statement;
-        Mir_drops.update_flags state ~before
-      end
+      if position >= index then
+        Emit_c.Ir_builder.with_site state.builder (Mir_places.locate_site state statement.origin)
+          (fun () ->
+            let before = Moves.copy frame.move_state in
+            Moves.apply_moves frame.moves frame.move_state statement;
+            Lowering.run_in_statement state (fun () -> lower_statement state statement);
+            Moves.apply frame.moves frame.move_state statement;
+            Mir_drops.update_flags state ~before)
       else Moves.apply frame.moves frame.move_state statement)
     basic.statements;
-  let before = Moves.copy frame.move_state in
-  Moves.apply_terminator_moves frame.moves frame.move_state basic;
-  Mir_drops.update_flags state ~before;
-  lower_terminator state region basic.terminator ~origin:basic.terminator_origin
+  Emit_c.Ir_builder.with_site state.builder (Mir_places.locate_site state basic.terminator_origin)
+    (fun () ->
+      let before = Moves.copy frame.move_state in
+      Moves.apply_terminator_moves frame.moves frame.move_state basic;
+      Mir_drops.update_flags state ~before;
+      lower_terminator state region basic.terminator ~origin:basic.terminator_origin)
 
 and lower_concurrent_block state (region : Mir_drops.region) ~fork
     ~(branches : Mir.Graph.branch list) ~join =

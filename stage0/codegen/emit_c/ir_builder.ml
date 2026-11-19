@@ -23,13 +23,14 @@ type function_ = {
   code : code;
   role : role;
   entry : Lowered.block;
+  opening : Lowered.site option;
   prologue : Lowered.statement list;
   mutable size : int;
 }
 
 type block_body = {
-  mutable statements : Lowered.statement list;
-  mutable terminator : Lowered.terminator option;
+  mutable statements : (Lowered.site option * Lowered.statement) list;
+  mutable terminator : (Lowered.site option * Lowered.terminator) option;
 }
 
 type t = {
@@ -40,11 +41,13 @@ type t = {
   mutable current : Lowered.block;
   functions : function_ Dynarray.t;
   mutable function_ : int;
+  mutable site : Lowered.site option;
 }
 
-let make_function ~code ~role ~entry ~prologue = { code; role; entry; prologue; size = 0 }
+let make_function ~code ~role ~entry ~opening ~prologue =
+  { code; role; entry; opening; prologue; size = 0 }
 
-let make_builder env =
+let make_builder env ~site =
   {
     env;
     locals = Dynarray.create ();
@@ -53,6 +56,7 @@ let make_builder env =
     current = 0;
     functions = Dynarray.create ();
     function_ = 0;
+    site;
   }
 
 let make_empty_body () = { statements = []; terminator = None }
@@ -63,11 +67,20 @@ let allocate_block builder =
   Dynarray.length builder.bodies - 1
 
 let start_function builder ~code =
-  Dynarray.add_last builder.functions (make_function ~code ~role:Enclosing ~entry:0 ~prologue:[]);
+  Dynarray.add_last builder.functions
+    (make_function ~code ~role:Enclosing ~entry:0 ~opening:builder.site ~prologue:[]);
   builder
 
-let create env ~item =
-  start_function (make_builder env) ~code:{ emission = Emission.create env ~item; nested = [] }
+let create ?site env ~item =
+  start_function (make_builder env ~site)
+    ~code:{ emission = Emission.create env ~item; nested = [] }
+
+let with_site builder site body =
+  let enclosing = builder.site in
+  builder.site <- Some site;
+  let result = body () in
+  builder.site <- enclosing;
+  result
 
 let allocate_local builder ?name ?(is_zeroed = false) ty =
   Dynarray.add_last builder.locals { ty; name; is_zeroed };
@@ -118,12 +131,12 @@ let emit builder statement =
       let function_ = lookup_current_function builder in
       function_.size <- function_.size + 1;
       let body = Dynarray.get builder.bodies builder.current in
-      body.statements <- statement :: body.statements
+      body.statements <- (builder.site, statement) :: body.statements
 
 let finish builder terminator =
   let function_ = lookup_current_function builder in
   function_.size <- function_.size + 2;
-  (Dynarray.get builder.bodies builder.current).terminator <- Some terminator
+  (Dynarray.get builder.bodies builder.current).terminator <- Some (builder.site, terminator)
 
 let run_in_block builder block body =
   let current = builder.current in
@@ -250,7 +263,7 @@ let outline builder ~index ~parts body =
        ~role:
          (Outlined
             { index; parent = builder.function_; parts = arrives :: parts; holder; environment })
-       ~entry
+       ~entry ~opening:builder.site
        ~prologue:
          [
            Assign
@@ -277,7 +290,7 @@ let mark_reached_blocks builder functions =
     if not reached.(block) then begin
       reached.(block) <- true;
       match (Dynarray.get builder.bodies block).terminator with
-      | Some terminator ->
+      | Some (_, terminator) ->
           List.iter
             (fun target ->
               jump_targets := Blocks.add target !jump_targets;
@@ -303,18 +316,22 @@ let print_reached_blocks builder functions ~reached ~result_types ~contexts =
           let function_ = functions.(number) and body = Dynarray.get builder.bodies block in
           let emission = function_.code.emission and fc = contexts.(number) in
           let statements =
-            List.map (C_code.render_statement emission fc) (List.rev body.statements)
+            List.map
+              (fun (site, statement) ->
+                C_text.Line_control site ++ C_code.render_statement emission fc statement)
+              (List.rev body.statements)
           in
           let terminator =
             match body.terminator with
-            | Some (Return value as terminator) ->
+            | Some (site, (Return value as terminator)) ->
                 check_return ~result:result_types.(number)
                   ~gives:
                     (match value with
                     | Some operand -> C_values.render_operand emission fc operand <> None
                     | None -> false);
-                C_code.render_terminator emission fc terminator
-            | Some terminator -> C_code.render_terminator emission fc terminator
+                C_text.Line_control site ++ C_code.render_terminator emission fc terminator
+            | Some (site, terminator) ->
+                C_text.Line_control site ++ C_code.render_terminator emission fc terminator
             | None -> raise_bug "block %d is never finished" block
           in
           C_text.Concat (statements @ [ terminator ])
@@ -525,6 +542,7 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
               result = result_types.(number);
               returns = (match function_.role with Enclosing -> returns | Outlined _ -> true);
             };
+        opening = function_.opening;
         body =
           Text " {\n"
           ++ render_local_declarations builder emission ~locals ~parameters
@@ -566,7 +584,7 @@ let build builder prototype =
 let build_nested parent ~index ~environment build_body =
   let code = (lookup_current_function parent).code in
   C_types.add_environment code.emission.types index environment;
-  let builder = start_function (make_builder parent.env) ~code in
+  let builder = start_function (make_builder parent.env ~site:parent.site) ~code in
   let prototype = build_body builder in
   code.nested <-
     (index, write_functions builder ~enclosing_symbol:(Nested_function index) prototype)

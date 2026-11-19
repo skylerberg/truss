@@ -1,7 +1,8 @@
 type t
 type prototype = { parameters : Lowered.local list; result : Lowered.ty option; returns : bool }
 
-val create : Memory_layout.env -> item:Lowered.Item.t -> t
+val create : ?site:Lowered.site -> Memory_layout.env -> item:Lowered.Item.t -> t
+val with_site : t -> Lowered.site -> (unit -> 'a) -> 'a
 
 val build_nested :
   t -> index:int -> environment:(string * Lowered.ty) list -> (t -> prototype) -> unit

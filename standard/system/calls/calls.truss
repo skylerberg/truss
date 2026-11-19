@@ -1,19 +1,28 @@
+use standard::capabilities
 use standard::growth
 use standard::intrinsic
 
-internal fn cancelled() -> Bool {
+internal fn cancelled() -> Bool
+  uses capabilities::System
+{
   intrinsic::runtime_tasks_cancelled() != 0
 }
 
-internal fn retry_after_signal() -> Bool {
+internal fn retry_after_signal() -> Bool
+  uses capabilities::System
+{
   intrinsic::libc_errno() == intrinsic::libc_eintr() && !cancelled()
 }
 
-internal fn watch(descriptor: Int32, writing: Bool) -> UInt64 {
+internal fn watch(descriptor: Int32, writing: Bool) -> UInt64
+  uses capabilities::System
+{
   intrinsic::runtime_descriptor_watch(descriptor, writing: if writing { 1 } else { 0 })
 }
 
-internal fn retry_when_ready(descriptor: Int32, writing: Bool, ticket: UInt64) -> Bool {
+internal fn retry_when_ready(descriptor: Int32, writing: Bool, ticket: UInt64) -> Bool
+  uses capabilities::System
+{
   let error = intrinsic::libc_errno()
   if error == intrinsic::libc_eagain() {
     intrinsic::runtime_descriptor_wait(descriptor, writing: if writing { 1 } else { 0 }, ticket: ticket) != 0
@@ -22,7 +31,9 @@ internal fn retry_when_ready(descriptor: Int32, writing: Bool, ticket: UInt64) -
   }
 }
 
-internal fn without_blocking(descriptor: Int32) -> Result[Unit, Int32] {
+internal fn without_blocking(descriptor: Int32) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   let flags = intrinsic::libc_fcntl_getfl(descriptor)
   if flags < 0 {
     return Err(intrinsic::libc_errno())
@@ -31,7 +42,7 @@ internal fn without_blocking(descriptor: Int32) -> Result[Unit, Int32] {
 }
 
 internal fn write_fully(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[Unit, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let length = intrinsic::view_length(bytes)
   var written: UInt64 = 0
@@ -66,7 +77,7 @@ internal fn read_onto_end(
   ensures !(result is Err(_) && intrinsic::storage_length(buffer) != old(intrinsic::storage_length(buffer)))
   ensures forall index in 0..old(intrinsic::storage_length(buffer)) =>
     intrinsic::storage_model(buffer)[index] == old(intrinsic::storage_model(buffer))[index]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   growth::reserve(mut buffer, additional: count)
   let length = intrinsic::storage_length(buffer)
@@ -89,7 +100,9 @@ internal fn read_onto_end(
   }
 }
 
-fn retry_read(descriptor: Int32, ticket: UInt64, waiting: Bool) -> Bool {
+fn retry_read(descriptor: Int32, ticket: UInt64, waiting: Bool) -> Bool
+  uses capabilities::System
+{
   if waiting {
     retry_when_ready(descriptor, writing: false, ticket: ticket)
   } else {
@@ -108,7 +121,7 @@ internal fn read_at_onto_end(
   ensures !(result is Err(_) && intrinsic::storage_length(buffer) != old(intrinsic::storage_length(buffer)))
   ensures forall index in 0..old(intrinsic::storage_length(buffer)) =>
     intrinsic::storage_model(buffer)[index] == old(intrinsic::storage_model(buffer))[index]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   growth::reserve(mut buffer, additional: count)
   let length = intrinsic::storage_length(buffer)
@@ -131,7 +144,7 @@ internal fn read_at_onto_end(
 
 internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[UInt64, Int32]
   ensures !(result is Ok(count) && count > intrinsic::view_length(bytes))
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let length = intrinsic::view_length(bytes)
   var ticket = watch(descriptor, writing: true)
@@ -152,7 +165,7 @@ internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Resu
 
 internal fn write_some_at(descriptor: Int32, bytes: intrinsic::View[UInt8], offset: Int64) -> Result[UInt64, Int32]
   ensures !(result is Ok(count) && count > intrinsic::view_length(bytes))
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let length = intrinsic::view_length(bytes)
   var wrote = intrinsic::libc_pwrite(descriptor, bytes: bytes, count: length, offset: offset)
@@ -169,13 +182,15 @@ internal fn write_some_at(descriptor: Int32, bytes: intrinsic::View[UInt8], offs
   }
 }
 
-internal fn seek(descriptor: Int32, offset: Int64, whence: Int32) -> Result[Int64, Int32] {
+internal fn seek(descriptor: Int32, offset: Int64, whence: Int32) -> Result[Int64, Int32]
+  uses capabilities::System
+{
   let position = intrinsic::libc_lseek(descriptor, offset: offset, whence: whence)
   if position < 0 { Err(intrinsic::libc_errno()) } else { Ok(position) }
 }
 
 internal fn set_length(descriptor: Int32, length: Int64) -> Result[Unit, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   var outcome = intrinsic::libc_ftruncate(descriptor, length: length)
   while outcome < 0 && retry_after_signal() {
@@ -185,7 +200,7 @@ internal fn set_length(descriptor: Int32, length: Int64) -> Result[Unit, Int32]
 }
 
 internal fn synchronize(descriptor: Int32) -> Result[Unit, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   var outcome = intrinsic::libc_fsync(descriptor)
   while outcome < 0 && retry_after_signal() {
@@ -194,7 +209,9 @@ internal fn synchronize(descriptor: Int32) -> Result[Unit, Int32]
   if outcome < 0 { Err(intrinsic::libc_errno()) } else { Ok(Unit) }
 }
 
-internal fn close(handle: own intrinsic::Handle) -> Result[Unit, Int32] {
+internal fn close(handle: own intrinsic::Handle) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   let descriptor = intrinsic::handle_release(own handle)
   if intrinsic::libc_close(descriptor) < 0 && !retry_after_signal() {
     Err(intrinsic::libc_errno())
@@ -204,7 +221,7 @@ internal fn close(handle: own intrinsic::Handle) -> Result[Unit, Int32] {
 }
 
 internal fn status_of_descriptor(descriptor: Int32) -> Result[intrinsic::Storage[UInt8], Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let size = intrinsic::libc_stat_size()
   var status: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(size)
@@ -227,6 +244,7 @@ fn status_into(name: intrinsic::View[UInt8], follow_links: Bool, status: mut int
   requires intrinsic::storage_length(status) + intrinsic::libc_stat_size() <= intrinsic::storage_capacity(status)
   ensures intrinsic::storage_length(status) == old(intrinsic::storage_length(status))
   ensures intrinsic::storage_capacity(status) == old(intrinsic::storage_capacity(status))
+  uses capabilities::System
 {
   if follow_links {
     intrinsic::libc_stat(name, status: mut status)
@@ -239,7 +257,7 @@ internal fn status_of_path(
   path: intrinsic::View[UInt8],
   follow_links: Bool,
 ) -> Result[intrinsic::Storage[UInt8], Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let name = ended_with_zero_byte(path)?
   let size = intrinsic::libc_stat_size()
@@ -275,21 +293,29 @@ internal fn number_at(bytes: intrinsic::View[UInt8], offset: UInt64, size: UInt6
   value
 }
 
-internal fn done(outcome: Int32) -> Result[Unit, Int32] {
+internal fn done(outcome: Int32) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   if outcome < 0 { Err(intrinsic::libc_errno()) } else { Ok(Unit) }
 }
 
-internal fn make_directory(path: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
+internal fn make_directory(path: intrinsic::View[UInt8]) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   let name = ended_with_zero_byte(path)?
   done(intrinsic::libc_mkdir(intrinsic::storage_view(name), mode: 0o777))
 }
 
-internal fn remove(path: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
+internal fn remove(path: intrinsic::View[UInt8]) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   let name = ended_with_zero_byte(path)?
   done(intrinsic::libc_remove(intrinsic::storage_view(name)))
 }
 
-internal fn rename(from: intrinsic::View[UInt8], to: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
+internal fn rename(from: intrinsic::View[UInt8], to: intrinsic::View[UInt8]) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   let old_name = ended_with_zero_byte(from)?
   let new_name = ended_with_zero_byte(to)?
   done(intrinsic::libc_rename(intrinsic::storage_view(old_name), to: intrinsic::storage_view(new_name)))
@@ -299,7 +325,9 @@ internal fn make_link(
   target: intrinsic::View[UInt8],
   link: intrinsic::View[UInt8],
   symbolic: Bool,
-) -> Result[Unit, Int32] {
+) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   let target_name = ended_with_zero_byte(target)?
   let link_name = ended_with_zero_byte(link)?
   if symbolic {
@@ -309,12 +337,16 @@ internal fn make_link(
   }
 }
 
-internal fn set_mode(path: intrinsic::View[UInt8], mode: Int32) -> Result[Unit, Int32] {
+internal fn set_mode(path: intrinsic::View[UInt8], mode: Int32) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   let name = ended_with_zero_byte(path)?
   done(intrinsic::libc_chmod(intrinsic::storage_view(name), mode: mode))
 }
 
-internal fn set_modified(path: intrinsic::View[UInt8], seconds: Int64, nanoseconds: Int64) -> Result[Unit, Int32] {
+internal fn set_modified(path: intrinsic::View[UInt8], seconds: Int64, nanoseconds: Int64) -> Result[Unit, Int32]
+  uses capabilities::System
+{
   let name = ended_with_zero_byte(path)?
   var times: intrinsic::Storage[Int64] = intrinsic::storage_with_capacity(4)
   intrinsic::storage_push(mut times, value: 0)
@@ -331,7 +363,9 @@ internal fn set_modified(path: intrinsic::View[UInt8], seconds: Int64, nanosecon
   )
 }
 
-internal fn read_link(path: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32] {
+internal fn read_link(path: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32]
+  uses capabilities::System
+{
   let name = ended_with_zero_byte(path)?
   let room = intrinsic::libc_path_max()
   var target: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
@@ -344,7 +378,9 @@ internal fn read_link(path: intrinsic::View[UInt8]) -> Result[intrinsic::Storage
   Ok(own target)
 }
 
-internal fn resolve(path: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32] {
+internal fn resolve(path: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32]
+  uses capabilities::System
+{
   let name = ended_with_zero_byte(path)?
   var room: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(intrinsic::libc_path_max())
   var is_present = false
@@ -352,7 +388,9 @@ internal fn resolve(path: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[U
   if is_present { Ok(copy_of(resolved)) } else { Err(intrinsic::libc_errno()) }
 }
 
-internal fn sleep(seconds: Int64, nanoseconds: Int64) {
+internal fn sleep(seconds: Int64, nanoseconds: Int64)
+  uses capabilities::System
+{
   let _ = intrinsic::runtime_sleep(seconds, nanoseconds: nanoseconds)
 }
 
@@ -388,7 +426,7 @@ internal fn ended_with_zero_byte(bytes: intrinsic::View[UInt8]) -> Result[intrin
 }
 
 internal fn open_file(path: intrinsic::View[UInt8], flags: Int32) -> Result[intrinsic::Handle, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let name = ended_with_zero_byte(path)?
   let closed_in_programs_it_runs = flags | intrinsic::libc_o_cloexec()
@@ -403,14 +441,16 @@ internal fn open_file(path: intrinsic::View[UInt8], flags: Int32) -> Result[intr
   }
 }
 
-internal fn close_descriptor(descriptor: Int32) {
+internal fn close_descriptor(descriptor: Int32)
+  uses capabilities::System
+{
   if descriptor >= 0 {
     let _ = intrinsic::libc_close(descriptor)
   }
 }
 
 internal fn wait_for(process: Int32) -> Result[Int32, Int32]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   var status: Int32 = 0
   var waited = intrinsic::libc_waitpid(process, status: mut status, options: 0)
@@ -420,7 +460,9 @@ internal fn wait_for(process: Int32) -> Result[Int32, Int32]
   if waited < 0 { Err(intrinsic::libc_errno()) } else { Ok(status) }
 }
 
-internal fn current_directory() -> Result[intrinsic::Storage[UInt8], Int32] {
+internal fn current_directory() -> Result[intrinsic::Storage[UInt8], Int32]
+  uses capabilities::System
+{
   let room = intrinsic::libc_path_max()
   var buffer: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
   var is_present = false
@@ -429,7 +471,7 @@ internal fn current_directory() -> Result[intrinsic::Storage[UInt8], Int32] {
 }
 
 internal fn host_name() -> intrinsic::Storage[UInt8]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let room: UInt64 = 256
   var name: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
@@ -443,7 +485,9 @@ internal fn host_name() -> intrinsic::Storage[UInt8]
   before_zero_byte(intrinsic::storage_view(name))
 }
 
-internal fn executable() -> Result[intrinsic::Storage[UInt8], Int32] {
+internal fn executable() -> Result[intrinsic::Storage[UInt8], Int32]
+  uses capabilities::System
+{
   if intrinsic::system_is_macos() {
     let room = intrinsic::libc_path_max()
     var path: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)

@@ -1,9 +1,12 @@
+use standard::capabilities
 use standard::network
 use standard::system::sockets
 
 internal type SystemNetworkServer()
 
-impl NetworkServer for SystemNetworkServer {
+impl NetworkServer for SystemNetworkServer
+  uses capabilities::System
+{
   fn listen(self, address: network::SocketAddress, options: network::ListenOptions) -> Result[network::Listener, SystemError] {
     sockets::listen(address, options: options)
   }

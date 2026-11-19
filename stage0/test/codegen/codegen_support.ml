@@ -150,18 +150,18 @@ let list_worker_counts () =
 let test_position (site : Lowered.site) : Emit_c.position =
   { file = "test.truss"; line = 1; column = site.offset + 1 }
 
-let run_program ?(extra = []) ?env ?input ?(profile = Emit_c.Development)
+let run_program ?(extra = []) ?env ?input ?(profile = Backend.Development)
     (program : program_fragment list) =
   let output = make_scratch_path "program" in
   let env = match env with Some env -> env | None -> make_shape_env ~extra () in
   let fragments = List.map (fun program_fragment -> program_fragment env) program in
   match
-    C_compiler.build_executable (Lazy.force c_compiler) O1
+    C_compiler.build_executable (Lazy.force c_compiler) Development
       ~units:
         [
           ("the runtime", Startup.render_runtime ~tests:false);
           ( "the program",
-            Emit_c.render_file env profile
+            Emit_c.render_file env profile ~resolve_position:test_position
               (List.map (fun fragment -> (fragment, Emit_c.External)) fragments) );
           ("main", Startup.For_testing.render_main_start (Emit_c.make_symbol (code_item "entry")));
           ("sites", Emit_c.render_sites_file ~resolve_position:test_position fragments);
@@ -269,7 +269,7 @@ let expect_output text expected = expect_string ~expected (run_source text)
 
 let build_program backend ~main =
   let output = make_scratch_path "program" in
-  Result.map (fun () -> output) (Backend.build_program backend ~main ~output)
+  Result.map (fun () -> output) (Backend.build_program backend ~main ~output ~is_kept:false)
 
 let build_main ?profile text =
   let _, backend = load ?profile text in

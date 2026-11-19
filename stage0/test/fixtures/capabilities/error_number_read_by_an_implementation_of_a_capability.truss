@@ -1,0 +1,13 @@
+use standard::intrinsic
+
+capability Errors {
+  fn last() -> Int32
+}
+
+type SystemErrors()
+
+impl Errors for SystemErrors {
+  fn last(self) -> Int32 {
+    intrinsic::libc_errno()
+  }
+}
