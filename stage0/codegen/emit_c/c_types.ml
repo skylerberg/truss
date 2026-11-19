@@ -112,9 +112,9 @@ let rec render_type types : Lowered.ty -> C_text.t = function
   | Environment nested_index -> render_key types (make_environment_key types nested_index)
   | Evidence nested_index -> render_key types (Evidence (max nested_index 1))
   | Capabilities count -> render_key types (Capabilities count)
-  | Trace -> Text "struct t_trace"
-  | Lend -> Text "struct t_lend"
-  | Lend_mark -> Text "struct t_lend_mark"
+  | Trace -> Text "struct truss_trace"
+  | Lend -> Text "struct truss_lend"
+  | Lend_mark -> Text "struct truss_lend_mark"
 
 let render_member_type types : Memory_layout.member -> C_text.t = function
   | Typed ty -> render_value_type types ty
@@ -226,14 +226,14 @@ and define_text types (key : C_text.key) =
           body =
             Text
               (Printf.sprintf
-                 "  struct t_evidence evidence;\n  const struct t_evidence *outer[%d];\n"
+                 "  struct truss_evidence evidence;\n  const struct truss_evidence *outer[%d];\n"
                  nested_index);
           holds = [];
         }
   | Capabilities count ->
       Struct
         {
-          body = Text (Printf.sprintf "  struct t_capability entries[%d];\n" (count + 1));
+          body = Text (Printf.sprintf "  struct truss_capability entries[%d];\n" (count + 1));
           holds = [];
         }
   | Environment (_, nested_index) ->

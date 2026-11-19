@@ -7,12 +7,11 @@ type t = {
   problems : Project.problem list;
 }
 
-let make_shown_file snapshot database packages file diagnostics =
+let make_shown_file snapshot database file diagnostics =
   match Diagnostic.select_shown diagnostics with
   | [] -> None
   | diagnostics ->
-      Some
-        { file; source = Command_packages.read_source snapshot database packages file; diagnostics }
+      Some { file; source = Command_packages.read_source snapshot database file; diagnostics }
 
 let gather ?(proofs = false) database snapshot packages =
   let program_packages = Command_packages.list_program_packages snapshot packages in
@@ -24,8 +23,7 @@ let gather ?(proofs = false) database snapshot packages =
     checked =
       List.filter_map
         (fun file ->
-          make_shown_file snapshot database packages file
-            (Database.list_file_diagnostics database file))
+          make_shown_file snapshot database file (Database.list_file_diagnostics database file))
         files;
     proofs;
     proven =
@@ -35,8 +33,7 @@ let gather ?(proofs = false) database snapshot packages =
             let proofs = Lazy.force proofs in
             List.filter_map
               (fun file ->
-                make_shown_file snapshot database packages file
-                  (Proofs.list_diagnostics proofs file))
+                make_shown_file snapshot database file (Proofs.list_diagnostics proofs file))
               files
         | None -> []);
     problems =

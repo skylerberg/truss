@@ -1,0 +1,7 @@
+fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element]
+  uses Source.Uses
+  ensures (result is Some(_)) ==> source.remaining() < old(source.remaining())
+    when Source: FiniteCursor
+{
+  mut source.next()
+}

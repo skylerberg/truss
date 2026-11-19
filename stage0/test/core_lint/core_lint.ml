@@ -318,7 +318,10 @@ let check_semantics context (form : Core.t) =
                    when List.exists
                           (fun known -> Well_known.is known trait.trait)
                           [ Add; Subtract; Multiply; Divide; Remainder; Negate ]
-                        && Option.is_some (Types.find_builtin self_type) ->
+                        && Option.is_some (Types.find_builtin self_type)
+                        && List.for_all
+                             (fun argument -> argument = Types.Type self_type)
+                             trait.trait_arguments ->
                      context.report
                        "an arithmetic operator on `%s` is a call of `%s`, not an Operator"
                        (Types.show self_type) (show_target call.callee.target)
@@ -427,7 +430,14 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
             check_trait subject reference
         | Types.Capability_variable _ ->
             report "%s contains a capability inference variable" subject
-        | Types.Capability_error _ -> report "%s contains a capability with an error" subject)
+        | Types.Capability_error _ -> report "%s contains a capability with an error" subject
+        | Types.Capability_unless { capability; unless } ->
+            check_capabilities subject (Types.make_capability_set [ capability ]);
+            List.iter
+              (fun (bound : Types.bound_condition) ->
+                check_type subject bound.subject;
+                check_trait subject bound.bound)
+              unless)
       (Types.list_capabilities set)
   and check_type subject (ty : Types.ty) =
     match ty with

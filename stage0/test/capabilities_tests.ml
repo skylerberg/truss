@@ -823,6 +823,33 @@ let () =
           Fixtures.Capabilities.time_clause_on_a_function_that_runs_forever;
           Fixtures.Capabilities.time_clause_on_a_function_type_that_runs_forever;
         ]);
+  Harness.test "a function that uses RunForever unless C states its time clause when C" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.time_of_a_function_that_runs_forever_unless_finite
+        "types.unbounded_time" ~says:"a `time` clause bounds it only `when Source: FiniteCursor`"
+        ~fixed:Fixtures.Capabilities.time_when_a_function_terminates;
+      expect_fine Fixtures.Capabilities.time_when_a_function_terminates);
+  Harness.test "a loop over a cursor that may not end uses RunForever unless it is finite"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.loop_over_a_cursor_that_may_not_end
+        "capabilities.not_available"
+        ~says:
+          "This loop's measure holds only when Source: FiniteCursor, so the loop uses `RunForever \
+           unless Source: FiniteCursor`";
+      expect_fine Fixtures.Capabilities.loop_over_a_cursor_unless_it_is_finite);
+  Harness.test "collecting a FiniteCursor uses no RunForever" (fun () ->
+      expect_fine Fixtures.Capabilities.collect_of_characters);
+  Harness.test "collecting a generic cursor passes on the condition of RunForever" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.collect_through_a_cursor_that_may_not_end
+        "capabilities.not_available"
+        ~says:"Declare it with `uses RunForever unless Items: FiniteCursor`.";
+      expect_fine Fixtures.Capabilities.collect_through_a_cursor_unless_it_is_finite);
+  Harness.test "collecting a cursor that is not finite uses RunForever" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.collect_of_a_cursor_that_never_ends
+        "capabilities.not_available" ~says:"This call uses `RunForever`, which");
+  Harness.test "RunForever unless C does not cover a loop that runs forever under C" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.loop_that_runs_forever_under_a_condition_on_another_capability
+        "capabilities.not_available" ~says:"This loop has no measure");
   Harness.test "a bound names the time of no callback that may run forever" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.time_of_a_callback_that_runs_forever
         "types.unbounded_time"

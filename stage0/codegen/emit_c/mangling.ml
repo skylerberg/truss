@@ -171,5 +171,5 @@ let shorten name =
   if String.length name <= limit then name
   else String.sub name 0 prefix_length ^ "_Hash_" ^ Blake3.hash_to_hex ~digits:32 name
 
-let make_symbol item = shorten ("t_" ^ mangle item)
-let make_type_name ty = shorten ("t_" ^ mangle_ty ty)
+let make_symbol item = shorten ("truss_" ^ mangle item)
+let make_type_name ty = shorten ("truss_" ^ mangle_ty ty)

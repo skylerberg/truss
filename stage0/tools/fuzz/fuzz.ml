@@ -138,7 +138,7 @@ let judge : Diagnostic.Code.t -> verdict = function
       | Conditional_operator | Let_mut | Address_of | Closure_bars | Brace_record | Turbofish
       | Trailing_lambda | As_conversion | Elif | Angle_brackets | Path_separator | Qualified_variant
       | Macro_call | Tuple | Power_operator | Short_declaration | Pipe_operator | Lambda_annotation
-      | Impl_parameters | Null_coalescing ) ->
+      | Impl_parameters | Null_coalescing | Misplaced_condition ) ->
       Grammar_rejects
   | Parser (Cost_word | Misplaced_potential | Interpolation_not_allowed) -> Unknown
   | Parser

@@ -108,7 +108,9 @@ let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
                 | Types.Capability_parameter _ -> false
                 | Types.Built_in _ | Types.Capability _ | Types.Capability_projection _
                 | Types.Capability_variable _ | Types.Capability_error _ ->
-                    true)
+                    true
+                | Types.Capability_unless _ ->
+                    Compiler_bug.raise_bug ~stage:"Prover" "a capability's base has a condition")
               signature.uses))
         && List.for_all
              (fun (info : Types.parameter_info) -> info.mode <> Language.Mode.Mut)

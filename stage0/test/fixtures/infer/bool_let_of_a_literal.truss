@@ -1,0 +1,4 @@
+fn f() -> Bool {
+  let flag: Bool = 3
+  flag
+}

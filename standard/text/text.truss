@@ -512,11 +512,13 @@ public fn String.from_utf16(units: Slice[UInt16]) -> Result[String, Utf16Error]
 }
 
 public fn String.collect[Source: Cursor[Element = Character]](source: own Source) -> String
-  uses Source.Uses, RunForever
+  uses Source.Uses, RunForever unless Source: FiniteCursor
 {
   var cursor = own source
   var text: String = ""
-  while mut cursor.next() is Some(character) {
+  while mut cursor.next() is Some(character)
+    decreases cursor.remaining() when Source: FiniteCursor
+  {
     mut text.push_character(character)
   }
   text

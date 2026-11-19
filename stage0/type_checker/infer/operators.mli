@@ -19,13 +19,12 @@ val check_prefix :
   Types.ty
 
 val check_operator_call :
-  operands:Tables.argument list ->
   State.state ->
-  Syntax.expression ->
+  Syntax.id ->
   method_:Well_known.method_ ->
   output:Well_known.associated ->
-  left:Types.ty ->
-  right:Types.ty option ->
+  left:Syntax.id * Types.ty ->
+  right:(Syntax.id * Types.ty) option ->
   Types.ty
 
 val check_literal_operands : State.state -> left:Types.ty -> right:Types.ty -> unit

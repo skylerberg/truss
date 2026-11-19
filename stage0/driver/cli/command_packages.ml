@@ -98,11 +98,12 @@ let select_files snapshot packages paths =
           List.exists (fun path -> File_system.is_inside ~directory:path written) wanted)
         (list_files snapshot packages)
 
-let show_file snapshot packages (file : Path.file) =
-  if List.mem file.module_.package packages then Shown_path.show_path (locate_file snapshot file)
-  else Path.show_file file
-
-let read_source snapshot database packages file =
+let read_source snapshot database file =
   Source.create
-    ~path:(show_file snapshot packages file)
+    ~path:(Workspace.locate_file snapshot file)
     (Source.text (Database.read_source database file))
+
+let show_project_path snapshot path =
+  match File_system.find_relative_path ~root:(Workspace.locate_root snapshot) path with
+  | Some relative -> relative
+  | None -> Compiler_bug.raise_bug ~stage:"Command" "%s is not inside the project" path

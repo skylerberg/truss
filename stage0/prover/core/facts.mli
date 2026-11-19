@@ -30,6 +30,7 @@ val oblige :
   ?template_clause:Obligation.template_clause ->
   ?cited:Resolve.Names.key * Core.origin ->
   ?fixes:Obligation.fix list ->
+  ?holds_when:Types.condition ->
   State.context ->
   State.frame ->
   Diagnostic.Code.prover ->
@@ -104,6 +105,10 @@ val read_or_arrive :
   State.context -> State.frame -> string -> Types.ty -> (State.frame -> Logic.term) -> Logic.term
 
 val bind : State.frame -> Locals.key -> Types.ty -> Logic.term -> State.frame
+
+val list_definition_bounds :
+  Lookups.t -> current:Path.t -> condition:Types.condition -> Interface.Impls.bounds
+
 val substitute_type : State.context -> State.frame -> Types.ty -> Types.ty
 val find_local_type : State.context -> State.frame -> Locals.key -> Types.ty option
 val mentions_potential : Logic.term -> bool
