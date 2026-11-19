@@ -74,7 +74,7 @@ let list_tasks blocks (body : Mir.Graph.block list) : Mir.task list =
     body
 
 let end_on_exits blocks ~(body : Mir.Graph.block list) ~part ~origin =
-  let dead : Mir.Graph.statement = { kind = Dead [ part ]; origin } in
+  let dead : Mir.Graph.statement = { kind = Basic (Dead [ part ]); origin } in
   let pads = Hashtbl.create 4 in
   let leave target =
     if List.mem target body then target
@@ -112,7 +112,7 @@ let end_body_parts (body : Mir.Graph.body) : Mir.Graph.body =
   for block = 0 to Array.length body.blocks - 1 do
     match lookup_block blocks block with
     | { terminator = For { iteration = Pull _; part; blocks = loop_body; loop; _ }; _ } ->
-        let dead : Mir.Graph.statement = { kind = Dead [ part ]; origin = loop.origin } in
+        let dead : Mir.Graph.statement = { kind = Basic (Dead [ part ]); origin = loop.origin } in
         List.iter
           (fun ending ->
             let basic = lookup_block blocks ending in

@@ -67,17 +67,17 @@ let list_call_uses ~is_moving (call : Mir.call) =
 let list_uses ~is_moving (statement : Mir.Graph.statement) =
   let origin = statement.origin in
   match statement.kind with
-  | Assign { value; _ } -> list_rvalue_uses ~is_moving ~origin value
-  | Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ } ->
+  | Basic (Assign { value; _ }) -> list_rvalue_uses ~is_moving ~origin value
+  | Basic (Call { call; _ } | Lend { call; _ } | Slice { call; _ } | Template { call; _ }) ->
       list_call_uses ~is_moving call
-  | Assert operand | Echo operand -> list_operand_uses ~is_moving ~by_value:false operand
-  | Provide { provided; _ } ->
+  | Basic (Assert operand | Echo operand) -> list_operand_uses ~is_moving ~by_value:false operand
+  | Provide_start { provided; _ } ->
       List.concat_map
         (fun (provided : Mir.provided) ->
           list_operand_uses ~is_moving ~by_value:false provided.value)
         provided
-  | Live _ | Dead _ | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _
-    ->
+  | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _)
+  | Provide_end ->
       []
 
 let rec list_yielded_uses ~is_moving ~owns : Mir.yielded -> use list = function
@@ -116,16 +116,20 @@ let list_moves ~is_moving statement = list_moved (list_uses ~is_moving statement
 
 let list_inits (statement : Mir.Graph.statement) : Mir.place list =
   match statement.kind with
-  | Assign { target; _ } -> [ target ]
-  | Call { destination; _ } -> Option.to_list destination
-  | Lend { part; _ } -> [ { root = Local part; projections = [] } ]
-  | Slice { destination; _ } | Template { destination; _ } -> [ destination ]
-  | Live _ | Dead _ | Assert _ | Echo _ | Provide _ | Provide_end | Loan_start _ | Loan_end _
-  | Ghost_assert _ | Matched _ | Proof _ ->
+  | Basic (Assign { target; _ }) -> [ target ]
+  | Basic (Call { destination; _ }) -> Option.to_list destination
+  | Basic (Lend { part; _ }) -> [ { root = Local part; projections = [] } ]
+  | Basic (Slice { destination; _ } | Template { destination; _ }) -> [ destination ]
+  | Basic
+      ( Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _
+      | Proof _ )
+  | Provide_start _ | Provide_end ->
       []
 
 let list_ended (statement : Mir.Graph.statement) =
-  match statement.kind with Dead locals -> locals | _ -> []
+  match statement.kind with
+  | Basic (Dead locals) -> locals
+  | Basic _ | Provide_start _ | Provide_end -> []
 
 let list_terminator_moves ~is_moving ~owns basic =
   list_moved (list_terminator_uses ~is_moving ~owns basic)
@@ -552,8 +556,8 @@ let accept_all _ = true
 
 let list_reads_and_writes (statement : Mir.Graph.statement) =
   match statement.kind with
-  | Live locals -> ([], locals)
-  | _ ->
+  | Basic (Live locals) -> ([], locals)
+  | Basic _ | Provide_start _ | Provide_end ->
       let given = list_inits statement in
       ( use_locals (list_uses ~is_moving:accept_all statement)
         @ List.concat_map
@@ -574,16 +578,16 @@ let compute_live_after analysis (body : Mir.Graph.body) =
       List.iter
         (fun (statement : Mir.Graph.statement) ->
           match statement.kind with
-          | Assign { target = { root = Local local; projections = [] }; value; _ }
+          | Basic (Assign { target = { root = Local local; projections = [] }; value; _ })
             when not (owns analysis local) ->
               bind local
                 (use_locals
                    (List.filter
                       (fun use -> match use.operand with Some (Borrow _) -> true | _ -> false)
                       (list_rvalue_uses ~is_moving:accept_all ~origin:statement.origin value)))
-          | Lend { part; call } ->
+          | Basic (Lend { part; call }) ->
               bind part (use_locals (list_call_uses ~is_moving:accept_all call))
-          | _ -> ())
+          | Basic _ | Provide_start _ | Provide_end -> ())
         basic.statements)
     body.blocks;
   let rec with_sources seen = function

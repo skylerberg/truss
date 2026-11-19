@@ -143,6 +143,19 @@ and lower_concurrent_block state (region : Mir_drops.region) ~fork
 and lower_statement state (statement : Mir.Graph.statement) =
   let origin = statement.origin in
   match statement.kind with
+  | Provide_start { provided; can_use_tasks } ->
+      provide state provided ~can_use_tasks ~site:(Some (Mir_places.locate_site state origin))
+  | Provide_end -> (
+      let frame = Mir_places.require_mir_frame state in
+      match frame.provides with
+      | enclosing :: rest ->
+          state.evidence <- enclosing;
+          frame.provides <- rest
+      | [] -> Definitions.raise_bug "the end of a provide that did not start")
+  | Basic basic -> lower_basic state basic ~origin
+
+and lower_basic state (basic : Mir.basic) ~origin =
+  match basic with
   | Assign { target; value; _ } -> assign state target value ~origin
   | Call { destination; call } ->
       let destination =
@@ -186,15 +199,6 @@ and lower_statement state (statement : Mir.Graph.statement) =
         (Mir_places.lower_operand_place state echoed)
         (Mir_places.compute_operand_type state echoed)
         ~site:(Mir_places.locate_site state origin)
-  | Provide { provided; can_use_tasks } ->
-      provide state provided ~can_use_tasks ~site:(Some (Mir_places.locate_site state origin))
-  | Provide_end -> (
-      let frame = Mir_places.require_mir_frame state in
-      match frame.provides with
-      | enclosing :: rest ->
-          state.evidence <- enclosing;
-          frame.provides <- rest
-      | [] -> Definitions.raise_bug "the end of a provide that did not start")
 
 and assign state (target : Mir.place) (value : Mir.rvalue) ~origin =
   match (target, value) with

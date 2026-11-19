@@ -160,8 +160,6 @@ and basic =
   | Dead of local list
   | Assert of operand
   | Echo of operand
-  | Provide of { provided : provided list; can_use_tasks : bool }
-  | Provide_end
   | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
   | Loan_end of int list
   | Ghost_assert of { condition : formula; by_bit_vector : bool }
@@ -188,6 +186,7 @@ and statement_kind =
       body : block;
     }
   | Fork of { fork : Core.origin; concurrent : bool; branches : block list }
+  | Provide of { target : place; provided : provided list; can_use_tasks : bool; body : block }
   | Resume of { winner : local; exits : early_exit list }
   | Yield of { mode : Types.mode; part : yielded }
   | Jump of jump

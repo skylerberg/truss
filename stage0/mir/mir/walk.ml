@@ -17,6 +17,7 @@ let list_nested_blocks_of_kind (kind : Tree.statement_kind) : Tree.block list =
   | For { lent; body; _ } ->
       Option.to_list (Option.map (fun (lent : Tree.lent_element) -> lent.count) lent) @ [ body ]
   | Fork { branches; _ } -> branches
+  | Provide { body; _ } -> [ body ]
   | Resume { exits; _ } -> List.map (fun (exit : Tree.early_exit) -> exit.resumed) exits
   | Basic
       ( Assign
@@ -28,8 +29,8 @@ let list_nested_blocks_of_kind (kind : Tree.statement_kind) : Tree.block list =
                   (Result | Entry _ | Yielded | Identical _ | Applied _ | Method_cost _ | Map _) );
             _;
           }
-      | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Provide _
-      | Provide_end | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ )
+      | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
+      | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ )
   | Yield _
   | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo) ->
       []
@@ -117,7 +118,7 @@ and visit_statement_places visit (kind : Tree.statement_kind) =
   | Basic (Assert value | Echo value | Loan_start { borrowed = value; _ })
   | Assert_by_bit_vector { condition = value; _ } ->
       visit_operand_places visit value
-  | Basic (Provide { provided; _ }) ->
+  | Provide { provided; _ } ->
       List.iter
         (fun (provided : Tree.provided) -> visit_operand_places visit provided.value)
         provided
@@ -127,7 +128,7 @@ and visit_statement_places visit (kind : Tree.statement_kind) =
   | Jump (Cancel { returned; _ }) ->
       Option.iter (fun (value, _) -> visit_operand_places visit value) returned
   | Jump (Break | Continue | Unreachable | Written_unreachable | Todo)
-  | Basic (Live _ | Dead _ | Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _)
+  | Basic (Live _ | Dead _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _)
   | Choose { choice = Cases _ | Conditional _ | Connective _; _ }
   | While _ | Fork _ | Resume _ ->
       ());
@@ -143,8 +144,8 @@ let rec visit_block visit (block : Tree.block) =
       | While { loop; _ } | For { loop; _ } -> visit_loop visit loop
       | Basic
           ( Assign _ | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
-          | Provide _ | Provide_end | Loan_start _ | Loan_end _ | Matched _ )
-      | Choose _ | Assert_by_bit_vector _ | Fork _ | Resume _ | Yield _ | Jump _ ->
+          | Loan_start _ | Loan_end _ | Matched _ )
+      | Choose _ | Assert_by_bit_vector _ | Fork _ | Provide _ | Resume _ | Yield _ | Jump _ ->
           ());
       List.iter (visit_block visit) (list_nested_blocks statement))
     block.statements
@@ -177,10 +178,11 @@ let find_callee (statement : Tree.statement) : Tree.callee option =
       Some call.callee
   | For { iteration = Pull { next; _ }; _ } -> Some next
   | Basic
-      ( Assign _ | Live _ | Dead _ | Assert _ | Echo _ | Provide _ | Provide_end | Loan_start _
-      | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ )
+      ( Assign _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
+      | Matched _ | Proof _ )
   | For { iteration = Range _; _ }
-  | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Resume _ | Yield _ | Jump _ ->
+  | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Provide _ | Resume _ | Yield _ | Jump _
+    ->
       None
 
 let extract_operand_type : Tree.operand -> Types.ty = function

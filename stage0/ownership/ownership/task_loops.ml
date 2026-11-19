@@ -2,10 +2,11 @@ let find_collection_type (body : Mir.Graph.body) ~(inside : Mir.Graph.block) (el
   List.find_map
     (fun (statement : Mir.Graph.statement) ->
       match statement.kind with
-      | Lend { part; call = { arguments = Passed { value = Borrow { type_; _ }; _ } :: _; _ } }
+      | Basic
+          (Lend { part; call = { arguments = Passed { value = Borrow { type_; _ }; _ } :: _; _ } })
         when part = element ->
           Some type_
-      | _ -> None)
+      | Basic _ | Provide_start _ | Provide_end -> None)
     body.blocks.(inside).statements
 
 let check context (mir : Mir.Graph.t) =

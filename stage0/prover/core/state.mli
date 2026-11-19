@@ -113,6 +113,7 @@ type context = {
   local_names : string Tables.Local_table.t;
   local_origins : Core.origin Tables.Local_table.t;
   mutable returns : (frame * Logic.term option) list;
+  mutable enclosing_provides : Mir.provided list list;
   mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
   mutable instantiating : Path.t list;
   mutable axiomatizing : Logic.symbol list;

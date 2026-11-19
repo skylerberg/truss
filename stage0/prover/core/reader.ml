@@ -10,7 +10,6 @@ type run = {
   infos : Mir.local_info array;
   changed_in_place : (Mir.local, unit) Hashtbl.t;
   lambdas : Mir.body array;
-  provides : (Core.origin, Mir.provided list) Hashtbl.t;
   mutable loops : loop_exits list;
   mutable cancelled : (Mir.task * State.frame list ref) list;
 }
@@ -294,15 +293,17 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
         | Basic (Slice { destination; call; _ } | Template { destination; call; _ }) ->
             note_assigned destination;
             note_passed call
-        | Basic (Provide { provided; _ }) -> List.iter note (list_mut_provided_places provided)
+        | Provide { target; provided; _ } ->
+            note_assigned target;
+            List.iter note (list_mut_provided_places provided)
         | For { iteration = Pull { cursor; _ }; _ } -> note cursor
         | Yield { mode = Types.Mut; part } -> note_lent part
         | Jump (Cancel { winner; returned; _ }) ->
             note { root = Local winner; projections = [] };
             Option.iter (fun (_, local) -> note { root = Local local; projections = [] }) returned
         | Basic
-            ( Live _ | Dead _ | Assert _ | Echo _ | Provide_end | Loan_start _ | Loan_end _
-            | Ghost_assert _ | Matched _ | Proof _ )
+            ( Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
+            | Matched _ | Proof _ )
         | Assert_by_bit_vector _ | While _ | Fork _ | Resume _
         | For { iteration = Range _; _ }
         | Yield { mode = Read | Own; _ }
@@ -960,6 +961,28 @@ and read_choice context frame run (choice : Mir.choice) =
               Some (Facts.restrict frame (Logic.not_ reads_right), Logic.Boolean (connective <> And))
           ))
 
+and read_providing (context : State.context) run provided ~refresh read =
+  let returns = context.returns in
+  let loops = List.map (fun (exits : loop_exits) -> (exits, exits.breaks, exits.ends)) run.loops in
+  let cancelled = List.map (fun (_, frames) -> (frames, !frames)) run.cancelled in
+  let enclosing = context.enclosing_provides in
+  context.enclosing_provides <- provided :: enclosing;
+  let read = Fun.protect ~finally:(fun () -> context.enclosing_provides <- enclosing) read in
+  let rec refresh_since ~before refresh_exit = function
+    | exits when exits == before -> exits
+    | exit :: rest -> refresh_exit exit :: refresh_since ~before refresh_exit rest
+    | [] -> Facts.raise_bug "the exits before a `provide` block are gone after it"
+  in
+  context.returns <-
+    refresh_since ~before:returns (fun (frame, value) -> (refresh frame, value)) context.returns;
+  List.iter
+    (fun ((exits : loop_exits), breaks, ends) ->
+      exits.breaks <- refresh_since ~before:breaks refresh exits.breaks;
+      exits.ends <- refresh_since ~before:ends refresh exits.ends)
+    loops;
+  List.iter (fun (frames, before) -> frames := refresh_since ~before refresh !frames) cancelled;
+  read
+
 and read_statement context frame run (statement : Mir.statement) =
   let location = Facts.locate context frame.source statement.origin in
   Facts.reject_recursion_through_supplied_code context frame location statement;
@@ -980,6 +1003,22 @@ and read_statement context frame run (statement : Mir.statement) =
         ~bit_vector:(Some (named, fun isolated -> snd (read_value context isolated run code)))
         term;
       Some frame
+  | Provide { target; provided; body; _ } ->
+      let refresh frame =
+        List.fold_left
+          (fun frame place ->
+            let root = { (expand_place frame run place) with Mir.projections = [] } in
+            refresh_place context frame
+              (compute_place_type context frame run root)
+              (make_passed_place context run root))
+          frame
+          (list_mut_provided_places provided)
+      in
+      let read =
+        read_providing context run provided ~refresh (fun () -> read_block context frame run body)
+      in
+      write_assignment context run target ~copied:(Option.to_list body.value)
+        (Option.map (fun (after, term) -> (refresh after, term)) read)
   | Choose { target; choice } ->
       let copied =
         match choice with
@@ -1437,22 +1476,6 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
           in
           Some (write_place context frame run destination tagged)
       | _ -> Facts.raise_unsupported location "a tagged template whose tag the prover cannot read")
-  | Provide { provided; _ } ->
-      Hashtbl.replace run.provides statement.origin provided;
-      Some frame
-  | Provide_end -> (
-      match Hashtbl.find_opt run.provides statement.origin with
-      | Some provided ->
-          Some
-            (List.fold_left
-               (fun frame place ->
-                 let root = { (expand_place frame run place) with Mir.projections = [] } in
-                 refresh_place context frame
-                   (compute_place_type context frame run root)
-                   (make_passed_place context run root))
-               frame
-               (list_mut_provided_places provided))
-      | None -> Some frame)
 
 and write_assignment context run (target : Mir.place) ~(copied : Mir.operand list) read =
   let copied =
@@ -1493,14 +1516,7 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
     | _ -> written)
 
 let make_run ~locals ~lambdas =
-  {
-    infos = locals;
-    changed_in_place = Hashtbl.create 4;
-    lambdas;
-    provides = Hashtbl.create 2;
-    loops = [];
-    cancelled = [];
-  }
+  { infos = locals; changed_in_place = Hashtbl.create 4; lambdas; loops = []; cancelled = [] }
 
 let read_formula context (frame : State.frame) (formula : Mir.formula) ~arguments =
   let run = make_run ~locals:formula.locals ~lambdas:formula.lambdas in

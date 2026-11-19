@@ -1,8 +1,9 @@
 let is_bookkeeping (statement : Mir.Graph.statement) =
   match statement.kind with
-  | Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> true
-  | Assign _ | Call _ | Lend _ | Slice _ | Template _ | Assert _ | Echo _ | Provide _ | Provide_end
-    ->
+  | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _) ->
+      true
+  | Basic (Assign _ | Call _ | Lend _ | Slice _ | Template _ | Assert _ | Echo _)
+  | Provide_start _ | Provide_end ->
       false
 
 let rec only_returns (body : Mir.Graph.body) block ~seen =
@@ -39,17 +40,20 @@ let find_forwarding (body : Mir.Graph.body) : forwarding option =
         in
         match statement.kind with
         | _ when is_bookkeeping statement -> scan ~held ~computed rest
-        | Assign { target = { root = Local local; projections = [] }; value = Operand operand; _ }
+        | Basic
+            (Assign
+               { target = { root = Local local; projections = [] }; value = Operand operand; _ })
           when is_new local ->
             scan ~held:((local, operand) :: held) ~computed rest
-        | Call
-            {
-              destination = Some { root = Local local; projections = [] };
-              call = { callee = { target = Intrinsic _; _ }; _ } as call;
-            }
+        | Basic
+            (Call
+               {
+                 destination = Some { root = Local local; projections = [] };
+                 call = { callee = { target = Intrinsic _; _ }; _ } as call;
+               })
           when is_new local ->
             scan ~held ~computed:(computed @ [ (local, call) ]) rest
-        | Lend { part; call } when List.for_all is_bookkeeping rest ->
+        | Basic (Lend { part; call }) when List.for_all is_bookkeeping rest ->
             Some (part, { held; computed; lending = call })
         | _ -> None)
   in

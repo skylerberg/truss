@@ -551,18 +551,19 @@ let list_returned_temporaries (body : Mir.Graph.body) =
         List.iter
           (fun (statement : Mir.Graph.statement) ->
             match statement.kind with
-            | Assign
-                {
-                  target = { root = Local target; projections = [] };
-                  value = Operand (Use { place = { root = Local source; projections = [] }; _ });
-                  _;
-                }
+            | Basic
+                (Assign
+                   {
+                     target = { root = Local target; projections = [] };
+                     value = Operand (Use { place = { root = Local source; projections = [] }; _ });
+                     _;
+                   })
               when List.mem target !returned
                    && body.locals.(source).kind = Temporary
                    && not (List.mem source !returned) ->
                 returned := source :: !returned;
                 changed := true
-            | _ -> ())
+            | Basic _ | Provide_start _ | Provide_end -> ())
           block.statements)
       body.blocks
   done;
@@ -583,174 +584,180 @@ let emit_statement builder (statement : Mir.Graph.statement) =
   let origin = statement.origin in
   let uses = Moves.list_statement_uses builder.moves statement in
   match statement.kind with
-  | Live locals ->
-      builder.unassigned_locals <- locals @ builder.unassigned_locals;
-      let core = List.filter_map (find_core_local builder) locals in
-      if core <> [] then emit builder (Bind core) origin
-  | Dead locals ->
-      List.iter
-        (fun (bound : lent_part_binding) ->
-          if List.mem bound.part locals && not (List.mem bound.binding locals) then
-            emit builder
-              (Bind_lent_part
-                 {
-                   scrutinee = bound.scrutinee;
-                   lent_part_type = (lookup_local_info builder bound.part).type_;
-                 })
-              bound.origin)
-        builder.lent_part_bindings;
-      let dropped =
-        List.filter_map
-          (fun local ->
-            let info = lookup_local_info builder local in
-            match info.kind with
-            | Temporary -> Some { owner = Place.Temporary local; origin = info.origin }
-            | Source { local = core; mode = Own; _ } ->
-                Some { owner = Place.Local core; origin = info.origin }
-            | Source _ | Lent _ -> None)
-          locals
-      in
-      if dropped <> [] then emit builder (Drop dropped) origin;
-      builder.lent_part_bindings <-
-        List.filter
-          (fun (bound : lent_part_binding) ->
-            not (List.mem bound.binding locals || List.mem bound.part locals))
-          builder.lent_part_bindings
-  | Assign { target = { root = Local local; projections = [] } as target; value; _ }
-    when List.mem local builder.unassigned_locals
-         ||
-         match (lookup_local_info builder local).kind with
-         | Temporary -> true
-         | Lent _ -> not (Hashtbl.mem builder.held local)
-         | Source _ -> false -> (
-      builder.unassigned_locals <-
-        List.filter (fun unassigned -> unassigned <> local) builder.unassigned_locals;
-      match (lookup_local_info builder local).kind with
-      | Temporary -> (
-          match value with
-          | Operand (Use { place; _ })
-            when List.mem local builder.returned_temporaries
-                 && Option.is_some (track_place builder place) ->
-              read_uses builder ~is_returned:(fun _ -> true) uses;
-              hold builder target (make_value (list_copy_views builder place))
-          | Operand (Borrow _) -> raise_bug "a temporary assigned a borrow"
-          | _ ->
-              read_uses builder uses;
-              hold builder target (compute_rvalue_held builder value))
-      | Lent _ -> (
-          read_uses builder uses;
-          match value with
-          | Operand (Borrow { place; _ }) -> hold builder target (Alias place)
-          | Convert { conversion = View_to_owned; _ } ->
-              hold builder target (compute_rvalue_held builder value)
-          | _ -> raise_bug "a lent local that holds neither a borrow nor the owner of a view")
-      | Source { local = core; _ } ->
-          read_uses builder uses;
-          emit_bound_value builder local core value origin
-            ~is_var:(List.mem core builder.context.mutable_locals))
-  | Assign { target; value; _ } -> (
-      read_uses builder uses;
-      let target = resolve_alias builder target in
-      let result = compute_rvalue_held builder value in
-      match track_place builder target with
-      | Some place -> (
-          emit_write_through builder (list_written_slices builder target) origin;
-          emit builder (Assign place) origin;
-          match value with
-          | Operand operand when is_view_operand builder operand ->
-              emit builder
-                (Store { place; views = list_held_views result; replaces_root = place.steps = [] })
-                origin
-          | _ -> ())
-      | None -> hold builder { target with projections = [] } (untrack_elements result))
-  | Call { destination; call = called } ->
-      read_uses builder uses;
-      emit_call builder called origin;
-      Option.iter
-        (fun destination ->
-          hold builder destination (make_value (list_result_views builder called)))
-        destination
-  | Template { destination; call = called; _ } ->
-      read_uses builder uses;
-      emit_call builder called origin;
-      hold builder destination (make_value (list_result_views builder called))
-  | Lend { part; call = called } -> (
-      let is_loop_element = List.mem part builder.loop_elements in
-      let selects_element (receiver : Mir.operand) =
-        match called.callee.target with
-        | Trait_method { trait; name = "at"; self_type; _ } ->
-            (Well_known.is Index trait.trait || Well_known.is Index_mut trait.trait)
-            && Place.is_storage_type self_type
-        | Trait_method { name = "element"; _ }
-        | Function { path = Method { name = "element"; _ }; _ } -> (
-            is_loop_element
-            &&
-            match find_operand_type receiver with
-            | Some type_ -> Place.is_storage_type type_
-            | None -> false)
-        | _ -> false
-      in
-      let element =
-        match called.arguments with
-        | Passed { mode; value = receiver; _ } :: _ when selects_element receiver -> (
-            let access = access_argument builder mode receiver in
-            match (find_reached_place access.reach, find_operand_origin receiver) with
-            | Some (collection : Place.t), Some receiver_origin ->
-                let place =
-                  {
-                    collection with
-                    steps = collection.steps @ [ Element { node = called.node; origin } ];
-                  }
-                in
-                Some (Element { place; written_slices = access.written_slices }, receiver_origin)
-            | _ -> None)
-        | _ -> None
-      in
-      read_uses builder uses;
-      let part_place = { Mir.root = Local part; projections = [] } in
-      match element with
-      | Some (element, receiver_origin) ->
-          builder.element_receivers <- receiver_origin :: builder.element_receivers;
-          hold builder part_place element
-      | None ->
-          emit_call builder called origin;
-          hold builder part_place
-            (make_lent_part builder called ~part_type:(lookup_local_info builder part).type_
-               ~is_loop_part:is_loop_element))
-  | Slice { destination; base; base_type; call = called } ->
-      read_uses builder uses;
-      emit_call builder called origin;
-      let base = access_place builder base ~borrowed_as:(Some base_type) in
-      let select_range (place : Place.t) =
-        { place with steps = place.steps @ [ Range { node = called.node; origin } ] }
-      in
-      hold builder destination
-        (match base.reach with
-        | Place_of elements | Elements_of elements ->
-            Range
-              {
-                elements = map_viewed_place select_range elements;
-                written_slices = base.written_slices;
-              }
-        | Views views -> Value { views; lent = []; written_slices = base.written_slices })
-  | Assert _ | Echo _ -> read_uses builder uses
-  | Provide { provided; _ } ->
+  | Provide_start { provided; _ } ->
       read_uses builder uses;
       List.iter
         (fun (provided : Mir.provided) ->
           if provided.mode = Mut then borrow_mut builder provided.value)
         provided
-  | Loan_start { loan; borrowed; mode; duration } ->
-      let loans =
-        match (duration, find_operand_origin borrowed) with
-        | Rest_of_statement, Some receiver when List.mem receiver builder.element_receivers -> []
-        | _ -> list_loans builder borrowed mode duration
-      in
-      emit builder (Start_loan { loan; loans }) origin;
-      if duration = Loop_body then
-        Hashtbl.replace builder.loop_body_starts builder.position.block (builder.position.index + 1)
-  | Loan_end loans -> emit builder (End_loans loans) origin
-  | Provide_end | Ghost_assert _ | Matched _ | Proof _ -> ()
+  | Provide_end -> ()
+  | Basic basic -> (
+      match basic with
+      | Live locals ->
+          builder.unassigned_locals <- locals @ builder.unassigned_locals;
+          let core = List.filter_map (find_core_local builder) locals in
+          if core <> [] then emit builder (Bind core) origin
+      | Dead locals ->
+          List.iter
+            (fun (bound : lent_part_binding) ->
+              if List.mem bound.part locals && not (List.mem bound.binding locals) then
+                emit builder
+                  (Bind_lent_part
+                     {
+                       scrutinee = bound.scrutinee;
+                       lent_part_type = (lookup_local_info builder bound.part).type_;
+                     })
+                  bound.origin)
+            builder.lent_part_bindings;
+          let dropped =
+            List.filter_map
+              (fun local ->
+                let info = lookup_local_info builder local in
+                match info.kind with
+                | Temporary -> Some { owner = Place.Temporary local; origin = info.origin }
+                | Source { local = core; mode = Own; _ } ->
+                    Some { owner = Place.Local core; origin = info.origin }
+                | Source _ | Lent _ -> None)
+              locals
+          in
+          if dropped <> [] then emit builder (Drop dropped) origin;
+          builder.lent_part_bindings <-
+            List.filter
+              (fun (bound : lent_part_binding) ->
+                not (List.mem bound.binding locals || List.mem bound.part locals))
+              builder.lent_part_bindings
+      | Assign { target = { root = Local local; projections = [] } as target; value; _ }
+        when List.mem local builder.unassigned_locals
+             ||
+             match (lookup_local_info builder local).kind with
+             | Temporary -> true
+             | Lent _ -> not (Hashtbl.mem builder.held local)
+             | Source _ -> false -> (
+          builder.unassigned_locals <-
+            List.filter (fun unassigned -> unassigned <> local) builder.unassigned_locals;
+          match (lookup_local_info builder local).kind with
+          | Temporary -> (
+              match value with
+              | Operand (Use { place; _ })
+                when List.mem local builder.returned_temporaries
+                     && Option.is_some (track_place builder place) ->
+                  read_uses builder ~is_returned:(fun _ -> true) uses;
+                  hold builder target (make_value (list_copy_views builder place))
+              | Operand (Borrow _) -> raise_bug "a temporary assigned a borrow"
+              | _ ->
+                  read_uses builder uses;
+                  hold builder target (compute_rvalue_held builder value))
+          | Lent _ -> (
+              read_uses builder uses;
+              match value with
+              | Operand (Borrow { place; _ }) -> hold builder target (Alias place)
+              | Convert { conversion = View_to_owned; _ } ->
+                  hold builder target (compute_rvalue_held builder value)
+              | _ -> raise_bug "a lent local that holds neither a borrow nor the owner of a view")
+          | Source { local = core; _ } ->
+              read_uses builder uses;
+              emit_bound_value builder local core value origin
+                ~is_var:(List.mem core builder.context.mutable_locals))
+      | Assign { target; value; _ } -> (
+          read_uses builder uses;
+          let target = resolve_alias builder target in
+          let result = compute_rvalue_held builder value in
+          match track_place builder target with
+          | Some place -> (
+              emit_write_through builder (list_written_slices builder target) origin;
+              emit builder (Assign place) origin;
+              match value with
+              | Operand operand when is_view_operand builder operand ->
+                  emit builder
+                    (Store
+                       { place; views = list_held_views result; replaces_root = place.steps = [] })
+                    origin
+              | _ -> ())
+          | None -> hold builder { target with projections = [] } (untrack_elements result))
+      | Call { destination; call = called } ->
+          read_uses builder uses;
+          emit_call builder called origin;
+          Option.iter
+            (fun destination ->
+              hold builder destination (make_value (list_result_views builder called)))
+            destination
+      | Template { destination; call = called; _ } ->
+          read_uses builder uses;
+          emit_call builder called origin;
+          hold builder destination (make_value (list_result_views builder called))
+      | Lend { part; call = called } -> (
+          let is_loop_element = List.mem part builder.loop_elements in
+          let selects_element (receiver : Mir.operand) =
+            match called.callee.target with
+            | Trait_method { trait; name = "at"; self_type; _ } ->
+                (Well_known.is Index trait.trait || Well_known.is Index_mut trait.trait)
+                && Place.is_storage_type self_type
+            | Trait_method { name = "element"; _ }
+            | Function { path = Method { name = "element"; _ }; _ } -> (
+                is_loop_element
+                &&
+                match find_operand_type receiver with
+                | Some type_ -> Place.is_storage_type type_
+                | None -> false)
+            | _ -> false
+          in
+          let element =
+            match called.arguments with
+            | Passed { mode; value = receiver; _ } :: _ when selects_element receiver -> (
+                let access = access_argument builder mode receiver in
+                match (find_reached_place access.reach, find_operand_origin receiver) with
+                | Some (collection : Place.t), Some receiver_origin ->
+                    let place =
+                      {
+                        collection with
+                        steps = collection.steps @ [ Element { node = called.node; origin } ];
+                      }
+                    in
+                    Some (Element { place; written_slices = access.written_slices }, receiver_origin)
+                | _ -> None)
+            | _ -> None
+          in
+          read_uses builder uses;
+          let part_place = { Mir.root = Local part; projections = [] } in
+          match element with
+          | Some (element, receiver_origin) ->
+              builder.element_receivers <- receiver_origin :: builder.element_receivers;
+              hold builder part_place element
+          | None ->
+              emit_call builder called origin;
+              hold builder part_place
+                (make_lent_part builder called ~part_type:(lookup_local_info builder part).type_
+                   ~is_loop_part:is_loop_element))
+      | Slice { destination; base; base_type; call = called } ->
+          read_uses builder uses;
+          emit_call builder called origin;
+          let base = access_place builder base ~borrowed_as:(Some base_type) in
+          let select_range (place : Place.t) =
+            { place with steps = place.steps @ [ Range { node = called.node; origin } ] }
+          in
+          hold builder destination
+            (match base.reach with
+            | Place_of elements | Elements_of elements ->
+                Range
+                  {
+                    elements = map_viewed_place select_range elements;
+                    written_slices = base.written_slices;
+                  }
+            | Views views -> Value { views; lent = []; written_slices = base.written_slices })
+      | Assert _ | Echo _ -> read_uses builder uses
+      | Loan_start { loan; borrowed; mode; duration } ->
+          let loans =
+            match (duration, find_operand_origin borrowed) with
+            | Rest_of_statement, Some receiver when List.mem receiver builder.element_receivers ->
+                []
+            | _ -> list_loans builder borrowed mode duration
+          in
+          emit builder (Start_loan { loan; loans }) origin;
+          if duration = Loop_body then
+            Hashtbl.replace builder.loop_body_starts builder.position.block
+              (builder.position.index + 1)
+      | Loan_end loans -> emit builder (End_loans loans) origin
+      | Ghost_assert _ | Matched _ | Proof _ -> ())
 
 let pull builder (iteration : Mir.iteration) origin =
   match iteration with
@@ -947,8 +954,8 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
                   List.concat_map
                     (fun (statement : Mir.Graph.statement) ->
                       match statement.kind with
-                      | Live locals -> List.filter_map (find_core_local builder) locals
-                      | _ -> [])
+                      | Basic (Live locals) -> List.filter_map (find_core_local builder) locals
+                      | Basic _ | Provide_start _ | Provide_end -> [])
                     body.blocks.(inside).statements;
                 temporaries =
                   List.concat_map

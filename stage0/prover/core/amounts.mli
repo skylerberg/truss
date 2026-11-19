@@ -29,6 +29,15 @@ val compute_callee_amount :
   Costs.counter ->
   Logic.term
 
+val compute_capability_amount :
+  State.context ->
+  State.frame ->
+  uses:Types.capability_set ->
+  Path.t ->
+  Costs.counter ->
+  direct:(unit -> Logic.term) ->
+  Logic.term
+
 val compute_step_amount :
   State.context -> State.frame -> Invocation.t -> State.passed list -> Costs.counter -> Logic.term
 
