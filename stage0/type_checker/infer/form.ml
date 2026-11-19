@@ -574,7 +574,7 @@ let build_pattern_fields state (fields : Types.field list)
     fields
 
 let convert_to_integer state (node : Core.expression) : Core.expression =
-  if node.type_ = Types.Integer || not (State.is_integer_type state node.type_) then node
+  if not (State.is_within state node.type_ Types.integer_types) then node
   else
     State.make_synthetic_expression state ~origin:node.origin Types.Integer
       (Convert { conversion = To_integer; value = node })

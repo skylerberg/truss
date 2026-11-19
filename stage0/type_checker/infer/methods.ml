@@ -449,7 +449,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
             callee_result = result;
           };
       Form.register_call state value;
-      Name_lookup.check_implements state value self_type reference;
+      Name_lookup.check_implements state (State.read_span state value.id) self_type reference;
       State.normalize state result
 
 and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_arguments
@@ -752,5 +752,6 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                     callee_result = result;
                   };
               Form.register_call state value;
-              Name_lookup.check_implements state value receiver_type trait;
+              Name_lookup.check_implements state (State.read_span state value.id) receiver_type
+                trait;
               State.normalize state result))

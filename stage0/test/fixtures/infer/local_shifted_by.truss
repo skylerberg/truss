@@ -1,0 +1,4 @@
+fn f(value: UInt8) -> UInt8 {
+  let amount = 3
+  value << amount
+}

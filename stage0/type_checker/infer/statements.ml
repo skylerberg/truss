@@ -21,9 +21,10 @@ let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
   State.check_when_final state (fun () ->
       let element = State.finalize_type state element in
       if
-        State.is_integer_type state element
-        || Types.is_builtin Character element
-        || (admits_integer && Types.equal element Types.Integer)
+        State.is_within state element
+          (Types.integer_types
+          @ Language.Builtin_type.Character
+            :: (if admits_integer then [ Language.Builtin_type.Integer ] else []))
       then state.tables.loops.(loop) <- Some (Integer_range { element; inclusive })
       else if not (Types.is_error element) then
         State.report state Not_indexable (State.read_span state range.id)
@@ -384,7 +385,7 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
                       Printf.sprintf
                         "A `for` loop cannot go over %s: it is not a `Cursor`, and it has no \
                          `count` and `element` to visit it by position."
-                        (Types.describe type_)
+                        (State.describe state type_)
                   | Mut ->
                       Printf.sprintf
                         "A `for` loop cannot mutate the elements of `%s`: it has no `element` that \

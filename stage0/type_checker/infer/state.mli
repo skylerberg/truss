@@ -35,11 +35,12 @@ type frame = {
   span : Source.Definition_span.t;
 }
 
-type undecided_literal = {
-  index : int;
-  kind : Types.literal_kind;
-  local : Syntax.id;
-  owner : frame;
+type undecided_literal = { index : int; local : Syntax.id; owner : frame }
+
+type narrowing = {
+  narrowed : Types.ty;
+  allowed : Language.Builtin_type.t list;
+  report_excluded : Types.ty -> Diagnostic.reported;
 }
 
 type literal_decision = {
@@ -90,7 +91,17 @@ type state = {
   mutable undecided : undecided_literal list;
   decisions : (int, literal_decision) Hashtbl.t;
   annotatable : (Syntax.id, unit) Hashtbl.t;
+  mutable narrowings : narrowing list;
 }
+
+val add_diagnostic :
+  state ->
+  ?notes:(Source.Definition_span.t * string) list ->
+  ?fixes:Source.Definition_span.t Diagnostic.fix list ->
+  Diagnostic.Code.types ->
+  Source.Definition_span.t ->
+  string ->
+  Diagnostic.reported
 
 val report :
   state ->
@@ -147,10 +158,24 @@ val check_when_final : state -> (unit -> unit) -> unit
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty
 val make_fresh_type : state -> Types.ty
-val is_integer_type : state -> Types.ty -> bool
-val is_signed_type : state -> Types.ty -> bool
 val lookup_bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Types.ty -> Types.ty
+val is_within : state -> Types.ty -> Language.Builtin_type.t list -> bool
+val read_integer_range : state -> Types.ty -> Z.t * Z.t
+
+val make_literal_type :
+  state ->
+  Language.Builtin_type.t list ->
+  report_excluded:(Types.ty -> Diagnostic.reported) ->
+  Types.ty
+
+val narrow :
+  state ->
+  Types.ty ->
+  Language.Builtin_type.t list ->
+  report_excluded:(Types.ty -> Diagnostic.reported) ->
+  Types.ty
+
 val finalize_type : state -> Types.ty -> Types.ty
 val finalize_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_argument : state -> Types.argument -> Types.argument

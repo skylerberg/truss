@@ -215,6 +215,100 @@ let () =
         ~fixed:Fixtures.Infer.local_wrapping_added_then_bound_to_a_uint8_fixed)
 
 let () =
+  Harness.test "a literal local used as a shift amount defaults to UInt64" (fun () ->
+      let text = Fixtures.Infer.local_shifted_by in
+      expect_fine text;
+      expect_type text "amount" ~occurrence:2 "UInt64");
+  Harness.test "a literal local used as a shift amount is decided by a later statement" (fun () ->
+      let text = Fixtures.Infer.local_shifted_by_then_bound_to_a_uint8 in
+      expect_fine text;
+      expect_type text "amount" ~occurrence:2 "UInt8");
+  Harness.test "a literal too large for Int64 defaults to UInt64" (fun () ->
+      let text = Fixtures.Infer.local_of_a_literal_beyond_int64 in
+      expect_fine text;
+      expect_type text "large" ~occurrence:2 "UInt64");
+  Harness.test "a literal in a specification that nothing decides is an Integer" (fun () ->
+      let text = Fixtures.Infer.requires_of_two_literals in
+      expect_fine text;
+      expect_type text "2" "Integer")
+
+let () =
+  Harness.test
+    "a negated local of literals decided unsigned is reported as a negated unsigned value"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.negation_of_a_literal_local_decided_unsigned
+        "types.negated_unsigned";
+      expect_one_diagnostic Fixtures.Infer.uint8_let_of_a_negated_literal_local
+        "types.negated_unsigned");
+  Harness.test "a negated local of literals used as a shift amount is an error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.local_shifted_by_then_negated "types.negated_unsigned");
+  Harness.test "a local of literals must fit its type before it is negated" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.int8_let_of_a_negated_local_of_128
+        "types.literal_out_of_range")
+
+let () =
+  Harness.test
+    "a local of literals of a type an integer trait bounds must fit every type that implements it"
+    (fun () ->
+      expect_fine Fixtures.Infer.unsigned_integer_compared_with_a_local_of_200;
+      expect_one_diagnostic Fixtures.Infer.unsigned_integer_compared_with_a_local_of_256
+        "types.literal_out_of_range";
+      expect_one_diagnostic Fixtures.Infer.fixed_width_integer_compared_with_a_local_of_200
+        "types.literal_out_of_range");
+  Harness.test "a negated local of literals compared with a SignedInteger parameter takes its type"
+    (fun () -> expect_fine Fixtures.Infer.signed_integer_compared_with_a_negated_local);
+  Harness.test "a literal operand of an associated type of a parameter takes that type" (fun () ->
+      expect_fine Fixtures.Infer.literal_plus_an_associated_type_of_a_parameter);
+  Harness.test "a shift amount of a parameter that may be signed is an error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.shift_by_a_fixed_width_integer_parameter "types.mismatch"
+        ~says:"A shift amount is an unsigned integer, not `Value`.";
+      expect_one_diagnostic Fixtures.Infer.shift_by_a_signed_integer_parameter "types.mismatch"
+        ~says:"A shift amount is an unsigned integer, not `Value`.");
+  Harness.test "a negated parameter that may be unsigned is an error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.negation_of_a_fixed_width_integer_parameter
+        "types.negated_unsigned" ~says:"may be unsigned");
+  Harness.test
+    "a negated local of literals compared with a parameter that may be unsigned is an error"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.fixed_width_integer_compared_with_a_negated_local
+        "types.negated_unsigned");
+  Harness.test "a negative literal compared with a parameter that may be unsigned is an error"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.fixed_width_integer_compared_with_minus_five
+        "types.negated_unsigned");
+  Harness.test "an integer pattern excludes the types its value does not fit from the scrutinee"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.local_matched_against_256_then_compared_with_a_uint8
+        "types.literal_out_of_range");
+  Harness.test
+    "a loop over a range of literals in a local takes their type from an operand in the body"
+    (fun () ->
+      let text = Fixtures.Infer.loop_over_a_literal_range_local_summed_into_a_uint8 in
+      expect_fine text;
+      expect_type text "range" ~occurrence:2 "Range[UInt8]")
+
+let () =
+  Harness.test "a literal operand that does not fit the other operand's type is an error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.uint8_plus_300 "types.literal_out_of_range");
+  Harness.test
+    "a local of a float literal too large for the Float32 it is compared with is an error"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.float32_compared_with_a_local_too_large_for_it
+        "types.literal_out_of_range")
+
+let () =
+  Harness.test "deriving Deserialize rejects an invariant whose literal does not fit the field"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.deserialize_of_a_level_with_an_invariant_beyond_its_type
+        "types.cannot_derive");
+  Harness.test
+    "a literal in a specification's arithmetic that does not fit the other operand is an Integer"
+    (fun () ->
+      let text = Fixtures.Infer.requires_adds_a_large_literal_to_a_uint8 in
+      expect_fine text;
+      expect_type text "300" "Integer")
+
+let () =
   Harness.test "comparing integer types that differ is an error with a fix that converts" (fun () ->
       expect_one_diagnostic Fixtures.Infer.comparison_of_uint64_and_uint32
         "types.mismatched_integers" ~fixed:Fixtures.Infer.comparison_of_uint64_and_uint32_fixed);
@@ -956,9 +1050,7 @@ let () =
                   List.iter
                     (Array.iter (function
                       | Some type_
-                        when Types.exists
-                               (function Variable _ | Literal _ -> true | _ -> false)
-                               type_ ->
+                        when Types.exists (function Variable _ -> true | _ -> false) type_ ->
                           Harness.fail "%s: an unsolved type" (Path.show declaration.key.path)
                       | _ -> ()))
                     [ tables.types; tables.local_types ]
@@ -1727,12 +1819,12 @@ let () =
 
 let () =
   Harness.test "a negated local of literals waits for the same decision" (fun () ->
+      expect_fine Fixtures.Infer.negation_of_a_literal_local;
       expect_type Fixtures.Infer.negation_of_a_literal_local "-count" "Int64";
+      expect_fine Fixtures.Infer.negation_of_a_float_literal_local;
       expect_type Fixtures.Infer.negation_of_a_float_literal_local "-ratio" "Float64");
-  Harness.test "a negated local of literals decided unsigned is an error" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.negation_of_a_literal_local_decided_unsigned
-        "types.no_impl");
   Harness.test "a loop over a range of literals in a local lets its body decide them" (fun () ->
+      expect_fine Fixtures.Infer.loop_over_a_literal_range_local;
       expect_type Fixtures.Infer.loop_over_a_literal_range_local "range" ~occurrence:2
         "Range[UInt8]");
   Harness.test "a loop over a reversed range of literals" (fun () ->

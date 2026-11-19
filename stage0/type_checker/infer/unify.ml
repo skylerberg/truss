@@ -4,28 +4,29 @@ type t = {
   value_solutions : (int, Types.value) Hashtbl.t;
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
-  mutable find_integer_range : Types.ty -> (Z.t * Z.t) option;
-  code_literals : (int, unit) Hashtbl.t;
+  domains : (int, Language.Builtin_type.t list) Hashtbl.t;
+  list_rigid_members : Types.ty -> Language.Builtin_type.t list;
 }
 
-let create () =
+let create ~list_rigid_members =
   {
     next = 0;
     type_solutions = Hashtbl.create 16;
     value_solutions = Hashtbl.create 4;
     capability_variable_count = 0;
     deferred_capability_equalities = [];
-    find_integer_range = (fun _ -> None);
-    code_literals = Hashtbl.create 4;
+    domains = Hashtbl.create 8;
+    list_rigid_members;
   }
 
 let make_fresh_type unifier =
   unifier.next <- unifier.next + 1;
   Types.Variable unifier.next
 
-let make_fresh_literal unifier kind =
-  unifier.next <- unifier.next + 1;
-  Types.Literal (kind, unifier.next)
+let make_fresh_number unifier domain =
+  let number = make_fresh_type unifier in
+  Hashtbl.replace unifier.domains unifier.next domain;
+  number
 
 let make_fresh_value unifier =
   unifier.next <- unifier.next + 1;
@@ -46,7 +47,7 @@ let unify_capabilities unifier (left : Types.capability_set) right =
 
 let rec resolve unifier (type_ : Types.ty) =
   match type_ with
-  | Variable index | Literal (_, index) -> (
+  | Variable index -> (
       match Hashtbl.find_opt unifier.type_solutions index with
       | Some bound -> resolve unifier bound
       | None -> type_)
@@ -104,15 +105,20 @@ and zonk_function unifier (function_type : Types.function_type) =
   }
 
 let occurs unifier index =
-  Types.exists ~resolve:(resolve unifier) (function
-    | Variable other | Literal (_, other) -> other = index
-    | _ -> false)
+  Types.exists ~resolve:(resolve unifier) (function Variable other -> other = index | _ -> false)
 
-let literal_fits unifier (kind : Types.literal_kind) (type_ : Types.ty) =
-  match (kind, type_) with
-  | Integer_literal, (Parameter _ | Projection _) -> unifier.find_integer_range type_ <> None
-  | Integer_literal, _ -> Types.is_integer_type type_ || type_ = Types.Integer
-  | Float_literal, _ -> Types.is_float_type type_
+let find_domain unifier index = Hashtbl.find_opt unifier.domains index
+
+let list_possible_members unifier type_ =
+  match resolve unifier type_ with
+  | Types.Variable index -> Option.value ~default:[] (find_domain unifier index)
+  | (Parameter _ | Projection _) as rigid -> unifier.list_rigid_members rigid
+  | type_ -> Types.list_scalar_members type_
+
+let is_within unifier type_ set =
+  match list_possible_members unifier type_ with
+  | [] -> false
+  | members -> List.for_all (fun member -> List.mem member set) members
 
 let bind unifier index type_ =
   if occurs unifier index type_ then false
@@ -121,17 +127,27 @@ let bind unifier index type_ =
     true
   end
 
-type unknown =
-  | Unknown_type of int
-  | Unknown_literal of Types.literal_kind * int
-  | Unknown_value of int
+let join unifier left right =
+  let older = min left right and younger = max left right in
+  let domain =
+    match (find_domain unifier older, find_domain unifier younger) with
+    | Some older_domain, Some younger_domain ->
+        Some (List.filter (fun member -> List.mem member younger_domain) older_domain)
+    | domain, None | None, domain -> domain
+  in
+  domain <> Some []
+  && begin
+    Option.iter (Hashtbl.replace unifier.domains older) domain;
+    bind unifier younger (Types.Variable older)
+  end
+
+type unknown = Unknown_type of int | Unknown_value of int
 
 let list_unknowns unifier (type_ : Types.ty) =
   let unknowns = ref [] in
   let rec collect (type_ : Types.ty) =
     match resolve unifier type_ with
     | Variable index -> unknowns := Unknown_type index :: !unknowns
-    | Literal (kind, index) -> unknowns := Unknown_literal (kind, index) :: !unknowns
     | Named { arguments; _ } -> List.iter collect_argument arguments
     | Projection { base; trait = reference; _ } ->
         collect base;
@@ -164,32 +180,22 @@ let list_argument_unknowns unifier = function
 let rec unify unifier (left : Types.ty) (right : Types.ty) =
   let left = resolve unifier left and right = resolve unifier right in
   match (left, right) with
-  | (Types.Variable index | Types.Literal (_, index)), ((Types.Error _ | Types.Hole) as unknown)
-  | ((Types.Error _ | Types.Hole) as unknown), (Types.Variable index | Types.Literal (_, index)) ->
+  | Types.Variable index, ((Types.Error _ | Types.Hole) as unknown)
+  | ((Types.Error _ | Types.Hole) as unknown), Types.Variable index ->
       Hashtbl.replace unifier.type_solutions index unknown;
       true
   | ((Types.Error _ | Types.Hole) as unknown), other
   | other, ((Types.Error _ | Types.Hole) as unknown) ->
       List.iter
         (function
-          | Unknown_type index | Unknown_literal (_, index) ->
-              Hashtbl.replace unifier.type_solutions index unknown
+          | Unknown_type index -> Hashtbl.replace unifier.type_solutions index unknown
           | Unknown_value _ -> ())
         (list_unknowns unifier other);
       true
-  | Variable left_index, Variable right_index when left_index = right_index -> true
-  | Variable index, other | other, Variable index -> bind unifier index other
-  | Literal (left_kind, left_index), Literal (right_kind, right_index) ->
-      let join () =
-        let root = min left_index right_index and joined = max left_index right_index in
-        if Hashtbl.mem unifier.code_literals joined then
-          Hashtbl.replace unifier.code_literals root ();
-        bind unifier joined (Types.Literal (left_kind, root))
-      in
-      left_kind = right_kind && (left_index = right_index || join ())
-  | Literal (kind, index), other | other, Literal (kind, index) ->
-      literal_fits unifier kind other
-      && (not (other = Integer && Hashtbl.mem unifier.code_literals index))
+  | Variable left_index, Variable right_index ->
+      left_index = right_index || join unifier left_index right_index
+  | Variable index, other | other, Variable index ->
+      Option.fold ~none:true ~some:(is_within unifier other) (find_domain unifier index)
       && bind unifier index other
   | Named left, Named right ->
       Path.equal left.path right.path && unify_arguments unifier left.arguments right.arguments

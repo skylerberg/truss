@@ -280,16 +280,6 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
   else
     match type_ with
     | Types.Error _ | Types.Hole | Types.Variable _ -> Some (Accepted type_)
-    | Types.Literal (kind, _) ->
-        if
-          List.for_all
-            (fun candidate ->
-              Option.is_some
-                (find_evidence lookups ~list_bounds ~depth:(depth + 1) ~checks_conditions candidate
-                   wanted))
-            (Types.list_literal_types kind)
-        then Some (Accepted type_)
-        else None
     | Types.Never | Types.Integer | Types.Function _ -> None
     | Types.Parameter _ | Types.Projection _ ->
         if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then Some From_bound

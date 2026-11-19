@@ -6,51 +6,26 @@ let select_arithmetic_method : Syntax.arithmetic -> Well_known.method_ * Well_kn
   | Divide -> (Divide_divide, Divide_output)
   | Remainder -> (Remainder_remainder, Remainder_output)
 
+let number_types = Types.integer_types @ Types.float_types @ [ Language.Builtin_type.Integer ]
+
 let infer_integer_result state span type_ ~(describe : string -> string) =
-  let is_integer resolved = State.is_integer_type state resolved || Types.is_error resolved in
-  match State.normalize state type_ with
-  | Types.Literal _ | Types.Variable _ ->
-      State.defer state (fun () ->
-          match State.normalize state type_ with
-          | Types.Literal _ | Types.Variable _ -> false
-          | resolved ->
-              if not (is_integer resolved) then
-                State.report state No_impl span (describe (Types.show resolved));
-              true);
-      type_
-  | resolved when is_integer resolved -> type_
-  | resolved -> State.make_error_type state No_impl span (describe (Types.show resolved))
+  State.narrow state type_ Types.integer_types ~report_excluded:(fun excluded ->
+      State.add_diagnostic state No_impl span (describe (State.describe state excluded)))
 
 let infer_bitwise_result state span type_ =
   infer_integer_result state span type_
-    ~describe:(Printf.sprintf "Bitwise operators work on built-in integers, not `%s`.")
+    ~describe:(Printf.sprintf "Bitwise operators work on built-in integers, not %s.")
 
 let infer_shift_result state ~left:(left_span, left_type) ~right:(right_span, right_type) =
-  (match State.resolve state right_type with
-  | Types.Literal (Integer_literal, _) ->
-      ignore (State.unify state right_type (Types.make_builtin UInt64))
-  | _ -> ());
-  State.defer state (fun () ->
-      match State.normalize state right_type with
-      | Types.Literal _ | Types.Variable _ -> false
-      | right_resolved ->
-          if
-            not
-              (State.is_integer_type state right_resolved
-               && not (State.is_signed_type state right_resolved)
-              || Types.is_error right_resolved)
-          then
-            State.report state Mismatch right_span
-              (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
-                 (Types.show right_resolved));
-          true);
+  ignore
+    (State.narrow state right_type Types.unsigned_integer_types ~report_excluded:(fun excluded ->
+         State.add_diagnostic state Mismatch right_span
+           (Printf.sprintf "A shift amount is an unsigned integer, not %s."
+              (State.describe state excluded))));
   infer_integer_result state left_span left_type
-    ~describe:(Printf.sprintf "Shifts work on built-in integers, not `%s`.")
+    ~describe:(Printf.sprintf "Shifts work on built-in integers, not %s.")
 
-let is_integer_operand state type_ =
-  let type_ = State.normalize state type_ in
-  State.is_integer_type state type_ || type_ = Types.Integer
-  || match State.resolve state type_ with Types.Literal (Integer_literal, _) -> true | _ -> false
+let is_integer_operand state type_ = State.is_within state type_ (Types.integer_types @ [ Integer ])
 
 let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
   State.reject_in_formula state env (State.read_span state value.id) "`?`";
@@ -96,16 +71,8 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
       check_built_in_operator state value [ inner ] type_;
       State.register_expression state value (fun () ->
           Form.build_operator state value Complement [ inner ]);
-      if
-        State.is_integer_type state (State.normalize state type_)
-        ||
-        match State.resolve state type_ with
-        | Types.Literal (Integer_literal, _) -> true
-        | _ -> false
-      then type_
-      else
-        State.make_error_type state No_impl (State.read_span state value.id)
-          (Printf.sprintf "`~` works on built-in integers, not %s." (State.describe state type_))
+      infer_integer_result state (State.read_span state value.id) type_
+        ~describe:(Printf.sprintf "`~` works on built-in integers, not %s.")
   | Negate -> (
       match inner.kind with
       | Integer number ->
@@ -113,52 +80,40 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
           state.tables.literals.(value.id) <- Some (Integer_value (Z.neg number));
           State.register_expression state value (fun () ->
               Form.build_numeric_literal state value.id);
-          let type_ = Name_lookup.infer_literal_type state ~expected Integer_literal in
+          let type_ =
+            Pattern_typing.check_integer_literal state env ?expected value (Z.neg number)
+          in
           State.record state inner type_;
-          State.defer state (fun () ->
-              match State.resolve state type_ with
-              | Types.Literal _ | Types.Variable _ -> false
-              | resolved ->
-                  if
-                    State.is_integer_type state resolved
-                    && (not (State.is_signed_type state resolved))
-                    && not (Z.equal number Z.zero)
-                  then
-                    State.report state Negated_unsigned (State.read_span state value.id)
-                      (Printf.sprintf "`%s` is unsigned, so it cannot be negated."
-                         (Types.show resolved))
-                  else Pattern_typing.check_literal_fits state value (Z.neg number) type_;
-                  true);
           type_
-      | _ ->
+      | _ -> (
           let type_ = Hooks.check_expression state env ?expected inner in
           let resolved = State.normalize state type_ in
-          if resolved = Types.Hole then Types.Hole
-          else if State.is_integer_type state resolved && not (State.is_signed_type state resolved)
-          then
-            State.make_error_type state Negated_unsigned (State.read_span state value.id)
-              (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (Types.show resolved))
-          else if
-            env.specification && (State.is_integer_type state resolved || resolved = Types.Integer)
-          then begin
-            State.register_expression state value (fun () ->
-                Form.build_operator state value Negate [ inner ]);
-            Types.Integer
-          end
-          else begin
-            Form.register_call state value;
-            check_operator_call
-              ~operands:
-                [
-                  {
-                    Tables.expression = inner.id;
-                    core_argument_index = 0;
-                    mode = Language.Mode.Read;
-                  };
-                ]
-              state value ~method_:Well_known.Negate_negate ~output:Well_known.Negate_output
-              ~left:type_ ~right:None
-          end)
+          match
+            if State.is_within state resolved number_types then
+              State.narrow state resolved
+                (Types.signed_integer_types @ Types.float_types @ [ Integer ])
+                ~report_excluded:(Pattern_typing.report_negated_unsigned state value)
+            else resolved
+          with
+          | Types.Hole -> Types.Hole
+          | Types.Error _ as error when not (Types.is_error resolved) -> error
+          | _ when env.specification && is_integer_operand state resolved ->
+              State.register_expression state value (fun () ->
+                  Form.build_operator state value Negate [ inner ]);
+              Types.Integer
+          | _ ->
+              Form.register_call state value;
+              check_operator_call
+                ~operands:
+                  [
+                    {
+                      Tables.expression = inner.id;
+                      core_argument_index = 0;
+                      mode = Language.Mode.Read;
+                    };
+                  ]
+                state value ~method_:Well_known.Negate_negate ~output:Well_known.Negate_output
+                ~left:type_ ~right:None))
 
 and check_operator_call ~operands state (value : Syntax.expression) ~method_ ~output ~left ~right =
   let { Well_known.owner; name; receiver } = Well_known.locate_method method_ in
@@ -166,12 +121,11 @@ and check_operator_call ~operands state (value : Syntax.expression) ~method_ ~ou
   let reference = State.make_trait_reference ~arguments (Well_known.make_path owner) in
   let result = State.make_fresh_type state in
   let is_one_built_in_number =
-    match (State.resolve state left, Option.map (State.resolve state) right) with
-    | Types.Literal (left_kind, _), Some (Types.Literal (right_kind, _)) -> left_kind = right_kind
-    | Types.Literal _, None -> true
-    | resolved, operand ->
-        (State.is_integer_type state resolved || Types.is_float_type resolved)
-        && Option.fold ~none:true ~some:(Types.equal resolved) operand
+    let resolved = State.resolve state left in
+    State.is_within state resolved number_types
+    && Option.fold ~none:true
+         ~some:(fun right -> Types.equal resolved (State.resolve state right))
+         right
   in
   if is_one_built_in_number then ignore (State.unify state result left);
   state.tables.calls.(value.id) <-
@@ -226,14 +180,8 @@ and check_operator_call ~operands state (value : Syntax.expression) ~method_ ~ou
   result
 
 and check_literal_operands state ~left ~right =
-  match (State.resolve state left, State.resolve state right) with
-  | Types.Literal (kind, _), other when Unify.literal_fits state.unifier kind other ->
-      ignore (State.unify state left right)
-  | other, Types.Literal (kind, _) when Unify.literal_fits state.unifier kind other ->
-      ignore (State.unify state left right)
-  | Types.Literal (left_kind, _), Types.Literal (right_kind, _) when left_kind = right_kind ->
-      ignore (State.unify state left right)
-  | _ -> ()
+  if State.is_within state left number_types && State.is_within state right number_types then
+    ignore (State.unify state left right)
 
 and check_built_in_operator state (value : Syntax.expression) (operands : Syntax.expression list)
     result =
@@ -363,7 +311,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
               omitted_defaults = [];
               callee_result = result;
             };
-        Name_lookup.check_implements state value compared_type
+        Name_lookup.check_implements state (State.read_span state value.id) compared_type
           (State.make_trait_reference ~arguments:[] trait);
         Types.bool
       end
@@ -404,14 +352,8 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           && is_integer_operand state left_type
           && is_integer_operand state right_type
         then begin
-          ignore
-            (match State.resolve state left_type with
-            | Types.Literal _ -> State.unify state left_type Types.Integer
-            | _ -> true);
-          ignore
-            (match State.resolve state right_type with
-            | Types.Literal _ -> State.unify state right_type Types.Integer
-            | _ -> true);
+          ignore (State.unify state left_type Types.Integer);
+          ignore (State.unify state right_type Types.Integer);
           State.register_expression state value (fun () ->
               Form.build_operator state value (Form.convert_to_operation operation) [ left; right ]);
           Types.Integer
@@ -419,8 +361,8 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
         else
           let method_, output = select_arithmetic_method arithmetic in
           if
-            (State.is_integer_type state (State.normalize state left_type)
-            && State.is_integer_type state (State.normalize state right_type))
+            State.is_within state left_type Types.integer_types
+            && State.is_within state right_type Types.integer_types
             && not
                  (Types.equal (State.normalize state left_type) (State.normalize state right_type))
           then Types.Error (add_operand_mismatch state value left right ~left_type ~right_type)
@@ -449,7 +391,10 @@ and add_operand_mismatch state (value : Syntax.expression) (left : Syntax.expres
   let sides = [ (left_type, right_type); (right_type, left_type) ] in
   let left_type = State.normalize state left_type
   and right_type = State.normalize state right_type in
-  if State.is_integer_type state left_type && State.is_integer_type state right_type then begin
+  if
+    State.is_within state left_type Types.integer_types
+    && State.is_within state right_type Types.integer_types
+  then begin
     let is_within narrower wider =
       match (Types.find_integer_range narrower, Types.find_integer_range wider) with
       | Some (low, high), Some (wider_low, wider_high) ->

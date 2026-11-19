@@ -36,27 +36,32 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Integer number ->
       state.tables.literals.(value.id) <- Some (Integer_value number);
       State.register_expression state value (fun () -> Form.build_numeric_literal state value.id);
-      let type_ = Name_lookup.infer_literal_type state ~expected Integer_literal in
-      Pattern_typing.check_literal_fits state value number type_;
-      type_
+      Pattern_typing.check_integer_literal state env ?expected value number
   | Float number ->
       State.register_expression state value (fun () -> Form.build_numeric_literal state value.id);
-      let type_ = Name_lookup.infer_literal_type state ~expected Float_literal in
       let significand = number.significand and exponent = number.exponent in
+      let rounded_float32 = Literals.round_float32 ~significand ~exponent
+      and rounded_float64 = Literals.round_float64 ~significand ~exponent in
+      let report_too_large target =
+        State.add_diagnostic state Literal_out_of_range (State.read_span state value.id)
+          (Printf.sprintf "This literal is too large for %s; it would round to infinity." target)
+      in
+      let type_ =
+        match
+          List.filter_map
+            (fun (builtin, rounded) -> Option.map (fun _ -> builtin) rounded)
+            [ (Language.Builtin_type.Float32, rounded_float32); (Float64, rounded_float64) ]
+        with
+        | [] -> Types.Error (report_too_large "`Float64`")
+        | allowed ->
+            State.make_literal_type state allowed ~report_excluded:(fun excluded ->
+                report_too_large (State.describe state excluded))
+      in
       State.check_when_final state (fun () ->
-          let final_type = State.finalize_type state type_ in
-          let rounded =
-            if Types.is_builtin Float32 final_type then
-              Literals.round_float32 ~significand ~exponent
-            else Literals.round_float64 ~significand ~exponent
-          in
-          match rounded with
-          | Some rounded_value ->
-              state.tables.literals.(value.id) <- Some (Float_value rounded_value)
-          | None ->
-              State.report state Literal_out_of_range (State.read_span state value.id)
-                (Printf.sprintf "This literal is too large for `%s`; it would round to infinity."
-                   (Types.show final_type)));
+          Option.iter
+            (fun rounded -> state.tables.literals.(value.id) <- Some (Float_value rounded))
+            (if Types.is_builtin Float32 (State.finalize_type state type_) then rounded_float32
+             else rounded_float64));
       type_
   | String literal -> (
       match Pattern_typing.find_character_tag state literal with

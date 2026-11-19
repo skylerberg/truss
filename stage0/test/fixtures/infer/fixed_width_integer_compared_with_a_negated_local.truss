@@ -1,0 +1,5 @@
+fn f[Value: FixedWidthInteger](value: Value) -> Bool {
+  let limit = 5
+  let lower = -limit
+  value == lower
+}
