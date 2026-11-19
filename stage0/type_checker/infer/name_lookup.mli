@@ -16,7 +16,6 @@ val coerce :
   expected:Types.ty ->
   unit
 
-val infer_literal_type : State.state -> expected:Types.ty option -> Types.literal_kind -> Types.ty
 val check_name : State.state -> State.env -> Syntax.expression -> Resolve.head -> Types.ty
 val check_field : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
 val check_static_member : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
@@ -47,7 +46,13 @@ val list_trait_static_methods :
   Path.receiver ->
   (Types.trait_reference * Types.trait_method) list
 
-val resolve_evidence : State.state -> Syntax.expression -> Types.ty -> Types.trait_reference -> unit
+val check_implements :
+  ?code:Diagnostic.Code.types ->
+  State.state ->
+  Source.Definition_span.t ->
+  Types.ty ->
+  Types.trait_reference ->
+  unit
 
 val instantiate_trait_method :
   State.state ->
@@ -55,7 +60,6 @@ val instantiate_trait_method :
   self_type:Types.ty ->
   Types.trait_reference ->
   Types.trait_method ->
-  evidence:Tables.evidence ->
   Instantiation.instance * Tables.callee
 
 val resolve_overloads :

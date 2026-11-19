@@ -1,0 +1,4 @@
+fn f[Value: UnsignedInteger](value: Value) -> Bool {
+  let limit = 200
+  value > limit
+}

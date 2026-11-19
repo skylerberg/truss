@@ -1,5 +1,4 @@
 type parameter = { owner : Path.t; name : string }
-type literal_kind = Integer_literal | Float_literal
 
 type ty =
   | Named of { path : Path.t; arguments : argument list }
@@ -10,7 +9,6 @@ type ty =
   | Never
   | Integer
   | Variable of int
-  | Literal of literal_kind * int
   | Hole
   | Error of Diagnostic.reported
 
@@ -141,8 +139,18 @@ let find_bound_integer_implementors bounds =
 
 let float_types : Language.Builtin_type.t list = [ Float32; Float64 ]
 
+let find_sealed_implementors trait =
+  if Well_known.is Floating_point trait then Some float_types else find_integer_implementors trait
+
 let is_integer_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin integer_types | None -> false
+
+let list_scalar_members = function
+  | Integer -> [ Language.Builtin_type.Integer ]
+  | type_ ->
+      List.filter
+        (fun scalar -> is_builtin scalar type_)
+        ((Language.Builtin_type.Character :: integer_types) @ float_types)
 
 let find_integer_bits type_ =
   match find_builtin type_ with
@@ -163,12 +171,13 @@ let find_integer_range type_ =
       else (Z.zero, Z.pred (Z.shift_left Z.one bits)))
     (find_integer_bits type_)
 
-let is_signed type_ =
-  match find_integer_bits type_ with Some (_, signed) -> signed | None -> false
-
-let list_literal_types (kind : literal_kind) =
-  List.map make_builtin
-    (match kind with Integer_literal -> integer_types | Float_literal -> float_types)
+let list_fitting_integer_types number =
+  List.filter
+    (fun builtin ->
+      match find_integer_range (make_builtin builtin) with
+      | Some (low, high) -> Z.leq low number && Z.leq number high
+      | None -> false)
+    integer_types
 
 let is_float_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin float_types | None -> false
@@ -214,7 +223,7 @@ let rec substitute substitution type_ =
         | None -> Projection { base; trait; name })
     | Function function_type -> Function (substitute_function substitution function_type)
     | Any trait -> Any (substitute_trait substitution trait)
-    | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_
+    | Never | Integer | Variable _ | Hole | Error _ -> type_
 
 and substitute_argument substitution = function
   | Type type_ -> Type (substitute substitution type_)
@@ -300,7 +309,7 @@ let rec map ?(map_capabilities = Fun.id) transform type_ =
               uses = map_capabilities function_type.uses;
             }
       | Any reference -> Any (map_trait reference)
-      | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_)
+      | Parameter _ | Never | Integer | Variable _ | Hole | Error _ -> type_)
 
 let rec exists ?(resolve = Fun.id) transform type_ =
   let type_ = resolve type_ in
@@ -318,7 +327,7 @@ let rec exists ?(resolve = Fun.id) transform type_ =
   | Function { inputs; output; _ } ->
       List.exists (fun (_, type_) -> exists type_) inputs || exists output
   | Any reference -> trait_exists reference
-  | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> false
+  | Parameter _ | Never | Integer | Variable _ | Hole | Error _ -> false
 
 let is_specification_only = function
   | Integer -> true
@@ -343,7 +352,7 @@ let is_error : ty -> bool = function Error _ -> true | _ -> false
 let is_open_type : ty -> bool = function Error _ | Variable _ | Hole -> true | _ -> false
 
 let rec contains_unsolved = function
-  | Variable _ | Literal _ | Hole -> true
+  | Variable _ | Hole -> true
   | Named { arguments; _ } -> List.exists is_unsolved_argument arguments
   | Projection { base; trait; _ } -> contains_unsolved base || is_unsolved_trait trait
   | Function { inputs; output; _ } ->
@@ -413,7 +422,7 @@ and show = function
   | Any trait -> "any " ^ show_trait trait
   | Never -> "Never"
   | Integer -> "Integer"
-  | Variable _ | Literal _ | Hole | Error _ -> "_"
+  | Variable _ | Hole | Error _ -> "_"
 
 and show_argument = function
   | Type type_ -> show type_
@@ -473,11 +482,6 @@ and show_function (function_type : function_type) =
       Printf.sprintf "(%s%s%s)" base
         (if uses = [] then "" else " uses " ^ String.concat ", " uses)
         (String.concat "" (List.map (fun cost -> " " ^ cost) costs))
-
-let describe = function
-  | Literal (Integer_literal, _) -> "an integer"
-  | Literal (Float_literal, _) -> "a float"
-  | type_ -> "`" ^ show type_ ^ "`"
 
 type generic_kind = Type_generic of trait_reference list | Value_generic
 type generic = { generic : parameter; kind : generic_kind }

@@ -1,0 +1,4 @@
+fn f() {
+  let large = 9223372036854775808
+  let _ = large
+}

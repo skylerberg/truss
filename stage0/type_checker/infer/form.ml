@@ -8,18 +8,21 @@ let read_call (state : State.state) (id : Syntax.id) : Tables.call =
   | Some call -> call
   | None -> State.raise_bug "the checker recorded no call for a call node"
 
-let convert_evidence : Tables.evidence -> Core.evidence = function
-  | Impl { impl; substitution } -> Impl { impl; substitution }
-  | Bound -> Bound
-  | Dynamic -> Dynamic
-  | Built_in -> State.raise_bug "a built-in method has no core evidence"
+let read_evidence state self_type trait : Core.evidence =
+  match State.find_evidence state self_type trait with
+  | Some (From_impl { impl; substitution }) -> Impl { impl; substitution }
+  | Some From_bound -> Bound
+  | Some From_any -> Dynamic
+  | Some (Built_in | Accepted _) | None ->
+      State.raise_bug "`%s` does not implement `%s` by an impl, a bound, or `any`"
+        (Types.show self_type) (Types.show_trait trait)
 
-let convert_callee (callee : Tables.callee) : Core.operand Core.target =
+let convert_callee state (callee : Tables.callee) : Core.operand Core.target =
   match callee with
   | Function { path; instantiation } -> Function { path; instantiation }
-  | Trait_method { trait; name; receiver; self_type; instantiation; evidence = inferred } ->
-      Trait_method
-        { trait; name; receiver; self_type; instantiation; evidence = convert_evidence inferred }
+  | Trait_method { trait; name; receiver; self_type; instantiation } ->
+      let evidence = read_evidence state self_type trait in
+      Trait_method { trait; name; receiver; self_type; instantiation; evidence }
   | Capability_method { capability; name } -> Capability_method { capability; name }
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
   | Constructor _ | Indirect | Built_in_operator -> State.raise_bug "this callee has no core callee"
@@ -47,7 +50,7 @@ let build_call state ~lends ?function_value (call : Tables.call) : Core.call =
     ~callee:
       (match (call.callee, function_value) with
       | Indirect, Some function_value -> Indirect (Operands.build Read function_value)
-      | direct, _ -> convert_callee direct)
+      | direct, _ -> convert_callee state direct)
     ~arguments:(build_arguments state call) ~lends
 
 let arithmetic_methods : (Well_known.method_ * Intrinsic.scalar) list =
@@ -105,7 +108,7 @@ let build_call_kind ?lends ?function_value state (value : Syntax.expression) : C
     match lends with Some lends -> Some lends | None -> state.tables.lend_modes.(value.id)
   in
   match recorded.callee with
-  | Trait_method { trait; evidence = Built_in; _ } when Well_known.is Copyable trait.trait -> (
+  | Trait_method { trait; _ } when Well_known.is Copyable trait.trait -> (
       match recorded.arguments with
       | [ receiver ] ->
           Copy (Operands.build Read (build_expression_by_id state receiver.expression))
@@ -390,7 +393,8 @@ let build_untagged_string state ~origin (literal : Syntax.string_literal) : Core
               (Evaluate
                  (make Types.unit
                     (Call
-                       (State.make_call state ~callee:(convert_callee recorded.callee)
+                       (State.make_call state
+                          ~callee:(convert_callee state recorded.callee)
                           ~arguments:
                             [
                               Operands.build_argument Read (State.build_expression state part);
@@ -502,7 +506,7 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
         make from_template.callee_result
           (Call
              (State.make_call state
-                ~callee:(convert_callee from_template.callee)
+                ~callee:(convert_callee state from_template.callee)
                 ~arguments:[ Operands.build_argument Read template ]
                 ~lends:None));
     }
@@ -515,30 +519,25 @@ let read_pattern_type (state : State.state) (id : Syntax.id) =
 let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant) :
     Core.pattern_kind =
   let type_ = read_pattern_type state id in
-  if is_built_in_scalar type_ then Literal value
+  if is_built_in_scalar type_ || type_ = Types.Integer then Literal value
   else
     let { Well_known.owner; name; receiver } = Well_known.locate_method Equal_equal in
     let equal = State.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
-    match State.find_evidence state type_ equal with
-    | Some implementation ->
-        Equal_to
-          {
-            value;
-            equal =
-              State.make_callee state
-                (Trait_method
-                   {
-                     trait = equal;
-                     name;
-                     receiver;
-                     self_type = type_;
-                     instantiation = Types.no_instantiation;
-                     evidence = convert_evidence (State.convert_evidence implementation);
-                   });
-          }
-    | None ->
-        State.raise_bug "a pattern compares values of `%s`, which does not implement `Equal`"
-          (Types.show type_)
+    Equal_to
+      {
+        value;
+        equal =
+          State.make_callee state
+            (Trait_method
+               {
+                 trait = equal;
+                 name;
+                 receiver;
+                 self_type = type_;
+                 instantiation = Types.no_instantiation;
+                 evidence = read_evidence state type_ equal;
+               });
+      }
 
 let read_constant_path (state : State.state) (id : Syntax.id) =
   match state.tables.patterns.(id) with
@@ -575,7 +574,7 @@ let build_pattern_fields state (fields : Types.field list)
     fields
 
 let convert_to_integer state (node : Core.expression) : Core.expression =
-  if node.type_ = Types.Integer || not (State.is_integer_type state node.type_) then node
+  if not (State.is_within state node.type_ Types.integer_types) then node
   else
     State.make_synthetic_expression state ~origin:node.origin Types.Integer
       (Convert { conversion = To_integer; value = node })
@@ -732,7 +731,8 @@ let build_compound_assign state (written : Syntax.statement) (target : Syntax.ex
               | None -> Language.Mode.Read
             in
             ( Call
-                (State.make_call state ~callee:(convert_callee recorded.callee)
+                (State.make_call state
+                   ~callee:(convert_callee state recorded.callee)
                    ~arguments:
                      [
                        Operands.build_argument (read_argument_mode 0) current;
@@ -840,7 +840,8 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
     count =
       State.make_synthetic_expression state ~origin uint64
         (Call
-           (State.make_call state ~callee:(convert_callee count.callee)
+           (State.make_call state
+              ~callee:(convert_callee state count.callee)
               ~arguments:[ make_receiver Read ]
               ~lends:None));
     position =
@@ -858,7 +859,8 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
           Lent
             (State.make_synthetic_expression state ~origin element.callee_result
                (Call
-                  (State.make_call state ~callee:(convert_callee element.callee)
+                  (State.make_call state
+                     ~callee:(convert_callee state element.callee)
                      ~arguments:
                        [
                          make_receiver lends;
@@ -886,21 +888,16 @@ let quantify_over_elements state (collection : Syntax.expression) ~count ~elemen
 let build_cursor_next state (cursor : Types.ty) : Core.callee =
   let { Well_known.owner; name; receiver } = Well_known.locate_method Cursor_next in
   let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
-  match State.find_evidence state cursor trait with
-  | Some implementation ->
-      State.make_callee state
-        (Trait_method
-           {
-             trait;
-             name;
-             receiver;
-             self_type = cursor;
-             instantiation = Types.no_instantiation;
-             evidence = convert_evidence (State.convert_evidence implementation);
-           })
-  | None ->
-      State.raise_bug "a loop iterates over `%s`, which does not implement `Cursor`"
-        (Types.show cursor)
+  State.make_callee state
+    (Trait_method
+       {
+         trait;
+         name;
+         receiver;
+         self_type = cursor;
+         instantiation = Types.no_instantiation;
+         evidence = read_evidence state cursor trait;
+       })
 
 let build_for_loop (state : State.state) (written : Syntax.statement) (iterable : Syntax.expression)
     ~pattern ~clauses ~body ~mode : Core.statement_kind =
@@ -932,7 +929,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
             State.make_synthetic_expression state ~origin:iterable.id cursor
               (Call
                  (State.make_call state
-                    ~callee:(convert_callee cursor_call.callee)
+                    ~callee:(convert_callee state cursor_call.callee)
                     ~arguments:[ Passed { mode = Own; value = Operands.build Own collection } ]
                     ~lends:None))
       in
@@ -946,7 +943,8 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
                   State.make_synthetic_expression state ~origin:iterable.id
                     (Types.make_builtin UInt64)
                     (Call
-                       (State.make_call state ~callee:(convert_callee remaining.callee)
+                       (State.make_call state
+                          ~callee:(convert_callee state remaining.callee)
                           ~arguments:[ Passed { mode = Read; value = Place place } ]
                           ~lends:None));
                 ])
@@ -1136,7 +1134,8 @@ let build_converted_literal state (value : Syntax.expression) ~(element : Types.
       (build_list_literal state ~origin:value.id element elements)
   in
   Call
-    (State.make_call state ~callee:(convert_callee recorded.callee)
+    (State.make_call state
+       ~callee:(convert_callee state recorded.callee)
        ~arguments:[ Operands.build_argument Own list ]
        ~lends:None)
 

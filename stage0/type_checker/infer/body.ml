@@ -576,18 +576,6 @@ let finalize (state : State.state) =
       associated = List.map (fun (name, type_) -> (name, finalize_type type_)) reference.associated;
     }
   in
-  let finalize_evidence : Tables.evidence -> Tables.evidence = function
-    | Impl { impl; substitution } ->
-        Impl
-          {
-            impl;
-            substitution =
-              Types.map_substitution ~argument:finalize_argument
-                ~capabilities:(State.finalize_capabilities state)
-                substitution;
-          }
-    | other -> other
-  in
   let finalize_call (written : Tables.call) : Tables.call =
     {
       written with
@@ -602,7 +590,6 @@ let finalize (state : State.state) =
                 trait = finalize_trait method_.trait;
                 self_type = finalize_type method_.self_type;
                 instantiation = finalize_instantiation method_.instantiation;
-                evidence = finalize_evidence method_.evidence;
               }
         | Constructor constructor ->
             Constructor
@@ -658,16 +645,6 @@ let finalize (state : State.state) =
         from_template = Option.map finalize_call template.from_template;
         part_conversions = List.map (Option.map finalize_call) template.part_conversions;
       })
-
-let find_integer_literal_range bounds =
-  Option.bind (Types.find_bound_integer_implementors bounds) (fun builtins ->
-      List.fold_left
-        (fun range builtin ->
-          match (range, Types.find_integer_range (Types.make_builtin builtin)) with
-          | Some (low, high), Some (other_low, other_high) ->
-              Some (Z.max low other_low, Z.min high other_high)
-          | None, found | found, None -> found)
-        None builtins)
 
 let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : Core.t) =
   let named =
@@ -735,7 +712,13 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
           tables_with_holes = None;
         };
       diagnostics = [];
-      unifier = Unify.create ();
+      unifier =
+        Unify.create ~list_rigid_members:(fun rigid ->
+            Option.value ~default:[]
+              (Types.find_bound_integer_implementors
+                 (Interface.Properties.list_known_bounds lookups.interface
+                    ~list_bounds:(Interface.Elaborator.list_bounds context)
+                    rigid)));
       locals = Hashtbl.create 32;
       law_parameters = [];
       frames = [];
@@ -750,17 +733,15 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       capability_constraints = [];
       capability_solution = None;
       evidence_packages = [];
+      final_type_checks = [];
       undecided = [];
       decisions = Hashtbl.create 4;
       annotatable = Hashtbl.create 8;
+      narrowings = [];
     }
   in
-  state.unifier.find_integer_range <-
-    (fun type_ ->
-      find_integer_literal_range
-        (Interface.Properties.list_known_bounds lookups.interface
-           ~list_bounds:(State.lookup_bounds state) type_));
   check_definition state elaborated ~checks_body;
+  List.iter (fun check -> check ()) (List.rev state.final_type_checks);
   state.diagnostics <- Interface.Elaborator.list_diagnostics context @ state.diagnostics;
   state.diagnostics <-
     Interface.Check.list_bound_diagnostics lookups.interface ~package:state.package

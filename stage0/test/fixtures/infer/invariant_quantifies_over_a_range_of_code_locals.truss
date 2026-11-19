@@ -1,0 +1,13 @@
+fn f(small: UInt8) -> Bool {
+  let low = 1
+  let high = 9
+  var index: UInt64 = 0
+  while index < 3
+    invariant forall step in low..high => step < 10
+  {
+    index = index + 1
+  }
+  let same = small == low
+  let reveal: Bool = high
+  reveal && same
+}

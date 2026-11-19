@@ -1,0 +1,10 @@
+fn f(count: UInt8) -> Bool {
+  let limit = 10
+  var index: UInt8 = 0
+  while index < count
+    decreases limit - index
+  {
+    index = index + 1
+  }
+  limit
+}

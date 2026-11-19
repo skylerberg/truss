@@ -1,0 +1,15 @@
+fn is_small(value: UInt8) -> Bool {
+  value < 10
+}
+
+fn f() -> Bool {
+  let limit = 5
+  var index: UInt64 = 0
+  while index < 3
+    invariant is_small(limit)
+  {
+    index = index + 1
+  }
+  let reveal: Bool = limit
+  reveal
+}

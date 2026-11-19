@@ -114,7 +114,6 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
   with
   | _ when is_specification_module key -> Not_proven_here
   | declaration, source -> (
-      lookups.read_patterns key;
       try
         match declaration.kind with
         | (Function | Method | Test) when Mir.find_code (lookups.mir.read_body_part key) = None ->

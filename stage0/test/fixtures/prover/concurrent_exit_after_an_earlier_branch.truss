@@ -1,0 +1,10 @@
+fn earlier(count: mut Int64) -> Int64
+  requires count < 100
+  ensures count == old(count) + 1
+  uses Tasks
+{
+  concurrent {
+    count += 1
+    return 0
+  }
+}

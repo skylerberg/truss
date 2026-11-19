@@ -18,20 +18,17 @@ let check_bit_vector_names state (value : Core.expression) =
 
 let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
     (range : Syntax.expression) element ~inclusive =
-  State.defer state (fun () ->
-      let element = State.normalize state element in
-      if Types.contains_unsolved element then false
-      else begin
-        if
-          State.is_integer_type state element
-          || Types.is_builtin Character element
-          || (admits_integer && Types.equal element Types.Integer)
-        then state.tables.loops.(loop) <- Some (Integer_range { element; inclusive })
-        else if not (Types.is_error element) then
-          State.report state Not_indexable (State.read_span state range.id)
-            (Printf.sprintf "%s range is of integers, not `%s`." described (Types.show element));
-        true
-      end)
+  State.check_when_final state (fun () ->
+      let element = State.finalize_type state element in
+      if
+        State.is_within state element
+          (Types.integer_types
+          @ Language.Builtin_type.Character
+            :: (if admits_integer then [ Language.Builtin_type.Integer ] else []))
+      then state.tables.loops.(loop) <- Some (Integer_range { element; inclusive })
+      else if not (Types.is_error element) then
+        State.report state Not_indexable (State.read_span state range.id)
+          (Printf.sprintf "%s range is of integers, not `%s`." described (Types.show element)))
 
 let rec check_block_value state env ?expected (written : Syntax.block) =
   let rec infer_statements_value = function
@@ -57,25 +54,22 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
           Evaluate (State.build_expression state value));
       let type_ = Hooks.check_expression state env value in
       if not last then
-        State.defer state (fun () ->
-            match State.normalize state type_ with
-            | Types.Variable _ | Types.Literal _ -> false
-            | resolved ->
-                if
-                  not
-                    (resolved = Types.unit || resolved = Types.Never || Types.is_error resolved
-                   || resolved = Types.Hole)
-                then
-                  State.report state Unused_value (State.read_span state value.id)
-                    ~fixes:
-                      [
-                        State.fix "Discard it on purpose."
-                          [ State.insert (State.read_span state value.id).start "let _ = " ];
-                      ]
-                    (Printf.sprintf
-                       "This value of type `%s` is not used. Use it, or discard it with `let _ =`."
-                       (Types.show resolved));
-                true)
+        State.check_when_final state (fun () ->
+            let final_type = State.finalize_type state type_ in
+            if
+              not
+                (final_type = Types.unit || final_type = Types.Never || Types.is_error final_type
+               || final_type = Types.Hole)
+            then
+              State.report state Unused_value (State.read_span state value.id)
+                ~fixes:
+                  [
+                    State.fix "Discard it on purpose."
+                      [ State.insert (State.read_span state value.id).start "let _ = " ];
+                  ]
+                (Printf.sprintf
+                   "This value of type `%s` is not used. Use it, or discard it with `let _ =`."
+                   (Types.show final_type)))
   | Let { is_var; pattern = written_pattern; annotation; value; else_ } ->
       let type_ =
         match annotation with
@@ -267,7 +261,7 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
           Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name ~receiver
         )
       with
-      | Some ((Interface.Impls.From_impl _ | From_bound | From_any) as evidence_source), Some _ ->
+      | Some (Interface.Impls.From_impl _ | From_bound | From_any), Some _ ->
           let index = State.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
           let make_parameter parameter_name type_ : Types.parameter_info =
             { name = parameter_name; mode = Own; type_; has_default = false }
@@ -302,7 +296,6 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
                       receiver;
                       self_type = base_type;
                       instantiation = Types.no_instantiation;
-                      evidence = State.convert_evidence evidence_source;
                     };
                 arguments =
                   [ make_argument base 0 Mut; make_argument key 1 Own; make_argument value 2 Own ];
@@ -325,15 +318,16 @@ and check_loop_body state env (body : Syntax.block) =
 
 and check_loop_clause state env (clause : Syntax.loop_clause) =
   let env = { env with specification = true } in
-  match clause.kind with
-  | Invariant value -> Hooks.check state env value Types.bool
-  | Loop_decreases measures ->
-      List.iter (fun measure -> ignore (Hooks.check_expression state env measure)) measures
-  | Loop_cost cost -> (
-      State.check_cost state cost;
-      match cost.bound with
-      | Big_o value | At_most value | Exactly value ->
-          ignore (Hooks.check_expression state env value))
+  State.run_in_statement state env (State.read_span state clause.id) (fun () ->
+      match clause.kind with
+      | Invariant value -> Hooks.check state env value Types.bool
+      | Loop_decreases measures ->
+          List.iter (fun measure -> ignore (Hooks.check_expression state env measure)) measures
+      | Loop_cost cost -> (
+          State.check_cost state cost;
+          match cost.bound with
+          | Big_o value | At_most value | Exactly value ->
+              ignore (Hooks.check_expression state env value)))
 
 and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression)
     =
@@ -392,7 +386,7 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
                       Printf.sprintf
                         "A `for` loop cannot go over %s: it is not a `Cursor`, and it has no \
                          `count` and `element` to visit it by position."
-                        (Types.describe type_)
+                        (State.describe state type_)
                   | Mut ->
                       Printf.sprintf
                         "A `for` loop cannot mutate the elements of `%s`: it has no `element` that \

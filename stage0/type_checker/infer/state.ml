@@ -36,11 +36,12 @@ type frame = {
   span : Source.Definition_span.t;
 }
 
-type undecided_literal = {
-  index : int;
-  kind : Types.literal_kind;
-  local : Syntax.id;
-  owner : frame;
+type undecided_literal = { index : int; local : Syntax.id; owner : frame }
+
+type narrowing = {
+  narrowed : Types.ty;
+  allowed : Language.Builtin_type.t list;
+  report_excluded : Types.ty -> Diagnostic.reported;
 }
 
 type literal_decision = {
@@ -87,9 +88,11 @@ type state = {
   mutable capability_constraints : subset_constraint list;
   mutable capability_solution : (int, Types.capability_set) Hashtbl.t option;
   mutable evidence_packages : Path.package list;
+  mutable final_type_checks : (unit -> unit) list;
   mutable undecided : undecided_literal list;
   decisions : (int, literal_decision) Hashtbl.t;
   annotatable : (Syntax.id, unit) Hashtbl.t;
+  mutable narrowings : narrowing list;
 }
 
 let add_diagnostic state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
@@ -367,32 +370,59 @@ let defer state check =
   | Some frame -> if not (check ()) then frame.deferred_checks <- check :: frame.deferred_checks
   | None -> ignore (check ())
 
+let check_when_final state check = state.final_type_checks <- check :: state.final_type_checks
 let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
 let make_fresh_type state = Unify.make_fresh_type state.unifier
-
-let is_integer_type state (type_ : Types.ty) =
-  Types.is_integer_type type_
-  ||
-  match type_ with
-  | Parameter _ | Projection _ -> state.unifier.find_integer_range type_ <> None
-  | _ -> false
-
-let is_signed_type state (type_ : Types.ty) =
-  Types.is_signed type_
-  ||
-  match type_ with
-  | Parameter _ | Projection _ -> (
-      match state.unifier.find_integer_range type_ with
-      | Some (low, _) -> Z.sign low < 0
-      | None -> false)
-  | _ -> false
-
 let lookup_bounds state parameter = Interface.Elaborator.list_bounds state.context parameter
 
 let normalize state type_ =
   Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
     (zonk state type_)
+
+let find_domain state type_ =
+  match resolve state type_ with
+  | Types.Variable index -> Unify.find_domain state.unifier index
+  | _ -> None
+
+let is_float_domain domain = List.exists (fun member -> List.mem member Types.float_types) domain
+let is_within state type_ set = Unify.is_within state.unifier (normalize state type_) set
+
+let read_integer_range state type_ =
+  match
+    List.filter_map
+      (fun member -> Types.find_integer_range (Types.make_builtin member))
+      (Unify.list_possible_members state.unifier (normalize state type_))
+  with
+  | [] -> raise_bug "`%s` may be no integer type" (Types.show (zonk state type_))
+  | first :: rest ->
+      List.fold_left
+        (fun (low, high) (other_low, other_high) -> (Z.max low other_low, Z.min high other_high))
+        first rest
+
+let rec narrow state type_ allowed ~report_excluded =
+  match normalize state type_ with
+  | Types.Error _ | Types.Hole -> type_
+  | Types.Variable index as variable -> (
+      match Unify.find_domain state.unifier index with
+      | None ->
+          defer state (fun () ->
+              match resolve state type_ with
+              | Types.Variable index when Unify.find_domain state.unifier index = None -> false
+              | _ ->
+                  ignore (narrow state type_ allowed ~report_excluded);
+                  true);
+          type_
+      | Some _
+        when Unify.unify state.unifier variable (Unify.make_fresh_number state.unifier allowed) ->
+          state.narrowings <- { narrowed = variable; allowed; report_excluded } :: state.narrowings;
+          type_
+      | Some _ -> Types.Error (report_excluded variable))
+  | resolved ->
+      if is_within state resolved allowed then type_ else Types.Error (report_excluded resolved)
+
+let make_literal_type state allowed ~report_excluded =
+  narrow state (Unify.make_fresh_number state.unifier allowed) allowed ~report_excluded
 
 let make_unsolved_type state =
   match state.unsolved with
@@ -423,7 +453,7 @@ let resolve_capabilities state (capabilities : Types.capability_set) =
 let rec finalize_type state type_ =
   Types.map ~map_capabilities:(finalize_capabilities state)
     (function
-      | Types.Variable _ | Types.Literal _ -> Some (make_unsolved_type state)
+      | Types.Variable _ -> Some (make_unsolved_type state)
       | Types.Hole when Option.is_some state.form.tables_with_holes -> Some Types.Never
       | _ -> None)
     (normalize state type_)
@@ -558,31 +588,32 @@ let make_call state ~callee ~arguments ~lends =
   Callee_uses.make_call state.lookups.interface ~list_bounds:(lookup_bounds state) ~callee
     ~arguments ~lends
 
-let convert_evidence = function
-  | Interface.Impls.From_impl { impl; substitution } -> Tables.Impl { impl; substitution }
-  | Interface.Impls.From_bound -> Tables.Bound
-  | Interface.Impls.From_any -> Tables.Dynamic
-  | Interface.Impls.Built_in | Interface.Impls.Accepted _ -> Tables.Built_in
-
 let make_trait_reference ~arguments trait : Types.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }
 
 let string_type = Types.Named { path = Well_known.make_path String; arguments = [] }
 
-let make_undecided_type (undecided : undecided_literal) =
-  Types.Literal (undecided.kind, undecided.index)
+let make_default_type domain =
+  match
+    List.filter
+      (fun default -> List.mem default domain)
+      [ Language.Builtin_type.Integer; Int64; UInt64; Float64 ]
+  with
+  | Integer :: _ -> Types.Integer
+  | default :: _ -> Types.make_builtin default
+  | [] -> raise_bug "a number has no default type"
 
 let decide_literals state ~(at : Source.Definition_span.t) ~is_default =
   state.undecided <-
     List.filter
       (fun (undecided : undecided_literal) ->
-        match Unify.resolve state.unifier (make_undecided_type undecided) with
-        | Types.Literal _ -> true
+        match resolve state (Types.Variable undecided.index) with
+        | Types.Variable _ -> true
         | _ ->
             Hashtbl.replace state.decisions undecided.index
               {
                 decided_local = undecided.local;
-                decided_type = Unify.zonk state.unifier (make_undecided_type undecided);
+                decided_type = zonk state (Types.Variable undecided.index);
                 decided_at = at;
                 is_default;
                 decision_report = None;
@@ -652,10 +683,10 @@ let settle state frame =
           | Some type_ ->
               List.iter
                 (function
-                  | Unify.Unknown_literal (kind, index) when index >= frame.first_variable ->
-                      if not frame.frame_specification then
-                        Hashtbl.replace state.unifier.code_literals index ();
-                      state.undecided <- { index; kind; local; owner = parent } :: state.undecided
+                  | Unify.Unknown_type index
+                    when index >= frame.first_variable
+                         && Option.is_some (Unify.find_domain state.unifier index) ->
+                      state.undecided <- { index; local; owner = parent } :: state.undecided
                   | _ -> ())
                 (Unify.list_unknowns state.unifier type_)
           | None -> ())
@@ -666,29 +697,27 @@ let settle state frame =
       (fun (undecided : undecided_literal) ->
         if undecided.owner == frame then None
         else
-          match Unify.resolve state.unifier (make_undecided_type undecided) with
-          | Types.Literal (_, root) -> Some root
+          match resolve state (Types.Variable undecided.index) with
+          | Types.Variable root -> Some root
           | _ -> None)
       state.undecided
   in
   let is_undecided index = List.mem index undecided in
   List.iter
     (function
-      | Unify.Unknown_literal (kind, index)
-        when index >= frame.first_variable && not (is_undecided index) ->
-          Hashtbl.replace state.unifier.type_solutions index
-            (match kind with
-            | Integer_literal ->
-                if frame.frame_specification then Types.Integer else Types.make_builtin Int64
-            | Float_literal -> Types.make_builtin Float64)
+      | Unify.Unknown_type index when index >= frame.first_variable && not (is_undecided index) ->
+          Option.iter
+            (fun domain ->
+              Hashtbl.replace state.unifier.type_solutions index (make_default_type domain))
+            (Unify.find_domain state.unifier index)
       | _ -> ())
     (list_unknowns ());
   run_pending ();
   let unsolved =
     List.filter
       (function
-        | Unify.Unknown_type index | Unknown_value index -> index >= frame.first_variable
-        | Unknown_literal (_, index) -> index >= frame.first_variable && not (is_undecided index))
+        | Unify.Unknown_type index | Unknown_value index ->
+            index >= frame.first_variable && not (is_undecided index))
       (list_unknowns ())
   in
   state.undecided <-
@@ -757,15 +786,15 @@ let settle state frame =
     if Option.is_none state.unsolved then state.unsolved <- Some report;
     List.iter
       (function
-        | Unify.Unknown_type index | Unknown_literal (_, index) ->
+        | Unify.Unknown_type index ->
             Hashtbl.replace state.unifier.type_solutions index (Types.Error report)
         | Unknown_value _ -> ())
       unsolved;
     frame.deferred_checks <- []
   end;
   let is_open = function
-    | Unify.Unknown_type index | Unknown_value index -> index < frame.first_variable
-    | Unknown_literal (_, index) -> index < frame.first_variable || is_undecided index
+    | Unify.Unknown_type index | Unknown_value index ->
+        index < frame.first_variable || is_undecided index
   in
   let finish table ids keep =
     List.iter
@@ -826,10 +855,13 @@ let run_in_statement state env (span : Source.Definition_span.t) body =
       span;
     }
   in
+  let enclosing_checks_specification = state.unifier.checks_specification in
   state.frames <- frame :: state.frames;
+  state.unifier.checks_specification <- frame.frame_specification;
   let result = body () in
   settle state frame;
   state.frames <- List.tl state.frames;
+  state.unifier.checks_specification <- enclosing_checks_specification;
   result
 
 let rec diverges ~is_never (written : Syntax.statement) =
@@ -879,28 +911,60 @@ let declare_compiled state env (name : Syntax.name) type_ ~binding ~mode =
 
 let find_target state (name : Syntax.name) = state.resolved.names.(name.id)
 
+let holds_class state root type_ =
+  List.mem (Unify.Unknown_type root) (Unify.list_unknowns state.unifier type_)
+
+let find_refused_class state ~sides =
+  Option.bind state.unifier.refused_code_unknown (fun root ->
+      if List.exists (fun (side, _) -> holds_class state root side) sides then Some root else None)
+
+let report_decided_in_specification state span root =
+  let message =
+    match
+      Array.find_index
+        (Option.fold ~none:false ~some:(holds_class state root))
+        state.tables.local_types
+    with
+    | Some local ->
+        let name = quote_span state (read_span state local) in
+        Printf.sprintf "A specification cannot decide the type of `%s`. Declare `%s` with a type."
+          name name
+    | None ->
+        "A specification cannot decide a type that code computes with. Give the call its type \
+         arguments."
+  in
+  let report = add_diagnostic state Decided_in_specification span message in
+  Hashtbl.replace state.unifier.type_solutions root (Types.Error report);
+  report
+
 let decide_default_literal state ~at type_ =
   let decide default =
     (match find_current_frame state with
     | Some frame -> decide_literals state ~at:frame.span ~is_default:false
     | None -> ());
     ignore (Unify.unify state.unifier type_ default);
-    decide_literals state ~at ~is_default:true;
-    default
+    match find_refused_class state ~sides:[ (type_, default) ] with
+    | Some root -> Types.Error (report_decided_in_specification state at root)
+    | None ->
+        decide_literals state ~at ~is_default:true;
+        default
   in
-  match Unify.resolve state.unifier type_ with
-  | Types.Literal (Integer_literal, _) -> decide (Types.make_builtin Int64)
-  | Types.Literal (Float_literal, _) -> decide (Types.make_builtin Float64)
-  | _ -> type_
+  match find_domain state type_ with
+  | Some domain -> decide (make_default_type domain)
+  | None -> type_
 
 let find_head state (value : Syntax.expression) = Resolve.find_head state.resolved value
 let show state type_ = Types.show (zonk state type_)
-let describe state type_ = Types.describe (zonk state type_)
+
+let describe state type_ =
+  match find_domain state type_ with
+  | Some domain -> if is_float_domain domain then "a float" else "an integer"
+  | None -> "`" ^ show state type_ ^ "`"
 
 let find_literal_decision state type_ =
   let rec follow (type_ : Types.ty) =
     match type_ with
-    | Literal (_, index) | Variable index -> (
+    | Variable index -> (
         match Hashtbl.find_opt state.decisions index with
         | Some decision -> Some decision
         | None -> Option.bind (Hashtbl.find_opt state.unifier.type_solutions index) follow)
@@ -908,18 +972,37 @@ let find_literal_decision state type_ =
   in
   follow type_
 
+let find_excluding_narrowing state (narrowed, wanted) =
+  match find_domain state narrowed with
+  | Some domain
+    when is_within state wanted
+           (if is_float_domain domain then Types.float_types else Types.integer_types) ->
+      Option.map
+        (fun narrowing -> (narrowing, wanted))
+        (List.find_opt
+           (fun narrowing ->
+             resolve state narrowing.narrowed = resolve state narrowed
+             && not (is_within state wanted narrowing.allowed))
+           (List.rev state.narrowings))
+  | _ -> None
+
 let add_mismatch_diagnostic state ?(fixes = []) code (span : Source.Definition_span.t)
     ~(sides : (Types.ty * Types.ty) list) message =
   let other_fixes = fixes in
   match
-    List.find_map
-      (fun (decided, wanted) ->
-        Option.map (fun decision -> (decision, wanted)) (find_literal_decision state decided))
-      sides
+    ( find_refused_class state ~sides,
+      List.find_map
+        (fun (decided, wanted) ->
+          Option.map (fun decision -> (decision, wanted)) (find_literal_decision state decided))
+        sides )
   with
-  | None -> add_diagnostic state ~fixes code span message
-  | Some ({ decision_report = Some report; _ }, _) -> report
-  | Some (decision, wanted) ->
+  | Some root, _ -> report_decided_in_specification state span root
+  | None, None -> (
+      match List.find_map (find_excluding_narrowing state) sides with
+      | Some (narrowing, wanted) -> narrowing.report_excluded wanted
+      | None -> add_diagnostic state ~fixes code span message)
+  | None, Some ({ decision_report = Some report; _ }, _) -> report
+  | None, Some (decision, wanted) ->
       let name = read_span state decision.decided_local in
       let text = quote_span state name in
       let local = Printf.sprintf "`%s`" text in
@@ -957,16 +1040,16 @@ let add_mismatch_diagnostic state ?(fixes = []) code (span : Source.Definition_s
 
 let add_mismatch state (span : Source.Definition_span.t) ~expected ~actual =
   let sides = [ (actual, expected); (expected, actual) ] in
-  let expected = zonk state expected and actual = zonk state actual in
-  match (resolve state actual, expected) with
-  | Types.Literal (Integer_literal, _), _ when Types.is_float_type expected ->
+  let expected = zonk state expected in
+  match find_domain state actual with
+  | Some domain when Types.is_float_type expected && not (is_float_domain domain) ->
       add_diagnostic state Integer_for_float span
         ~fixes:[ fix "Write it as a float." [ insert span.stop ".0" ] ]
         (Printf.sprintf "An integer literal is never a float, and `%s` is expected here."
            (Types.show expected))
   | _ ->
       add_mismatch_diagnostic state Mismatch span ~sides
-        (Printf.sprintf "Expected %s, found %s." (Types.describe expected) (Types.describe actual))
+        (Printf.sprintf "Expected %s, found %s." (describe state expected) (describe state actual))
 
 let report_mismatch state span ~expected ~actual =
   ignore (add_mismatch state span ~expected ~actual)
@@ -1247,12 +1330,10 @@ let convert state env ?argument ?(takes_view_as_owner = false) ?expression
       match (actual_type, wanted, expression) with
       | Types.Never, _, _ -> Some From_never
       | Types.Integer, _, Some _
-        when is_argument && env.specification && is_integer_type state wanted ->
+        when is_argument && env.specification && is_within state wanted Types.integer_types ->
           Some From_integer
-      | Types.Literal (Integer_literal, index), Types.Integer, _
-        when env.specification && Hashtbl.mem state.unifier.code_literals index ->
-          Some To_integer
-      | _, Types.Integer, _ when env.specification && is_integer_type state actual_type ->
+      | _, Types.Integer, _
+        when env.specification && is_within state actual_type Types.integer_types ->
           Some To_integer
       | Types.Function actual_function, Types.Function wanted_function, _
         when not (Types.has_same_clauses actual_function wanted_function) ->

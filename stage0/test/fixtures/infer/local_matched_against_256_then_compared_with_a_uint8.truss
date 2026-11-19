@@ -1,0 +1,8 @@
+fn f(small: UInt8) -> Bool {
+  let limit = 10
+  let wide = match limit {
+    256 => true
+    _ => false
+  }
+  wide && small == limit
+}

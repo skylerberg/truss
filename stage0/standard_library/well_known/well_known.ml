@@ -26,6 +26,7 @@ type t =
   | Fixed_width_integer
   | Signed_integer
   | Unsigned_integer
+  | Floating_point
   | Range
   | Exit_code
   | Option
@@ -199,6 +200,7 @@ let items =
     (Fixed_width_integer, [ "numbers"; "integers" ], "FixedWidthInteger");
     (Signed_integer, [ "numbers"; "integers" ], "SignedInteger");
     (Unsigned_integer, [ "numbers"; "integers" ], "UnsignedInteger");
+    (Floating_point, [ "numbers"; "float_math" ], "FloatingPoint");
     (Range, [ "core" ], "Range");
     (Exit_code, [ "core" ], "ExitCode");
     (Option, [ "option" ], "Option");

@@ -21,11 +21,6 @@ let rec coerce state env ?argument ?takes_view_as_owner (value : Syntax.expressi
   State.convert state env ?argument ?takes_view_as_owner ~expression:value.id
     (State.read_span state value.id) ~actual ~expected
 
-and infer_literal_type state ~expected kind =
-  match Option.map (State.resolve state) expected with
-  | Some expected when Unify.literal_fits state.unifier kind expected -> expected
-  | _ -> Unify.make_fresh_literal state.unifier kind
-
 and check_name (state : State.state) (env : State.env) (value : Syntax.expression)
     ({ name; target; type_arguments } : Resolve.head) =
   let text = name.text in
@@ -380,8 +375,8 @@ and list_trait_static_methods (state : State.state) path name receiver =
     (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
        ~from:state.key.module_ name)
 
-and resolve_evidence state (value : Syntax.expression) self_type (reference : Types.trait_reference)
-    =
+and check_implements ?(code : Diagnostic.Code.types = No_impl) state
+    (span : Source.Definition_span.t) self_type (reference : Types.trait_reference) =
   State.defer state (fun () ->
       let self_type = State.zonk state self_type in
       let reference = State.solve_trait_arguments state self_type reference in
@@ -390,28 +385,13 @@ and resolve_evidence state (value : Syntax.expression) self_type (reference : Ty
         || List.exists Types.is_unsolved_argument reference.trait_arguments
       then false
       else begin
-        (match State.find_evidence state self_type reference with
-        | Some evidence -> (
-            match state.tables.calls.(value.id) with
-            | Some ({ callee = Trait_method method_; _ } as call) ->
-                state.tables.calls.(value.id) <-
-                  Some
-                    {
-                      call with
-                      callee =
-                        Trait_method
-                          {
-                            method_ with
-                            trait = reference;
-                            evidence = State.convert_evidence evidence;
-                          };
-                    }
-            | _ -> ())
-        | None ->
-            if not (Types.is_error self_type) then
-              State.report state No_impl (State.read_span state value.id)
-                (Printf.sprintf "`%s` does not implement `%s`." (Types.show self_type)
-                   (Types.show_trait reference)));
+        if
+          Option.is_none (State.find_evidence state self_type reference)
+          && not (Types.is_error self_type)
+        then
+          State.report state code span
+            (Printf.sprintf "`%s` does not implement `%s`." (Types.show self_type)
+               (Types.show_trait reference));
         true
       end)
 
@@ -545,20 +525,13 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
       | Some (Trait_overload (trait, method_)) ->
           let instance, callee =
             instantiate_trait_method state span ~self_type:type_ trait method_
-              ~evidence:
-                (match type_ with
-                | Types.Any _ -> Tables.Dynamic
-                | Types.Parameter _ -> Bound
-                | _ -> (
-                    match State.find_evidence state type_ trait with
-                    | Some evidence -> State.convert_evidence evidence
-                    | None -> Built_in))
           in
+          check_implements ~code:Not_indexable state span type_ trait;
           Visible (callee, (instance : Instantiation.instance).signature)
       | Some (View_overload _) | None -> Absent)
 
 and instantiate_trait_method state span ~self_type (trait : Types.trait_reference)
-    (method_ : Types.trait_method) ~evidence =
+    (method_ : Types.trait_method) =
   let instance =
     Instantiation.instantiate state span
       ~extra:
@@ -575,7 +548,6 @@ and instantiate_trait_method state span ~self_type (trait : Types.trait_referenc
         receiver = method_.method_receiver;
         self_type;
         instantiation = instance.instantiation;
-        evidence;
       } )
 
 and make_argumentless_call callee result : Tables.call =

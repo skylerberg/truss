@@ -1536,6 +1536,22 @@ fn List[Element].push(mut self, item: own Element)
 | An opaque type has a model. | Other packages reason about the type through its model, without its fields. |
 | `identical(a, b)` is identity, and is separate from `==`. | A generic contract must say that an element is a given value, whatever its type. `==` cannot say that: it is the type's `Equal`, which `List[Element]` does not require, and which is an equivalence and not identity for a set stored as an unsorted list. `==` therefore keeps one meaning everywhere. |
 
+### What proofs do not model
+
+Every proof treats a value as a value. A call changes only its `mut`
+arguments and the state behind the capabilities it uses, and `mut` access
+lasts one call, one iteration, or one `provide mut` block. The prover
+therefore models no memory and no time. Each feature below would need a
+model of one, so the language leaves it out, and adding it would change
+every proof.
+
+| Not modeled | Reason, or the section that gives it |
+|---|---|
+| A fact about a capability's state that relates two calls, such as a counter that never decreases or the order of a channel's messages | Such a fact needs ghost state or permissions that persist across calls, as Verus's tracked tokens and Iris provide. The prover never models an implementation's state between calls ([Shared state](#shared-state)), and it proves the invariant of the shared value's type, which each update re-establishes. |
+| Stored `mut` access: a cursor over mutable elements, a returned mutable view, or a record that holds one | [Views](#views): `mut` access is never stored. |
+| Code that runs after a lend | [Lending methods](#lending-methods) |
+| Foreign code | [No foreign code](#no-foreign-code) |
+
 ## Unfinished code
 
 Rules: [Unfinished code](SPECIFICATION.md#unfinished-code).
@@ -1709,6 +1725,8 @@ which a `cost` clause can promise. This is why a key is `Ordered` as well as
 | Convention | Reason |
 |---|---|
 | A method that needs no ownership of the storage is declared once, on the view type. | A `String`, a `List`, and an `Array` have the methods of their views ([Method lookup](#method-lookup)), so `mut names.sort()` works without `names[..]`, and a second declaration on the owning type would only forward. The owning type declares a method of that name where it uses its storage: `List.reverse` keeps the list's capacity. |
+| A method that every integer type has, or both float types have, is declared once, in a sealed trait. | Generic code over the trait can call the method, and the method's contract in the trait holds for every type. A method declared on each type is a separate function per type, which generic code cannot call. |
+| `FloatingPoint` is sealed: only `Float32` and `Float64` implement it. | The trait describes their IEEE 754 formats, which its `Bits` and methods such as `is_nan` expose. In generic code over the trait, `is_nan` and the `ieee_` comparisons then mean what IEEE 754 defines, for every instantiation. |
 | A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write. |
 | Every failure of the operating system is a `SystemError`. | Code that reads a file and sends it over a connection handles one error type. |
 | Text in an embedded language is a tagged template, and a `processes::Command` is a program and a list of arguments. | Neither is a string that is passed to an interpreter, so neither allows an injection. |
@@ -1831,6 +1849,7 @@ contract, so a typo in a body blocks no caller.
 |---|---|
 | The database keeps no earlier version of a failing part. | An earlier version would make the database depend on the order of the edits. A caller checked against an earlier signature would also report errors that the files do not hold. |
 | A build, a test run, or a template check requires that no definition it reaches has errors. | No run executes code that the files do not hold, and a test whose code is correct runs while unrelated code is broken. |
+| A constant's value belongs to its contract. | A pattern that names a constant covers the constant's value, and a contract can hold a pattern. The check of that contract reads the value, as a caller's proof reads a callee's contract. |
 
 ### Caches
 

@@ -23,13 +23,12 @@ let record_conversion (state : State.state) (value : Syntax.expression) (collect
               receiver;
               self_type = collection;
               instantiation = Types.no_instantiation;
-              evidence = Built_in;
             };
         arguments = [];
         omitted_defaults = [];
         callee_result = collection;
       };
-  Name_lookup.resolve_evidence state value collection trait
+  Name_lookup.check_implements state (State.read_span state value.id) collection trait
 
 let rec check_string_literal state env ?expected (value : Syntax.expression)
     (literal : Syntax.string_literal) =
@@ -58,20 +57,12 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
             }
     | None -> ()
   in
-  let trait_call ?(mode = Language.Mode.Read) trait method_ self_type evidence arguments result :
-      Tables.call =
+  let trait_call ?(mode = Language.Mode.Read) trait method_ self_type arguments result : Tables.call
+      =
     let { Well_known.name; receiver; _ } = Well_known.locate_method method_ in
     {
       callee =
-        Trait_method
-          {
-            trait;
-            name;
-            receiver;
-            self_type;
-            instantiation = Types.no_instantiation;
-            evidence = State.convert_evidence evidence;
-          };
+        Trait_method { trait; name; receiver; self_type; instantiation = Types.no_instantiation };
       arguments =
         List.mapi
           (fun index (written : Syntax.expression) ->
@@ -87,24 +78,19 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
           Form.build_untagged_string state ~origin:value.id literal);
       List.iteri
         (fun index ((part : Syntax.expression), part_type) ->
-          State.defer state (fun () ->
-              let part_type = State.normalize state part_type in
-              if Types.contains_unsolved part_type then false
-              else begin
-                let display =
-                  State.make_trait_reference ~arguments:[] (Well_known.make_path Display)
-                in
-                (match State.find_evidence state part_type display with
-                | Some evidence ->
-                    set_part index
-                      (trait_call display Display_display part_type evidence [ part ] Types.unit)
-                | None ->
-                    State.report state No_impl (State.read_span state part.id)
-                      (Printf.sprintf
-                         "`%s` does not implement `Display`, so it cannot be interpolated."
-                         (Types.show part_type)));
-                true
-              end))
+          State.check_when_final state (fun () ->
+              let part_type = State.finalize_type state part_type in
+              let display =
+                State.make_trait_reference ~arguments:[] (Well_known.make_path Display)
+              in
+              match State.find_evidence state part_type display with
+              | Some _ ->
+                  set_part index (trait_call display Display_display part_type [ part ] Types.unit)
+              | None ->
+                  State.report state No_impl (State.read_span state part.id)
+                    (Printf.sprintf
+                       "`%s` does not implement `Display`, so it cannot be interpolated."
+                       (Types.show part_type))))
         parts;
       let is_view_expected =
         parts = []
@@ -140,57 +126,51 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                   Form.build_tagged_string state value literal
                     ~part:(State.finalize_type state part)
               | None -> State.raise_bug "a tagged string's part type was not inferred");
-          State.defer state (fun () ->
-              let tag_type = State.normalize state tag_type in
-              if Types.contains_unsolved tag_type then false
-              else begin
-                (match State.find_evidence state tag_type template_trait with
-                | Some evidence ->
-                    (match state.tables.templates.(literal.id) with
-                    | Some template ->
-                        state.tables.templates.(literal.id) <-
-                          Some
-                            {
-                              template with
-                              from_template =
-                                Some
-                                  (trait_call template_trait From_template_from_template tag_type
-                                     evidence [] tag_type);
-                            }
-                    | None -> ());
-                    let part =
-                      State.resolve_associated_type state tag_type template_trait From_template_part
-                        ~at:(State.read_span state literal.id)
-                    in
-                    part_type := Some part;
-                    List.iteri
-                      (fun index ((part_expression : Syntax.expression), part_type) ->
-                        let part_type = State.normalize state part_type in
-                        if not (Types.equal part_type part) then
-                          let from =
-                            State.make_trait_reference ~arguments:[ Types.Type part_type ]
-                              (Well_known.make_path From)
-                          in
-                          match State.find_evidence state part from with
-                          | Some evidence ->
-                              set_part index
-                                (trait_call ~mode:Own from From_from part evidence
-                                   [ part_expression ] part)
-                          | None ->
-                              State.report state No_impl
-                                (State.read_span state part_expression.id)
-                                (Printf.sprintf "`%s` cannot become a `%s`, the part type of `%s`."
-                                   (Types.show part_type) (Types.show part) (Types.show tag_type)))
-                      parts
-                | None ->
-                    if not (Types.is_error tag_type) then
-                      State.report state No_impl
-                        (State.read_span state literal.id)
-                        (Printf.sprintf
-                           "`%s` does not implement `FromTemplate`, so it is not a tag."
-                           (Types.show tag_type)));
-                true
-              end);
+          State.check_when_final state (fun () ->
+              let tag_type = State.finalize_type state tag_type in
+              match State.find_evidence state tag_type template_trait with
+              | Some _ ->
+                  (match state.tables.templates.(literal.id) with
+                  | Some template ->
+                      state.tables.templates.(literal.id) <-
+                        Some
+                          {
+                            template with
+                            from_template =
+                              Some
+                                (trait_call template_trait From_template_from_template tag_type []
+                                   tag_type);
+                          }
+                  | None -> ());
+                  let part =
+                    State.resolve_associated_type state tag_type template_trait From_template_part
+                      ~at:(State.read_span state literal.id)
+                  in
+                  part_type := Some part;
+                  List.iteri
+                    (fun index ((part_expression : Syntax.expression), part_type) ->
+                      let part_type = State.finalize_type state part_type in
+                      if not (Types.equal part_type part) then
+                        let from =
+                          State.make_trait_reference ~arguments:[ Types.Type part_type ]
+                            (Well_known.make_path From)
+                        in
+                        match State.find_evidence state part from with
+                        | Some _ ->
+                            set_part index
+                              (trait_call ~mode:Own from From_from part [ part_expression ] part)
+                        | None ->
+                            State.report state No_impl
+                              (State.read_span state part_expression.id)
+                              (Printf.sprintf "`%s` cannot become a `%s`, the part type of `%s`."
+                                 (Types.show part_type) (Types.show part) (Types.show tag_type)))
+                    parts
+              | None ->
+                  if not (Types.is_error tag_type) then
+                    State.report state No_impl
+                      (State.read_span state literal.id)
+                      (Printf.sprintf "`%s` does not implement `FromTemplate`, so it is not a tag."
+                         (Types.show tag_type)));
           tag_type
       | Some (Unknown report) -> Types.Error report
       | _ ->

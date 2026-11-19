@@ -1,0 +1,10 @@
+type Color =
+  | Red
+  | Green
+  | Blue
+
+fn f(color: Color) -> Int64 {
+  match color {
+    Red => 1
+  }
+}
