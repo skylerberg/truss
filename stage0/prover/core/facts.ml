@@ -236,8 +236,10 @@ let show_truss_value context term =
         Option.map
           (fun printed -> parenthesize level 1 (String.concat " - " printed))
           (collect_printed [ show_arithmetic 1 left; show_arithmetic 2 right ])
+    | Logic.Operation (Negate, [ Logic.Operation (Negate, [ inner ]) ]) ->
+        show_arithmetic level inner
     | Logic.Operation (Negate, [ inner ]) ->
-        Option.map (fun printed -> parenthesize level 3 ("-" ^ printed)) (show_arithmetic 3 inner)
+        Option.map (fun printed -> parenthesize level 3 ("-" ^ printed)) (show_arithmetic 4 inner)
     | Logic.Integer value when Z.sign value < 0 && level > 0 -> Some ("(" ^ Z.to_string value ^ ")")
     | Logic.Apply (Logic.Symbol.Field { field; variant = None; _ }, [ receiver ]) ->
         Option.map (fun receiver -> receiver ^ "." ^ field) (show_arithmetic 4 receiver)

@@ -57,7 +57,6 @@ let make_context ?node (lookups : Lookups.t) ~home ~current ~terminates ~measure
       equalities = [];
       decisions = [];
       entry = [];
-      proving = false;
       inherits_precondition;
       holes = [];
       unfinished = [];
@@ -85,6 +84,7 @@ let make_empty_frame source =
     result = None;
     condition = Logic.Boolean true;
     makes_obligations = true;
+    is_ghost = false;
     bound = [];
     binders = [];
     substitution = Types.no_substitution;
@@ -226,7 +226,6 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
            path substitution)
       ~terminates ~measures:contract.decreases ~inherits_precondition
   in
-  context.proving <- proof;
   context.callbacks <-
     List.filter_map
       (fun (position, callback) ->
@@ -265,7 +264,7 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
             | _ -> ());
             Validity.assume_valid context frame ty term;
             Facts.bind frame (Core_local local) ty term)
-      { (make_empty_frame source) with substitution }
+      { (make_empty_frame source) with substitution; is_ghost = proof }
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in

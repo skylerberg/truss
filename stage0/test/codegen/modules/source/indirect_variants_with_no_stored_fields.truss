@@ -1,0 +1,31 @@
+type Shape =
+  | indirect Dot()
+  | indirect Marked(marker: Unit)
+  | Square(side: Int64)
+
+type Maybe[Value] =
+  | indirect Nothing()
+  | Just(value: Value)
+
+fn measure(shape: Shape) -> Int64 {
+  match shape {
+    Dot => 1
+    Marked(..) => 2
+    Square(side) => side
+  }
+}
+
+fn describe(maybe: Maybe[String]) -> String {
+  match maybe {
+    Nothing => "nothing"
+    Just(value) => value.copy()
+  }
+}
+
+test "an indirect variant whose fields take no space is built and matched" {
+  assert measure(Shape.Dot()) == 1
+  assert measure(Shape.Marked(marker: Unit)) == 2
+  assert measure(Shape.Square(side: 5)) == 5
+  assert describe(Maybe[String].Nothing()) == "nothing"
+  assert describe(Maybe.Just(value: "x")) == "x"
+}

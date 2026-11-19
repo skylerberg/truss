@@ -1,0 +1,7 @@
+fn f() -> Int64 {
+  var total = 0
+  total += 2
+  var count = 0
+  count = count + 1
+  total + count
+}

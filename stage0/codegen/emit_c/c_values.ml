@@ -332,23 +332,22 @@ let render_variant_test (emission : Emission.t) text sum variant =
 
 let render_initializers (emission : Emission.t) fc prefix (fields : Memory_layout.field list)
     (values : (string * Lowered.operand) list) =
-  C_text.join ", "
-    (List.filter_map
-       (fun (name, operand) ->
-         match find_field fields name with
-         | None -> None
-         | Some _ -> (
-             let designator = Printf.sprintf "%s.f_%s = " prefix name in
-             match render_operand emission fc operand with
-             | Some (text, Lowered.Pointer { target; writable = false }) ->
-                 Some
-                   (Text designator
-                   ++ render_cast
-                        (C_types.render_type emission.types (Pointer { target; writable = true }))
-                        text)
-             | Some (text, _) -> Some (Text designator ++ text)
-             | None -> None))
-       values)
+  List.filter_map
+    (fun (name, operand) ->
+      match find_field fields name with
+      | None -> None
+      | Some _ -> (
+          let designator = Printf.sprintf "%s.f_%s = " prefix name in
+          match render_operand emission fc operand with
+          | Some (text, Lowered.Pointer { target; writable = false }) ->
+              Some
+                (Text designator
+                ++ render_cast
+                     (C_types.render_type emission.types (Pointer { target; writable = true }))
+                     text)
+          | Some (text, _) -> Some (Text designator ++ text)
+          | None -> None))
+    values
 
 let list_payload_fields (payload : Memory_layout.t) =
   match payload.form with Struct fields -> fields | _ -> []
@@ -382,16 +381,15 @@ let build_laid_out_c (emission : Emission.t) fc ty variant
                C_runtime.raise_bug "a value of %s built with a field %s, which it does not have"
                  (Ground.to_string ty) name)
            values);
-  let render_literal initializers = render_cast c_type (Text "{ " ++ initializers ++ Text " }") in
+  let render_literal initializers = render_cast c_type (C_text.render_braces initializers) in
   let read_block variant =
     let key : C_text.key = Block (ty, variant) in
     let fields = list_payload_fields (Memory_layout.lay_out_block emission.types.env ty variant) in
     ( key,
       Text "("
       ++ C_types.render_key emission.types key
-      ++ Text "){ "
-      ++ render_initializers emission fc "" fields values
-      ++ Text " }" )
+      ++ Text ")"
+      ++ C_text.render_braces (render_initializers emission fc "" fields values) )
   in
   match (variant, layout.form) with
   | _, Zero_size -> None
@@ -409,13 +407,13 @@ let build_laid_out_c (emission : Emission.t) fc ty variant
       | Some candidate -> (
           let tag = Printf.sprintf ".tag = %d" candidate.index in
           match candidate.payload.form with
-          | Zero_size -> Some (Expression (render_literal (Text tag)))
+          | Zero_size -> Some (Expression (render_literal [ Text tag ]))
           | Struct fields ->
               Some
                 (Expression
                    (render_literal
-                      (Text (tag ^ ", ")
-                      ++ render_initializers emission fc (".payload.v_" ^ name) fields values)))
+                      (Text tag
+                      :: render_initializers emission fc (".payload.v_" ^ name) fields values)))
           | Scalar (Pointer (Block _)) ->
               let block, fill = read_block name in
               Some
@@ -425,7 +423,7 @@ let build_laid_out_c (emission : Emission.t) fc ty variant
                      fill;
                      value =
                        (fun pointer ->
-                         render_literal (Text (tag ^ ", .payload.v_" ^ name ^ " = ") ++ pointer));
+                         render_literal [ Text tag; Text (".payload.v_" ^ name ^ " = ") ++ pointer ]);
                    })
           | _ -> C_runtime.raise_bug "a payload"))
   | Some name, Niche_encoded { dataful; dataless } ->
@@ -447,7 +445,8 @@ let build_laid_out_c (emission : Emission.t) fc ty variant
                 match niche.path with
                 | [] -> Some (Expression (render_cast c_type stored))
                 | path ->
-                    Some (Expression (render_literal (Text (render_path path ^ " = ") ++ stored)))))
+                    Some (Expression (render_literal [ Text (render_path path ^ " = ") ++ stored ]))
+                ))
         | None -> C_runtime.raise_bug "no variant %s" name
         end
   | _ -> C_runtime.raise_bug "building %s" (Ground.to_string ty)
@@ -511,10 +510,8 @@ let render_rvalue (emission : Emission.t) fc (target : Lowered.ty) (rvalue : Low
         (Expression
            (render_cast
               (C_types.render_type emission.types target)
-              (Text "{ "
-              ++ C_text.join ", "
-                   (List.map
-                      (fun (field, value) -> Text (".f_" ^ field ^ " = ") ++ value)
-                      (Builtin_records.Function_value.list_fields ~code:(Text "&" ++ symbol)
-                         ~environment))
-              ++ Text " }")))
+              (C_text.render_braces
+                 (List.map
+                    (fun (field, value) -> Text (".f_" ^ field ^ " = ") ++ value)
+                    (Builtin_records.Function_value.list_fields ~code:(Text "&" ++ symbol)
+                       ~environment)))))

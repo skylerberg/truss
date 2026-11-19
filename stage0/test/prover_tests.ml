@@ -1241,6 +1241,17 @@ let () =
       let text = Fixtures.Prover.theorem_of_todo in
       expect_proven text;
       if count_holes text <> 1 then Harness.fail "%d holes" (count_holes text));
+  Harness.test "a todo in a contract is a hole where it is written and where it is relied on"
+    (fun () ->
+      List.iter
+        (fun (text, holes) ->
+          expect_proven text;
+          if count_holes text <> holes then Harness.fail "%d holes" (count_holes text))
+        [
+          (Fixtures.Prover.todo_requires_with_a_caller, 2);
+          (Fixtures.Prover.todo_ensures_with_a_caller, 3);
+          (Fixtures.Prover.positive_with_a_todo_invariant, 2);
+        ]);
   Harness.test "a todo in a proof block leaves the rest of its path to it" (fun () ->
       let text = Fixtures.Prover.proof_block_of_todo in
       expect_proven text;
@@ -1690,6 +1701,17 @@ let () =
       expect_proven Fixtures.Prover.zeros_filled)
 
 let () =
+  Harness.test "a requires fix reads a negated negation as the value it negates" (fun () ->
+      let text = Fixtures.Prover.negation_of_a_negated_parameter in
+      let packages = Support.setup [ ("app::main", text) ] in
+      match check packages (Support.parse_file "app::main") with
+      | [ { fixes = [ fix ]; _ } ] ->
+          if fix.title <> "Add `requires value <= Int64.maximum - 1`" then
+            Harness.fail "%s" fix.title;
+          expect_proven (Diagnostic.apply_edits text fix.edits)
+      | actual -> Harness.fail "%d diagnostics" (List.length actual))
+
+let () =
   Harness.test "a callee's requires about the caller's parameters is offered as the caller's"
     (fun () ->
       let packages =
@@ -1722,7 +1744,12 @@ let () =
   Harness.test "a concurrent for may return early, with a value known by its type" (fun () ->
       expect_proven Fixtures.Prover.any_negative_through_a_concurrent_for);
   Harness.test "a value returned from a concurrent for is not known to be any one iteration's"
-    (fun () -> expect_not_proven Fixtures.Prover.claimed_through_a_concurrent_for "prover.ensures")
+    (fun () -> expect_not_proven Fixtures.Prover.claimed_through_a_concurrent_for "prover.ensures");
+  Harness.test "a function that waits for its tasks has no time bound" (fun () ->
+      expect_not_proven Fixtures.Prover.concurrent_block_under_a_time_bound "prover.cost";
+      expect_not_proven Fixtures.Prover.concurrent_for_under_a_time_bound "prover.cost");
+  Harness.test "waiting for tasks allocates nothing" (fun () ->
+      expect_proven Fixtures.Prover.concurrent_block_under_an_allocation_bound)
 
 let () =
   let fix_titles text =

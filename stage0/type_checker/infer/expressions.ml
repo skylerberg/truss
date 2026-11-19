@@ -76,6 +76,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       State.register_expression state value (fun () -> Todo);
       match expected with Some expected -> expected | None -> Types.Hole)
   | Unreachable ->
+      State.reject_in_formula state env (State.read_span state value.id) "`unreachable`";
       State.register_expression state value (fun () -> Unreachable);
       Types.Never
   | Break | Continue ->

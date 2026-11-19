@@ -1,8 +1,9 @@
-fn f(ready: Bool) {
+fn f(ready: Bool) -> Int64 {
   var total = 0
   parallel for item in 0..10 {
     if ready {
       total = item
     }
   }
+  total
 }

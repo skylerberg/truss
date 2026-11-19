@@ -27,6 +27,10 @@ let join separator parts =
   | [] -> empty
   | first :: rest -> Concat (first :: List.concat_map (fun part -> [ Text separator; part ]) rest)
 
+let render_braces = function
+  | [] -> Text "{ 0 }"
+  | parts -> Text "{ " ++ join ", " parts ++ Text " }"
+
 let render_key_name = function
   | Type ty -> Mangling.make_type_name ty
   | Block (ty, variant) -> Mangling.make_type_name ty ^ "_Block_" ^ variant
