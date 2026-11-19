@@ -1308,17 +1308,12 @@ and lower_for_loop ?cursor_type ?(elements = ref None) ?matched builder ~origin
                 binding_count := List.length (Emitter.emitted builder)));
         if Emitter.reaches builder then Some Emitter.unit_value else None)
   in
+  let bindings : Tree.block =
+    { statements = List.take !binding_count body.statements; value = None }
+  and body = { body with statements = List.drop !binding_count body.statements } in
   Emitter.start_group builder origin origin;
   Emitter.emit builder
-    (For
-       {
-         loop = loop ();
-         iteration;
-         part;
-         elements = !elements;
-         binding_count = !binding_count;
-         body;
-       })
+    (For { loop = loop (); iteration; part; elements = !elements; bindings; body })
     origin;
   Emitter.resume_group builder origin origin
 

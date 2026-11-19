@@ -14,9 +14,9 @@ let list_nested_blocks_of_kind (kind : Tree.statement_kind) : Tree.block list =
   | Choose { choice; _ } -> list_choice_blocks choice
   | While { condition; body; failed; _ } ->
       [ condition; body; { statements = failed; value = None } ]
-  | For { elements; body; _ } ->
+  | For { elements; bindings; body; _ } ->
       Option.to_list (Option.map (fun (elements : Tree.elements) -> elements.count) elements)
-      @ [ body ]
+      @ [ bindings; body ]
   | Fork { branches; _ } -> branches
   | Provide { body; _ } -> [ body ]
   | Resume { exits; _ } -> List.map (fun (exit : Tree.early_exit) -> exit.resumed) exits
