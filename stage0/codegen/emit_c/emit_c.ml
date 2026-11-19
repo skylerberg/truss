@@ -227,9 +227,9 @@ let render_file env (profile : Profile.t) ~resolve_position (fragments : (fragme
   Buffer.add_string buffer
     (match profile with
     | Development ->
-        "#define TRUSS_UNREACHABLE() t_runtime_compiler_bug()\n\
+        "#define TRUSS_UNREACHABLE() truss_runtime_compiler_bug()\n\
          #define TRUSS_FAIL_OBLIGATION_WHEN(condition, message, length, site, trace) ((condition) \
-         ? t_runtime_panic(message, length, site, trace) : (void)0)\n"
+         ? truss_runtime_panic(message, length, site, trace) : (void)0)\n"
     | Release ->
         "#define TRUSS_UNREACHABLE() __builtin_unreachable()\n\
          #define TRUSS_FAIL_OBLIGATION_WHEN(condition, message, length, site, trace) \
@@ -296,7 +296,7 @@ let render_file env (profile : Profile.t) ~resolve_position (fragments : (fragme
   List.iter
     (fun site ->
       Buffer.add_string buffer
-        (Printf.sprintf "extern const struct t_site %s;\n" (C_runtime.render_site_symbol site)))
+        (Printf.sprintf "extern const struct truss_site %s;\n" (C_runtime.render_site_symbol site)))
     (List.sort_uniq compare
        (List.concat_map (fun ((fragment : fragment), _) -> fragment.sites) fragments));
   List.iter
@@ -347,7 +347,7 @@ let render_sites_file ~resolve_position:resolve fragments =
   in
   let file_symbols =
     List.mapi
-      (fun index file -> (file, Printf.sprintf "t_file_%d" index))
+      (fun index file -> (file, Printf.sprintf "truss_file_%d" index))
       (List.sort_uniq String.compare
          (List.map (fun (_, (position : position)) -> position.file) positions))
   in
@@ -360,7 +360,7 @@ let render_sites_file ~resolve_position:resolve fragments =
           file_symbols
     @ List.map
         (fun (site, (position : position)) ->
-          Printf.sprintf "const struct t_site %s = { %s, %d, %d, %d };\n"
+          Printf.sprintf "const struct truss_site %s = { %s, %d, %d, %d };\n"
             (C_runtime.render_site_symbol site)
             (List.assoc position.file file_symbols)
             (String.length position.file) position.line position.column)

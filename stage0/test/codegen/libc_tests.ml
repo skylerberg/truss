@@ -123,7 +123,7 @@ let () =
           }
       in
       let c = Emit_c.For_testing.render_c fragment in
-      if not (String.includes ~affix:"t_runtime_panic(" c) then
+      if not (String.includes ~affix:"truss_runtime_panic(" c) then
         Codegen_support.fail "the call does not stop the program:\n%s" c;
       if String.includes ~affix:"proc_pidpath(" c then
         Codegen_support.fail "the function is called:\n%s" c);
