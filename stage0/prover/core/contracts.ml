@@ -183,12 +183,3 @@ let find_resource (cost : Mir.cost) ~locals : Costs.resource option =
         (Locals.find_opt (Core_local local) locals)
   | Calls (Capability path) -> Some (Calls (Capability path))
   | Calls (Capability_method (path, name)) -> Some (Calls (Capability_method (path, name)))
-
-let find_comparison_operator (comparison : Core.comparison) =
-  match comparison with
-  | Equal -> Some "="
-  | Less -> Some "<"
-  | Less_equal -> Some "<="
-  | Greater -> Some ">"
-  | Greater_equal -> Some ">="
-  | Not_equal -> None
