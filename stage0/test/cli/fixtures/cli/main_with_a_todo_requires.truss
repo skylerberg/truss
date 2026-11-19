@@ -1,0 +1,10 @@
+fn main(arguments: List[String]) -> ExitCode {
+  let _ = f(1)
+  ExitCode.success
+}
+
+fn f(value: Int64) -> Int64
+  requires todo
+{
+  value
+}

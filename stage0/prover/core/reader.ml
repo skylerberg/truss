@@ -655,8 +655,9 @@ let refresh_place context frame ty (place : State.passed_place) =
   frame
 
 let record_todo (context : State.context) (frame : State.frame) location =
-  if context.proving then begin
-    context.holes <- (context.home, location) :: context.holes;
+  if frame.is_ghost then begin
+    if not (List.mem (context.home, location) context.holes) then
+      context.holes <- (context.home, location) :: context.holes;
     context.unfinished <- frame.condition :: context.unfinished
   end
 
@@ -1521,6 +1522,7 @@ let read_formula context (frame : State.frame) (formula : Mir.formula) ~argument
       aliases = Locals.empty;
       slices = Locals.empty;
       lends = Locals.empty;
+      is_ghost = true;
     }
   in
   let inside =
@@ -1535,8 +1537,10 @@ let read_formula context (frame : State.frame) (formula : Mir.formula) ~argument
         inside formula.parameters arguments
   in
   Facts.run_in_source context frame.source (fun () ->
-      let after, term = read_value context inside run formula.value in
-      ({ frame with spent = after.spent }, term))
+      match read_block context inside run formula.value with
+      | Some (after, term) -> ({ frame with spent = after.spent }, term)
+      | None when Types.equal formula.type_ Types.bool -> (frame, Logic.Boolean true)
+      | None -> (frame, Facts.arrive context frame "unfinished" formula.type_))
 
 let read_body context start ~(lambdas : Mir.body array) (body : Mir.body) =
   let run = make_run ~locals:body.locals ~lambdas in

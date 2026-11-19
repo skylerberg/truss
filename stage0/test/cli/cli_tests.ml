@@ -722,8 +722,20 @@ let () =
       let root = make_package [ ("main.truss", Fixtures.Cli.main_with_a_todo_proof) ] in
       let status, output = run_truss [ "build"; "-C"; root ] in
       if status <> 1 then fail "did not refuse";
-      if not (String.includes ~affix:"main.truss:3:5: `todo` in a proof can be reached" output) then
-        fail "%s" output)
+      if
+        not
+          (String.includes ~affix:"main.truss:3:5: `todo` in a proof or a contract can be reached"
+             output)
+      then fail "%s" output);
+  test "build refuses a program that can reach a hole in a contract" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.main_with_a_todo_requires) ] in
+      let status, output = run_truss [ "build"; "-C"; root ] in
+      if status <> 1 then fail "did not refuse";
+      if
+        not
+          (String.includes ~affix:"main.truss:7:12: `todo` in a proof or a contract can be reached"
+             output)
+      then fail "%s" output)
 
 let encode_report_record kind fields =
   let payload = Buffer.create 32 in

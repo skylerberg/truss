@@ -1241,6 +1241,17 @@ let () =
       let text = Fixtures.Prover.theorem_of_todo in
       expect_proven text;
       if count_holes text <> 1 then Harness.fail "%d holes" (count_holes text));
+  Harness.test "a todo in a contract is a hole where it is written and where it is relied on"
+    (fun () ->
+      List.iter
+        (fun (text, holes) ->
+          expect_proven text;
+          if count_holes text <> holes then Harness.fail "%d holes" (count_holes text))
+        [
+          (Fixtures.Prover.todo_requires_with_a_caller, 2);
+          (Fixtures.Prover.todo_ensures_with_a_caller, 3);
+          (Fixtures.Prover.positive_with_a_todo_invariant, 2);
+        ]);
   Harness.test "a todo in a proof block leaves the rest of its path to it" (fun () ->
       let text = Fixtures.Prover.proof_block_of_todo in
       expect_proven text;

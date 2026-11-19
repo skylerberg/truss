@@ -1180,6 +1180,8 @@ let () =
       expect_one_diagnostic Fixtures.Infer.proof_block_assigning_a_var "types.not_in_specification");
   Harness.test "a proof block cannot return" (fun () ->
       expect_one_diagnostic Fixtures.Infer.proof_block_returning "types.not_in_specification");
+  Harness.test "unreachable is not part of a formula" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.requires_unreachable "types.not_in_specification");
   Harness.test "a quantifier's body in code cannot return" (fun () ->
       expect_one_diagnostic Fixtures.Infer.quantifier_returning_in_a_body
         "types.not_in_specification");

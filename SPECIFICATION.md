@@ -2454,6 +2454,8 @@ an invariant, a law, or a proof.
   `requires`, and each index is in bounds. `&&`, `||`, `==>`, and `if` read
   left to right, so the right side can rely on the left.
 - `==` is the type's `Equal`, and `identical(a, b)` is identity, for any type.
+- A specification is read as a formula, not run: it holds no `return`,
+  `break`, `continue`, `?`, `var`, loop, or `unreachable`.
 
 | Form | Meaning |
 |---|---|
@@ -2521,9 +2523,11 @@ public opaque type Session = todo
   definition.
 - Code with a `todo` is type-checked and proven, and callers are checked
   against the signature of an unfinished function.
-- A release build refuses a program whose `main` can reach a `todo`. In a
-  development build, a `todo` that runs stops the program and reports its
-  position.
+- A `todo` in a specification is a hole: on the paths through it, the
+  specification is neither proven nor assumed.
+- A release build refuses a program whose `main` can reach a `todo`, in its
+  code or its specifications. In a development build, a `todo` that runs
+  stops the program and reports its position.
 - A type defined as `todo` can be named, but its contents cannot be used.
 
 ## Debug output

@@ -1,0 +1,10 @@
+fn f(value: Int64) -> Int64
+  ensures todo
+  ensures result == todo
+{
+  value
+}
+
+fn g() -> Int64 {
+  f(1)
+}
