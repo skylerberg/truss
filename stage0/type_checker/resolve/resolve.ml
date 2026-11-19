@@ -191,9 +191,9 @@ let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : S
        (fun seen (item : Syntax.path Syntax.item) ->
          let span = Source.make_span item.base item.stop in
          let used_module = Names.resolve_used_module lookups ~from:module_ item.value in
-         let last = Names.extract_last_name used_module in
-         if Names.is_restricted_module ~from:module_ used_module then
-           report Intrinsic_import span Names.restricted_module_message
+         let last = Names.Scope.extract_last_name used_module in
+         if Names.Scope.is_restricted_module ~from:module_ used_module then
+           report Intrinsic_import span Names.Scope.restricted_module_message
          else if not (Names.is_visible_module lookups ~from:module_ used_module) then
            report Unknown_module span
              (Printf.sprintf "No module `%s` exists." (Path.show_module used_module))

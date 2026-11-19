@@ -35,8 +35,8 @@ let list_components program root =
     ~list_successors:(list_references program) [ root ]
 
 let derive_component_keys program ~read_known_key component =
-  Backend.derive_test_keys
-    ~read_lowered:(fun item -> Backend.For_testing.make_lowered (lookup program item))
+  Lowering.derive_test_keys
+    ~read_lowered:(fun item -> Lowering.Compiled (lookup program item))
     ~read_known_key component
 
 let derive_test_key program root =

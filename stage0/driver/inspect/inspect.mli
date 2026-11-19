@@ -1,4 +1,22 @@
-module References = References
+module References : sig
+  type target = References.target = Definition of Path.t | Module of Path.module_
+  type occurrence = References.occurrence = { span : Source.Definition_span.t; target : target }
+
+  val list_occurrences :
+    path:Path.t ->
+    Source.Definition_span.t array ->
+    Syntax.definition ->
+    Resolve.resolved ->
+    Infer.tables option ->
+    occurrence list
+
+  val list_uses :
+    resolve_module:(Syntax.path -> Path.module_) ->
+    Syntax.path Syntax.item list ->
+    (Path.module_ * Source.span) list
+
+  val is_named_by : Path.t -> target -> bool
+end
 
 type unfinished = {
   keyword : [ `Todo | `Echo ];

@@ -633,7 +633,7 @@ let () =
       Codegen_support.expect_int ~expected:(180 + 6 + 32) (String.length left);
       if left = right then Codegen_support.fail "two long names give one symbol")
 
-let intrinsic_types : Backend.For_testing.Intrinsics.types =
+let intrinsic_types : Lowering.For_testing.Intrinsics.types =
   { uint64 = Codegen_support.uint64; string_slice = Codegen_support.named "StringSlice" }
 
 let build_entry build_body : Codegen_support.program_fragment =
@@ -647,7 +647,7 @@ let build_entry build_body : Codegen_support.program_fragment =
 
 let operate builder ?destination ?(type_arguments = [ Codegen_support.int32 ]) ?value_arguments
     operation arguments =
-  Backend.For_testing.Intrinsics.lower ?value_arguments
+  Lowering.For_testing.Intrinsics.lower ?value_arguments
     (Codegen_support.make_shape_env ())
     builder intrinsic_types operation ~type_arguments arguments ~destination
     ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
@@ -885,7 +885,7 @@ let () =
       in
       let view_ty = Storage.make_view_type Codegen_support.int32 in
       let operate builder ?destination operation arguments =
-        Backend.For_testing.Intrinsics.lower
+        Lowering.For_testing.Intrinsics.lower
           ~value_arguments:[ Z.of_int 3 ]
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
@@ -971,7 +971,7 @@ let () =
         Ground.make_builtin Array ~arguments:[ Type Codegen_support.int32; Value (Z.of_int 3) ]
       in
       let operate builder ?destination operation arguments =
-        Backend.For_testing.Intrinsics.lower
+        Lowering.For_testing.Intrinsics.lower
           ~value_arguments:[ Z.of_int 3 ]
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
@@ -1096,7 +1096,7 @@ let () =
   Codegen_support.test "a storage is shortened in place and keeps its room" (fun () ->
       let storage_ty = Storage.make_storage_type Codegen_support.uint8 in
       let operate_checked builder ?destination operation arguments =
-        Backend.For_testing.Intrinsics.lower
+        Lowering.For_testing.Intrinsics.lower
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
           ~destination
@@ -1170,7 +1170,7 @@ let () =
       let view_ty = Storage.make_view_type Codegen_support.uint8 in
       let operate_checked builder ?destination operation arguments =
         ignore
-          (Backend.For_testing.Intrinsics.lower
+          (Lowering.For_testing.Intrinsics.lower
              (Codegen_support.make_shape_env ())
              builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
              ~destination

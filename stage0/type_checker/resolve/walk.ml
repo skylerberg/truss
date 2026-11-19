@@ -151,7 +151,7 @@ let resolve_module_names state (first : Syntax.name) (rest : Syntax.name list) =
     (lookup_current_names state).used_imports <-
       first.text :: (lookup_current_names state).used_imports;
   begin match
-    Names.lookup_module state.lookups ~from:state.key.module_
+    Names.Scope.lookup_module state.lookups ~from:state.key.module_
       ~imports:(state.lookups.list_imports state.key)
       first.text
       (List.map (fun (name : Syntax.name) -> name.text) rest)
@@ -162,7 +162,7 @@ let resolve_module_names state (first : Syntax.name) (rest : Syntax.name list) =
   | Restricted_module ->
       make_failure
         (add_diagnostic state Intrinsic_import (read_span state first.id)
-           Names.restricted_module_message)
+           Names.Scope.restricted_module_message)
   | Ambiguous_module (imported, package) ->
       make_failure
         (add_diagnostic state Ambiguous_module (read_span state first.id)
@@ -177,8 +177,8 @@ let resolve_module_names state (first : Syntax.name) (rest : Syntax.name list) =
   end
 
 let find_in_module state module_ (name : Syntax.name) ~types =
-  let is_kind = if types then Names.is_type_kind else Names.is_value_kind in
-  match Names.lookup_in state.lookups ~from:state.key.module_ module_ name.text ~is_kind with
+  let is_kind = if types then Names.Scope.is_type_kind else Names.Scope.is_value_kind in
+  match Names.Scope.lookup_in state.lookups ~from:state.key.module_ module_ name.text ~is_kind with
   | Visible (item, path) ->
       set_target state name (Definition (item.kind, path));
       Some (path, item)
@@ -193,8 +193,9 @@ let find_in_module state module_ (name : Syntax.name) ~types =
         List.filter_map
           (fun (item : Names.entry) ->
             if
-              (if types then Names.is_type_kind item.kind else Names.is_value_kind item.kind)
-              && Names.is_visible ~from:state.key.module_ module_ item.visibility
+              (if types then Names.Scope.is_type_kind item.kind
+               else Names.Scope.is_value_kind item.kind)
+              && Names.Scope.is_visible ~from:state.key.module_ module_ item.visibility
             then Some item.name
             else None)
           (state.lookups.list_entries module_)
@@ -205,7 +206,8 @@ let find_in_module state module_ (name : Syntax.name) ~types =
 let list_type_candidates state scope =
   List.map fst (String_map.bindings scope.types)
   @ List.filter_map
-      (fun (item : Names.entry) -> if Names.is_type_kind item.kind then Some item.name else None)
+      (fun (item : Names.entry) ->
+        if Names.Scope.is_type_kind item.kind then Some item.name else None)
       (state.lookups.list_entries state.key.module_)
   @ List.map fst Prelude.types
 
@@ -220,7 +222,7 @@ let resolve_type_name state scope ?(variants = false) (path : Syntax.path) =
       match String_map.find_opt text scope.types with
       | Some parameter -> set_target state path.last parameter
       | None -> (
-          match Names.find_bare_type state.lookups ~from:state.key.module_ text with
+          match Names.Scope.find_bare_type state.lookups ~from:state.key.module_ text with
           | Some (item, found) -> set_target state path.last (Definition (item.kind, found))
           | None -> (
               match if variants then Prelude.find_variant text else None with
@@ -382,7 +384,7 @@ and resolve_local_value state scope (name : Syntax.name) =
                    text)))
       else
         begin match find_module_item state text with
-        | Some item when Names.is_value_kind item.kind ->
+        | Some item when Names.Scope.is_value_kind item.kind ->
             set_target state name
               (Definition (item.kind, Top { module_ = state.key.module_; name = text }))
         | _ ->
@@ -405,7 +407,7 @@ and resolve_local_value state scope (name : Syntax.name) =
                 (List.map fst (String_map.bindings scope.values)
                 @ List.filter_map
                     (fun (item : Names.entry) ->
-                      if Names.is_value_kind item.kind then Some item.name else None)
+                      if Names.Scope.is_value_kind item.kind then Some item.name else None)
                     (state.lookups.list_entries state.key.module_))
         end
 
@@ -433,7 +435,7 @@ and find_specification_function state scope name =
     (not (String_map.mem name scope.values))
     &&
     match find_module_item state name with
-    | Some item -> not (Names.is_value_kind item.kind)
+    | Some item -> not (Names.Scope.is_value_kind item.kind)
     | None -> true
   in
   let specification_function =
@@ -821,7 +823,7 @@ let find_shadowed_type state scope text =
   if String_map.mem text scope.types then Some "a generic parameter here"
   else
     match find_module_item state text with
-    | Some item when Names.is_type_kind item.kind ->
+    | Some item when Names.Scope.is_type_kind item.kind ->
         Some (Names.show_kind (Names.convert_named item.kind) ^ " of this module")
     | _ -> if List.mem text Prelude.names then Some "a name in the prelude" else None
 
@@ -1017,6 +1019,24 @@ let list_field_names (fields_ : Syntax.field list) =
       match field.kind with Field_declaration { name; _ } -> Some name.text | Field_error -> None)
     fields_
 
+let find_law_parameters lookups (trait : Path.t) law =
+  match Names.find_definition lookups trait with
+  | Some (_, { kind = Trait { members; _ }; _ }) ->
+      List.find_map
+        (fun (member : Syntax.trait_member Syntax.node) ->
+          match member.kind with
+          | Law written_law when written_law.name.text = law ->
+              Some
+                (List.filter_map
+                   (fun (parameter : Syntax.parameter) ->
+                     match parameter.kind with
+                     | Named_parameter { name; _ } -> Some name.text
+                     | Self_parameter _ | Parameter_error -> None)
+                   written_law.parameters)
+          | _ -> None)
+        members
+  | _ -> None
+
 let resolve_inherited scope ~(owner : Path.t) (generics : Syntax.generic_parameter list) =
   List.fold_left
     (fun scope (generic : Syntax.generic_parameter) ->
@@ -1169,7 +1189,7 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
         let law_parameters =
           match (lookup_current_names state).names.(trait_.path.last.id) with
           | Some (Definition (Trait, trait)) ->
-              Option.value ~default:[] (Names.find_law_parameters state.lookups trait law.text)
+              Option.value ~default:[] (find_law_parameters state.lookups trait law.text)
           | _ -> []
         in
         let values =
