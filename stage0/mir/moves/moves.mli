@@ -1,13 +1,13 @@
 type path = { local : Mir.local; projections : Mir.projection list }
 
-val path_of_place : Mir.place -> path option
+val find_place_path : Mir.place -> path option
 val is_inside : outer:path -> path -> bool
 
 type t
 
 val analyse :
-  ?passed:(Mir.local -> Types.mode option) ->
-  ?moving:(Types.ty -> bool) ->
+  ?find_passed:(Mir.local -> Types.mode option) ->
+  ?is_moving:(Types.ty -> bool) ->
   tracks:(path -> bool) ->
   Mir.Graph.body ->
   t
@@ -41,7 +41,7 @@ val list_moved_at : t -> state -> path -> Core.origin list
 type status = Holds | Empty | Maybe
 
 val find_status : t -> state -> path -> status option
-val may_be_empty : t -> state -> path -> path option
+val find_possibly_empty : t -> state -> path -> path option
 val list_inside : t -> path -> path list
 val list_flagged : t -> path list
 val list_changed : t -> before:state -> after:state -> (path * bool) list

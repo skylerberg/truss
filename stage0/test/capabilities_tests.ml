@@ -1,28 +1,97 @@
 let check packages =
-  Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ] (Support.database packages)
+  Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
+    (Support.make_database packages)
 
-let one_diagnostic = Support.one_diagnostic ~check
-let fine text = Support.no_diagnostics ~check [ ("app::main", text) ]
+let expect_one_diagnostic = Support.expect_one_diagnostic ~check
+let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
+
+let list_core_expressions text ~of_function =
+  let module_ = Support.parse_module "app::main" in
+  (Support.collect_core_nodes
+     (Support.setup [ ("app::main", text) ])
+     { module_; path = Top { module_; name = of_function }; ordinal = 0 })
+    .expressions
+
+let expect_not_available text ~message =
+  match check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main") with
+  | [ diagnostic ]
+    when Diagnostic.Code.name diagnostic.code = "capabilities.not_available"
+         && diagnostic.message = message ->
+      ()
+  | reported ->
+      Harness.fail "expected %S, got [%s]" message
+        (String.concat "; "
+           (List.map
+              (fun (diagnostic : Diagnostic.t) ->
+                Diagnostic.Code.name diagnostic.code ^ " " ^ diagnostic.message)
+              reported))
 
 let () =
-  Harness.test "a capability call needs its capability" (fun () ->
-      one_diagnostic Fixtures.Capabilities.clock_call_without_uses "capabilities.not_available");
+  Harness.test "a call in a capability's impl declares the capability on the impl" (fun () ->
+      expect_not_available Fixtures.Capabilities.greeter_impl_calling_panic
+        ~message:
+          "This call uses `Panic`, which is not available here. Declare it with `uses Panic` on \
+           the `impl`.");
+  Harness.test "a call in an impl declares the capability in the set its trait's method uses"
+    (fun () ->
+      expect_not_available Fixtures.Capabilities.countdown_cursor_calling_panic
+        ~message:
+          "This call uses `Panic`, which is not available here. Declare it with `capability Uses = \
+           Panic` in the `impl`.";
+      expect_not_available Fixtures.Capabilities.countdown_cursor_using_random_calling_panic
+        ~message:
+          "This call uses `Panic`, which is not available here. Declare it with `Panic` in the \
+           `impl`'s `capability Uses`.");
+  Harness.test "a call in an impl declares a capability its trait's method allows on the method"
+    (fun () ->
+      expect_not_available Fixtures.Capabilities.describe_impl_omitting_the_clock_its_trait_declares
+        ~message:
+          "This call uses `Clock`, which is not available here. Declare it with `uses Clock`, or \
+           `provide` an implementation.";
+      expect_not_available Fixtures.Capabilities.countdown_cursor_using_panic_without_naming_its_set
+        ~message:
+          "This call uses `Panic`, which is not available here. Declare it with `uses Panic`.");
+  Harness.test "a call in an impl adds the capability to its set and names the set on the method"
+    (fun () ->
+      expect_not_available
+        Fixtures.Capabilities.countdown_cursor_calling_panic_without_naming_its_set
+        ~message:
+          "This call uses `Panic`, which is not available here. Declare it with `capability Uses = \
+           Panic` in the `impl` and `uses Self.Uses` on the method.");
+  Harness.test "a call in an impl of a trait that fixes its method's capabilities can only provide"
+    (fun () ->
+      expect_not_available Fixtures.Capabilities.describe_impl_calling_clock
+        ~message:
+          "This call uses `Clock`, but `describe` can use only the capabilities `Describe` \
+           declares for it. Provide an implementation with `provide`.";
+      expect_not_available Fixtures.Capabilities.describe_impl_calling_panic
+        ~message:
+          "This call uses `Panic`, but `describe` can use only the capabilities `Describe` \
+           declares for it.");
+  Harness.test "a provided implementation's capabilities are declared as a call's are" (fun () ->
+      expect_not_available Fixtures.Capabilities.provide_of_a_greeter_using_clock
+        ~message:
+          "This implementation uses `Clock`, which is not available here. Declare it with `uses \
+           Clock`, or `provide` an implementation.")
+
+let () =
+  Harness.test "a capability call needs its capability, which it may declare or provide" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.clock_call_without_uses
+        "capabilities.not_available"
+        ~says:
+          "This call uses `Clock`, which is not available here. Declare it with `uses Clock`, or \
+           `provide` an implementation.");
+  Harness.test "a call that uses Panic can only declare it, since nothing can provide Panic"
+    (fun () ->
+      expect_one_diagnostic "fn f() {\n  Panic.crash(\"no\")\n}\n" "capabilities.not_available"
+        ~says:"This call uses `Panic`, which is not available here. Declare it with `uses Panic`.");
   Harness.test "a function that declares a capability may call it" (fun () ->
-      fine Fixtures.Capabilities.clock_call_using_clock);
+      expect_fine Fixtures.Capabilities.clock_call_using_clock);
   Harness.test "a call to a function with uses needs its capabilities" (fun () ->
-      one_diagnostic Fixtures.Capabilities.call_of_stamp "capabilities.not_available");
+      expect_one_diagnostic Fixtures.Capabilities.call_of_stamp "capabilities.not_available");
   Harness.test "provide makes a capability available in its block" (fun () ->
-      fine Fixtures.Capabilities.provide_of_a_fixed_clock);
+      expect_fine Fixtures.Capabilities.provide_of_a_fixed_clock);
   Harness.test "provide records each capability's impl with its generic arguments" (fun () ->
-      let text = Fixtures.Capabilities.provide_of_a_generic_fixed_clock in
-      let packages = Support.setup [ ("app::main", text) ] in
-      let key : Resolve.Names.key =
-        {
-          module_ = Support.module_of "app::main";
-          path = Top { module_ = Support.module_of "app::main"; name = "f" };
-          ordinal = 0;
-        }
-      in
       match
         List.filter_map
           (fun (node : Core.expression) ->
@@ -33,51 +102,140 @@ let () =
                      (fun (implementation : Core.implementation) -> implementation.provides)
                      implementations)
             | _ -> None)
-          (Support.core_nodes packages key).expressions
+          (list_core_expressions Fixtures.Capabilities.provide_of_a_generic_fixed_clock
+             ~of_function:"f")
       with
-      | [ [ [ { capability; impl = Impl _; arguments = [ (_, Type tag) ] } ] ] ]
-        when Path.equal capability (Support.top "standard::capabilities" "Clock")
-             && Types.show tag = "Bool" ->
+      | [ [ [ { capability; impl = Impl _; arguments } ] ] ]
+        when Path.equal capability (Support.make_top_path "standard::capabilities" "Clock")
+             &&
+             match Types.For_testing.list_arguments arguments with
+             | [ (_, Type tag) ] -> Types.show tag = "Bool"
+             | _ -> false ->
           ()
       | _ -> Harness.fail "not recorded");
   Harness.test "a specification may not use Panic" (fun () ->
-      one_diagnostic Fixtures.Capabilities.ensures_calling_checked_using_panic
+      expect_one_diagnostic Fixtures.Capabilities.ensures_calling_checked_using_panic
         "capabilities.not_available");
   Harness.test "a specification cannot use the function's capabilities" (fun () ->
-      one_diagnostic Fixtures.Capabilities.ensures_calling_stamp "capabilities.not_available");
+      expect_one_diagnostic Fixtures.Capabilities.ensures_calling_stamp "capabilities.not_available");
   Harness.test "a loop invariant cannot use the function's capabilities" (fun () ->
-      one_diagnostic Fixtures.Capabilities.loop_invariant_calling_stamp "capabilities.not_available");
-  Harness.test "a type's invariant may use no capability" (fun () ->
-      one_diagnostic Fixtures.Capabilities.invariant_calling_stamp "capabilities.not_available");
-  Harness.test "a law may use no capability" (fun () ->
-      one_diagnostic Fixtures.Capabilities.law_calling_stamp "capabilities.not_available");
-  Harness.test "a parallel branch has only Panic" (fun () ->
-      one_diagnostic Fixtures.Capabilities.clock_call_in_a_parallel_branch
+      expect_one_diagnostic Fixtures.Capabilities.loop_invariant_calling_stamp
         "capabilities.not_available");
+  Harness.test "a type's invariant may use no capability" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.invariant_calling_stamp
+        "capabilities.not_available");
+  Harness.test "a law may use no capability" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.law_calling_stamp "capabilities.not_available");
   Harness.test "a lambda's uses must fit the function type it is passed as" (fun () ->
-      one_diagnostic Fixtures.Capabilities.lambda_using_clock_passed_as_plain
+      expect_one_diagnostic Fixtures.Capabilities.lambda_using_clock_passed_as_plain
         "capabilities.lambda_uses");
   Harness.test "a loop over a value needs the capabilities that its `element` uses" (fun () ->
-      one_diagnostic Fixtures.Capabilities.loop_over_a_ticker_without_uses
+      expect_one_diagnostic Fixtures.Capabilities.loop_over_a_ticker_without_uses
         "capabilities.not_available");
   Harness.test "a loop over a value can use the function's capabilities" (fun () ->
-      fine Fixtures.Capabilities.loop_over_a_ticker_using_clock);
+      expect_fine Fixtures.Capabilities.loop_over_a_ticker_using_clock);
   Harness.test
     "a capability parameter is instantiated with the capabilities of the lambdas passed for it"
-    (fun () -> fine Fixtures.Capabilities.for_each_of_lambdas);
+    (fun () -> expect_fine Fixtures.Capabilities.for_each_of_lambdas);
   Harness.test "a trait's method solves its capability parameter as a function does" (fun () ->
       let visitor = Fixtures.Capabilities.visitor in
       let call =
         "{\n  numbers.visit_all(fn(value) {\n    let _ = Clock.now()\n    let _ = value\n  })\n}\n"
       in
-      fine (visitor ^ "fn f(numbers: Numbers)\n  uses Clock\n" ^ call);
-      one_diagnostic (visitor ^ "fn f(numbers: Numbers)\n" ^ call) "capabilities.not_available");
-  Harness.test "a capability parameter's set must be available at the call" (fun () ->
-      one_diagnostic Fixtures.Capabilities.for_each_of_a_lambda_using_clock
+      expect_fine (visitor ^ "fn f(numbers: Numbers)\n  uses Clock\n" ^ call);
+      expect_one_diagnostic
+        (visitor ^ "fn f(numbers: Numbers)\n" ^ call)
         "capabilities.not_available");
-  Harness.test "a test has Panic" (fun () -> fine Fixtures.Capabilities.test_calling_panic);
+  Harness.test "a capability parameter's set must be available at the call" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.for_each_of_a_lambda_using_clock
+        "capabilities.not_available");
+  Harness.test "a test that crashes declares Panic, as a function does" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.test_calling_panic "capabilities.not_available";
+      expect_fine Fixtures.Capabilities.test_declaring_panic);
+  Harness.test "a test that runs a loop without a measure declares RunForever, as a function does"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.test_running_a_loop_without_a_measure
+        "capabilities.not_available";
+      expect_fine Fixtures.Capabilities.test_declaring_run_forever);
   Harness.test "a place whose implementation mutates state is provided mut" (fun () ->
-      one_diagnostic Fixtures.Capabilities.counter_provided_as_tally "capabilities.provide_mode")
+      expect_one_diagnostic Fixtures.Capabilities.counter_provided_as_tally
+        "capabilities.provide_mode")
+
+let first_or_crash = Fixtures.Capabilities.first_or_crash
+let run = first_or_crash ^ Fixtures.Capabilities.run
+
+let () =
+  let declare_panic =
+    "This call uses `Panic`, which is not available here. Declare it with `uses Panic`."
+  in
+  let only_panic description =
+    Printf.sprintf
+      "This call uses `Clock`, but %s may use no capability except `Panic` and `RunForever`, even \
+       one that is available outside it. Parallel calls of one implementation could race."
+      description
+  in
+  Harness.test "a call in a parallel branch needs Panic as the same call outside the branch does"
+    (fun () ->
+      expect_one_diagnostic
+        (first_or_crash ^ Fixtures.Capabilities.first_or_crash_in_a_parallel_branch_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("first_or_crash(left)", 1);
+      expect_fine
+        (first_or_crash ^ Fixtures.Capabilities.first_or_crash_in_a_parallel_branch_using_panic));
+  Harness.test "a call in a nested parallel branch needs the function's Panic" (fun () ->
+      expect_one_diagnostic
+        (first_or_crash
+       ^ Fixtures.Capabilities.first_or_crash_in_a_nested_parallel_branch_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("first_or_crash(left)", 1));
+  Harness.test "a call in a parallel for needs Panic as the same call outside the loop does"
+    (fun () ->
+      expect_one_diagnostic
+        (first_or_crash ^ Fixtures.Capabilities.first_or_crash_in_a_parallel_for_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("first_or_crash(row)", 1);
+      expect_fine
+        (first_or_crash ^ Fixtures.Capabilities.first_or_crash_in_a_parallel_for_using_panic));
+  Harness.test "a parallel branch may use no capability but Panic, even one its function declares"
+    (fun () ->
+      expect_not_available Fixtures.Capabilities.clock_call_in_a_parallel_branch
+        ~message:(only_panic "a `parallel` branch");
+      expect_not_available Fixtures.Capabilities.clock_call_in_a_parallel_for
+        ~message:(only_panic "a `parallel for`"));
+  Harness.test "a capability that a parallel branch may not use is reported once, by the branch"
+    (fun () ->
+      expect_not_available Fixtures.Capabilities.clock_call_in_a_parallel_branch_without_uses
+        ~message:(only_panic "a `parallel` branch"));
+  Harness.test "a parallel branch may use a capability that it provides" (fun () ->
+      expect_fine Fixtures.Capabilities.provide_of_a_fixed_clock_in_a_parallel_branch);
+  Harness.test "a parallel branch in a lambda uses Panic only where the lambda's type allows it"
+    (fun () ->
+      expect_one_diagnostic
+        (first_or_crash
+       ^ Fixtures.Capabilities.lambda_with_a_crashing_parallel_branch_passed_as_plain)
+        "capabilities.lambda_uses"
+        ~says:"This lambda uses `Panic`, which the function type it is passed as does not allow."
+        ~at:("fn() {", 1));
+  Harness.test "a parallel branch in a lambda adds Panic to the lambda's inferred uses" (fun () ->
+      expect_one_diagnostic
+        (run ^ Fixtures.Capabilities.run_of_a_lambda_with_a_crashing_parallel_branch_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("run(fn", 1);
+      let text =
+        run ^ Fixtures.Capabilities.run_of_a_lambda_with_a_crashing_parallel_branch_using_panic
+      in
+      expect_fine text;
+      match
+        List.filter_map
+          (fun (node : Core.expression) ->
+            match (node.kind, node.type_) with
+            | Lambda _, Function { uses; _ } ->
+                Some (Types.has_capability (Types.Capability (Well_known.make_path Panic)) uses)
+            | _ -> None)
+          (list_core_expressions text ~of_function:"f")
+      with
+      | [ true ] -> ()
+      | _ -> Harness.fail "the lambda's inferred uses leave out Panic");
+  Harness.test "a call in a parallel branch needs the Panic of a lambda passed to it" (fun () ->
+      expect_one_diagnostic
+        (run ^ Fixtures.Capabilities.run_of_a_crashing_lambda_in_a_parallel_branch_without_uses)
+        "capabilities.not_available" ~says:declare_panic ~at:("run(fn", 1))
 
 let () =
   Harness.test "a dependency can use only the capabilities that it is granted" (fun () ->
@@ -92,7 +250,7 @@ let () =
         Support.with_dependencies packages { owner = None; name = "app" }
           [ { package = { owner = None; name = "clock_library" }; capabilities = [] } ]
       in
-      match Support.codes (check packages (Support.file_of "app::main")) with
+      match Support.list_codes (check packages (Support.parse_file "app::main")) with
       | [ "capabilities.not_granted" ] -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual))
 
@@ -102,7 +260,7 @@ let () =
       Support.with_dependencies (Support.setup files) { owner = None; name = "app" }
         [ { package = { owner = None; name = "clock_library" }; capabilities = granted } ]
     in
-    Support.codes (check packages (Support.file_of "app::main"))
+    Support.list_codes (check packages (Support.parse_file "app::main"))
   in
   let library = ("clock_library::time", Fixtures.Capabilities.library_time) in
   Harness.test "a dependency's trait method can use only the granted capabilities" (fun () ->
@@ -111,7 +269,9 @@ let () =
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
   Harness.test "a dependency's trait method can use a granted capability" (fun () ->
       match
-        with_grant [ ("app::main", Fixtures.Capabilities.wall_stamp_call); library ] [ "Clock" ]
+        with_grant
+          [ ("app::main", Fixtures.Capabilities.wall_stamp_call); library ]
+          [ Grant.Prelude "Clock" ]
       with
       | [] -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
@@ -127,18 +287,19 @@ let () =
 
 let () =
   Harness.test "an implementation of a capability may not call the capability directly" (fun () ->
-      one_diagnostic Fixtures.Capabilities.notes_impl_calling_notes "capabilities.not_available");
+      expect_one_diagnostic Fixtures.Capabilities.notes_impl_calling_notes
+        "capabilities.not_available");
   Harness.test "an implementation of a capability may hand the capability to a function value"
-    (fun () -> fine Fixtures.Capabilities.notes_impl_handing_notes_to_a_function)
+    (fun () -> expect_fine Fixtures.Capabilities.notes_impl_handing_notes_to_a_function)
 
-let codes_with_grants files grants =
+let list_codes_with_grants files grants =
   let packages =
     Support.with_dependencies
       (Support.setup ~dependencies:[ ("plugins", "framework") ] files)
       { owner = None; name = "app" }
       (List.map (fun (package, capabilities) -> { Manifest.package; capabilities }) grants)
   in
-  (packages, Support.codes (check packages (Support.file_of "app::main")))
+  (packages, Support.list_codes (check packages (Support.parse_file "app::main")))
 
 let expect_codes ~expected (_, actual) =
   if actual <> expected then
@@ -154,87 +315,95 @@ let () =
   Harness.test "a function value of a dependency's function can use only the granted capabilities"
     (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
-        (codes_with_grants [ value; time ] [ ({ owner = None; name = "clock_library" }, []) ]));
+        (list_codes_with_grants [ value; time ] [ ({ owner = None; name = "clock_library" }, []) ]));
   Harness.test "a function value of a dependency's function can use a granted capability" (fun () ->
       expect_codes ~expected:[]
-        (codes_with_grants [ value; time ]
-           [ ({ owner = None; name = "clock_library" }, [ "Clock" ]) ]));
+        (list_codes_with_grants [ value; time ]
+           [ ({ owner = None; name = "clock_library" }, [ Grant.Prelude "Clock" ]) ]));
   let bound = ("app::main", Fixtures.Capabilities.bound) in
   Harness.test
     "an impl of a dependency that satisfies a bound can use only the granted capabilities"
     (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
-        (codes_with_grants [ bound; sources; timers ]
+        (list_codes_with_grants [ bound; sources; timers ]
            [
-             ({ owner = None; name = "framework" }, [ "Clock" ]);
+             ({ owner = None; name = "framework" }, [ Grant.Prelude "Clock" ]);
              ({ owner = None; name = "plugins" }, []);
            ]));
   Harness.test "an impl of a dependency that satisfies a bound can use a granted capability"
     (fun () ->
       expect_codes ~expected:[]
-        (codes_with_grants [ bound; sources; timers ]
+        (list_codes_with_grants [ bound; sources; timers ]
            [
-             ({ owner = None; name = "framework" }, [ "Clock" ]);
-             ({ owner = None; name = "plugins" }, [ "Clock" ]);
+             ({ owner = None; name = "framework" }, [ Grant.Prelude "Clock" ]);
+             ({ owner = None; name = "plugins" }, [ Grant.Prelude "Clock" ]);
            ]));
   Harness.test "an impl of a dependency behind an `any` value can use only the granted capabilities"
     (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
-        (codes_with_grants
+        (list_codes_with_grants
            [ ("app::main", Fixtures.Capabilities.any_timer_from_plugins); sources; timers ]
            [
-             ({ owner = None; name = "framework" }, [ "Clock" ]);
+             ({ owner = None; name = "framework" }, [ Grant.Prelude "Clock" ]);
              ({ owner = None; name = "plugins" }, []);
            ]))
 
 let ledger = ("store::ledger", Fixtures.Capabilities.ledger_ledger)
 let pays = ("app::main", Fixtures.Capabilities.pays)
 
-let problems packages =
+let list_problems packages =
   let app : Path.package = { owner = None; name = "app" } in
-  let database = Support.database packages in
-  Database.check database [ app ];
+  let database = Support.make_database packages in
   Database.list_manifest_problems database app
 
 let () =
   Harness.test "a grant names a capability outside the prelude by its full path" (fun () ->
       expect_codes ~expected:[]
-        (codes_with_grants [ pays; ledger ]
-           [ ({ owner = None; name = "store" }, [ "store::ledger::Ledger" ]) ]));
+        (list_codes_with_grants [ pays; ledger ]
+           [
+             ( { owner = None; name = "store" },
+               [ Grant.Full_path { module_names = [ "store"; "ledger" ]; name = "Ledger" } ] );
+           ]));
   Harness.test "a capability's name alone grants only one of the prelude" (fun () ->
       let packages, actual =
-        codes_with_grants [ pays; ledger ] [ ({ owner = None; name = "store" }, [ "Ledger" ]) ]
+        list_codes_with_grants [ pays; ledger ]
+          [ ({ owner = None; name = "store" }, [ Grant.Prelude "Ledger" ]) ]
       in
       expect_codes ~expected:[ "capabilities.not_granted" ] (packages, actual);
-      match problems packages with
-      | [ Not_a_capability { dependency = { Path.owner = None; name = "store" }; name = "Ledger" } ]
-        ->
+      match list_problems packages with
+      | [
+       Not_a_capability
+         { dependency = { Path.owner = None; name = "store" }; capability = Prelude "Ledger" };
+      ] ->
           ()
       | _ -> Harness.fail "the grant is not reported");
   Harness.test "a grant covers only the capabilities it names" (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
-        (codes_with_grants [ pays; ledger ]
-           [ ({ Path.owner = None; name = "store" }, [ "Clock" ]) ]))
+        (list_codes_with_grants [ pays; ledger ]
+           [ ({ Path.owner = None; name = "store" }, [ Grant.Prelude "Clock" ]) ]))
 
 let () =
   Harness.test "a dependency that nothing in the package names is reported" (fun () ->
       let packages, _ =
-        codes_with_grants
+        list_codes_with_grants
           [ ("app::main", Fixtures.Capabilities.function_returning_one); time ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
-      match problems packages with
+      match list_problems packages with
       | [ Unused_dependency { Path.owner = None; name = "clock_library" } ] -> ()
       | _ -> Harness.fail "not reported");
   Harness.test "a dependency named in a path is used" (fun () ->
       let packages, _ =
-        codes_with_grants [ pays; ledger ]
-          [ ({ Path.owner = None; name = "store" }, [ "store::ledger::Ledger" ]) ]
+        list_codes_with_grants [ pays; ledger ]
+          [
+            ( { Path.owner = None; name = "store" },
+              [ Grant.Full_path { module_names = [ "store"; "ledger" ]; name = "Ledger" } ] );
+          ]
       in
-      if problems packages <> [] then Harness.fail "reported");
+      if list_problems packages <> [] then Harness.fail "reported");
   Harness.test "a dependency whose trait's method is called with a dot is used" (fun () ->
       let packages, actual =
-        codes_with_grants
+        list_codes_with_grants
           [
             ("app::main", Fixtures.Capabilities.call_of_doubled);
             ("shapes::sizes", Fixtures.Capabilities.doubled_trait_for_int64);
@@ -242,30 +411,30 @@ let () =
           [ ({ Path.owner = None; name = "shapes" }, []) ]
       in
       expect_codes ~expected:[] (packages, actual);
-      if problems packages <> [] then Harness.fail "reported");
+      if list_problems packages <> [] then Harness.fail "reported");
   Harness.test "an unused dependency is reported for every kind of definition in the package"
     (fun () ->
       let packages, actual =
-        codes_with_grants
+        list_codes_with_grants
           [ ("app::main", Fixtures.Capabilities.package_of_every_kind_of_definition); time ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
       expect_codes ~expected:[] (packages, actual);
-      match problems packages with
+      match list_problems packages with
       | [ Unused_dependency { Path.owner = None; name = "clock_library" } ] -> ()
       | _ -> Harness.fail "not reported");
   Harness.test "an unused dependency is not reported for a package with an error" (fun () ->
       let packages, _ =
-        codes_with_grants
+        list_codes_with_grants
           [ ("app::main", Fixtures.Capabilities.function_returning_true_as_int64); time ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
-      if problems packages <> [] then Harness.fail "reported");
+      if list_problems packages <> [] then Harness.fail "reported");
   Harness.test "a dependency that only a test uses is left out of the code's packages" (fun () ->
       let shapes : Path.package = { owner = None; name = "shapes" }
       and limits : Path.package = { owner = None; name = "limits" } in
       let packages, actual =
-        codes_with_grants
+        list_codes_with_grants
           [
             ("app::main", Fixtures.Capabilities.doubling_with_a_test_of_bounds);
             ("shapes::sizes", Fixtures.Capabilities.doubled_trait_for_int64);
@@ -274,9 +443,9 @@ let () =
           [ (shapes, []); (limits, []) ]
       in
       expect_codes ~expected:[] (packages, actual);
-      if problems packages <> [] then Harness.fail "a dependency is reported unused";
+      if list_problems packages <> [] then Harness.fail "a dependency is reported unused";
       match
-        Database.list_code_packages (Support.database packages) { owner = None; name = "app" }
+        Database.find_code_packages (Support.make_database packages) { owner = None; name = "app" }
       with
       | Some code_packages when List.mem shapes code_packages && not (List.mem limits code_packages)
         ->
@@ -289,213 +458,448 @@ let ticks = Fixtures.Capabilities.ticks
 
 let () =
   Harness.test "a function that uses a capability is not passed as one that uses none" (fun () ->
-      one_diagnostic (ticks ^ Fixtures.Capabilities.tick_passed_without_uses) "types.mismatch");
+      expect_one_diagnostic
+        (ticks ^ Fixtures.Capabilities.tick_passed_without_uses)
+        "types.mismatch");
   Harness.test "a function that uses a capability is not bound as one that uses none" (fun () ->
-      one_diagnostic (ticks ^ Fixtures.Capabilities.tick_bound_without_uses) "types.mismatch");
+      expect_one_diagnostic (ticks ^ Fixtures.Capabilities.tick_bound_without_uses) "types.mismatch");
   Harness.test "a function that uses a capability is not returned as one that uses none" (fun () ->
-      one_diagnostic (ticks ^ Fixtures.Capabilities.tick_returned_without_uses) "types.mismatch");
+      expect_one_diagnostic
+        (ticks ^ Fixtures.Capabilities.tick_returned_without_uses)
+        "types.mismatch");
   Harness.test "a function that uses a capability is not stored as one that uses none" (fun () ->
-      one_diagnostic (ticks ^ Fixtures.Capabilities.tick_stored_without_uses) "types.mismatch");
+      expect_one_diagnostic
+        (ticks ^ Fixtures.Capabilities.tick_stored_without_uses)
+        "types.mismatch");
   Harness.test "a function that uses a capability is not assigned as one that uses none" (fun () ->
-      one_diagnostic (ticks ^ Fixtures.Capabilities.tick_assigned_without_uses) "types.mismatch");
+      expect_one_diagnostic
+        (ticks ^ Fixtures.Capabilities.tick_assigned_without_uses)
+        "types.mismatch");
   Harness.test "function types inside a type must list the same capabilities" (fun () ->
-      one_diagnostic (ticks ^ Fixtures.Capabilities.list_of_actions_losing_uses) "types.mismatch");
+      expect_one_diagnostic
+        (ticks ^ Fixtures.Capabilities.list_of_actions_losing_uses)
+        "types.mismatch");
   Harness.test "a function that uses nothing is passed as one that may use a capability" (fun () ->
-      fine (ticks ^ Fixtures.Capabilities.still_bound_using_clock));
+      expect_fine (ticks ^ Fixtures.Capabilities.still_bound_using_clock));
   Harness.test "a branch's function meets the function type expected of the branches" (fun () ->
-      fine (ticks ^ Fixtures.Capabilities.branches_of_functions_using_clock));
+      expect_fine (ticks ^ Fixtures.Capabilities.branches_of_functions_using_clock));
   Harness.test "a branch's function that uses a capability is not bound as one that uses none"
     (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (ticks ^ Fixtures.Capabilities.branches_of_functions_bound_without_uses)
         "types.mismatch");
   Harness.test
     "a capability parameter is instantiated with the capabilities of the functions passed for it"
-    (fun () -> fine (ticks ^ Fixtures.Capabilities.each_time_of_tick_using_clock));
+    (fun () -> expect_fine (ticks ^ Fixtures.Capabilities.each_time_of_tick_using_clock));
   Harness.test "the capabilities of a function passed for a capability parameter must be available"
     (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (ticks ^ Fixtures.Capabilities.each_time_of_tick_without_uses)
         "capabilities.not_available");
   Harness.test
     "a capability parameter is instantiated with the capabilities of a parenthesized lambda"
     (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (ticks ^ Fixtures.Capabilities.each_time_of_a_parenthesized_lambda)
         "capabilities.not_available");
   Harness.test
     "a capability parameter is instantiated with the capabilities of a function in a branch"
     (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (ticks ^ Fixtures.Capabilities.each_time_of_a_branch_of_functions)
         "capabilities.not_available");
   Harness.test
     "a capability parameter is instantiated with the capabilities of a lambda in a branch"
     (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (ticks ^ Fixtures.Capabilities.each_time_of_a_branch_with_a_lambda)
         "capabilities.not_available");
   Harness.test "a function passes its own capability parameter on" (fun () ->
-      fine (ticks ^ Fixtures.Capabilities.passes_on_its_own_capability));
+      expect_fine (ticks ^ Fixtures.Capabilities.passes_on_its_own_capability));
   Harness.test "a function's own capability parameter is rigid in a lambda's type" (fun () ->
-      one_diagnostic Fixtures.Capabilities.own_capability_given_a_lambda_using_clock
+      expect_one_diagnostic Fixtures.Capabilities.own_capability_given_a_lambda_using_a_ticker
         "capabilities.lambda_uses");
   Harness.test "a function's own capability parameter is rigid in a binding's type" (fun () ->
-      one_diagnostic (ticks ^ Fixtures.Capabilities.own_capability_given_tick) "types.mismatch");
+      expect_one_diagnostic
+        (ticks ^ Fixtures.Capabilities.own_capability_given_tick)
+        "types.mismatch");
   Harness.test "a function calls itself with its own capability parameter" (fun () ->
-      fine Fixtures.Capabilities.repeat_passing_its_own_capability);
+      expect_fine Fixtures.Capabilities.repeat_passing_its_own_capability);
   Harness.test "a recursive call needs the capabilities that it passes for its capability parameter"
     (fun () ->
       let repeat uses =
         ticks
-        ^ "fn repeat[capability Mine](action: (fn() -> Instant uses Mine), again: Bool) -> Instant\n\
-          \  uses " ^ uses
+        ^ "fn repeat(action: (fn() -> Instant uses generic Mine), again: Bool) -> Instant\n  uses "
+        ^ uses
         ^ "\n{\n  if again {\n    repeat(tick, again: false)\n  } else {\n    action()\n  }\n}\n"
       in
-      one_diagnostic (repeat "Mine") "capabilities.not_available";
-      fine (repeat "Mine, Clock"))
+      expect_one_diagnostic (repeat "generic Mine") "capabilities.not_available";
+      expect_fine (repeat "generic Mine, Clock"))
 
 let later = ticks ^ Fixtures.Capabilities.later
 
 let () =
   Harness.test "a call's result has the capabilities that were passed for the capability parameter"
     (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (later ^ Fixtures.Capabilities.later_of_tick_without_uses)
         "capabilities.not_available";
-      fine (later ^ Fixtures.Capabilities.later_of_tick_using_clock);
-      fine (later ^ Fixtures.Capabilities.later_of_still));
+      expect_fine (later ^ Fixtures.Capabilities.later_of_tick_using_clock);
+      expect_fine (later ^ Fixtures.Capabilities.later_of_still));
   Harness.test "a call's result must fit the function type that it is checked against" (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (later ^ Fixtures.Capabilities.later_of_tick_bound_without_uses)
         "types.mismatch";
-      fine (later ^ Fixtures.Capabilities.later_of_tick_bound_using_clock));
+      expect_fine (later ^ Fixtures.Capabilities.later_of_tick_bound_using_clock));
+  Harness.test
+    "a call needs no capability that it passes for a capability parameter its callee only returns"
+    (fun () ->
+      let chosen = Fixtures.Capabilities.chosen in
+      expect_fine (chosen ^ Fixtures.Capabilities.chosen_kept_without_calling);
+      expect_one_diagnostic
+        (chosen ^ Fixtures.Capabilities.chosen_called_without_its_capability)
+        "capabilities.not_available");
   Harness.test "a call's result may widen to more `uses` without requiring them at the call"
-    (fun () -> fine (ticks ^ Fixtures.Capabilities.checked_result_widened));
+    (fun () -> expect_fine (ticks ^ Fixtures.Capabilities.checked_result_widened));
   Harness.test "a variable that is assigned a second function has the capabilities of both"
     (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (later ^ Fixtures.Capabilities.held_still_then_tick_without_uses)
         "capabilities.not_available";
-      fine (later ^ Fixtures.Capabilities.held_still_then_tick_using_clock));
-  Harness.test "a type and a trait cannot take a capability parameter" (fun () ->
-      one_diagnostic "type Holder[capability Granted](action: (fn() -> Instant uses Granted))\n"
-        "types.misplaced_capability_parameter";
-      one_diagnostic Fixtures.Capabilities.trait_with_a_capability_parameter
-        "types.misplaced_capability_parameter";
-      fine "type Holder(action: (fn() -> Instant uses Clock))\n")
-
-let widenings text =
-  List.length
-    (List.filter
-       (fun (node : Core.expression) ->
-         match node.kind with Convert { conversion = Widen; _ } -> true | _ -> false)
-       (Support.first_core_nodes text).expressions)
+      expect_fine (later ^ Fixtures.Capabilities.held_still_then_tick_using_clock));
+  Harness.test "only a function, a method, or a theorem names a capability parameter" (fun () ->
+      expect_one_diagnostic "type Holder(action: (fn() -> Instant uses generic Granted))\n"
+        "resolve.unknown_name";
+      expect_one_diagnostic "test \"t\" uses generic Granted {}\n" "resolve.unknown_name";
+      expect_fine "type Holder(action: (fn() -> Instant uses Clock))\n")
 
 let () =
-  Harness.test "a function bound as a type that promises a cost leaves the cost to the prover"
-    (fun () ->
-      match widenings Fixtures.Capabilities.forever_bound_as_finite with
-      | 1 -> ()
-      | actual -> Harness.fail "%d conversions" actual);
-  Harness.test "a function that promises to end can be bound as one that does" (fun () ->
-      fine Fixtures.Capabilities.quick_bound_as_finite);
+  Harness.test "a function that may run forever is not bound as one that terminates" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.forever_bound_as_a_function_that_terminates
+        "types.mismatch" ~says:"Expected `fn() -> Int64`, found `(fn() -> Int64 uses RunForever)`.");
+  Harness.test "a function with a time clause is bound as a function type with the clause"
+    (fun () -> expect_fine Fixtures.Capabilities.quick_bound_with_its_time_clause);
   Harness.test "function types inside a type must promise the same costs" (fun () ->
-      one_diagnostic Fixtures.Capabilities.list_of_actions_gaining_a_cost "types.mismatch")
+      expect_one_diagnostic Fixtures.Capabilities.list_of_actions_gaining_a_cost "types.mismatch"
+        ~says:"Expected `List[(fn() -> Int64 cost time O(...))]`, found `List[fn() -> Int64]`.")
 
 let readings = Fixtures.Capabilities.readings
 
 let () =
   Harness.test "the next of a cursor needs the capabilities in its `Uses`" (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (readings ^ Fixtures.Capabilities.next_of_readings_without_uses)
         "capabilities.not_available");
   Harness.test "the next of a cursor is fine where its `Uses` are available" (fun () ->
-      fine (readings ^ Fixtures.Capabilities.next_of_readings_using_meter));
+      expect_fine (readings ^ Fixtures.Capabilities.next_of_readings_using_meter));
   Harness.test "a for loop over a cursor needs the capabilities in the cursor's `Uses`" (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (readings ^ Fixtures.Capabilities.for_loop_over_readings)
         "capabilities.not_available");
   Harness.test "a cursor whose `next` uses a capability meets a Cursor bound" (fun () ->
-      fine (readings ^ Fixtures.Capabilities.pull_from_readings_using_meter));
+      expect_fine (readings ^ Fixtures.Capabilities.pull_from_readings_using_meter));
   Harness.test "a generic function that advances a cursor needs the cursor's capabilities"
-    (fun () -> one_diagnostic Fixtures.Capabilities.pull_without_uses "capabilities.not_available");
+    (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.pull_without_uses "capabilities.not_available");
   Harness.test "a call that passes a cursor needs the capabilities in the cursor's `Uses`"
     (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (readings ^ Fixtures.Capabilities.pull_from_readings)
         "capabilities.not_available");
   Harness.test "a method that Cursor provides needs the capabilities in the cursor's `Uses`"
     (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (readings ^ Fixtures.Capabilities.count_of_readings_without_uses)
         "capabilities.not_available");
   Harness.test "a method that Cursor provides runs where the cursor's `Uses` are available"
-    (fun () -> fine (readings ^ Fixtures.Capabilities.count_of_readings_using_meter));
+    (fun () -> expect_fine (readings ^ Fixtures.Capabilities.count_of_readings_using_meter));
   Harness.test "a cursor whose `next` uses no capability needs none" (fun () ->
-      fine Fixtures.Capabilities.counted_cursor);
+      expect_fine Fixtures.Capabilities.counted_cursor);
   Harness.test "a cursor whose `next` uses a capability cannot be an any value" (fun () ->
-      one_diagnostic (readings ^ Fixtures.Capabilities.any_cursor_of_readings) "types.no_impl")
+      expect_one_diagnostic
+        (readings ^ Fixtures.Capabilities.any_cursor_of_readings)
+        "types.no_impl")
 
 let feed = Fixtures.Capabilities.feed
 
 let () =
   Harness.test "an impl that leaves out an associated capability set has the empty set" (fun () ->
-      fine (feed ^ Fixtures.Capabilities.drain_of_a_counter));
+      expect_fine (feed ^ Fixtures.Capabilities.pull_once_of_a_counter));
   Harness.test "a call needs the capabilities of the set that the impl defines" (fun () ->
-      one_diagnostic
-        (feed ^ Fixtures.Capabilities.drain_of_a_gauge_without_uses)
+      expect_one_diagnostic
+        (feed ^ Fixtures.Capabilities.pull_once_of_a_gauge_without_uses)
         "capabilities.not_available");
   Harness.test "a provided method needs the capabilities of the set that the impl defines"
     (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (feed ^ Fixtures.Capabilities.skip_of_a_gauge_without_uses)
         "capabilities.not_available");
   Harness.test "a set defined from a parameter's set is the argument's set" (fun () ->
-      fine (feed ^ Fixtures.Capabilities.twice_of_a_gauge_using_meter);
-      one_diagnostic
+      expect_fine (feed ^ Fixtures.Capabilities.twice_of_a_gauge_using_meter);
+      expect_one_diagnostic
         (feed ^ Fixtures.Capabilities.twice_of_twice_of_a_gauge_without_uses)
         "capabilities.not_available");
   Harness.test "a method of an impl can use only the set that the impl defines" (fun () ->
-      one_diagnostic (feed ^ Fixtures.Capabilities.greedy_feed_pull_using_meter) "types.impl_uses");
+      expect_one_diagnostic
+        (feed ^ Fixtures.Capabilities.greedy_feed_pull_using_meter)
+        "types.impl_uses");
   Harness.test "an impl defines only a set that its trait declares, and only once" (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (feed ^ Fixtures.Capabilities.impl_defining_an_undeclared_set)
         "types.extra_member";
-      one_diagnostic (feed ^ Fixtures.Capabilities.impl_defining_uses_twice) "types.extra_member");
+      expect_one_diagnostic
+        (feed ^ Fixtures.Capabilities.impl_defining_uses_twice)
+        "types.extra_member");
   Harness.test "a set cannot be defined from itself" (fun () ->
-      one_diagnostic
+      expect_one_diagnostic
         (feed ^ Fixtures.Capabilities.set_defined_as_itself)
         "types.unknown_associated_capability");
   Harness.test "an associated capability set is of a trait that declares it" (fun () ->
-      one_diagnostic Fixtures.Capabilities.trait_using_an_undeclared_set
+      expect_one_diagnostic Fixtures.Capabilities.trait_using_an_undeclared_set
         "types.unknown_associated_capability";
-      one_diagnostic Fixtures.Capabilities.unbounded_parameters_set
+      expect_one_diagnostic Fixtures.Capabilities.unbounded_parameters_set
         "types.unknown_associated_capability";
-      one_diagnostic Fixtures.Capabilities.self_set_outside_a_trait "types.misplaced_self_type";
-      one_diagnostic Fixtures.Capabilities.set_of_an_unknown_name "resolve.not_a_generic_parameter";
-      one_diagnostic Fixtures.Capabilities.set_of_a_capability_parameter
-        "types.unknown_associated_type");
+      expect_one_diagnostic Fixtures.Capabilities.self_set_outside_a_trait
+        "types.misplaced_self_type";
+      expect_one_diagnostic Fixtures.Capabilities.set_of_an_unknown_name
+        "resolve.not_a_generic_parameter";
+      expect_one_diagnostic Fixtures.Capabilities.set_of_a_capability_parameter
+        "resolve.not_a_generic_parameter");
   Harness.test "a trait's methods can use a set that a required trait declares" (fun () ->
       let rewind = Fixtures.Capabilities.rewind in
-      fine (feed ^ rewind ^ Fixtures.Capabilities.rewind_of_a_gauge_using_meter);
-      one_diagnostic
+      expect_fine (feed ^ rewind ^ Fixtures.Capabilities.rewind_of_a_gauge_using_meter);
+      expect_one_diagnostic
         (feed ^ rewind ^ Fixtures.Capabilities.back_twice_of_a_gauge_without_uses)
         "capabilities.not_available");
   Harness.test "a function type can use an associated capability set" (fun () ->
       let apply = Fixtures.Capabilities.apply in
-      fine (feed ^ apply ^ Fixtures.Capabilities.apply_to_a_gauge);
-      one_diagnostic
+      expect_fine (feed ^ apply ^ Fixtures.Capabilities.apply_to_a_gauge);
+      expect_one_diagnostic
         (feed ^ apply ^ Fixtures.Capabilities.apply_to_a_counter_using_meter)
         "capabilities.lambda_uses");
   Harness.test "a capability parameter adds to an associated capability set" (fun () ->
       let folded = Fixtures.Capabilities.folded in
-      fine (feed ^ folded ^ Fixtures.Capabilities.fold_of_a_counter_using_meter);
-      one_diagnostic
+      expect_fine (feed ^ folded ^ Fixtures.Capabilities.fold_of_a_counter_using_meter);
+      expect_one_diagnostic
         (feed ^ folded ^ Fixtures.Capabilities.fold_of_a_gauge_without_uses)
         "capabilities.not_available");
   Harness.test "an any value hides only a type whose associated capability sets are empty"
     (fun () ->
-      fine (feed ^ Fixtures.Capabilities.any_feed_of_a_counter);
-      one_diagnostic (feed ^ Fixtures.Capabilities.any_feed_of_a_gauge) "types.no_impl";
-      one_diagnostic (feed ^ Fixtures.Capabilities.any_feed_of_a_generic_source) "types.no_impl")
+      expect_fine (feed ^ Fixtures.Capabilities.any_feed_of_a_counter);
+      expect_one_diagnostic (feed ^ Fixtures.Capabilities.any_feed_of_a_gauge) "types.no_impl";
+      expect_one_diagnostic
+        (feed ^ Fixtures.Capabilities.any_feed_of_a_generic_source)
+        "types.no_impl")
+
+let () =
+  Harness.test "an impl cannot take only the callbacks that terminate where its trait takes any"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.spin_passed_to_an_impl_whose_callback_drops_run_forever
+        "types.signature_mismatch" ~at:("each", 2));
+  Harness.test "a capability's implementation cannot take only the callbacks that terminate"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.spin_passed_to_a_capability_whose_impl_drops_run_forever
+        "types.signature_mismatch" ~at:("run", 2));
+  Harness.test "an impl cannot take only the callbacks that use no capability" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.note_passed_to_an_impl_whose_callback_drops_the_journal
+        "types.signature_mismatch" ~at:("each", 2));
+  Harness.test "an impl cannot swap the capability parameters of its trait's callbacks" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities
+        .note_passed_to_an_impl_that_swaps_the_capability_parameters_of_its_callbacks
+        "types.signature_mismatch" ~at:("each", 2))
+
+let () =
+  let loop_needs_run_forever =
+    "This loop has no measure, so it uses `RunForever`, which is not available here. Declare it \
+     with `uses RunForever`, or give the loop a `decreases` clause"
+  in
+  Harness.test "a loop without a measure uses RunForever" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.while_loop_without_a_measure
+        "capabilities.not_available" ~says:(loop_needs_run_forever ^ ".") ~at:("while", 1);
+      expect_one_diagnostic Fixtures.Capabilities.cursor_loop_without_a_measure
+        "capabilities.not_available"
+        ~says:(loop_needs_run_forever ^ ", or `Countdown` a `remaining(self) -> UInt64` method.")
+        ~at:("for value", 1));
+  Harness.test "a function that uses RunForever holds a loop without a measure" (fun () ->
+      expect_fine Fixtures.Capabilities.while_loop_without_a_measure_using_run_forever);
+  Harness.test "a call of a function that uses RunForever uses it" (fun () ->
+      expect_not_available Fixtures.Capabilities.call_of_a_function_that_runs_forever
+        ~message:
+          "This call uses `RunForever`, which is not available here. Declare it with `uses \
+           RunForever`.");
+  Harness.test "a parallel branch runs forever where its function does" (fun () ->
+      expect_fine
+        Fixtures.Capabilities.while_loop_without_a_measure_in_a_parallel_branch_using_run_forever;
+      expect_one_diagnostic Fixtures.Capabilities.while_loop_without_a_measure_in_a_parallel_branch
+        "capabilities.not_available" ~says:(loop_needs_run_forever ^ "."));
+  Harness.test "a specification calls no function that uses RunForever" (fun () ->
+      expect_not_available Fixtures.Capabilities.specification_calling_a_function_that_runs_forever
+        ~message:"This call uses `RunForever`, but a specification must terminate.")
+
+let () =
+  Harness.test "a lambda that loops without a measure uses RunForever" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.lambda_looping_without_a_measure_bound_as_using_no_capability
+        "capabilities.lambda_uses"
+        ~says:
+          "This lambda uses `RunForever`, which the function type it is passed as does not allow."
+        ~notes:[ ("This loop has no measure, so it uses `RunForever`.", ("while", 1)) ];
+      expect_one_diagnostic
+        Fixtures.Capabilities.lambda_looping_without_a_measure_bound_as_using_a_capability_parameter
+        "capabilities.lambda_uses"
+        ~says:
+          "This lambda uses `RunForever`, which the function type it is passed as does not allow.");
+  Harness.test "a function type that names a capability parameter takes a lambda that terminates"
+    (fun () ->
+      expect_fine
+        Fixtures.Capabilities
+        .lambda_calling_the_enclosing_functions_callback_bound_as_using_a_capability_parameter;
+      expect_fine Fixtures.Capabilities.lambda_calling_slow_bound_as_using_a_capability_parameter);
+  Harness.test
+    "a function type that names a capability parameter and RunForever takes a lambda that calls \
+     the parameter's callback and loops" (fun () ->
+      expect_fine
+        Fixtures.Capabilities
+        .lambda_calling_the_enclosing_functions_callback_then_looping_bound_as_using_run_forever);
+  Harness.test
+    "a function type that names a capability parameter takes no function that runs forever"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.forever_bound_as_using_a_capability_parameter
+        "types.mismatch"
+        ~says:"Expected `(fn() uses generic Mine)`, found `(fn() uses RunForever)`."
+        ~at:("forever", 2));
+  Harness.test "a call passes RunForever on through a capability parameter" (fun () ->
+      expect_not_available
+        (ticks
+       ^ Fixtures.Capabilities
+         .each_time_of_a_lambda_calling_the_enclosing_functions_callback_then_looping)
+        ~message:
+          "This call uses `RunForever`, which is not available here. Declare it with `uses \
+           RunForever`.";
+      let text =
+        ticks
+        ^ Fixtures.Capabilities
+          .each_time_of_a_lambda_calling_the_enclosing_functions_callback_then_looping_using_run_forever
+      in
+      expect_fine text;
+      match
+        List.filter_map
+          (fun (node : Core.expression) ->
+            match (node.kind, node.type_) with
+            | Lambda _, Function { uses; _ } -> Some (Types.list_capabilities uses)
+            | _ -> None)
+          (list_core_expressions text ~of_function:"run")
+      with
+      | [ [ Capability path; Capability_parameter { name = "Mine"; _ } ] ]
+        when Well_known.is Run_forever path ->
+          ()
+      | _ -> Harness.fail "the lambda's type does not hold `RunForever` and `Mine` alone");
+  Harness.test
+    "a binding without a type holds a function that uses a capability parameter and RunForever"
+    (fun () ->
+      expect_fine
+        (later
+       ^ Fixtures.Capabilities
+         .later_of_a_lambda_calling_the_enclosing_functions_callback_then_looping_bound_without_a_type
+        ))
+
+let () =
+  Harness.test "an impl's method runs forever only where its trait's method allows it" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.impl_method_running_forever_where_its_trait_does_not "types.impl_uses"
+        ~says:"`step` can use only the capabilities `Step` declares for it.");
+  Harness.test "an associated capability set carries RunForever from an impl" (fun () ->
+      expect_fine Fixtures.Capabilities.cursor_running_forever_through_its_capability_set);
+  Harness.test "a function with a time clause can crash through Panic.crash and expect" (fun () ->
+      expect_fine Fixtures.Capabilities.crash_and_expect_in_functions_with_a_time_clause);
+  Harness.test "a function that uses RunForever has no time clause" (fun () ->
+      List.iter
+        (fun text ->
+          expect_one_diagnostic text "types.unbounded_time"
+            ~says:
+              "A function that uses `RunForever` may run forever, so no `time` clause bounds it.")
+        [
+          Fixtures.Capabilities.time_clause_on_a_function_that_runs_forever;
+          Fixtures.Capabilities.time_clause_on_a_function_type_that_runs_forever;
+        ]);
+  Harness.test "a bound names the time of no callback that may run forever" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.time_of_a_callback_that_runs_forever
+        "types.unbounded_time"
+        ~says:
+          "`work` may run forever, since its type uses `RunForever`, so `time(work)` has no value."
+        ~at:("time(work)", 1))
+
+let () =
+  let spawning = Fixtures.Infer.tally ^ Fixtures.Capabilities.spawning_cursor in
+  Harness.test
+    "a monitor needs `Tasks` where its body uses `Tasks` through the `next` of a cursor, pulled by \
+     a loop or called" (fun () ->
+      expect_one_diagnostic
+        (spawning
+       ^ Fixtures.Capabilities.spawning_cursor_pulled_under_a_tally_provided_without_tasks)
+        "capabilities.monitor_needs_tasks" ~at:("mut tally {", 1);
+      expect_one_diagnostic
+        (spawning
+       ^ Fixtures.Capabilities.next_of_a_spawning_cursor_called_under_a_tally_provided_without_tasks
+        )
+        "capabilities.monitor_needs_tasks" ~at:("mut tally {", 1));
+  Harness.test
+    "a monitor that is provided with `Tasks` holds a cursor whose `next` uses `Tasks`, pulled by a \
+     loop or called" (fun () ->
+      expect_fine
+        (spawning ^ Fixtures.Capabilities.spawning_cursor_under_a_tally_provided_with_tasks))
+
+let () =
+  let make_standard_packages files : Project.package list =
+    [
+      {
+        name = Path.standard_package;
+        dependencies = [];
+        files = List.map (fun (name, text) -> (Support.parse_file name, text)) files;
+      };
+    ]
+  in
+  let check_in_standard packages =
+    Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
+      (Support.extend_standard_library packages)
+  in
+  let expect_one_in_standard =
+    Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard::probe"
+      ~check:check_in_standard
+  in
+  let expect_fine_in_standard text =
+    match
+      check_in_standard
+        (make_standard_packages [ ("standard::probe", text) ])
+        (Support.parse_file "standard::probe")
+    with
+    | [] -> ()
+    | reported -> Harness.fail "found [%s]" (String.concat "; " (Support.list_codes reported))
+  in
+  Harness.test "a call of an intrinsic needs the capabilities that the intrinsic uses" (fun () ->
+      expect_one_in_standard Fixtures.Capabilities.shared_count_updated_without_tasks
+        "capabilities.not_available"
+        ~says:"This call uses `Tasks`, which is not available here. Declare it with `uses Tasks`"
+        ~at:("intrinsic::shared_update", 1);
+      expect_fine_in_standard Fixtures.Capabilities.shared_count_updated_using_tasks);
+  Harness.test
+    "an implementation of a capability calls an intrinsic without the capabilities that the \
+     intrinsic uses" (fun () ->
+      expect_fine_in_standard
+        Fixtures.Capabilities.shared_count_updated_by_an_implementation_of_a_capability);
+  Harness.test
+    "an intrinsic named as a value has a function type that uses the capabilities of the intrinsic"
+    (fun () ->
+      expect_one_in_standard
+        Fixtures.Capabilities.shared_key_named_as_a_value_of_a_type_without_uses "types.mismatch"
+        ~says:"found `(fn(Shared[Int64]) -> UInt64 uses Tasks)`" ~at:("intrinsic::shared_key", 1));
+  Harness.test "a monitor needs `Tasks` where its body calls an intrinsic that uses `Tasks`"
+    (fun () ->
+      expect_one_in_standard
+        ("use standard::intrinsic\n\n" ^ Fixtures.Infer.tally
+       ^ Fixtures.Capabilities.shared_count_updated_under_a_tally_provided_without_tasks)
+        "capabilities.monitor_needs_tasks" ~at:("mut tally {", 1))

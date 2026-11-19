@@ -41,29 +41,12 @@ let types =
             "Range";
             "ExitCode";
           ] );
-        ([ "text" ], [ "String"; "StringSlice"; "TextBuilder"; "FromTemplate"; "Template" ]);
-        ([ "list" ], [ "List"; "Slice" ]);
+        ([ "text" ], [ "String"; "StringSlice"; "FromTemplate"; "Template" ]);
+        ([ "list" ], [ "List"; "Slice"; "FromElements" ]);
         ([ "specification" ], [ "Sequence"; "FiniteSet"; "FiniteMap"; "Multiset" ]);
-        ([ "map" ], [ "Map" ]);
+        ([ "map" ], [ "Map"; "FromEntries" ]);
         ([ "set" ], [ "Set" ]);
-        ( [ "capabilities" ],
-          [
-            "Console";
-            "FileRead";
-            "FileWrite";
-            "NetworkClient";
-            "NetworkServer";
-            "Handles";
-            "Clock";
-            "Random";
-            "Environment";
-            "Processes";
-            "Signals";
-            "Tasks";
-            "Log";
-            "Panic";
-            "SystemError";
-          ] );
+        (Grant.prelude_capability_module.modules, Grant.prelude_capabilities @ [ "SystemError" ]);
         ([ "time" ], [ "Instant"; "Duration" ]);
         ([ "files" ], [ "Path" ]);
       ]

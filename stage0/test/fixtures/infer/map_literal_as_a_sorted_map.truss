@@ -1,0 +1,6 @@
+use standard::collections
+
+fn f() {
+  let ports: collections::SortedMap[String, Int64] = ["http": 80, "https": 443]
+  let empty: collections::SortedMap[String, Int64] = [:]
+}

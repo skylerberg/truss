@@ -140,6 +140,7 @@ capability_reference:
   | path_type { () }
   | SELF_TYPE DOT UPPER { () }
   | UPPER DOT UPPER { () }
+  | LOWER UPPER { () }
 
 cost:
   | LOWER cost_after_word { () }
@@ -243,7 +244,6 @@ generic_parameter:
   | UPPER { () }
   | UPPER COLON bound_list { () }
   | LOWER COLON type_expression { () }
-  | CAPABILITY UPPER { () }
 
 bound_list:
   | separated_nonempty_list(PLUS, path_type) { () }
@@ -488,12 +488,8 @@ argument:
   | LOWER COLON expression { () }
 
 update:
-  | update_path { () }
-  | update_path COLON expression { () }
-
-update_path:
-  | LOWER { () }
-  | update_path DOT LOWER { () }
+  | expression { () }
+  | expression COLON expression { () }
 
 primary:
   | INTEGER { () } | FLOAT { () } | STRING { () } | tagged_string { () }

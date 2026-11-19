@@ -1,0 +1,48 @@
+trait Walk {
+  fn each(self, visit: (fn(Int64) uses generic Granted))
+    uses generic Granted
+
+  fn each_finite(self, visit: (fn(Int64) uses generic Granted))
+    uses generic Granted
+
+  fn each_of[Item](self, items: List[Item], visit: (fn(Item) uses generic Granted))
+    uses generic Granted
+}
+
+type Pair(first: Int64, second: Int64)
+
+impl Walk for Pair {
+  fn each(self, visit: (fn(Int64) uses generic Granted))
+    uses generic Granted
+  {
+  }
+
+  fn each_finite(self, visit: (fn(Int64) uses generic Granted))
+    uses generic Granted
+  {
+  }
+
+  fn each_of[Item](self, items: List[Item], visit: (fn(Item) uses generic Granted))
+    uses generic Granted
+  {
+  }
+}
+
+type Single(only: Int64)
+
+impl Walk for Single {
+  fn each(self, visit: (fn(Int64) uses generic Granted))
+    uses generic Granted
+  {
+  }
+
+  fn each_finite(self, visit: (fn(Int64) uses generic Granted))
+    uses generic Granted
+  {
+  }
+
+  fn each_of[Element](self, items: List[Element], visit: (fn(Element) uses generic Granted))
+    uses generic Granted
+  {
+  }
+}

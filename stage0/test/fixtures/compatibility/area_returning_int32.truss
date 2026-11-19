@@ -1,3 +1,0 @@
-public fn area(side: Int64) -> Int32 {
-  1
-}

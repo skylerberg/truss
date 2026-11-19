@@ -6,7 +6,7 @@ let operator_module_names =
 let is_operator_module (name : Longident.t) =
   match name with Lapply _ -> false | _ -> List.mem (Longident.flatten name) operator_modules
 
-let opened_module_name (declaration : Parsetree.open_declaration) =
+let find_opened_module_name (declaration : Parsetree.open_declaration) =
   match declaration.popen_expr.pmod_desc with Pmod_ident name -> Some name.txt | _ -> None
 
 let open_item = "qualify the names this open brings into scope, and remove it"
@@ -22,7 +22,7 @@ let alias = "name the module by its path instead of this alias, and remove it"
 let is_export (name : string option) (target : Longident.t) =
   match (name, target) with Some name, Lident target -> name = target | _ -> false
 
-let rejected_names path =
+let list_rejected_names path =
   let text = In_channel.with_open_bin path In_channel.input_all in
   let lexbuf = Lexing.from_string text in
   Location.init lexbuf path;
@@ -59,7 +59,7 @@ let rejected_names path =
         (fun iterator expression ->
           match expression.pexp_desc with
           | Pexp_struct_item ({ pstr_desc = Pstr_open declaration; _ }, body) ->
-              (match opened_module_name declaration with
+              (match find_opened_module_name declaration with
               | Some name -> reject_unless_operator_module expression.pexp_loc name
               | None -> reject expression.pexp_loc local_open);
               iterator.module_expr iterator declaration.popen_expr;
@@ -108,7 +108,7 @@ let () =
       (fun path ->
         List.map
           (fun (line, message) -> Printf.sprintf "%s:%d: %s" path line message)
-          (rejected_names path))
+          (list_rejected_names path))
       (List.tl (Array.to_list Sys.argv))
   in
   List.iter print_endline failures;

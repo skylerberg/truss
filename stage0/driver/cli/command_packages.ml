@@ -12,7 +12,7 @@ let load directory =
   | Ok (snapshot, selected) ->
       let packages = List.map snd selected in
       if packages = [] && Workspace.problems snapshot = [] then
-        Outcome.cannot_run "No package in %s or any directory below it."
+        Outcome.raise_cannot_run "No package in %s or any directory below it."
           (Shown_path.show_path directory);
       (snapshot, packages)
 
@@ -27,9 +27,9 @@ let load_worktree () = load (Workspace.locate_root (fst (load_current ())))
 
 let require_one = function
   | [ package ] -> package
-  | [] -> Outcome.cannot_run "No package here."
+  | [] -> Outcome.raise_cannot_run "No package here."
   | several ->
-      Outcome.cannot_run
+      Outcome.raise_cannot_run
         "This directory contains %d packages: %s. Run the command in one package's directory."
         (List.length several)
         (String.concat ", " (List.map Path.show_package several))
@@ -37,10 +37,9 @@ let require_one = function
 let locate_directory snapshot name =
   let root = Workspace.locate_root snapshot in
   match List.find_opt (fun (_, other) -> other = name) (Workspace.list_packages snapshot) with
-  | Some ("", _) -> root
-  | Some (relative, _) -> Filename.concat root relative
+  | Some (relative, _) -> File_system.join_path root relative
   | None ->
-      Compiler_bug.bug ~stage:"Command" "%s is not a package of the project"
+      Compiler_bug.raise_bug ~stage:"Command" "%s is not a package of the project"
         (Path.show_package name)
 
 let locate_file snapshot file =
@@ -52,24 +51,24 @@ let list_modules snapshot packages =
   List.sort_uniq compare
     (List.map (fun (file : Path.file) -> file.module_) (list_files snapshot packages))
 
-let project_dependencies snapshot packages =
+let list_project_dependencies snapshot packages =
   let project_packages = List.map snd (Workspace.list_packages snapshot) in
-  let seen = Package_table.create 8 in
+  let visited = Package_table.create 8 in
   let rec visit name =
     List.iter
       (fun dependency ->
-        if List.mem dependency project_packages && not (Package_table.mem seen dependency) then begin
-          Package_table.replace seen dependency ();
+        if List.mem dependency project_packages && not (Package_table.mem visited dependency) then begin
+          Package_table.replace visited dependency ();
           visit dependency
         end)
       (Workspace.list_dependency_names snapshot name)
   in
   List.iter visit packages;
   List.filter
-    (fun name -> Package_table.mem seen name && not (List.mem name packages))
+    (fun name -> Package_table.mem visited name && not (List.mem name packages))
     project_packages
 
-let list_program_packages snapshot packages = packages @ project_dependencies snapshot packages
+let list_program_packages snapshot packages = packages @ list_project_dependencies snapshot packages
 
 let list_manifest_problems snapshot database packages =
   List.concat_map
@@ -89,27 +88,21 @@ let select_files snapshot packages paths =
         List.map
           (fun path ->
             if not (Sys.file_exists (Shown_path.normalize path)) then
-              Outcome.cannot_run "%s does not exist." (Shown_path.show_path path);
+              Outcome.raise_cannot_run "%s does not exist." (Shown_path.show_path path);
             Shown_path.resolve_real_path path)
           paths
       in
       List.filter
         (fun file ->
           let written = locate_file snapshot file in
-          List.exists
-            (fun path -> written = path || String.starts_with ~prefix:(path ^ "/") written)
-            wanted)
+          List.exists (fun path -> File_system.is_inside ~directory:path written) wanted)
         (list_files snapshot packages)
 
-let read_source snapshot packages (file : Path.file) =
-  let source = Workspace.read_source snapshot file in
-  if List.mem file.module_.package packages then
-    Source.create ~path:(Shown_path.show_path (locate_file snapshot file)) (Source.text source)
-  else source
+let show_file snapshot packages (file : Path.file) =
+  if List.mem file.module_.package packages then Shown_path.show_path (locate_file snapshot file)
+  else Path.show_file file
 
-let show_workspace_path snapshot packages workspace_path =
-  match
-    List.find_opt (fun file -> Path.show_file file = workspace_path) (list_files snapshot packages)
-  with
-  | Some file -> Shown_path.show_path (locate_file snapshot file)
-  | None -> workspace_path
+let read_source snapshot database packages file =
+  Source.create
+    ~path:(show_file snapshot packages file)
+    (Source.text (Database.read_source database file))

@@ -1,8 +1,8 @@
 type t = {
-  source : Path.file -> Source.t;
+  read_source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
   mir : Mir.lookups;
-  patterns : Resolve.Names.key -> unit;
-  must_be_disjoint : Resolve.Names.key -> (Core.origin * Core.origin) list;
-  recursion_group : Path.t -> Path.t list;
+  read_patterns : Resolve.Names.key -> unit;
+  list_must_be_disjoint : Resolve.Names.key -> (Core.origin list * Core.origin list) list;
+  list_recursion_group : Path.t -> Path.t list;
 }

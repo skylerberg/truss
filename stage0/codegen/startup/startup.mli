@@ -4,5 +4,5 @@ val render_evaluator_start : string -> string
 val render_program_start : string -> string
 
 module For_testing : sig
-  val main_calling : string -> string
+  val render_main_start : string -> string
 end

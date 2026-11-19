@@ -15,7 +15,7 @@ type ty =
   | Hole
   | Error of Diagnostic.reported
 
-and argument = Type of ty | Value of value | Capabilities of capability_set
+and argument = Type of ty | Value of value
 and value = Known of Z.t | Value_parameter of parameter | Value_variable of int
 
 and trait_reference = {
@@ -42,24 +42,19 @@ and capability =
 
 and capability_set = private capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
-
-and resource =
-  | Time
-  | Allocations
-  | Allocated_bytes
-  | Calls of { capability : Path.t; method_ : string option }
-
-and cost_bound = Finite_cost | Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
+and resource = Metric of Metric.t | Calls of { capability : Path.t; method_ : string option }
+and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
 val unit : ty
 val bool : ty
-val make_builtin : Intrinsic.builtin -> ty
+val make_builtin : ?arguments:argument list -> Intrinsic.builtin -> ty
 val make_self_parameter : Path.t -> parameter
 val is_self_parameter : parameter -> bool
 val make_named : Path.t -> ty list -> ty
 val is_builtin : Intrinsic.builtin -> ty -> bool
 val find_builtin : ty -> Intrinsic.builtin option
 val is_well_known : Well_known.t -> ty -> bool
+val find_view : ty -> ty option
 val find_integer_bits : ty -> (int * bool) option
 val find_integer_range : ty -> (Z.t * Z.t) option
 val is_integer_type : ty -> bool
@@ -70,61 +65,102 @@ val is_float_type : ty -> bool
 val make_capability_set : capability list -> capability_set
 val no_capabilities : capability_set
 val union_capabilities : capability_set -> capability_set -> capability_set
-val is_capability_subset : capability_set -> capability_set -> bool
+val run_forever : capability
+val has_capability : capability -> capability_set -> bool
+val exists_capability : (capability -> bool) -> capability_set -> bool
+val list_capabilities : capability_set -> capability list
+val built_in_capabilities : capability_set
+val is_built_in_capability : capability -> bool
+val terminates : capability_set -> bool
+val intersect_capabilities : capability_set list -> capability_set
 val subtract_capabilities : capability_set -> capability_set -> capability_set
+val is_capability_subset : capability_set -> capability_set -> bool
 
-val list_missing_capabilities :
+val compute_missing_capabilities :
   required:capability_set -> available:capability_set -> capability_set
 
-val flat_map_capabilities : (capability -> capability list) -> capability_set -> capability_set
+val replace_capabilities : (capability -> capability_set option) -> capability_set -> capability_set
 
-type substitution = (parameter * argument) list
+type substitution
 
+val no_substitution : substitution
+val is_empty_substitution : substitution -> bool
+val combine_substitutions : substitution -> substitution -> substitution
+val bind_argument : parameter -> argument -> substitution -> substitution
+val find_argument : parameter -> substitution -> argument option
+val list_type_arguments : substitution -> (parameter * ty) list
 val substitute : substitution -> ty -> ty
 val substitute_argument : substitution -> argument -> argument
 val substitute_trait : substitution -> trait_reference -> trait_reference
 val substitute_function : substitution -> function_type -> function_type
 val substitute_capabilities : substitution -> capability_set -> capability_set
+val substitute_substitution : substitution -> substitution -> substitution
+
+val map_substitution :
+  argument:(argument -> argument) ->
+  capabilities:(capability_set -> capability_set) ->
+  substitution ->
+  substitution
+
 val extract_result_type : result -> ty
 val show_mode : mode -> string
-val map : ?capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
+val map : ?map_capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
 val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
 val find_specification_only_type : ty -> ty option
-val has_capability_variable : capability_set -> bool
-val may_panic : capability_set -> bool
+val contains_capability_variable : capability_set -> bool
 val has_unsolved_capabilities : capability_set -> bool
 val equal : ty -> ty -> bool
 val is_error : ty -> bool
+val is_open_type : ty -> bool
 val contains_unsolved : ty -> bool
-val terminates : function_type -> bool
+val is_unsolved_argument : argument -> bool
 val has_same_clauses : function_type -> function_type -> bool
 val costs_imply : provided:cost list -> required:cost list -> bool
 val show : ty -> string
+val describe : ty -> string
 val show_capability : capability -> string
 val show_trait : trait_reference -> string
 val show_argument : argument -> string
+val show_capabilities : capability_set -> string
 val show_output : result -> string
 
-type generic_kind = Type_generic of trait_reference list | Value_generic | Capability_generic
+type generic_kind = Type_generic of trait_reference list | Value_generic
 type generic = { generic : parameter; kind : generic_kind }
 
 val list_generic_arguments : generic list -> argument list
+val list_capability_arguments : parameter list -> (string * capability_set) list
 val list_bounds : generic list -> parameter -> trait_reference list
 val make_substitution : generic list -> argument list -> substitution
+val make_capability_substitution : parameter list -> (string * capability_set) list -> substitution
 
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 
+val list_capture_free_parameters : parameter_info list -> string list
+val mentions_specification_only_type : parameter_info list -> result -> bool
+
 type signature = {
   generics : generic list;
+  capability_parameters : parameter list;
   receiver : (Path.receiver * ty) option;
   parameters : parameter_info list;
   output : result;
   uses : capability_set;
-  terminates : bool;
+  costs : cost list;
   specification_only : bool;
+  is_update_step : bool;
   capture_free_parameters : string list;
 }
 
+type instantiation = {
+  type_arguments : argument list;
+  capability_arguments : (string * capability_set) list;
+}
+
+val no_instantiation : instantiation
+val substitute_instantiation : substitution -> instantiation -> instantiation
+val make_signature_substitution : signature -> instantiation -> substitution
+val make_trait_substitution : generic list -> self:ty -> trait_reference -> substitution
+val map_bounds : (trait_reference list -> trait_reference list) -> generic list -> generic list
 val map_signature : (ty -> ty) -> signature -> signature
 val substitute_signature : substitution -> signature -> signature
 
@@ -175,4 +211,14 @@ type impl_interface = {
   impl_methods : (string * Path.receiver) list;
 }
 
+val is_implemented_by :
+  trait_interface -> trait_method -> name:string -> receiver:Path.receiver -> bool
+
+val find_implementing_receiver :
+  trait_interface -> impl_interface -> trait_method -> Path.receiver option
+
 type constant_interface = { constant_type : ty }
+
+module For_testing : sig
+  val list_arguments : substitution -> (parameter * argument) list
+end

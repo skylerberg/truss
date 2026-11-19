@@ -3,32 +3,22 @@ let is_public (lookups : Lookups.t) (module_ : Path.module_) name =
   | Some entry -> Resolve.Names.is_public entry.visibility
   | None -> true
 
-let is_visible_to_other_packages (lookups : Lookups.t) (path : Path.t) =
+let is_declared_public (lookups : Lookups.t) path =
+  match lookups.interface.names.find_key path with
+  | Some key -> Resolve.Names.is_public (lookups.interface.names.read_declaration key).visibility
+  | None -> true
+
+let rec is_visible_to_other_packages (lookups : Lookups.t) (path : Path.t) =
   match path with
   | Top { module_; name } -> module_ = Intrinsic.module_ || is_public lookups module_ name
-  | Method { owner = Top { module_; name }; _ }
-  | Member_constant { owner = Top { module_; name }; _ } -> (
-      is_public lookups module_ name
-      &&
-      match Resolve.Names.find_definition lookups.interface.names path with
-      | Some (_, definition) -> Resolve.Names.is_public definition.visibility
-      | None -> true)
-  | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ -> true
+  | Method { owner; _ } | Member_constant { owner; _ } ->
+      is_visible_to_other_packages lookups owner && is_declared_public lookups path
+  | Impl _ -> is_declared_public lookups path
+  | Derived _ | Test _ | Law_proof _ -> true
   | Unresolved _ -> false
 
 let is_called_from_other_packages (state : State.state) =
-  match state.lookups.interface.names.container state.key with
-  | None -> Resolve.Names.is_public state.definition.visibility
-  | Some container -> (
-      match Interface.Definition.read_interface state.lookups.interface container.path with
-      | Some (Trait_interface _) -> is_visible_to_other_packages state.lookups container.path
-      | Some (Impl_interface impl) -> (
-          is_visible_to_other_packages state.lookups impl.implements.trait
-          &&
-          match impl.for_type with
-          | Types.Named { path; _ } -> is_visible_to_other_packages state.lookups path
-          | _ -> true)
-      | _ -> false)
+  Resolve.Names.is_public (state.lookups.interface.names.read_declaration state.key).visibility
 
 let check_clauses (state : State.state) (name : Syntax.name) clauses =
   let requires_and_costs =
@@ -40,7 +30,7 @@ let check_clauses (state : State.state) (name : Syntax.name) clauses =
       clauses
   in
   if is_called_from_other_packages state && requires_and_costs <> [] then begin
-    let named id (path : Path.t) =
+    let record_name id (path : Path.t) =
       let span = State.read_span state id in
       if
         List.exists
@@ -59,11 +49,11 @@ let check_clauses (state : State.state) (name : Syntax.name) clauses =
     in
     Array.iteri
       (fun id (call : Tables.call option) ->
-        match call with Some { callee = Function { path; _ }; _ } -> named id path | _ -> ())
+        match call with Some { callee = Function { path; _ }; _ } -> record_name id path | _ -> ())
       state.tables.calls;
     Array.iteri
       (fun id (resolution : Tables.resolution option) ->
-        match resolution with Some (Global { path; _ }) -> named id path | _ -> ())
+        match resolution with Some (Global { path; _ }) -> record_name id path | _ -> ())
       state.tables.resolutions
   end
 

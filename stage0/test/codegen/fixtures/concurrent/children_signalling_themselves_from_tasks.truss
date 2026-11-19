@@ -1,0 +1,54 @@
+use standard::processes
+
+type Endings(terminated: String, piped: String)
+
+fn shown(status: processes::ExitStatus) -> String {
+  match status {
+    Exited(code) => "exited ${code}"
+    Signaled(signal) => match signal {
+      Terminate => "ended by SIGTERM".copy()
+      Other(number) => "ended by signal ${number}"
+      _ => "ended by another signal".copy()
+    }
+  }
+}
+
+fn run_script(script: StringSlice) -> String
+  uses Processes
+{
+  let command = processes::Command.new("sh")
+    .argument("-c")
+    .argument(script)
+    .output(processes::Redirect.Capture)
+  match Processes.run(command) {
+    Ok(output) => shown(output.status)
+    Err(_) => "did not start".copy()
+  }
+}
+
+fn signal_children() -> Endings
+  uses Processes
+{
+  Endings(
+    terminated: run_script("kill -TERM $$; echo survived"),
+    piped: run_script("kill -PIPE $$; echo survived"),
+  )
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes, Tasks
+{
+  var first = Endings(terminated: "".copy(), piped: "".copy())
+  var second = Endings(terminated: "".copy(), piped: "".copy())
+  concurrent {
+    {
+      first = signal_children()
+    }
+    {
+      second = signal_children()
+    }
+  }
+  Console.print_line("${first.terminated}, ${second.terminated}")
+  Console.print_line("${first.piped}, ${second.piped}")
+  ExitCode.success
+}

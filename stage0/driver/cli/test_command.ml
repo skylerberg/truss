@@ -1,32 +1,30 @@
 type test = { path : Path.t; module_ : Path.module_; name : string; file : string; line : int }
 
 let select snapshot database packages ~paths ~match_ =
-  let names = Database.make_name_lookups database packages in
+  let names = Database.make_name_lookups database in
   List.concat_map
     (fun (file : Path.file) ->
-      let source = Command_packages.read_source snapshot packages file in
+      let source = Command_packages.read_source snapshot database packages file in
       List.filter_map
         (fun (declaration : Resolve.Names.declaration) ->
-          match declaration.path with
+          match declaration.key.path with
           | Test { name; _ }
-            when declaration.ordinal = 0
+            when declaration.key.ordinal = 0
                  && match match_ with Some text -> String.includes ~affix:text name | None -> true
             ->
               let line =
-                fst
-                  (Source.compute_position source
-                     (names.place (Resolve.Names.make_key declaration)).base)
+                fst (Source.compute_position source (names.read_place declaration.key).base)
               in
               Some
                 {
-                  path = declaration.path;
+                  path = declaration.key.path;
                   module_ = file.module_;
                   name;
                   file = Source.path source;
                   line;
                 }
           | _ -> None)
-        (names.declarations_in file))
+        (names.list_declarations_in file))
     (Command_packages.select_files snapshot packages paths)
 
 let label_test test = Path.show_module test.module_ ^ " " ^ Diagnostic.quote test.name
@@ -39,22 +37,26 @@ let show_duration microseconds =
 let show_seconds microseconds = Printf.sprintf "%.1fs" (float microseconds /. 1e6)
 let read_microseconds () = int_of_float (Unix.gettimeofday () *. 1e6)
 
-let print_indented text =
+let print_indented ?(indent = 4) text =
+  let prefix = String.make indent ' ' in
   String.split_on_char '\n' text
   |> List.filter (( <> ) "")
-  |> List.iter (fun line -> Output.print_line ("    " ^ line))
+  |> List.iter (fun line -> Output.print_line (prefix ^ line))
 
-let summarize (records : Compile.record list) =
+let summarize (records : Backend.Test_report.record list) =
   let count outcome =
-    List.length (List.filter (fun (record : Compile.record) -> record.outcome = outcome) records)
+    List.length
+      (List.filter (fun (record : Backend.Test_report.record) -> record.outcome = outcome) records)
   in
-  let cached = List.length (List.filter (fun (record : Compile.record) -> record.cached) records) in
+  let cached =
+    List.length (List.filter (fun (record : Backend.Test_report.record) -> record.cached) records)
+  in
   List.filter_map
     (fun outcome ->
       match count outcome with
       | 0 -> None
       | count ->
-          let words = Compile.show_outcome outcome in
+          let words = Backend.Test_report.show_outcome outcome in
           let words = String.map (function '_' -> ' ' | character -> character) words in
           if outcome = Passed && cached > 0 then
             Some (Printf.sprintf "%d %s (%d cached)" count words cached)
@@ -64,29 +66,41 @@ let summarize (records : Compile.record list) =
 
 type timings = { check : int; build : int; tests : int; total : int }
 
-let print_report tests (records : Compile.record list) ~timings:show_timings timings =
+let print_report tests (records : Backend.Test_report.record list) ~timings:show_timings timings =
+  let is_listed (record : Backend.Test_report.record) =
+    record.outcome <> Passed || record.echo <> None
+  in
   List.iter2
-    (fun test (record : Compile.record) ->
-      if record.outcome <> Passed then begin
-        Output.printf "%s: %s\n" (label_test test) (Compile.show_outcome record.outcome);
+    (fun test (record : Backend.Test_report.record) ->
+      if is_listed record then begin
+        Output.printf "%s: %s\n" (label_test test) (Backend.Test_report.show_outcome record.outcome);
         Option.iter print_indented record.message;
-        Option.iter print_indented record.echo
+        Option.iter print_indented record.echo;
+        if record.outcome <> Passed then
+          Option.iter
+            (fun output ->
+              Output.print_line "    output:";
+              print_indented ~indent:6 output)
+            record.output
       end)
     tests records;
-  if List.exists (fun (record : Compile.record) -> record.outcome <> Passed) records then
-    Output.print_line "";
+  if List.exists is_listed records then Output.print_line "";
   if show_timings then begin
     let rows =
       List.combine tests records
-      |> List.stable_sort (fun (_, (left : Compile.record)) (_, (right : Compile.record)) ->
-          compare right.microseconds left.microseconds)
+      |> List.stable_sort
+           (fun
+             (_, (left : Backend.Test_report.record)) (_, (right : Backend.Test_report.record)) ->
+             compare right.microseconds left.microseconds)
     in
     let shown =
-      List.map (fun (_, (record : Compile.record)) -> show_duration record.microseconds) rows
+      List.map
+        (fun (_, (record : Backend.Test_report.record)) -> show_duration record.microseconds)
+        rows
     in
     let width = List.fold_left (fun widest name -> max widest (String.length name)) 0 shown in
     List.iter2
-      (fun (test, (record : Compile.record)) text ->
+      (fun (test, (record : Backend.Test_report.record)) text ->
         Output.printf "%*s  %s%s\n" width text (label_test test)
           (if record.cached then "  cached" else ""))
       rows shown;
@@ -97,18 +111,19 @@ let print_report tests (records : Compile.record list) ~timings:show_timings tim
     (show_seconds timings.total) (show_seconds timings.check) (show_seconds timings.build)
     (show_seconds timings.tests)
 
-let test_json test (record : Compile.record) =
+let test_json test (record : Backend.Test_report.record) =
   Json.Object
     [
       ("module", Json.String (Path.show_module test.module_));
       ("name", Json.String test.name);
       ("file", Json.String test.file);
       ("line", Json.Int test.line);
-      ("outcome", Json.String (Compile.show_outcome record.outcome));
+      ("outcome", Json.String (Backend.Test_report.show_outcome record.outcome));
       ("cached", Json.Bool record.cached);
       ("microseconds", Json.Int record.microseconds);
       ("message", Json.encode_option (fun message -> Json.String message) record.message);
       ("echo", Json.encode_option (fun echo -> Json.String echo) record.echo);
+      ("output", Json.encode_option (fun output -> Json.String output) record.output);
     ]
 
 let encode_timings timings =
@@ -121,7 +136,7 @@ let encode_timings timings =
     ]
 
 type progress = {
-  line : Status_line.t;
+  status_line : Status_line.t;
   tests : test array;
   mutable ended : int;
   mutable not_passed : int;
@@ -129,7 +144,7 @@ type progress = {
   running : (int, int) Hashtbl.t;
 }
 
-let draw progress =
+let draw (progress : progress) =
   let now = read_microseconds () in
   let total = Array.length progress.tests in
   let width = String.length (string_of_int total) in
@@ -157,13 +172,13 @@ let draw progress =
         ]
     | None -> []
   in
-  Status_line.show progress.line (String.concat " · " parts)
+  Status_line.show progress.status_line (String.concat " · " parts)
 
-let handle_progress progress ~build_ended (event : Compile.progress) =
+let handle_progress progress ~build_ended (event : Backend.progress) =
   match event with
-  | Lowering -> Status_line.show progress.line "building · lowering"
+  | Lowering -> Status_line.show progress.status_line "building · lowering"
   | Compiling { compiled; total } ->
-      Status_line.show progress.line
+      Status_line.show progress.status_line
         (Printf.sprintf "building · compiling %d/%d C files" compiled total)
   | Running _ ->
       let now = read_microseconds () in
@@ -179,17 +194,19 @@ let handle_progress progress ~build_ended (event : Compile.progress) =
       if record.outcome <> Passed then progress.not_passed <- progress.not_passed + 1;
       draw progress
 
-let run_tests ?rerun ?progress database snapshot packages tests =
+let run_tests ?rerun ?report_progress database snapshot packages tests =
   if tests = [] then []
   else
     match
-      Compile.run_tests ?rerun ?progress
-        (Compiler.create database snapshot packages Development)
+      Backend.run_tests ?rerun ?report_progress
+        (Workspace_backend.create snapshot packages
+           (Workspace_backend.require_lowered_lookups database packages)
+           Development)
         ~time_limit_ms:(Workspace.time_limit_ms snapshot)
         (List.map (fun test -> test.path) tests)
     with
     | Ok records -> records
-    | Error message -> Outcome.cannot_run "%s" message
+    | Error message -> Outcome.raise_cannot_run "%s" message
 
 let run ~paths ~match_ ~timings:show_timings ~rerun =
   let json = Output.json () in
@@ -199,10 +216,10 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   let report = Report.gather database snapshot packages in
   let checked = read_microseconds () in
   let tests = select snapshot database packages ~paths ~match_ in
-  if not (Report.clean report) then raise (Report.Errors report);
+  Report.require_no_errors report;
   let progress =
     {
-      line = Status_line.create ~enabled:(not json);
+      status_line = Status_line.create ~enabled:(not json);
       tests = Array.of_list tests;
       ended = 0;
       not_passed = 0;
@@ -213,10 +230,10 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   let build_ended = ref None in
   let records =
     Fun.protect
-      ~finally:(fun () -> Status_line.clear progress.line)
+      ~finally:(fun () -> Status_line.clear progress.status_line)
       (fun () ->
         run_tests ~rerun
-          ~progress:(handle_progress progress ~build_ended)
+          ~report_progress:(handle_progress progress ~build_ended)
           database snapshot packages tests)
   in
   let ended = read_microseconds () in
@@ -231,14 +248,16 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   in
   if json then
     Json.print
-      (Json.make_document ~diagnostics:[]
+      (Report.make_document report
          [
            ("tests", Json.List (List.map2 test_json tests records));
            ("timings", encode_timings timings);
          ])
   else print_report tests records ~timings:show_timings timings;
-  if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records then 0 else 1
+  if List.for_all (fun (record : Backend.Test_report.record) -> record.outcome = Passed) records
+  then 0
+  else 1
 
 module For_testing = struct
-  let duration = show_duration
+  let show_duration = show_duration
 end

@@ -1,13 +1,11 @@
 trait Measured {
   fn size(self) -> Int64
-    cost time finite
 }
 
 type Box(width: Int64)
 
 impl Measured for Box {
   fn size(self) -> Int64
-    cost time finite
   {
     7
   }

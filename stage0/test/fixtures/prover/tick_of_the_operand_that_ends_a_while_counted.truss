@@ -1,0 +1,12 @@
+fn f(limit: UInt32)
+  uses Meter, RunForever
+  cost calls(Meter.tick) == 1
+{
+  var index: UInt32 = 0
+  while index < limit || refuse()
+    invariant index <= limit
+    cost calls(Meter.tick) == 0
+  {
+    index = index + 1
+  }
+}

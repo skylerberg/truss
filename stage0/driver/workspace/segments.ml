@@ -2,21 +2,21 @@ type segment = { number : int; size : int; digest : string }
 
 type t = {
   directory : string;
-  lock : Unix.file_descr;
-  mutable header : string list option;
+  lock : Lock_file.t;
+  mutable header : string option;
   mutable segments : segment list;
 }
 
-let list_magic = "truss database"
+let list_format = "truss database"
 let segment_magic = "truss segment\n"
-let list_path t = Filename.concat t.directory "list"
+let make_list_path t = Filename.concat t.directory "list"
 let make_next_list_path t = Filename.concat t.directory "list.new"
 let make_segments_directory t = Filename.concat t.directory "segments"
 
 let make_segment_path t number =
   Filename.concat (make_segments_directory t) (Printf.sprintf "%08d.segment" number)
 
-let digest text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
+let compute_digest text = Digest.BLAKE128.string text
 
 let write_durably path text =
   let descriptor = Unix.openfile path [ O_WRONLY; O_CREAT; O_TRUNC; O_CLOEXEC ] 0o644 in
@@ -26,44 +26,48 @@ let write_durably path text =
       File_system.write_all descriptor text;
       Unix.fsync descriptor)
 
-let header_prefix = "header "
+let encode_list ~header segments =
+  Cbor.encode
+    (Cbor.Array
+       [
+         Cbor.Text list_format;
+         Cbor.Bytes header;
+         Cbor.Array
+           (List.map
+              (fun { number; size; digest } ->
+                Cbor.Array [ Cbor.int number; Cbor.int size; Cbor.Bytes digest ])
+              segments);
+       ])
 
-let parse_list text =
-  let parse_line parsed line =
-    Option.bind parsed (fun (header, segments) ->
-        if String.starts_with ~prefix:header_prefix line then
-          let length = String.length header_prefix in
-          Some (String.sub line length (String.length line - length) :: header, segments)
-        else
-          match String.split_on_char ' ' line with
-          | [ "segment"; number; size; digest ] -> (
-              match (int_of_string_opt number, int_of_string_opt size) with
-              | Some number, Some size -> Some (header, { number; size; digest } :: segments)
-              | None, _ | _, None -> None)
-          | [ "" ] -> Some (header, segments)
-          | _ -> None)
-  in
-  match String.split_on_char '\n' text with
-  | magic :: lines when magic = list_magic ->
-      Option.map
-        (fun (header, segments) -> (List.rev header, List.rev segments))
-        (List.fold_left parse_line (Some ([], [])) lines)
+let decode_segment = function
+  | Cbor.Array [ number; size; Cbor.Bytes digest ] -> (
+      match (Cbor.find_int number, Cbor.find_int size) with
+      | Some number, Some size -> Some { number; size; digest }
+      | None, _ | _, None -> None)
   | _ -> None
 
-let open_ directory =
-  File_system.make_directory directory;
+let decode_list text =
+  match Cbor.decode text with
+  | Some (Cbor.Array [ Cbor.Text format; Cbor.Bytes header; segments ]) when format = list_format ->
+      Option.map (fun segments -> (header, segments)) (Cbor.find_list decode_segment segments)
+  | Some _ | None -> None
+
+let open_ directory ~stop_holder =
+  (try Unix.mkdir directory 0o755 with Unix.Unix_error (EEXIST, _, _) -> ());
   let ignored = Filename.concat directory ".gitignore" in
   if not (Sys.file_exists ignored) then File_system.write ignored "*\n";
+  let lock_path = Filename.concat directory "lock" in
   let lock =
-    Unix.openfile (Filename.concat directory "lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
+    match Lock_file.acquire_if_free lock_path with
+    | Some lock -> Some lock
+    | None when stop_holder () -> Some (Lock_file.acquire lock_path)
+    | None -> None
   in
-  match Unix.lockf lock F_TLOCK 0 with
-  | exception Unix.Unix_error ((EAGAIN | EACCES), _, _) ->
-      Unix.close lock;
-      Error `Open_elsewhere
-  | () ->
+  match lock with
+  | None -> Error `Open_elsewhere
+  | Some lock ->
       let t = { directory; lock; header = None; segments = [] } in
-      (match parse_list (File_system.read (list_path t)) with
+      (match decode_list (File_system.read (make_list_path t)) with
       | Some (header, segments) ->
           t.header <- Some header;
           t.segments <- segments
@@ -77,21 +81,21 @@ exception Damaged
 
 let parse_records text =
   let length = String.length text in
-  let length_at position =
+  let read_length_at position =
     if position + 4 > length then raise Damaged
     else Int32.to_int (String.get_int32_le text position)
   in
-  let bytes_at position size =
+  let read_bytes_at position size =
     if size < 0 || position + size > length then raise Damaged else String.sub text position size
   in
   let rec read position records =
     if position = length then List.rev records
     else
-      let key_length = length_at position in
-      let key = bytes_at (position + 4) key_length in
-      let kind = bytes_at (position + 4 + key_length) 1 in
-      let value_length = length_at (position + 5 + key_length) in
-      let value = bytes_at (position + 9 + key_length) value_length in
+      let key_length = read_length_at position in
+      let key = read_bytes_at (position + 4) key_length in
+      let kind = read_bytes_at (position + 4 + key_length) 1 in
+      let value_length = read_length_at (position + 5 + key_length) in
+      let value = read_bytes_at (position + 9 + key_length) value_length in
       let next = position + 9 + key_length + value_length in
       match kind with
       | "v" -> read next ((key, Some value) :: records)
@@ -103,7 +107,7 @@ let parse_records text =
 
 let read_segment t segment =
   match File_system.read (make_segment_path t segment.number) with
-  | text when String.length text = segment.size && digest text = segment.digest ->
+  | text when String.length text = segment.size && compute_digest text = segment.digest ->
       parse_records text
   | _ -> raise Damaged
   | exception Sys_error _ -> raise Damaged
@@ -156,22 +160,13 @@ let write_segment t entries =
     + List.fold_left max 0
         (list_segment_numbers t @ List.map (fun segment -> segment.number) t.segments)
   in
-  File_system.make_directory (make_segments_directory t);
+  (try Unix.mkdir (make_segments_directory t) 0o755 with Unix.Unix_error (EEXIST, _, _) -> ());
   write_durably (make_segment_path t number) text;
-  { number; size = String.length text; digest = digest text }
-
-let list_text ~header segments =
-  String.concat "\n"
-    ((list_magic :: List.map (fun line -> header_prefix ^ line) header)
-    @ List.map
-        (fun segment ->
-          Printf.sprintf "segment %d %d %s" segment.number segment.size segment.digest)
-        segments)
-  ^ "\n"
+  { number; size = String.length text; digest = compute_digest text }
 
 let prepare_commit t ~header entries =
   let segments = if entries = [] then t.segments else t.segments @ [ write_segment t entries ] in
-  write_durably (make_next_list_path t) (list_text ~header segments);
+  write_durably (make_next_list_path t) (encode_list ~header segments);
   segments
 
 let remove_unlisted t =
@@ -182,7 +177,7 @@ let remove_unlisted t =
     (list_segment_numbers t)
 
 let rename_list t ~header segments =
-  Unix.rename (make_next_list_path t) (list_path t);
+  Unix.rename (make_next_list_path t) (make_list_path t);
   t.header <- Some header;
   t.segments <- segments;
   remove_unlisted t
@@ -198,7 +193,7 @@ let compact t ~header =
   match list_live t with
   | entries ->
       let compacted = write_segment t (List.map (fun (key, value) -> (key, Some value)) entries) in
-      write_durably (make_next_list_path t) (list_text ~header [ compacted ]);
+      write_durably (make_next_list_path t) (encode_list ~header [ compacted ]);
       rename_list t ~header [ compacted ]
   | exception Damaged -> ()
 
@@ -212,8 +207,8 @@ let discard t =
   t.header <- None;
   t.segments <- []
 
-let close t = Unix.close t.lock
+let close t = Lock_file.release t.lock
 
 module For_testing = struct
-  let interrupted_commit t ~header entries = ignore (prepare_commit t ~header entries)
+  let interrupt_commit t ~header entries = ignore (prepare_commit t ~header entries)
 end

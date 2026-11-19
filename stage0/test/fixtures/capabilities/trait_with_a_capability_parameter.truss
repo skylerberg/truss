@@ -1,4 +1,0 @@
-trait Runs[capability Granted] {
-  fn run(self)
-    uses Granted
-}

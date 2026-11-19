@@ -1,4 +1,4 @@
-let storage = Storage.make_storage_type
+let make_storage_type = Storage.make_storage_type
 
 let fill_storage ~target ~buffer values =
   let count = List.length values in
@@ -18,17 +18,10 @@ let fill_storage ~target ~buffer values =
   @ [
       Assign
         ( Codegen_support.at target,
-          Build
-            {
-              ty = storage Codegen_support.int32;
-              variant = None;
-              fields =
-                [
-                  ("buffer", Codegen_support.copy buffer);
-                  ("length", uint64_constant count);
-                  ("capacity", uint64_constant count);
-                ];
-            } );
+          Storage.build_storage
+            (make_storage_type Codegen_support.int32)
+            ~buffer:(Codegen_support.copy buffer) ~length:(uint64_constant count)
+            ~capacity:(uint64_constant count) );
     ]
 
 let copy_call drop_and_copy ty ~destination ~source =
@@ -37,8 +30,8 @@ let copy_call drop_and_copy ty ~destination ~source =
       target =
         Direct
           {
-            function_ = Instance (Copy ty);
-            signature = Compile.For_testing.copy_signature drop_and_copy ty;
+            function_ = Item (Copy ty);
+            signature = Lowering.For_testing.copy_signature drop_and_copy ty;
           };
       arguments =
         [
@@ -49,34 +42,32 @@ let copy_call drop_and_copy ty ~destination ~source =
     }
 
 let () =
-  let drop_and_copy = Compile.For_testing.drop_and_copy (Codegen_support.shape_env ()) in
+  let drop_and_copy = Lowering.For_testing.drop_and_copy (Codegen_support.make_shape_env ()) in
   Codegen_support.test "plain data is trivial and storage is not" (fun () ->
       if
         not
-          (Compile.For_testing.is_trivial drop_and_copy
+          (Lowering.For_testing.is_trivial drop_and_copy
              (Codegen_support.option Codegen_support.int32))
       then Codegen_support.fail "Option[Int32] is not trivial";
-      if Compile.For_testing.is_trivial drop_and_copy (storage Codegen_support.int32) then
-        Codegen_support.fail "Storage[Int32] is trivial");
+      if Lowering.For_testing.is_trivial drop_and_copy (make_storage_type Codegen_support.int32)
+      then Codegen_support.fail "Storage[Int32] is trivial");
   Codegen_support.test "a record's drop drops only the fields that own something" (fun () ->
       let extra =
         [
           ( "Holder",
             Memory_layout.Record
               [
-                Codegen_support.field "items" (storage Codegen_support.int32);
+                Codegen_support.field "items" (make_storage_type Codegen_support.int32);
                 Codegen_support.field "count" Codegen_support.int32;
               ] );
         ]
       in
-      let env = Codegen_support.shape_env ~extra () in
+      let env = Codegen_support.make_shape_env ~extra () in
       let c =
-        Emit_c.For_testing.c
-          (Emit_c.make_fragment env
-             (Code
-                (Compile.For_testing.drop
-                   (Compile.For_testing.drop_and_copy env)
-                   (Codegen_support.named "Holder"))))
+        Emit_c.For_testing.render_c
+          (Lowering.For_testing.drop
+             (Lowering.For_testing.drop_and_copy env)
+             (Codegen_support.named "Holder"))
       in
       if not (String.includes ~affix:"f_items" c) then
         Codegen_support.fail "the drop does not drop the items:\n%s" c;
@@ -85,19 +76,18 @@ let () =
   Codegen_support.test "a copy of storage of plain data is one allocation and one memory copy"
     (fun () ->
       let c =
-        Emit_c.For_testing.c
-          (Emit_c.make_fragment (Codegen_support.shape_env ())
-             (Code (Compile.For_testing.copy drop_and_copy (storage Codegen_support.int32))))
+        Emit_c.For_testing.render_c
+          (Lowering.For_testing.copy drop_and_copy (make_storage_type Codegen_support.int32))
       in
       let count sub = String.find_all ~sub (fun _ matches -> matches + 1) c 0 in
       if count "t_runtime_allocate(" <> 1 || count "__builtin_memcpy(" <> 1 then
         Codegen_support.fail "the copy does not allocate and copy once:\n%s" c);
   Codegen_support.test "a copy of storage keeps its values when the original is mutated" (fun () ->
-      let ty = storage Codegen_support.int32 in
+      let ty = make_storage_type Codegen_support.int32 in
       Codegen_support.expect_status 20
         [
-          Codegen_support.printed (Compile.For_testing.copy drop_and_copy ty);
-          Codegen_support.printed (Compile.For_testing.drop drop_and_copy ty);
+          Codegen_support.make_program_fragment (Lowering.For_testing.copy drop_and_copy ty);
+          Codegen_support.make_program_fragment (Lowering.For_testing.drop drop_and_copy ty);
           Codegen_support.entry
             [
               Codegen_support.local (Codegen_support.value ty);
@@ -117,7 +107,7 @@ let () =
                         Use (Codegen_support.constant_int32 99) );
                     Assign
                       ( Codegen_support.at 3,
-                        Use (Codegen_support.copy ~projections:[ Field "buffer" ] 2) );
+                        Use (Copy (Storage.project_buffer (Codegen_support.at 2))) );
                     Drop (Codegen_support.at 0);
                   ])
                 (Return
@@ -128,44 +118,31 @@ let () =
             ];
         ]);
   Codegen_support.test "dropping a storage with nothing allocated frees nothing" (fun () ->
-      let ty = storage Codegen_support.uint8 in
+      let ty = make_storage_type Codegen_support.uint8 in
       Codegen_support.expect_status 0
         [
-          Codegen_support.printed (Compile.For_testing.drop drop_and_copy ty);
+          Codegen_support.make_program_fragment (Lowering.For_testing.drop drop_and_copy ty);
           Codegen_support.entry
             [ Codegen_support.local (Codegen_support.value ty) ]
             [
               Codegen_support.block
                 [
-                  Assign
-                    ( Codegen_support.at 0,
-                      Build
-                        {
-                          ty;
-                          variant = None;
-                          fields =
-                            [
-                              ("buffer", Constant (Bytes ""));
-                              ("length", Constant (Integer (UInt64, Z.zero)));
-                              ("capacity", Constant (Integer (UInt64, Z.zero)));
-                            ];
-                        } );
-                  Drop (Codegen_support.at 0);
+                  Assign (Codegen_support.at 0, Storage.build_empty ty); Drop (Codegen_support.at 0);
                 ]
                 (Return (Some (Codegen_support.constant_int32 0)));
             ];
         ]);
   Codegen_support.test "a copy of storage of storage copies every element and both drop cleanly"
     (fun () ->
-      let inner = storage Codegen_support.int32 in
-      let outer = storage inner in
+      let inner = make_storage_type Codegen_support.int32 in
+      let outer = make_storage_type inner in
       let uint64_constant number = Lowered.Constant (Integer (UInt64, Z.of_int number)) in
       Codegen_support.expect_status 4
         [
-          Codegen_support.printed (Compile.For_testing.copy drop_and_copy outer);
-          Codegen_support.printed (Compile.For_testing.copy drop_and_copy inner);
-          Codegen_support.printed (Compile.For_testing.drop drop_and_copy outer);
-          Codegen_support.printed (Compile.For_testing.drop drop_and_copy inner);
+          Codegen_support.make_program_fragment (Lowering.For_testing.copy drop_and_copy outer);
+          Codegen_support.make_program_fragment (Lowering.For_testing.copy drop_and_copy inner);
+          Codegen_support.make_program_fragment (Lowering.For_testing.drop drop_and_copy outer);
+          Codegen_support.make_program_fragment (Lowering.For_testing.drop drop_and_copy inner);
           Codegen_support.entry
             [
               Codegen_support.local (Codegen_support.value inner);
@@ -198,28 +175,20 @@ let () =
                         Use (Move (Codegen_support.at 2)) );
                     Assign
                       ( Codegen_support.at 5,
-                        Build
-                          {
-                            ty = outer;
-                            variant = None;
-                            fields =
-                              [
-                                ("buffer", Codegen_support.copy 4);
-                                ("length", uint64_constant 2);
-                                ("capacity", uint64_constant 2);
-                              ];
-                          } );
+                        Storage.build_storage outer ~buffer:(Codegen_support.copy 4)
+                          ~length:(uint64_constant 2) ~capacity:(uint64_constant 2) );
                     copy_call drop_and_copy outer ~destination:6 ~source:5;
                     Drop (Codegen_support.at 5);
                     Assign
                       ( Codegen_support.at 7,
-                        Use (Codegen_support.copy ~projections:[ Field "buffer" ] 6) );
+                        Use (Copy (Storage.project_buffer (Codegen_support.at 6))) );
                     Assign
                       ( Codegen_support.at 8,
                         Use
-                          (Codegen_support.copy
-                             ~projections:[ Index (uint64_constant 1); Field "buffer" ]
-                             7) );
+                          (Copy
+                             (Storage.project_buffer
+                                (Codegen_support.at ~projections:[ Index (uint64_constant 1) ] 7)))
+                      );
                     Assign
                       ( Codegen_support.at 9,
                         Use (Codegen_support.copy ~projections:[ Index (uint64_constant 0) ] 8) );

@@ -1,0 +1,18 @@
+type Inner(size: Int64)
+  derives Equal
+
+type Outer(inner: Inner)
+
+fn same[Item: Equal](left: Item, right: Item) -> Bool
+  ensures result == (left == right)
+{
+  left == right
+}
+
+impl Equal for Outer {
+  fn equal(self, other: Outer) -> Bool
+    ensures result == (self.inner == other.inner)
+  {
+    same(self.inner, right: other.inner)
+  }
+}

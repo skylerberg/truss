@@ -1,7 +1,7 @@
 let is_test (context : State.context) =
   match context.current with Path.Test _ -> true | _ -> false
 
-let bitwise_operations : Intrinsic.operation list =
+let bitwise_operations : Intrinsic.scalar list =
   [
     Bit_and;
     Bit_or;
@@ -29,83 +29,75 @@ let add_bitwise_definitions (query : Logic.query) =
            bitwise_terms := (term, named) :: !bitwise_terms);
         List.iter (walk bound) arguments
     | Logic.Forall (symbols, _, body) | Logic.Exists (symbols, body) -> walk (symbols @ bound) body
-    | term -> List.iter (walk bound) (Logic.arguments term)
+    | term -> List.iter (walk bound) (Logic.list_arguments term)
   in
   List.iter (walk []) (query.goal :: query.facts);
-  let definition term =
+  let find_definition term =
     match term with
     | Logic.Apply (name, arguments) -> (
         match (find_bitwise_operation name, arguments) with
         | Some (operation, bits, signed), first :: rest ->
-            let bits_of value = Logic.Operation (Printf.sprintf "(_ int2bv %d)" bits, [ value ]) in
-            let operand_bits = bits_of first in
+            let convert_to_bits value = Logic.Operation (Int2bv { width = bits }, [ value ]) in
+            let operand_bits = convert_to_bits first in
             let result =
               match (operation, rest) with
-              | Intrinsic.Complement, _ -> Some (Logic.Operation ("bvnot", [ operand_bits ]))
+              | Intrinsic.Complement, _ -> Some (Logic.Operation (Bvnot, [ operand_bits ]))
               | Bit_and, [ second_operand ] ->
-                  Some (Logic.Operation ("bvand", [ operand_bits; bits_of second_operand ]))
+                  Some (Logic.Operation (Bvand, [ operand_bits; convert_to_bits second_operand ]))
               | Bit_or, [ second_operand ] ->
-                  Some (Logic.Operation ("bvor", [ operand_bits; bits_of second_operand ]))
+                  Some (Logic.Operation (Bvor, [ operand_bits; convert_to_bits second_operand ]))
               | Bit_xor, [ second_operand ] ->
-                  Some (Logic.Operation ("bvxor", [ operand_bits; bits_of second_operand ]))
+                  Some (Logic.Operation (Bvxor, [ operand_bits; convert_to_bits second_operand ]))
               | Shift_left, [ second_operand ] ->
-                  Some (Logic.Operation ("bvshl", [ operand_bits; bits_of second_operand ]))
+                  Some (Logic.Operation (Bvshl, [ operand_bits; convert_to_bits second_operand ]))
               | Shift_right, [ second_operand ] ->
                   Some
                     (Logic.Operation
-                       ( (if signed then "bvashr" else "bvlshr"),
-                         [ operand_bits; bits_of second_operand ] ))
+                       ( (if signed then Bvashr else Bvlshr),
+                         [ operand_bits; convert_to_bits second_operand ] ))
               | (Rotate_left | Rotate_right), [ second_operand ] ->
-                  let by = bits_of (Logic.Operation ("mod", [ second_operand; Logic.int bits ])) in
-                  let rest = Logic.Operation ("bvsub", [ bits_of (Logic.int bits); by ]) in
+                  let by =
+                    convert_to_bits (Logic.Operation (Mod, [ second_operand; Logic.int bits ]))
+                  in
+                  let rest = Logic.Operation (Bvsub, [ convert_to_bits (Logic.int bits); by ]) in
                   let towards, back =
-                    if operation = Rotate_left then ("bvshl", "bvlshr") else ("bvlshr", "bvshl")
+                    if operation = Rotate_left then (Logic.Bvshl, Logic.Bvlshr)
+                    else (Logic.Bvlshr, Logic.Bvshl)
                   in
                   Some
                     (Logic.Operation
-                       ( "bvor",
+                       ( Bvor,
                          [
                            Logic.Operation (towards, [ operand_bits; by ]);
                            Logic.Operation (back, [ operand_bits; rest ]);
                          ] ))
               | Swap_bytes, _ ->
-                  let byte index =
+                  let extract_byte index =
                     Logic.Operation
-                      ( Printf.sprintf "(_ extract %d %d)" ((8 * index) + 7) (8 * index),
-                        [ operand_bits ] )
+                      (Extract { high = (8 * index) + 7; low = 8 * index }, [ operand_bits ])
                   in
-                  let bytes = List.init (bits / 8) byte in
+                  let bytes = List.init (bits / 8) extract_byte in
                   Some
                     (List.fold_left
-                       (fun swapped next -> Logic.Operation ("concat", [ swapped; next ]))
+                       (fun swapped next -> Logic.Operation (Concat, [ swapped; next ]))
                        (List.hd bytes) (List.tl bytes))
               | _ -> None
             in
             Option.map
               (fun result ->
-                let unsigned = Logic.Operation ("bv2nat", [ result ]) in
-                let value =
-                  if signed then
-                    let half = Logic.Integer (Z.shift_left Z.one (bits - 1)) in
-                    Logic.ite
-                      (Logic.Operation (">=", [ unsigned; half ]))
-                      (Logic.Operation ("-", [ unsigned; Logic.Integer (Z.shift_left Z.one bits) ]))
-                      unsigned
-                  else unsigned
-                in
-                Logic.equal term value)
+                Logic.equal term (Logic.integer_of_bits ~is_signed:signed ~width:bits result))
               result
         | _ -> None)
     | _ -> None
   in
-  let defined (term, named) =
+  let find_defined (term, named) =
     Option.map
       (fun definition -> if named = [] then definition else Logic.forall (named, definition))
-      (definition term)
+      (find_definition term)
   in
-  { query with facts = query.facts @ List.filter_map defined (List.rev !bitwise_terms) }
+  { query with facts = query.facts @ List.filter_map find_defined (List.rev !bitwise_terms) }
 
-let bit_vector_assertion (context : State.context) frame ~named ~origin
+let assert_bit_vector (context : State.context) frame ~named ~origin
     ~(read : State.frame -> Logic.term) =
   let saved_facts = context.facts and saved_decisions = context.decisions in
   let saved_stated = Tables.Stated_table.copy context.stated in
@@ -161,7 +153,7 @@ let bit_vector_assertion (context : State.context) frame ~named ~origin
 let check_assertion context frame ~origin ~bit_vector term =
   (match bit_vector with
   | Some (named, read) when not (is_test context) ->
-      bit_vector_assertion context frame ~named ~origin ~read
+      assert_bit_vector context frame ~named ~origin ~read
   | _ -> ());
   if is_test context || bit_vector <> None then Facts.assume context frame term
   else

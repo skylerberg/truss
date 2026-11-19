@@ -10,16 +10,16 @@ public type DecodeError =
   derives Equal
 
 impl Display for DecodeError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       InvalidCharacter(offset) => {
-        mut output.write("the byte at offset ")
+        mut output.push("the byte at offset ")
         offset.display(mut output)
-        mut output.write(" is not in the alphabet")
+        mut output.push(" is not in the alphabet")
       }
-      InvalidLength => mut output.write("the text is one symbol too long to be whole bytes")
-      InvalidPadding => mut output.write("the padding is wrong, or the last symbol has bits that no byte uses")
+      InvalidLength => mut output.push("the text is one symbol too long to be whole bytes")
+      InvalidPadding => mut output.push("the padding is wrong, or the last symbol has bits that no byte uses")
     }
   }
 }
@@ -71,7 +71,7 @@ public fn encode(bytes: Slice[UInt8], alphabet: Alphabet = Alphabet.Standard, pa
 {
   let count = bytes.length()
   if count > UInt64.maximum / 2 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(4 * ((count + 2) / 3))
   var index: UInt64 = 0
@@ -116,14 +116,14 @@ public fn encode(bytes: Slice[UInt8], alphabet: Alphabet = Alphabet.Standard, pa
 
 public fn encode_onto(
   bytes: Slice[UInt8],
-  output: mut TextBuilder,
+  output: mut String,
   alphabet: Alphabet = Alphabet.Standard,
   padding: Bool = true,
 )
   cost amortized time O(bytes.length())
 {
   let text = encode(bytes, alphabet: alphabet, padding: padding)
-  mut output.write(text.slice())
+  mut output.push(text)
 }
 
 internal fn unpadded_length(text: StringSlice) -> UInt64

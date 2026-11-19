@@ -6,19 +6,19 @@ use standard::text
 public type Host =
   | Domain(name: String)
   | Address(address: network::IpAddress)
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 impl Display for Host {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Domain(name) => mut output.write(name.slice())
+      Domain(name) => mut output.push(name)
       Address(address) => match address {
         Version4(_) => address.display(mut output)
         Version6(_) => {
-          mut output.write("[")
+          mut output.push("[")
           address.display(mut output)
-          mut output.write("]")
+          mut output.push("]")
         }
       }
     }
@@ -34,7 +34,7 @@ public opaque type Url(
   query: Option[String],
   fragment: Option[String],
 )
-  derives Copyable, Equal, Hash
+  derives Copyable, Equal, Hash, Ordered
 
 public type ParseError =
   | MissingScheme
@@ -46,22 +46,22 @@ public type ParseError =
   derives Equal
 
 impl Display for ParseError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      MissingScheme => mut output.write("the URL has no scheme")
-      InvalidScheme => mut output.write("the scheme is not letters, digits, `+`, `-`, and `.` after a letter")
-      InvalidHost => mut output.write("the host is not a name or an address")
-      InvalidPort => mut output.write("the port is not a number up to 65535")
+      MissingScheme => mut output.push("the URL has no scheme")
+      InvalidScheme => mut output.push("the scheme is not letters, digits, `+`, `-`, and `.` after a letter")
+      InvalidHost => mut output.push("the host is not a name or an address")
+      InvalidPort => mut output.push("the port is not a number up to 65535")
       InvalidCharacter(offset) => {
-        mut output.write("a character at offset ")
+        mut output.push("a character at offset ")
         offset.display(mut output)
-        mut output.write(" cannot appear there in a URL")
+        mut output.push(" cannot appear there in a URL")
       }
       InvalidPercentEncoding(offset) => {
-        mut output.write("the `%` at offset ")
+        mut output.push("the `%` at offset ")
         offset.display(mut output)
-        mut output.write(" is not followed by two hexadecimal digits")
+        mut output.push(" is not followed by two hexadecimal digits")
       }
     }
   }
@@ -397,7 +397,7 @@ internal fn percent_encode(text: StringSlice, how: EscapeSet) -> String
   cost time O(text.length())
 {
   if text.length() > UInt64.maximum / 8 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   let form = how == EscapeSet.AsForm
   var extra: UInt64 = 0
@@ -577,14 +577,7 @@ internal fn remove_dot_segments(path: StringSlice) -> String
   String(storage: own output)
 }
 
-internal fn text_equals(scheme: StringSlice, name: StringSlice) -> Bool
-  cost time O(name.length())
-{
-  scheme.length() == name.length() && scheme.matches_at(name, offset: 0)
-}
-
 internal fn Url.merge_path(self, relative: StringSlice) -> String
-  cost time finite
 {
   let base = self.path.slice()
   var merged: String = ""
@@ -634,16 +627,15 @@ public fn decode_component(text: StringSlice) -> Result[String, ParseError]
 }
 
 public fn encode_query(parameters: Slice[Parameter]) -> String
-  cost time finite
 {
   var output: String = ""
   for index in 0..parameters.length() {
     if index > 0 {
       mut output.push("&")
     }
-    mut output.push(percent_encode(parameters[index].name.slice(), how: EscapeSet.AsForm))
+    mut output.push(percent_encode(parameters[index].name, how: EscapeSet.AsForm))
     mut output.push("=")
-    mut output.push(percent_encode(parameters[index].value.slice(), how: EscapeSet.AsForm))
+    mut output.push(percent_encode(parameters[index].value, how: EscapeSet.AsForm))
   }
   output
 }
@@ -712,13 +704,13 @@ public fn Url.port_or_default(self) -> Option[UInt16]
     Some(port) => Some(port)
     None => {
       let scheme = self.scheme.slice()
-      if text_equals(scheme, name: "http") || text_equals(scheme, name: "ws") {
+      if scheme == "http" || scheme == "ws" {
         Some(80)
-      } else if text_equals(scheme, name: "https") || text_equals(scheme, name: "wss") {
+      } else if scheme == "https" || scheme == "wss" {
         Some(443)
-      } else if text_equals(scheme, name: "ftp") {
+      } else if scheme == "ftp" {
         Some(21)
-      } else if text_equals(scheme, name: "ssh") {
+      } else if scheme == "ssh" {
         Some(22)
       } else {
         None
@@ -772,20 +764,18 @@ public fn Url.query(self) -> Option[StringSlice]
 }
 
 public fn Url.query_parameters(self) -> List[Parameter]
-  cost time finite
 {
   match self.query {
-    Some(query) => if decode_query(query.slice()) is Ok(parameters) { parameters } else { [] }
+    Some(query) => if decode_query(query) is Ok(parameters) { parameters } else { [] }
     None => []
   }
 }
 
 public fn Url.query_parameter(self, name: StringSlice) -> Option[String]
-  cost time finite
 {
   let parameters = self.query_parameters()
   for index in 0..parameters.length() {
-    if parameters[index].name.slice() == name {
+    if parameters[index].name == name {
       return Some(parameters[index].value.copy())
     }
   }
@@ -799,11 +789,10 @@ public fn Url.fragment(self) -> Option[StringSlice]
 }
 
 public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]
-  cost time finite
 {
   if scheme_end(reference) < reference.length() {
     var absolute = parse(reference)?
-    absolute.path = remove_dot_segments(absolute.path.slice())
+    absolute.path = remove_dot_segments(absolute.path)
     return Ok(own absolute)
   }
   var from: UInt64 = 0
@@ -815,7 +804,7 @@ public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]
   }
   var rest = parse_path_query_fragment(reference, from: from)?
   if authority is Some(_) {
-    rest.path = remove_dot_segments(rest.path.slice())
+    rest.path = remove_dot_segments(rest.path)
     return Ok(build_url(self.scheme.copy(), authority: own authority, rest: own rest))
   }
   var joined = self.copy()
@@ -828,22 +817,21 @@ public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]
   }
   joined.query = own rest.query
   if rest.path.slice().byte(0) == 47 {
-    joined.path = remove_dot_segments(rest.path.slice())
+    joined.path = remove_dot_segments(rest.path)
   } else {
-    let merged = self.merge_path(rest.path.slice())
-    joined.path = remove_dot_segments(merged.slice())
+    let merged = self.merge_path(rest.path)
+    joined.path = remove_dot_segments(merged)
   }
   Ok(own joined)
 }
 
 public fn Url.with_path(own self, path: StringSlice) -> Url
-  cost time finite
 {
   var changed = own self
   let escaped = percent_encode(path, how: EscapeSet.AsPath)
   if changed.host is Some(_) && escaped.length() > 0 && escaped.slice().byte(0) != 47 {
     var rooted: String = "/"
-    mut rooted.push(escaped.slice())
+    mut rooted.push(escaped)
     changed.path = own rooted
   } else {
     changed.path = own escaped
@@ -852,7 +840,6 @@ public fn Url.with_path(own self, path: StringSlice) -> Url
 }
 
 public fn Url.with_path_segment(own self, segment: StringSlice) -> Url
-  cost time finite
 {
   var changed = own self
   let length = changed.path.length()
@@ -864,7 +851,6 @@ public fn Url.with_path_segment(own self, segment: StringSlice) -> Url
 }
 
 public fn Url.with_query(own self, parameters: Slice[Parameter]) -> Url
-  cost time finite
 {
   var changed = own self
   changed.query = if parameters.length() == 0 { None } else { Some(encode_query(parameters)) }
@@ -872,13 +858,12 @@ public fn Url.with_query(own self, parameters: Slice[Parameter]) -> Url
 }
 
 public fn Url.with_query_parameter(own self, name: StringSlice, value: StringSlice) -> Url
-  cost time finite
 {
   var changed = own self
   var query: String = ""
   match changed.query {
     Some(existing) => {
-      mut query.push(existing.slice())
+      mut query.push(existing)
       if existing.length() > 0 {
         mut query.push("&")
       }
@@ -893,11 +878,10 @@ public fn Url.with_query_parameter(own self, name: StringSlice, value: StringSli
 }
 
 public fn Url.with_fragment(own self, fragment: Option[String]) -> Url
-  cost time finite
 {
   var changed = own self
   changed.fragment = match fragment {
-    Some(text) => Some(percent_encode(text.slice(), how: EscapeSet.AsFragment))
+    Some(text) => Some(percent_encode(text, how: EscapeSet.AsFragment))
     None => None
   }
   changed
@@ -912,24 +896,24 @@ public fn Url.with_port(own self, port: Option[UInt16]) -> Url
 }
 
 impl Display for Url {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write(self.scheme.slice())
-    mut output.write(":")
+    mut output.push(self.scheme)
+    mut output.push(":")
     match self.host {
       Some(host) => {
-        mut output.write("//")
+        mut output.push("//")
         match self.user_information {
           Some(user) => {
-            mut output.write(user.slice())
-            mut output.write("@")
+            mut output.push(user)
+            mut output.push("@")
           }
           None => {}
         }
         host.display(mut output)
         match self.port {
           Some(port) => {
-            mut output.write(":")
+            mut output.push(":")
             port.display(mut output)
           }
           None => {}
@@ -937,18 +921,18 @@ impl Display for Url {
       }
       None => {}
     }
-    mut output.write(self.path.slice())
+    mut output.push(self.path)
     match self.query {
       Some(query) => {
-        mut output.write("?")
-        mut output.write(query.slice())
+        mut output.push("?")
+        mut output.push(query)
       }
       None => {}
     }
     match self.fragment {
       Some(fragment) => {
-        mut output.write("#")
-        mut output.write(fragment.slice())
+        mut output.push("#")
+        mut output.push(fragment)
       }
       None => {}
     }
@@ -965,6 +949,7 @@ impl text::Parse for Url {
 }
 
 public opaque type Component(text: String)
+  derives Equal
 
 impl From[StringSlice] for Component {
   fn from(value: own StringSlice) -> Component {
@@ -974,7 +959,7 @@ impl From[StringSlice] for Component {
 
 impl From[String] for Component {
   fn from(value: own String) -> Component {
-    Component(text: encode_component(value.slice()))
+    Component(text: encode_component(value))
   }
 }
 
@@ -1004,11 +989,11 @@ impl FromTemplate for Url {
     {
       mut text.push(template.literals[index].text())
       if index < template.parts.length() {
-        mut text.push(template.parts[index].text.slice())
+        mut text.push(template.parts[index].text)
       }
       index += 1
     }
-    match parse(text.slice()) {
+    match parse(text) {
       Ok(url) => url
       Err(_) => Url(
         scheme: "",
@@ -1024,7 +1009,6 @@ impl FromTemplate for Url {
 }
 
 internal fn template_text(literals: Slice[text::Literal], part: StringSlice) -> String
-  cost time finite
 {
   var text = ""
   var index: UInt64 = 0
@@ -1058,17 +1042,15 @@ internal fn path_start(text: StringSlice) -> UInt64
 
 internal fn parses_with_parts_after_authority(literals: Slice[text::Literal], part: StringSlice) -> Bool
   requires literals.length() > 0
-  cost time finite
 {
   let text = template_text(literals, part: part)
-  if !(parse(text.slice()) is Ok(_)) {
+  if !(parse(text) is Ok(_)) {
     return false
   }
-  literals.length() == 1 || path_start(text.slice()) <= literals[0].text().length()
+  literals.length() == 1 || path_start(text) <= literals[0].text().length()
 }
 
 public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
-  cost time finite
 {
   literals.length() > 0
     && parses_with_parts_after_authority(literals, part: "~")

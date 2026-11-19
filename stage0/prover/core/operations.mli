@@ -1,5 +1,5 @@
 val compare_terms : Types.ty -> Core.comparison -> Logic.term -> Logic.term -> Logic.term
-val check_widened : State.location -> is_written:bool -> Types.ty -> Types.ty -> unit
+val check_widened : Obligation.location -> is_written:bool -> Types.ty -> Types.ty -> unit
 
 val convert_from_integer :
   State.context -> State.frame -> Invocation.site -> Logic.term -> Logic.term
@@ -18,11 +18,11 @@ val make_equality :
 val find_innermost_axiom : State.context -> State.frame -> Logic.term -> State.open_axiom option
 val declare_power : State.context -> State.frame -> Logic.term -> Logic.term -> Logic.term
 
-val primitive_operation :
+val translate_primitive_operation :
   State.context ->
   State.frame ->
   site:Invocation.site ->
-  Intrinsic.operation ->
+  Intrinsic.scalar ->
   Types.ty list ->
   Logic.term list ->
   arguments:Core.origin option list ->

@@ -55,7 +55,6 @@ module Code = struct
     | Lends_own
     | Repeated_clause
     | Cost_word
-    | Finite_not_time
     | Loop_cost_bound
     | Function_type_names
     | Misplaced_requires
@@ -109,6 +108,7 @@ module Code = struct
     | Not_a_constant
     | Alternative_bindings
     | Not_a_generic_parameter
+    | Unconstrained_capability_parameter
     | Null
 
   type types =
@@ -129,6 +129,7 @@ module Code = struct
     | Unknown_member
     | Ambiguous_method
     | Private_field
+    | Member_not_visible
     | Not_callable
     | Not_a_value
     | No_impl
@@ -138,6 +139,9 @@ module Code = struct
     | Integer_for_float
     | Negated_unsigned
     | Unused_value
+    | Unbounded_time
+    | Upper_bound_in_exact_bound
+    | Cost_of_other_resource
     | Not_assignable
     | Wrong_try
     | Lambda_needs_type
@@ -153,7 +157,6 @@ module Code = struct
     | Not_a_type
     | Not_a_trait
     | Not_a_capability
-    | Misplaced_capability_parameter
     | Arity
     | Argument_kind
     | Unsatisfied_bound
@@ -163,6 +166,7 @@ module Code = struct
     | Not_constant
     | Constant_overflow
     | Main_signature
+    | No_real_implementation
     | Duplicate_field
     | Cannot_derive
     | Derives_inferred
@@ -173,14 +177,20 @@ module Code = struct
     | Extra_member
     | Signature_mismatch
     | Missing_required_impl
-    | Implements_panic
+    | Implements_built_in_capability
     | Impl_uses
     | Unknown_associated_type
     | Unknown_associated_capability
     | Associated_type_not_fixed
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
-  type usage = Unused_variable | Unreachable_code
+
+  type usage =
+    | Unused_variable
+    | Unused_function
+    | Unused_constant
+    | Unreachable_code
+    | Self_comparison
 
   type ownership =
     | Views_temporary
@@ -198,6 +208,7 @@ module Code = struct
     | Lends_other_parameter
     | Read_only_view
     | Lent_mut_in_variant
+    | Needs_lent_mut
     | Task_outlives_view
 
   type capabilities =
@@ -250,7 +261,7 @@ module Code = struct
     | Prover of prover
     | Too_many_diagnostics
 
-  let lexer_name code =
+  let name_lexer_code code =
     match code with
     | Invalid_utf8 -> "invalid_utf8"
     | Carriage_return -> "carriage_return"
@@ -289,7 +300,7 @@ module Code = struct
     | Unclosed_bracket -> "unclosed_bracket"
     | Unmatched_closing_bracket -> "unmatched_closing_bracket"
 
-  let parser_name code =
+  let name_parser_code code =
     match code with
     | Unexpected_token -> "unexpected_token"
     | Needs_parentheses -> "needs_parentheses"
@@ -308,7 +319,6 @@ module Code = struct
     | Lends_own -> "lends_own"
     | Repeated_clause -> "repeated_clause"
     | Cost_word -> "cost_word"
-    | Finite_not_time -> "finite_not_time"
     | Loop_cost_bound -> "loop_cost_bound"
     | Function_type_names -> "function_type_names"
     | Misplaced_requires -> "misplaced_requires"
@@ -363,9 +373,10 @@ module Code = struct
     | Not_a_constant -> "not_a_constant"
     | Alternative_bindings -> "alternative_bindings"
     | Not_a_generic_parameter -> "not_a_generic_parameter"
+    | Unconstrained_capability_parameter -> "unconstrained_capability_parameter"
     | Null -> "null"
 
-  let types_name code =
+  let name_types_code code =
     match code with
     | Character_scalar_count -> "character_scalar_count"
     | Misplaced_self_type -> "misplaced_self_type"
@@ -384,6 +395,7 @@ module Code = struct
     | Unknown_member -> "unknown_member"
     | Ambiguous_method -> "ambiguous_method"
     | Private_field -> "private_field"
+    | Member_not_visible -> "member_not_visible"
     | Not_callable -> "not_callable"
     | Not_a_value -> "not_a_value"
     | No_impl -> "no_impl"
@@ -393,6 +405,9 @@ module Code = struct
     | Integer_for_float -> "integer_for_float"
     | Negated_unsigned -> "negated_unsigned"
     | Unused_value -> "unused_value"
+    | Unbounded_time -> "unbounded_time"
+    | Upper_bound_in_exact_bound -> "upper_bound_in_exact_bound"
+    | Cost_of_other_resource -> "cost_of_other_resource"
     | Not_assignable -> "not_assignable"
     | Wrong_try -> "wrong_try"
     | Lambda_needs_type -> "lambda_needs_type"
@@ -408,7 +423,6 @@ module Code = struct
     | Not_a_type -> "not_a_type"
     | Not_a_trait -> "not_a_trait"
     | Not_a_capability -> "not_a_capability"
-    | Misplaced_capability_parameter -> "misplaced_capability_parameter"
     | Arity -> "arity"
     | Argument_kind -> "argument_kind"
     | Unsatisfied_bound -> "unsatisfied_bound"
@@ -418,6 +432,7 @@ module Code = struct
     | Not_constant -> "not_constant"
     | Constant_overflow -> "constant_overflow"
     | Main_signature -> "main_signature"
+    | No_real_implementation -> "no_real_implementation"
     | Duplicate_field -> "duplicate_field"
     | Cannot_derive -> "cannot_derive"
     | Derives_inferred -> "derives_inferred"
@@ -428,23 +443,28 @@ module Code = struct
     | Extra_member -> "extra_member"
     | Signature_mismatch -> "signature_mismatch"
     | Missing_required_impl -> "missing_required_impl"
-    | Implements_panic -> "implements_panic"
+    | Implements_built_in_capability -> "implements_built_in_capability"
     | Impl_uses -> "impl_uses"
     | Unknown_associated_type -> "unknown_associated_type"
     | Unknown_associated_capability -> "unknown_associated_capability"
     | Associated_type_not_fixed -> "associated_type_not_fixed"
 
-  let patterns_name code =
+  let name_patterns_code code =
     match code with
     | Not_covered -> "not_covered"
     | Unreachable_arm -> "unreachable_arm"
     | Unreachable_alternative -> "unreachable_alternative"
     | Refutable -> "refutable"
 
-  let usage_name code =
-    match code with Unused_variable -> "unused_variable" | Unreachable_code -> "unreachable_code"
+  let name_usage_code code =
+    match code with
+    | Unused_variable -> "unused_variable"
+    | Unused_function -> "unused_function"
+    | Unused_constant -> "unused_constant"
+    | Unreachable_code -> "unreachable_code"
+    | Self_comparison -> "self_comparison"
 
-  let ownership_name code =
+  let name_ownership_code code =
     match code with
     | Views_temporary -> "views_temporary"
     | Use_after_move -> "use_after_move"
@@ -461,9 +481,10 @@ module Code = struct
     | Lends_other_parameter -> "lends_other_parameter"
     | Read_only_view -> "read_only_view"
     | Lent_mut_in_variant -> "lent_mut_in_variant"
+    | Needs_lent_mut -> "needs_lent_mut"
     | Task_outlives_view -> "task_outlives_view"
 
-  let capabilities_name code =
+  let name_capabilities_code code =
     match code with
     | Not_available -> "not_available"
     | Lambda_uses -> "lambda_uses"
@@ -473,7 +494,7 @@ module Code = struct
     | Callback_may_deadlock -> "callback_may_deadlock"
     | Monitor_needs_tasks -> "monitor_needs_tasks"
 
-  let package_name code =
+  let name_package_code code =
     match code with
     | Impl_location -> "impl_location"
     | Sealed_trait_impl -> "sealed_trait_impl"
@@ -486,7 +507,7 @@ module Code = struct
     | Constant_cycle -> "constant_cycle"
     | Duplicate_test -> "duplicate_test"
 
-  let prover_name code =
+  let name_prover_code code =
     match code with
     | Overflow -> "overflow"
     | Division -> "division"
@@ -504,24 +525,26 @@ module Code = struct
     | Unsupported -> "unsupported"
 
   let name = function
-    | Lexer code -> "lexer." ^ lexer_name code
-    | Parser code -> "parser." ^ parser_name code
+    | Lexer code -> "lexer." ^ name_lexer_code code
+    | Parser code -> "parser." ^ name_parser_code code
     | Resolve code -> "resolve." ^ resolve_name code
-    | Types code -> "types." ^ types_name code
-    | Patterns code -> "patterns." ^ patterns_name code
-    | Usage code -> "usage." ^ usage_name code
-    | Ownership code -> "ownership." ^ ownership_name code
-    | Capabilities code -> "capabilities." ^ capabilities_name code
-    | Package code -> "package." ^ package_name code
-    | Prover code -> "prover." ^ prover_name code
+    | Types code -> "types." ^ name_types_code code
+    | Patterns code -> "patterns." ^ name_patterns_code code
+    | Usage code -> "usage." ^ name_usage_code code
+    | Ownership code -> "ownership." ^ name_ownership_code code
+    | Capabilities code -> "capabilities." ^ name_capabilities_code code
+    | Package code -> "package." ^ name_package_code code
+    | Prover code -> "prover." ^ name_prover_code code
     | Too_many_diagnostics -> "too_many_diagnostics"
 end
 
 type 'span edit = { span : 'span; replacement : string }
 type 'span fix = { title : string; edits : 'span edit list }
+type severity = Error | Warning
 
 type 'span diagnostic = {
   code : Code.t;
+  severity : severity;
   message : string;
   span : 'span;
   notes : ('span * string) list;
@@ -531,62 +554,41 @@ type 'span diagnostic = {
 type t = Source.span diagnostic
 type in_definition = Source.Definition_span.t diagnostic
 
-let make ?(notes = []) ?(fixes = []) ~code span message = { code; message; span; notes; fixes }
+let make ?(severity : severity = Error) ?(notes = []) ?(fixes = []) ~code span message =
+  { code; severity; message; span; notes; fixes }
+
+let is_error (diagnostic : _ diagnostic) = diagnostic.severity = Error
+let show_severity : severity -> string = function Error -> "error" | Warning -> "warning"
 
 type reported = Reported
 
 let make_reported (_ : _ diagnostic) = Reported
-let make_recovered _ = Reported
+let reported_elsewhere = Reported
 let fix title edits = { title; edits }
 let replace span replacement = { span; replacement }
 let insert at replacement = { span = at; replacement }
 let delete span = { span; replacement = "" }
 
-let edit_distance left right =
-  let rows = String.length left + 1 and columns = String.length right + 1 in
-  let table = Array.make_matrix rows columns 0 in
-  for row = 0 to rows - 1 do
-    table.(row).(0) <- row
-  done;
-  for column = 0 to columns - 1 do
-    table.(0).(column) <- column
-  done;
-  for row = 1 to rows - 1 do
-    for column = 1 to columns - 1 do
-      let cost = if left.[row - 1] = right.[column - 1] then 0 else 1 in
-      let best =
-        min
-          (min (table.(row - 1).(column) + 1) (table.(row).(column - 1) + 1))
-          (table.(row - 1).(column - 1) + cost)
-      in
-      table.(row).(column) <-
-        (if
-           row > 1 && column > 1
-           && left.[row - 1] = right.[column - 2]
-           && left.[row - 2] = right.[column - 1]
-         then min best (table.(row - 2).(column - 2) + 1)
-         else best)
-    done
-  done;
-  table.(rows - 1).(columns - 1)
-
 let find_closest text candidates =
   let limit = max 1 (String.length text / 3) in
-  let best =
-    List.fold_left
-      (fun best candidate ->
-        let distance = edit_distance text candidate in
-        if candidate = text || distance > limit then best
-        else
-          match best with
-          | Some (_, best_distance) when best_distance <= distance -> best
-          | _ -> Some (candidate, distance))
-      None
+  let enumerate_candidates select =
+    List.iter
+      (fun candidate -> if candidate <> text then select candidate)
       (List.sort_uniq compare candidates)
   in
-  Option.map fst best
+  match String.spellcheck ~max_dist:(fun _ -> limit) enumerate_candidates text with
+  | closest :: _ -> Some closest
+  | [] -> None
 
-let map_spans convert diagnostic =
+let list_spelling_fixes span ~written candidates =
+  match find_closest written candidates with
+  | Some candidate -> [ fix (Printf.sprintf "Write `%s`." candidate) [ replace span candidate ] ]
+  | None -> []
+
+let show_count count singular plural =
+  Printf.sprintf "%d %s" count (if count = 1 then singular else plural)
+
+let map_spans convert (diagnostic : _ diagnostic) : _ diagnostic =
   {
     diagnostic with
     span = convert diagnostic.span;
@@ -616,7 +618,7 @@ let apply_edits text (edits : Source.span edit list) =
   let position =
     List.fold_left
       (fun position (edit : Source.span edit) ->
-        if edit.span.start < position then invalid_arg "Diagnostic.apply_fix: overlapping edits";
+        if edit.span.start < position then invalid_arg "Diagnostic.apply_edits: overlapping edits";
         Buffer.add_substring buffer text position (edit.span.start - position);
         Buffer.add_string buffer edit.replacement;
         edit.span.stop)
@@ -624,8 +626,6 @@ let apply_edits text (edits : Source.span edit list) =
   in
   Buffer.add_substring buffer text position (String.length text - position);
   Buffer.contents buffer
-
-let apply_fix text (fix : Source.span fix) = apply_edits text fix.edits
 
 module Starts = Map.Make (Int)
 
@@ -688,8 +688,10 @@ let select_shown diagnostics =
     | [] -> []
     | rest when count = limit ->
         [
-          make ~code:Too_many_diagnostics (Source.make_zero_width last)
-            (Printf.sprintf "%d more errors are not shown." (List.length rest));
+          make
+            ~severity:(if List.exists is_error rest then (Error : severity) else Warning)
+            ~code:Too_many_diagnostics (Source.make_zero_width last)
+            (Printf.sprintf "%d more diagnostics are not shown." (List.length rest));
         ]
     | (first : t) :: rest -> first :: take (count + 1) first.span.stop rest
   in
@@ -699,17 +701,17 @@ let show_location source offset =
   let line, column = Source.compute_position source offset in
   Printf.sprintf "%s:%d:%d" (Source.path source) line column
 
-let iter_utf8 text ~valid ~invalid =
+let iter_utf8 text ~on_valid ~on_invalid =
   let rec loop index =
     if index < String.length text then begin
-      let decoded = Unicode.decode text index in
-      if not (Unicode.Decoded.is_valid decoded) then begin
-        invalid text.[index];
+      let decoded = String.get_utf_8_uchar text index in
+      if not (Uchar.utf_decode_is_valid decoded) then begin
+        on_invalid text.[index];
         loop (index + 1)
       end
       else begin
-        let length = Unicode.Decoded.length decoded in
-        valid (String.sub text index length);
+        let length = Uchar.utf_decode_length decoded in
+        on_valid (String.sub text index length);
         loop (index + length)
       end
     end
@@ -720,7 +722,7 @@ let quote text =
   let buffer = Buffer.create (String.length text + 2) in
   Buffer.add_char buffer '"';
   iter_utf8 text
-    ~valid:(fun character ->
+    ~on_valid:(fun character ->
       match character with
       | "\"" -> Buffer.add_string buffer "\\\""
       | "\\" -> Buffer.add_string buffer "\\\\"
@@ -731,19 +733,20 @@ let quote text =
         ->
           Printf.bprintf buffer "\\x%02X" (Char.code scalar.[0])
       | scalar -> Buffer.add_string buffer scalar)
-    ~invalid:(fun byte -> Printf.bprintf buffer "\\x%02X" (Char.code byte));
+    ~on_invalid:(fun byte -> Printf.bprintf buffer "\\x%02X" (Char.code byte));
   Buffer.add_char buffer '"';
   Buffer.contents buffer
 
 let render source (diagnostic : t) =
   let buffer = Buffer.create 256 in
   let text = Source.text source in
-  Printf.bprintf buffer "%s: error[%s]: %s\n"
+  Printf.bprintf buffer "%s: %s[%s]: %s\n"
     (show_location source diagnostic.span.start)
+    (show_severity diagnostic.severity)
     (Code.name diagnostic.code) diagnostic.message;
   let start = diagnostic.span.start in
-  let line_start = Source.line_start source start in
-  let line_end = Source.line_end source start in
+  let line_start = Source.compute_line_start source start in
+  let line_end = Source.compute_line_end source start in
   let line = String.sub text line_start (line_end - line_start) in
   let _, start_column = Source.compute_position source start in
   let _, stop_column = Source.compute_position source (min diagnostic.span.stop line_end) in
@@ -751,7 +754,7 @@ let render source (diagnostic : t) =
     String.for_all (fun character -> character = '\t' || Char.code character >= 0x20) line
     &&
     let valid = ref true in
-    iter_utf8 line ~valid:ignore ~invalid:(fun _ -> valid := false);
+    iter_utf8 line ~on_valid:ignore ~on_invalid:(fun _ -> valid := false);
     !valid
   in
   if is_printable && String.length line <= 200 then begin
@@ -789,7 +792,7 @@ let encode_json_string value =
   let buffer = Buffer.create (String.length value + 2) in
   Buffer.add_char buffer '"';
   iter_utf8 value
-    ~valid:(fun character ->
+    ~on_valid:(fun character ->
       match character with
       | "\"" -> Buffer.add_string buffer "\\\""
       | "\\" -> Buffer.add_string buffer "\\\\"
@@ -801,7 +804,7 @@ let encode_json_string value =
         ->
           Printf.bprintf buffer "\\u%04x" (Char.code scalar.[0])
       | scalar -> Buffer.add_string buffer scalar)
-    ~invalid:(fun _ -> Buffer.add_string buffer "\xEF\xBF\xBD");
+    ~on_invalid:(fun _ -> Buffer.add_string buffer "\xEF\xBF\xBD");
   Buffer.add_char buffer '"';
   Buffer.contents buffer
 
@@ -835,14 +838,13 @@ let to_json_object source diagnostic =
           (String.concat "," edits))
       diagnostic.fixes
   in
-  Printf.sprintf {|{"path":%s,"code":%s,"message":%s,"span":%s,"notes":[%s],"fixes":[%s]}|} path
+  Printf.sprintf
+    {|{"path":%s,"code":%s,"severity":%s,"message":%s,"span":%s,"notes":[%s],"fixes":[%s]}|} path
     (encode_json_string (Code.name diagnostic.code))
+    (encode_json_string (show_severity diagnostic.severity))
     (encode_json_string diagnostic.message)
     (encode_json_span source diagnostic.span)
     (String.concat "," notes) (String.concat "," fixes)
-
-let to_json source diagnostics =
-  "[" ^ String.concat ",\n" (List.map (to_json_object source) diagnostics) ^ "]\n"
 
 module For_testing = struct
   let limit = limit

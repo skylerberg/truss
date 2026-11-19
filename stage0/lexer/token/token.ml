@@ -116,27 +116,17 @@ type foreign = Plus_plus | Minus_minus | Star_star | Colon_equal | Pipe_greater
 module Decimal : sig
   type t = private { significand : Z.t; exponent : Z.t }
 
-  val normalized : significand:Z.t -> exponent:Z.t -> t
+  val normalize : significand:Z.t -> exponent:Z.t -> t
 end = struct
   type t = { significand : Z.t; exponent : Z.t }
 
   let ten = Z.of_int 10
 
-  let normalized ~significand ~exponent =
+  let normalize ~significand ~exponent =
     if Z.equal significand Z.zero then { significand = Z.zero; exponent = Z.zero }
     else
-      let digits = Z.to_string significand in
-      let rec trailing_zeros count =
-        if digits.[String.length digits - 1 - count] = '0' then trailing_zeros (count + 1)
-        else count
-      in
-      let zeros = trailing_zeros 0 in
-      if zeros = 0 then { significand; exponent }
-      else
-        {
-          significand = Z.divexact significand (Z.pow ten zeros);
-          exponent = Z.add exponent (Z.of_int zeros);
-        }
+      let significand, zeros = Z.remove significand ten in
+      { significand; exponent = Z.add exponent (Z.of_int zeros) }
 end
 
 type t = {
@@ -178,7 +168,6 @@ let equal_punctuation (first : punctuation) (second : punctuation) =
   | (Open _ | Close _), _ | _, (Open _ | Close _) -> false
   | _ -> first == second
 
-let list_texts literal = Array.append [| literal.first |] (Array.map snd literal.rest)
 let list_interpolations literal = Array.map fst literal.rest
 
 let keywords =
@@ -349,14 +338,14 @@ let escape text =
   Buffer.contents buffer
 
 let rec spell_tokens ?(insertions = []) (tokens : t array) =
-  let inserted offset =
+  let spell_inserted offset =
     String.concat ""
       (List.filter_map (fun (at, text) -> if at = offset then Some text else None) insertions)
   in
   let buffer = Buffer.create 64 in
   let rec spell index previous_stop =
     if index = Array.length tokens then begin
-      Option.iter (fun stop -> Buffer.add_string buffer (inserted stop)) previous_stop;
+      Option.iter (fun stop -> Buffer.add_string buffer (spell_inserted stop)) previous_stop;
       true
     end
     else
@@ -369,12 +358,12 @@ let rec spell_tokens ?(insertions = []) (tokens : t array) =
           | Some text ->
               (match previous_stop with
               | Some stop ->
-                  Buffer.add_string buffer (inserted stop);
+                  Buffer.add_string buffer (spell_inserted stop);
                   if stop < token.span.start then begin
                     Buffer.add_char buffer ' ';
-                    Buffer.add_string buffer (inserted token.span.start)
+                    Buffer.add_string buffer (spell_inserted token.span.start)
                   end
-              | None -> Buffer.add_string buffer (inserted token.span.start));
+              | None -> Buffer.add_string buffer (spell_inserted token.span.start));
               Buffer.add_string buffer text;
               spell (index + 1) (Some token.span.stop))
   in
@@ -459,3 +448,9 @@ let can_begin = function
       | Opaque | Requires | Uses | With ) ->
       false
   | Punctuation _ | Newline | End_of_file -> false
+
+module For_testing = struct
+  let list_texts literal = Array.append [| literal.first |] (Array.map snd literal.rest)
+  let keywords = keywords
+  let reserved_words = reserved_words
+end

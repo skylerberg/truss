@@ -1,0 +1,4 @@
+fn f(names: own List[String]) -> String {
+  var first = names[0]
+  first
+}

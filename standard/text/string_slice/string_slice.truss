@@ -13,6 +13,7 @@ public fn StringSlice.is_empty(self) -> Bool
 public fn StringSlice.bytes(self) -> Slice[UInt8]
   ensures result.length() == self.length()
   cost time O(1)
+  cost allocations == 0
 {
   Slice(elements: self.bytes)
 }
@@ -542,8 +543,9 @@ public fn StringSlice.find_last(self, pattern: StringSlice) -> Option[UInt64]
 
 public fn StringSlice.find_character(
   self,
-  predicate: (fn(Character) -> Bool cost time finite),
+  predicate: (fn(Character) -> Bool uses generic Granted),
 ) -> Option[UInt64]
+  uses generic Granted
   ensures match result {
     Some(offset) => offset < self.length() && self.is_boundary(offset)
     None => true
@@ -685,7 +687,8 @@ public fn StringSlice.trim_end(self) -> StringSlice
   self.part(0, to: self.trailing_whitespace_start())
 }
 
-internal fn StringSlice.leading_matching(self, predicate: (fn(Character) -> Bool cost time finite)) -> UInt64
+internal fn StringSlice.leading_matching(self, predicate: (fn(Character) -> Bool uses generic Granted)) -> UInt64
+  uses generic Granted
   ensures result <= self.length()
   cost time O(self.length() * time(predicate))
 {
@@ -706,9 +709,10 @@ internal fn StringSlice.leading_matching(self, predicate: (fn(Character) -> Bool
 
 internal fn StringSlice.trailing_matching_start(
   self,
-  predicate: (fn(Character) -> Bool cost time finite),
+  predicate: (fn(Character) -> Bool uses generic Granted),
   from: UInt64,
 ) -> UInt64
+  uses generic Granted
   requires from <= self.length()
   ensures from <= result
   ensures result <= self.length()
@@ -730,7 +734,8 @@ internal fn StringSlice.trailing_matching_start(
   end
 }
 
-public fn StringSlice.trim_matching(self, predicate: (fn(Character) -> Bool cost time finite)) -> StringSlice
+public fn StringSlice.trim_matching(self, predicate: (fn(Character) -> Bool uses generic Granted)) -> StringSlice
+  uses generic Granted
   ensures result.length() <= self.length()
   cost time O(self.length() * time(predicate))
 {
@@ -814,7 +819,8 @@ public fn StringSlice.split_at_most(self, separator: StringSlice, parts: UInt64)
   pieces
 }
 
-public fn StringSlice.split_matching(self, predicate: (fn(Character) -> Bool cost time finite)) -> List[StringSlice]
+public fn StringSlice.split_matching(self, predicate: (fn(Character) -> Bool uses generic Granted)) -> List[StringSlice]
+  uses generic Granted
   ensures result.length() <= self.length() + 1
   cost time O(self.length() * time(predicate))
 {
@@ -916,7 +922,7 @@ public fn StringSlice.replace(self, pattern: StringSlice, replacement: StringSli
     return self.to_string()
   }
   if replacement.length() > UInt64.maximum / 4 / count || self.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   var budget = count * replacement.length()
   let capacity = self.length() + budget
@@ -962,7 +968,7 @@ public fn StringSlice.replace_first(self, pattern: StringSlice, replacement: Str
   match self.find(pattern) {
     Some(offset) => {
       if replacement.length() > UInt64.maximum / 4 || self.length() > UInt64.maximum / 4 {
-        intrinsic::crash("a string cannot hold that many bytes".slice())
+        intrinsic::crash("a string cannot hold that many bytes")
       }
       var output: intrinsic::Storage[UInt8] =
         intrinsic::storage_with_capacity(self.length() - pattern.length() + replacement.length())
@@ -983,7 +989,7 @@ public fn StringSlice.repeated(self, times: UInt64) -> String
     return String(storage: intrinsic::storage_empty())
   }
   if times > UInt64.maximum / 2 / self.length() {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   let total = self.length() * times
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(total)
@@ -1072,7 +1078,7 @@ internal fn PendingText.push_character(mut self, character: Character)
 internal fn PendingText.flush(mut self, output: mut String)
   cost amortized time O(1)
 {
-  mut output.push(self.text.slice())
+  mut output.push(self.text)
   self.text = ""
 }
 
@@ -1209,7 +1215,7 @@ internal fn StringSlice.padded(self, width: UInt64, fill: Character, at_start: B
   let missing = width - count
   let unit = fill.utf8_length()
   if missing > UInt64.maximum / 16 || self.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes".slice())
+    intrinsic::crash("a string cannot hold that many bytes")
   }
   var room: UInt64 = if unit == 1 {
     missing
@@ -1297,6 +1303,7 @@ impl Ordered for StringSlice {
   fn compare(self, other: StringSlice) -> Ordering
     ensures (result == Ordering.Less) == (intrinsic::compare_bytes(self.bytes, right: other.bytes) < 0)
     ensures (result == Ordering.Equal) == identical(self.model(), other.model())
+    cost allocations == 0
   {
     let order = intrinsic::compare_bytes(self.bytes, right: other.bytes)
     if order < 0 { Ordering.Less } else if order > 0 { Ordering.Greater } else { Ordering.Equal }
@@ -1304,7 +1311,9 @@ impl Ordered for StringSlice {
 }
 
 impl Hash for StringSlice {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write_bytes(self.bytes())
   }
 }

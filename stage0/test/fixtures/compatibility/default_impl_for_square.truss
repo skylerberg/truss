@@ -1,6 +1,0 @@
-
-impl Default for Square {
-  fn default() -> Square {
-    Square(1)
-  }
-}

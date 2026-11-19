@@ -1,0 +1,46 @@
+fn count_of(counts: Map[String, Int64], word: StringSlice) -> Int64 {
+  match counts.get(word) {
+    Some(count) => count
+    None => 0
+  }
+}
+
+fn counts_of(words: Slice[StringSlice]) -> Map[String, Int64] {
+  var counts: Map[String, Int64] = [:]
+  for word in words {
+    let seen = count_of(counts, word: word)
+    counts[word.to_string()] = seen.saturating_add(1)
+  }
+  counts
+}
+
+test "a map of strings is read with string slices" {
+  let text = "pear fig pear plum pear fig"
+  let counts = counts_of(text.slice().split(" "))
+  assert counts.length() == 3
+  assert count_of(counts, word: "pear") == 3
+  assert count_of(counts, word: text.slice().substring(5, to: 8)) == 2
+  assert count_of(counts, word: "kiwi") == 0
+  assert counts.contains(text.slice().substring(14, to: 18))
+  assert counts[text.slice().substring(0, to: 4)] == 3
+}
+
+test "a set and a list of strings are searched with string slices" {
+  let text = "pear fig"
+  let names: Set[String] = ["fig", "plum"]
+  let listed: List[String] = ["pear", "plum"]
+  assert names.contains(text.slice().substring(5, to: 8))
+  assert !names.contains(text.slice().substring(0, to: 4))
+  assert listed.contains(text.slice().substring(0, to: 4))
+  assert !listed.contains(text.slice().substring(5, to: 8))
+}
+
+test "a map of lists is read with slices, and a removal takes one" {
+  var tables: Map[List[UInt8], Int64] = [:]
+  mut tables.insert([1, 2, 3], value: 7)
+  let bytes: List[UInt8] = [0, 1, 2, 3]
+  assert tables.get(bytes[1..]) == Some(7)
+  assert tables.get(bytes[..3]) is None
+  mut tables.remove(bytes[1..])
+  assert tables.is_empty()
+}

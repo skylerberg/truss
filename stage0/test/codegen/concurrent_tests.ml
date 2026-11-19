@@ -7,7 +7,7 @@ let expect_main ~expected text =
   if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors;
   Codegen_support.expect_string ~expected output
 
-let passes_in_order name ~count source =
+let expect_pass_in_order name ~count source =
   Codegen_support.test name (fun () ->
       Codegen_support.expect_output (source ^ in_order)
         (String.concat "" (List.init count (Printf.sprintf "test %d passed\n"))))
@@ -97,25 +97,25 @@ let () =
         Fixtures.Concurrent.bag_of_integers_lent_to_tasks)
 
 let () =
-  passes_in_order "a task borrows an element that a collection lends from a read-only parameter"
+  expect_pass_in_order "a task views an element that a collection lends from a read-only parameter"
     ~count:3 Fixtures.Concurrent.bag_of_strings_lent_to_tasks;
-  passes_in_order "a task owns a value that a cursor computes, and copies a plain one" ~count:2
+  expect_pass_in_order "a task owns a value that a cursor computes, and copies a plain one" ~count:2
     Fixtures.Concurrent.labels_cursor_owned_by_tasks
 
 let () =
-  passes_in_order "a task owns its item, and an item whose task is not spawned is dropped" ~count:2
-    Fixtures.Concurrent.longest_owned_word;
-  passes_in_order "a value returned through two nested tasks is neither leaked nor dropped twice"
-    ~count:1 Fixtures.Concurrent.nested_concurrent_for_returning_a_list
+  expect_pass_in_order "a task owns its item, and an item whose task is not spawned is dropped"
+    ~count:2 Fixtures.Concurrent.longest_owned_word;
+  expect_pass_in_order
+    "a value returned through two nested tasks is neither leaked nor dropped twice" ~count:1
+    Fixtures.Concurrent.nested_concurrent_for_returning_a_list
 
-let () =
-  Codegen_support.passes "a return value that loses the cancel is dropped"
-    Fixtures.Concurrent.spawns_when_cancelled
-
-let expect_threaded ~expected text =
-  let status, output, errors = Codegen_support.run_main text in
+let expect_program_output ~expected program =
+  let status, output, errors = Process.run program [] in
   if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors;
   Codegen_support.expect_string ~expected output
+
+let expect_threaded ~expected text =
+  expect_program_output ~expected (Codegen_support.build_main text)
 
 let () =
   Codegen_support.test
@@ -133,11 +133,12 @@ let () =
     (fun () -> expect_threaded ~expected:"total 1400\n" Fixtures.Concurrent.lengths_of_owned_items)
 
 let expect_with_each_thread_count ~expected text =
+  let program = Codegen_support.build_main text in
   List.iter
     (fun workers ->
       Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
-      expect_threaded ~expected text)
-    Codegen_support.worker_counts
+      expect_program_output ~expected program)
+    (Codegen_support.list_worker_counts ())
 
 let tally = Fixtures.Concurrent.tally
 
@@ -211,3 +212,10 @@ let () =
     (fun () ->
       expect_threaded ~expected:"run: cancelled\ntimed out\n"
         Fixtures.Concurrent.captured_sleep_with_a_time_out)
+
+let () =
+  Codegen_support.test
+    "a child that a task starts has no signal blocked, and SIGPIPE at its default action" (fun () ->
+      expect_with_each_thread_count
+        ~expected:"ended by SIGTERM, ended by SIGTERM\nended by signal 13, ended by signal 13\n"
+        Fixtures.Concurrent.children_signalling_themselves_from_tasks)

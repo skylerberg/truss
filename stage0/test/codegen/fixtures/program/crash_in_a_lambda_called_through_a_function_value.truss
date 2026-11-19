@@ -1,0 +1,17 @@
+fn apply(action: (fn(Int64) -> Int64 uses Panic), value: Int64) -> Int64
+  uses Panic
+{
+  action(value)
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Panic
+{
+  let result = apply(fn(value) {
+    if value > 1 {
+      Panic.crash("the lambda got more than 1")
+    }
+    value
+  }, value: 5)
+  if result == 0 { ExitCode.success } else { ExitCode.failure }
+}

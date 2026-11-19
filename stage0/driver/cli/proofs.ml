@@ -10,20 +10,25 @@ let make_solver () =
       ()
   with
   | Ok solver -> solver
-  | Error message -> Outcome.cannot_run "%s" message
+  | Error message -> Outcome.raise_cannot_run "%s" message
 
 type t = { proofs : Database.proofs; verdicts : Prover.verdicts Lazy.t }
 
-let run_template_checks compiler checks =
+let run_template_checks backend checks =
   List.map
-    (fun ({ from_template; literals; clauses } as check : Prover.State.template_check) ->
-      (check, Compile.run_template_check compiler ~from_template ~literals ~clauses))
+    (fun ({ from_template; literals; clauses } as check : Prover.Obligation.template_check) ->
+      (check, Backend.run_template_check backend ~from_template ~literals ~clauses))
     checks
 
 let list_runs database snapshot packages proofs =
   match Database.list_template_checks proofs with
   | [] -> []
-  | checks -> run_template_checks (Compiler.create database snapshot packages Development) checks
+  | checks ->
+      run_template_checks
+        (Workspace_backend.create snapshot packages
+           (Workspace_backend.require_lowered_lookups database packages)
+           Development)
+        checks
 
 let check database snapshot packages files =
   let proofs = Database.prove database files in
@@ -43,8 +48,5 @@ let list_states checked file = Prover.list_states (Lazy.force checked.verdicts) 
 
 let list_holes snapshot packages checked definition =
   List.map
-    (fun (file, offset) ->
-      let source = Command_packages.read_source snapshot packages file in
-      let line, column = Source.compute_position source offset in
-      (Shown_path.show_path (Source.path source), line, column))
+    (fun (file, line, column) -> (Command_packages.show_file snapshot packages file, line, column))
     (Database.list_holes checked.proofs definition)

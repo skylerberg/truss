@@ -7,11 +7,13 @@ type ty =
   | Raw of Memory_layout.scalar
   | Environment of int
   | Evidence of int
+  | Capabilities of int
+  | Trace
   | Lend
   | Lend_mark
 
 type site = { definition : Path.t; offset : int }
-type root = Local of local | Static of { key : Instance.key; ty : Ground.ty }
+type root = Local of local | Static of { item : Item.t; ty : Ground.ty }
 
 type place = { root : root; projections : projection list }
 
@@ -36,12 +38,13 @@ and constant =
   | Character of int
   | Bytes of string
   | Null
-  | Symbol_address of Instance.key
+  | Symbol_address of Item.t
   | Site of site
+  | Capability of Path.t
   | Size_of of Ground.ty
   | Alignment_of of Ground.ty
 
-and function_ref = Instance of Instance.key | Nested of int
+and function_ref = Item of Item.t | Nested of int
 
 type signature = { parameters : ty list; result : ty option; returns : bool }
 type unary = Negate | Not | Complement
@@ -57,6 +60,8 @@ type binary =
   | Bit_xor
   | Shift_left
   | Shift_right
+
+type comparison =
   | Equal
   | Not_equal
   | Less
@@ -66,6 +71,8 @@ type binary =
   | Ieee_equal
   | Ieee_less
   | Ieee_less_equal
+
+type test = comparison * operand * operand
 
 type intrinsic =
   | Allocate
@@ -101,6 +108,9 @@ type intrinsic =
   | Evidence_outer
   | Program_argument
   | Evidence_fill
+  | Capabilities_fill
+  | Capability_find
+  | Trace_link
   | Coroutine_start
   | Coroutine_resume
   | Coroutine_suspend
@@ -123,7 +133,7 @@ type intrinsic =
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }
-  | Indirect of { value : operand; signature : signature }
+  | Indirect of { code : operand; environment : operand; signature : signature }
   | Intrinsic of intrinsic
   | Foreign of Libc.declaration
   | Evidence_call of { evidence : operand; capability : Path.t; slot : int; signature : signature }
@@ -133,12 +143,13 @@ type rvalue =
   | Use of operand
   | Unary of unary * operand
   | Binary of binary * operand * operand
+  | Compare of test
   | Convert of operand * Memory_layout.scalar
   | Build of { ty : Ground.ty; variant : string option; fields : (string * operand) list }
   | Is_variant of place * string
   | Function_value of { code : function_ref; environment : operand option }
 
-type failure = Panic | Assertion | Todo
+type failure = Panic | Obligation | Assertion | Todo
 type destination = Discarded | Returned of place | Written of place
 
 type statement =
@@ -153,6 +164,7 @@ type statement =
 
 type terminator =
   | Goto of block
+  | Branch of { test : test; yes : block; no : block }
   | Switch of { value : operand; cases : (Z.t * block) list; default : block }
   | Switch_variant of { place : place; cases : (string * block) list; default : block option }
   | Return of operand option
@@ -163,6 +175,7 @@ type terminator =
       length : operand;
       site : site;
       reported : operand option;
+      trace : operand option;
     }
 
 type static_value =
@@ -172,10 +185,10 @@ type static_value =
   | Static_array of static_value list
   | Static_storage of { element : Ground.ty; elements : static_value list }
 
-type data = { data_key : Instance.key; ty : Ground.ty; value : static_value }
+type data = { data_item : Item.t; ty : Ground.ty; value : static_value }
 
 type table = {
-  table_key : Instance.key;
+  table_item : Item.t;
   capability : Path.t option;
-  entries : (Instance.key * signature) list;
+  entries : (Item.t * signature) list;
 }

@@ -1,0 +1,51 @@
+trait Level {
+  fn height(self) -> Int64
+
+  fn raised(self, floor: Int64) -> Int64 {
+    self.height().max(floor)
+  }
+
+  fn picked(self) -> Int64 {
+    pick(self)
+  }
+}
+
+type Shelf(height: Int64)
+
+type Stair(height: Int64)
+
+type Pot[Item](item: Item)
+
+impl Level for Shelf {
+  fn height(self) -> Int64 {
+    self.height
+  }
+}
+
+impl Level for Stair {
+  fn height(self) -> Int64 {
+    self.height + 1
+  }
+}
+
+impl Level for Pot[Item: Level] {
+  fn height(self) -> Int64 {
+    self.item.height()
+  }
+}
+
+fn raise(shelf: Shelf) -> Int64 {
+  shelf.raised(0)
+}
+
+fn measure(pot: Pot[Stair]) -> Int64 {
+  pot.height()
+}
+
+fn pick[Item: Level](item: Item) -> Int64 {
+  item.height()
+}
+
+fn name_pick() -> fn(Stair) -> Int64 {
+  pick[Stair]
+}

@@ -1,22 +1,60 @@
-let common =
-  let directory =
-    Cmdliner.Arg.(
-      value & opt dir "."
-      & info [ "C" ] ~docv:"DIRECTORY"
-          ~doc:"Run as if from $(docv): find the packages and resolve paths from there.")
-  and json =
-    Cmdliner.Arg.(
-      value & flag
-      & info [ "json" ]
-          ~doc:
-            "Write one JSON document to standard output instead of the report for people, with \
-             every diagnostic and the command's own fields.")
+type command =
+  | In_client of (unit -> Outcome.t)
+  | In_project of { directory : string; has_no_server_flag : bool; run : unit -> Outcome.t }
+
+let directory_option =
+  let make_absolute directory =
+    if Filename.is_relative directory then Filename.concat (Sys.getcwd ()) directory else directory
   in
   Cmdliner.Term.(
-    const (fun directory json ->
-        Sys.chdir directory;
-        Output.set_json json)
-    $ directory $ json)
+    const make_absolute
+    $ Cmdliner.Arg.(
+        value & opt dir "."
+        & info [ "C" ] ~docv:"DIRECTORY"
+            ~doc:"Run as if from $(docv): find the packages and resolve paths from there."))
+
+let json_flag =
+  Cmdliner.Arg.(
+    value & flag
+    & info [ "json" ]
+        ~doc:
+          "Write one JSON document to standard output instead of the report for people, with every \
+           diagnostic and the command's own fields.")
+
+let no_server_flag =
+  Cmdliner.Arg.(
+    value & flag
+    & info [ "no-server" ]
+        ~doc:"Run the command in this process, and not in the project's background process.")
+
+let no_server_variable = "TRUSS_NO_SERVER"
+
+let uses_server ~has_no_server_flag =
+  (not has_no_server_flag) && Sys.getenv_opt no_server_variable <> Some "1"
+
+let make_client_term run =
+  Cmdliner.Term.(
+    const (fun directory run ->
+        In_client
+          (fun () ->
+            Sys.chdir directory;
+            run ()))
+    $ directory_option $ run)
+
+let make_project_term run =
+  Cmdliner.Term.(
+    const (fun directory json has_no_server_flag run ->
+        In_project
+          {
+            directory;
+            has_no_server_flag;
+            run =
+              (fun () ->
+                Sys.chdir directory;
+                Output.set_json json;
+                run ());
+          })
+    $ directory_option $ json_flag $ no_server_flag $ run)
 
 let make_paths_argument items =
   Cmdliner.Arg.(
@@ -53,9 +91,11 @@ let check =
   in
   make_command "check"
     ~doc:"Report every diagnostic of the packages and of the project's packages they depend on."
-    Cmdliner.Term.(
-      const (fun () fix no_proofs -> Outcome.Exit (Check_command.run ~fix ~proofs:(not no_proofs)))
-      $ common $ fix $ no_proofs)
+    (make_project_term
+       Cmdliner.Term.(
+         const (fun fix no_proofs () ->
+             Outcome.Exit (Check_command.run ~fix ~proofs:(not no_proofs)))
+         $ fix $ no_proofs))
 
 let test =
   let match_ =
@@ -79,10 +119,11 @@ let test =
           ~doc:"Run every selected test without reading cached results, and cache the new ones.")
   in
   make_command "test" ~doc:"Check the packages, then run the tests without a cached result."
-    Cmdliner.Term.(
-      const (fun () paths match_ timings rerun ->
-          Outcome.Exit (Test_command.run ~paths ~match_ ~timings ~rerun))
-      $ common $ make_paths_argument "tests" $ match_ $ timings $ rerun)
+    (make_project_term
+       Cmdliner.Term.(
+         const (fun paths match_ timings rerun () ->
+             Outcome.Exit (Test_command.run ~paths ~match_ ~timings ~rerun))
+         $ make_paths_argument "tests" $ match_ $ timings $ rerun))
 
 let make_release_flag doc = Cmdliner.Arg.(value & flag & info [ "release" ] ~doc)
 
@@ -97,14 +138,14 @@ let run =
       [
         `S Cmdliner.Manpage.s_description;
         `P
-          "The first argument that is not an option starts the program's arguments, and $(b,--) \
-           marks the start when the first one begins with $(b,-).";
+          "Every argument after $(b,--) is the program's, as in $(b,truss run -- input.txt -v). \
+           Before $(b,--), an argument that begins with $(b,-) is an option of $(b,truss run).";
       ]
-    Cmdliner.Term.(
-      const (fun () release arguments -> Program_command.run ~release ~arguments)
-      $ common
-      $ make_release_flag "Build as $(b,truss build) does, then run the program."
-      $ arguments)
+    (make_project_term
+       Cmdliner.Term.(
+         const (fun release arguments () -> Program_command.run ~release ~arguments)
+         $ make_release_flag "Build as $(b,truss build) does, then run the program."
+         $ arguments))
 
 let build =
   let output =
@@ -120,16 +161,18 @@ let build =
     ~doc:
       "Check the package and build its program for release, rejecting a program whose $(b,main) \
        reaches a $(b,todo) or an $(b,echo)."
-    Cmdliner.Term.(const (fun () output -> Program_command.build ~output) $ common $ output)
+    (make_project_term
+       Cmdliner.Term.(const (fun output () -> Program_command.build ~output) $ output))
 
 let holes =
   make_command "holes"
     ~doc:
       "List every $(b,todo) with its expected type, the bindings in scope, and the tests and \
        $(b,main) that reach it."
-    Cmdliner.Term.(
-      const (fun () paths -> Outcome.Exit (Holes_command.run ~paths))
-      $ common $ make_paths_argument "holes")
+    (make_project_term
+       Cmdliner.Term.(
+         const (fun paths () -> Outcome.Exit (Holes_command.run ~paths))
+         $ make_paths_argument "holes"))
 
 let show =
   let paths =
@@ -137,15 +180,15 @@ let show =
       non_empty & pos_all string []
       & info [] ~docv:"PATH"
           ~doc:
-            "A package, module, type, definition, or method, such as $(b,weather), \
-             $(b,weather::forecast), $(b,weather::forecast::parse), or \
-             $(b,weather::forecast::Forecast.summary).")
+            "A package, module, or definition: its full path, such as $(b,weather::forecast) or \
+             $(b,weather::forecast::Forecast.summary); a name in scope in every module, such as \
+             $(b,Int64); or a suffix of a definition's path, such as $(b,Forecast.summary).")
   in
   let body = Cmdliner.Arg.(value & flag & info [ "body" ] ~doc:"Print whole definitions.") in
   make_command "show" ~doc:"Print the signatures of a package, module, type, or definition."
-    Cmdliner.Term.(
-      const (fun () paths body -> Outcome.Exit (Show_command.run ~paths ~body))
-      $ common $ paths $ body)
+    (make_project_term
+       Cmdliner.Term.(
+         const (fun paths body () -> Outcome.Exit (Show_command.run ~paths ~body)) $ paths $ body))
 
 let explain =
   let position =
@@ -158,8 +201,9 @@ let explain =
     ~doc:
       "Describe the name or expression at a position: its meaning, its type, and the signature of \
        its definition."
-    Cmdliner.Term.(
-      const (fun () position -> Outcome.Exit (Explain_command.run ~position)) $ common $ position)
+    (make_project_term
+       Cmdliner.Term.(
+         const (fun position () -> Outcome.Exit (Explain_command.run ~position)) $ position))
 
 let name_argument =
   Cmdliner.Arg.(
@@ -167,32 +211,42 @@ let name_argument =
     & pos 0 (some string) None
     & info [] ~docv:"NAME"
         ~doc:
-          "A definition: its full path, or a suffix of one, such as $(b,parse) or \
-           $(b,Forecast.summary).")
+          "A definition: its full path, a name in scope in every module, such as $(b,Option), or a \
+           suffix of a definition's path, such as $(b,parse) or $(b,Forecast.summary).")
 
 let dependents =
   make_command "dependents"
     ~doc:"List the parts of other definitions that read a part of a definition, by kind of part."
-    Cmdliner.Term.(
-      const (fun () name -> Outcome.Exit (Graph_command.run ~direction:Dependents ~name))
-      $ common $ name_argument)
+    (make_project_term
+       Cmdliner.Term.(
+         const (fun name () -> Outcome.Exit (Graph_command.run ~direction:Dependents ~name))
+         $ name_argument))
 
 let dependencies =
   make_command "dependencies"
     ~doc:"List the parts of other definitions that a definition's parts read, by kind of part."
-    Cmdliner.Term.(
-      const (fun () name -> Outcome.Exit (Graph_command.run ~direction:Dependencies ~name))
-      $ common $ name_argument)
+    (make_project_term
+       Cmdliner.Term.(
+         const (fun name () -> Outcome.Exit (Graph_command.run ~direction:Dependencies ~name))
+         $ name_argument))
 
 let rename =
-  let from_ = Cmdliner.Arg.(required & pos 0 (some string) None & info [] ~docv:"FROM") in
+  let from_ =
+    Cmdliner.Arg.(
+      required
+      & pos 0 (some string) None
+      & info [] ~docv:"FROM"
+          ~doc:
+            "A module or definition of the project's packages: its full path, or a suffix of a \
+             definition's path that names only that definition.")
+  in
   let to_ = Cmdliner.Arg.(required & pos 1 (some string) None & info [] ~docv:"TO") in
   make_command "rename"
     ~doc:
       "Rename a definition, method, or module, and every reference to it in the project's packages."
-    Cmdliner.Term.(
-      const (fun () from_ to_ -> Outcome.Exit (Rename_command.run ~from_ ~to_))
-      $ common $ from_ $ to_)
+    (make_project_term
+       Cmdliner.Term.(
+         const (fun from_ to_ () -> Outcome.Exit (Rename_command.run ~from_ ~to_)) $ from_ $ to_))
 
 let make_packages_argument ~doc =
   Cmdliner.Arg.(value & pos_all string [] & info [] ~docv:"PACKAGE" ~doc)
@@ -202,50 +256,298 @@ let add =
     ~doc:
       "Add registry packages as dependencies of the package, each granted nothing, at the version \
        written after $(b,@) or the newest."
-    Cmdliner.Term.(
-      const (fun () names -> Outcome.Exit (Add_command.run ~names))
-      $ common
-      $ make_packages_argument
-          ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2).")
+    (make_project_term
+       Cmdliner.Term.(
+         const (fun names () -> Outcome.Exit (Add_command.run ~names))
+         $ make_packages_argument
+             ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."))
 
 let upgrade =
   make_command "upgrade"
     ~doc:
       "Change the project's registry packages, or only the named ones, to their newest versions or \
        the version written after $(b,@), and report the effect."
-    Cmdliner.Term.(
-      const (fun () names -> Outcome.Exit (Upgrade_command.run ~names))
-      $ common
-      $ make_packages_argument
-          ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2).")
+    (make_project_term
+       Cmdliner.Term.(
+         const (fun names () -> Outcome.Exit (Upgrade_command.run ~names))
+         $ make_packages_argument
+             ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."))
 
 let publish =
+  let version =
+    Cmdliner.Arg.(
+      required
+      & pos 0 (some string) None
+      & info [] ~docv:"VERSION"
+          ~doc:
+            "The release's version, such as $(b,1.4.2). It starts with the number after $(b,_v) at \
+             the end of the package's name, or 1, and is higher than the newest release's.")
+  in
   make_command "publish"
-    ~doc:
-      "Publish the package to the registry as its next version, if it is complete and compatible \
-       with its previous version."
-    Cmdliner.Term.(const (fun () -> Outcome.Exit (Publish_command.run ())) $ common)
+    ~doc:"Publish the package to the registry as $(i,VERSION), if it is complete."
+    (make_project_term
+       Cmdliner.Term.(
+         const (fun version () -> Outcome.Exit (Publish_command.run ~version)) $ version))
 
 let new_ =
   let name = Cmdliner.Arg.(required & pos 0 (some string) None & info [] ~docv:"NAME") in
   make_command "new" ~doc:"Create a package in a directory named $(i,NAME)."
-    Cmdliner.Term.(const (fun () name -> Outcome.Exit (New_command.run ~name)) $ common $ name)
-
-let status =
-  make_command "status" ~doc:"List the package databases that the background process holds."
-    Cmdliner.Term.(
-      const (fun () ->
-          List.iter Output.print_line (Workspace.list_package_databases ());
-          Outcome.Exit 0)
-      $ common)
+    (make_client_term
+       Cmdliner.Term.(const (fun name () -> Outcome.Exit (New_command.run ~name)) $ name))
 
 let stop =
-  make_command "stop" ~doc:"Stop the background process."
+  let all =
+    Cmdliner.Arg.(
+      value & flag
+      & info [ "all" ] ~doc:"Stop the background processes of every project, not only this one.")
+  in
+  make_command "stop" ~doc:"Stop the background processes of every build of truss for the project."
+    (make_client_term
+       Cmdliner.Term.(
+         const (fun all () ->
+             let directory = Sys.getcwd () in
+             match (all, Workspace.find_project_root directory) with
+             | true, _ ->
+                 if not (Workspace.stop_servers ()) then
+                   Output.eprint_line "No background process is running.";
+                 Outcome.Exit 0
+             | false, None ->
+                 Output.eprintf
+                   "No `truss.toml` in %s or any directory above it, so it is in no project. To \
+                    stop the background processes of every project, use --all.\n"
+                   directory;
+                 Outcome.Exit 2
+             | false, Some root ->
+                 if not (Workspace.stop_servers ~key:root ()) then
+                   Output.eprintf "No background process serves %s.\n" root;
+                 Outcome.Exit 0)
+         $ all))
+
+let clean =
+  make_command "clean"
+    ~doc:
+      "Stop the background processes of every project and every build of truss, then delete the \
+       cache directory."
+    ~man:
+      [
+        `S Cmdliner.Manpage.s_description;
+        `P
+          "The cache directory is $(b,TRUSS_CACHE), else $(b,XDG_CACHE_HOME)/truss, else \
+           ~/.cache/truss.";
+      ]
+    (Cmdliner.Term.const
+       (In_client
+          (fun () ->
+            ignore (Workspace.stop_servers ());
+            Workspace.reset ();
+            match Cache.locate_default_directory () with
+            | Error message -> raise (Outcome.Cannot_run message)
+            | Ok directory -> (
+                match File_system.remove directory with
+                | () -> Outcome.Exit 0
+                | exception Unix.Unix_error (error, _, path) ->
+                    Outcome.raise_cannot_run "Cannot delete %s: %s" path (Unix.error_message error)
+                | exception Sys_error message -> Outcome.raise_cannot_run "Cannot delete %s" message
+                ))))
+
+let database_counts_variable = "TRUSS_DATABASE_COUNTS"
+
+let print_database_counts (counts : Database.counts list) =
+  let total =
+    List.fold_left
+      (fun (total : Database.counts) (counts : Database.counts) ->
+        {
+          total with
+          computed = total.computed + counts.computed;
+          unchanged = total.unchanged + counts.unchanged;
+          writes = total.writes + counts.writes;
+          reads = total.reads + counts.reads;
+          distinct_reads = total.distinct_reads + counts.distinct_reads;
+        })
+      { kind = "total"; computed = 0; unchanged = 0; writes = 0; reads = 0; distinct_reads = 0 }
+      counts
+  in
+  let rows =
+    List.map
+      (fun (counts : Database.counts) ->
+        ( counts.kind,
+          List.map string_of_int
+            [
+              counts.computed; counts.unchanged; counts.writes; counts.reads; counts.distinct_reads;
+            ] ))
+      (counts @ [ total ])
+  in
+  let heading = ("kind", [ "computed"; "unchanged"; "writes"; "reads"; "distinct reads" ]) in
+  let kind_width, cell_widths =
+    List.fold_left
+      (fun (kind_width, cell_widths) (kind, cells) ->
+        ( max kind_width (String.length kind),
+          List.map2 (fun width cell -> max width (String.length cell)) cell_widths cells ))
+      (0, List.map (fun _ -> 0) (snd heading))
+      (heading :: rows)
+  in
+  List.iter
+    (fun (kind, cells) ->
+      Output.eprint_line
+        (String.concat "  "
+           (Printf.sprintf "%-*s" kind_width kind
+           :: List.map2 (fun width cell -> Printf.sprintf "%*s" width cell) cell_widths cells)))
+    (heading :: rows)
+
+let with_database_counts run =
+  if Sys.getenv_opt database_counts_variable = Some "1" then begin
+    let outcome, counts = Database.count run in
+    print_database_counts counts;
+    outcome
+  end
+  else run ()
+
+let with_directory directory work =
+  let previous = Sys.getcwd () in
+  Fun.protect
+    ~finally:(fun () -> try Sys.chdir previous with Sys_error _ -> ())
+    (fun () ->
+      Sys.chdir directory;
+      work ())
+
+let execute ~doing run =
+  Output.set_json false;
+  with_directory (Sys.getcwd ()) (fun () ->
+      with_database_counts (fun () ->
+          match Compiler_bug.run_while_doing ~stage:"Command" doing run with
+          | outcome -> outcome
+          | exception Outcome.Stop status -> Outcome.Exit status
+          | exception Report.Errors report ->
+              if Output.json () then Json.print (Report.make_document report [])
+              else Report.print report;
+              Outcome.Exit 1
+          | exception (Outcome.Cannot_run message | Workspace.Unusable_cache message) ->
+              Output.eprint_line message;
+              Outcome.Exit 2
+          | exception Compiler_bug.Bug bug ->
+              Output.eprint_line
+                ("The compiler has a bug, and cannot continue. Please report it.\n  "
+               ^ Compiler_bug.to_string bug);
+              Outcome.Exit 2
+          | exception exception_ ->
+              Output.eprintf "The compiler failed: %s\n" (Printexc.to_string exception_);
+              Outcome.Exit 2))
+
+let forwarded =
+  [
+    Registry.Index.variable;
+    "TRUSS_Z3";
+    "TRUSS_CACHE_SIZE";
+    "TRUSS_WORKERS";
+    database_counts_variable;
+  ]
+  @ C_compiler.variables
+
+type work =
+  | Command_line of string list
+  | Check_buffers of {
+      root : string;
+      encoding : Lsp_command.encoding;
+      buffers : (string * string) list;
+    }
+  | List_package_databases
+
+type request = {
+  work : work;
+  directory : string;
+  environment : (string * string) list;
+  terminal : bool;
+  columns : int option;
+}
+
+type response = { output : string; outcome : Outcome.t }
+
+let make_request ?(directory = Sys.getcwd ()) work =
+  {
+    work;
+    directory;
+    environment =
+      List.map (fun name -> (name, Option.value (Sys.getenv_opt name) ~default:"")) forwarded;
+    terminal = Output.terminal ();
+    columns = Output.columns ();
+  }
+
+let respond ~report_progress request run =
+  let buffer = Buffer.create 1024 in
+  List.iter (fun (name, value) -> Unix.putenv name value) request.environment;
+  let outcome =
+    Output.with_
+      {
+        print_out = Buffer.add_string buffer;
+        print_err = report_progress;
+        terminal = request.terminal;
+        columns = request.columns;
+        json = false;
+      }
+      (fun () -> with_directory request.directory run)
+  in
+  { output = Buffer.contents buffer; outcome }
+
+let check_buffers ~root encoding buffers =
+  execute ~doing:("checking the editor's buffers in " ^ root) (fun () ->
+      Json.print (Lsp_command.check ~root encoding buffers);
+      Outcome.Exit 0)
+
+let status =
+  make_command "status"
+    ~doc:"List the package databases that the background processes of this build of truss hold."
+    (Cmdliner.Term.const
+       (In_client
+          (fun () ->
+            match Workspace.list_servers () with
+            | [] ->
+                Output.eprint_line "No background process of this build of truss is running.";
+                Outcome.Exit 0
+            | keys ->
+                Outcome.Exit
+                  (List.fold_left
+                     (fun exit_status key ->
+                       match
+                         (Workspace.call ~start_server:false ~key ~report_progress:Output.eprint
+                            (make_request List_package_databases)
+                           : (response, string) result)
+                       with
+                       | Ok { output; outcome = Exit code } ->
+                           Output.print output;
+                           max exit_status code
+                       | Ok { outcome = Run_program _; _ } ->
+                           Compiler_bug.raise_bug ~stage:"Command"
+                             "a background process answered `truss status` with a program to run"
+                       | Error message ->
+                           Output.eprint_line message;
+                           exit_status)
+                     0 keys))))
+
+let run_language_server ~has_no_server_flag =
+  let check ~root encoding buffers =
+    let request = make_request ~directory:root (Check_buffers { root; encoding; buffers }) in
+    let response =
+      match Workspace.find_project_root root with
+      | Some project_root when uses_server ~has_no_server_flag ->
+          Workspace.call ~key:project_root ~report_progress:ignore request
+      | Some _ | None ->
+          let response =
+            respond ~report_progress:ignore request (fun () -> check_buffers ~root encoding buffers)
+          in
+          Workspace.flush ();
+          Ok response
+    in
+    match response with Ok { output; outcome = Exit 0 } -> Some output | Ok _ | Error _ -> None
+  in
+  Outcome.Exit (Lsp_command.serve ~input:stdin ~output:stdout ~check)
+
+let lsp =
+  make_command "lsp"
+    ~doc:"Answer an editor's Language Server Protocol requests on standard input and output."
     Cmdliner.Term.(
-      const (fun () ->
-          Workspace.stop ();
-          Outcome.Exit 0)
-      $ common)
+      const (fun has_no_server_flag ->
+          In_client (fun () -> run_language_server ~has_no_server_flag))
+      $ no_server_flag)
 
 let version =
   Printf.sprintf "stage0 (Truss %s, code generation %d, Unicode %s)" Manifest.truss_version
@@ -258,8 +560,19 @@ let truss =
          [
            `S Cmdliner.Manpage.s_environment;
            `P
-             "$(b,TRUSS_NO_SERVER=1), or $(b,--no-server) before or after the command, runs the \
-              command in its own process, and not in the background process.";
+             ("$(b," ^ no_server_variable
+            ^ "=1) runs every command in its own process, as $(b,--no-server) does.");
+           `P
+             ("$(b," ^ database_counts_variable
+            ^ "=1) writes a table to standard error after the command. The table has a row for \
+               each kind of part that the database computed or wrote during the command. A row \
+               counts the parts computed, the computed parts whose value came out unchanged, the \
+               writes, the reads that the computations made, and the distinct parts that each \
+               computation read. A write is a changed value or a removed part. A last row, \
+               untracked, counts the reads that no part records: the command's own reads of the \
+               database, and the reads that order the parts of a stage. The table omits the work \
+               that the background process did before the command, such as propagating a saved \
+               file.");
          ]
        ~doc:"Check, test, build, and change Truss code.")
     [
@@ -279,105 +592,53 @@ let truss =
       new_;
       status;
       stop;
+      clean;
+      lsp;
     ]
 
-let evaluate arguments =
-  Output.set_json false;
+let parse_command_line arguments =
   let buffer_out = Buffer.create 256 and buffer_err = Buffer.create 256 in
   let help = Format.formatter_of_buffer buffer_out
   and err = Format.formatter_of_buffer buffer_err in
-  let run () =
-    match arguments with
-    | "__check-buffers" :: rest -> Outcome.Exit (Lsp_command.check_buffers rest)
-    | _ -> (
-        match
-          Cmdliner.Cmd.eval_value ~help ~err ~catch:false
-            ~argv:(Array.of_list ("truss" :: arguments))
-            truss
-        with
-        | Ok (`Ok outcome) -> outcome
-        | Ok (`Version | `Help) -> Outcome.Exit 0
-        | Error (`Parse | `Term | `Exn) -> Outcome.Exit 2)
-  in
-  let outcome =
+  let command =
     match
-      Compiler_bug.while_doing ~stage:"Command"
-        ("running `truss " ^ String.concat " " arguments ^ "`")
-        run
+      Cmdliner.Cmd.eval_value ~help ~err ~catch:false
+        ~argv:(Array.of_list ("truss" :: arguments))
+        truss
     with
-    | outcome -> outcome
-    | exception Outcome.Stop status -> Outcome.Exit status
-    | exception Report.Errors report ->
-        if Output.json () then Json.print (Report.make_document report []) else Report.print report;
-        Outcome.Exit 1
-    | exception (Outcome.Cannot_run message | Workspace.Unusable_cache message) ->
-        Output.eprint_line message;
-        Outcome.Exit 2
-    | exception Compiler_bug.Bug bug ->
-        Output.eprint_line
-          ("The compiler has a bug, and cannot continue. Please report it.\n  "
-         ^ Compiler_bug.to_string bug);
-        Outcome.Exit 2
+    | Ok (`Ok command) -> Ok command
+    | Ok (`Version | `Help) -> Error 0
+    | Error (`Parse | `Term | `Exn) -> Error 2
   in
   Format.pp_print_flush help ();
   Format.pp_print_flush err ();
   Output.print (Buffer.contents buffer_out);
   Output.eprint (Buffer.contents buffer_err);
-  outcome
+  command
 
-let run_command_line ?(directory = Sys.getcwd ()) arguments =
-  let previous = Sys.getcwd () in
-  Fun.protect
-    ~finally:(fun () -> try Sys.chdir previous with Sys_error _ -> ())
-    (fun () ->
-      Sys.chdir directory;
-      match evaluate arguments with
-      | outcome -> outcome
-      | exception exception_ ->
-          Output.eprintf "The compiler failed: %s\n" (Printexc.to_string exception_);
-          Outcome.Exit 2)
+let describe_command_line arguments = "running `truss " ^ String.concat " " arguments ^ "`"
 
-let forwarded =
-  [
-    Registry.Index.variable;
-    Toolchain.added_flags_variable;
-    "TRUSS_CC";
-    "TRUSS_KEEP_C";
-    "TRUSS_Z3";
-    "TRUSS_CACHE_SIZE";
-    "TRUSS_WORKERS";
-  ]
+let run_project_command arguments =
+  execute ~doing:(describe_command_line arguments) (fun () ->
+      match parse_command_line arguments with
+      | Error status -> Outcome.Exit status
+      | Ok (In_project { run; _ }) -> run ()
+      | Ok (In_client _) ->
+          Compiler_bug.raise_bug ~stage:"Command"
+            "`truss %s` runs in the client, and a background process received it"
+            (String.concat " " arguments))
 
-type request = {
-  arguments : string list;
-  directory : string;
-  environment : (string * string) list;
-  terminal : bool;
-  columns : int option;
-}
-
-type response = { output : string; outcome : Outcome.t }
-
-let handle ~progress request =
-  let buffer = Buffer.create 1024 in
-  List.iter (fun (name, value) -> Unix.putenv name value) request.environment;
-  let outcome =
-    Output.with_
-      {
-        out = Buffer.add_string buffer;
-        err = progress;
-        terminal = request.terminal;
-        columns = request.columns;
-        json = false;
-      }
-      (fun () -> run_command_line ~directory:request.directory request.arguments)
-  in
-  { output = Buffer.contents buffer; outcome }
+let handle ~report_progress request =
+  respond ~report_progress request (fun () ->
+      match request.work with
+      | Command_line arguments -> run_project_command arguments
+      | Check_buffers { root; encoding; buffers } -> check_buffers ~root encoding buffers
+      | List_package_databases ->
+          execute ~doing:"listing the package databases" (fun () ->
+              List.iter Output.print_line (Workspace.list_package_databases ());
+              Outcome.Exit 0))
 
 let serve key = Workspace.serve ~key ~handle
-
-let find_command arguments =
-  List.find_opt (fun argument -> not (String.starts_with ~prefix:"-" argument)) arguments
 
 let finish (outcome : Outcome.t) =
   match outcome with
@@ -387,119 +648,37 @@ let finish (outcome : Outcome.t) =
         ~finally:(fun () -> try Sys.remove program with Sys_error _ -> ())
         (fun () -> Process.run_attached program arguments)
 
-let request arguments =
-  {
-    arguments;
-    directory = Sys.getcwd ();
-    environment =
-      List.map (fun name -> (name, Option.value (Sys.getenv_opt name) ~default:"")) forwarded;
-    terminal = Output.terminal ();
-    columns = Output.columns ();
-  }
-
-let ask_running arguments : (string * (response, string) result) list =
-  List.map
-    (fun key ->
-      (key, Workspace.call ~start_server:false ~key ~progress:Output.eprint (request arguments)))
-    (Workspace.list_servers ())
-
-let wait_until_stopped answers =
-  List.iter
-    (fun (key, answer) -> if Result.is_ok answer then Workspace.wait_until_ended ~key)
-    answers
-
-let clean_cache () =
-  wait_until_stopped (ask_running [ "stop" ]);
-  Workspace.reset ();
-  match Cache.locate_default_directory () with
-  | Error message ->
-      Output.eprint_line message;
-      2
-  | Ok directory -> (
-      match File_system.remove directory with
-      | () -> 0
-      | exception Unix.Unix_error (error, _, _) ->
-          Output.eprintf "Cannot delete %s: %s\n" directory (Unix.error_message error);
-          2)
-
-let locate_directory arguments =
-  let rec named = function
-    | "-C" :: directory :: _ -> Some directory
-    | option :: _ when String.length option > 2 && String.starts_with ~prefix:"-C" option ->
-        Some (String.sub option 2 (String.length option - 2))
-    | _ :: rest -> named rest
-    | [] -> None
-  in
-  match named arguments with
-  | Some directory when Filename.is_relative directory -> Filename.concat (Sys.getcwd ()) directory
-  | Some directory -> directory
-  | None -> Sys.getcwd ()
-
-let run_language_server ~no_server =
-  let check ~root encoding buffers =
-    let request =
-      { (request (Lsp_command.check_arguments ~root encoding buffers)) with directory = root }
-    in
-    let response =
-      if no_server then begin
-        let response = handle ~progress:ignore request in
-        Workspace.flush ();
-        Ok response
-      end
-      else Workspace.call ~key:(Workspace.make_server_key root) ~progress:ignore request
-    in
-    match response with Ok { output; outcome = Exit 0 } -> Some output | Ok _ | Error _ -> None
-  in
-  Lsp_command.serve ~input:stdin ~output:stdout ~check
-
 let run_client argv =
-  let arguments = List.tl (Arguments.prepare argv) in
-  let no_server = List.mem "--no-server" arguments || Sys.getenv_opt "TRUSS_NO_SERVER" = Some "1" in
-  let arguments = List.filter (( <> ) "--no-server") arguments in
-  let local () =
-    let outcome = run_command_line arguments in
+  let arguments = List.tl (Arguments.move_leading_options argv) in
+  let run_here run =
+    let outcome = execute ~doing:(describe_command_line arguments) run in
     Workspace.flush ();
-    finish outcome
+    outcome
   in
-  match find_command arguments with
-  | Some "clean" -> clean_cache ()
-  | Some "lsp" -> run_language_server ~no_server
-  | None | Some "new" -> local ()
-  | _ when no_server -> local ()
-  | Some (("status" | "stop") as command) -> (
-      match ask_running arguments with
-      | [] ->
-          Output.eprint_line "No background process is running.";
-          0
-      | answers ->
-          let status =
-            List.fold_left
-              (fun status (_, answer) ->
-                match answer with
-                | Ok response ->
-                    Output.print response.output;
-                    max status (finish response.outcome)
-                | Error message ->
-                    Output.eprint_line message;
-                    status)
-              0 answers
-          in
-          if command = "stop" then wait_until_stopped answers;
-          status)
-  | Some _ -> (
-      match
-        (Workspace.call
-           ~key:(Workspace.make_server_key (locate_directory arguments))
-           ~progress:Output.eprint (request arguments)
-          : (response, string) result)
-      with
-      | Ok response ->
-          Output.print response.output;
-          finish response.outcome
-      | Error message ->
-          Output.eprint_line message;
-          2)
+  finish
+    (match parse_command_line arguments with
+    | Error status -> Outcome.Exit status
+    | Ok (In_client run) -> run_here run
+    | Ok (In_project { directory; has_no_server_flag; run }) -> (
+        match Workspace.find_project_root directory with
+        | Some root when uses_server ~has_no_server_flag -> (
+            match
+              (Workspace.call ~key:root ~report_progress:Output.eprint
+                 (make_request (Command_line arguments))
+                : (response, string) result)
+            with
+            | Ok response ->
+                Output.print response.output;
+                response.outcome
+            | Error message ->
+                Output.eprint_line message;
+                Outcome.Exit 2)
+        | Some _ | None -> run_here run))
 
 module For_testing = struct
-  let run_command_line = run_command_line
+  let run_command_line arguments =
+    execute ~doing:(describe_command_line arguments) (fun () ->
+        match parse_command_line arguments with
+        | Error status -> Outcome.Exit status
+        | Ok (In_client run | In_project { run; _ }) -> run ())
 end

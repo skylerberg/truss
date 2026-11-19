@@ -1,30 +1,36 @@
-let make_trait_substitution (interface : Types.trait_interface) ~self
-    (reference : Types.trait_reference) : Types.substitution =
-  (Types.make_self_parameter reference.trait, Types.Type self)
-  :: Types.make_substitution interface.trait_generics reference.trait_arguments
-
-let list_bound_closure lookups ~self (bound : Types.trait_reference) =
+let list_bound_closure_over ~find_requirements ~self (bound : Types.trait_reference) =
   let closure = ref [] in
   let rec visit ancestors (bound : Types.trait_reference) =
     if not (List.exists (Path.equal bound.trait) ancestors || List.mem bound !closure) then begin
       closure := bound :: !closure;
-      match Definition.read_trait_interface lookups bound.trait with
-      | Some trait ->
+      match find_requirements bound.trait with
+      | Some (trait_generics, requires) ->
+          let substitution =
+            Types.bind_argument
+              (Types.make_self_parameter bound.trait)
+              (Types.Type self)
+              (Types.make_substitution trait_generics bound.trait_arguments)
+          in
           List.iter
             (fun required ->
-              visit (bound.trait :: ancestors)
-                (Types.substitute_trait (make_trait_substitution trait ~self bound) required))
-            trait.requires
+              visit (bound.trait :: ancestors) (Types.substitute_trait substitution required))
+            requires
       | None -> ()
     end
   in
   visit [] bound;
   List.rev !closure
 
+let list_bound_closure lookups =
+  list_bound_closure_over ~find_requirements:(fun trait ->
+      Option.map
+        (fun (interface : Types.trait_interface) -> (interface.trait_generics, interface.requires))
+        (Definition.find_trait_interface lookups trait))
+
 let find_declaring_trait lookups ~base (trait : Types.trait_reference) ~is_declared =
   List.find_opt
     (fun (reference : Types.trait_reference) ->
-      match Definition.read_interface lookups reference.trait with
+      match Definition.find_interface lookups reference.trait with
       | Some (Environment.Trait_interface interface) -> is_declared interface
       | Some (Environment.Error_interface _) -> true
       | _ -> false)
@@ -46,33 +52,34 @@ let list_associated_bounds lookups ~base trait name =
       (fun (declaring : Types.trait_reference) ->
         Option.map
           (fun interface -> (declaring, interface))
-          (Definition.read_trait_interface lookups declaring.trait))
+          (Definition.find_trait_interface lookups declaring.trait))
   with
   | Some (declaring, interface) ->
       List.concat_map
         (fun (associated : Types.associated_type) ->
           if associated.associated_name = name then
             List.map
-              (Types.substitute_trait (make_trait_substitution interface ~self:base declaring))
+              (Types.substitute_trait
+                 (Types.make_trait_substitution interface.trait_generics ~self:base declaring))
               associated.associated_bounds
           else [])
         interface.associated_types
   | None -> []
 
-let list_known_bounds lookups ~bounds (type_ : Types.ty) =
+let list_known_bounds lookups ~list_bounds (type_ : Types.ty) =
   match type_ with
   | Types.Parameter parameter ->
-      List.concat_map (list_bound_closure lookups ~self:type_) (bounds parameter)
+      List.concat_map (list_bound_closure lookups ~self:type_) (list_bounds parameter)
   | Types.Projection { base; trait; name } ->
       List.concat_map
         (list_bound_closure lookups ~self:type_)
         (list_associated_bounds lookups ~base trait name)
   | _ -> []
 
-let has_bound lookups ~bounds type_ trait =
+let has_bound lookups ~list_bounds type_ trait =
   List.exists
     (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)
-    (list_known_bounds lookups ~bounds type_)
+    (list_known_bounds lookups ~list_bounds type_)
 
 type property = Copyable | Plain | View | Holds_function
 type occurrence = Environment.occurrence = In_place | Indirect | Function_input
@@ -98,7 +105,6 @@ let to_requirement = function None -> Never | Some types -> Requires types
 let to_exposure = function None -> Always | Some types -> If_any types
 let of_requirement = function Never -> None | Requires types -> Some types
 let of_exposure = function Always -> None | If_any types -> Some types
-let read_facts (lookups : Lookups.t) path = Option.value ~default:empty (lookups.type_facts path)
 
 let find_stored_conditions (facts : Environment.type_facts) = function
   | Copyable -> of_requirement facts.copyable
@@ -140,17 +146,27 @@ let fail_at_recursion_limit query =
            holds a larger type can grow a type forever."
           query recursion_limit))
 
-let rec compute_conditions lookups ~facts_of ~resolve ~leaf ?(in_progress = []) property
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Interface" format
+
+let rec strip_projections = function
+  | Types.Projection { base; _ } -> strip_projections base
+  | type_ -> type_
+
+let rec compute_conditions lookups ~facts_of ~resolve ~compute_leaf ?(in_progress = []) property
     (type_ : Types.ty) =
-  let each =
-    combine_conditions (compute_conditions lookups ~facts_of ~resolve ~leaf ~in_progress property)
+  let combine_each =
+    combine_conditions
+      (compute_conditions lookups ~facts_of ~resolve ~compute_leaf ~in_progress property)
   in
   match type_ with
-  | Types.Error _ | Types.Hole | Types.Variable _ | Types.Never | Types.Literal _ | Types.Integer ->
-      Some []
+  | Types.Never | Types.Literal _ | Types.Integer -> Some []
+  | Types.Error _ | Types.Hole | Types.Variable _ -> Some [ type_ ]
   | Types.Function _ -> (
       match property with View | Holds_function -> None | Copyable | Plain -> Some [])
-  | Types.Parameter _ | Types.Projection _ -> leaf type_
+  | Types.Parameter _ | Types.Projection _ -> (
+      match strip_projections type_ with
+      | root when Types.is_open_type root -> Some [ root ]
+      | _ -> compute_leaf type_)
   | Types.Any trait -> (
       let requires traits =
         List.exists
@@ -165,31 +181,28 @@ let rec compute_conditions lookups ~facts_of ~resolve ~leaf ?(in_progress = []) 
       | View -> if requires [ Well_known.make_path Storable ] then Some [] else None
       | Holds_function -> None)
   | Types.Named { path; arguments } -> (
-      match (Intrinsic.builtin_of_path path, property) with
+      match (Intrinsic.find_builtin path, property) with
       | Some Storage, Plain | Some View, View | Some Handle, (Copyable | Plain) -> None
       | Some Shared, Copyable -> Some []
       | Some Shared, Plain -> None
       | Some Shared, View | Some (Shared | View), Holds_function ->
-          each (list_type_arguments arguments)
-      | Some (Storage | Array), _ -> each (list_type_arguments arguments)
+          combine_each (list_type_arguments arguments)
+      | Some (Storage | Array), _ -> combine_each (list_type_arguments arguments)
       | Some _, _ -> Some []
-      | None, _ -> (
-          match Definition.read_type_interface lookups path with
-          | None -> (
-              match property with View | Holds_function -> Some [] | Copyable | Plain -> None)
-          | Some _ when List.exists (Types.equal type_) in_progress -> Some []
-          | Some _ when List.length in_progress > recursion_limit ->
-              fail_at_recursion_limit
-                (Printf.sprintf "Deciding whether `%s` %s" (Types.show type_)
-                   (show_property property))
-          | Some interface ->
-              Option.bind
-                (find_stored_conditions (facts_of path) property)
-                (fun arguments_conditions ->
-                  combine_conditions
-                    (compute_conditions lookups ~facts_of ~resolve ~leaf
-                       ~in_progress:(type_ :: in_progress) property)
-                    (instantiate ~resolve interface arguments arguments_conditions))))
+      | None, _ ->
+          let interface = Definition.read_type_interface lookups path in
+          if List.exists (Types.equal type_) in_progress then Some []
+          else if List.length in_progress > recursion_limit then
+            fail_at_recursion_limit
+              (Printf.sprintf "Deciding whether `%s` %s" (Types.show type_) (show_property property))
+          else
+            Option.bind
+              (find_stored_conditions (facts_of path) property)
+              (fun arguments_conditions ->
+                combine_conditions
+                  (compute_conditions lookups ~facts_of ~resolve ~compute_leaf
+                     ~in_progress:(type_ :: in_progress) property)
+                  (instantiate ~resolve interface arguments arguments_conditions)))
 
 type recursion = { recursive : Types.ty; occurrence : occurrence; defining : Path.t list }
 type contents = { contained : (Types.ty * occurrence) list; recursions : recursion list }
@@ -198,7 +211,7 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
     =
   let contained = ref [] and recursions = ref [] in
   let rec visit ~enclosing occurrence (type_ : Types.ty) =
-    let inside ?named ?(defining = []) step =
+    let step_inside ?named ?(defining = []) step =
       visit
         ~enclosing:
           (Option.to_list (Option.map (fun named -> (named, step, defining)) named)
@@ -213,20 +226,21 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
     | Types.Function ({ inputs; output; _ } as function_) ->
         List.iter
           (fun (_, input) ->
-            inside (if Types.terminates function_ then Function_input else Indirect) input)
+            step_inside (if Types.terminates function_.uses then Function_input else Indirect) input)
           inputs;
-        inside Indirect output
+        step_inside Indirect output
     | Types.Any { trait_arguments; associated; _ } ->
-        List.iter (inside Indirect) (list_type_arguments trait_arguments @ List.map snd associated)
+        List.iter (step_inside Indirect)
+          (list_type_arguments trait_arguments @ List.map snd associated)
     | Types.Named { path; arguments } -> (
-        match Intrinsic.builtin_of_path path with
-        | Some Array -> List.iter (inside In_place) (list_type_arguments arguments)
-        | Some _ -> List.iter (inside Indirect) (list_type_arguments arguments)
+        match Intrinsic.find_builtin path with
+        | Some Array -> List.iter (step_inside In_place) (list_type_arguments arguments)
+        | Some _ -> List.iter (step_inside Indirect) (list_type_arguments arguments)
         | None -> (
             contained := (type_, occurrence) :: !contained;
             match
               ( List.find_opt (fun (named, _, _) -> Types.equal named type_) enclosing,
-                Definition.read_type_interface lookups path )
+                Definition.find_type_interface lookups path )
             with
             | Some (_, occurrence, defining), _ ->
                 recursions := { recursive = type_; occurrence; defining } :: !recursions
@@ -238,12 +252,14 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
                 List.iter
                   (fun (condition, step) ->
                     let condition, defining = resolve (Types.substitute substitution condition) in
-                    inside ~named:type_ ~defining step condition)
+                    step_inside ~named:type_ ~defining step condition)
                   (facts_of path).contains
             | None, Some { shape = Todo_type | Builtin_type _; _ } ->
-                List.iter (inside Indirect) (list_type_arguments arguments)
+                List.iter (step_inside Indirect) (list_type_arguments arguments)
             | None, _ -> ()))
-    | _ -> ()
+    | Types.Never | Types.Integer -> ()
+    | Types.Error _ | Types.Hole | Types.Variable _ | Types.Literal _ ->
+        raise_bug "the contents of the inference type `%s` are listed" (Types.show type_)
   in
   visit ~enclosing:[] In_place type_;
   { contained = List.rev !contained; recursions = List.rev !recursions }
@@ -264,7 +280,7 @@ let compute_facts lookups ~facts_of (interface : Types.type_interface) : Environ
     Option.map (List.sort_uniq compare)
       (combine_conditions
          (compute_conditions lookups ~facts_of ~resolve:Fun.id
-            ~leaf:(fun type_ -> if is_small type_ then Some [ type_ ] else None)
+            ~compute_leaf:(fun type_ -> if is_small type_ then Some [ type_ ] else None)
             property)
          types)
   in
@@ -342,55 +358,57 @@ let list_field_type_paths ~package (interface : Types.type_interface) =
   List.concat_map list_named (Types.list_field_types interface)
 
 let compute_component_facts (lookups : Lookups.t) interfaces =
-  let each facts =
+  let map_each select_facts =
     List.fold_left
       (fun facts_by_path (path, interface) ->
-        Path.Map.add path (facts path interface) facts_by_path)
+        Path.Map.add path (select_facts path interface) facts_by_path)
       Path.Map.empty interfaces
   in
   let rec settle assumed =
     let facts_of path =
       match Path.Map.find_opt path assumed with
       | Some facts -> facts
-      | None -> read_facts lookups path
+      | None -> lookups.read_type_facts path
     in
-    let next = each (fun _ interface -> compute_facts lookups ~facts_of interface) in
+    let next = map_each (fun _ interface -> compute_facts lookups ~facts_of interface) in
     if Path.Map.equal ( = ) next assumed then next else settle next
   in
-  Path.Map.bindings (settle (each (fun _ _ -> empty)))
+  Path.Map.bindings (settle (map_each (fun _ _ -> empty)))
 
-let rec is_open = function
-  | Types.Parameter _ | Types.Variable _ | Types.Hole | Types.Error _ -> true
-  | Types.Projection { base; _ } -> is_open base
-  | _ -> false
+type decision = Holds | Fails | Depends_on of Types.ty
 
-let has_property (lookups : Lookups.t) ~bounds ~normalize property type_ =
-  let leaf type_ =
-    let bounded trait = has_bound lookups ~bounds type_ trait in
+let compute_decision ~is_conjunction conditions =
+  match conditions with
+  | Some [] -> if is_conjunction then Holds else Fails
+  | None -> if is_conjunction then Fails else Holds
+  | Some (open_type :: _) -> Depends_on open_type
+
+let decide_property (lookups : Lookups.t) ~list_bounds ~normalize property type_ =
+  let compute_leaf type_ =
+    let is_bounded trait = has_bound lookups ~list_bounds type_ trait in
     let adds_nothing =
       match property with
-      | Copyable -> bounded (Well_known.make_path Copyable) || bounded (Well_known.make_path Plain)
-      | Plain -> bounded (Well_known.make_path Plain)
-      | View -> is_open type_
+      | Copyable ->
+          is_bounded (Well_known.make_path Copyable) || is_bounded (Well_known.make_path Plain)
+      | Plain -> is_bounded (Well_known.make_path Plain)
+      | View -> ( match strip_projections type_ with Types.Parameter _ -> true | _ -> false)
       | Holds_function -> true
     in
     if adds_nothing then Some [] else None
   in
-  let type_conditions =
-    compute_conditions lookups ~facts_of:(read_facts lookups) ~resolve:normalize ~leaf property
-      (normalize type_)
-  in
-  match property with
-  | Copyable | Plain -> Option.is_some type_conditions
-  | View | Holds_function -> Option.is_none type_conditions
+  compute_decision
+    ~is_conjunction:
+      (match property with Copyable | Plain -> true | View | Holds_function -> false)
+    (compute_conditions lookups ~facts_of:lookups.read_type_facts ~resolve:normalize ~compute_leaf
+       property (normalize type_))
 
-let is_storable (lookups : Lookups.t) ~bounds ~normalize type_ =
-  let leaf type_ =
-    if has_bound lookups ~bounds type_ (Well_known.make_path Storable) then Some [] else None
+let decide_storable (lookups : Lookups.t) ~list_bounds ~normalize type_ =
+  let compute_leaf type_ =
+    if has_bound lookups ~list_bounds type_ (Well_known.make_path Storable) then Some [] else None
   in
-  Option.is_some
-    (compute_conditions lookups ~facts_of:(read_facts lookups) ~resolve:normalize ~leaf View
-       (normalize type_))
+  compute_decision ~is_conjunction:true
+    (compute_conditions lookups ~facts_of:lookups.read_type_facts ~resolve:normalize ~compute_leaf
+       View (normalize type_))
 
 let collect_contents (lookups : Lookups.t) ~normalize type_ =
-  walk_contents lookups ~facts_of:(read_facts lookups) ~resolve:normalize (fst (normalize type_))
+  walk_contents lookups ~facts_of:lookups.read_type_facts ~resolve:normalize (fst (normalize type_))

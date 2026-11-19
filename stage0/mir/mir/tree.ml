@@ -1,7 +1,7 @@
 type local = int
 
 type local_kind =
-  | Source of { local : Core.local; mode : Types.mode; name : string option; is_var : bool }
+  | Source of { local : Core.local; mode : Types.mode; is_var : bool; is_binding : bool }
   | Temporary
   | Lent of Types.mode
 
@@ -22,31 +22,19 @@ type operand =
   | Use of { place : place; type_ : Types.ty; origin : Core.origin }
   | Borrow of { place : place; type_ : Types.ty; mode : Types.mode; origin : Core.origin }
   | Take of { place : place; type_ : Types.ty; origin : Core.origin }
-  | Constant of { value : constant; type_ : Types.ty }
+  | Immediate of { value : constant; type_ : Types.ty }
 
-type callee = operand Core.target
+type callee = { target : operand Core.target; uses : Types.capability_set }
 
 type function_argument =
   | Function_reference of { path : Path.t; origin : Core.origin }
   | Lambda_expression of { body : int; origin : Core.origin; type_ : Types.ty }
 
 type argument =
-  | Passed of {
-      mode : Types.mode;
-      value : operand;
-      mode_keyword : Core.mode_keyword option;
-      function_ : function_argument option;
-    }
+  | Passed of { mode : Types.mode; value : operand; function_ : function_argument option }
   | Default
 
-type call = {
-  callee : callee;
-  arguments : argument list;
-  uses : Types.capability_set;
-  node : Core.id;
-  origin : Core.origin;
-}
-
+type call = { callee : callee; arguments : argument list; node : Core.id; origin : Core.origin }
 type capture = { local : Core.local; type_ : Types.ty; place : place }
 
 type yielded =
@@ -73,13 +61,17 @@ type connective = And | Or | Implies
 type rvalue =
   | Operand of operand
   | Operation of {
-      operation : Intrinsic.operation;
+      operation : Intrinsic.scalar;
       type_arguments : Types.argument list;
       operands : operand list;
     }
   | Compare of { comparison : Core.comparison; left : operand; right : operand }
   | Not of operand
-  | Construct of { variant : string option; fields : (string * operand option) list }
+  | Construct of {
+      variant : string option;
+      fields : (string * operand option) list;
+      type_ : Types.ty;
+    }
   | Array of operand list
   | Is_variant of { place : place; variant : string }
   | Convert of {
@@ -89,20 +81,20 @@ type rvalue =
     }
   | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
   | Copy of operand
-  | Function_value of { path : Path.t; type_arguments : Types.argument list; is_argument : bool }
+  | Function_value of { path : Path.t; instantiation : Types.instantiation; is_argument : bool }
   | Lambda of { body : int; captures : capture list; is_argument : bool }
   | Value_parameter of Types.parameter
   | Specification of specification
 
 and choice =
   | Conditional of {
-      condition : operand;
+      condition : block;
       then_ : block;
       else_ : block;
       if_condition : Core.origin option;
     }
   | Cases of case list
-  | Connective of { connective : connective; left : operand; right : block }
+  | Connective of { connective : connective; left : block; right : block }
 
 and specification =
   | Result
@@ -114,7 +106,7 @@ and specification =
       arguments : operand list;
       unconverted : Types.ty list;
     }
-  | Method_time of callee
+  | Method_cost of { metric : Metric.t; method_ : operand Core.target }
   | Map of (operand * operand) list
   | Quantified of {
       quantifier : Core.quantifier;
@@ -129,7 +121,6 @@ and case = { tests : block; guard : block option; value : block }
 and quantifier_range =
   | Over_type of Types.ty
   | Over_range of { start : operand; stop : operand; inclusive : bool }
-  | Over_collection of operand
 
 and block = { statements : statement list; value : operand option }
 
@@ -142,17 +133,10 @@ and formula = {
   lambdas : body array;
 }
 
-and bound = Finite | Order_of of formula | At_most of formula | Exactly of formula
+and bound = Order_of of formula | At_most of formula | Exactly of formula
 and cost = { origin : Core.origin; amortized : bool; resource : Core.resource; bound : bound }
 and loop_clause = Invariant of formula | Decreases of formula list | Cost of cost
-
-and quantified = {
-  quantifier : Core.quantifier;
-  binding_count : int;
-  decision : int;
-  holds : operand;
-  decides : local;
-}
+and quantified = { quantifier : Core.quantifier; decides : local }
 
 and loop = {
   clauses : loop_clause list;
@@ -245,15 +229,8 @@ type requirement = {
   names : (Core.local * Core.origin) list;
 }
 
-type callback = { inputs : (Core.local * string) list; requires : formula list }
-
-type parameter = {
-  local : Core.local;
-  name : string;
-  mode : Types.mode;
-  type_ : Types.ty;
-  has_default : bool;
-}
+type callback = { inputs : Core.local list; requires : formula list }
+type parameter = { local : Core.local; mode : Types.mode; type_ : Types.ty; has_default : bool }
 
 type contract = {
   parameters : parameter list;

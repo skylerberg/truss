@@ -1,0 +1,7 @@
+fn apply(make: fn() -> List[String]) -> UInt64 {
+  make().length()
+}
+
+fn f(name: own String) -> UInt64 {
+  apply(fn() { [name.copy()] })
+}

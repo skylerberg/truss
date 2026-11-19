@@ -12,7 +12,7 @@ let remove_trivia cursor ~start ~stop ~line_break =
   | true, false -> Diagnostic.delete (Source.make_span before after)
   | false, true -> Diagnostic.delete (Source.make_span start after)
   | false, false ->
-      let line_start = Source.line_start cursor.source start in
+      let line_start = Source.compute_line_start cursor.source start in
       let stop =
         if Cursor.is_at_end cursor after then after
         else after + Cursor.measure_line_break cursor after
@@ -22,13 +22,15 @@ let remove_trivia cursor ~start ~stop ~line_break =
 let report_forbidden_run (cursor : Cursor.t) ~context =
   let start = cursor.position in
   let rec collect characters =
-    let decoded = Cursor.decode cursor cursor.position in
-    if Unicode.Decoded.is_valid decoded && Unicode.is_forbidden (Unicode.Decoded.code_point decoded)
-    then begin
-      cursor.position <- cursor.position + Unicode.Decoded.length decoded;
-      collect (Unicode.Decoded.code_point decoded :: characters)
-    end
-    else List.rev characters
+    if Cursor.is_at_end cursor cursor.position then List.rev characters
+    else
+      let decoded = Cursor.decode cursor cursor.position in
+      let scalar_value = Uchar.utf_decode_uchar decoded in
+      if Uchar.utf_decode_is_valid decoded && Unicode.is_forbidden scalar_value then begin
+        cursor.position <- cursor.position + Uchar.utf_decode_length decoded;
+        collect (scalar_value :: characters)
+      end
+      else List.rev characters
   in
   let characters = collect [] in
   let stop = cursor.position in
@@ -60,7 +62,12 @@ let report_forbidden_run (cursor : Cursor.t) ~context =
               [ remove_trivia cursor ~start ~stop ~line_break:false ];
           ] )
     | Ordinary_string ->
-        let escapes = String.concat "" (List.map (Printf.sprintf "\\u{%X}") characters) in
+        let escapes =
+          String.concat ""
+            (List.map
+               (fun character -> Printf.sprintf "\\u{%X}" (Uchar.to_int character))
+               characters)
+        in
         ( base ^ " Write it as an escape, so that it can be seen.",
           [
             Diagnostic.fix
@@ -79,7 +86,7 @@ let report_invalid_run (cursor : Cursor.t) =
   let start = cursor.position in
   while
     (not (Cursor.is_at_end cursor cursor.position))
-    && not (Unicode.Decoded.is_valid (Cursor.decode cursor cursor.position))
+    && not (Uchar.utf_decode_is_valid (Cursor.decode cursor cursor.position))
   do
     cursor.position <- cursor.position + 1
   done;
@@ -87,13 +94,13 @@ let report_invalid_run (cursor : Cursor.t) =
     (Source.make_span start cursor.position)
     "Source files must be UTF-8, and these bytes are not valid UTF-8."
 
-let copy_plain (cursor : Cursor.t) buffer ~special =
+let copy_plain (cursor : Cursor.t) buffer ~is_special =
   let start = cursor.position in
   let rec stop index =
     if Cursor.is_at_end cursor index then index
     else
       let current = Cursor.lookup_char cursor index in
-      if (current >= ' ' && current < '\x7F' && not (special current)) || current = '\t' then
+      if (current >= ' ' && current < '\x7F' && not (is_special current)) || current = '\t' then
         stop (index + 1)
       else index
   in
@@ -105,12 +112,13 @@ let copy_plain (cursor : Cursor.t) buffer ~special =
 
 let read_character cursor buffer ~context =
   let decoded = Cursor.decode cursor cursor.position in
-  if not (Unicode.Decoded.is_valid decoded) then report_invalid_run cursor
-  else if Unicode.is_forbidden (Unicode.Decoded.code_point decoded) then
+  if not (Uchar.utf_decode_is_valid decoded) then report_invalid_run cursor
+  else if Unicode.is_forbidden (Uchar.utf_decode_uchar decoded) then
     report_forbidden_run cursor ~context
   else begin
-    Buffer.add_substring buffer cursor.text cursor.position (Unicode.Decoded.length decoded);
-    cursor.position <- cursor.position + Unicode.Decoded.length decoded
+    let length = Uchar.utf_decode_length decoded in
+    Buffer.add_substring buffer cursor.text cursor.position length;
+    cursor.position <- cursor.position + length
   end
 
 let consume_line_break (cursor : Cursor.t) =

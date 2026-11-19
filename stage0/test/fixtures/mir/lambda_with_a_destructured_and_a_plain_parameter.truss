@@ -1,0 +1,9 @@
+type Pair(left: Int64, right: Int64)
+
+fn apply(transform: fn(Pair, Int64) -> Int64) -> Int64 {
+  transform(Pair(left: 1, right: 2), 3)
+}
+
+fn g(offset: Int64) -> Int64 {
+  apply(fn((left, right), scale) { left + right + scale + offset })
+}

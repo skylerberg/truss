@@ -2,6 +2,7 @@ module Part = Part
 module Call_graph = Graph.Make (Path)
 
 type 'a part = Value of 'a | Failed of Diagnostic.in_definition list | Blocked
+type binding = Binding : 'a Part.stored * 'a part -> binding
 type 'a slot = { stored : 'a option; replace : 'a -> unit; remove : unit -> unit }
 
 exception Reads_failed_part
@@ -9,34 +10,9 @@ exception Reads_failed_part
 module Make_table (Key : sig
   type t
 end) =
-struct
-  include Hashtbl.Make (Structural_key.Make (Key))
-
-  let make_slot table key =
-    {
-      stored = find_opt table key;
-      replace = replace table key;
-      remove = (fun () -> remove table key);
-    }
-
-  let make_access select key owner = make_slot (select owner) key
-  let list_keys table make_part = fold (fun key _ parts -> make_part key :: parts) table []
-
-  let list_failures table key =
-    match find_opt table key with
-    | Some (Failed diagnostics) -> diagnostics
-    | Some (Value _ | Blocked) | None -> []
-end
+  Hashtbl.Make (Structural_key.Make (Key))
 
 module Path_table = Make_table (Path)
-
-module Key_table = Make_table (struct
-  type t = Resolve.Names.key
-end)
-
-module Key_section_table = Make_table (struct
-  type t = Resolve.Names.key * Resolve.section
-end)
 
 module File_table = Make_table (struct
   type t = Path.file
@@ -50,40 +26,28 @@ module Package_stage_table = Make_table (struct
   type t = Path.package * Stage.t
 end)
 
-module Check_table = Make_table (struct
-  type t = Package_checks.check
-end)
-
-module Type_trait_table = Make_table (struct
-  type t = Path.t * Path.t
-end)
-
 module Part_table = Make_table (Part)
 
-module Computed_table = Make_table (struct
-  type t = Part.computed
-end)
-
 module Stored_table = Make_table (struct
-  type t = Part.stored
+  type t = Part.any
 end)
 
-module Instance_table = Make_table (Instance)
-module References = Graph.Make (Instance)
+module Item_table = Make_table (Lowered.Item)
+module References = Graph.Make (Lowered.Item)
 
 module Entry = struct
   type t =
-    | Value of Part.stored
-    | Reads of Part.computed
-    | Stale of Part.computed
+    | Value of Part.any
+    | Reads of Part.any
+    | Stale of Part.any
     | Package of Path.package
     | File of Path.file
-    | Owned of Part.t
+    | Claimed of Part.t
 end
 
 module Entry_table = Make_table (Entry)
 
-type parsed = { tree : Syntax.file; diagnostics : Diagnostic.t list; text : string }
+type parsed = Part.parsed = { tree : Syntax.file; diagnostics : Diagnostic.t list; text : string }
 
 type package_database = {
   name : Path.package;
@@ -91,53 +55,34 @@ type package_database = {
   mutable modules : Path.module_ list;
   mutable files : Path.file list;
   sources : Source.t File_table.t;
-  parsed : parsed File_table.t;
-  mutable namespace : Resolve.Names.namespace option;
-  resolved_names : Resolve.resolved part Key_section_table.t;
-  grants : Interface.Environment.grant Package_table.t;
-  import_checks : Diagnostic.t list File_table.t;
-  trait_headers : Resolve.trait_header part Key_table.t;
-  constant_values : Z.t option part Path_table.t;
-  headers : Interface.Environment.header part Key_table.t;
-  interfaces : Interface.Environment.elaborated_interface part Key_table.t;
-  derived_interfaces : Types.impl_interface part Type_trait_table.t;
-  type_facts : Interface.Environment.type_facts part Path_table.t;
-  signature_checks : unit part Key_table.t;
-  contracts : Core.t part Key_table.t;
-  checked_bodies : Infer.checked part Key_table.t;
-  derived_forms : Core.t part Path_table.t;
-  body_parts : Mir.body_part part Key_table.t;
-  contract_parts : Mir.contract_part part Key_table.t;
-  generated_parts : (Mir.body_part * Mir.contract_part) part Path_table.t;
-  mir_call_edges : Path.t list part Path_table.t;
-  patterns : unit part Key_table.t;
-  usage : unit part Key_table.t;
-  ownership : (Core.origin * Core.origin) list part Key_table.t;
-  package_checks : Package_checks.outcome part Check_table.t;
-  recursion_groups : Path.t list part Path_table.t;
-  proofs : Prover.proof part Key_table.t;
+  values : binding Stored_table.t;
+  diagnostics : (Source.t * Diagnostic.t list) list;
 }
 
 type t = {
   package_databases : package_database Package_table.t;
   mutable project : Path.package list;
   absent : package_database Package_table.t;
-  reads : Part.t list Computed_table.t;
-  readers : unit Computed_table.t Part_table.t;
-  stale : unit Computed_table.t Package_stage_table.t;
-  implied : Part.computed list Package_table.t;
+  reads : Part.t list Stored_table.t;
+  readers : unit Stored_table.t Part_table.t;
+  stale : unit Stored_table.t Package_stage_table.t;
+  implied : Part.any list Package_table.t;
   graphs : Call_graph.t Package_table.t;
-  lowering : Compile.Lookups.settings option;
-  lowered : (Compile.lowered, Compile.unsupported) result part Instance_table.t;
-  test_keys : (string, Compile.unsupported) result part Instance_table.t;
+  item_values : binding Stored_table.t;
   references : References.t;
-  owners : Part.t list Instance_table.t;
-  owned : Instance.key list Part_table.t;
+  claimants : Part.t list Item_table.t;
+  claimed_roots : Lowered.Item.t list Part_table.t;
   unsaved : unit Entry_table.t;
-  mutable observe : observation -> unit;
+  bugs : Compiler_bug.t Stored_table.t;
 }
 
-and observation = Recomputed of Part.stored | Collected of Part.lowering
+type observation =
+  | Computation of { parts : Part.any list; reads : int; distinct_reads : int }
+  | Unchanged of Part.any
+  | Write of { part : Part.any; is_removal : bool }
+  | Untracked_read of Part.t
+
+let observer : (observation -> unit) ref = ref ignore
 
 let make_empty_package_database name ~dependencies =
   {
@@ -146,34 +91,22 @@ let make_empty_package_database name ~dependencies =
     modules = [];
     files = [];
     sources = File_table.create 64;
-    parsed = File_table.create 64;
-    namespace = None;
-    resolved_names = Key_section_table.create 1024;
-    grants = Package_table.create 4;
-    import_checks = File_table.create 64;
-    trait_headers = Key_table.create 64;
-    constant_values = Path_table.create 64;
-    headers = Key_table.create 64;
-    interfaces = Key_table.create 256;
-    derived_interfaces = Type_trait_table.create 16;
-    type_facts = Path_table.create 64;
-    signature_checks = Key_table.create 256;
-    contracts = Key_table.create 256;
-    checked_bodies = Key_table.create 256;
-    derived_forms = Path_table.create 16;
-    body_parts = Key_table.create 256;
-    contract_parts = Key_table.create 256;
-    generated_parts = Path_table.create 16;
-    mir_call_edges = Path_table.create 256;
-    patterns = Key_table.create 64;
-    usage = Key_table.create 64;
-    ownership = Key_table.create 64;
-    package_checks = Check_table.create 64;
-    recursion_groups = Path_table.create 64;
-    proofs = Key_table.create 64;
+    values = Stored_table.create 4096;
+    diagnostics = [];
   }
 
-let list_files (package_database : package_database) files =
+let make_absent_package_database name =
+  let package_database = make_empty_package_database name ~dependencies:[] in
+  Stored_table.replace package_database.values (Any (Namespace name))
+    (Binding (Namespace name, Value Resolve.Namespace.empty));
+  package_database
+
+let find_package_namespace (package_database : package_database) : Resolve.Namespace.t =
+  match Stored_table.find_opt package_database.values (Any (Namespace package_database.name)) with
+  | Some (Binding (Namespace _, Value namespace)) -> namespace
+  | Some _ | None -> Resolve.Namespace.empty
+
+let set_files (package_database : package_database) files =
   package_database.files <- List.sort compare files;
   package_database.modules <-
     List.sort_uniq compare
@@ -186,52 +119,62 @@ let make_package_database name ~dependencies (texts : (Path.file * string) list)
   List.iter
     (fun (file, text) -> File_table.replace package_database.sources file (make_source file text))
     texts;
-  list_files package_database (List.map fst texts);
+  set_files package_database (List.map fst texts);
   package_database
 
+let list_stored_parts (package_database : package_database) =
+  Stored_table.fold (fun part _ parts -> part :: parts) package_database.values []
+
 let mark_unsaved database entry = Entry_table.replace database.unsaved entry ()
+
+let is_saved_part database (Part.Any typed as part) =
+  match typed with
+  | Namespace _ -> false
+  | Lowered _ | Test_key _ -> true
+  | _ -> List.mem (Part.Storage.locate_package part) database.project
 
 let mark_package_database_unsaved database (package_database : package_database) =
   mark_unsaved database (Package package_database.name);
   List.iter (fun file -> mark_unsaved database (File file)) package_database.files
 
+let locate_stale_parts part = (Part.Storage.locate_package part, Stage.of_part part)
+
 let mark_stale database part =
-  let slot = (Part.locate_package part, Stage.of_part part) in
+  let slot = locate_stale_parts part in
   let parts =
     match Package_stage_table.find_opt database.stale slot with
     | Some parts -> parts
     | None ->
-        let parts = Computed_table.create 64 in
+        let parts = Stored_table.create 64 in
         Package_stage_table.replace database.stale slot parts;
         parts
   in
-  if not (Computed_table.mem parts part) then begin
-    Computed_table.replace parts part ();
+  if not (Stored_table.mem parts part) then begin
+    Stored_table.replace parts part ();
     mark_unsaved database (Stale part)
   end
 
 let is_stale database part =
-  match
-    Package_stage_table.find_opt database.stale (Part.locate_package part, Stage.of_part part)
-  with
-  | Some parts -> Computed_table.mem parts part
+  match Package_stage_table.find_opt database.stale (locate_stale_parts part) with
+  | Some parts -> Stored_table.mem parts part
   | None -> false
 
 let unmark database part =
+  Stored_table.remove database.bugs part;
   Option.iter
     (fun parts ->
-      if Computed_table.mem parts part then begin
-        Computed_table.remove parts part;
+      if Stored_table.mem parts part then begin
+        Stored_table.remove parts part;
         mark_unsaved database (Stale part)
       end)
-    (Package_stage_table.find_opt database.stale (Part.locate_package part, Stage.of_part part))
+    (Package_stage_table.find_opt database.stale (locate_stale_parts part))
 
 let list_stale_parts database package stage =
   match Package_stage_table.find_opt database.stale (package, stage) with
-  | Some parts -> Computed_table.fold (fun part () parts -> part :: parts) parts []
+  | Some parts -> Stored_table.fold (fun part () parts -> part :: parts) parts []
   | None -> []
 
-let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
+let make ?(loaded = []) (packages : Project.package list) =
   let package_databases = Package_table.create 8 in
   List.iter
     (fun package_database ->
@@ -242,19 +185,17 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       package_databases;
       project = List.map (fun (package : Project.package) -> package.name) packages;
       absent = Package_table.create 4;
-      reads = Computed_table.create 4096;
+      reads = Stored_table.create 4096;
       readers = Part_table.create 4096;
       stale = Package_stage_table.create 64;
       implied = Package_table.create 8;
       graphs = Package_table.create 8;
-      lowering = Option.map (fun system -> { Compile.Lookups.checks; system }) Libc.host;
-      lowered = Instance_table.create 1024;
-      test_keys = Instance_table.create 1024;
+      item_values = Stored_table.create 2048;
       references = References.create ~tracks_blocked:false;
-      owners = Instance_table.create 64;
-      owned = Part_table.create 64;
+      claimants = Item_table.create 64;
+      claimed_roots = Part_table.create 64;
       unsaved = Entry_table.create 4096;
-      observe = ignore;
+      bugs = Stored_table.create 8;
     }
   in
   List.iter
@@ -264,8 +205,8 @@ let create ?(loaded = []) ?(checks = true) (packages : Project.package list) =
       in
       Package_table.replace package_databases package.name package_database;
       mark_package_database_unsaved database package_database;
-      List.iter (fun file -> mark_stale database (Parsed file)) package_database.files;
-      mark_stale database (Namespace package.name))
+      List.iter (fun file -> mark_stale database (Any (Parsed file))) package_database.files;
+      mark_stale database (Any (Namespace package.name)))
     packages;
   database
 
@@ -276,31 +217,8 @@ let copy_package_database (package_database : package_database) =
     modules = package_database.modules;
     files = package_database.files;
     sources = File_table.copy package_database.sources;
-    parsed = File_table.copy package_database.parsed;
-    namespace = package_database.namespace;
-    resolved_names = Key_section_table.copy package_database.resolved_names;
-    grants = Package_table.copy package_database.grants;
-    import_checks = File_table.copy package_database.import_checks;
-    trait_headers = Key_table.copy package_database.trait_headers;
-    constant_values = Path_table.copy package_database.constant_values;
-    headers = Key_table.copy package_database.headers;
-    interfaces = Key_table.copy package_database.interfaces;
-    derived_interfaces = Type_trait_table.copy package_database.derived_interfaces;
-    type_facts = Path_table.copy package_database.type_facts;
-    signature_checks = Key_table.copy package_database.signature_checks;
-    contracts = Key_table.copy package_database.contracts;
-    checked_bodies = Key_table.copy package_database.checked_bodies;
-    derived_forms = Path_table.copy package_database.derived_forms;
-    body_parts = Key_table.copy package_database.body_parts;
-    contract_parts = Key_table.copy package_database.contract_parts;
-    generated_parts = Path_table.copy package_database.generated_parts;
-    mir_call_edges = Path_table.copy package_database.mir_call_edges;
-    patterns = Key_table.copy package_database.patterns;
-    usage = Key_table.copy package_database.usage;
-    ownership = Key_table.copy package_database.ownership;
-    package_checks = Check_table.copy package_database.package_checks;
-    recursion_groups = Path_table.copy package_database.recursion_groups;
-    proofs = Key_table.copy package_database.proofs;
+    values = Stored_table.copy package_database.values;
+    diagnostics = package_database.diagnostics;
   }
 
 let copy database =
@@ -312,43 +230,41 @@ let copy database =
          else package_database))
     package_databases;
   let readers = Part_table.copy database.readers in
-  Part_table.filter_map_inplace (fun _ parts -> Some (Computed_table.copy parts)) readers;
+  Part_table.filter_map_inplace (fun _ parts -> Some (Stored_table.copy parts)) readers;
   let stale = Package_stage_table.copy database.stale in
-  Package_stage_table.filter_map_inplace (fun _ parts -> Some (Computed_table.copy parts)) stale;
+  Package_stage_table.filter_map_inplace (fun _ parts -> Some (Stored_table.copy parts)) stale;
   let graphs = Package_table.copy database.graphs in
   Package_table.filter_map_inplace (fun _ graph -> Some (Call_graph.copy graph)) graphs;
   {
     package_databases;
     project = database.project;
     absent = Package_table.copy database.absent;
-    reads = Computed_table.copy database.reads;
+    reads = Stored_table.copy database.reads;
     readers;
     stale;
     implied = Package_table.copy database.implied;
     graphs;
-    lowering = database.lowering;
-    lowered = Instance_table.copy database.lowered;
-    test_keys = Instance_table.copy database.test_keys;
+    item_values = Stored_table.copy database.item_values;
     references = References.copy database.references;
-    owners = Instance_table.copy database.owners;
-    owned = Part_table.copy database.owned;
+    claimants = Item_table.copy database.claimants;
+    claimed_roots = Part_table.copy database.claimed_roots;
     unsaved = Entry_table.create 64;
-    observe = ignore;
+    bugs = Stored_table.copy database.bugs;
   }
 
 let add_reads database part read_parts =
-  Computed_table.replace database.reads part read_parts;
+  Stored_table.replace database.reads part read_parts;
   List.iter
     (fun read ->
       let readers =
         match Part_table.find_opt database.readers read with
         | Some readers -> readers
         | None ->
-            let readers = Computed_table.create 4 in
+            let readers = Stored_table.create 4 in
             Part_table.replace database.readers read readers;
             readers
       in
-      Computed_table.replace readers part ())
+      Stored_table.replace readers part ())
     read_parts
 
 let record database parts reads =
@@ -356,13 +272,13 @@ let record database parts reads =
     Part_table.fold
       (fun (read : Part.t) () read_parts ->
         match read with
-        | Stored (Computed read) when List.mem read parts -> read_parts
+        | Stored read when List.mem read parts -> read_parts
         | _ -> read :: read_parts)
       reads []
   in
   List.iter
     (fun part ->
-      let before = Computed_table.find_opt database.reads part in
+      let before = Stored_table.find_opt database.reads part in
       let is_unchanged =
         match before with
         | Some before ->
@@ -374,7 +290,7 @@ let record database parts reads =
       Option.iter
         (List.iter (fun read ->
              Option.iter
-               (fun readers -> Computed_table.remove readers part)
+               (fun readers -> Stored_table.remove readers part)
                (Part_table.find_opt database.readers read)))
         before;
       add_reads database part read_parts)
@@ -382,44 +298,48 @@ let record database parts reads =
 
 let compute_and_record database parts compute =
   let reads = Part_table.create 16 in
-  let result = compute (fun part -> Part_table.replace reads part ()) in
+  let read_count = ref 0 in
+  let result =
+    compute (fun part ->
+        incr read_count;
+        Part_table.replace reads part ())
+  in
   record database parts reads;
+  !observer (Computation { parts; reads = !read_count; distinct_reads = Part_table.length reads });
   result
 
-let mark_readers ?(only = fun _ -> true) database part =
+let mark_readers ?(is_selected = fun _ -> true) database part =
   Option.iter
-    (Computed_table.iter (fun reader () -> if only reader then mark_stale database reader))
+    (Stored_table.iter (fun reader () -> if is_selected reader then mark_stale database reader))
     (Part_table.find_opt database.readers part)
 
+let mark_written database (part : Part.any) ~is_removal =
+  !observer (Write { part; is_removal });
+  if is_saved_part database part then mark_unsaved database (Value part);
+  mark_readers database (Stored part)
+
 let store database part slot value =
-  let is_changed =
-    match (slot.stored, value) with
-    | Some stored, Some value -> stored <> value
-    | None, None -> false
-    | Some _, None | None, Some _ -> true
-  in
-  if is_changed then begin
+  if slot.stored = value then !observer (Unchanged part)
+  else begin
     (match value with Some value -> slot.replace value | None -> slot.remove ());
-    mark_unsaved database (Value part);
-    mark_readers database (Stored part)
+    mark_written database part ~is_removal:(Option.is_none value)
   end
 
 let compute_into database part slot compute =
-  store database (Computed part) slot (compute_and_record database [ part ] compute)
+  store database part slot (compute_and_record database [ part ] compute)
 
-let find_owner database package =
+let obtain_owner database package =
   match Package_table.find_opt database.package_databases package with
   | Some package_database -> package_database
   | None -> (
       match Package_table.find_opt database.absent package with
       | Some package_database -> package_database
       | None ->
-          let package_database = make_empty_package_database package ~dependencies:[] in
-          package_database.namespace <- Some Resolve.Names.empty_namespace;
+          let package_database = make_absent_package_database package in
           Package_table.replace database.absent package package_database;
           package_database)
 
-let find_call_graph database package =
+let obtain_call_graph database package =
   match Package_table.find_opt database.graphs package with
   | Some graph -> graph
   | None ->
@@ -427,21 +347,95 @@ let find_call_graph database package =
       Package_table.replace database.graphs package graph;
       graph
 
-let report_uncomputed part =
-  Compiler_bug.bug ~stage:"Database" "%s is not computed" (Part.show_computed part)
+let locate_values database (Part.Any typed as part) =
+  match typed with
+  | Lowered _ | Test_key _ -> database.item_values
+  | _ -> (obtain_owner database (Part.Storage.locate_package part)).values
 
-let read database note part =
-  note (Part.Stored (Computed part));
+let find_stored (type a) database (typed : a Part.stored) : a part option =
+  let part = Part.Any typed in
+  match Stored_table.find_opt (locate_values database part) part with
+  | None -> None
+  | Some (Binding (stored, value)) -> (
+      match Part.Storage.find_type_equality typed stored with
+      | Some Equal -> Some value
+      | None ->
+          Compiler_bug.raise_bug ~stage:"Database" "%s holds a value of another kind"
+            (Part.show (Stored part)))
+
+let list_item_parts item = [ Part.Any (Lowered item); Part.Any (Test_key item) ]
+
+let create_item database item =
+  List.iter
+    (fun part ->
+      if not (is_stale database part || Stored_table.mem database.item_values part) then
+        mark_stale database part)
+    (list_item_parts item)
+
+let list_call_edges = function
+  | Some (Value edges) -> edges
+  | Some (Failed _ | Blocked) | None -> []
+
+let list_lowered_references = function
+  | Some (Value (Ok lowered)) ->
+      List.sort_uniq Lowered.Item.compare (Lowering.list_references lowered)
+  | Some (Value (Error _) | Failed _ | Blocked) | None -> []
+
+let update_indexes (type a) database (part : a Part.stored) ~(before : a part option)
+    ~(after : a part option) =
+  match part with
+  | Call_edges (path, calling_package) ->
+      List.iter
+        (fun node -> mark_stale database (Any (Call_edges (node, calling_package))))
+        (Call_graph.change_successors
+           (obtain_call_graph database calling_package)
+           path ~before:(list_call_edges before) ~after:(list_call_edges after))
+  | Lowered key ->
+      List.iter (create_item database)
+        (References.change_successors database.references key
+           ~before:(list_lowered_references before) ~after:(list_lowered_references after))
+  | _ -> ()
+
+let write_value database typed value =
+  let part = Part.Any typed in
+  let values = locate_values database part in
+  let before = find_stored database typed in
+  (match value with
+  | Some value -> Stored_table.replace values part (Binding (typed, value))
+  | None -> Stored_table.remove values part);
+  update_indexes database typed ~before ~after:value
+
+let list_item_edges database item = list_lowered_references (find_stored database (Lowered item))
+
+let make_value_slot database typed =
+  {
+    stored = find_stored database typed;
+    replace = (fun value -> write_value database typed (Some value));
+    remove = (fun () -> write_value database typed None);
+  }
+
+let report_uncomputed (part : Part.any) =
+  Compiler_bug.raise_bug ~stage:"Database" "%s is not computed" (Part.show (Stored part))
+
+let raise_stale_read database (part : Part.any) message =
+  match Stored_table.find_opt database.bugs part with
+  | Some bug -> raise (Compiler_bug.Bug bug)
+  | None -> Compiler_bug.raise_bug ~stage:"Database" "%s" message
+
+let note_read database note (part : Part.any) =
+  note (Part.Stored part);
   if is_stale database part then
-    Compiler_bug.bug ~stage:"Database" "%s is read while it is stale" (Part.show_computed part)
+    raise_stale_read database part (Part.show (Stored part) ^ " is read while it is stale")
 
-let read_part database note part_of select (key : Resolve.Names.key) =
-  let part = part_of key in
-  read database note part;
-  match Key_table.find_opt (select (find_owner database key.module_.package)) key with
-  | Some (Value value) -> value
-  | Some (Failed _ | Blocked) -> raise Reads_failed_part
-  | None -> report_uncomputed part
+let note_untracked_read database (part : Part.t) =
+  !observer (Untracked_read part);
+  match part with
+  | Name name ->
+      let namespace = Part.Any (Namespace (Part.Storage.locate_name_package name)) in
+      if is_stale database namespace then
+        raise_stale_read database namespace
+          (Part.show part ^ " is read while its namespace is stale")
+  | Input _ | Stored _ -> ()
 
 let make_part compute argument =
   match compute argument with value -> Value value | exception Reads_failed_part -> Blocked
@@ -453,6 +447,22 @@ let make_checked_part check key =
   | exception Reads_failed_part -> Blocked
 
 let require_value = function Value value -> value | Failed _ | Blocked -> raise Reads_failed_part
+
+let read_stored database typed =
+  match find_stored database typed with
+  | Some part -> part
+  | None -> report_uncomputed (Part.Any typed)
+
+let find_part database note typed =
+  note_read database note (Part.Any typed);
+  find_stored database typed
+
+let read_part database note typed =
+  note_read database note (Part.Any typed);
+  read_stored database typed
+
+let read_value database note typed = require_value (read_part database note typed)
+let find_value database note typed = Option.map require_value (find_part database note typed)
 let find_package database name = Package_table.find_opt database.package_databases name
 
 let list_dependency_names database name =
@@ -461,13 +471,11 @@ let list_dependency_names database name =
       List.map (fun (dependency : Manifest.dependency) -> dependency.package) package.dependencies
   | None -> []
 
-let list_modules database name =
-  match find_package database name with Some package -> package.modules | None -> []
-
-let find_source database (file : Path.file) =
-  match File_table.find_opt (find_owner database file.module_.package).sources file with
+let read_source database (file : Path.file) =
+  match File_table.find_opt (obtain_owner database file.module_.package).sources file with
   | Some source -> source
-  | None -> Compiler_bug.bug ~stage:"Database" "%s is not a file of the build" (Path.show_file file)
+  | None ->
+      Compiler_bug.raise_bug ~stage:"Database" "%s is not a file of the build" (Path.show_file file)
 
 let sort_in_dependency_order database packages =
   let seen = Package_table.create 8 in
@@ -483,41 +491,38 @@ let sort_in_dependency_order database packages =
   List.iter visit packages;
   List.rev !order
 
-let find_namespace database package =
-  match (find_owner database package).namespace with
-  | Some namespace -> namespace
-  | None -> report_uncomputed (Namespace package)
+let read_namespace database package =
+  match read_stored database (Namespace package) with
+  | Value namespace -> namespace
+  | Failed _ | Blocked ->
+      Compiler_bug.raise_bug ~stage:"Database" "the namespace of %s is not a value"
+        (Path.show_package package)
 
-let make_name_lookups_over database ~namespace =
-  Resolve.Names.of_namespaces ~namespace
-    ~module_exists:(fun (module_ : Path.module_) ->
-      module_ = Intrinsic.module_ || List.mem module_ (list_modules database module_.package))
+let make_name_lookups_over database ~read_namespace =
+  Resolve.Namespace.make_lookups ~read_namespace
     ~split_module:
       (Path.split_module ~is_package:(fun name -> Option.is_some (find_package database name)))
-    ~dependency_names:(list_dependency_names database)
-
-let make_stored_name_lookups database =
-  make_name_lookups_over database ~namespace:(find_namespace database)
+    ~list_dependency_names:(list_dependency_names database)
 
 let add_recording (names : Resolve.Names.lookups) (note : Part.t -> unit) : Resolve.Names.lookups =
-  let noting (part : Part.name) read =
+  let note_name_read (part : Part.name) read =
     note (Name part);
     read
   in
-  let noting_input (part : Part.input) read =
+  let note_input_read (part : Part.input) read =
     note (Input part);
     read
   in
   {
-    find = (fun module_ name -> noting (Entry (module_, name)) (names.find module_ name));
-    entries = (fun module_ -> noting (Entries module_) (names.entries module_));
-    imports = (fun key -> noting (Imports key) (names.imports key));
+    find = (fun module_ name -> note_name_read (Entry (module_, name)) (names.find module_ name));
+    list_entries = (fun module_ -> note_name_read (Entries module_) (names.list_entries module_));
+    list_imports = (fun key -> note_name_read (Imports key) (names.list_imports key));
     module_exists =
-      (fun module_ -> noting_input (Modules module_.package) (names.module_exists module_));
-    split_module = (fun parts -> noting_input Packages (names.split_module parts));
-    dependency_names =
-      (fun package -> noting_input (Dependencies package) (names.dependency_names package));
-    key =
+      (fun module_ -> note_input_read (Modules module_.package) (names.module_exists module_));
+    split_module = (fun parts -> note_input_read Packages (names.split_module parts));
+    list_dependency_names =
+      (fun package -> note_input_read (Dependencies package) (names.list_dependency_names package));
+    find_key =
       (fun path ->
         (match path with
         | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ }
@@ -526,46 +531,50 @@ let add_recording (names : Resolve.Names.lookups) (note : Part.t -> unit) : Reso
         | Method { owner; name; _ } | Member_constant { owner; name } ->
             note (Name (Members (owner, name)))
         | Derived _ | Unresolved _ -> ());
-        names.key path);
-    declaration = (fun key -> noting (Declaration key) (names.declaration key));
-    declarations =
-      (fun module_ -> noting (Module_declarations module_) (names.declarations module_));
-    declarations_in = (fun file -> noting (File_declarations file) (names.declarations_in file));
-    package_declarations =
-      (fun package -> noting (Package_declarations package) (names.package_declarations package));
-    definition = (fun key -> noting (Tree key) (names.definition key));
-    text = (fun key -> noting (Text key) (names.text key));
-    spans = (fun key -> noting (Tree key) (names.spans key));
-    recovered = (fun key -> noting (Tree key) (names.recovered key));
-    place = (fun key -> noting (Place key) (names.place key));
-    container = (fun key -> noting (Container key) (names.container key));
-    contained = (fun key -> noting (Contained key) (names.contained key));
-    members = (fun owner name -> noting (Members (owner, name)) (names.members owner name));
-    traits_declaring =
+        names.find_key path);
+    read_declaration = (fun key -> note_name_read (Declaration key) (names.read_declaration key));
+    list_declarations =
+      (fun module_ ->
+        note_name_read (Module_declarations module_) (names.list_declarations module_));
+    list_declarations_in =
+      (fun file -> note_name_read (File_declarations file) (names.list_declarations_in file));
+    list_package_declarations =
+      (fun package ->
+        note_name_read (Package_declarations package) (names.list_package_declarations package));
+    read_definition = (fun key -> note_name_read (Tree key) (names.read_definition key));
+    read_text = (fun key -> note_name_read (Text key) (names.read_text key));
+    read_spans = (fun key -> note_name_read (Tree key) (names.read_spans key));
+    list_syntax_errors = (fun key -> note_name_read (Tree key) (names.list_syntax_errors key));
+    read_place = (fun key -> note_name_read (Place key) (names.read_place key));
+    find_container = (fun key -> note_name_read (Container key) (names.find_container key));
+    list_contained = (fun key -> note_name_read (Contained key) (names.list_contained key));
+    list_members =
+      (fun owner name -> note_name_read (Members (owner, name)) (names.list_members owner name));
+    list_traits_declaring =
       (fun package name ->
-        noting (Traits_declaring (package, name)) (names.traits_declaring package name));
-    impls = (fun package -> noting (Impl_index package) (names.impls package));
-    impls_of_type =
+        note_name_read (Traits_declaring (package, name)) (names.list_traits_declaring package name));
+    list_impls = (fun package -> note_name_read (Impl_index package) (names.list_impls package));
+    list_impls_of_type =
       (fun package type_ ->
-        noting (Impls_of_type (package, type_)) (names.impls_of_type package type_));
-    impls_of_trait =
+        note_name_read (Impls_of_type (package, type_)) (names.list_impls_of_type package type_));
+    list_impls_of_trait =
       (fun package trait ->
-        noting (Impls_of_trait (package, trait)) (names.impls_of_trait package trait));
-    law_proofs =
-      (fun package name -> noting (Law_proofs (package, name)) (names.law_proofs package name));
+        note_name_read (Impls_of_trait (package, trait)) (names.list_impls_of_trait package trait));
+    list_law_proofs =
+      (fun package name ->
+        note_name_read (Law_proofs (package, name)) (names.list_law_proofs package name));
   }
 
 let make_recording_name_lookups database note =
-  add_recording (make_stored_name_lookups database) note
+  add_recording (make_name_lookups_over database ~read_namespace:(read_namespace database)) note
 
-let find_parsed_file database (file : Path.file) =
-  match File_table.find_opt (find_owner database file.module_.package).parsed file with
-  | Some parsed -> parsed
-  | None -> report_uncomputed (Parsed file)
+let make_untracked_name_lookups database =
+  make_recording_name_lookups database (note_untracked_read database)
 
 let make_namespace database note (package_database : package_database) =
   note (Part.Input (Modules package_database.name));
-  Resolve.Names.build_namespace
+  note (Part.Input (Files package_database.name));
+  Resolve.Namespace.build
     (make_recording_name_lookups database note)
     package_database.name
     (List.map
@@ -574,87 +583,46 @@ let make_namespace database note (package_database : package_database) =
            List.filter_map
              (fun (file : Path.file) ->
                if file.module_ = module_ then begin
-                 read database note (Parsed file);
-                 let parsed = find_parsed_file database file in
+                 let parsed = read_value database note (Parsed file) in
                  Some (file, parsed.tree, parsed.text)
                end
                else None)
              package_database.files ))
        package_database.modules)
 
-let list_file_keys database file =
-  List.map Resolve.Names.make_key ((make_stored_name_lookups database).declarations_in file)
+let list_file_keys (names : Resolve.Names.lookups) file =
+  List.map
+    (fun (declaration : Resolve.Names.declaration) -> declaration.key)
+    (names.list_declarations_in file)
 
-let read_resolution_part database note section (key : Resolve.Names.key) =
-  read database note (Resolved (key, section));
-  match
-    Key_section_table.find_opt (find_owner database key.module_.package).resolved_names
-      (key, section)
-  with
-  | Some part -> part
-  | None -> report_uncomputed (Resolved (key, section))
-
-let read_resolution database note section key =
-  require_value (read_resolution_part database note section key)
+let read_resolution database note section key = read_value database note (Resolved (key, section))
 
 let read_whole_resolution database note key =
   Resolve.merge
     (List.map (fun section -> read_resolution database note section key) Resolve.sections)
 
-let read_elaborated_interface database note ~is_checked (key : Resolve.Names.key) =
-  let owner = find_owner database key.module_.package in
-  read database note (Interface key);
-  if is_checked then begin
-    read database note (Signature_check key);
-    match Key_table.find_opt owner.signature_checks key with
-    | Some (Failed _ | Blocked) -> raise Reads_failed_part
-    | Some (Value ()) -> ()
-    | None -> report_uncomputed (Signature_check key)
-  end;
-  match Key_table.find_opt owner.interfaces key with
-  | Some part -> require_value part
-  | None -> report_uncomputed (Interface key)
+let read_elaborated_interface database note ~is_checked key =
+  if is_checked then read_value database note (Signature_check key);
+  read_value database note (Interface key)
 
 let make_recording_interface_lookups database note ~is_checked : Interface.Lookups.t =
   let names = make_recording_name_lookups database note in
   let read_elaborated_interface = read_elaborated_interface database note ~is_checked in
   {
     names;
-    resolved = read_resolution database note;
-    trait_header =
+    read_resolved = read_resolution database note;
+    find_trait_header =
       (fun path ->
-        Option.bind (names.key path) (fun key ->
-            read database note (Trait_header key);
-            Option.map require_value
-              (Key_table.find_opt (find_owner database key.module_.package).trait_headers key)));
-    constant_value =
-      (fun path ->
-        read database note (Constant_value path);
-        Option.bind
-          (Path_table.find_opt (find_owner database (Path.locate_package path)).constant_values path)
-          require_value);
-    header =
-      (fun key ->
-        read database note (Header key);
-        Option.map require_value
-          (Key_table.find_opt (find_owner database key.module_.package).headers key));
-    elaborated_interface = read_elaborated_interface;
-    derived_interface =
+        Option.bind (names.find_key path) (fun key -> find_value database note (Trait_header key)));
+    find_constant_value = (fun path -> Option.join (find_value database note (Constant_value path)));
+    find_header = (fun key -> find_value database note (Header key));
+    read_elaborated_interface;
+    find_derived_interface =
       (fun ~type_ ~trait ->
-        Option.iter (fun key -> ignore (read_elaborated_interface key)) (names.key type_);
-        read database note (Derived_interface { type_; trait });
-        Option.map require_value
-          (Type_trait_table.find_opt
-             (find_owner database (Path.locate_package type_)).derived_interfaces (type_, trait)));
-    type_facts =
-      (fun path ->
-        read database note (Type_facts path);
-        Option.map require_value
-          (Path_table.find_opt (find_owner database (Path.locate_package path)).type_facts path));
-    granted =
-      (fun package dependency ->
-        read database note (Grant (package, dependency));
-        Package_table.find_opt (find_owner database package).grants dependency);
+        Option.iter (fun key -> ignore (read_elaborated_interface key)) (names.find_key type_);
+        find_value database note (Derived_interface { type_; trait }));
+    read_type_facts = (fun path -> read_value database note (Type_facts path));
+    find_grant = (fun package dependency -> find_value database note (Grant (package, dependency)));
   }
 
 let make_interface_part (elaborated : Interface.Environment.elaborated_interface) =
@@ -664,84 +632,90 @@ let make_interface_part (elaborated : Interface.Environment.elaborated_interface
   | diagnostics, _ -> Failed diagnostics
 
 let find_type_interface lookups path =
-  match make_part (Interface.Definition.read_type_interface lookups) path with
+  match make_part (Interface.Definition.find_type_interface lookups) path with
   | Value interface -> interface
   | Failed _ | Blocked -> None
 
-let list_derived_methods (names : Resolve.Names.lookups) package =
+let list_unwritten_methods (names : Resolve.Names.lookups) package =
   List.concat_map
     (fun (((trait : Path.t), _), (impl : Path.t)) ->
-      match (impl, names.key trait) with
-      | Derived _, Some trait_key ->
+      match names.find_key trait with
+      | Some trait_key when (names.read_declaration trait_key).kind = Trait ->
           List.filter_map
             (fun (member : Resolve.Names.key) ->
               match member.path with
-              | Method { name; receiver; _ } -> Some (Path.Method { owner = impl; name; receiver })
+              | Method { name; receiver; _ } ->
+                  let method_ = Path.Method { owner = impl; name; receiver } in
+                  if Option.is_some (names.find_key method_) then None else Some method_
               | _ -> None)
-            (names.contained trait_key)
-      | _ -> [])
-    (names.impls package)
+            (names.list_contained trait_key)
+      | Some _ | None -> [])
+    (names.list_impls package)
 
-let list_package_parts database (names : Resolve.Names.lookups) package : Part.computed list =
-  let package_database = find_owner database package in
-  let declarations = names.package_declarations package in
+let is_derived_method (path : Path.t) =
+  match path with
+  | Method { owner = Derived { trait; _ }; name; _ } -> Infer.derives trait name
+  | _ -> false
+
+let list_package_parts database (names : Resolve.Names.lookups) package : Part.any list =
+  let package_database = obtain_owner database package in
+  let declarations = names.list_package_declarations package in
   let paths =
-    List.map (fun (declaration : Resolve.Names.declaration) -> declaration.path) declarations
+    List.map (fun (declaration : Resolve.Names.declaration) -> declaration.key.path) declarations
   in
-  let of_declaration (declaration : Resolve.Names.declaration) : Part.computed list =
-    let key = Resolve.Names.make_key declaration in
-    List.map (fun section -> Part.Resolved (key, section)) Resolve.sections
+  let unwritten_methods = list_unwritten_methods names package in
+  let of_declaration (declaration : Resolve.Names.declaration) : Part.any list =
+    let key = declaration.key in
+    List.map (fun section -> Part.Any (Resolved (key, section))) Resolve.sections
     @ [
-        Part.Interface key;
-        Signature_check key;
-        Contract key;
-        Checked_body key;
-        Body_mir key;
-        Contract_mir key;
-        Patterns key;
-        Usage key;
-        Ownership key;
-        Proof key;
+        Part.Any (Interface key);
+        Any (Signature_check key);
+        Any (Contract key);
+        Any (Checked_body key);
+        Any (Body_mir key);
+        Any (Contract_mir key);
+        Any (Patterns key);
+        Any (Usage key);
+        Any (Ownership key);
+        Any (Proof key);
       ]
     @ (match declaration.kind with
-      | Trait -> [ Part.Trait_header key; Header key ]
-      | Impl | Capability -> [ Part.Header key ]
+      | Trait -> [ Part.Any (Trait_header key); Any (Header key) ]
+      | Impl | Capability -> [ Part.Any (Header key) ]
       | _ -> [])
     @
     match declaration.kind with
-    | (Constant | Member_constant) when declaration.ordinal = 0 -> [ Part.Constant_value key.path ]
-    | Type when declaration.ordinal = 0 -> [ Part.Type_facts key.path ]
+    | (Constant | Member_constant) when key.ordinal = 0 -> [ Part.Any (Constant_value key.path) ]
+    | Type when key.ordinal = 0 -> [ Part.Any (Type_facts key.path) ]
     | _ -> []
   in
   List.concat_map of_declaration declarations
   @ List.filter_map
       (function
-        | _, Path.Derived { type_; trait } -> Some (Part.Derived_interface { type_; trait })
+        | _, Path.Derived { type_; trait } -> Some (Part.Any (Derived_interface { type_; trait }))
         | _ -> None)
-      (names.impls package)
-  @ List.concat_map
-      (fun path -> [ Part.Derived_form path; Generated_mir path ])
-      (list_derived_methods names package)
-  @ List.concat_map
-      (fun path -> [ Part.Mir_call_edges path; Call_edges (path, package) ])
-      (List.sort_uniq Path.compare paths)
+      (names.list_impls package)
   @ List.map
-      (fun dependency -> Part.Grant (package, dependency))
-      (List.sort_uniq Path.compare_package (names.dependency_names package))
-  @ List.map (fun file -> Part.Import_check file) package_database.files
+      (fun path -> Part.Any (Generated_mir path))
+      (List.filter is_derived_method unwritten_methods)
+  @ List.concat_map
+      (fun path -> [ Part.Any (Mir_call_edges path); Any (Call_edges (path, package)) ])
+      (List.sort_uniq Path.compare (paths @ unwritten_methods))
   @ List.map
-      (fun check -> Part.Package_check (package, check))
+      (fun dependency -> Part.Any (Grant (package, dependency)))
+      (List.sort_uniq Path.compare_package (names.list_dependency_names package))
+  @ List.map (fun file -> Part.Any (Import_check file)) package_database.files
+  @ List.map
+      (fun check -> Part.Any (Package_check (package, check)))
       (Package_checks.list_checks declarations)
 
-let read_checked database note key =
-  read_part database note (fun key -> Part.Checked_body key) (fun owner -> owner.checked_bodies) key
-
+let read_checked database note key = read_value database note (Checked_body key)
 let read_checked_form database note key = (read_checked database note key).form
 
 let make_recording_infer_lookups database note : Infer.Lookups.t =
   {
     interface = make_recording_interface_lookups database note ~is_checked:true;
-    contract = read_part database note (fun key -> Part.Contract key) (fun owner -> owner.contracts);
+    read_contract = (fun key -> read_value database note (Contract key));
   }
 
 let type_check run lookups key =
@@ -752,29 +726,17 @@ let type_check run lookups key =
   | exception Reads_failed_part -> Blocked
 
 let make_form_origin database note =
-  Infer.find_form_origin (make_recording_interface_lookups database note ~is_checked:true)
-    ~is_derived:(fun path ->
-      read database note (Derived_form path);
-      Path_table.mem (find_owner database (Path.locate_package path)).derived_forms path)
+  Interface.find_form_origin (make_recording_interface_lookups database note ~is_checked:true)
+    ~is_derived:(fun path -> Option.is_some (find_part database note (Generated_mir path)))
 
-let read_body_mir database note =
-  read_part database note (fun key -> Part.Body_mir key) (fun owner -> owner.body_parts)
+let read_body_mir database note key = read_value database note (Body_mir key)
 
 let make_recording_mir_lookups database note : Mir.lookups =
   {
-    form_origin = make_form_origin database note;
-    body_part = read_body_mir database note;
-    contract_part =
-      read_part database note (fun key -> Part.Contract_mir key) (fun owner -> owner.contract_parts);
-    generated_parts =
-      (fun path ->
-        read database note (Generated_mir path);
-        match
-          Path_table.find_opt (find_owner database (Path.locate_package path)).generated_parts path
-        with
-        | Some (Value parts) -> parts
-        | Some (Failed _ | Blocked) -> raise Reads_failed_part
-        | None -> report_uncomputed (Generated_mir path));
+    find_form_origin = make_form_origin database note;
+    read_body_part = read_body_mir database note;
+    read_contract_part = (fun key -> read_value database note (Contract_mir key));
+    read_generated_parts = (fun path -> read_value database note (Generated_mir path));
   }
 
 let make_recording_call_edge_lookups database note : Mir.Call_edges.lookups =
@@ -783,317 +745,177 @@ let make_recording_call_edge_lookups database note : Mir.Call_edges.lookups =
     mir = make_recording_mir_lookups database note;
   }
 
-let read_mir_call_edges database note path =
-  read database note (Mir_call_edges path);
-  match
-    Path_table.find_opt (find_owner database (Path.locate_package path)).mir_call_edges path
-  with
-  | Some part -> part
-  | None -> Blocked
-
 let make_recording_patterns_lookups database note : Patterns.Lookups.t =
   {
-    core = read_checked_form database note;
+    read_core = read_checked_form database note;
     interface = make_recording_interface_lookups database note ~is_checked:true;
   }
 
 let make_recording_usage_lookups database note : Usage.Lookups.t =
   {
-    names = make_recording_name_lookups database note;
-    resolved = read_whole_resolution database note;
-    tables = (fun key -> (read_checked database note key).tables);
+    interface = make_recording_interface_lookups database note ~is_checked:true;
+    read_resolved = read_whole_resolution database note;
+    read_tables = (fun key -> (read_checked database note key).tables);
   }
 
 let make_recording_ownership_lookups database note : Ownership.Lookups.t =
   {
-    graph = (fun key -> Mir.find_graph (read_body_mir database note key));
+    find_graph = (fun key -> Mir.find_graph (read_body_mir database note key));
+    list_places_without_keyword =
+      (fun key -> (read_checked database note key).places_without_keyword);
+    list_mode_keywords = (fun key -> (read_checked database note key).mode_keywords);
     interface = make_recording_interface_lookups database note ~is_checked:true;
   }
 
 let make_recording_package_checks_lookups database note : Package_checks.Lookups.t =
   {
     interface = make_recording_interface_lookups database note ~is_checked:true;
-    core = read_checked_form database note;
-    used_packages = (fun key -> (read_checked database note key).used_packages);
+    read_core = read_checked_form database note;
+    list_used_packages = (fun key -> (read_checked database note key).used_packages);
   }
 
-let list_used_imports database note file =
-  note (Part.Name (File_declarations file));
+let find_used_imports database note file =
   let used =
     List.concat_map
       (fun key ->
         List.map
           (fun section ->
-            match read_resolution_part database note section key with
+            match read_part database note (Resolved (key, section)) with
             | Value resolved -> Some resolved.used_imports
             | Failed _ | Blocked -> None)
           Resolve.sections)
-      (list_file_keys database file)
+      (list_file_keys (make_recording_name_lookups database note) file)
   in
   if List.for_all Option.is_some used then Some (List.concat_map Option.get used) else None
 
 let list_import_diagnostics database note (file : Path.file) =
-  read database note (Parsed file);
   note (Part.Input (Source file));
   Resolve.list_file_diagnostics
     (make_recording_name_lookups database note)
-    file (find_parsed_file database file).tree
-    ~text:(Source.text (find_source database file))
-    ~used:(list_used_imports database note file)
+    file (read_value database note (Parsed file)).tree
+    ~text:(Source.text (read_source database file))
+    ~used:(find_used_imports database note file)
 
-let list_call_edges database note ~viewer path =
-  match read_mir_call_edges database note path with
-  | Failed _ | Blocked -> None
-  | Value mir_call_edges -> (
-      match
-        Mir.Call_edges.list_implementations
-          (make_recording_call_edge_lookups database note)
-          ~viewer path
-      with
-      | implementations -> Some (List.sort_uniq Path.compare (mir_call_edges @ implementations))
-      | exception Reads_failed_part -> None)
+type node_edges = Of_definition of Path.t list part | Of_removed_definition
+
+let read_node_edges database note ~calling_package path ~had_edges =
+  match find_part database note (Mir_call_edges path) with
+  | Some (Value mir_call_edges) ->
+      Of_definition
+        (make_part
+           (fun path ->
+             List.sort_uniq Path.compare
+               (mir_call_edges
+               @ Mir.Call_edges.list_implementations
+                   (make_recording_call_edge_lookups database note)
+                   ~calling_package path))
+           path)
+  | Some (Failed _ | Blocked) -> Of_definition (Value [])
+  | None when had_edges -> Of_removed_definition
+  | None ->
+      Compiler_bug.raise_bug ~stage:"Database"
+        "%s is a node of the call graph of %s, and no definition registers its call edges"
+        (Path.show path)
+        (Path.show_package calling_package)
 
 let read_recursion_group database note path =
-  note (Part.Stored (Recursion_group path));
-  match
-    Path_table.find_opt (find_owner database (Path.locate_package path)).recursion_groups path
-  with
-  | Some (Value members) -> members
-  | Some (Failed _ | Blocked) -> raise Reads_failed_part
-  | None -> []
+  Option.value (find_value database note (Recursion_group path)) ~default:[]
 
 let make_recording_proof_lookups database note : Prover.Lookups.t =
   {
-    source =
+    read_source =
       (fun file ->
         note (Part.Input (Source file));
-        find_source database file);
+        read_source database file);
     interface = make_recording_interface_lookups database note ~is_checked:true;
     mir = make_recording_mir_lookups database note;
-    patterns = read_part database note (fun key -> Part.Patterns key) (fun owner -> owner.patterns);
-    must_be_disjoint =
-      read_part database note (fun key -> Part.Ownership key) (fun owner -> owner.ownership);
-    recursion_group = read_recursion_group database note;
+    read_patterns = (fun key -> read_value database note (Patterns key));
+    list_must_be_disjoint = (fun key -> read_value database note (Ownership key));
+    list_recursion_group = read_recursion_group database note;
   }
 
-let make_recording_lowering_lookups database note : Compile.Lookups.t =
+let make_recording_lowering_lookups database note : Lowering.Lookups.t =
   {
     interface = make_recording_interface_lookups database note ~is_checked:true;
     mir = make_recording_mir_lookups database note;
   }
 
-let read_instance_part database note table part instance =
-  read database note (Lowering part);
-  match Instance_table.find_opt table instance with
-  | Some (Value value) -> value
-  | Some (Failed _ | Blocked) -> raise Reads_failed_part
-  | None -> report_uncomputed (Lowering part)
+exception Reaches_unsupported of Lowering.unsupported
 
-let read_lowered database note key =
-  read_instance_part database note database.lowered (Lowered key) key
-
-let read_test_key database note key =
-  read_instance_part database note database.test_keys (Test_key key) key
-
-exception Reaches_unsupported of Compile.unsupported
-
-let compute_test_keys database keys =
+let compute_test_keys database items =
   let outcome =
     compute_and_record database
-      (List.map (fun key -> Part.Lowering (Test_key key)) keys)
+      (List.map (fun item -> Part.Any (Test_key item)) items)
       (fun note ->
-        let supported = function
+        let require_supported = function
           | Ok value -> value
           | Error unsupported -> raise (Reaches_unsupported unsupported)
         in
         match
-          Compile.derive_test_keys
-            ~lowered:(fun key -> supported (read_lowered database note key))
-            ~known:(fun key -> supported (read_test_key database note key))
-            keys
+          Lowering.derive_test_keys
+            ~read_lowered:(fun item -> require_supported (read_value database note (Lowered item)))
+            ~read_known_key:(fun item ->
+              require_supported (read_value database note (Test_key item)))
+            items
         with
         | test_keys -> Value (Ok test_keys)
         | exception Reaches_unsupported unsupported -> Value (Error unsupported)
         | exception Reads_failed_part -> Blocked)
   in
   List.iter
-    (fun key ->
-      let part = Part.Lowering (Test_key key) in
-      database.observe (Recomputed (Computed part));
-      store database (Computed part)
-        (Instance_table.make_slot database.test_keys key)
+    (fun item ->
+      store database (Any (Test_key item))
+        (make_value_slot database (Test_key item))
         (Some
            (match outcome with
-           | Value (Ok test_keys) -> Value (Ok (List.assoc key test_keys))
+           | Value (Ok test_keys) -> Value (Ok (List.assoc item test_keys))
            | Value (Error unsupported) -> Value (Error unsupported)
            | Failed _ | Blocked -> Blocked)))
-    keys
+    items
 
 type stored = {
+  has_value : bool;
   is_failed : bool;
+  failures : Diagnostic.in_definition list;
   remove : unit -> unit;
   is_equal_in : t -> bool;
-  saved : unit -> string option;
+  marshal : unit -> string option;
   restore : string -> unit;
 }
 
 let marshal value = Marshal.to_string value []
 
-let make_stored database (part : Part.stored) =
-  let package =
-    match part with
-    | Computed part -> Part.locate_package part
-    | Recursion_group path -> Path.locate_package path
+let make_stored database (part : Part.any) =
+  let values = locate_values database part in
+  let binding = Stored_table.find_opt values part in
+  let failures =
+    match binding with
+    | Some (Binding (_, Failed diagnostics)) -> Some diagnostics
+    | Some (Binding (_, (Value _ | Blocked))) | None -> None
   in
-  let package_database = find_owner database package in
-  let failed = function Failed _ -> true | Value _ | Blocked -> false in
-  let never _ = false in
-  let in_owner ~is_failed ~owner access =
-    let current = owner database in
-    {
-      is_failed = Option.fold ~none:false ~some:is_failed (access current).stored;
-      remove = (fun () -> (access current).remove ());
-      is_equal_in = (fun other -> compare (access (owner other)).stored (access current).stored = 0);
-      saved = (fun () -> Option.map marshal (access current).stored);
-      restore = (fun bytes -> (access current).replace (Marshal.from_string bytes 0));
-    }
-  in
-  let keyed ~is_failed access =
-    in_owner ~is_failed ~owner:(fun database -> find_owner database package) access
-  in
-  let of_database access = in_owner ~is_failed:failed ~owner:Fun.id access in
-  match part with
-  | Recursion_group path ->
-      keyed ~is_failed:failed
-        (Path_table.make_access (fun package_database -> package_database.recursion_groups) path)
-  | Computed part -> (
-      match part with
-      | Parsed file ->
-          keyed ~is_failed:never
-            (File_table.make_access (fun package_database -> package_database.parsed) file)
-      | Namespace _ ->
-          {
-            is_failed = false;
-            remove = (fun () -> package_database.namespace <- None);
-            is_equal_in =
-              (fun other ->
-                compare (find_owner other package).namespace package_database.namespace = 0);
-            saved = (fun () -> None);
-            restore = ignore;
-          }
-      | Resolved (key, section) ->
-          keyed ~is_failed:failed
-            (Key_section_table.make_access
-               (fun package_database -> package_database.resolved_names)
-               (key, section))
-      | Grant (_, dependency) ->
-          keyed ~is_failed:never
-            (Package_table.make_access (fun package_database -> package_database.grants) dependency)
-      | Import_check file ->
-          keyed ~is_failed:never
-            (File_table.make_access (fun package_database -> package_database.import_checks) file)
-      | Trait_header key ->
-          keyed ~is_failed:failed
-            (Key_table.make_access (fun package_database -> package_database.trait_headers) key)
-      | Constant_value path ->
-          keyed ~is_failed:failed
-            (Path_table.make_access (fun package_database -> package_database.constant_values) path)
-      | Header key ->
-          keyed ~is_failed:failed
-            (Key_table.make_access (fun package_database -> package_database.headers) key)
-      | Interface key ->
-          keyed ~is_failed:failed
-            (Key_table.make_access (fun package_database -> package_database.interfaces) key)
-      | Derived_interface { type_; trait } ->
-          keyed ~is_failed:failed
-            (Type_trait_table.make_access
-               (fun package_database -> package_database.derived_interfaces)
-               (type_, trait))
-      | Type_facts path ->
-          keyed ~is_failed:failed
-            (Path_table.make_access (fun package_database -> package_database.type_facts) path)
-      | Signature_check key ->
-          keyed ~is_failed:failed
-            (Key_table.make_access (fun package_database -> package_database.signature_checks) key)
-      | Contract key ->
-          keyed ~is_failed:failed
-            (Key_table.make_access (fun package_database -> package_database.contracts) key)
-      | Checked_body key ->
-          keyed ~is_failed:failed
-            (Key_table.make_access (fun package_database -> package_database.checked_bodies) key)
-      | Derived_form path ->
-          keyed ~is_failed:failed
-            (Path_table.make_access (fun package_database -> package_database.derived_forms) path)
-      | Body_mir key ->
-          keyed ~is_failed:failed
-            (Key_table.make_access (fun package_database -> package_database.body_parts) key)
-      | Contract_mir key ->
-          keyed ~is_failed:failed
-            (Key_table.make_access (fun package_database -> package_database.contract_parts) key)
-      | Generated_mir path ->
-          keyed ~is_failed:failed
-            (Path_table.make_access (fun package_database -> package_database.generated_parts) path)
-      | Mir_call_edges path ->
-          keyed ~is_failed:failed
-            (Path_table.make_access (fun package_database -> package_database.mir_call_edges) path)
-      | Patterns key ->
-          keyed ~is_failed:failed
-            (Key_table.make_access (fun package_database -> package_database.patterns) key)
-      | Usage key ->
-          keyed ~is_failed:failed
-            (Key_table.make_access (fun package_database -> package_database.usage) key)
-      | Ownership key ->
-          keyed ~is_failed:failed
-            (Key_table.make_access (fun package_database -> package_database.ownership) key)
-      | Package_check (_, check) ->
-          keyed ~is_failed:failed
-            (Check_table.make_access
-               (fun package_database -> package_database.package_checks)
-               check)
-      | Call_edges (path, viewer) ->
-          let call_edges database =
-            Option.bind (Package_table.find_opt database.graphs viewer) (fun graph ->
-                Call_graph.successors graph path)
-          in
-          {
-            is_failed = false;
-            remove = (fun () -> Call_graph.remove_successors (find_call_graph database viewer) path);
-            is_equal_in = (fun other -> call_edges other = call_edges database);
-            saved = (fun () -> Option.map marshal (call_edges database));
-            restore =
-              (fun bytes ->
-                ignore
-                  (Call_graph.set_successors (find_call_graph database viewer) path
-                     (Marshal.from_string bytes 0)));
-          }
-      | Proof key ->
-          keyed ~is_failed:failed
-            (Key_table.make_access (fun package_database -> package_database.proofs) key)
-      | Lowering (Lowered key) ->
-          of_database (Instance_table.make_access (fun database -> database.lowered) key)
-      | Lowering (Test_key key) ->
-          of_database (Instance_table.make_access (fun database -> database.test_keys) key))
+  {
+    has_value = Option.is_some binding;
+    is_failed = Option.is_some failures;
+    failures = Option.value failures ~default:[];
+    remove =
+      (fun () ->
+        match binding with
+        | Some (Binding (stored, _)) -> write_value database stored None
+        | None -> ());
+    is_equal_in =
+      (fun other -> compare (Stored_table.find_opt (locate_values other part) part) binding = 0);
+    marshal = (fun () -> Option.map marshal binding);
+    restore = (fun bytes -> Stored_table.replace values part (Marshal.from_string bytes 0));
+  }
 
 let discard database part =
   unmark database part;
   record database [ part ] (Part_table.create 0);
-  Computed_table.remove database.reads part;
+  Stored_table.remove database.reads part;
   mark_unsaved database (Reads part)
 
-let list_instance_parts key : Part.lowering list = [ Lowered key; Test_key key ]
-
-let is_stored database (part : Part.lowering) =
-  match part with
-  | Lowered key -> Instance_table.mem database.lowered key
-  | Test_key key -> Instance_table.mem database.test_keys key
-
-let is_created database part = is_stale database (Lowering part) || is_stored database part
-let is_current database part = (not (is_stale database (Lowering part))) && is_stored database part
-
-let create_instance database key =
-  List.iter
-    (fun part -> if not (is_created database part) then mark_stale database (Lowering part))
-    (list_instance_parts key)
+let is_current database part =
+  (not (is_stale database part)) && Stored_table.mem database.item_values part
 
 let rec subtract_sorted compare left right =
   match (left, right) with
@@ -1106,151 +928,139 @@ let rec subtract_sorted compare left right =
       else subtract_sorted compare left others
 
 let rec forget database parts =
-  let removed = Computed_table.create 16 in
-  List.iter (fun part -> Computed_table.replace removed part ()) parts;
   List.iter
     (fun part ->
-      (make_stored database (Computed part)).remove ();
-      mark_unsaved database (Value (Computed part));
-      discard database part)
+      let stored = make_stored database part in
+      if stored.has_value then begin
+        stored.remove ();
+        mark_written database part ~is_removal:true
+      end)
     parts;
-  let is_kept reader = not (Computed_table.mem removed reader) in
-  List.iter (fun part -> mark_readers ~only:is_kept database (Stored (Computed part))) parts;
+  List.iter (discard database) parts;
   List.iter
     (function
-      | Part.Proof _ as owner -> own_roots database (Part.Stored (Computed owner)) [] | _ -> ())
+      | Part.Any (Proof _) as claimant -> claim_roots database (Part.Stored claimant) [] | _ -> ())
     parts
 
-and own_roots database owner roots =
-  let before = Option.value (Part_table.find_opt database.owned owner) ~default:[] in
-  let roots = List.sort_uniq Instance.compare roots in
+and claim_roots database claimant roots =
+  let before = Option.value (Part_table.find_opt database.claimed_roots claimant) ~default:[] in
+  let roots = List.sort_uniq Lowered.Item.compare roots in
   if roots <> before then begin
-    if roots = [] then Part_table.remove database.owned owner
-    else Part_table.replace database.owned owner roots;
-    mark_unsaved database (Owned owner);
-    let owners root = Option.value (Instance_table.find_opt database.owners root) ~default:[] in
+    if roots = [] then Part_table.remove database.claimed_roots claimant
+    else Part_table.replace database.claimed_roots claimant roots;
+    mark_unsaved database (Claimed claimant);
+    let list_claimants root =
+      Option.value (Item_table.find_opt database.claimants root) ~default:[]
+    in
     List.iter
       (fun root ->
-        match List.filter (fun other -> other <> owner) (owners root) with
+        match List.filter (fun other -> other <> claimant) (list_claimants root) with
         | [] ->
-            Instance_table.remove database.owners root;
+            Item_table.remove database.claimants root;
             References.remove_root database.references root
-        | others -> Instance_table.replace database.owners root others)
-      (subtract_sorted Instance.compare before roots);
+        | others -> Item_table.replace database.claimants root others)
+      (subtract_sorted Lowered.Item.compare before roots);
     List.iter
       (fun root ->
-        Instance_table.replace database.owners root (owner :: owners root);
-        if References.add_root database.references root then create_instance database root)
-      (subtract_sorted Instance.compare roots before);
+        Item_table.replace database.claimants root (claimant :: list_claimants root);
+        if References.add_root database.references root then create_item database root)
+      (subtract_sorted Lowered.Item.compare roots before);
     settle_references database
   end
 
 and settle_references database =
   if References.has_changes database.references then
-    collect database (References.update database.references).removed
+    collect database
+      (References.update database.references ~find_successors:(fun item ->
+           Some (list_item_edges database item)))
+        .removed
 
-and collect database keys =
-  let parts = List.concat_map list_instance_parts keys in
-  List.iter (fun part -> database.observe (Collected part)) parts;
-  forget database (List.map (fun part -> Part.Lowering part) parts)
+and collect database items = forget database (List.concat_map list_item_parts items)
 
-let list_lowered_references database key =
-  match Instance_table.find_opt database.lowered key with
-  | Some (Value (Ok lowered)) -> Compile.list_references lowered
-  | Some (Value (Error _) | Failed _ | Blocked) | None -> []
+let list_current_edges database item =
+  if is_stale database (Any (Lowered item)) then [] else list_item_edges database item
 
-let list_instance_edges database key =
-  List.sort_uniq Instance.compare (list_lowered_references database key)
-
-let update_references database key =
-  let edges = list_instance_edges database key in
-  if References.successors database.references key <> Some (Some edges) then begin
-    List.iter (create_instance database)
-      (References.set_successors database.references key (Some edges));
-    settle_references database
-  end
-
-let list_current_edges database key =
-  if is_stale database (Lowering (Lowered key)) then [] else list_lowered_references database key
-
-let list_ready_instances database =
-  let ready = Instance_table.create 1024 in
+let collect_ready_items database =
+  let ready = Item_table.create 1024 in
   let pending = Queue.create () in
-  let reach key =
-    if not (Instance_table.mem ready key) then begin
-      Instance_table.replace ready key ();
-      Queue.add key pending
+  let reach item =
+    if not (Item_table.mem ready item) then begin
+      Item_table.replace ready item ();
+      Queue.add item pending
     end
   in
-  let is_current_owner (owner : Part.t) =
-    match owner with
-    | Stored (Computed owner) -> not (is_stale database owner)
-    | Input _ | Name _ | Stored (Recursion_group _) -> true
+  let is_current_claimant (claimant : Part.t) =
+    match claimant with
+    | Stored claimant -> not (is_stale database claimant)
+    | Input _ | Name _ -> true
   in
-  Instance_table.iter
-    (fun root owners -> if List.exists is_current_owner owners then reach root)
-    database.owners;
+  Item_table.iter
+    (fun root claimants -> if List.exists is_current_claimant claimants then reach root)
+    database.claimants;
   while not (Queue.is_empty pending) do
     List.iter reach (list_current_edges database (Queue.pop pending))
   done;
   ready
 
-let is_drained ~ready (part : Part.computed) =
+let is_drained ~ready (Part.Any part) =
   match part with
-  | Lowering (Lowered key | Test_key key) -> Instance_table.mem (Lazy.force ready) key
+  | Lowered item | Test_key item -> Item_table.mem (Lazy.force ready) item
   | _ -> true
 
-let find_lowering_settings database =
-  match database.lowering with
-  | Some settings -> settings
-  | None -> Compiler_bug.bug ~stage:"Database" "this host has no lowering settings"
+let read_host_system () =
+  match Libc.host with
+  | Ok system -> system
+  | Error _ ->
+      Compiler_bug.raise_bug ~stage:"Database"
+        "code is lowered on a host that Stage0 does not build for"
 
-let list_proof_template_checks database (key : Resolve.Names.key) =
-  match Key_table.find_opt (find_owner database key.module_.package).proofs key with
-  | Some (Value (Obligations { obligations; _ })) ->
+let list_proof_template_checks : Prover.proof part -> _ = function
+  | Value (Obligations { obligations; _ }) ->
       List.filter_map
-        (fun (obligation : Prover.State.obligation) ->
+        (fun (obligation : Prover.Obligation.t) ->
           Option.map
-            (fun (template_clause : Prover.State.template_clause) -> template_clause.check)
+            (fun (template_clause : Prover.Obligation.template_clause) -> template_clause.check)
             obligation.template_clause)
         obligations
-  | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) -> []
-  | None -> report_uncomputed (Proof key)
+  | Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked -> []
 
-let make_template_check_root ({ from_template; literals; clauses } : Prover.State.template_check) =
-  Instance.Template_check { from_template; literals; clauses }
+let make_template_check_root
+    ({ from_template; literals; clauses } : Prover.Obligation.template_check) =
+  Lowered.Item.Template_check { from_template; literals; clauses }
 
-let own_template_checks database (key : Resolve.Names.key) =
-  if Option.is_some database.lowering then
-    own_roots database (Stored (Computed (Proof key)))
-      (List.map make_template_check_root (list_proof_template_checks database key))
+let claim_template_check_roots database (key : Resolve.Names.key) =
+  if Result.is_ok Libc.host then
+    claim_roots database (Stored (Any (Proof key)))
+      (List.map make_template_check_root
+         (list_proof_template_checks (read_stored database (Proof key))))
 
 let find_entry_point (names : Resolve.Names.lookups) package =
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->
-      match declaration.path with
-      | Top { name = "main"; _ } when declaration.kind = Function && declaration.ordinal = 0 ->
-          Some declaration.path
-      | _ -> None)
-    (names.declarations { package; modules = [] })
+      if
+        Path.is_entry_point declaration.key.path
+        && declaration.kind = Function && declaration.key.ordinal = 0
+      then Some declaration.key.path
+      else None)
+    (names.list_declarations { package; modules = [] })
 
-let own_lowering_roots database (names : Resolve.Names.lookups) package =
-  if Option.is_some database.lowering then
-    own_roots database (Stored (Computed (Namespace package)))
-      (Compile.list_roots
+let claim_lowering_roots database (names : Resolve.Names.lookups) package =
+  if Result.is_ok Libc.host then
+    claim_roots database (Stored (Any (Namespace package)))
+      (Lowering.list_roots
          ~tests:
            (List.filter_map
               (fun (declaration : Resolve.Names.declaration) ->
-                match declaration.path with Test _ -> Some declaration.path | _ -> None)
-              (names.package_declarations package))
+                match declaration.key.path with Test _ -> Some declaration.key.path | _ -> None)
+              (names.list_package_declarations package))
          ~mains:(Option.to_list (find_entry_point names package)))
 
-let holds_position database (part : Part.computed) =
-  match part with
-  | Proof _ | Package_check _ | Lowering (Lowered _) -> true
-  | _ -> (make_stored database (Computed part)).is_failed
+let holds_position database (Part.Any typed as part) =
+  match typed with
+  | Proof _ | Package_check _ | Lowered _ -> true
+  | _ -> (make_stored database part).is_failed
 
-let mark_change database package (change : Resolve.Names.change) =
+let mark_change database package (change : Resolve.Namespace.change) =
   let part : Part.name =
     match change with
     | Entry (module_, name) -> Entry (module_, name)
@@ -1273,64 +1083,67 @@ let mark_change database package (change : Resolve.Names.change) =
     | Law_proofs name -> Law_proofs (package, name)
   in
   match change with
-  | Positions _ -> mark_readers ~only:(holds_position database) database (Name part)
+  | Positions _ -> mark_readers ~is_selected:(holds_position database) database (Name part)
   | _ -> mark_readers database (Name part)
 
-let is_own_namespace_part package (part : Part.t) =
+let is_package_namespace_part package (part : Part.t) =
   match part with
-  | Name part -> Part.locate_name_package part = package
-  | Stored (Computed (Namespace namespace_package)) -> namespace_package = package
+  | Name part -> Part.Storage.locate_name_package part = package
+  | Stored (Any (Namespace namespace_package)) -> namespace_package = package
   | Input _ | Stored _ -> false
 
 let compute_namespace_and_implied database (package_database : package_database) =
   let package = package_database.name in
   let namespace, implied =
-    compute_and_record database [ Part.Namespace package ] (fun note ->
-        let note part = if not (is_own_namespace_part package part) then note part in
-        let own_namespace = make_namespace database note package_database in
+    compute_and_record database [ Part.Any (Namespace package) ] (fun note ->
+        let note part = if not (is_package_namespace_part package part) then note part in
+        let package_namespace = make_namespace database note package_database in
         let names =
-          make_name_lookups_over database ~namespace:(fun name ->
-              if name = package then own_namespace else find_namespace database name)
+          make_name_lookups_over database ~read_namespace:(fun name ->
+              if name = package then package_namespace else read_namespace database name)
         in
-        (own_namespace, list_package_parts database (add_recording names note) package))
+        (package_namespace, list_package_parts database (add_recording names note) package))
   in
-  package_database.namespace <- Some namespace;
   Package_table.replace database.implied package implied;
   (namespace, implied)
 
 let compute_namespace database (package_database : package_database) =
   let package = package_database.name in
-  let before = Option.value package_database.namespace ~default:Resolve.Names.empty_namespace in
+  let before = find_package_namespace package_database in
   let implied_before = Option.value ~default:[] (Package_table.find_opt database.implied package) in
   let after, implied = compute_namespace_and_implied database package_database in
-  let membership parts =
-    let members = Computed_table.create 256 in
-    List.iter (fun part -> Computed_table.replace members part ()) parts;
-    Computed_table.mem members
+  store database (Any (Namespace package))
+    (make_value_slot database (Namespace package))
+    (Some (Value after));
+  let make_membership_test parts =
+    let members = Stored_table.create 256 in
+    List.iter (fun part -> Stored_table.replace members part ()) parts;
+    Stored_table.mem members
   in
-  let was_implied = membership implied_before and is_implied = membership implied in
-  let graph = find_call_graph database package in
+  let was_implied = make_membership_test implied_before
+  and is_implied = make_membership_test implied in
+  let graph = obtain_call_graph database package in
   List.iter
     (function
-      | Part.Call_edges (root, _) as part when not (is_implied part) ->
+      | Part.Any (Call_edges (root, _)) as part when not (is_implied part) ->
           Call_graph.remove_root graph root
       | _ -> ())
     implied_before;
   List.iter
     (function
-      | Part.Call_edges (root, _) as part when not (was_implied part) ->
+      | Part.Any (Call_edges (root, _)) as part when not (was_implied part) ->
           ignore (Call_graph.add_root graph root)
       | _ -> ())
     implied;
-  List.iter (mark_change database package) (Resolve.Names.list_changes before after);
+  List.iter (mark_change database package) (Resolve.Namespace.list_changes before after);
   List.iter (fun part -> if not (was_implied part) then mark_stale database part) implied;
   forget database (List.filter (fun part -> not (is_implied part)) implied_before);
-  own_lowering_roots database (make_stored_name_lookups database) package
+  claim_lowering_roots database (make_untracked_name_lookups database) package
 
 let compute_type_facts database paths =
   let facts =
     compute_and_record database
-      (List.map (fun path -> Part.Type_facts path) paths)
+      (List.map (fun path -> Part.Any (Type_facts path)) paths)
       (fun note ->
         let lookups = make_recording_interface_lookups database note ~is_checked:false in
         let interfaces = List.map (fun path -> (path, find_type_interface lookups path)) paths in
@@ -1344,293 +1157,272 @@ let compute_type_facts database paths =
   in
   List.iter
     (fun path ->
-      database.observe (Recomputed (Computed (Type_facts path)));
-      store database (Computed (Type_facts path))
-        (Path_table.make_slot (find_owner database (Path.locate_package path)).type_facts path)
+      store database (Any (Type_facts path))
+        (make_value_slot database (Type_facts path))
         (Some
            (match facts with
            | Value facts -> (
                match List.assoc_opt path facts with
                | Some facts -> Value facts
                | None ->
-                   Compiler_bug.bug ~stage:"Database" "the type facts of a component omit %s"
+                   Compiler_bug.raise_bug ~stage:"Database" "the type facts of a component omit %s"
                      (Path.show path))
            | Failed _ | Blocked -> Blocked)))
     paths
 
-let compute_part database (part : Part.computed) =
-  database.observe (Recomputed (Computed part));
-  let package_database = find_owner database (Part.locate_package part) in
-  let into slot compute = compute_into database part slot compute in
-  match part with
+let compute_part database (Part.Any typed as part) =
+  let package_database = obtain_owner database (Part.Storage.locate_package part) in
+  let compute_into slot compute = compute_into database part slot compute in
+  let compute_value typed compute =
+    compute_into (make_value_slot database typed) (fun note -> Some (compute note))
+  in
+  match typed with
   | Parsed file ->
-      into (File_table.make_slot package_database.parsed file) (fun note ->
+      compute_value (Parsed file) (fun note ->
           note (Input (Source file));
-          let source = find_source database file in
-          let tokens, lexer_diagnostics = Lexer.lex source in
-          let tree, parser_diagnostics = Parser.parse tokens ~lexer_diagnostics in
-          Some
-            {
-              tree;
-              diagnostics = lexer_diagnostics @ parser_diagnostics;
-              text = Source.text source;
-            })
+          let source = read_source database file in
+          let tree, diagnostics = Parser.parse_source source in
+          Value { tree; diagnostics; text = Source.text source })
   | Namespace _ -> compute_namespace database package_database
   | Resolved (key, section) ->
-      into
-        (Key_section_table.make_slot package_database.resolved_names (key, section))
+      compute_value
+        (Resolved (key, section))
         (fun note ->
-          Some
-            (match Resolve.resolve (make_recording_name_lookups database note) key section with
-            | Some (Ok resolved) -> Value resolved
-            | Some (Error diagnostics) -> Failed diagnostics
-            | None -> Blocked))
+          match Resolve.resolve (make_recording_name_lookups database note) key section with
+          | Some (Ok resolved) -> Value resolved
+          | Some (Error diagnostics) -> Failed diagnostics
+          | None -> Blocked)
   | Grant (package, dependency) ->
       let entry =
         List.find
           (fun (entry : Manifest.dependency) -> entry.package = dependency)
           package_database.dependencies
       in
-      into (Package_table.make_slot package_database.grants dependency) (fun note ->
+      compute_value
+        (Grant (package, dependency))
+        (fun note ->
           note (Input (Dependencies package));
-          Some
+          Value
             (Interface.Grants.resolve_grant
                (make_recording_name_lookups database note)
                ~package entry.capabilities))
   | Import_check file ->
-      into (File_table.make_slot package_database.import_checks file) (fun note ->
-          Some (list_import_diagnostics database note file))
+      compute_value (Import_check file) (fun note ->
+          Value (list_import_diagnostics database note file))
   | Trait_header key ->
-      into (Key_table.make_slot package_database.trait_headers key) (fun note ->
-          Some
-            (match
-               ( (make_recording_name_lookups database note).definition key,
-                 read_resolution_part database note Interface key )
-             with
-            | definition, Value resolved -> (
-                match Resolve.make_trait_header definition resolved with
-                | Some header -> Value header
-                | None -> Blocked)
-            | _, (Failed _ | Blocked) -> Blocked))
+      compute_value (Trait_header key) (fun note ->
+          match
+            ( (make_recording_name_lookups database note).read_definition key,
+              read_part database note (Resolved (key, Interface)) )
+          with
+          | definition, Value resolved -> (
+              match Resolve.make_trait_header definition resolved with
+              | Some header -> Value header
+              | None -> Blocked)
+          | _, (Failed _ | Blocked) -> Blocked)
   | Constant_value path ->
-      into (Path_table.make_slot package_database.constant_values path) (fun note ->
-          Some
-            (make_part
-               (Interface.Constants.evaluate_constant
-                  (make_recording_interface_lookups database note ~is_checked:false))
-               path))
+      compute_value (Constant_value path) (fun note ->
+          make_part
+            (Interface.Constants.evaluate_constant
+               (make_recording_interface_lookups database note ~is_checked:false))
+            path)
   | Header key ->
-      into (Key_table.make_slot package_database.headers key) (fun note ->
-          Some
-            (match
-               make_part
-                 (Interface.Elaborator.elaborate_header
-                    (make_recording_interface_lookups database note ~is_checked:false))
-                 key
-             with
-            | Value (Ok header) -> Value header
-            | Value (Error (_ :: _ as diagnostics)) -> Failed diagnostics
-            | Value (Error []) | Failed _ | Blocked -> Blocked))
+      compute_value (Header key) (fun note ->
+          match
+            make_part
+              (Interface.Elaborator.elaborate_header
+                 (make_recording_interface_lookups database note ~is_checked:false))
+              key
+          with
+          | Value (Ok header) -> Value header
+          | Value (Error (_ :: _ as diagnostics)) -> Failed diagnostics
+          | Value (Error []) | Failed _ | Blocked -> Blocked)
   | Interface key ->
-      into (Key_table.make_slot package_database.interfaces key) (fun note ->
-          Some
-            (match
-               make_part
-                 (Interface.Elaborator.elaborate_definition
-                    (make_recording_interface_lookups database note ~is_checked:false))
-                 key
-             with
-            | Value elaborated -> make_interface_part elaborated
-            | Failed _ | Blocked -> Blocked))
+      compute_value (Interface key) (fun note ->
+          match
+            make_part
+              (Interface.Elaborator.elaborate_definition
+                 (make_recording_interface_lookups database note ~is_checked:false))
+              key
+          with
+          | Value elaborated -> make_interface_part elaborated
+          | Failed _ | Blocked -> Blocked)
   | Derived_interface { type_; trait } ->
-      into
-        (Type_trait_table.make_slot package_database.derived_interfaces (type_, trait))
+      compute_value
+        (Derived_interface { type_; trait })
         (fun note ->
-          Some
-            (match
-               make_part
-                 (fun trait ->
-                   Interface.Impls.derive_interface
-                     (make_recording_interface_lookups database note ~is_checked:false)
-                     ~type_ ~trait)
-                 trait
-             with
-            | Value (Some interface) -> Value interface
-            | Value None | Failed _ | Blocked -> Blocked))
+          match
+            make_part
+              (fun trait ->
+                Interface.Impls.derive_interface
+                  (make_recording_interface_lookups database note ~is_checked:false)
+                  ~type_ ~trait)
+              trait
+          with
+          | Value (Some interface) -> Value interface
+          | Value None | Failed _ | Blocked -> Blocked)
   | Type_facts path -> compute_type_facts database [ path ]
   | Signature_check key ->
-      into (Key_table.make_slot package_database.signature_checks key) (fun note ->
-          read database note (Interface key);
-          Some
-            (match Key_table.find_opt package_database.interfaces key with
-            | Some (Value _) ->
-                make_checked_part
-                  (fun key ->
-                    ( Interface.Check.list_diagnostics
-                        (make_recording_interface_lookups database note ~is_checked:false)
-                        key,
-                      () ))
-                  key
-            | Some (Failed _ | Blocked) -> Blocked
-            | None -> report_uncomputed (Interface key)))
+      compute_value (Signature_check key) (fun note ->
+          match read_part database note (Interface key) with
+          | Value _ ->
+              make_checked_part
+                (fun key ->
+                  ( Interface.Check.list_diagnostics
+                      (make_recording_interface_lookups database note ~is_checked:false)
+                      key,
+                    () ))
+                key
+          | Failed _ | Blocked -> Blocked)
   | Contract key ->
-      into (Key_table.make_slot package_database.contracts key) (fun note ->
-          Some
-            (match
-               type_check Infer.check_contract (make_recording_infer_lookups database note) key
-             with
-            | Value (checked : Infer.checked) -> Value checked.form
-            | Failed diagnostics -> Failed diagnostics
-            | Blocked -> Blocked))
+      compute_value (Contract key) (fun note ->
+          match
+            type_check Infer.check_contract (make_recording_infer_lookups database note) key
+          with
+          | Value (checked : Infer.checked) -> Value checked.form
+          | Failed diagnostics -> Failed diagnostics
+          | Blocked -> Blocked)
   | Checked_body key ->
-      into (Key_table.make_slot package_database.checked_bodies key) (fun note ->
-          Some (type_check Infer.check_body (make_recording_infer_lookups database note) key))
-  | Derived_form path ->
-      into (Path_table.make_slot package_database.derived_forms path) (fun note ->
-          match Infer.derive_form (make_recording_infer_lookups database note) path with
-          | Some form -> Some (Value form)
-          | None -> None
-          | exception Reads_failed_part -> Some Blocked)
+      compute_value (Checked_body key) (fun note ->
+          type_check Infer.check_body (make_recording_infer_lookups database note) key)
   | Body_mir key ->
-      into (Key_table.make_slot package_database.body_parts key) (fun note ->
-          read database note (Checked_body key);
-          Some
-            (match Key_table.find_opt package_database.checked_bodies key with
-            | Some (Value checked) -> (
-                match read_elaborated_interface database note ~is_checked:true key with
-                | elaborated ->
-                    Value (Mir.make_body_part ~interface:elaborated.interface checked.form)
-                | exception Reads_failed_part -> Blocked)
-            | Some (Failed _ | Blocked) -> Blocked
-            | None -> report_uncomputed (Checked_body key)))
+      compute_value (Body_mir key) (fun note ->
+          match read_part database note (Checked_body key) with
+          | Value checked -> (
+              match read_elaborated_interface database note ~is_checked:true key with
+              | elaborated ->
+                  Value (Mir.make_body_part ~interface:elaborated.interface checked.form)
+              | exception Reads_failed_part -> Blocked)
+          | Failed _ | Blocked -> Blocked)
   | Contract_mir key ->
-      into (Key_table.make_slot package_database.contract_parts key) (fun note ->
-          read database note (Contract key);
-          Some
-            (match Key_table.find_opt package_database.contracts key with
-            | Some (Value form) ->
-                Value
-                  (Mir.make_contract_part
-                     ~type_interface:
-                       (Interface.Definition.read_type_interface
-                          (make_recording_interface_lookups database note ~is_checked:true))
-                     key.path form)
-            | Some (Failed _ | Blocked) -> Blocked
-            | None -> report_uncomputed (Contract key)))
+      compute_value (Contract_mir key) (fun note ->
+          match read_part database note (Contract key) with
+          | Value form ->
+              Value
+                (Mir.make_contract_part
+                   ~find_type_interface:
+                     (Interface.Definition.find_type_interface
+                        (make_recording_interface_lookups database note ~is_checked:true))
+                   key.path form)
+          | Failed _ | Blocked -> Blocked)
   | Generated_mir path ->
-      into (Path_table.make_slot package_database.generated_parts path) (fun note ->
-          read database note (Derived_form path);
-          Option.map
-            (function
-              | Value form ->
-                  Value
-                    ( Mir.make_body_part form,
-                      Mir.make_contract_part
-                        ~type_interface:
-                          (Interface.Definition.read_type_interface
-                             (make_recording_interface_lookups database note ~is_checked:true))
-                        path form )
-              | Failed _ | Blocked -> Blocked)
-            (Path_table.find_opt package_database.derived_forms path))
+      compute_into (make_value_slot database (Generated_mir path)) (fun note ->
+          match Infer.derive_form (make_recording_infer_lookups database note) path with
+          | None -> None
+          | Some form ->
+              Some
+                (make_part
+                   (fun form ->
+                     ( Mir.make_body_part form,
+                       Mir.make_contract_part
+                         ~find_type_interface:
+                           (Interface.Definition.find_type_interface
+                              (make_recording_interface_lookups database note ~is_checked:true))
+                         path form ))
+                   form)
+          | exception Reads_failed_part -> Some Blocked)
   | Mir_call_edges path ->
-      into (Path_table.make_slot package_database.mir_call_edges path) (fun note ->
-          Some
-            (make_part
-               (Mir.Call_edges.list_path_edges (make_recording_call_edge_lookups database note))
-               path))
+      compute_value (Mir_call_edges path) (fun note ->
+          make_part
+            (Mir.Call_edges.list_path_edges (make_recording_call_edge_lookups database note))
+            path)
   | Patterns key ->
-      into (Key_table.make_slot package_database.patterns key) (fun note ->
-          Some
-            (make_checked_part
-               (fun key -> (Patterns.check (make_recording_patterns_lookups database note) key, ()))
-               key))
+      compute_value (Patterns key) (fun note ->
+          make_checked_part
+            (fun key -> (Patterns.check (make_recording_patterns_lookups database note) key, ()))
+            key)
   | Usage key ->
-      into (Key_table.make_slot package_database.usage key) (fun note ->
-          Some
-            (make_checked_part
-               (fun key -> (Usage.check (make_recording_usage_lookups database note) key, ()))
-               key))
+      compute_value (Usage key) (fun note ->
+          make_checked_part
+            (fun key -> (Usage.check (make_recording_usage_lookups database note) key, ()))
+            key)
   | Ownership key ->
-      into (Key_table.make_slot package_database.ownership key) (fun note ->
-          Some
-            (make_checked_part
-               (fun key ->
-                 let result =
-                   Ownership.check (make_recording_ownership_lookups database note) key
-                 in
-                 (result.diagnostics, result.must_be_disjoint))
-               key))
+      compute_value (Ownership key) (fun note ->
+          make_checked_part
+            (fun key ->
+              let result = Ownership.check (make_recording_ownership_lookups database note) key in
+              (result.diagnostics, result.must_be_disjoint))
+            key)
   | Package_check (package, check) ->
-      into (Check_table.make_slot package_database.package_checks check) (fun note ->
-          Some
-            (make_part
-               (Package_checks.run (make_recording_package_checks_lookups database note) package)
-               check))
-  | Call_edges (path, viewer) ->
-      let graph = find_call_graph database viewer in
-      into
-        {
-          stored = Call_graph.successors graph path;
-          replace =
-            (fun call_edges ->
-              List.iter
-                (fun node -> mark_stale database (Call_edges (node, viewer)))
-                (Call_graph.set_successors graph path call_edges));
-          remove = (fun () -> Call_graph.remove_successors graph path);
-        }
-        (fun note -> Some (list_call_edges database note ~viewer path))
+      compute_value
+        (Package_check (package, check))
+        (fun note ->
+          make_part
+            (Package_checks.run (make_recording_package_checks_lookups database note) package)
+            check)
+  | Call_edges (path, calling_package) ->
+      let slot = make_value_slot database (Call_edges (path, calling_package)) in
+      compute_into slot (fun note ->
+          match
+            read_node_edges database note ~calling_package path
+              ~had_edges:(Option.is_some slot.stored)
+          with
+          | Of_definition edges -> Some edges
+          | Of_removed_definition -> None)
+  | Recursion_group _ ->
+      Compiler_bug.raise_bug ~stage:"Database" "%s is computed by its call graph, not by a stage"
+        (Part.show (Stored part))
   | Proof key ->
-      into (Key_table.make_slot package_database.proofs key) (fun note ->
-          Some (make_part (Prover.prove (make_recording_proof_lookups database note)) key));
-      own_template_checks database key
-  | Lowering (Lowered key) ->
-      into (Instance_table.make_slot database.lowered key) (fun note ->
-          Some
-            (match
-               Compile.lower (find_lowering_settings database)
-                 (make_recording_lowering_lookups database note)
-                 key
-             with
-            | lowered -> Value lowered
-            | exception Reads_failed_part -> Blocked
-            | exception (Compile.Todo_type _ | Compile.Infinite_size _) -> Failed []));
-      update_references database key
-  | Lowering (Test_key key) -> compute_test_keys database [ key ]
+      compute_value (Proof key) (fun note ->
+          make_part (Prover.prove (make_recording_proof_lookups database note)) key);
+      claim_template_check_roots database key
+  | Lowered key ->
+      compute_value (Lowered key) (fun note ->
+          match
+            Lowering.lower (read_host_system ()) (make_recording_lowering_lookups database note) key
+          with
+          | lowered -> Value lowered
+          | exception Reads_failed_part -> Blocked
+          | exception (Lowering.Todo_type _ | Lowering.Infinite_size _) -> Failed []);
+      settle_references database
+  | Test_key key -> compute_test_keys database [ key ]
 
 type component =
-  | Single of Part.computed
+  | Single of Part.any
   | Type_fact_component of Path.t list
-  | Test_key_component of Instance.key list
+  | Test_key_component of Lowered.Item.t list
 
 let list_component_parts = function
   | Single part -> [ part ]
-  | Type_fact_component paths -> List.map (fun path -> Part.Type_facts path) paths
-  | Test_key_component keys -> List.map (fun key -> Part.Lowering (Test_key key)) keys
+  | Type_fact_component paths -> List.map (fun path -> Part.Any (Type_facts path)) paths
+  | Test_key_component items -> List.map (fun item -> Part.Any (Test_key item)) items
+
+let failing_part : Part.any option ref = ref None
 
 let compute database unit =
+  Option.iter
+    (fun failing ->
+      if List.mem failing (list_component_parts unit) then
+        Compiler_bug.raise_bug ~stage:"Database" "%s fails for a test" (Part.show (Stored failing)))
+    !failing_part;
   try
     match unit with
     | Single part -> compute_part database part
     | Type_fact_component paths -> compute_type_facts database paths
-    | Test_key_component keys -> compute_test_keys database keys
+    | Test_key_component items -> compute_test_keys database items
   with Interface.Properties.Recursion_limit message ->
-    Compiler_bug.bug ~stage:"Database" "a stage after the checks reached a recursion limit: %s"
+    Compiler_bug.raise_bug ~stage:"Database"
+      "a stage after the checks reached a recursion limit computing %s: %s"
+      (String.concat ", "
+         (List.map (fun part -> Part.show (Part.Stored part)) (list_component_parts unit)))
       message
 
 let list_components database (stage : Stage.t) package parts =
   match stage with
   | Type_facts ->
       let paths =
-        List.filter_map (function Part.Type_facts path -> Some path | _ -> None) parts
+        List.filter_map (function Part.Any (Type_facts path) -> Some path | _ -> None) parts
       in
       let in_closure = Path_table.create 64 in
       List.iter (fun path -> Path_table.replace in_closure path ()) paths;
-      let lookups = make_recording_interface_lookups database ignore ~is_checked:false in
+      let lookups =
+        make_recording_interface_lookups database (note_untracked_read database) ~is_checked:false
+      in
       List.map
         (fun paths -> Type_fact_component paths)
-        (Strongly_connected.find_components
+        (Strongly_connected.list_components
            (module Path)
-           ~successors:(fun path ->
+           ~list_successors:(fun path ->
              match find_type_interface lookups path with
              | Some interface ->
                  List.filter (Path_table.mem in_closure)
@@ -1640,46 +1432,56 @@ let list_components database (stage : Stage.t) package parts =
   | _ -> List.map (fun part -> Single part) parts
 
 let list_test_key_components database parts =
-  let keys =
-    List.filter_map (function Part.Lowering (Test_key key) -> Some key | _ -> None) parts
+  let items =
+    List.filter_map (function Part.Any (Test_key item) -> Some item | _ -> None) parts
   in
-  let in_closure = Instance_table.of_seq (Seq.map (fun key -> (key, ())) (List.to_seq keys)) in
+  let in_closure = Item_table.of_seq (Seq.map (fun item -> (item, ())) (List.to_seq items)) in
   List.map
-    (fun keys -> Test_key_component keys)
-    (Strongly_connected.find_components
-       (module Instance)
-       ~successors:(fun key ->
-         match Instance_table.find_opt database.lowered key with
-         | Some (Value (Ok lowered)) ->
-             List.filter (Instance_table.mem in_closure) (Compile.list_references lowered)
-         | Some (Value (Error _) | Failed _ | Blocked) | None -> [])
-       keys)
+    (fun items -> Test_key_component items)
+    (Strongly_connected.list_components
+       (module Lowered.Item)
+       ~list_successors:(fun item ->
+         List.filter (Item_table.mem in_closure) (list_item_edges database item))
+       items)
+
+let find_call_successors database calling_package node =
+  match find_stored database (Call_edges (node, calling_package)) with
+  | Some (Value edges) -> Some edges
+  | Some (Failed _ | Blocked) | None -> None
 
 let update_groups database package =
   match Package_table.find_opt database.graphs package with
   | Some graph when Call_graph.has_changes graph ->
-      let { Call_graph.touched; removed } = Call_graph.update graph in
+      let find_successors = find_call_successors database package in
+      let { Call_graph.touched; removed } = Call_graph.update graph ~find_successors in
       List.iter
         (fun node ->
-          let part = Part.Call_edges (node, package) in
-          mark_unsaved database (Value (Computed part));
-          discard database part)
-        removed;
-      let groups = Path_table.make_slot (find_owner database package).recursion_groups in
-      let is_own node = Path.locate_package node = package in
+          if Option.is_none (find_stored database (Call_edges (node, package))) then
+            Compiler_bug.raise_bug ~stage:"Database"
+              "%s is a node of the call graph of %s after the graph's update, and its definition \
+               is removed"
+              (Path.show node) (Path.show_package package))
+        touched;
+      forget database (List.map (fun node -> Part.Any (Call_edges (node, package))) removed);
+      let make_group_slot node = make_value_slot database (Recursion_group node) in
+      let is_package_node node = Path.locate_package node = package in
       List.iter
         (fun node ->
-          if is_own node then begin
-            database.observe (Recomputed (Recursion_group node));
-            store database (Recursion_group node) (groups node)
-              (match Call_graph.group graph node with
+          if is_package_node node then begin
+            !observer
+              (Computation { parts = [ Any (Recursion_group node) ]; reads = 0; distinct_reads = 0 });
+            store database (Any (Recursion_group node)) (make_group_slot node)
+              (match Call_graph.group graph ~find_successors node with
               | Blocked -> Some Blocked
               | Members [] -> None
               | Members members -> Some (Value members))
           end)
         touched;
       List.iter
-        (fun node -> if is_own node then store database (Recursion_group node) (groups node) None)
+        (fun node ->
+          if is_package_node node then
+            let slot = make_group_slot node in
+            if Option.is_some slot.stored then store database (Any (Recursion_group node)) slot None)
         removed
   | Some _ | None -> ()
 
@@ -1691,25 +1493,25 @@ let has_work database package (stage : Stage.t) =
       | None -> false)
   | stage -> (
       match Package_stage_table.find_opt database.stale (package, stage) with
-      | Some parts -> Computed_table.length parts > 0
+      | Some parts -> Stored_table.length parts > 0
       | None -> false)
 
 let drain_stage database ~is_drained ~on_raise (stage : Stage.t) packages =
   match stage with
   | Recursion_groups -> List.iter (update_groups database) packages
   | stage -> (
-      let closure = Computed_table.create 64 in
+      let closure = Stored_table.create 64 in
       let rec close part =
-        if not (Computed_table.mem closure part) then begin
-          Computed_table.replace closure part ();
+        if not (Stored_table.mem closure part) then begin
+          Stored_table.replace closure part ();
           Option.iter
-            (Computed_table.iter (fun reader () ->
+            (Stored_table.iter (fun reader () ->
                  if
                    Stage.of_part reader = stage
-                   && List.mem (Part.locate_package reader) packages
+                   && List.mem (Part.Storage.locate_package reader) packages
                    && is_drained reader
                  then close reader))
-            (Part_table.find_opt database.readers (Stored (Computed part)))
+            (Part_table.find_opt database.readers (Stored part))
         end
       in
       List.iter
@@ -1725,60 +1527,80 @@ let drain_stage database ~is_drained ~on_raise (stage : Stage.t) packages =
               | () -> ()
               | exception raised ->
                   List.iter (mark_stale database) parts;
+                  (match raised with
+                  | Compiler_bug.Bug bug ->
+                      List.iter (fun part -> Stored_table.replace database.bugs part bug) parts
+                  | _ -> ());
                   on_raise parts raised
             end)
       in
-      let parts_where keep =
-        Computed_table.fold
-          (fun part () parts -> if keep part then part :: parts else parts)
+      let list_parts_where is_kept =
+        Stored_table.fold
+          (fun part () parts -> if is_kept part then part :: parts else parts)
           closure []
       in
-      let all_parts () = parts_where (fun _ -> true) in
+      let list_all_parts () = list_parts_where (fun _ -> true) in
       match stage with
-      | Lowered_code -> compute_components (List.map (fun part -> Single part) (all_parts ()))
-      | Test_keys -> compute_components (list_test_key_components database (all_parts ()))
+      | Lowered_code -> compute_components (List.map (fun part -> Single part) (list_all_parts ()))
+      | Test_keys -> compute_components (list_test_key_components database (list_all_parts ()))
       | stage ->
           List.iter
             (fun package ->
               compute_components
                 (list_components database stage package
-                   (parts_where (fun part -> Part.locate_package part = package))))
+                   (list_parts_where (fun part -> Part.Storage.locate_package part = package))))
             packages)
 
 let drain_where ?on_bug database ~drains requested =
   let packages = sort_in_dependency_order database requested in
-  let broken = Computed_table.create 0 in
+  let broken = Stored_table.create 0 in
   let on_raise parts raised =
     match (on_bug, raised) with
     | Some on_bug, Compiler_bug.Bug bug ->
-        List.iter (fun part -> Computed_table.replace broken part ()) parts;
+        List.iter (fun part -> Stored_table.replace broken part ()) parts;
         on_bug bug
     | _ -> raise raised
   in
-  let rec next () =
-    let ready = lazy (list_ready_instances database) in
-    let is_drained part = is_drained ~ready part && not (Computed_table.mem broken part) in
+  let rec drain_next () =
+    let ready = lazy (collect_ready_items database) in
+    let is_drained part = is_drained ~ready part && not (Stored_table.mem broken part) in
     let has_drained_work stage =
       List.exists
         (fun package ->
           has_work database package stage
-          && ((Computed_table.length broken = 0 && not (Stage.is_lowering stage))
+          && ((Stored_table.length broken = 0 && not (Stage.is_lowering stage))
              || List.exists is_drained (list_stale_parts database package stage)))
         packages
     in
     match List.find_opt (fun stage -> drains stage && has_drained_work stage) Stage.all with
     | Some stage ->
         drain_stage database ~is_drained ~on_raise stage packages;
-        next ()
+        drain_next ()
     | None -> ()
   in
-  next ()
+  drain_next ()
 
 let drain database ~through requested =
   drain_where database ~drains:(Stage.drains ~through) requested
 
 let propagate ?on_bug database =
   drain_where ?on_bug database ~drains:(fun _ -> true) database.project
+
+let propagate_checks ?on_bug database =
+  let bugs = ref [] in
+  drain_where database
+    ~on_bug:(fun bug -> bugs := bug :: !bugs)
+    ~drains:(Stage.drains ~through:Package_checks)
+    database.project;
+  match (on_bug, List.rev !bugs) with
+  | Some on_bug, bugs -> List.iter on_bug bugs
+  | None, bug :: _ -> raise (Compiler_bug.Bug bug)
+  | None, [] -> ()
+
+let create ?on_bug ?loaded packages =
+  let database = make ?loaded packages in
+  propagate_checks ?on_bug database;
+  database
 
 type read = { dependent : Part.t; dependency : Part.t }
 
@@ -1792,15 +1614,13 @@ let is_of_other definition part =
   | Some other -> not (Path.equal other definition)
   | None -> false
 
-let drain_checks database = drain database ~through:Proofs database.project
 let is_checked part = not (Stage.is_lowering (Stage.of_part part))
 
 let list_dependencies database paths =
-  drain_checks database;
   let wanted = make_definition_set paths in
-  Computed_table.fold
+  Stored_table.fold
     (fun dependent dependencies found ->
-      let dependent_part = Part.Stored (Computed dependent) in
+      let dependent_part = Part.Stored dependent in
       match Part.find_definition dependent_part with
       | Some definition when is_checked dependent && Path_table.mem wanted definition ->
           List.fold_left
@@ -1813,15 +1633,14 @@ let list_dependencies database paths =
     database.reads []
 
 let list_dependents database paths =
-  drain_checks database;
   let wanted = make_definition_set paths in
   Part_table.fold
     (fun dependency readers found ->
       match Part.find_definition dependency with
       | Some definition when Path_table.mem wanted definition ->
-          Computed_table.fold
+          Stored_table.fold
             (fun dependent () found ->
-              let dependent_part = Part.Stored (Computed dependent) in
+              let dependent_part = Part.Stored dependent in
               if is_checked dependent && is_of_other definition dependent_part then
                 { dependent = dependent_part; dependency } :: found
               else found)
@@ -1830,28 +1649,23 @@ let list_dependents database paths =
     database.readers []
 
 let list_changes database other =
-  drain_checks database;
-  drain_checks other;
   let parts = Stored_table.create 1024 in
-  let add (part : Part.stored) =
-    match part with
-    | Computed (Namespace _ | Lowering _) -> ()
-    | Computed _ | Recursion_group _ ->
+  let add (Part.Any typed as part) =
+    match typed with
+    | Namespace _ | Lowered _ | Test_key _ -> ()
+    | _ ->
         if Option.is_some (Part.find_definition (Stored part)) then
           Stored_table.replace parts part ()
   in
   List.iter
     (fun database ->
-      Computed_table.iter (fun part _ -> add (Computed part)) database.reads;
+      Stored_table.iter (fun part _ -> add part) database.reads;
       Part_table.iter
         (fun (part : Part.t) _ ->
           match part with Stored part -> add part | Input _ | Name _ -> ())
         database.readers;
       List.iter
-        (fun package ->
-          Path_table.iter
-            (fun path _ -> add (Recursion_group path))
-            (find_owner database package).recursion_groups)
+        (fun package -> List.iter add (list_stored_parts (obtain_owner database package)))
         database.project)
     [ database; other ];
   Stored_table.fold
@@ -1859,7 +1673,7 @@ let list_changes database other =
       if (make_stored database part).is_equal_in other then changed else Part.Stored part :: changed)
     parts []
 
-let update database changes =
+let record_changes database changes =
   List.iter
     (fun ((file : Path.file), text) ->
       let package = file.module_.package in
@@ -1867,7 +1681,7 @@ let update database changes =
         match Package_table.find_opt database.package_databases package with
         | Some package_database -> package_database
         | None ->
-            Compiler_bug.bug ~stage:"Database" "%s is not a package of the build"
+            Compiler_bug.raise_bug ~stage:"Database" "%s is not a package of the build"
               (Path.show_package package)
       in
       let previous = File_table.find_opt package_database.sources file in
@@ -1882,123 +1696,76 @@ let update database changes =
         (match text with
         | Some text ->
             File_table.replace package_database.sources file (make_source file text);
-            mark_stale database (Parsed file)
+            mark_stale database (Any (Parsed file))
         | None ->
             File_table.remove package_database.sources file;
-            forget database [ Parsed file ]);
+            forget database [ Any (Parsed file) ]);
         mark_readers database (Input (Source file));
         if Option.is_none previous || Option.is_none text then begin
           let modules = package_database.modules in
-          list_files package_database
+          set_files package_database
             (List.filter (( <> ) file) package_database.files
             @ if Option.is_some text then [ file ] else []);
           if modules <> package_database.modules then
             mark_readers database (Input (Modules package));
-          mark_stale database (Namespace package)
+          mark_readers database (Input (Files package))
         end
       end)
     changes
 
-let list_stored_parts (package_database : package_database) : Part.stored list =
-  Path_table.list_keys package_database.recursion_groups (fun path -> Part.Recursion_group path)
-  @ List.map
-      (fun part -> Part.Computed part)
-      (List.concat
-         [
-           File_table.list_keys package_database.parsed (fun file -> Part.Parsed file);
-           Key_section_table.list_keys package_database.resolved_names (fun (key, section) ->
-               Part.Resolved (key, section));
-           Package_table.list_keys package_database.grants (fun dependency ->
-               Part.Grant (package_database.name, dependency));
-           File_table.list_keys package_database.import_checks (fun file -> Part.Import_check file);
-           Key_table.list_keys package_database.trait_headers (fun key -> Part.Trait_header key);
-           Path_table.list_keys package_database.constant_values (fun path ->
-               Part.Constant_value path);
-           Key_table.list_keys package_database.headers (fun key -> Part.Header key);
-           Key_table.list_keys package_database.interfaces (fun key -> Part.Interface key);
-           Type_trait_table.list_keys package_database.derived_interfaces (fun (type_, trait) ->
-               Part.Derived_interface { type_; trait });
-           Path_table.list_keys package_database.type_facts (fun path -> Part.Type_facts path);
-           Key_table.list_keys package_database.signature_checks (fun key ->
-               Part.Signature_check key);
-           Key_table.list_keys package_database.contracts (fun key -> Part.Contract key);
-           Key_table.list_keys package_database.checked_bodies (fun key -> Part.Checked_body key);
-           Path_table.list_keys package_database.derived_forms (fun path -> Part.Derived_form path);
-           Key_table.list_keys package_database.body_parts (fun key -> Part.Body_mir key);
-           Key_table.list_keys package_database.contract_parts (fun key -> Part.Contract_mir key);
-           Path_table.list_keys package_database.generated_parts (fun path ->
-               Part.Generated_mir path);
-           Path_table.list_keys package_database.mir_call_edges (fun path ->
-               Part.Mir_call_edges path);
-           Key_table.list_keys package_database.patterns (fun key -> Part.Patterns key);
-           Key_table.list_keys package_database.usage (fun key -> Part.Usage key);
-           Key_table.list_keys package_database.ownership (fun key -> Part.Ownership key);
-           Check_table.list_keys package_database.package_checks (fun check ->
-               Part.Package_check (package_database.name, check));
-           Key_table.list_keys package_database.proofs (fun key -> Part.Proof key);
-         ])
+let update ?on_bug database changes =
+  record_changes database changes;
+  propagate_checks ?on_bug database
 
 let mark_differences database name ~(before : package_database option)
     ~(after : package_database option) =
-  let empty () =
-    let package_database = make_empty_package_database name ~dependencies:[] in
-    package_database.namespace <- Some Resolve.Names.empty_namespace;
-    package_database
-  in
-  let before = match before with Some package_database -> package_database | None -> empty () in
-  let after = match after with Some package_database -> package_database | None -> empty () in
-  let namespace (package_database : package_database) =
-    Option.value package_database.namespace ~default:Resolve.Names.empty_namespace
-  in
+  let before = Option.value before ~default:(make_absent_package_database name) in
+  let after = Option.value after ~default:(make_absent_package_database name) in
   List.iter (mark_change database name)
-    (Resolve.Names.list_changes (namespace before) (namespace after));
-  let text (package_database : package_database) file =
+    (Resolve.Namespace.list_changes (find_package_namespace before) (find_package_namespace after));
+  let find_text (package_database : package_database) file =
     Option.map Source.text (File_table.find_opt package_database.sources file)
   in
   List.iter
     (fun file ->
-      if text before file <> text after file then mark_readers database (Input (Source file)))
+      if find_text before file <> find_text after file then
+        mark_readers database (Input (Source file)))
     (List.sort_uniq compare (before.files @ after.files));
   if before.modules <> after.modules then mark_readers database (Input (Modules name));
   if before.dependencies <> after.dependencies then
     mark_readers database (Input (Dependencies name));
-  let view (package_database : package_database) =
-    let package_databases = Package_table.create 1 in
-    Package_table.replace package_databases name package_database;
-    { database with package_databases }
-  in
-  let parts = Stored_table.create 1024 in
-  List.iter
-    (fun part -> Stored_table.replace parts part ())
-    (list_stored_parts before @ list_stored_parts after);
+  let parts = Stored_table.copy before.values in
+  Stored_table.iter (fun part binding -> Stored_table.replace parts part binding) after.values;
   Stored_table.iter
-    (fun part () ->
-      if not ((make_stored (view before) part).is_equal_in (view after)) then
-        mark_readers database (Stored part))
+    (fun part _ ->
+      let after_binding = Stored_table.find_opt after.values part in
+      if compare (Stored_table.find_opt before.values part) after_binding <> 0 then
+        mark_written database part ~is_removal:(Option.is_none after_binding))
     parts
 
 let retire database (package_database : package_database) =
   let package = package_database.name in
-  own_roots database (Stored (Computed (Namespace package))) [];
-  Key_table.iter
-    (fun key _ -> own_roots database (Stored (Computed (Proof key))) [])
-    package_database.proofs;
-  let is_own part =
-    (not (Stage.is_lowering (Stage.of_part part))) && Part.locate_package part = package
+  claim_roots database (Stored (Any (Namespace package))) [];
+  List.iter
+    (function
+      | Part.Any (Proof _) as claimant -> claim_roots database (Stored claimant) [] | _ -> ())
+    (list_stored_parts package_database);
+  let is_package_part part =
+    (not (Stage.is_lowering (Stage.of_part part))) && Part.Storage.locate_package part = package
   in
   mark_package_database_unsaved database package_database;
   List.iter (fun part -> mark_unsaved database (Value part)) (list_stored_parts package_database);
   List.iter
     (fun part ->
-      mark_unsaved database (Value (Computed part));
+      mark_unsaved database (Value part);
       discard database part)
-    (Computed_table.fold
-       (fun part _ parts -> if is_own part then part :: parts else parts)
+    (Stored_table.fold
+       (fun part _ parts -> if is_package_part part then part :: parts else parts)
        database.reads []);
   Package_stage_table.filter_map_inplace
-    (fun (owner, stage) parts ->
-      if owner = package && not (Stage.is_lowering stage) then begin
-        Computed_table.iter (fun part () -> mark_unsaved database (Stale part)) parts;
+    (fun (stage_package, stage) parts ->
+      if stage_package = package && not (Stage.is_lowering stage) then begin
+        Stored_table.iter (fun part () -> mark_unsaved database (Stale part)) parts;
         None
       end
       else Some parts)
@@ -2007,9 +1774,9 @@ let retire database (package_database : package_database) =
   Package_table.remove database.implied package;
   Package_table.remove database.package_databases package
 
-let relayout database ~(loaded : package_database list) (packages : Project.package list) =
+let record_layout database ~(loaded : package_database list) (packages : Project.package list) =
   let project = List.map (fun (package : Project.package) -> package.name) packages in
-  let loaded_as name =
+  let find_loaded name =
     List.find_opt (fun (package_database : package_database) -> package_database.name = name) loaded
   in
   let names_before =
@@ -2021,12 +1788,12 @@ let relayout database ~(loaded : package_database list) (packages : Project.pack
       let is_kept =
         if List.mem name database.project then List.mem name project
         else
-          match loaded_as name with
+          match find_loaded name with
           | Some package_database -> package_database == before
           | None -> false
       in
       if not is_kept then begin
-        let after = if List.mem name project then None else loaded_as name in
+        let after = if List.mem name project then None else find_loaded name in
         mark_differences database name ~before:(Some before) ~after;
         retire database before;
         Option.iter (Package_table.replace database.package_databases name) after
@@ -2047,10 +1814,9 @@ let relayout database ~(loaded : package_database list) (packages : Project.pack
           if package_database.dependencies <> package.dependencies then begin
             package_database.dependencies <- package.dependencies;
             mark_unsaved database (Package package.name);
-            mark_readers database (Input (Dependencies package.name));
-            mark_stale database (Namespace package.name)
+            mark_readers database (Input (Dependencies package.name))
           end;
-          update database
+          record_changes database
             (List.map (fun (file, text) -> (file, Some text)) package.files
             @ List.filter_map
                 (fun file -> if List.mem_assoc file package.files then None else Some (file, None))
@@ -2064,8 +1830,8 @@ let relayout database ~(loaded : package_database list) (packages : Project.pack
           mark_package_database_unsaved database package_database;
           mark_readers database (Input (Modules package.name));
           mark_readers database (Input (Dependencies package.name));
-          List.iter (fun file -> mark_stale database (Parsed file)) package_database.files;
-          mark_stale database (Namespace package.name))
+          List.iter (fun file -> mark_stale database (Any (Parsed file))) package_database.files;
+          mark_stale database (Any (Namespace package.name)))
     packages;
   let names_after =
     Package_table.fold (fun name _ names -> name :: names) database.package_databases []
@@ -2074,24 +1840,21 @@ let relayout database ~(loaded : package_database list) (packages : Project.pack
     mark_readers database (Input Packages);
   database.project <- project
 
-let fingerprint text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
+let relayout ?on_bug database ~loaded packages =
+  record_layout database ~loaded packages;
+  propagate_checks ?on_bug database
 
-let is_saved_part database (part : Part.stored) =
-  match part with
-  | Computed (Namespace _) -> false
-  | Computed (Lowering _) -> true
-  | Computed part -> List.mem (Part.locate_package part) database.project
-  | Recursion_group path -> List.mem (Path.locate_package path) database.project
+let fingerprint text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
 
 let find_saved_value database (entry : Entry.t) =
   match entry with
-  | Value part -> if is_saved_part database part then (make_stored database part).saved () else None
+  | Value part ->
+      if is_saved_part database part then (make_stored database part).marshal () else None
   | Reads part ->
-      if is_saved_part database (Computed part) then
-        Option.map marshal (Computed_table.find_opt database.reads part)
+      if is_saved_part database part then
+        Option.map marshal (Stored_table.find_opt database.reads part)
       else None
-  | Stale part ->
-      if is_saved_part database (Computed part) && is_stale database part then Some "" else None
+  | Stale part -> if is_saved_part database part && is_stale database part then Some "" else None
   | Package name ->
       if List.mem name database.project then
         Option.map
@@ -2106,10 +1869,9 @@ let find_saved_value database (entry : Entry.t) =
               (fun source -> fingerprint (Source.text source))
               (File_table.find_opt package_database.sources file))
       else None
-  | Owned owner -> Option.map marshal (Part_table.find_opt database.owned owner)
+  | Claimed claimant -> Option.map marshal (Part_table.find_opt database.claimed_roots claimant)
 
 let list_unsaved database =
-  drain database ~through:Namespaces database.project;
   List.iter (update_groups database) database.project;
   Entry_table.fold
     (fun entry () entries ->
@@ -2118,7 +1880,7 @@ let list_unsaved database =
 
 let mark_saved database = Entry_table.reset database.unsaved
 
-let restore_packages database ~texts entries =
+let restore_packages database ~find_text entries =
   let files = Package_table.create 64 in
   List.iter
     (function
@@ -2137,12 +1899,12 @@ let restore_packages database ~texts entries =
           let listed = Option.value ~default:[] (Package_table.find_opt files name) in
           List.iter
             (fun (file, saved) ->
-              match texts file with
+              match find_text file with
               | Some text when String.equal (fingerprint text) saved ->
                   File_table.replace package_database.sources file (make_source file text)
               | Some _ | None -> ())
             listed;
-          list_files package_database (List.map fst listed);
+          set_files package_database (List.map fst listed);
           Package_table.replace database.package_databases name package_database;
           database.project <- name :: database.project
       | _ -> ())
@@ -2154,10 +1916,11 @@ let restore_parts database entries =
     (fun ((entry : Entry.t), bytes) ->
       match entry with
       | Value part when is_saved_part database part -> (make_stored database part).restore bytes
-      | Reads part when is_saved_part database (Computed part) ->
+      | Reads part when is_saved_part database part ->
           add_reads database part (Marshal.from_string bytes 0)
-      | Stale part when is_saved_part database (Computed part) -> mark_stale database part
-      | Owned owner -> Part_table.replace database.owned owner (Marshal.from_string bytes 0)
+      | Stale part when is_saved_part database part -> mark_stale database part
+      | Claimed claimant ->
+          Part_table.replace database.claimed_roots claimant (Marshal.from_string bytes 0)
       | Value _ | Reads _ | Stale _ | Package _ | File _ -> ())
     entries
 
@@ -2165,53 +1928,72 @@ let restore_namespaces database =
   List.iter
     (fun name ->
       if List.mem name database.project then begin
-        let _, implied =
-          compute_namespace_and_implied database
-            (Package_table.find database.package_databases name)
-        in
-        let graph = find_call_graph database name in
+        let package_database = Package_table.find database.package_databases name in
+        let namespace, implied = compute_namespace_and_implied database package_database in
+        (make_value_slot database (Namespace name)).replace (Value namespace);
+        let graph = obtain_call_graph database name in
         List.iter
           (function
-            | Part.Call_edges (root, _) -> ignore (Call_graph.add_root graph root) | _ -> ())
-          implied
+            | Part.Any (Call_edges (root, _)) -> ignore (Call_graph.add_root graph root) | _ -> ())
+          implied;
+        Stored_table.iter
+          (fun _ -> function
+            | Binding (Call_edges (path, _), value) ->
+                ignore (Call_graph.add_node graph path);
+                ignore
+                  (Call_graph.change_successors graph path ~before:[]
+                     ~after:(list_call_edges (Some value)))
+            | Binding _ -> ())
+          package_database.values
       end)
     (sort_in_dependency_order database database.project)
 
 let restore_references database =
   Part_table.iter
-    (fun owner roots ->
+    (fun claimant roots ->
       List.iter
         (fun root ->
-          Instance_table.replace database.owners root
-            (owner :: Option.value (Instance_table.find_opt database.owners root) ~default:[]);
+          Item_table.replace database.claimants root
+            (claimant :: Option.value (Item_table.find_opt database.claimants root) ~default:[]);
           ignore (References.add_root database.references root))
         roots)
-    database.owned;
-  let instances = Instance_table.create 1024 in
-  let note key = Instance_table.replace instances key () in
-  Instance_table.iter (fun key _ -> note key) database.lowered;
-  Instance_table.iter
-    (fun key () ->
-      ignore
-        (References.set_successors database.references key
-           (Some (list_instance_edges database key))))
-    instances;
+    database.claimed_roots;
+  Stored_table.iter
+    (fun _ -> function
+      | Binding (Lowered key, value) ->
+          ignore (References.add_node database.references key);
+          ignore
+            (References.change_successors database.references key ~before:[]
+               ~after:(list_lowered_references (Some value)))
+      | Binding _ -> ())
+    database.item_values;
   settle_references database
 
-let restore ~loaded ~texts entries =
-  let database = create ~loaded [] in
+let restore ?on_bug ~saved ~find_text ~loaded packages entries =
+  let database = make ~loaded:saved [] in
   let entries =
     List.map (fun (key, value) -> ((Marshal.from_string key 0 : Entry.t), value)) entries
   in
-  restore_packages database ~texts entries;
+  restore_packages database ~find_text entries;
   restore_parts database entries;
   restore_namespaces database;
   restore_references database;
   List.iter (update_groups database) database.project;
   mark_saved database;
+  record_layout database ~loaded packages;
+  propagate_checks ?on_bug database;
   database
 
-type checker = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
+type checker =
+  | Parse
+  | Resolve
+  | Interface
+  | Infer
+  | Patterns
+  | Usage
+  | Ownership
+  | Package_checks
+  | Unexported
 
 let remove_duplicates diagnostics =
   List.sort_uniq
@@ -2219,23 +2001,21 @@ let remove_duplicates diagnostics =
       compare (left.span, left.code, left.message) (right.span, right.code, right.message))
     diagnostics
 
-let list_definition_diagnostics database (key : Resolve.Names.key) checker =
-  let owner = find_owner database key.module_.package in
-  match checker with
-  | Resolve ->
-      List.concat_map
-        (fun section -> Key_section_table.list_failures owner.resolved_names (key, section))
-        Resolve.sections
-  | Interface ->
-      Key_table.list_failures owner.headers key
-      @ Key_table.list_failures owner.interfaces key
-      @ Key_table.list_failures owner.signature_checks key
-  | Infer ->
-      Key_table.list_failures owner.contracts key @ Key_table.list_failures owner.checked_bodies key
-  | Patterns -> Key_table.list_failures owner.patterns key
-  | Usage -> Key_table.list_failures owner.usage key
-  | Ownership -> Key_table.list_failures owner.ownership key
-  | Package_checks -> []
+let list_checked_parts (key : Resolve.Names.key) : checker -> Part.any list = function
+  | Resolve -> List.map (fun section -> Part.Any (Resolved (key, section))) Resolve.sections
+  | Interface -> [ Any (Header key); Any (Interface key); Any (Signature_check key) ]
+  | Infer -> [ Any (Contract key); Any (Checked_body key) ]
+  | Patterns -> [ Any (Patterns key) ]
+  | Usage -> [ Any (Usage key) ]
+  | Ownership -> [ Any (Ownership key) ]
+  | Parse | Package_checks | Unexported -> []
+
+let list_definition_diagnostics database key checker =
+  List.concat_map
+    (fun part ->
+      note_read database (note_untracked_read database) part;
+      (make_stored database part).failures)
+    (list_checked_parts key checker)
 
 let sort_by_span_and_code diagnostics =
   List.sort
@@ -2246,112 +2026,165 @@ let sort_by_span_and_code diagnostics =
 let list_package_outcomes database package =
   match find_package database package with
   | None -> []
-  | Some package_database ->
+  | Some _ ->
       List.filter_map
         (fun check ->
-          match Check_table.find_opt package_database.package_checks check with
-          | Some (Value outcome) -> Some outcome
-          | Some (Failed _ | Blocked) -> None
-          | None -> report_uncomputed (Package_check (package, check)))
+          match
+            read_part database (note_untracked_read database) (Package_check (package, check))
+          with
+          | Value outcome -> Some (check, outcome)
+          | Failed _ | Blocked -> None)
         (Package_checks.list_checks
-           ((make_stored_name_lookups database).package_declarations package))
+           ((make_untracked_name_lookups database).list_package_declarations package))
+
+let place_diagnostics (names : Resolve.Names.lookups) file key diagnostics =
+  let ({ file = home; base } : Resolve.Names.place) = names.read_place key in
+  if home = file then
+    List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
+  else []
 
 let list_checker_diagnostics database (file : Path.file) checker =
-  let names = make_stored_name_lookups database in
-  let package_database = find_owner database file.module_.package in
-  let placed key diagnostics =
-    let ({ file = home; base } : Resolve.Names.place) = names.place key in
-    if home = file then
-      List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) diagnostics
-    else []
-  in
+  let names = make_untracked_name_lookups database in
+  let place_diagnostics = place_diagnostics names file in
   let of_definitions () =
     List.concat_map
-      (fun key -> placed key (list_definition_diagnostics database key checker))
-      (list_file_keys database file)
+      (fun key -> place_diagnostics key (list_definition_diagnostics database key checker))
+      (list_file_keys names file)
+  in
+  let of_package_checks (is_selected : Package_checks.check -> bool) =
+    List.concat_map
+      (fun (check, outcome) ->
+        match outcome with
+        | Package_checks.Placed diagnostics when is_selected check ->
+            List.concat_map
+              (fun (diagnostic : Package_checks.placed) ->
+                place_diagnostics diagnostic.key [ diagnostic.diagnostic ])
+              diagnostics
+        | Placed _ | Unused_dependencies _ -> [])
+      (list_package_outcomes database file.module_.package)
   in
   sort_by_span_and_code
     (match checker with
+    | Parse -> (read_value database (note_untracked_read database) (Parsed file)).diagnostics
     | Resolve ->
-        Option.value ~default:[] (File_table.find_opt package_database.import_checks file)
+        Option.value ~default:[]
+          (find_value database (note_untracked_read database) (Import_check file))
         @ of_definitions ()
-    | Package_checks ->
-        List.concat_map
-          (function
-            | Package_checks.Placed diagnostics ->
-                List.concat_map
-                  (fun (diagnostic : Package_checks.placed) ->
-                    placed diagnostic.key [ diagnostic.diagnostic ])
-                  diagnostics
-            | Unused_dependencies _ -> [])
-          (list_package_outcomes database file.module_.package)
+    | Package_checks -> of_package_checks (fun check -> check <> Unexported)
+    | Unexported -> of_package_checks (fun check -> check = Unexported)
     | Interface | Infer | Patterns | Usage | Ownership -> of_definitions ())
 
-let checkers = [ Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks ]
-let check database packages = drain database ~through:Package_checks packages
+let checkers =
+  [ Parse; Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks; Unexported ]
+
+let list_diagnostics checkers database (file : Path.file) =
+  remove_duplicates (List.concat_map (list_checker_diagnostics database file) checkers)
 
 let read_checked_body database (key : Resolve.Names.key) =
-  drain database ~through:Checked_bodies [ key.module_.package ];
-  match Key_table.find_opt (find_owner database key.module_.package).checked_bodies key with
-  | Some (Value checked) -> Some checked
-  | Some (Failed _ | Blocked) -> None
-  | None -> report_uncomputed (Checked_body key)
+  match read_part database (note_untracked_read database) (Checked_body key) with
+  | Value checked -> Some checked
+  | Failed _ | Blocked -> None
 
-let list_file_diagnostics database (file : Path.file) =
-  drain database ~through:Package_checks [ file.module_.package ];
+let list_file_diagnostics database file = list_diagnostics checkers database file
+
+let list_blocking_diagnostics database (file : Path.file) =
+  let names = make_untracked_name_lookups database in
   remove_duplicates
-    ((find_parsed_file database file).diagnostics
-    @ List.concat_map (list_checker_diagnostics database file) checkers)
+    (list_checker_diagnostics database file Parse
+    @ List.concat_map
+        (fun (key : Resolve.Names.key) ->
+          match key.path with
+          | Test _ -> []
+          | _ ->
+              place_diagnostics names file key
+                (List.concat_map
+                   (list_definition_diagnostics database key)
+                   [ Resolve; Interface; Infer; Patterns; Usage; Ownership ]))
+        (list_file_keys names file))
+
+let list_dependency_diagnostics database package =
+  match find_package database package with
+  | Some package_database when not (List.mem package database.project) ->
+      package_database.diagnostics
+  | Some package_database ->
+      List.filter_map
+        (fun file ->
+          match list_blocking_diagnostics database file with
+          | [] -> None
+          | diagnostics -> Some (read_source database file, diagnostics))
+        package_database.files
+  | None ->
+      Compiler_bug.raise_bug ~stage:"Database" "%s is not a package of the build"
+        (Path.show_package package)
 
 type manifest_problem =
-  | Not_a_capability of { dependency : Path.package; name : string }
+  | Not_a_capability of { dependency : Path.package; capability : Grant.capability }
   | Unused_dependency of Path.package
 
 let list_manifest_problems database package =
-  drain database ~through:Package_checks [ package ];
-  let grants = (find_owner database package).grants in
   List.concat_map
     (fun dependency ->
-      match Package_table.find_opt grants dependency with
-      | Some (grant : Interface.Environment.grant) ->
-          List.map (fun name -> Not_a_capability { dependency; name }) grant.unknown
-      | None -> report_uncomputed (Grant (package, dependency)))
-    ((make_stored_name_lookups database).dependency_names package)
+      List.map
+        (fun capability -> Not_a_capability { dependency; capability })
+        (read_value database (note_untracked_read database) (Grant (package, dependency))).unknown)
+    ((make_untracked_name_lookups database).list_dependency_names package)
   @ List.concat_map
       (function
-        | Package_checks.Unused_dependencies dependencies ->
+        | _, Package_checks.Unused_dependencies dependencies ->
             List.map (fun dependency -> Unused_dependency dependency) dependencies
-        | Placed _ -> [])
+        | _, Placed _ -> [])
       (list_package_outcomes database package)
 
-let list_code_packages database package =
-  drain database ~through:Checked_bodies [ package ];
-  let checked_bodies = (find_owner database package).checked_bodies in
+let find_code_packages database package =
   let read_used (declaration : Resolve.Names.declaration) =
-    match declaration.path with
+    match declaration.key.path with
     | Test _ -> Some []
     | _ -> (
-        let key = Resolve.Names.make_key declaration in
-        match Key_table.find_opt checked_bodies key with
-        | Some (Value checked) -> Some checked.used_packages
-        | Some (Failed _ | Blocked) -> None
-        | None -> report_uncomputed (Checked_body key))
+        match read_part database (note_untracked_read database) (Checked_body declaration.key) with
+        | Value checked -> Some checked.used_packages
+        | Failed _ | Blocked -> None)
   in
   let used =
-    List.map read_used ((make_stored_name_lookups database).package_declarations package)
+    List.map read_used ((make_untracked_name_lookups database).list_package_declarations package)
   in
   if List.mem None used then None
   else Some (List.sort_uniq Path.compare_package (List.concat_map Option.get used))
 
-let read_package_database database package =
-  drain database ~through:Recursion_groups [ package ];
-  match Package_table.find_opt database.package_databases package with
-  | Some package_database -> package_database
+let build_package_database ~loaded (package : Project.package) =
+  let database = make ~loaded [ package ] in
+  drain database ~through:Recursion_groups [ package.name ];
+  match Package_table.find_opt database.package_databases package.name with
+  | Some package_database ->
+      { package_database with diagnostics = list_dependency_diagnostics database package.name }
   | None ->
-      Compiler_bug.bug ~stage:"Database" "%s is not a package of the build"
-        (Path.show_package package)
+      Compiler_bug.raise_bug ~stage:"Database" "%s is missing from the database built for it"
+        (Path.show_package package.name)
+
+let list_package_diagnostics (package_database : package_database) = package_database.diagnostics
 
 type proofs = { database : t; keys : Resolve.Names.key list }
+
+let has_errors database package =
+  match find_package database package with
+  | Some package_database when List.mem package database.project ->
+      List.exists
+        (fun file -> List.exists Diagnostic.is_error (list_file_diagnostics database file))
+        package_database.files
+  | Some package_database -> package_database.diagnostics <> []
+  | None -> true
+
+let require_diagnostics_for_blocked_proofs database packages keys =
+  let is_blocked key =
+    match read_stored database (Proof key) with Value _ -> false | Failed _ | Blocked -> true
+  in
+  match List.find_opt is_blocked keys with
+  | Some key
+    when not (List.exists (has_errors database) (sort_in_dependency_order database packages)) ->
+      Compiler_bug.raise_bug ~stage:"Database"
+        "the proof of %s is blocked, and no code of its package or of a package it depends on has \
+         a diagnostic"
+        (Resolve.Names.show_key key)
+  | Some _ | None -> ()
 
 let prove database files =
   let packages =
@@ -2359,40 +2192,47 @@ let prove database files =
       (List.map (fun (file : Path.file) -> file.module_.package) files)
   in
   drain database ~through:Recursion_groups packages;
-  let keys = List.concat_map (list_file_keys database) files in
+  let keys = List.concat_map (list_file_keys (make_untracked_name_lookups database)) files in
   List.iter
     (fun (key : Resolve.Names.key) ->
-      let part = Part.Proof key in
-      if
-        is_stale database part
-        || not (Key_table.mem (find_owner database key.module_.package).proofs key)
-      then begin
+      let part = Part.Any (Proof key) in
+      if is_stale database part || Option.is_none (find_stored database (Proof key)) then begin
         unmark database part;
         compute_part database part
       end
-      else own_template_checks database key)
+      else claim_template_check_roots database key)
     keys;
+  require_diagnostics_for_blocked_proofs database packages keys;
   { database; keys }
 
-let read_proof proofs (key : Resolve.Names.key) =
-  Key_table.find_opt (find_owner proofs.database key.module_.package).proofs key
+let find_proof proofs key =
+  find_part proofs.database (note_untracked_read proofs.database) (Proof key)
 
 let list_holes proofs path =
-  let names = make_stored_name_lookups proofs.database in
-  match Option.bind (names.key path) (read_proof proofs) with
+  let names = make_untracked_name_lookups proofs.database in
+  match Option.bind (names.find_key path) (find_proof proofs) with
   | Some (Value (Obligations { holes; _ })) ->
       List.map
         (fun ((home : Resolve.Names.key), location) ->
-          let ({ file; base } : Resolve.Names.place) = names.place home in
+          let ({ file; base } : Resolve.Names.place) = names.read_place home in
           let span = Prover.resolve_location names home location in
-          (file, (Source.Definition_span.to_file ~base span).start))
+          let line, column =
+            Source.compute_position
+              (read_source proofs.database file)
+              (Source.Definition_span.to_file ~base span).start
+          in
+          (file, line, column))
         holes
   | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
 
 let list_template_checks (proofs : proofs) =
   let database = proofs.database in
+  let note = note_untracked_read database in
   match
-    List.sort_uniq compare (List.concat_map (list_proof_template_checks database) proofs.keys)
+    List.sort_uniq compare
+      (List.concat_map
+         (fun key -> list_proof_template_checks (read_part database note (Proof key)))
+         proofs.keys)
   with
   | [] -> []
   | checks ->
@@ -2401,7 +2241,7 @@ let list_template_checks (proofs : proofs) =
            (List.map (fun (key : Resolve.Names.key) -> key.module_.package) proofs.keys));
       List.filter
         (fun check ->
-          match Instance_table.find_opt database.test_keys (make_template_check_root check) with
+          match find_part database note (Test_key (make_template_check_root check)) with
           | Some Blocked -> false
           | Some (Value _ | Failed _) | None -> true)
         checks
@@ -2409,87 +2249,86 @@ let list_template_checks (proofs : proofs) =
 let list_proofs (proofs : proofs) =
   List.filter_map
     (fun key ->
-      match read_proof proofs key with
-      | Some (Value proof) -> Some (key, proof)
-      | Some (Failed _ | Blocked) -> None
-      | None -> report_uncomputed (Proof key))
+      match read_part proofs.database (note_untracked_read proofs.database) (Proof key) with
+      | Value proof -> Some (key, proof)
+      | Failed _ | Blocked -> None)
     proofs.keys
 
-let make_proof_lookups database = make_recording_proof_lookups database ignore
+let make_proof_lookups database =
+  make_recording_proof_lookups database (note_untracked_read database)
 
 let read_parsed database (file : Path.file) =
-  drain database ~through:Parse [ file.module_.package ];
-  (find_parsed_file database file).tree
+  (read_value database (note_untracked_read database) (Parsed file)).tree
 
-let make_name_lookups database packages =
-  drain database ~through:Namespaces packages;
-  make_stored_name_lookups database
+let make_name_lookups database = make_untracked_name_lookups database
 
 let read_resolved database (key : Resolve.Names.key) =
-  drain database ~through:Resolution [ key.module_.package ];
-  let owner = find_owner database key.module_.package in
   match
     List.filter_map
       (fun section ->
-        match Key_section_table.find_opt owner.resolved_names (key, section) with
-        | Some (Value resolved) -> Some resolved
-        | Some (Failed _ | Blocked) -> None
-        | None -> report_uncomputed (Resolved (key, section)))
+        match read_part database (note_untracked_read database) (Resolved (key, section)) with
+        | Value resolved -> Some resolved
+        | Failed _ | Blocked -> None)
       Resolve.sections
   with
   | [] -> None
   | parts -> Some (Resolve.merge parts)
 
-let request database packages ~through ~needs keys =
-  drain database ~through packages;
-  List.iter
-    (fun key ->
-      if not (List.for_all (is_current database) (needs key)) then
-        Compiler_bug.bug ~stage:"Database" "%s is requested, and no root of lowering reaches it"
-          (Instance.to_string key))
-    keys
+let check_reached database part =
+  if not (is_current database part) then
+    Compiler_bug.raise_bug ~stage:"Database" "%s is read, and no root of lowering reaches it"
+      (Part.show (Stored part))
 
-let read_requested table part key =
-  match Instance_table.find_opt table key with
-  | Some (Value value) -> value
-  | Some (Failed _ | Blocked) ->
-      Compiler_bug.bug ~stage:"Database" "%s is requested from code with errors"
-        (Part.show_computed (Lowering part))
-  | None -> report_uncomputed (Lowering part)
+let read_reached database typed =
+  check_reached database (Part.Any typed);
+  match read_part database (note_untracked_read database) typed with
+  | Value value -> value
+  | Failed _ | Blocked ->
+      Compiler_bug.raise_bug ~stage:"Database" "%s is read from code with errors"
+        (Part.show (Stored (Part.Any typed)))
 
-let make_interface_lookups database packages =
-  drain database ~through:Signature_checks packages;
-  make_recording_interface_lookups database ignore ~is_checked:true
+let make_interface_lookups database =
+  make_recording_interface_lookups database (note_untracked_read database) ~is_checked:true
 
 let check_calls database interface viewers key = function
   | Ok lowered ->
       List.iter
-        (fun viewer ->
-          Option.iter
-            (fun graph ->
-              Compile.check_calls interface
-                ~list_call_edges:(fun path -> Option.join (Call_graph.successors graph path))
-                key lowered)
-            (Package_table.find_opt database.graphs viewer))
+        (fun calling_package ->
+          if Package_table.mem database.graphs calling_package then
+            Lowering.check_calls interface
+              ~find_call_edges:(fun path ->
+                match
+                  find_part database (note_untracked_read database)
+                    (Call_edges (path, calling_package))
+                with
+                | Some (Value edges) -> Some edges
+                | Some (Failed _ | Blocked) | None -> None)
+              key lowered)
         viewers
   | Error _ -> ()
 
 let list_reached_todo_types database key =
-  let list_reads part = Option.value (Computed_table.find_opt database.reads part) ~default:[] in
+  let list_reads part = Option.value (Stored_table.find_opt database.reads part) ~default:[] in
+  let note = note_untracked_read database in
   let is_stored_blocked = function
     | Some Blocked -> true
     | Some (Value _ | Failed _) | None -> false
   in
-  let is_blocked (part : Part.computed) =
+  let is_blocked (Part.Any part) =
     match part with
-    | Lowering (Test_key key) -> is_stored_blocked (Instance_table.find_opt database.test_keys key)
-    | Lowering (Lowered key) -> is_stored_blocked (Instance_table.find_opt database.lowered key)
+    | Test_key key -> is_stored_blocked (find_part database note (Test_key key))
+    | Lowered key -> is_stored_blocked (find_part database note (Lowered key))
     | _ -> false
+  in
+  let is_failed key =
+    match find_part database note (Lowered key) with
+    | Some (Failed _) -> true
+    | Some (Value _ | Blocked) | None -> false
   in
   let find_todo_type (part : Part.t) =
     match part with
-    | Stored (Computed (Interface key)) -> (
-        match Key_table.find_opt (find_owner database key.module_.package).interfaces key with
+    | Stored (Any (Interface key)) -> (
+        match find_part database note (Interface key) with
         | Some (Value { interface = Type_interface { shape = Todo_type; _ }; _ }) -> Some key.path
         | Some (Value _ | Failed _ | Blocked) | None -> None)
     | _ -> None
@@ -2500,48 +2339,53 @@ let list_reached_todo_types database key =
     else begin
       Part_table.replace visited part ();
       match part with
-      | Stored (Computed (Lowering (Lowered _) as part))
-        when (make_stored database (Computed part)).is_failed ->
+      | Stored (Any (Lowered key) as part) when is_failed key ->
           List.filter_map find_todo_type (list_reads part) @ todo_types
-      | Stored (Computed part) when is_blocked part ->
-          List.fold_left visit todo_types (list_reads part)
+      | Stored part when is_blocked part -> List.fold_left visit todo_types (list_reads part)
       | _ -> todo_types
     end
   in
-  List.sort_uniq Path.compare (visit [] (Stored (Computed (Lowering (Test_key key)))))
+  List.sort_uniq Path.compare (visit [] (Stored (Any (Test_key key))))
 
-let make_lowering_requests database packages : Compile.requests =
-  let interface = make_interface_lookups database packages in
-  {
-    settings = find_lowering_settings database;
-    source = find_source database;
-    interface;
-    mir = make_recording_mir_lookups database ignore;
-    lowered =
-      (fun key ->
-        request database packages ~through:Lowered_code ~needs:(fun key -> [ Lowered key ]) [ key ];
-        match Instance_table.find_opt database.lowered key with
-        | Some (Value lowered) ->
-            check_calls database interface packages key lowered;
-            Some lowered
-        | Some (Failed _ | Blocked) -> None
-        | None -> report_uncomputed (Lowering (Lowered key)));
-    test_key =
-      (fun key ->
-        request database packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
-        read_requested database.test_keys (Test_key key) key);
-    reached_todo_types =
-      (fun key ->
-        request database packages ~through:Test_keys ~needs:(fun key -> [ Test_key key ]) [ key ];
-        list_reached_todo_types database key);
-  }
+let find_lowered_lookups database packages : (Lowering.lowered_lookups, string) result =
+  match Libc.host with
+  | Error message -> Error message
+  | Ok system ->
+      drain database ~through:Test_keys packages;
+      let interface = make_interface_lookups database in
+      Ok
+        {
+          system;
+          read_source =
+            (fun file ->
+              note_untracked_read database (Input (Source file));
+              read_source database file);
+          interface;
+          find_lowered =
+            (fun key ->
+              check_reached database (Part.Any (Lowered key));
+              match read_part database (note_untracked_read database) (Lowered key) with
+              | Value lowered ->
+                  check_calls database interface packages key lowered;
+                  Some lowered
+              | Failed _ | Blocked -> None);
+          read_test_key = (fun key -> read_reached database (Test_key key));
+          list_reached_todo_types =
+            (fun key ->
+              check_reached database (Part.Any (Test_key key));
+              list_reached_todo_types database key);
+        }
 
-let find_main database package =
-  drain database ~through:Namespaces [ package ];
-  find_entry_point (make_stored_name_lookups database) package
+let find_main database package = find_entry_point (make_untracked_name_lookups database) package
+
+let with_observer observe run =
+  let previous = !observer in
+  observer := observe;
+  Fun.protect ~finally:(fun () -> observer := previous) run
 
 module For_testing = struct
   type nonrec checker = checker =
+    | Parse
     | Resolve
     | Interface
     | Infer
@@ -2549,58 +2393,49 @@ module For_testing = struct
     | Usage
     | Ownership
     | Package_checks
+    | Unexported
 
-  let list_diagnostics checkers database (file : Path.file) =
-    let through : Stage.t =
-      if List.mem Package_checks checkers then Package_checks
-      else if List.exists (fun checker -> List.mem checker [ Patterns; Usage; Ownership ]) checkers
-      then Body_checks
-      else if List.mem Infer checkers then Checked_bodies
-      else if List.mem Interface checkers then Signature_checks
-      else Import_checks
-    in
-    drain database ~through [ file.module_.package ];
-    List.concat_map (list_checker_diagnostics database file) checkers
+  let list_diagnostics = list_diagnostics
+  let fragment_checkers = List.filter (fun checker -> checker <> Unexported) checkers
+  let locate_package = Part.Storage.locate_package
+
+  let make_unchecked_interface_lookups database =
+    make_recording_interface_lookups database (note_untracked_read database) ~is_checked:false
 
   let read_derived_form database path =
-    drain database ~through:Checked_bodies [ Path.locate_package path ];
     match
-      Path_table.find_opt (find_owner database (Path.locate_package path)).derived_forms path
+      Infer.derive_form (make_recording_infer_lookups database (note_untracked_read database)) path
     with
-    | Some (Value form) -> Some form
-    | Some (Failed _ | Blocked) | None -> None
+    | form -> form
+    | exception Reads_failed_part -> None
 
   let read_core database path =
-    drain database ~through:Checked_bodies [ Path.locate_package path ];
-    Option.bind (make_form_origin database ignore path) (fun (origin, substitution) ->
+    Option.bind
+      (make_form_origin database (note_untracked_read database) path)
+      (fun (origin, substitution) ->
         Option.map
           (fun form -> (form, substitution))
           (match origin with
-          | Infer.Written key | Inherited key ->
+          | Interface.Written key | Inherited key ->
               Option.map
                 (fun (checked : Infer.checked) -> checked.form)
                 (read_checked_body database key)
           | Derived _ -> read_derived_form database path))
 
-  let make_mir_lookups database package =
-    drain database ~through:Mir [ package ];
-    make_recording_mir_lookups database ignore
+  let make_mir_lookups database = make_recording_mir_lookups database (note_untracked_read database)
 
-  let list_reads database shown =
-    match
-      Computed_table.fold
-        (fun part reads found -> if Part.show_computed part = shown then Some reads else found)
-        database.reads None
-    with
-    | Some reads -> List.sort compare (List.map Part.show reads)
-    | None -> Compiler_bug.bug ~stage:"Database" "%s is not computed" shown
+  let list_reads database part =
+    match Stored_table.find_opt database.reads part with
+    | Some reads -> reads
+    | None ->
+        Compiler_bug.raise_bug ~stage:"Database" "%s is not computed" (Part.show (Stored part))
 
   let list_unread_parts database packages =
     drain database ~through:Recursion_groups packages;
-    Computed_table.fold
+    Stored_table.fold
       (fun part _ unread ->
-        match Part_table.find_opt database.readers (Part.Stored (Computed part)) with
-        | Some readers when Computed_table.length readers > 0 -> unread
+        match Part_table.find_opt database.readers (Part.Stored part) with
+        | Some readers when Stored_table.length readers > 0 -> unread
         | Some _ | None -> part :: unread)
       database.reads []
 
@@ -2608,52 +2443,138 @@ module For_testing = struct
     let parts = Stored_table.create 1024 in
     List.iter
       (fun database ->
-        Computed_table.iter
-          (fun part _ -> Stored_table.replace parts (Computed part) ())
-          database.reads;
+        Stored_table.iter (fun part _ -> Stored_table.replace parts part ()) database.reads;
         Package_table.iter
           (fun _ package_database ->
-            Path_table.iter
-              (fun path _ -> Stored_table.replace parts (Recursion_group path) ())
-              package_database.recursion_groups)
+            Stored_table.iter
+              (fun part _ ->
+                match part with
+                | Part.Any (Recursion_group _) -> Stored_table.replace parts part ()
+                | _ -> ())
+              package_database.values)
           database.package_databases)
       [ hot; cold ];
-    let reads database (part : Part.stored) =
-      match part with
-      | Computed part ->
-          Option.map (List.sort compare) (Computed_table.find_opt database.reads part)
-      | Recursion_group _ -> None
+    let find_reads database part =
+      Option.map (List.sort compare) (Stored_table.find_opt database.reads part)
     in
     List.sort compare
       (Stored_table.fold
          (fun part () differences ->
-           if reads hot part <> reads cold part || not ((make_stored hot part).is_equal_in cold)
-           then Part.show (Stored part) :: differences
+           if
+             find_reads hot part <> find_reads cold part
+             || not ((make_stored hot part).is_equal_in cold)
+           then part :: differences
            else differences)
          parts [])
 
-  type observed = { recomputed : string list; collected : string list }
+  type observed = { recomputed : Part.any list; collected : Part.any list }
 
-  let observe database run =
+  let observe run =
     let recomputed = ref [] and collected = ref [] in
-    database.observe <-
-      (function
-      | Recomputed part -> recomputed := Part.show (Stored part) :: !recomputed
-      | Collected part -> collected := Part.show_computed (Lowering part) :: !collected);
-    Fun.protect ~finally:(fun () -> database.observe <- ignore) run;
-    {
-      recomputed = List.sort_uniq compare !recomputed;
-      collected = List.sort_uniq compare !collected;
-    }
+    let result =
+      with_observer
+        (function
+          | Computation { parts; _ } -> recomputed := parts @ !recomputed
+          | Write { part = Any (Lowered _) as part; is_removal = true }
+          | Write { part = Any (Test_key _) as part; is_removal = true } ->
+              collected := part :: !collected
+          | Write _ | Unchanged _ | Untracked_read _ -> ())
+        run
+    in
+    ( result,
+      {
+        recomputed = List.sort_uniq compare !recomputed;
+        collected = List.sort_uniq compare !collected;
+      } )
 
-  let root database key =
-    own_roots database (Input Packages)
-      (key :: Option.value (Part_table.find_opt database.owned (Input Packages)) ~default:[])
+  let propagate = propagate
 
-  let read_proof = read_proof
+  let with_failing_part part run =
+    failing_part := Some part;
+    Fun.protect ~finally:(fun () -> failing_part := None) run
 
-  let read_ownership database (key : Resolve.Names.key) =
-    match Key_table.find_opt (find_owner database key.module_.package).ownership key with
-    | Some part -> part
-    | None -> report_uncomputed (Ownership key)
+  let add_root database key =
+    claim_roots database (Input Packages)
+      (key :: Option.value (Part_table.find_opt database.claimed_roots (Input Packages)) ~default:[])
+
+  let find_proof = find_proof
+
+  let read_ownership database key =
+    read_part database (note_untracked_read database) (Ownership key)
+
+  let extend_package ~loaded ~package files =
+    let database =
+      make
+        ~loaded:
+          (List.map
+             (fun (package_database : package_database) ->
+               if package_database.name = package then copy_package_database package_database
+               else package_database)
+             loaded)
+        []
+    in
+    database.project <- [ package ];
+    restore_namespaces database;
+    record_changes database (List.map (fun (file, text) -> (file, Some text)) files);
+    mark_stale database (Any (Namespace package));
+    propagate_checks database;
+    database
 end
+
+type counts = {
+  kind : string;
+  computed : int;
+  unchanged : int;
+  writes : int;
+  reads : int;
+  distinct_reads : int;
+}
+
+let make_empty_counts kind =
+  { kind; computed = 0; unchanged = 0; writes = 0; reads = 0; distinct_reads = 0 }
+
+let count run =
+  let counts_by_kind = Hashtbl.create 32 in
+  let add (part : Part.any) increment =
+    let stage = Stage.of_part part and kind = Part.show_kind (Stored part) in
+    let counts =
+      Option.value (Hashtbl.find_opt counts_by_kind (stage, kind)) ~default:(make_empty_counts kind)
+    in
+    Hashtbl.replace counts_by_kind (stage, kind) (increment counts)
+  in
+  let untracked = ref (make_empty_counts "untracked") and untracked_parts = Part_table.create 64 in
+  let result =
+    with_observer
+      (function
+        | Computation { parts = []; _ } ->
+            Compiler_bug.raise_bug ~stage:"Database" "a computation computed no part"
+        | Computation { parts = first :: _ as parts; reads; distinct_reads } ->
+            add first (fun counts ->
+                {
+                  counts with
+                  computed = counts.computed + List.length parts;
+                  reads = counts.reads + reads;
+                  distinct_reads = counts.distinct_reads + distinct_reads;
+                })
+        | Unchanged part ->
+            add part (fun counts -> { counts with unchanged = counts.unchanged + 1 })
+        | Write { part; _ } -> add part (fun counts -> { counts with writes = counts.writes + 1 })
+        | Untracked_read part ->
+            Part_table.replace untracked_parts part ();
+            untracked :=
+              {
+                !untracked with
+                reads = !untracked.reads + 1;
+                distinct_reads = Part_table.length untracked_parts;
+              })
+      run
+  in
+  ( result,
+    List.map snd
+      (List.sort
+         (fun ((stage, kind), _) ((other_stage, other_kind), _) ->
+           match Stage.compare stage other_stage with
+           | 0 -> String.compare kind other_kind
+           | order -> order)
+         (List.of_seq (Hashtbl.to_seq counts_by_kind)))
+    @ if !untracked.reads = 0 then [] else [ !untracked ] )

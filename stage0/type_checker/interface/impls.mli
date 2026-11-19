@@ -6,7 +6,22 @@ val list_impls_of_trait_for_type :
 
 val list_impls_of_trait : Lookups.t -> trait:Path.t -> Path.package -> Path.t list
 val derive_interface : Lookups.t -> type_:Path.t -> trait:Path.t -> Types.impl_interface option
-val make_impl_substitution : Lookups.t -> Path.t -> Types.substitution option
+
+type implementation = {
+  impl : Types.impl_interface;
+  trait : Types.trait_interface;
+  substitution : Types.substitution;
+}
+
+val find_implementation : Lookups.t -> Path.t -> implementation option
+
+type implemented_method = {
+  implementation : implementation;
+  declared : Types.trait_method;
+  declaration : Path.t;
+}
+
+val find_implemented_method : Lookups.t -> Path.t -> implemented_method option
 
 val match_type :
   variables:Types.parameter list ->
@@ -35,29 +50,26 @@ val classify_through_any : Lookups.t -> trait:Path.t -> Types.trait_method -> th
 
 type bounds = Types.parameter -> Types.trait_reference list
 
-val no_bounds : bounds
+val list_no_bounds : bounds
 
 val list_required_bounds :
   Types.generic list -> Types.substitution -> (Types.ty * Types.trait_reference) list
 
-val implements :
+val find_evidence :
   Lookups.t ->
-  bounds:bounds ->
+  list_bounds:bounds ->
   ?depth:int ->
   ?checks_conditions:bool ->
   Types.ty ->
   Types.trait_reference ->
   evidence option
 
-val find_declaring_type_trait :
-  Lookups.t -> base:Types.ty -> Types.trait_reference -> string -> Types.trait_reference
-
-val find_declaring_capability_trait :
-  Lookups.t -> base:Types.ty -> Types.trait_reference -> string -> Types.trait_reference
+val list_matching_bounds :
+  Lookups.t -> list_bounds:bounds -> Types.ty -> Types.trait_reference -> Types.trait_reference list
 
 val project_associated_type :
   Lookups.t ->
-  bounds:bounds ->
+  list_bounds:bounds ->
   ?defining:Path.t list ref ->
   Types.ty ->
   Types.trait_reference ->
@@ -66,7 +78,7 @@ val project_associated_type :
 
 val project_capability_set :
   Lookups.t ->
-  bounds:bounds ->
+  list_bounds:bounds ->
   ?depth:int ->
   Types.ty ->
   Types.trait_reference ->
@@ -74,12 +86,52 @@ val project_capability_set :
   Types.capability_set
 
 val normalize_capabilities :
-  Lookups.t -> bounds:bounds -> ?depth:int -> Types.capability_set -> Types.capability_set
+  Lookups.t -> list_bounds:bounds -> ?depth:int -> Types.capability_set -> Types.capability_set
 
-val normalize : Lookups.t -> bounds:bounds -> ?defining:Path.t list ref -> Types.ty -> Types.ty
+val normalize : Lookups.t -> list_bounds:bounds -> ?defining:Path.t list ref -> Types.ty -> Types.ty
+
+module Conformance : sig
+  val find_implementation_of : Lookups.t -> Types.impl_interface -> implementation option
+
+  val list_impl_bounds :
+    Types.impl_interface -> list_bounds:bounds -> Types.parameter -> Types.trait_reference list
+
+  val normalize_capabilities_in_impl :
+    Lookups.t ->
+    list_bounds:bounds ->
+    Types.impl_interface ->
+    Types.capability_set ->
+    Types.capability_set
+
+  val normalize_signature_in_impl :
+    Lookups.t -> list_bounds:bounds -> implementation -> Types.signature -> Types.signature
+
+  val make_expected_signature :
+    Lookups.t -> ?written:Types.signature -> implemented_method -> Types.signature
+end
+
 val read_signature : Lookups.t -> Path.t -> Types.signature option
-val is_copyable : Lookups.t -> bounds:bounds -> Types.ty -> bool
-val is_plain : Lookups.t -> bounds:bounds -> Types.ty -> bool
-val is_view : Lookups.t -> bounds:bounds -> Types.ty -> bool
-val holds_function : Lookups.t -> bounds:bounds -> Types.ty -> bool
-val list_contents : Lookups.t -> bounds:bounds -> Types.ty -> Properties.contents
+val read_scope : Lookups.t -> Resolve.Names.key -> Environment.scope
+
+type declaring_clause =
+  | Own_uses
+  | Impl_uses
+  | Associated_capability_set of { name : string; is_defined : bool; is_named : bool }
+
+type capability_declaration =
+  | Declared_by of declaring_clause
+  | Fixed_by_trait of { trait : Types.trait_reference; method_name : string }
+
+val find_capability_declaration :
+  Lookups.t -> Path.t -> Types.capability -> capability_declaration option
+
+val show_declaring_clause : declaring_clause -> string -> string
+
+val decide_property :
+  Properties.property -> Lookups.t -> list_bounds:bounds -> Types.ty -> Properties.decision
+
+val is_copyable : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
+val is_plain : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
+val is_view : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
+val holds_function : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
+val collect_contents : Lookups.t -> list_bounds:bounds -> Types.ty -> Properties.contents

@@ -36,9 +36,8 @@ let lock_file snapshot =
       ]
 
 let fix snapshot packages =
-  let rec round snapshot number fixed =
+  let rec run_round snapshot number fixed =
     let database = Workspace.open_database snapshot in
-    Database.check database packages;
     let applied =
       List.concat_map
         (fun file ->
@@ -46,7 +45,7 @@ let fix snapshot packages =
           match Diagnostic.list_machine_applicable diagnostics with
           | [] -> []
           | chosen ->
-              let source = Command_packages.read_source snapshot packages file in
+              let source = Command_packages.read_source snapshot database packages file in
               let edits =
                 List.concat_map
                   (fun (diagnostic : Diagnostic.t) ->
@@ -62,9 +61,9 @@ let fix snapshot packages =
       @ lock_file snapshot
     in
     if applied = [] || number = rounds then (snapshot, List.rev fixed)
-    else round (Command_packages.retake snapshot) (number + 1) (List.rev_append applied fixed)
+    else run_round (Command_packages.retake snapshot) (number + 1) (List.rev_append applied fixed)
   in
-  round snapshot 1 []
+  run_round snapshot 1 []
 
 let run ~fix:fixing ~proofs =
   let snapshot, packages = Command_packages.load_current () in
@@ -79,7 +78,7 @@ let run ~fix:fixing ~proofs =
           else []))
   else begin
     if fixed <> [] then
-      Output.eprintf "Fixed %s.\n" (Report.pluralize (List.length fixed) "error" "errors");
+      Output.eprintf "Fixed %s.\n" (Diagnostic.show_count (List.length fixed) "error" "errors");
     Report.print report
   end;
-  if Report.clean report then 0 else 1
+  if Report.has_errors report then 1 else 0

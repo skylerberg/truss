@@ -12,16 +12,16 @@ type hole = {
 
 let list_holes snapshot packages database (names : Resolve.Names.lookups)
     (declaration : Resolve.Names.declaration) =
-  let key = Resolve.Names.make_key declaration in
+  let key = declaration.key in
   match Database.read_resolved database key with
   | Some resolved ->
-      let ({ file; base } : Resolve.Names.place) = names.place key in
-      let source = Command_packages.read_source snapshot packages file in
+      let ({ file; base } : Resolve.Names.place) = names.read_place key in
+      let source = Command_packages.read_source snapshot database packages file in
       List.map
         (fun (hole : Inspect.hole) ->
           let line, column = Source.compute_position source (base + hole.offset) in
           {
-            definition = declaration.path;
+            definition = key.path;
             file = Source.path source;
             line;
             column;
@@ -29,21 +29,22 @@ let list_holes snapshot packages database (names : Resolve.Names.lookups)
             in_scope = hole.scope;
             blocks = [];
           })
-        (Inspect.list_holes (names.spans key) (names.definition key) resolved
+        (Inspect.list_holes (names.read_spans key) (names.read_definition key) resolved
            (Option.map
               (fun (checked : Infer.checked) -> checked.tables)
               (Database.read_checked_body database key)))
   | None -> []
 
 let gather snapshot packages database paths =
-  let names = Database.make_name_lookups database packages in
+  let names = Database.make_name_lookups database in
   List.concat_map
     (fun file ->
       List.concat_map
         (fun (declaration : Resolve.Names.declaration) ->
-          if declaration.ordinal = 0 then list_holes snapshot packages database names declaration
+          if declaration.key.ordinal = 0 then
+            list_holes snapshot packages database names declaration
           else [])
-        (names.declarations_in file))
+        (names.list_declarations_in file))
     (Command_packages.select_files snapshot packages paths)
 
 let attach_blocks snapshot packages database holes =
@@ -55,12 +56,12 @@ let attach_blocks snapshot packages database holes =
         (fun (test : Test_command.test) -> ("test " ^ Test_command.label_test test, test.path))
         (Test_command.select snapshot database packages ~paths:[] ~match_:None)
   in
-  let compile = lazy (Compiler.make_lowering_compiler database packages) in
+  let lookups = lazy (Workspace_backend.require_lowered_lookups database packages) in
   let read_memoized table list_reached root =
     match Path_table.find_opt table root with
     | Some reached -> reached
     | None ->
-        let reached = list_reached (Lazy.force compile) root in
+        let reached = list_reached (Lazy.force lookups) root in
         Path_table.replace table root reached;
         reached
   in
@@ -68,8 +69,8 @@ let attach_blocks snapshot packages database holes =
   List.map
     (fun hole ->
       let list_reached =
-        if hole.type_ = None then read_memoized reached_todo_types Compile.list_reached_todo_types
-        else read_memoized reached_definitions Compile.list_reached_definitions
+        if hole.type_ = None then read_memoized reached_todo_types Backend.list_reached_todo_types
+        else read_memoized reached_definitions Backend.list_reached_definitions
       in
       {
         hole with
@@ -127,4 +128,4 @@ let run ~paths =
     List.iter print holes;
     if holes = [] then Output.print_line "No holes."
   end;
-  if Report.clean report then 0 else 1
+  if Report.has_errors report then 1 else 0

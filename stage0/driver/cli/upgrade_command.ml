@@ -1,36 +1,33 @@
 module Path_table = Hashtbl.Make (Path)
 
+let read_version text =
+  match Registry.Version.parse text with
+  | Some version -> version
+  | None ->
+      Outcome.raise_cannot_run "`%s` is not a version, which is three numbers, such as 1.4.2." text
+
 let parse_wanted text =
   let written, version =
-    match String.index_opt text '@' with
-    | Some at ->
-        (String.sub text 0 at, Some (String.sub text (at + 1) (String.length text - at - 1)))
+    match String.split_first ~sep:"@" text with
+    | Some (written, version) -> (written, Some version)
     | None -> (text, None)
   in
   let name =
     match Manifest.parse_name written with
     | Some ({ owner = Some _; _ } as name) -> name
     | _ ->
-        Outcome.cannot_run
+        Outcome.raise_cannot_run
           "`%s` is not a registry package's name, which is an owner and a name, such as \
            `acme::geometry`."
           written
   in
-  ( name,
-    Option.map
-      (fun version ->
-        match Registry.Version.parse version with
-        | Some version -> version
-        | None ->
-            Outcome.cannot_run "`%s` is not a version, which is three numbers, such as 1.4.2."
-              version)
-      version )
+  (name, Option.map read_version version)
 
 type change =
   | Entered of Registry.Lock.entry
   | Left of Registry.Lock.entry
   | Moved of { name : Path.package; from : Registry.Version.t; to_ : Registry.Version.t }
-  | Holds of { name : Path.package; gained : string list }
+  | Holds of { name : Path.package; gained : Grant.capability list }
 
 let lock_changes ~(before : Registry.Lock.t) ~(after : Registry.Lock.t) =
   List.concat_map
@@ -50,13 +47,14 @@ let lock_changes ~(before : Registry.Lock.t) ~(after : Registry.Lock.t) =
         if Registry.Lock.find after entry.name = None then Some (Left entry) else None)
       before
 
-let holds = function [] -> "" | held -> ", which holds " ^ String.concat ", " held
+let show_capabilities held = String.concat ", " (List.map Grant.show_capability held)
+let describe_held = function [] -> "" | held -> ", which holds " ^ show_capabilities held
 
 let describe_change = function
   | Entered entry ->
       Printf.sprintf "`%s` %s enters the build%s." (Path.show_package entry.name)
         (Registry.Version.show entry.version)
-        (holds entry.holds)
+        (describe_held entry.holds)
   | Left entry ->
       Printf.sprintf "`%s` %s leaves the build." (Path.show_package entry.name)
         (Registry.Version.show entry.version)
@@ -65,7 +63,10 @@ let describe_change = function
         (Registry.Version.show from) (Registry.Version.show to_)
   | Holds { name; gained } ->
       Printf.sprintf "`%s` would hold %s, which it did not." (Path.show_package name)
-        (String.concat ", " gained)
+        (show_capabilities gained)
+
+let encode_capabilities held =
+  Json.List (List.map (fun capability -> Json.String (Grant.show_capability capability)) held)
 
 let encode_change = function
   | Entered entry ->
@@ -74,7 +75,7 @@ let encode_change = function
           ("kind", Json.String "entered");
           ("package", Json.String (Path.show_package entry.name));
           ("version", Json.String (Registry.Version.show entry.version));
-          ("holds", Json.List (List.map (fun held -> Json.String held) entry.holds));
+          ("holds", encode_capabilities entry.holds);
         ]
   | Left entry ->
       Json.Object
@@ -96,7 +97,7 @@ let encode_change = function
         [
           ("kind", Json.String "holds");
           ("package", Json.String (Path.show_package name));
-          ("gained", Json.List (List.map (fun held -> Json.String held) gained));
+          ("gained", encode_capabilities gained);
         ]
 
 type signature = {
@@ -108,32 +109,33 @@ type signature = {
 
 let list_signatures snapshot trial =
   let database = Workspace.open_database snapshot and upgraded = Workspace.open_database trial in
-  let own = List.map snd (Workspace.list_packages snapshot) in
-  let is_own path = List.mem (Path.locate_package path) own in
+  let project_packages = List.map snd (Workspace.list_packages snapshot) in
+  let is_in_project path = List.mem (Path.locate_package path) project_packages in
   let changed =
     List.filter
       (fun part ->
         Signatures.is_signature part
         &&
         match Database.Part.find_definition part with
-        | Some path -> not (is_own path)
+        | Some path -> not (is_in_project path)
         | None -> false)
       (Database.list_changes database upgraded)
   in
+  ignore
+    (Database.prove database
+       (List.concat_map (Workspace.list_package_files snapshot) project_packages));
   let dependents = Path_table.create 16 in
   List.iter
     (fun ({ dependent; dependency } : Database.read) ->
       match (Database.Part.find_definition dependent, Database.Part.find_definition dependency) with
-      | Some reader, Some path when is_own reader && List.mem dependency changed ->
+      | Some reader, Some path when is_in_project reader && List.mem dependency changed ->
           Path_table.replace dependents path
             (reader :: Option.value (Path_table.find_opt dependents path) ~default:[])
       | _ -> ())
     (Database.list_dependents database
        (List.sort_uniq Path.compare (List.filter_map Database.Part.find_definition changed)));
-  let text database path =
-    Signatures.find_signature
-      (Database.make_name_lookups database [ Path.locate_package path ])
-      path
+  let find_text database path =
+    Signatures.find_signature (Database.make_name_lookups database) path
   in
   List.sort
     (fun left right -> Path.compare left.path right.path)
@@ -141,18 +143,17 @@ let list_signatures snapshot trial =
        (fun path readers signatures ->
          {
            path;
-           before = text database path;
-           after = text upgraded path;
+           before = find_text database path;
+           after = find_text upgraded path;
            dependents = List.sort_uniq Path.compare readers;
          }
          :: signatures)
        dependents [])
 
-let new_errors snapshot trial =
-  let own = List.map snd (Workspace.list_packages snapshot) in
-  let diagnostics (snapshot : Workspace.snapshot) =
+let list_new_errors snapshot trial =
+  let project_packages = List.map snd (Workspace.list_packages snapshot) in
+  let list_diagnostics (snapshot : Workspace.snapshot) =
     let database = Workspace.open_database snapshot in
-    Database.check database own;
     List.map Project.show_problem (Workspace.problems snapshot)
     @ List.concat_map
         (fun file ->
@@ -160,10 +161,10 @@ let new_errors snapshot trial =
             (fun (diagnostic : Diagnostic.t) ->
               Printf.sprintf "%s: %s" (Workspace.locate_file snapshot file) diagnostic.message)
             (Database.list_file_diagnostics database file))
-        (List.concat_map (Workspace.list_package_files snapshot) own)
+        (List.concat_map (Workspace.list_package_files snapshot) project_packages)
   in
-  let now = diagnostics snapshot in
-  List.filter (fun diagnostic -> not (List.mem diagnostic now)) (diagnostics trial)
+  let now = list_diagnostics snapshot in
+  List.filter (fun diagnostic -> not (List.mem diagnostic now)) (list_diagnostics trial)
 
 let encode_signature (changed : signature) =
   Json.Object
@@ -211,7 +212,7 @@ let run ~names =
   let snapshot, _ = Command_packages.load_current () in
   let set = List.map parse_wanted names in
   match Workspace.plan_lock snapshot ~set ~all:(names = []) with
-  | Error message -> Outcome.cannot_run "%s" message
+  | Error message -> Outcome.raise_cannot_run "%s" message
   | Ok plan ->
       let lock = lock_changes ~before:plan.before ~after:plan.after in
       if lock = [] then begin
@@ -223,7 +224,7 @@ let run ~names =
       else begin
         let trial = Workspace.make_trial snapshot [ (Project.lock_file, Some plan.text) ] in
         let signatures = list_signatures snapshot trial in
-        let broken = new_errors snapshot trial in
+        let broken = list_new_errors snapshot trial in
         Command_packages.write_file (lock_file snapshot) plan.text;
         report ~lock ~signatures ~broken;
         if broken = [] then 0 else 1

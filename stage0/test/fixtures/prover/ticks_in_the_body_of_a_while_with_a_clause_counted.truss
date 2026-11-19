@@ -1,0 +1,13 @@
+fn f(count: UInt32)
+  uses Meter
+  cost calls(Meter.tick) == count
+{
+  var index: UInt32 = 0
+  while index < count
+    invariant index <= count
+    cost calls(Meter.tick) == index
+  {
+    Meter.tick()
+    index = index + 1
+  }
+}

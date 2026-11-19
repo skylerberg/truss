@@ -5,7 +5,7 @@ type system = { os : os; architecture : architecture }
 val oses : os list
 val architectures : architecture list
 val show_system : system -> string
-val host : system option
+val host : (system, string) result
 
 type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | Float32 | Float64
 
@@ -174,6 +174,7 @@ type function_ =
   | Read
   | Open
   | Close
+  | Dup2
   | Errno
   | Clock_gettime
   | Getentropy

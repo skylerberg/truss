@@ -1,0 +1,6 @@
+fn first_or_crash(values: Slice[Int64]) -> Int64
+  uses Panic
+{
+  values.first().expect("the values are not empty")
+}
+

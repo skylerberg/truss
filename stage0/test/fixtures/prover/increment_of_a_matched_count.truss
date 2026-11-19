@@ -1,0 +1,7 @@
+fn f(value: Option[UInt8]) -> UInt8 {
+  if value is Some(count) {
+    count + 1
+  } else {
+    0
+  }
+}

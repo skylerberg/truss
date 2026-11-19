@@ -1,6 +1,5 @@
-fn apply(change: (fn(Bool) -> Bool cost time finite), value: Bool) -> Bool
+fn apply(change: fn(Bool) -> Bool, value: Bool) -> Bool
   ensures result == change(value)
-  cost time finite
 {
   change(value)
 }

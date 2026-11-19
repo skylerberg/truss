@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"Memory_layout" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Memory_layout" format
 
 type integer = Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64
 
@@ -52,16 +52,16 @@ exception Infinite_size of Ground.ty
 
 type env = {
   system : Libc.system;
-  shape_of : Ground.ty -> shape;
+  compute_shape : Ground.ty -> shape;
   layouts : t Type_table.t;
   in_progress : unit Type_table.t;
 }
 
-let create system ~shape_of =
-  { system; shape_of; layouts = Type_table.create 64; in_progress = Type_table.create 8 }
+let create system ~compute_shape =
+  { system; compute_shape; layouts = Type_table.create 64; in_progress = Type_table.create 8 }
 
 let system env = env.system
-let shape env ty = env.shape_of ty
+let compute_shape env ty = env.compute_shape ty
 
 let compute_integer_size = function
   | Int8 | UInt8 -> 1
@@ -160,7 +160,7 @@ let rec of_type env ty =
       let layout =
         Fun.protect
           ~finally:(fun () -> Type_table.remove env.in_progress ty)
-          (fun () -> lay_out env ty (env.shape_of ty))
+          (fun () -> lay_out env ty (env.compute_shape ty))
       in
       Type_table.replace env.layouts ty layout;
       layout
@@ -259,13 +259,13 @@ and of_sum env ty shapes =
       }
 
 let lay_out_block env ty name =
-  match env.shape_of ty with
+  match env.compute_shape ty with
   | Sum variants -> (
       match List.find_opt (fun (variant : variant_shape) -> variant.name = name) variants with
       | Some { indirect = true; fields = fields'; _ } -> lay_out_fields env fields'
-      | Some _ -> bug "variant %s is not indirect" name
-      | None -> bug "no variant %s" name)
-  | _ -> bug "a block of a type that is not a sum type"
+      | Some _ -> raise_bug "variant %s is not indirect" name
+      | None -> raise_bug "no variant %s" name)
+  | _ -> raise_bug "a block of a type that is not a sum type"
 
 type tag = { at : step list; integer : integer }
 
@@ -286,37 +286,39 @@ let list_tagged_values tag variants =
   ( { at = [ Tag ]; integer = tag },
     List.map (fun (variant : variant) -> (variant.name, Z.of_int variant.index)) variants )
 
-let find_tag_value values name =
-  match List.assoc_opt name values with Some value -> value | None -> bug "no variant %s" name
+let read_tag_value values name =
+  match List.assoc_opt name values with
+  | Some value -> value
+  | None -> raise_bug "no variant %s" name
 
 let compute_discriminant layout name =
-  let tag_value (tag, values) = Tag_value { tag; value = find_tag_value values name } in
+  let make_tag_value (tag, values) = Tag_value { tag; value = read_tag_value values name } in
   match layout.form with
   | Zero_size -> Only
-  | Tag_only { tag; variants } -> tag_value (list_tag_only_values tag variants)
-  | Tagged { tag; variants; _ } -> tag_value (list_tagged_values tag variants)
+  | Tag_only { tag; variants } -> make_tag_value (list_tag_only_values tag variants)
+  | Tagged { tag; variants; _ } -> make_tag_value (list_tagged_values tag variants)
   | Niche_encoded { dataful; dataless = None } ->
-      if dataful.name = name then Only else bug "no variant %s" name
+      if dataful.name = name then Only else raise_bug "no variant %s" name
   | Niche_encoded { dataful; dataless = Some { niche; niche_values } } -> (
       if dataful.name = name then
         Not_niche { niche; stop = Z.add niche.start (Z.of_int (List.length niche_values)) }
       else
         match List.assoc_opt name niche_values with
         | Some value -> Niche_value { niche; value }
-        | None -> bug "no variant %s" name)
-  | Scalar _ | Struct _ | Array _ -> bug "a discriminant of a type that is not a sum type"
+        | None -> raise_bug "no variant %s" name)
+  | Scalar _ | Struct _ | Array _ -> raise_bug "a discriminant of a type that is not a sum type"
 
 let dispatch layout cases =
-  let switch (tag, values) =
-    Switch { tag; cases = List.map (fun (name, case) -> (find_tag_value values name, case)) cases }
+  let make_switch (tag, values) =
+    Switch { tag; cases = List.map (fun (name, case) -> (read_tag_value values name, case)) cases }
   in
   match layout.form with
-  | Tag_only { tag; variants } -> switch (list_tag_only_values tag variants)
-  | Tagged { tag; variants; _ } -> switch (list_tagged_values tag variants)
+  | Tag_only { tag; variants } -> make_switch (list_tag_only_values tag variants)
+  | Tagged { tag; variants; _ } -> make_switch (list_tagged_values tag variants)
   | Zero_size | Niche_encoded _ | Scalar _ | Struct _ | Array _ ->
       Tests (List.map (fun (name, case) -> (compute_discriminant layout name, case)) cases)
 
-let integer_to_string = function
+let show_integer = function
   | Int8 -> "Int8"
   | Int16 -> "Int16"
   | Int32 -> "Int32"
@@ -326,8 +328,8 @@ let integer_to_string = function
   | UInt32 -> "UInt32"
   | UInt64 -> "UInt64"
 
-let scalar_to_string = function
-  | Integer integer -> integer_to_string integer
+let show_scalar = function
+  | Integer integer -> show_integer integer
   | Float32 -> "Float32"
   | Float64 -> "Float64"
   | Bool -> "Bool"
@@ -335,19 +337,19 @@ let scalar_to_string = function
   | Pointer _ -> "pointer"
   | Nullable_pointer _ -> "nullable pointer"
 
-let path_to_string = function
+let show_path = function
   | [] -> "."
   | path -> String.concat "." (List.map (function Field name -> name | Tag -> "tag") path)
 
-let niche_to_string niche =
-  Printf.sprintf "niche %s %s+%s" (path_to_string niche.path) (Z.to_string niche.start)
+let show_niche niche =
+  Printf.sprintf "niche %s %s+%s" (show_path niche.path) (Z.to_string niche.start)
     (Z.to_string niche.count)
 
 let rec to_string layout =
   let form =
     match layout.form with
     | Zero_size -> "zero"
-    | Scalar scalar -> scalar_to_string scalar
+    | Scalar scalar -> show_scalar scalar
     | Struct fields ->
         "struct("
         ^ String.concat " "
@@ -358,9 +360,9 @@ let rec to_string layout =
     | Array { element_layout; count; _ } ->
         Printf.sprintf "array(%d x %s)" count (to_string element_layout)
     | Tag_only { tag; variants } ->
-        Printf.sprintf "tag(%s: %s)" (integer_to_string tag) (String.concat " " variants)
+        Printf.sprintf "tag(%s: %s)" (show_integer tag) (String.concat " " variants)
     | Tagged { tag; payload_offset; variants } ->
-        Printf.sprintf "tagged(%s, payload@%d: %s)" (integer_to_string tag) payload_offset
+        Printf.sprintf "tagged(%s, payload@%d: %s)" (show_integer tag) payload_offset
           (String.concat " " (List.map (fun (variant : variant) -> variant.name) variants))
     | Niche_encoded { dataful; dataless = None } ->
         Printf.sprintf "niche-encoded(%s;  at nothing)" dataful.name
@@ -368,10 +370,10 @@ let rec to_string layout =
         Printf.sprintf "niche-encoded(%s; %s at %s)" dataful.name
           (String.concat " "
              (List.map (fun (name, value) -> name ^ "=" ^ Z.to_string value) niche_values))
-          (path_to_string niche.path)
+          (show_path niche.path)
   in
   Printf.sprintf "%d/%d %s%s" layout.size layout.alignment form
-    (match layout.niche with None -> "" | Some niche -> " " ^ niche_to_string niche)
+    (match layout.niche with None -> "" | Some niche -> " " ^ show_niche niche)
 
 let has_zero_size env ty = (of_type env ty).size = 0
 

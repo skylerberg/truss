@@ -1,7 +1,11 @@
 (test
  (name cli_tests)
+ (deps ../../driver/truss/truss.exe)
  (libraries
+  file_system
   harness
+  lock_file
+  process
   unix
   cli
   path
@@ -11,7 +15,7 @@
   manifest
   registry
   project
-  compile
+  backend
   watcher))
 
 (rule

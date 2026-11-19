@@ -1,7 +1,7 @@
 val list_bound_diagnostics :
   Lookups.t ->
   package:Path.package ->
-  bounds:Impls.bounds ->
+  list_bounds:Impls.bounds ->
   spans:Source.Definition_span.t array ->
   (Syntax.id * Types.ty) list ->
   Diagnostic.in_definition list

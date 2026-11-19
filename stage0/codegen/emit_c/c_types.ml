@@ -1,267 +1,255 @@
-type key =
-  | Type of Ground.ty
-  | Block of Ground.ty * string
-  | Code of Ground.function_type
-  | Environment of string * int
-  | Evidence of int
+let ( ++ ) = C_text.( ++ )
 
 module Keys = Map.Make (struct
-  type t = key
+  type t = C_text.key
 
   let compare = Stdlib.compare
 end)
 
-let render_key_name = function
-  | Type ty -> Instance.make_type_symbol ty
-  | Block (ty, variant) -> Instance.make_type_symbol ty ^ "_Block_" ^ variant
-  | Code function_type -> Instance.make_type_symbol (Function function_type) ^ "_Code"
-  | Environment (symbol, nested_index) -> Printf.sprintf "%s_Environment_%d" symbol nested_index
-  | Evidence nested_index -> Printf.sprintf "t_Evidence_%d" nested_index
+type 'text definition =
+  | Typedef of 'text
+  | Code_typedef of 'text
+  | Struct of { body : 'text; holds : C_text.key list }
 
-type definition =
-  | Typedef of string
-  | Code_typedef of string
-  | Struct of { body : string; holds : key list }
+type 'text defined = { definition : 'text definition; references : C_text.key list }
 
-type defined = { definition : definition; references : key list }
-
-type context = {
-  env : Memory_layout.env;
-  prefix : string;
-  mutable order : key list;
-  mutable registered : unit Keys.t;
-  mutable environments : (string * Lowered.ty) list Keys.t;
-  bytes : (string, int) Hashtbl.t;
-  mutable prototypes : (string * string) list;
-  mutable sites : Lowered.site list;
-  mutable references : key list option;
-  mutable helpers_used : string list;
-  mutable statics : string list;
-  mutable instances : Instance.key list;
-  mutable called : Instance.key list;
-  mutable calls : (Path.t * int) list;
-  mutable failures : (C_runtime.failure * Lowered.site) list;
-}
-
-let make_context env prefix =
+let map_defined render { definition; references } =
   {
-    env;
-    prefix;
-    order = [];
-    registered = Keys.empty;
-    environments = Keys.empty;
-    bytes = Hashtbl.create 16;
-    prototypes = [];
-    sites = [];
-    references = None;
-    helpers_used = [];
-    statics = [];
-    instances = [];
-    called = [];
-    calls = [];
-    failures = [];
+    definition =
+      (match definition with
+      | Typedef text -> Typedef (render text)
+      | Code_typedef text -> Code_typedef (render text)
+      | Struct { body; holds } -> Struct { body = render body; holds });
+    references;
   }
 
-let refer context key =
-  if not (List.exists (Instance.equal key) context.instances) then
-    context.instances <- key :: context.instances
+type registry = {
+  owner : Lowered.Item.t option;
+  order : C_text.key Dynarray.t;
+  mutable registered : unit Keys.t;
+  mutable environments : (string * Lowered.ty) list Keys.t;
+  mutable references : C_text.key list option;
+}
 
-let use_helper context name =
-  if not (List.mem name context.helpers_used) then
-    context.helpers_used <- name :: context.helpers_used;
-  name
+type t = { env : Memory_layout.env; registry : registry }
 
-let register context key =
-  (match context.references with
-  | Some references -> context.references <- Some (key :: references)
+let create env ~owner =
+  {
+    env;
+    registry =
+      {
+        owner;
+        order = Dynarray.create ();
+        registered = Keys.empty;
+        environments = Keys.empty;
+        references = None;
+      };
+  }
+
+let make_environment_key { registry; _ } nested_index : C_text.key =
+  match registry.owner with
+  | Some owner -> Environment (owner, nested_index)
+  | None -> C_runtime.raise_bug "the environment %d of no function" nested_index
+
+let add_environment types nested_index fields =
+  types.registry.environments <-
+    Keys.add (make_environment_key types nested_index) fields types.registry.environments
+
+let read_environment types nested_index =
+  match Keys.find_opt (make_environment_key types nested_index) types.registry.environments with
+  | Some fields -> fields
+  | None -> C_runtime.raise_bug "the environment %d has no fields" nested_index
+
+let register { registry; _ } key =
+  (match registry.references with
+  | Some references -> registry.references <- Some (key :: references)
   | None -> ());
-  if not (Keys.mem key context.registered) then begin
-    context.registered <- Keys.add key () context.registered;
-    context.order <- key :: context.order
+  if not (Keys.mem key registry.registered) then begin
+    registry.registered <- Keys.add key () registry.registered;
+    Dynarray.add_last registry.order key
   end
 
-let compute_layout context ty = Memory_layout.of_type context.env ty
+let list_keys { registry; _ } = Dynarray.to_list registry.order
 
-let is_struct context (ty : Ground.ty) =
-  match (compute_layout context ty).form with
+let render_key types key : C_text.t =
+  register types key;
+  Name (Type_name key)
+
+let compute_layout types ty = Memory_layout.of_type types.env ty
+
+let is_struct types (ty : Ground.ty) =
+  match (compute_layout types ty).form with
   | Struct _ | Array _ | Tagged _ -> true
   | Niche_encoded { dataful; _ } -> (
       match dataful.payload.form with Struct _ -> true | _ -> false)
   | Zero_size | Scalar _ | Tag_only _ -> false
 
-let rec render_value_type context (ty : Ground.ty) =
-  match (compute_layout context ty).form with
-  | Zero_size -> "void"
-  | Scalar scalar -> render_scalar_type context scalar
-  | _ ->
-      register context (Type ty);
-      Instance.make_type_symbol ty
+let rec render_value_type types (ty : Ground.ty) : C_text.t =
+  match (compute_layout types ty).form with
+  | Zero_size -> Text "void"
+  | Scalar scalar -> render_scalar_type types scalar
+  | _ -> render_key types (Type ty)
 
-and render_scalar_type context : Memory_layout.scalar -> string = function
-  | Integer integer -> C_runtime.render_integer_type integer
-  | Float32 -> "float"
-  | Float64 -> "double"
-  | Bool -> "uint8_t"
-  | Character -> "uint32_t"
-  | Pointer pointee | Nullable_pointer pointee -> render_pointee_type context pointee
+and render_scalar_type types : Memory_layout.scalar -> C_text.t = function
+  | Integer integer -> Text (C_runtime.render_integer_type integer)
+  | Float32 -> Text "float"
+  | Float64 -> Text "double"
+  | Bool -> Text "uint8_t"
+  | Character -> Text "uint32_t"
+  | Pointer pointee | Nullable_pointer pointee -> render_pointee_type types pointee
 
-and render_pointee_type context : Memory_layout.pointee -> string = function
-  | Data ty -> render_value_type context ty ^ " *"
-  | Block (ty, variant) ->
-      register context (Block (ty, variant));
-      render_key_name (Block (ty, variant)) ^ " *"
-  | Code function_type ->
-      register context (Code function_type);
-      render_key_name (Code function_type)
-  | Opaque -> "void *"
+and render_pointee_type types : Memory_layout.pointee -> C_text.t = function
+  | Data ty -> render_value_type types ty ++ Text " *"
+  | Block (ty, variant) -> render_key types (Block (ty, variant)) ++ Text " *"
+  | Code function_type -> render_key types (Code function_type)
+  | Opaque -> Text "void *"
 
-let rec render_type context symbol : Lowered.ty -> string = function
-  | Value ty -> render_value_type context ty
+let rec render_type types : Lowered.ty -> C_text.t = function
+  | Value ty -> render_value_type types ty
   | Pointer { target; writable } ->
-      (if writable then "" else "const ") ^ render_type context symbol target ^ " *"
-  | Raw scalar -> render_scalar_type context scalar
-  | Environment nested_index ->
-      register context (Environment (symbol, nested_index));
-      render_key_name (Environment (symbol, nested_index))
-  | Evidence nested_index ->
-      let key = Evidence (max nested_index 1) in
-      register context key;
-      render_key_name key
-  | Lend -> "struct " ^ use_helper context "t_lend"
-  | Lend_mark -> "struct " ^ use_helper context "t_lend" ^ "_mark"
+      Text (if writable then "" else "const ") ++ render_type types target ++ Text " *"
+  | Raw scalar -> render_scalar_type types scalar
+  | Environment nested_index -> render_key types (make_environment_key types nested_index)
+  | Evidence nested_index -> render_key types (Evidence (max nested_index 1))
+  | Capabilities count -> render_key types (Capabilities count)
+  | Trace -> Text "struct t_trace"
+  | Lend -> Text "struct t_lend"
+  | Lend_mark -> Text "struct t_lend_mark"
 
-let render_member_type context : Memory_layout.member -> string = function
-  | Typed ty -> render_value_type context ty
-  | Raw scalar -> render_scalar_type context scalar
+let render_member_type types : Memory_layout.member -> C_text.t = function
+  | Typed ty -> render_value_type types ty
+  | Raw scalar -> render_scalar_type types scalar
 
-let holds_member context : Memory_layout.member -> key list = function
-  | Typed ty when is_struct context ty -> [ Type ty ]
+let list_held_keys types : Memory_layout.member -> C_text.key list = function
+  | Typed ty when is_struct types ty -> [ Type ty ]
   | Typed _ | Raw _ -> []
 
-let render_field_declarations context (fields : Memory_layout.field list) =
-  ( String.concat ""
+let render_member ~indent c_type name = Text indent ++ c_type ++ Text (" " ^ name ^ ";\n")
+
+let render_field_declarations types ~indent (fields : Memory_layout.field list) =
+  ( C_text.Concat
       (List.map
          (fun (field : Memory_layout.field) ->
-           Printf.sprintf "  %s f_%s;\n" (render_member_type context field.member) field.name)
+           render_member ~indent (render_member_type types field.member) ("f_" ^ field.name))
          fields),
-    List.concat_map (fun (field : Memory_layout.field) -> holds_member context field.member) fields
+    List.concat_map (fun (field : Memory_layout.field) -> list_held_keys types field.member) fields
   )
 
-let render_signature_parameters context symbol (parameters : Lowered.ty list) names =
+let render_signature_parameters types (parameters : Lowered.ty list) names : C_text.t =
   match parameters with
-  | [] -> "void"
+  | [] -> Text "void"
   | _ ->
-      String.concat ", "
+      C_text.join ", "
         (List.mapi
            (fun position ty ->
-             let order = render_type context symbol ty in
-             let qualified = match ty with Lowered.Pointer _ -> order ^ "restrict" | _ -> order in
+             let qualified =
+               match ty with
+               | Lowered.Pointer _ -> render_type types ty ++ Text "restrict"
+               | _ -> render_type types ty
+             in
              match names with
              | None -> qualified
-             | Some names -> qualified ^ " " ^ List.nth names position)
+             | Some names -> qualified ++ Text " " ++ List.nth names position)
            parameters)
 
-let rec define context key =
-  context.references <- Some [];
-  let definition = define_text context key in
+let rec define (types : t) key =
+  types.registry.references <- Some [];
+  let definition = define_text types key in
   let references =
-    match context.references with Some references -> List.rev references | None -> []
+    match types.registry.references with Some references -> List.rev references | None -> []
   in
-  context.references <- None;
+  types.registry.references <- None;
   { definition; references }
 
-and define_text context key =
+and define_text types (key : C_text.key) =
   match key with
   | Type ty -> (
-      match (compute_layout context ty).form with
-      | Tag_only { tag; _ } -> Typedef (C_runtime.render_integer_type tag)
+      match (compute_layout types ty).form with
+      | Tag_only { tag; _ } -> Typedef (C_text.Text (C_runtime.render_integer_type tag))
       | Niche_encoded { dataful = { payload = { form = Scalar scalar; _ }; _ }; _ } ->
-          Typedef (render_scalar_type context scalar)
+          Typedef (render_scalar_type types scalar)
       | Niche_encoded { dataful = { payload = { form = Struct fields; _ }; _ }; _ } | Struct fields
         ->
-          let body, holds = render_field_declarations context fields in
+          let body, holds = render_field_declarations types ~indent:"  " fields in
           Struct { body; holds }
       | Array { element; count; _ } ->
           Struct
             {
-              body = Printf.sprintf "  %s items[%d];\n" (render_value_type context element) count;
-              holds = (if is_struct context element then [ Type element ] else []);
+              body =
+                render_member ~indent:"  " (render_value_type types element)
+                  (Printf.sprintf "items[%d]" count);
+              holds = (if is_struct types element then [ Type element ] else []);
             }
       | Tagged { tag; variants; _ } ->
           let members, holds =
             List.split
               (List.filter_map
                  (fun (variant : Memory_layout.variant) ->
+                   let name = "v_" ^ variant.name in
                    match variant.payload.form with
                    | Zero_size -> None
                    | Struct fields ->
-                       let body, holds = render_field_declarations context fields in
-                       let body =
-                         String.concat ""
-                           (List.map
-                              (fun line -> "  " ^ line ^ "\n")
-                              (List.filter (( <> ) "") (String.split_on_char '\n' body)))
-                       in
-                       Some (Printf.sprintf "    struct {\n%s    } v_%s;\n" body variant.name, holds)
+                       let body, holds = render_field_declarations types ~indent:"      " fields in
+                       Some (Text "    struct {\n" ++ body ++ Text ("    } " ^ name ^ ";\n"), holds)
                    | Scalar scalar ->
-                       Some
-                         ( Printf.sprintf "    %s v_%s;\n"
-                             (render_scalar_type context scalar)
-                             variant.name,
-                           [] )
-                   | _ -> C_runtime.bug "a variant's payload is a struct, a pointer, or nothing")
+                       Some (render_member ~indent:"    " (render_scalar_type types scalar) name, [])
+                   | _ ->
+                       C_runtime.raise_bug "a variant's payload is a struct, a pointer, or nothing")
                  variants)
           in
           Struct
             {
               body =
-                Printf.sprintf "  %s tag;\n  union {\n%s  } payload;\n"
-                  (C_runtime.render_integer_type tag)
-                  (String.concat "" members);
+                Text (Printf.sprintf "  %s tag;\n  union {\n" (C_runtime.render_integer_type tag))
+                ++ Concat members ++ Text "  } payload;\n";
               holds = List.concat holds;
             }
-      | Niche_encoded _ -> C_runtime.bug "a niche-encoded payload is a struct or a pointer"
-      | Zero_size | Scalar _ -> C_runtime.bug "%s needs no definition" (Ground.to_string ty))
+      | Niche_encoded _ -> C_runtime.raise_bug "a niche-encoded payload is a struct or a pointer"
+      | Zero_size | Scalar _ -> C_runtime.raise_bug "%s needs no definition" (Ground.to_string ty))
   | Block (ty, variant) -> (
-      match (Memory_layout.lay_out_block context.env ty variant).form with
+      match (Memory_layout.lay_out_block types.env ty variant).form with
       | Struct fields ->
-          let body, holds = render_field_declarations context fields in
+          let body, holds = render_field_declarations types ~indent:"  " fields in
           Struct { body; holds }
-      | _ -> C_runtime.bug "the block of %s.%s has no fields" (Ground.to_string ty) variant)
+      | _ -> C_runtime.raise_bug "the block of %s.%s has no fields" (Ground.to_string ty) variant)
   | Code function_type ->
-      let signature = Convention.make_function_value_signature context.env function_type in
-      let result =
-        match signature.result with None -> "void" | Some ty -> render_type context "" ty
-      in
+      let signature = Convention.make_function_value_signature types.env function_type in
       Code_typedef
-        (Printf.sprintf "typedef %s (*%s)(%s);\n" result (render_key_name key)
-           (render_signature_parameters context "" signature.parameters None))
+        (Text "typedef "
+        ++ (match signature.result with None -> Text "void" | Some ty -> render_type types ty)
+        ++ Text " (*" ++ Name (Type_name key) ++ Text ")("
+        ++ render_signature_parameters types signature.parameters None
+        ++ Text ");\n")
   | Evidence nested_index ->
       Struct
         {
           body =
-            Printf.sprintf "  struct t_evidence evidence;\n  const struct t_evidence *outer[%d];\n"
-              nested_index;
+            Text
+              (Printf.sprintf
+                 "  struct t_evidence evidence;\n  const struct t_evidence *outer[%d];\n"
+                 nested_index);
           holds = [];
         }
-  | Environment _ ->
-      let fields =
-        match Keys.find_opt key context.environments with
-        | Some function_type -> function_type
-        | None -> []
-      in
-      let symbol = match key with Environment (symbol, _) -> symbol | _ -> "" in
+  | Capabilities count ->
+      Struct
+        {
+          body = Text (Printf.sprintf "  struct t_capability entries[%d];\n" (count + 1));
+          holds = [];
+        }
+  | Environment (_, nested_index) ->
+      let fields = read_environment types nested_index in
       Struct
         {
           body =
-            String.concat ""
+            Concat
               (List.map
-                 (fun (name, ty) ->
-                   Printf.sprintf "  %s f_%s;\n" (render_type context symbol ty) name)
+                 (fun (name, ty) -> render_member ~indent:"  " (render_type types ty) ("f_" ^ name))
                  fields);
           holds =
             List.concat_map
               (fun (_, ty) ->
-                match ty with Lowered.Value ty when is_struct context ty -> [ Type ty ] | _ -> [])
+                match ty with
+                | Lowered.Value ty when is_struct types ty -> [ C_text.Type ty ]
+                | _ -> [])
               fields;
         }

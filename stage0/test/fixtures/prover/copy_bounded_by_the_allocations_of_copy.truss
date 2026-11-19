@@ -1,0 +1,13 @@
+fn duplicate[Element: Copyable](item: Element) -> Element
+  cost allocations <= allocations(Element.copy)
+  cost allocated_bytes <= allocated_bytes(Element.copy)
+{
+  item.copy()
+}
+
+fn f(item: Int64) -> Int64
+  cost allocations <= 0
+  cost allocated_bytes <= 0
+{
+  duplicate(item)
+}

@@ -1,5 +1,5 @@
-fn apply[capability Granted](run: (fn() uses Granted))
-  uses Granted
+fn apply(run: (fn() uses generic Granted))
+  uses generic Granted
 {
   run()
 }

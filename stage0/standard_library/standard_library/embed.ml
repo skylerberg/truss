@@ -4,13 +4,13 @@ let () =
   List.iter
     (fun file ->
       let text = In_channel.with_open_bin file In_channel.input_all in
-      let rec after_standard = function
+      let rec strip_to_standard = function
         | "standard" :: rest -> rest
-        | _ :: rest -> after_standard rest
+        | _ :: rest -> strip_to_standard rest
         | [] -> failwith ("not under standard/: " ^ file)
       in
-      let names = after_standard (String.split_on_char '/' file) in
-      let modules = List.filteri (fun index _ -> index < List.length names - 1) names in
+      let names = strip_to_standard (String.split_on_char '/' file) in
+      let modules = List.take (List.length names - 1) names in
       Printf.printf "  ([ %s ], %S, %S);\n"
         (String.concat "; " (List.map (Printf.sprintf "%S") modules))
         (Filename.chop_suffix (Filename.basename file) ".truss")

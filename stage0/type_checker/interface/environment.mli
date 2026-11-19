@@ -4,7 +4,7 @@ type interface =
   | Trait_interface of Types.trait_interface
   | Impl_interface of Types.impl_interface
   | Constant_interface of Types.constant_interface
-  | Test_interface of Types.capability_set
+  | Test_interface of Types.signature
   | Theorem_interface of Types.signature
   | Law_proof_interface of {
       generics : Types.generic list;
@@ -65,4 +65,4 @@ type type_facts = {
   contains : (Types.ty * occurrence) list;
 }
 
-type grant = { capabilities : Path.t list; unknown : string list }
+type grant = { capabilities : Path.t list; unknown : Grant.capability list }

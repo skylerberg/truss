@@ -1,0 +1,11 @@
+fn spin(value: Int64) -> Int64
+  uses RunForever
+{
+  while true {}
+}
+
+fn f(value: Int64) -> Int64
+  requires spin(value) > 0
+{
+  value
+}

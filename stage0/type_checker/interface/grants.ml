@@ -1,4 +1,5 @@
-let resolve_capability (names : Resolve.Names.lookups) ~package written : Path.t option =
+let resolve_capability (names : Resolve.Names.lookups) ~package (capability : Grant.capability) :
+    Path.t option =
   let find_visible_capability (module_ : Path.module_) name =
     if not (Resolve.Names.is_visible_module names ~from:{ package; modules = [] } module_) then None
     else
@@ -8,47 +9,52 @@ let resolve_capability (names : Resolve.Names.lookups) ~package written : Path.t
           Some (Path.Top { module_; name })
       | _ -> None
   in
-  match Option.map List.rev (Path.parse_names written) with
-  | Some [ name ] ->
-      Option.bind (Resolve.Prelude.find_type name) (fun module_ ->
+  match capability with
+  | Prelude name -> find_visible_capability Grant.prelude_capability_module name
+  | Full_path { module_names; name } ->
+      Option.bind (names.split_module module_names) (fun module_ ->
           find_visible_capability module_ name)
-  | Some (name :: modules) -> (
-      match names.split_module (List.rev modules) with
-      | Some module_ -> find_visible_capability module_ name
-      | None -> None)
-  | Some [] | None -> None
 
-let show_as_written (path : Path.t) =
-  match path with
-  | Top { module_; name } when Resolve.Prelude.find_type name = Some module_ -> name
-  | _ -> Path.show path
+let show_as_written : Path.t -> string = function
+  | Top { module_; name } ->
+      Grant.show_capability
+        (Grant.make_capability ~module_names:(Path.list_module_parts module_) name)
+  | path ->
+      Compiler_bug.raise_bug ~stage:"Interface" "the capability %s is not a definition of a module"
+        (Path.show path)
 
-let resolve_grant names ~package written_capabilities : Environment.grant =
+let resolve_grant names ~package capabilities : Environment.grant =
   let resolved =
-    List.map (fun name -> (name, resolve_capability names ~package name)) written_capabilities
+    List.map
+      (fun capability -> (capability, resolve_capability names ~package capability))
+      capabilities
   in
   {
     capabilities = List.filter_map snd resolved;
-    unknown = List.filter_map (fun (name, path) -> if path = None then Some name else None) resolved;
+    unknown =
+      List.filter_map
+        (fun (capability, path) -> if path = None then Some capability else None)
+        resolved;
   }
 
-let describe_not_a_capability ~dependency name =
+let describe_not_a_capability ~dependency capability =
   Printf.sprintf
     "`%s`, in the entry for `%s`, names no capability. A grant names a capability of the prelude \
      by its name, such as `Clock`, and any other by its full path."
-    name (Path.show_package dependency)
+    (Grant.show_capability capability)
+    (Path.show_package dependency)
 
 let list_missing (lookups : Lookups.t) ~package ~of_ (uses : Types.capability_set) =
   if of_ = package || of_ = Path.standard_package then []
   else
     let granted =
-      match lookups.granted package of_ with Some grant -> grant.capabilities | None -> []
+      match lookups.find_grant package of_ with Some grant -> grant.capabilities | None -> []
     in
     List.filter_map
       (function
         | Types.Capability path when not (List.exists (Path.equal path) granted) -> Some path
         | _ -> None)
-      (uses :> Types.capability list)
+      (Types.list_capabilities uses)
 
 let describe_missing ~subject ~of_ capability =
   let of_ = Path.show_package of_ in
@@ -57,10 +63,10 @@ let describe_missing ~subject ~of_ capability =
      for `%s` in `truss.toml`."
     subject (show_as_written capability) of_ (show_as_written capability) of_
 
-let rec list_evidence_uses lookups ~bounds (evidence : Impls.evidence) =
+let rec list_evidence_uses lookups ~list_bounds (evidence : Impls.evidence) =
   match evidence with
   | From_impl { impl; substitution } -> (
-      match Definition.read_impl_interface lookups impl with
+      match Definition.find_impl_interface lookups impl with
       | None -> []
       | Some interface ->
           ( impl,
@@ -73,8 +79,8 @@ let rec list_evidence_uses lookups ~bounds (evidence : Impls.evidence) =
               interface.impl_uses interface.impl_methods )
           :: List.concat_map
                (fun (argument, bound) ->
-                 match Impls.implements lookups ~bounds argument bound with
-                 | Some nested -> list_evidence_uses lookups ~bounds nested
+                 match Impls.find_evidence lookups ~list_bounds argument bound with
+                 | Some nested -> list_evidence_uses lookups ~list_bounds nested
                  | None -> [])
                (Impls.list_required_bounds interface.impl_generics substitution))
   | _ -> []
@@ -92,6 +98,3 @@ let describe_missing_in_impls lookups ~package impls =
            ~of_)
         (list_missing lookups ~package ~of_ uses))
     impls
-
-let describe_missing_in_evidence lookups ~package ~bounds evidence =
-  describe_missing_in_impls lookups ~package (list_evidence_uses lookups ~bounds evidence)

@@ -59,13 +59,8 @@ let correct_case name =
   | _ -> to_snake name
 
 let find_case_problem name =
-  let length = String.length name in
-  let rec has_double_underscore index =
-    index + 1 < length
-    && ((name.[index] = '_' && name.[index + 1] = '_') || has_double_underscore (index + 1))
-  in
   let message =
-    if length > 0 && name.[0] = '_' then Some "Names cannot start with `_`."
+    if String.starts_with ~prefix:"_" name then Some "Names cannot start with `_`."
     else if classify_name name = Upper then
       if not (String.contains name '_') then None
       else if not (String.exists is_lower name) then
@@ -78,25 +73,21 @@ let find_case_problem name =
     else if String.exists is_upper name then
       Some
         "A name that starts with a lowercase letter is lower_snake_case, with no uppercase letters."
-    else if length > 0 && name.[length - 1] = '_' then Some "Names cannot end with `_`."
-    else if has_double_underscore 0 then
+    else if String.ends_with ~suffix:"_" name then Some "Names cannot end with `_`."
+    else if String.includes ~affix:"__" name then
       Some "`_` appears only singly, between the parts of a name."
     else None
   in
   Option.map (fun message -> (Diagnostic.Code.Name_case, message)) message
 
 let find_first_non_ascii name =
-  let rec find index =
-    if index >= String.length name then None
-    else if Char.code name.[index] >= 0x80 then
-      let decoded = Unicode.decode name index in
-      Some
-        (Printf.sprintf "`%s` (U+%04X)"
-           (String.sub name index (Unicode.Decoded.length decoded))
-           (Unicode.Decoded.code_point decoded))
-    else find (index + 1)
-  in
-  find 0
+  Option.map
+    (fun index ->
+      let decoded = String.get_utf_8_uchar name index in
+      Printf.sprintf "`%s` (U+%04X)"
+        (String.sub name index (Uchar.utf_decode_length decoded))
+        (Uchar.to_int (Uchar.utf_decode_uchar decoded)))
+    (String.find_first_index (Fun.negate Char.Ascii.is_valid) name)
 
 let check name =
   match find_first_non_ascii name with

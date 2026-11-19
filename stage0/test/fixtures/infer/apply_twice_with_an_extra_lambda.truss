@@ -1,0 +1,7 @@
+fn apply_twice(value: Int64, transform: fn(Int64) -> Int64) -> Int64 {
+  transform(transform(value))
+}
+
+fn f() -> Int64 {
+  apply_twice(1, transform: fn(number) { number }, fn(number) { number })
+}

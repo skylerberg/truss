@@ -1,5 +1,6 @@
 type id = int
-type name = { text : string; id : id }
+type case = Upper | Lower
+type name = { text : string; case : case; id : id }
 type path = { modules : name list; last : name }
 type mode = Mut | Own
 type prefix = Negate | Not | Complement
@@ -44,7 +45,6 @@ and generic_parameter = generic_kind node
 and generic_kind =
   | Type_parameter of name * path_type list
   | Value_parameter of name * type_expression
-  | Capability_parameter of name
   | Generic_error
 
 and capability_reference = capability_reference_kind node
@@ -53,6 +53,7 @@ and capability_reference_kind =
   | Capability_path of path_type
   | Self_capabilities of name
   | Associated_capabilities of name * name
+  | Generic_capability of name
 
 and clause = clause_kind node
 
@@ -65,14 +66,14 @@ and clause_kind =
   | Clause_error
 
 and cost = { amortized : bool; resource : resource; bound : bound }
-and resource = Time | Allocations | Allocated_bytes | Calls of call_target
+and resource = Metric of Metric.t | Calls of call_target
 
 and call_target =
   | Call_parameter of name
   | Call_capability of path_type
   | Call_method of path_type * name
 
-and bound = Big_o of expression | Finite | At_most of expression | Exactly of expression
+and bound = Big_o of expression | At_most of expression | Exactly of expression
 and expression = expression_kind node
 
 and expression_kind =
@@ -129,11 +130,7 @@ and text = { value : string; id : id }
 and argument = { label : name option; value : expression }
 and bracket_item = Item of expression | Item_constraint of name * type_expression
 and update = update_kind node
-
-and update_kind =
-  | Update of { field : name; path : name list; value : expression option }
-  | Update_error
-
+and update_kind = Update of { path : name list; value : expression } | Update_error
 and binder = Binder_in of pattern * expression | Binder_type of name * type_expression
 and else_branch = Else of block | Else_if of expression
 and block = { statements : statement list; id : id }
@@ -199,7 +196,7 @@ and range_end_kind = End_literal of literal | End_constant of constant
 and pattern_field = pattern_field_kind node
 and pattern_field_kind = Named_field of name * pattern | Field of pattern | Rest
 
-type visibility = Private | Internal | Public | Public_opaque
+type visibility = Internal | Public | Public_opaque
 type type_head = { path : path; generics : generic_parameter list; id : id }
 type definition_name = Plain_name of name | Member_name of type_head * name
 
@@ -300,11 +297,11 @@ type definition_kind =
   | Law_proof of { trait_ : path_type; law : name; type_ : type_head; body : block }
   | Definition_error of { intended : intended_kind option; name : definition_name option }
 
-type definition = { visibility : visibility; kind : definition_kind; id : id }
+type definition = { visibility : visibility option; kind : definition_kind; id : id }
 
 type positions = {
   spans : Source.Definition_span.t array;
-  recovered : Source.Definition_span.t list;
+  syntax_errors : Source.Definition_span.t list;
 }
 
 type 'value item = { base : int; stop : int; value : 'value; positions : positions }

@@ -2,32 +2,32 @@ module Local_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Core.local
 end))
 
-let callee_name : Core.callee -> string = function
+let show_target : Core.operand Core.target -> string = function
   | Function { path; _ } -> Path.show path
   | Trait_method { trait; name; _ } -> Path.show trait.trait ^ "." ^ name
   | Capability_method { capability; name } -> Path.show capability ^ "." ^ name
   | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.show_operation operation
   | Indirect _ -> "a function value"
 
-let method_signature interface owner name receiver =
-  Interface.Definition.read_declared_signature interface (Method { owner; name; receiver })
+let find_method_signature interface owner name receiver =
+  Interface.Definition.find_declared_signature interface (Method { owner; name; receiver })
 
-let declared_fields interface path arguments =
-  Option.bind (Interface.Definition.read_type_interface interface path) (fun type_interface ->
+let find_declared_fields interface path arguments =
+  Option.bind (Interface.Definition.find_type_interface interface path) (fun type_interface ->
       Types.instantiate_fields type_interface arguments)
 
-let declared_variants interface path arguments =
-  Option.bind (Interface.Definition.read_type_interface interface path) (fun type_interface ->
+let find_declared_variants interface path arguments =
+  Option.bind (Interface.Definition.find_type_interface interface path) (fun type_interface ->
       Types.instantiate_variants type_interface arguments)
 
 type context = {
   interface : Interface.Lookups.t;
-  wrong : 'a. ('a, unit, string, unit) format4 -> 'a;
+  report : 'a. ('a, unit, string, unit) format4 -> 'a;
   at : Core.origin option ref;
   bounds : Interface.Impls.bounds;
 }
 
-let located at (visit : Core_walk.visit) : Core_walk.visit =
+let track_location at (visit : Core_walk.visit) : Core_walk.visit =
   {
     visit with
     expression =
@@ -45,34 +45,45 @@ let located at (visit : Core_walk.visit) : Core_walk.visit =
   }
 
 let excerpt text =
-  let line =
-    match String.index_opt text '\n' with Some stop -> String.sub text 0 stop | None -> text
-  in
-  let line = String.trim line in
+  let line = String.trim (String.take_first_while (fun character -> character <> '\n') text) in
   if String.length line > 60 then String.sub line 0 57 ^ "..." else line
 
-let operand_type (operand : Core.operand) =
+let read_operand_type (operand : Core.operand) =
   match operand with
   | Place place -> Core_walk.compute_place_type place
   | Value value -> value.type_
 
-let normal context ty = Interface.Impls.normalize context.interface ~bounds:context.bounds ty
+let normalize_type context ty =
+  Interface.Impls.normalize context.interface ~list_bounds:context.bounds ty
 
 let fits context ~expected ~found =
   match found with
   | Types.Never -> true
-  | _ -> Types.equal (normal context expected) (normal context found)
+  | _ -> Types.equal (normalize_type context expected) (normalize_type context found)
 
-let substitution context generics arguments ~subject =
+let make_substitution context generics arguments ~subject =
   if List.length generics = List.length arguments then Types.make_substitution generics arguments
   else begin
-    context.wrong "%s has %d type arguments for %d generic parameters" subject
+    context.report "%s has %d type arguments for %d generic parameters" subject
       (List.length arguments) (List.length generics);
-    []
+    Types.no_substitution
   end
 
-let instantiated context (callee : Core.callee) =
-  let subject = "a call of `" ^ callee_name callee ^ "`" in
+let make_capability_substitution context (signature : Types.signature) arguments ~subject =
+  let parameters =
+    List.sort compare
+      (List.map
+         (fun (parameter : Types.parameter) -> parameter.name)
+         signature.capability_parameters)
+  in
+  if List.sort compare (List.map fst arguments) <> parameters then
+    context.report "%s gives capability arguments for [%s], and its callee has [%s]" subject
+      (String.concat ", " (List.map fst arguments))
+      (String.concat ", " parameters);
+  Types.make_capability_substitution signature.capability_parameters arguments
+
+let instantiate context (target : Core.operand Core.target) =
+  let subject = "a call of `" ^ show_target target ^ "`" in
   let of_signature ?(has_receiver = true) substitution (signature : Types.signature) =
     let signature = Types.substitute_signature substitution signature in
     let receiver =
@@ -85,38 +96,48 @@ let instantiated context (callee : Core.callee) =
         @ List.map (fun (parameter : Types.parameter_info) -> parameter.type_) signature.parameters,
         signature.output )
   in
-  match callee with
-  | Function { path; type_arguments } -> (
+  match target with
+  | Function { path; instantiation } -> (
       match Interface.Impls.read_signature context.interface path with
       | Some signature ->
-          of_signature (substitution context signature.generics type_arguments ~subject) signature
+          of_signature
+            (Types.combine_substitutions
+               (make_substitution context signature.generics instantiation.type_arguments ~subject)
+               (make_capability_substitution context signature instantiation.capability_arguments
+                  ~subject))
+            signature
       | None -> None)
   | Intrinsic { operation; type_arguments } ->
       let signature = Intrinsic_signatures.make_signature operation in
-      of_signature (substitution context signature.generics type_arguments ~subject) signature
-  | Trait_method { trait = reference; name; receiver; self_type; type_arguments; _ } -> (
+      of_signature (make_substitution context signature.generics type_arguments ~subject) signature
+  | Trait_method { trait = reference; name; receiver; self_type; instantiation; _ } -> (
       match
-        ( method_signature context.interface reference.trait name receiver,
-          Interface.Definition.read_trait_interface context.interface reference.trait )
+        ( find_method_signature context.interface reference.trait name receiver,
+          Interface.Definition.find_trait_interface context.interface reference.trait )
       with
       | Some signature, Some interface ->
           of_signature
-            (Interface.Properties.make_trait_substitution interface ~self:self_type reference
-            @ substitution context signature.generics type_arguments ~subject)
+            (Types.combine_substitutions
+               (Types.make_trait_substitution interface.trait_generics ~self:self_type reference)
+               (Types.combine_substitutions
+                  (make_substitution context signature.generics instantiation.type_arguments
+                     ~subject)
+                  (make_capability_substitution context signature instantiation.capability_arguments
+                     ~subject)))
             signature
       | _ -> None)
   | Capability_method { capability; name } -> (
-      match method_signature context.interface capability name Static with
-      | Some signature -> of_signature ~has_receiver:false [] signature
+      match find_method_signature context.interface capability name Static with
+      | Some signature -> of_signature ~has_receiver:false Types.no_substitution signature
       | None -> None)
   | Indirect function_value -> (
-      match operand_type function_value with
+      match read_operand_type function_value with
       | Function { inputs; output; _ } -> Some (List.map snd inputs, Types.Returns output)
       | _ -> None)
 
-let call_types context (node : Core.expression) (call : Core.call) =
-  let callee = callee_name call.callee in
-  match instantiated context call.callee with
+let check_call_types context (node : Core.expression) (call : Core.call) =
+  let callee = show_target call.callee.target in
+  match instantiate context call.callee.target with
   | None -> ()
   | Some (parameters, output) ->
       if List.length parameters = List.length call.arguments then
@@ -124,9 +145,9 @@ let call_types context (node : Core.expression) (call : Core.call) =
           (fun position (expected, (argument : Core.argument)) ->
             match argument with
             | Passed { value; _ } ->
-                let found = operand_type value in
+                let found = read_operand_type value in
                 if not (fits context ~expected ~found) then
-                  context.wrong
+                  context.report
                     "argument %d of a call of `%s` has the type `%s`, and its parameter `%s`"
                     position callee (Types.show found) (Types.show expected)
             | Default -> ())
@@ -139,7 +160,7 @@ let call_types context (node : Core.expression) (call : Core.call) =
               (fits context ~expected:node.type_ ~found:result
               || fits context ~expected:result ~found:node.type_)
           then
-            context.wrong "a call of `%s` has the type `%s`, and its callee returns `%s`" callee
+            context.report "a call of `%s` has the type `%s`, and its callee returns `%s`" callee
               (Types.show node.type_) (Types.show result))
         result
 
@@ -159,9 +180,9 @@ let is_built_in context (ty : Types.ty) =
   | Projection { trait; _ } -> is_integer_trait trait.trait
   | _ -> Option.is_some (Types.find_builtin ty)
 
-let operator_types context (node : Core.expression) (operation : Intrinsic.operation) arguments =
+let check_operator_types context (node : Core.expression) (operation : Intrinsic.scalar) arguments =
   if not (is_built_in context node.type_) then
-    context.wrong "an operator has the type `%s`, which is not built in" (Types.show node.type_);
+    context.report "an operator has the type `%s`, which is not built in" (Types.show node.type_);
   let operands =
     match (operation, arguments) with
     | ( ( Add | Subtract | Multiply | Divide | Remainder | Wrapping_add | Wrapping_subtract
@@ -175,8 +196,8 @@ let operator_types context (node : Core.expression) (operation : Intrinsic.opera
   List.iter
     (fun (operand : Core.expression) ->
       if not (fits context ~expected:node.type_ ~found:operand.type_) then
-        context.wrong "an operand of `%s` has the type `%s`, and the operator `%s`"
-          (Intrinsic.show_operation operation)
+        context.report "an operand of `%s` has the type `%s`, and the operator `%s`"
+          (Intrinsic.show_operation (Scalar operation))
           (Types.show operand.type_) (Types.show node.type_))
     operands
 
@@ -186,10 +207,10 @@ let compare_types context (left : Core.expression) (right : Core.expression) =
       (fits context ~expected:left.type_ ~found:right.type_
       || fits context ~expected:right.type_ ~found:left.type_)
   then
-    context.wrong "a comparison compares the type `%s` with `%s`" (Types.show left.type_)
+    context.report "a comparison compares the type `%s` with `%s`" (Types.show left.type_)
       (Types.show right.type_)
   else if not (is_built_in context left.type_ && is_built_in context right.type_) then
-    context.wrong "a `Compare` compares the type `%s`, which is not built in"
+    context.report "a `Compare` compares the type `%s`, which is not built in"
       (Types.show left.type_)
 
 let construct_fields context (node : Core.expression) variant fields =
@@ -197,33 +218,33 @@ let construct_fields context (node : Core.expression) variant fields =
   | Named { path; arguments } -> (
       let declared =
         match variant with
-        | None -> declared_fields context.interface path arguments
+        | None -> find_declared_fields context.interface path arguments
         | Some name ->
             Option.map
               (fun (variant : Types.variant) -> Option.value ~default:[] variant.fields)
               (Option.bind
-                 (declared_variants context.interface path arguments)
+                 (find_declared_variants context.interface path arguments)
                  (List.find_opt (fun (declared : Types.variant) -> declared.variant_name = name)))
       in
       let type_name = Types.show node.type_ in
       match declared with
       | None when fields = [] && Option.is_some (Types.find_builtin node.type_) -> ()
-      | None -> context.wrong "a construct of `%s` names no record or variant" type_name
+      | None -> context.report "a construct of `%s` names no record or variant" type_name
       | Some declared ->
           let names = List.map fst fields in
           if
             List.sort compare names
             <> List.sort compare (List.map (fun (field : Types.field) -> field.field_name) declared)
           then
-            context.wrong "a construct of `%s` lists the fields %s" type_name
+            context.report "a construct of `%s` lists the fields %s" type_name
               (String.concat ", " names);
-          let rec given_then_omitted = function
+          let rec is_given_then_omitted = function
             | (_, None) :: (_, Some _) :: _ -> false
-            | _ :: rest -> given_then_omitted rest
+            | _ :: rest -> is_given_then_omitted rest
             | [] -> true
           in
-          if not (given_then_omitted fields) then
-            context.wrong "a construct of `%s` lists an omitted field before a given one" type_name;
+          if not (is_given_then_omitted fields) then
+            context.report "a construct of `%s` lists an omitted field before a given one" type_name;
           List.iter
             (fun (name, (operand : Core.operand option)) ->
               match
@@ -231,23 +252,23 @@ let construct_fields context (node : Core.expression) variant fields =
                   operand )
               with
               | Some field, Some operand ->
-                  let found = operand_type operand in
+                  let found = read_operand_type operand in
                   if not (fits context ~expected:field.field_type ~found) then
-                    context.wrong
+                    context.report
                       "the field `%s` of a construct of `%s` has the type `%s`, and is declared \
                        `%s`"
                       name type_name (Types.show found) (Types.show field.field_type)
               | Some field, None ->
                   if not field.field_has_default then
-                    context.wrong "a construct of `%s` omits `%s`, which has no default" type_name
+                    context.report "a construct of `%s` omits `%s`, which has no default" type_name
                       name
               | None, _ -> ())
             fields)
   | _ ->
-      context.wrong "a construct has the type `%s`, which is not a named type"
+      context.report "a construct has the type `%s`, which is not a named type"
         (Types.show node.type_)
 
-let free_locals (parameters : Core.pattern list) (body : Core.block) =
+let list_free_locals (parameters : Core.pattern list) (body : Core.block) =
   let bound = Local_table.create 8 and read = ref [] in
   let bind_pattern (pattern : Core.pattern) =
     match pattern.kind with Bind { local; _ } -> Local_table.replace bound local () | _ -> ()
@@ -284,137 +305,48 @@ let free_locals (parameters : Core.pattern list) (body : Core.block) =
     body;
   List.rev !read
 
-let is_executable context (condition : Core.expression) =
-  not
-    (Core_walk.For_testing.expression_exists
-       (fun (node : Core.expression) ->
-         Types.equal node.type_ Integer
-         ||
-         match node.kind with
-         | Quantified _ | Old _ | Result | Specification_function _ | Method_time _ -> true
-         | Call { callee = Function { path; _ }; _ } -> (
-             match Interface.Impls.read_signature context.interface path with
-             | Some signature -> signature.specification_only
-             | None -> false)
-         | _ -> false)
-       condition)
-
-let specification_expressions (definition : Core.definition) =
-  let ids = Hashtbl.create 64 in
-  let mark =
-    Core_walk.make_deep_visitor
-      {
-        Core_walk.ignore_all with
-        expression = (fun (node : Core.expression) -> Hashtbl.replace ids node.id ());
-      }
-  in
-  let cost (spent : Core.cost) =
-    match spent.bound with
-    | Finite -> ()
-    | Order_of bound | At_most bound | Exactly bound -> mark.expression bound
-  in
-  (match definition with
-  | Function { parameters; contract; _ } ->
-      List.iter
-        (fun (parameter : Core.parameter) ->
-          Option.iter
-            (fun (contract : Core.callback_contract) -> List.iter mark.expression contract.requires)
-            parameter.callback_contract)
-        parameters;
-      List.iter
-        (fun (condition : Core.condition) -> mark.expression condition.value)
-        contract.requires;
-      List.iter mark.expression contract.ensures;
-      List.iter mark.expression contract.decreases;
-      List.iter cost contract.costs
-  | Type { invariants; potential; _ } ->
-      List.iter (fun (invariant : Core.condition) -> mark.expression invariant.value) invariants;
-      Option.iter mark.expression potential
-  | Trait laws ->
-      List.iter
-        (fun (law : Core.law) ->
-          List.iter mark.expression law.requires;
-          Core_walk.walk_block mark law.body)
-        laws
-  | Constant _ | Test _ | Law_proof _ | Empty -> ());
-  Core_walk.walk_definition
-    {
-      Core_walk.ignore_all with
-      statement =
-        (fun (node : Core.statement) ->
-          match node.kind with
-          | Proof body -> Core_walk.walk_block mark body
-          | Assert { condition; _ } -> (
-              match definition with Test _ -> () | _ -> mark.expression condition.value)
-          | For { clauses; _ } | While { clauses; _ } ->
-              List.iter (Core_walk.walk_loop_clause mark) clauses
-          | _ -> ());
-    }
-    definition;
-  ids
-
 let check_semantics context (form : Core.t) =
-  let in_specification = specification_expressions form.definition in
-  let executable subject (condition : Core.condition) =
-    if condition.executable <> is_executable context condition.value then
-      context.wrong "%s is marked %sexecutable" subject
-        (if condition.executable then "" else "not ")
-  in
-  (match form.definition with
-  | Function { contract; _ } -> List.iter (executable "a `requires` clause") contract.requires
-  | Type { invariants; _ } -> List.iter (executable "an `invariant` clause") invariants
-  | _ -> ());
   Core_walk.walk_definition
-    (located context.at
+    (track_location context.at
        {
          Core_walk.ignore_all with
-         statement =
-           (fun (node : Core.statement) ->
-             match node.kind with
-             | Assert { condition; _ } -> executable "an `assert`" condition
-             | _ -> ());
          expression =
            (fun (node : Core.expression) ->
              match node.kind with
              | Call call -> (
-                 call_types context node call;
-                 match call.callee with
+                 check_call_types context node call;
+                 match call.callee.target with
                  | Trait_method { trait; self_type; _ }
                    when List.exists
                           (fun known -> Well_known.is known trait.trait)
                           [ Add; Subtract; Multiply; Divide; Remainder; Negate ]
                         && Option.is_some (Types.find_builtin self_type) ->
-                     context.wrong
+                     context.report
                        "an arithmetic operator on `%s` is a call of `%s`, not an Operator"
-                       (Types.show self_type) (callee_name call.callee)
+                       (Types.show self_type) (show_target call.callee.target)
                  | Trait_method { self_type = Any _; evidence = Impl _ | Bound; _ } ->
-                     context.wrong "a call of `%s` on an `any` value is not dynamic"
-                       (callee_name call.callee)
+                     context.report "a call of `%s` on an `any` value is not dynamic"
+                       (show_target call.callee.target)
                  | Trait_method { self_type; evidence = Dynamic; _ }
                    when match self_type with Any _ -> false | _ -> true ->
-                     context.wrong "a call of `%s` on `%s` is dynamic" (callee_name call.callee)
-                       (Types.show self_type)
+                     context.report "a call of `%s` on `%s` is dynamic"
+                       (show_target call.callee.target) (Types.show self_type)
                  | _ -> ())
              | To_any { evidence = Dynamic; _ } ->
-                 context.wrong "a conversion to `any` has dynamic evidence"
-             | Operator { operation; arguments } -> operator_types context node operation arguments
+                 context.report "a conversion to `any` has dynamic evidence"
+             | Operator { operation; arguments } ->
+                 check_operator_types context node operation arguments
              | Compare { left; right; _ } -> compare_types context left right
              | Construct { variant; fields } -> construct_fields context node variant fields
              | Lambda { parameters; captures; body; _ } ->
-                 let free = free_locals parameters body in
+                 let free = list_free_locals parameters body in
                  if List.map (fun (capture : Core.capture) -> capture.local) captures <> free then
-                   context.wrong
+                   context.report
                      "a lambda captures %d locals, and its body reads %d of the enclosing \
                       function's"
                      (List.length captures) (List.length free)
-             | Quantified { binder = Over_elements _; _ } when Hashtbl.mem in_specification node.id
-               ->
-                 context.wrong "a quantifier in a specification runs as a loop (`Over_elements`)"
-             | Quantified { binder = Over_collection _; _ }
-               when not (Hashtbl.mem in_specification node.id) ->
-                 context.wrong "a quantifier in executable code is over a mathematical collection"
              | Slice { callee; bounds; _ } ->
-                 let name = callee_name callee in
+                 let name = show_target callee.target in
                  let ends suffix =
                    String.length name >= String.length suffix
                    && String.sub name
@@ -428,42 +360,44 @@ let check_semantics context (form : Core.t) =
                      | 2 -> ends ".slice_range"
                      | 1 -> ends ".slice_from"
                      | _ -> false)
-                 then context.wrong "a `Slice` with %d bounds calls `%s`" (List.length bounds) name
+                 then context.report "a `Slice` with %d bounds calls `%s`" (List.length bounds) name
              | _ -> ());
        })
     form.definition
 
 let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolve.Names.key option)
     (form : Core.t) =
-  let bounds parameter =
+  let list_bounds parameter =
     let of_key key =
       Option.value ~default:[]
-        (List.assoc_opt parameter (interface.elaborated_interface key).scope.bounds)
+        (List.assoc_opt parameter (interface.read_elaborated_interface key).scope.bounds)
     in
     match key with
-    | Some key -> of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.container key)
+    | Some key ->
+        of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.find_container key)
     | None -> []
   in
-  let normalize = Interface.Impls.normalize interface ~bounds in
+  let normalize = Interface.Impls.normalize interface ~list_bounds in
   let at = ref None in
   let name = match key with Some key -> Resolve.Names.show_key key | None -> Path.show path in
   let source =
-    lazy (Option.map (fun key -> (interface.names.spans key, interface.names.text key)) key)
+    lazy
+      (Option.map (fun key -> (interface.names.read_spans key, interface.names.read_text key)) key)
   in
-  let quoted () =
+  let quote () =
     match (!at, Lazy.force source) with
     | Some origin, Some (spans, text) when origin >= 0 && origin < Array.length spans ->
         let span : Source.Definition_span.t = spans.(origin) in
         Printf.sprintf ", in `%s`" (excerpt (String.sub text span.start (span.stop - span.start)))
     | _ -> ""
   in
-  let wrong format =
-    Printf.ksprintf (fun message -> Harness.fail "%s: %s%s" name message (quoted ())) format
+  let report format =
+    Printf.ksprintf (fun message -> Harness.fail "%s: %s%s" name message (quote ())) format
   in
   let own =
     let of_generics = List.map (fun (generic : Types.generic) -> generic.generic) in
-    let declared path =
-      match Interface.Definition.read_interface interface path with
+    let list_declared path =
+      match Interface.Definition.find_interface interface path with
       | Some (Function_interface signature | Theorem_interface signature) ->
           of_generics signature.generics
       | Some (Type_interface interface) -> of_generics interface.type_generics
@@ -473,93 +407,111 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
       | Some (Law_proof_interface interface) -> of_generics interface.generics
       | _ -> []
     in
-    declared path
+    list_declared path
     @ (match Interface.Impls.read_signature interface path with
       | Some signature -> of_generics signature.generics
       | None -> [])
     @
-    match Option.bind key interface.names.container with
-    | Some container -> declared container.path
+    match Option.bind key interface.names.find_container with
+    | Some container -> list_declared container.path
     | None -> []
   in
-  let parameter subject (mentioned : Types.parameter) =
+  let own_capability_parameters =
+    match Interface.Impls.read_signature interface path with
+    | Some signature -> signature.capability_parameters
+    | None -> []
+  in
+  let check_parameter subject (mentioned : Types.parameter) =
     if not (List.mem mentioned own) then
-      wrong "%s mentions `%s`, a generic parameter of `%s`" subject mentioned.name
+      report "%s mentions `%s`, a generic parameter of `%s`" subject mentioned.name
         (Path.show mentioned.owner)
   in
-  let rec capabilities subject (set : Types.capability_set) =
+  let check_capability_parameter subject (mentioned : Types.parameter) =
+    if not (List.mem mentioned own_capability_parameters) then
+      report "%s mentions `generic %s`, a capability parameter of `%s`" subject mentioned.name
+        (Path.show mentioned.owner)
+  in
+  let rec check_capabilities subject (set : Types.capability_set) =
     List.iter
       (function
         | Types.Capability _ -> ()
-        | Types.Capability_parameter mentioned -> parameter subject mentioned
+        | Types.Capability_parameter mentioned -> check_capability_parameter subject mentioned
         | Types.Capability_projection { base; trait = reference; name } ->
             (match base with
             | Parameter _ | Projection _ -> ()
             | _ ->
-                wrong "%s contains `%s.%s`, which is not normalized" subject (Types.show base) name);
-            type_ subject base;
-            trait subject reference
-        | Types.Capability_variable _ -> wrong "%s contains a capability inference variable" subject
-        | Types.Capability_error _ -> wrong "%s contains a capability with an error" subject)
-      (set :> Types.capability list)
-  and type_ subject (ty : Types.ty) =
+                report "%s contains `%s.%s`, which is not normalized" subject (Types.show base) name);
+            check_type subject base;
+            check_trait subject reference
+        | Types.Capability_variable _ ->
+            report "%s contains a capability inference variable" subject
+        | Types.Capability_error _ -> report "%s contains a capability with an error" subject)
+      (Types.list_capabilities set)
+  and check_type subject (ty : Types.ty) =
     match ty with
-    | Named { arguments; _ } -> List.iter (argument subject) arguments
-    | Parameter named -> parameter subject named
+    | Named { arguments; _ } -> List.iter (check_argument subject) arguments
+    | Parameter named -> check_parameter subject named
     | Projection { base; trait = reference; _ } ->
-        type_ subject base;
-        trait subject reference
+        check_type subject base;
+        check_trait subject reference
     | Function { inputs; output; uses; _ } ->
-        List.iter (fun (_, input) -> type_ subject input) inputs;
-        capabilities subject uses;
-        type_ subject output
-    | Any reference -> trait subject reference
+        List.iter (fun (_, input) -> check_type subject input) inputs;
+        check_capabilities subject uses;
+        check_type subject output
+    | Any reference -> check_trait subject reference
     | Never | Integer -> ()
     | Variable _ | Literal _ | Hole | Error _ ->
-        wrong "%s has the type `%s`, which is not fully inferred" subject (Types.show ty)
-  and argument subject = function
-    | Types.Type inner -> type_ subject inner
-    | Types.Value (Value_parameter named) -> parameter subject named
+        report "%s has the type `%s`, which is not fully inferred" subject (Types.show ty)
+  and check_argument subject = function
+    | Types.Type inner -> check_type subject inner
+    | Types.Value (Value_parameter named) -> check_parameter subject named
     | Types.Value (Known _) -> ()
-    | Types.Value (Value_variable _) -> wrong "%s contains a value inference variable" subject
-    | Types.Capabilities set -> capabilities subject set
-  and trait subject (reference : Types.trait_reference) =
-    List.iter (argument subject) reference.trait_arguments;
-    List.iter (fun (_, inner) -> type_ subject inner) reference.associated
+    | Types.Value (Value_variable _) -> report "%s contains a value inference variable" subject
+  and check_trait subject (reference : Types.trait_reference) =
+    List.iter (check_argument subject) reference.trait_arguments;
+    List.iter (fun (_, inner) -> check_type subject inner) reference.associated
   in
   let seen = Hashtbl.create 64 in
-  let unique id =
-    if Hashtbl.mem seen id then wrong "the node id %d is used twice" id;
+  let check_unique id =
+    if Hashtbl.mem seen id then report "the node id %d is used twice" id;
     Hashtbl.replace seen id ()
   in
   let task_origins = Hashtbl.create 4 in
-  let unique_task_origin (node : Core.statement) =
+  let check_unique_task_origin (node : Core.statement) =
     match node.kind with
     | Concurrent _ | For { mode = Concurrent_loop; _ } ->
         if Hashtbl.mem task_origins node.origin then
-          wrong
+          report
             "two `concurrent` statements have the origin %d, so an early exit of a task of one \
              would end the tasks of the other"
             node.origin;
         Hashtbl.replace task_origins node.origin ()
     | _ -> ()
   in
-  let callee (callee : Core.callee) =
-    match callee with
-    | Function { type_arguments; _ } -> List.iter (argument "a call's type argument") type_arguments
-    | Trait_method { trait = reference; self_type; type_arguments; evidence; _ } -> (
-        trait "a call's trait" reference;
-        type_ "a call's `Self`" self_type;
-        List.iter (argument "a call's type argument") type_arguments;
+  let check_instantiation subject (instantiation : Types.instantiation) =
+    List.iter (check_argument (subject ^ "'s type argument")) instantiation.type_arguments;
+    List.iter
+      (fun (_, argument) -> check_capabilities (subject ^ "'s capability argument") argument)
+      instantiation.capability_arguments
+  in
+  let check_target (target : Core.operand Core.target) =
+    match target with
+    | Function { instantiation; _ } -> check_instantiation "a call" instantiation
+    | Trait_method { trait = reference; self_type; instantiation; evidence; _ } -> (
+        check_trait "a call's trait" reference;
+        check_type "a call's `Self`" self_type;
+        check_instantiation "a call" instantiation;
         match evidence with
-        | Impl { arguments; _ } ->
-            List.iter (fun (_, inner) -> argument "an `impl`'s type argument" inner) arguments
+        | Impl { substitution; _ } ->
+            List.iter
+              (fun (_, inner) -> check_argument "an `impl`'s type argument" inner)
+              (Types.For_testing.list_arguments substitution)
         | Bound | Dynamic -> ())
     | Intrinsic { type_arguments; _ } ->
-        List.iter (argument "an intrinsic's type argument") type_arguments
+        List.iter (check_argument "an intrinsic's type argument") type_arguments
     | Capability_method _ | Indirect _ -> ()
   in
-  let callee_parameters (callee : Core.callee) : (Types.mode * bool) list option =
+  let find_parameters (target : Core.operand Core.target) : (Types.mode * bool) list option =
     let of_signature ~has_receiver (signature : Types.signature) =
       let receiver =
         match signature.receiver with
@@ -574,16 +526,16 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
           (fun (parameter : Types.parameter_info) -> (parameter.mode, parameter.has_default))
           signature.parameters
     in
-    match callee with
+    match target with
     | Function { path; _ } ->
         Option.map (of_signature ~has_receiver:true) (Interface.Impls.read_signature interface path)
     | Trait_method { trait = reference; name; receiver; _ } ->
         Option.map (of_signature ~has_receiver:true)
-          (method_signature interface reference.trait name receiver)
+          (find_method_signature interface reference.trait name receiver)
     | Capability_method { capability; name } ->
         Option.map
           (of_signature ~has_receiver:false)
-          (method_signature interface capability name Static)
+          (find_method_signature interface capability name Static)
     | Intrinsic { operation; _ } ->
         Some (of_signature ~has_receiver:true (Intrinsic_signatures.make_signature operation))
     | Indirect function_value -> (
@@ -596,38 +548,38 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         | Function { inputs; _ } -> Some (List.map (fun (mode, _) -> (mode, false)) inputs)
         | _ -> None)
   in
-  let arguments_fit (call : Core.call) =
-    let callee = callee_name call.callee in
-    match callee_parameters call.callee with
-    | None -> wrong "a call of `%s` has a callee with no signature" callee
+  let check_arguments_fit (call : Core.call) =
+    let callee = show_target call.callee.target in
+    match find_parameters call.callee.target with
+    | None -> report "a call of `%s` has a callee with no signature" callee
     | Some parameters when List.length parameters <> List.length call.arguments ->
-        wrong "a call of `%s` has %d arguments for %d parameters" callee
+        report "a call of `%s` has %d arguments for %d parameters" callee
           (List.length call.arguments) (List.length parameters)
     | Some parameters ->
         List.iteri
           (fun position ((mode, has_default), (argument : Core.argument)) ->
             match argument with
             | Passed { mode = passed; _ } when passed <> mode ->
-                wrong "argument %d of a call of `%s` has the mode `%s`, and its parameter `%s`"
+                report "argument %d of a call of `%s` has the mode `%s`, and its parameter `%s`"
                   position callee (Types.show_mode passed) (Types.show_mode mode)
             | Default when not has_default ->
-                wrong "a call of `%s` omits argument %d, whose parameter has no default" callee
+                report "a call of `%s` omits argument %d, whose parameter has no default" callee
                   position
             | Passed _ | Default -> ())
           (List.combine parameters call.arguments)
   in
   let compound_assignments = ref 0 and current_targets = ref 0 in
   let local_types : Types.ty Local_table.t = Local_table.create 16 in
-  let parameters =
+  let check_parameters =
     List.iter (fun (parameter : Core.parameter) ->
         Local_table.replace local_types parameter.local parameter.type_)
   in
   (match form.definition with
-  | Function { parameters = declared; _ } -> parameters declared
-  | Trait laws -> List.iter (fun (law : Core.law) -> parameters law.parameters) laws
+  | Function { parameters = declared; _ } -> check_parameters declared
+  | Trait laws -> List.iter (fun (law : Core.law) -> check_parameters law.parameters) laws
   | Type _ | Constant _ | Test _ | Law_proof _ | Empty -> ());
   Core_walk.walk_definition
-    (located at
+    (track_location at
        {
          Core_walk.ignore_all with
          expression =
@@ -643,161 +595,158 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
              | _ -> ());
        })
     form.definition;
-  let rec place (core_place : Core.place) =
+  let rec check_place (core_place : Core.place) =
     match core_place with
     | Local { local; type_ = used; _ } -> (
-        type_ "a local" used;
+        check_type "a local" used;
         match Local_table.find_opt local_types local with
         | Some bound when not (Types.equal (normalize bound) (normalize used)) ->
-            wrong "a local is used with the type `%s` and bound with the type `%s`"
+            report "a local is used with the type `%s` and bound with the type `%s`"
               (Types.show used) (Types.show bound)
         | _ -> ())
-    | Constant { type_ = constant; _ } -> type_ "a constant" constant
+    | Constant { type_ = constant; _ } -> check_type "a constant" constant
     | Lent { kind = Call { lends = Some _; _ }; _ } | Temporary _ -> ()
-    | Lent _ -> wrong "a `Lent` place is not a call of a lending method"
+    | Lent _ -> report "a `Lent` place is not a call of a lending method"
     | Field { base; type_ = field; _ } ->
-        type_ "a field" field;
-        place base
+        check_type "a field" field;
+        check_place base
   in
-  let operand (core_operand : Core.operand) =
-    match core_operand with Place core_place -> place core_place | Value _ -> ()
+  let check_operand (core_operand : Core.operand) =
+    match core_operand with Place core_place -> check_place core_place | Value _ -> ()
   in
-  let rec mutable_place subject (core_place : Core.place) =
-    place core_place;
+  let rec check_mutable_place subject (core_place : Core.place) =
+    check_place core_place;
     match core_place with
     | Local _ | Temporary _ -> ()
-    | Constant { path; _ } -> wrong "%s mutates the constant `%s`" subject (Path.show path)
-    | Field { base; _ } -> mutable_place subject base
+    | Constant { path; _ } -> report "%s mutates the constant `%s`" subject (Path.show path)
+    | Field { base; _ } -> check_mutable_place subject base
     | Lent { kind = Call { lends = Some Mut; _ }; _ } -> ()
-    | Lent _ -> wrong "%s mutates a place that is lent read-only" subject
+    | Lent _ -> report "%s mutates a place that is lent read-only" subject
   in
   let yielded = Hashtbl.create 8 in
-  let rec yielded_operand (mode : Types.mode) (part : Core.operand) =
+  let rec check_yielded_operand (mode : Types.mode) (part : Core.operand) =
     match part with
     | Place core_place ->
-        if mode = Mut then mutable_place "a `Yield` with the mode `mut`" core_place
-        else place core_place
+        if mode = Mut then check_mutable_place "a `Yield` with the mode `mut`" core_place
+        else check_place core_place
     | Value ({ kind = Construct { fields; _ }; _ } as node) ->
         Hashtbl.replace yielded node.id ();
-        List.iter (fun (_, field) -> Option.iter (yielded_operand mode) field) fields
+        List.iter (fun (_, field) -> Option.iter (check_yielded_operand mode) field) fields
     | Value _ -> ()
   in
   Core_walk.walk_definition
-    (located at
+    (track_location at
        {
          Core_walk.ignore_all with
          statement =
            (fun (node : Core.statement) ->
-             match node.kind with Yield { mode; part } -> yielded_operand mode part | _ -> ());
+             match node.kind with
+             | Yield { mode; part } -> check_yielded_operand mode part
+             | _ -> ());
        })
     form.definition;
-  let rec bindings (pattern : Core.pattern) : (Core.local * Types.ty * Types.mode) list =
+  let rec list_bindings (pattern : Core.pattern) : (Core.local * Types.ty * Types.mode) list =
     match pattern.kind with
     | Bind { local; mode; _ } -> [ (local, pattern.type_, mode) ]
     | Variant { fields; _ } | Record fields ->
-        List.concat_map (fun (_, inner) -> bindings inner) fields
-    | Alternatives (first :: _) -> bindings first
+        List.concat_map (fun (_, inner) -> list_bindings inner) fields
+    | Alternatives (first :: _) -> list_bindings first
     | Alternatives [] | Wildcard | Literal _ | Range _ | Equal_to _ -> []
   in
-  let binds_own subject (value : Core.operand) (pattern : Core.pattern) =
-    operand value;
+  let check_binds_own subject (value : Core.operand) (pattern : Core.pattern) =
+    check_operand value;
     match value with
     | Value _ ->
-        if List.exists (fun (_, _, mode) -> mode <> Types.Own) (bindings pattern) then
-          wrong "%s on a value binds a name that is not `own`" subject
+        if List.exists (fun (_, _, mode) -> mode <> Types.Own) (list_bindings pattern) then
+          report "%s on a value binds a name that is not `own`" subject
     | Place _ -> ()
   in
   Core_walk.walk_definition
-    (located at
+    (track_location at
        {
          expression =
            (fun (node : Core.expression) ->
-             unique node.id;
-             type_ "an expression" node.type_;
+             check_unique node.id;
+             check_type "an expression" node.type_;
              match node.kind with
-             | Use core_place -> place core_place
+             | Use core_place -> check_place core_place
              | Construct { fields; _ } ->
                  List.iter
                    (fun (_, (field : Core.operand option)) ->
                      match field with
                      | Some (Place _) when not (Hashtbl.mem yielded node.id) ->
-                         wrong "a construct that no `Yield` lends has a field that is a place"
+                         report "a construct that no `Yield` lends has a field that is a place"
                      | _ -> ())
                    fields
-             | Slice { base; callee = sliced; bounds } ->
-                 place base;
-                 callee sliced;
-                 arguments_fit
+             | Slice { base; callee; bounds } ->
+                 check_place base;
+                 check_arguments_fit
                    {
-                     callee = sliced;
-                     arguments =
-                       Passed { mode = Read; value = Place base; mode_keyword = None } :: bounds;
+                     callee;
+                     arguments = Passed { mode = Read; value = Place base } :: bounds;
                      lends = None;
-                     uses = Types.no_capabilities;
                    }
-             | Matches { value; pattern } -> binds_own "an `is`" value pattern
+             | Matches { value; pattern } -> check_binds_own "an `is`" value pattern
              | Match { scrutinees; arms; _ } ->
                  List.iter
                    (fun (arm : Core.arm) ->
                      if List.length arm.patterns <> List.length scrutinees then
-                       wrong "a `match` arm does not have one pattern per scrutinee";
-                     List.iter2 (binds_own "a `match`") scrutinees arm.patterns)
+                       report "a `match` arm does not have one pattern per scrutinee";
+                     List.iter2 (check_binds_own "a `match`") scrutinees arm.patterns)
                    arms
-             | Function_value { type_arguments; _ } ->
-                 List.iter (argument "a function value's type argument") type_arguments
-             | Value_parameter named -> parameter "a value" named
-             | Method_time method_ -> callee method_
+             | Function_value { instantiation; _ } ->
+                 check_instantiation "a function value" instantiation
+             | Value_parameter named -> check_parameter "a value" named
+             | Method_cost { method_; _ } -> check_target method_
              | Lambda { result; captures; _ } ->
-                 type_ "a lambda's result" result;
+                 check_type "a lambda's result" result;
                  List.iter
                    (fun ({ local; type_ } : Core.capture) ->
-                     place (Local { local; type_; origin = node.origin }))
+                     check_place (Local { local; type_; origin = node.origin }))
                    captures
-             | To_any { trait = reference; _ } -> trait "a conversion to `any`" reference
+             | To_any { trait = reference; _ } -> check_trait "a conversion to `any`" reference
              | Provide { implementations; _ } ->
                  List.iter
                    (fun (implementation : Core.implementation) ->
-                     type_ "an implementation" implementation.type_;
+                     check_type "an implementation" implementation.type_;
                      match (implementation.mode, implementation.value) with
-                     | Mut, Place core_place -> mutable_place "a `provide`" core_place
-                     | _, value -> operand value)
+                     | Mut, Place core_place -> check_mutable_place "a `provide`" core_place
+                     | _, value -> check_operand value)
                    implementations
              | Current_target -> incr current_targets
              | Call call ->
-                 arguments_fit call;
-                 callee call.callee;
-                 capabilities "a call's `uses`" call.uses;
-                 (match call.callee with
-                 | Indirect function_value -> operand function_value
+                 check_arguments_fit call;
+                 (match call.callee.target with
+                 | Indirect function_value -> check_operand function_value
                  | _ -> ());
                  List.iter
                    (function
                      | Core.Passed { mode = Mut; value = Value { kind = Slice { base; _ }; _ }; _ }
                        ->
-                         mutable_place "a slice passed `mut`" base
+                         check_mutable_place "a slice passed `mut`" base
                      | Core.Passed { mode = Mut; value = Value _; _ } ->
-                         wrong "a `mut` parameter receives a value that is not a slice"
+                         report "a `mut` parameter receives a value that is not a slice"
                      | Passed { mode = Mut; value = Place core_place; _ } ->
-                         mutable_place "a `mut` argument" core_place
+                         check_mutable_place "a `mut` argument" core_place
                      | Passed { mode = Own; value = Place _; _ } ->
-                         wrong "an `own` parameter receives a place"
+                         report "an `own` parameter receives a place"
                      | Passed { mode = Read; value = Value { kind = Use _; _ }; _ } ->
-                         wrong
+                         report
                            "a read-only parameter of `%s` receives a `Use`, which moves or copies \
                             the place"
-                           (callee_name call.callee)
-                     | Passed { value; _ } -> operand value
+                           (show_target call.callee.target)
+                     | Passed { value; _ } -> check_operand value
                      | Default -> ())
                    call.arguments
              | _ -> ());
          statement =
            (fun (node : Core.statement) ->
-             unique node.id;
-             unique_task_origin node;
+             check_unique node.id;
+             check_unique_task_origin node;
              match node.kind with
-             | Assign { target; _ } -> mutable_place "an assignment" target
+             | Assign { target; _ } -> check_mutable_place "an assignment" target
              | Compound_assign { target; value; _ } -> (
-                 mutable_place "an assignment" target;
+                 check_mutable_place "an assignment" target;
                  incr compound_assignments;
                  match value.kind with
                  | Operator { arguments = { kind = Current_target; _ } :: _; _ }
@@ -808,61 +757,65 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                      } ->
                      ()
                  | _ ->
-                     wrong
+                     report
                        "a compound assignment's new value is not an operation on `Current_target`")
              | Let { pattern; value; _ } -> (
-                 binds_own "a `let`" value pattern;
+                 check_binds_own "a `let`" value pattern;
                  match (pattern.kind, value) with
                  | Bind { is_var = true; _ }, Place _ ->
-                     wrong "a `let` that binds a mutable local receives a place"
+                     report "a `let` that binds a mutable local receives a place"
                  | _ -> ())
-             | For { iteration = Cursor { cursor; _ }; _ } -> mutable_place "a `for` loop" cursor
+             | For { iteration = Cursor { cursor; _ }; _ } ->
+                 check_mutable_place "a `for` loop" cursor
              | For { iteration = Elements { count; position; element }; _ } -> (
                  (match count.kind with
                  | Call _ -> ()
-                 | _ -> wrong "the count of an `Elements` loop is not a call");
+                 | _ -> report "the count of an `Elements` loop is not a call");
                  (match position.kind with
                  | Bind _ -> ()
-                 | _ -> wrong "the position of an `Elements` loop is not a `Bind`");
+                 | _ -> report "the position of an `Elements` loop is not a `Bind`");
                  match element with
                  | Lent { kind = Call _; _ } -> ()
-                 | _ -> wrong "the element of an `Elements` loop is not the lent place of a call")
+                 | _ -> report "the element of an `Elements` loop is not the lent place of a call")
              | _ -> ());
          pattern =
            (fun (node : Core.pattern) ->
-             unique node.id;
-             type_ "a pattern" node.type_;
+             check_unique node.id;
+             check_type "a pattern" node.type_;
              match node.kind with
              | Alternatives (first :: rest) ->
-                 let bound alternative = List.sort compare (bindings alternative) in
-                 let expected = bound first in
-                 if List.exists (fun alternative -> bound alternative <> expected) rest then
-                   wrong "the alternatives of a pattern do not bind the same locals"
+                 let list_bound alternative = List.sort compare (list_bindings alternative) in
+                 let expected = list_bound first in
+                 if List.exists (fun alternative -> list_bound alternative <> expected) rest then
+                   report "the alternatives of a pattern do not bind the same locals"
              | _ -> ());
-         callee;
+         callee =
+           (fun callee ->
+             check_target callee.target;
+             check_capabilities "a callee's `uses`" callee.uses);
          place = ignore;
        })
     form.definition;
   at := None;
   if !current_targets <> !compound_assignments then
-    wrong "`Current_target` appears %d times in %d compound assignments" !current_targets
+    report "`Current_target` appears %d times in %d compound assignments" !current_targets
       !compound_assignments;
   at := None;
-  check_semantics { interface; wrong; at; bounds } form
+  check_semantics { interface; report; at; bounds = list_bounds } form
 
 let check interface (key : Resolve.Names.key) form =
   check_form interface ~path:key.path ~key:(Some key) form
 
 let check_derived interface path form = check_form interface ~path ~key:None form
 
-let check_file (interface : Interface.Lookups.t) ~core (file : Path.file) =
+let check_file (interface : Interface.Lookups.t) ~find_core (file : Path.file) =
   List.fold_left
     (fun count (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.make_key declaration in
-      match core key with
+      let key = declaration.key in
+      match find_core key with
       | Some form ->
           check interface key form;
           count + 1
       | None -> count)
     0
-    (interface.names.declarations_in file)
+    (interface.names.list_declarations_in file)

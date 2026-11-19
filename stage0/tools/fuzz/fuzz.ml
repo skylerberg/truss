@@ -82,7 +82,7 @@ let check_tree text (item : Syntax.definition Syntax.item) =
   in
   let spans = item.positions.spans in
   let ids = Hashtbl.create 64 in
-  let rec expression (outer : Source.Definition_span.t) (value : Syntax.expression) =
+  let rec visit_expression (outer : Source.Definition_span.t) (value : Syntax.expression) =
     let span = spans.(value.id) in
     if not (contains_span outer span) then
       fail "an expression's span is outside its parent in %s" quoted;
@@ -95,7 +95,7 @@ let check_tree text (item : Syntax.definition Syntax.item) =
         let inner_start = spans.(inner.id).start in
         if inner_start < !previous then fail "expressions out of order in %s" quoted;
         previous := inner_start;
-        expression span inner)
+        visit_expression span inner)
       value
   in
   let length = item.stop - item.base in
@@ -106,9 +106,9 @@ let check_tree text (item : Syntax.definition Syntax.item) =
     fail "a definition's span is out of bounds in %s" quoted;
   List.iter
     (fun (span : Source.Definition_span.t) ->
-      if span.stop > length then fail "a recovery is out of bounds in %s" quoted)
-    item.positions.recovered;
-  Syntax_walk.visit_definition (expression definition_span) item.value
+      if span.stop > length then fail "a syntax error is out of bounds in %s" quoted)
+    item.positions.syntax_errors;
+  Syntax_walk.visit_definition (visit_expression definition_span) item.value
 
 let check_parse_robust text =
   match parse text with
@@ -125,13 +125,13 @@ let check_parse_robust text =
       if
         diagnostics = []
         && List.exists
-             (fun (item : Syntax.definition Syntax.item) -> item.positions.recovered <> [])
+             (fun (item : Syntax.definition Syntax.item) -> item.positions.syntax_errors <> [])
              items
-      then fail "the parser recovered with no error in %s" (Diagnostic.quote text)
+      then fail "a syntax error has no diagnostic in %s" (Diagnostic.quote text)
 
 type verdict = Grammar_rejects | Grammar_accepts | Unknown
 
-let verdict : Diagnostic.Code.t -> verdict = function
+let judge : Diagnostic.Code.t -> verdict = function
   | Parser
       ( Unexpected_token | Needs_parentheses | Reserved_word | Statement_at_top_level | Missing_body
       | Open_range | Float_pattern | Increment | Double_negation | Match_arm_comma
@@ -143,8 +143,8 @@ let verdict : Diagnostic.Code.t -> verdict = function
   | Parser (Cost_word | Misplaced_potential | Interpolation_not_allowed) -> Unknown
   | Parser
       ( Use_after_definition | Let_else_brace | Nesting_too_deep | Misplaced_opaque
-      | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Finite_not_time
-      | Loop_cost_bound | Function_type_names | Misplaced_requires | Misplaced_function_type
+      | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Loop_cost_bound
+      | Function_type_names | Misplaced_requires | Misplaced_function_type
       | Misplaced_associated_type | Misplaced_constraint | Specification_only | Misplaced_assert
       | Misplaced_proof | Misplaced_loop_exit | Exits_parallel | Echo_in_specification
       | Reserved_specification_name )
@@ -164,17 +164,17 @@ let check_parsers_agree text =
               (Array.to_list (Token.list_interpolations literal))
         | _ -> [])
   in
-  let inside_interpolation (span : Source.span) =
+  let is_inside_interpolation (span : Source.span) =
     List.exists
       (fun (inner : Source.span) -> inner.start <= span.start && span.start < inner.stop)
       interpolations
   in
-  let in_cost_clause offset =
-    let rec back index =
+  let is_in_cost_clause offset =
+    let rec look_back index =
       if index < 0 then false
       else
         let token = tokens.(index) in
-        if token.span.start > offset then back (index - 1)
+        if token.span.start > offset then look_back (index - 1)
         else
           match token.kind with
           | Keyword Cost -> true
@@ -182,16 +182,16 @@ let check_parsers_agree text =
           | Punctuation (Open Curly)
           | Newline ->
               false
-          | _ -> back (index - 1)
+          | _ -> look_back (index - 1)
     in
-    back (Array.length tokens - 1)
+    look_back (Array.length tokens - 1)
   in
   let verdicts =
     List.filter_map
       (fun (diagnostic : Diagnostic.t) ->
-        if inside_interpolation diagnostic.span then None
-        else if in_cost_clause diagnostic.span.start then Some Unknown
-        else Some (verdict diagnostic.code))
+        if is_inside_interpolation diagnostic.span then None
+        else if is_in_cost_clause diagnostic.span.start then Some Unknown
+        else Some (judge diagnostic.code))
       diagnostics
   in
   let all = Array.to_list tokens in
@@ -204,7 +204,7 @@ let check_parsers_agree text =
             all)
   then
     let parser_rejects = List.mem Grammar_rejects verdicts
-    and reference_rejects = not (Reference_parser.accepts Reference_parser.file all) in
+    and reference_rejects = not (Reference_parser.accepts Reference_parser.parse_file all) in
     if parser_rejects <> reference_rejects then
       fail "the parser %s and the reference grammar %s %s"
         (if parser_rejects then "rejects" else "accepts")
@@ -212,21 +212,21 @@ let check_parsers_agree text =
         (Diagnostic.quote text)
 
 let adds_none ~(before : Diagnostic.t list) ~(after : Diagnostic.t list) =
-  let codes diagnostics =
+  let list_codes diagnostics =
     List.sort compare (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.code) diagnostics)
   in
-  let rec contained smaller larger =
+  let rec is_contained smaller larger =
     match (smaller, larger) with
     | [], _ -> true
     | _ :: _, [] -> false
     | first :: rest, candidate :: larger_rest ->
-        if first = candidate then contained rest larger_rest
-        else if first > candidate then contained smaller larger_rest
+        if first = candidate then is_contained rest larger_rest
+        else if first > candidate then is_contained smaller larger_rest
         else false
   in
-  contained (codes after) (codes before)
+  is_contained (list_codes after) (list_codes before)
 
-let rec joined_spans ~(edits : Source.span Diagnostic.edit list) ~(written : Token.t array)
+let rec list_joined_spans ~(edits : Source.span Diagnostic.edit list) ~(written : Token.t array)
     ~(fixed : Token.t array) =
   let is_replaced (span : Source.span) =
     List.exists
@@ -235,7 +235,7 @@ let rec joined_spans ~(edits : Source.span Diagnostic.edit list) ~(written : Tok
         && span.stop <= edit.span.stop)
       edits
   in
-  let tokens ~is_kept array =
+  let list_tokens ~is_kept array =
     List.filter
       (fun (token : Token.t) ->
         token.kind <> Newline && token.kind <> End_of_file
@@ -243,7 +243,7 @@ let rec joined_spans ~(edits : Source.span Diagnostic.edit list) ~(written : Tok
         && is_kept token)
       (Array.to_list array)
   in
-  let inside (token : Token.t) =
+  let list_inside (token : Token.t) =
     match token.kind with
     | String literal ->
         Array.concat
@@ -257,48 +257,51 @@ let rec joined_spans ~(edits : Source.span Diagnostic.edit list) ~(written : Tok
     match fixed with
     | [] -> []
     | token :: rest -> (
-        let rec after = function
-          | (other : Token.t) :: others when other.span.stop <= token.span.start -> after others
+        let rec list_after = function
+          | (other : Token.t) :: others when other.span.stop <= token.span.start ->
+              list_after others
           | written -> written
         in
-        let written = after written in
+        let written = list_after written in
         let overlaps (other : Token.t) = other.span.start < token.span.stop in
         match written with
         | first :: second :: _ when overlaps first && overlaps second ->
             token.span :: walk written rest
         | first :: _ when overlaps first ->
-            joined_spans ~edits ~written:(inside first) ~fixed:(inside token) @ walk written rest
+            list_joined_spans ~edits ~written:(list_inside first) ~fixed:(list_inside token)
+            @ walk written rest
         | _ -> walk written rest)
   in
   walk
-    (tokens ~is_kept:(fun _ -> true) written)
-    (tokens ~is_kept:(fun (token : Token.t) -> not (is_replaced token.span)) fixed)
+    (list_tokens ~is_kept:(fun _ -> true) written)
+    (list_tokens ~is_kept:(fun (token : Token.t) -> not (is_replaced token.span)) fixed)
 
 let alters_neighbors text ~edits ~fixed_text =
   let scan text = fst (Lexer.For_testing.scan (Source.create ~path:"fuzz.truss" text)) in
   let written = scan text and fixed = Lexer.For_testing.to_original edits (scan fixed_text) in
-  joined_spans ~edits ~written ~fixed @ joined_spans ~edits ~written:fixed ~fixed:written <> []
+  list_joined_spans ~edits ~written ~fixed @ list_joined_spans ~edits ~written:fixed ~fixed:written
+  <> []
 
 let check_fixes_work text =
-  let all text =
+  let list_all_diagnostics text =
     let _, _, diagnostics = parse text in
     diagnostics
   in
   let is_lexer (diagnostic : Diagnostic.t) =
     match diagnostic.code with Lexer _ -> true | _ -> false
   in
-  let diagnostics = all text in
+  let diagnostics = list_all_diagnostics text in
   List.iter
     (fun (diagnostic : Diagnostic.t) ->
-      let judged = if is_lexer diagnostic then List.filter is_lexer else Fun.id in
-      let before = judged (List.filter (fun other -> other != diagnostic) diagnostics) in
+      let select_judged = if is_lexer diagnostic then List.filter is_lexer else Fun.id in
+      let before = select_judged (List.filter (fun other -> other != diagnostic) diagnostics) in
       List.iter
         (fun (fix : Source.span Diagnostic.fix) ->
-          match Diagnostic.apply_fix text fix with
+          match Diagnostic.apply_edits text fix.edits with
           | exception Invalid_argument _ ->
               fail "the fix %S has overlapping edits in %s" fix.title (Diagnostic.quote text)
           | fixed ->
-              if not (adds_none ~before ~after:(judged (all fixed))) then
+              if not (adds_none ~before ~after:(select_judged (list_all_diagnostics fixed))) then
                 fail "the fix %S for %s leaves or adds an error in %s" fix.title
                   (Diagnostic.Code.name diagnostic.code)
                   (Diagnostic.quote text);
@@ -479,10 +482,12 @@ let round_trip random =
   in
   let others =
     Array.of_list
-      (List.map (fun (spelling, keyword) -> (spelling, Token.Keyword keyword)) Token.keywords
+      (List.map
+         (fun (spelling, keyword) -> (spelling, Token.Keyword keyword))
+         Token.For_testing.keywords
       @ List.map
           (fun (spelling, reserved) -> (spelling, Token.Reserved reserved))
-          Token.reserved_words
+          Token.For_testing.reserved_words
       @ List.filter_map
           (fun (spelling, punctuation) ->
             match punctuation with
@@ -521,16 +526,16 @@ let () =
     (fun path -> paths := path :: !paths)
     "fuzz [--seed N] [--count N] PATH...";
   let random = Random.State.make [| !seed |] in
-  let rec truss_files path =
+  let rec list_truss_files path =
     if Sys.is_directory path then
       List.concat_map
-        (fun name -> truss_files (Filename.concat path name))
+        (fun name -> list_truss_files (Filename.concat path name))
         (List.sort compare (Array.to_list (Sys.readdir path)))
     else if Filename.check_suffix path ".truss" then [ path ]
     else []
   in
-  let pieces path =
-    let source = Source.read_file path in
+  let list_pieces path =
+    let source = Source.For_testing.read_file path in
     let tokens, _ = Lexer.lex source in
     List.map
       (fun (piece : Parser.For_testing.piece) ->
@@ -539,13 +544,13 @@ let () =
       (Parser.For_testing.split tokens)
   in
   let examples =
-    Array.of_list (List.concat_map pieces (List.concat_map truss_files (List.rev !paths)))
+    Array.of_list (List.concat_map list_pieces (List.concat_map list_truss_files (List.rev !paths)))
   in
   if Array.length examples = 0 then (
     prerr_endline "fuzz: give .truss files, or directories of them";
     exit 2);
-  let example () = examples.(Random.State.int random (Array.length examples)) in
-  let random_text () =
+  let pick_example () = examples.(Random.State.int random (Array.length examples)) in
+  let make_random_text () =
     let length = Random.State.int random 120 in
     if Random.State.bool random then
       String.init length (fun _ -> Char.chr (Random.State.int random 256))
@@ -572,7 +577,7 @@ let () =
       match Random.State.int random 6 with
       | 0 when removed > 0 -> ""
       | 1 ->
-          let other = example () in
+          let other = pick_example () in
           let start = Random.State.int random (String.length other + 1) in
           String.sub other start (min (String.length other - start) (Random.State.int random 40))
       | _ -> mistakes.(Random.State.int random (Array.length mistakes))
@@ -580,15 +585,15 @@ let () =
     String.sub text 0 at ^ piece ^ String.sub text (at + removed) (length - at - removed)
   in
   for _ = 1 to !count do
-    check_robust (random_text ());
-    let several = ref (example ()) in
+    check_robust (make_random_text ());
+    let several = ref (pick_example ()) in
     for _ = 1 to 1 + Random.State.int random 4 do
       several := mutate !several
     done;
     check_robust !several;
     check_parse_robust !several;
     check_parsers_agree !several;
-    let one = mutate (example ()) in
+    let one = mutate (pick_example ()) in
     check_fixes_work one;
     check_machine_fixes_work one;
     check_machine_fixes_work !several;

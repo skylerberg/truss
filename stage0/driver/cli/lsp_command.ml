@@ -10,38 +10,29 @@ let locate_offset encoding source ~line ~column =
   Source.compute_offset (classify_units encoding) source ~line ~column
 
 let encode_range encoding source (span : Source.span) =
-  let point offset =
+  let encode_point offset =
     let line, character = locate_position encoding source offset in
     Json.Object [ ("line", Json.Int line); ("character", Json.Int character) ]
   in
-  Json.Object [ ("start", point span.start); ("end", point span.stop) ]
+  Json.Object [ ("start", encode_point span.start); ("end", encode_point span.stop) ]
 
-let parse_hex_digit character =
-  match character with
-  | '0' .. '9' -> Some (Char.code character - Char.code '0')
-  | 'a' .. 'f' -> Some (Char.code character - Char.code 'a' + 10)
-  | 'A' .. 'F' -> Some (Char.code character - Char.code 'A' + 10)
-  | _ -> None
-
-let path_of_uri uri =
+let decode_file_uri uri =
   let prefix = "file://" in
   if not (String.starts_with ~prefix uri) then None
   else
-    let encoded =
-      String.sub uri (String.length prefix) (String.length uri - String.length prefix)
-    in
+    let encoded = String.drop_first (String.length prefix) uri in
     let buffer = Buffer.create (String.length encoded) in
     let rec decode at =
       if at < String.length encoded then
         match encoded.[at] with
-        | '%' when at + 2 < String.length encoded -> (
-            match (parse_hex_digit encoded.[at + 1], parse_hex_digit encoded.[at + 2]) with
-            | Some high, Some low ->
-                Buffer.add_char buffer (Char.chr ((high * 16) + low));
-                decode (at + 3)
-            | _ ->
-                Buffer.add_char buffer '%';
-                decode (at + 1))
+        | '%'
+          when at + 2 < String.length encoded
+               && Char.Ascii.is_hex_digit encoded.[at + 1]
+               && Char.Ascii.is_hex_digit encoded.[at + 2] ->
+            let high = Char.Ascii.hex_digit_to_int encoded.[at + 1]
+            and low = Char.Ascii.hex_digit_to_int encoded.[at + 2] in
+            Buffer.add_char buffer (Char.chr ((high * 16) + low));
+            decode (at + 3)
         | character ->
             Buffer.add_char buffer character;
             decode (at + 1)
@@ -53,7 +44,7 @@ let encode_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
   Json.Object
     [
       ("range", encode_range encoding source diagnostic.span);
-      ("severity", Json.Int 1);
+      ("severity", Json.Int (match diagnostic.severity with Error -> 1 | Warning -> 2));
       ("code", Json.String (Diagnostic.Code.name diagnostic.code));
       ("source", Json.String "truss");
       ("message", Json.String diagnostic.message);
@@ -74,9 +65,9 @@ let encode_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
 let encode_state encoding source (state : Source.span Prover.state) =
   Json.Object
     [
-      ("range", encode_range encoding source state.span);
-      ("code", Json.String (Diagnostic.Code.name (Prover state.code)));
-      ("shows", Json.String state.shows);
+      ("range", encode_range encoding source state.site.span);
+      ("code", Json.String (Diagnostic.Code.name (Prover state.site.code)));
+      ("shows", Json.String state.site.shows);
       ("proven", Json.Bool (state.failure = None));
       ("trustsCompiledCode", Json.Bool state.trusts_compiled_code);
     ]
@@ -84,7 +75,7 @@ let encode_state encoding source (state : Source.span Prover.state) =
 let check ~root encoding (buffers : (string * string) list) =
   let buffers =
     List.filter_map
-      (fun (uri, text) -> Option.map (fun path -> (uri, path, text)) (path_of_uri uri))
+      (fun (uri, text) -> Option.map (fun path -> (uri, path, text)) (decode_file_uri uri))
       buffers
   in
   let snapshot, _ = Command_packages.load root in
@@ -96,7 +87,7 @@ let check ~root encoding (buffers : (string * string) list) =
          buffers)
   in
   let packages = List.map snd (Workspace.list_packages trial) in
-  let file_of path =
+  let find_file path =
     List.find_opt
       (fun file -> Shown_path.normalize (Command_packages.locate_file trial file) = path)
       (Command_packages.list_files trial packages)
@@ -104,11 +95,10 @@ let check ~root encoding (buffers : (string * string) list) =
   let opened =
     List.map
       (fun (uri, path, text) ->
-        (uri, Source.create ~path text, file_of (Shown_path.normalize path)))
+        (uri, Source.create ~path text, find_file (Shown_path.normalize path)))
       buffers
   in
   let database = Workspace.open_database trial in
-  Database.check database packages;
   let proofs =
     Proofs.check database trial packages (List.filter_map (fun (_, _, file) -> file) opened)
   in
@@ -138,21 +128,19 @@ let check ~root encoding (buffers : (string * string) list) =
     ]
 
 let read_message input =
-  let rec headers length =
+  let rec read_headers length =
     match In_channel.input_line input with
     | None -> None
     | Some line -> (
         let line = String.trim line in
         if line = "" then length
         else
-          match String.index_opt line ':' with
-          | Some colon when String.lowercase_ascii (String.sub line 0 colon) = "content-length" ->
-              headers
-                (int_of_string_opt
-                   (String.trim (String.sub line (colon + 1) (String.length line - colon - 1))))
-          | _ -> headers length)
+          match String.split_first ~sep:":" line with
+          | Some (name, value) when String.lowercase_ascii name = "content-length" ->
+              read_headers (int_of_string_opt (String.trim value))
+          | _ -> read_headers length)
   in
-  match headers None with
+  match read_headers None with
   | None -> None
   | Some length -> really_input_string input length |> Option.some
 
@@ -235,7 +223,7 @@ let choose_client_encoding params =
 
 let extract_root params =
   match (Json.lookup_field "rootUri" params, Json.lookup_field "rootPath" params) with
-  | Json.String uri, _ when path_of_uri uri <> None -> Option.get (path_of_uri uri)
+  | Json.String uri, _ when decode_file_uri uri <> None -> Option.get (decode_file_uri uri)
   | _, Json.String path -> path
   | _ -> Sys.getcwd ()
 
@@ -264,7 +252,7 @@ let apply_changes encoding text changes =
       | Json.Null, Json.String whole -> whole
       | range, Json.String replacement ->
           let source = Source.create ~path:"" text in
-          let point name =
+          let read_point name =
             match
               ( Json.lookup_field "line" (Json.lookup_field name range),
                 Json.lookup_field "character" (Json.lookup_field name range) )
@@ -272,8 +260,8 @@ let apply_changes encoding text changes =
             | Json.Int line, Json.Int column -> locate_offset encoding source ~line ~column
             | _ -> 0
           in
-          let start = point "start" and stop = point "end" in
-          String.sub text 0 start ^ replacement ^ String.sub text stop (String.length text - stop)
+          let start = read_point "start" and stop = read_point "end" in
+          String.sub text 0 start ^ replacement ^ String.drop_first stop text
       | _ -> text)
     text changes
 
@@ -296,7 +284,7 @@ let handle server message =
   | Json.String "exit" -> Stop (if server.shut_down then 0 else 1)
   | Json.String "textDocument/didOpen" -> (
       match (uri, Json.lookup_field "text" document) with
-      | Some uri, Json.String text when path_of_uri uri <> None ->
+      | Some uri, Json.String text when decode_file_uri uri <> None ->
           server.buffers <- (uri, text) :: List.remove_assoc uri server.buffers;
           Recheck
       | _ -> Continue)
@@ -337,13 +325,13 @@ let create ~write ~check =
 
 let serve ~input ~output ~check =
   let server = create ~write:(fun value -> write_message output (Json.to_string value)) ~check in
-  let waiting () =
+  let is_waiting () =
     match Unix.select [ Unix.descr_of_in_channel input ] [] [] 0.0 with
     | readable, _, _ -> readable <> []
     | exception Unix.Unix_error _ -> false
   in
   let rec loop pending =
-    if pending && not (waiting ()) then begin
+    if pending && not (is_waiting ()) then begin
       refresh server;
       loop false
     end
@@ -363,21 +351,9 @@ let serve ~input ~output ~check =
   in
   loop false
 
-let check_buffers = function
-  | root :: encoding :: rest ->
-      let rec pairs = function uri :: text :: rest -> (uri, text) :: pairs rest | _ -> [] in
-      let encoding = if encoding = "utf-8" then Utf_8 else Utf_16 in
-      Json.print (check ~root encoding (pairs rest));
-      0
-  | _ -> 2
-
-let check_arguments ~root encoding buffers =
-  "__check-buffers" :: root :: show_encoding encoding
-  :: List.concat_map (fun (uri, text) -> [ uri; text ]) buffers
-
 module For_testing = struct
-  let position = locate_position
-  let offset = locate_offset
+  let locate_position = locate_position
+  let locate_offset = locate_offset
 
   type nonrec server = server
 

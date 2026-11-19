@@ -7,6 +7,8 @@
   hashing_tests
   compiler_bug_tests
   process_tests
+  lock_file_tests
+  file_system_tests
   cache_tests
   resolve_tests
   standard_library_tests
@@ -23,20 +25,20 @@
   documents_tests
   manifest_tests
   registry_tests
-  compatibility_tests
   prover_tests
   library_use_tests
   database_tests
   standard_package_loading_tests)
  (libraries
+  metric
   process
+  lock_file
   harness
   compiler_bug
   source
   diagnostic
   token
   lexer
-  unicode
   zarith
   documents
   file_system
@@ -55,6 +57,7 @@
   cache
   unix
   path
+  grant
   well_known
   project
   resolve
@@ -63,6 +66,7 @@
   solver
   prover
   database
+  lowered
   types
   intrinsic
   interface
@@ -70,11 +74,10 @@
   syntax_walk
   manifest
   registry
-  cli
-  compile
-  toolchain
-  build)
+  backend
+  c_compiler)
  (deps
+  served_length/served_length.exe
   (glob_files %{workspace_root}/*.md)
   (glob_files_rec %{workspace_root}/standard/*.md)
   (glob_files_rec %{workspace_root}/standard/*.truss)

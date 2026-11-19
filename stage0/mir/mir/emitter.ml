@@ -2,7 +2,7 @@ module Local_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Core.local
 end))
 
-let bug format = Compiler_bug.bug ~stage:"MIR" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"MIR" format
 
 type frame = Bindings | Statement | Condition
 
@@ -14,8 +14,13 @@ type scope = {
   provides : bool;
 }
 
-type condition_lends = For_statement | For_block | For_condition
-type held = Tree.local list * Tree.local list * int list
+type lowered_condition = {
+  value : Tree.operand option;
+  ended_if_true : scope;
+  ended_if_false : scope;
+  block_scope_if_true : scope;
+}
+
 type task_exit = Exit_return of Tree.operand option | Exit_break | Exit_continue
 
 type group = {
@@ -38,7 +43,7 @@ type t = {
   mutable loan_count : int;
   mutable deferred : Tree.local list option;
   mutable extended : Core.id list;
-  mutable binds_into : frame;
+  mutable binds_to_statement : bool;
   mutable tasks : (Tree.task * int) list;
   groups : (Core.origin, group) Hashtbl.t;
   held_places : (Tree.local, Tree.place) Hashtbl.t;
@@ -69,7 +74,7 @@ let create ?(is_specification = false) ~entry_locals ?(takes_free_locals = false
     loan_count = 0;
     deferred = None;
     extended = [];
-    binds_into = Bindings;
+    binds_to_statement = false;
     tasks = [];
     groups = Hashtbl.create 1;
     held_places = Hashtbl.create 8;
@@ -128,7 +133,7 @@ let build_block builder (build : unit -> Tree.operand option) : Tree.block =
       Tree.value = (if builder.reaches then value else None);
     }
   in
-  if builder.reaches && value = None then bug "a block that control leaves by no jump";
+  if builder.reaches && value = None then raise_bug "a block that control leaves by no jump";
   builder.statements <- enclosing;
   builder.reaches <- true;
   block
@@ -139,28 +144,32 @@ let obtain_free_source builder (local : Core.local) ~type_ ~origin =
   | None when builder.takes_free_locals ->
       let free =
         allocate_local builder
-          (Source { local; mode = Read; name = None; is_var = false })
+          (Source { local; mode = Read; is_var = false; is_binding = false })
           type_ origin
       in
       Local_table.replace builder.sources local free;
       builder.free <- free :: builder.free;
       free
-  | None -> bug "a local that nothing binds"
+  | None -> raise_bug "a local that nothing binds"
+
+let find_statement_scope builder =
+  match List.find_opt (fun scope -> scope.frame = Statement) builder.scopes with
+  | Some scope -> scope
+  | None -> raise_bug "code lowered outside any statement"
 
 let find_binding_scope builder =
-  match List.find_opt (fun scope -> scope.frame = builder.binds_into) builder.scopes with
-  | Some scope -> Some scope
-  | None -> List.find_opt (fun scope -> scope.frame <> Condition) builder.scopes
+  if builder.binds_to_statement then Some (find_statement_scope builder)
+  else List.find_opt (fun scope -> scope.frame = Bindings) builder.scopes
 
 let register_binding builder local =
   Option.iter (fun scope -> scope.bound <- local :: scope.bound) (find_binding_scope builder)
 
-let bind_source ~name ?(is_var = false) builder (local : Core.local) mode type_ origin =
+let bind_source ?(is_var = false) builder (local : Core.local) mode type_ origin =
   match Local_table.find_opt builder.sources local with
   | Some bound -> bound
   | None ->
       let bound =
-        allocate_local builder (Source { local; mode; name = Some name; is_var }) type_ origin
+        allocate_local builder (Source { local; mode; is_var; is_binding = true }) type_ origin
       in
       Local_table.replace builder.sources local bound;
       (match builder.deferred with
@@ -198,14 +207,18 @@ let end_scope builder scope origin =
     (fun (ended : Tree.statement) -> emit builder ended.kind ended.origin)
     (list_scope_ends scope origin)
 
-let in_scope ?(provides = false) ?(held = ([], [], [])) builder origin f =
-  let names, lent, loans = held in
-  let scope = { frame = Bindings; bound = names; loans; temporaries = lent; provides } in
+let make_block_scope ?(provides = false) () =
+  { frame = Bindings; bound = []; loans = []; temporaries = []; provides }
+
+let run_in_block_scope builder scope origin f =
   builder.scopes <- scope :: builder.scopes;
   let result = f () in
   builder.scopes <- List.tl builder.scopes;
   end_scope builder scope origin;
   result
+
+let run_in_scope ?provides builder origin f =
+  run_in_block_scope builder (make_block_scope ?provides ()) origin f
 
 let leave_scopes builder ~depth origin =
   let rec leave scopes count =
@@ -218,7 +231,7 @@ let leave_scopes builder ~depth origin =
   in
   leave builder.scopes (List.length builder.scopes)
 
-let in_statement builder origin f =
+let run_in_statement builder origin f =
   let scope = { frame = Statement; bound = []; loans = []; temporaries = []; provides = false } in
   builder.scopes <- scope :: builder.scopes;
   let result = f () in
@@ -232,14 +245,14 @@ let hold_past_scopes builder origin (value : Tree.operand) =
       let local = allocate_local builder Temporary type_ origin in
       assign builder (make_local_place local) (Operand value) origin;
       Tree.Use { place = make_local_place local; type_; origin }
-  | Constant _ | Borrow _ | Take _ -> value
+  | Immediate _ | Borrow _ | Take _ -> value
 
 let return_from_scopes builder value origin =
   let value = Option.map (hold_past_scopes builder origin) value in
   leave_scopes builder ~depth:0 origin;
   jump builder (Return value) origin
 
-let unit_value = Tree.Constant { value = Unit; type_ = Types.unit }
+let unit_value = Tree.Immediate { value = Unit; type_ = Types.unit }
 
 let group_key : Tree.task -> Core.origin = function
   | Branch { block; _ } -> block
@@ -247,7 +260,7 @@ let group_key : Tree.task -> Core.origin = function
 
 let hold_operand builder (value : Tree.operand) type_ origin =
   match value with
-  | Constant _ | Borrow { mode = Mut; _ } | Take _ -> value
+  | Immediate _ | Borrow { mode = Mut; _ } | Take _ -> value
   | Use { place = { root = Local local; projections = [] }; _ }
     when (Hashtbl.find builder.infos local).kind = Temporary ->
       value
@@ -272,51 +285,68 @@ let rec borrow_place builder (place : Tree.place) =
       | None -> place)
   | Constant _ | Literal _ -> place
 
-let in_condition_scope :
-    'value.
-    lends:condition_lends ->
-    t ->
-    (unit -> 'value) ->
-    'value * scope * scope * (Tree.local list * Tree.local list * int list) =
- fun ~lends builder evaluate ->
-  let naming = List.find_opt (fun scope -> scope.frame = Statement) builder.scopes in
-  let named_before = match naming with Some scope -> scope.bound | None -> [] in
+let partition_lent builder temporaries =
+  List.partition
+    (fun local ->
+      match (Hashtbl.find builder.infos local).kind with
+      | Lent _ -> true
+      | Source _ | Temporary -> false)
+    temporaries
+
+let run_in_condition_frame builder evaluate =
   let scope = { frame = Condition; bound = []; loans = []; temporaries = []; provides = false } in
   builder.scopes <- scope :: builder.scopes;
   let value = evaluate () in
   builder.scopes <- List.tl builder.scopes;
-  let lent, others =
-    List.partition
-      (fun local ->
-        match (Hashtbl.find builder.infos local).kind with Lent _ -> true | _ -> false)
-      scope.temporaries
-  in
-  let loans = scope.loans in
-  if lends = For_statement then begin
-    List.iter (add_temporary builder) (List.rev lent);
-    match builder.scopes with
-    | enclosing :: _ -> enclosing.loans <- loans @ enclosing.loans
-    | [] -> ()
-  end;
-  let names =
-    match (lends, naming) with
-    | For_block, Some named ->
-        let names = List.filter (fun local -> not (List.mem local named_before)) named.bound in
-        named.bound <- named_before;
-        names
-    | _ -> []
-  in
-  let without_lends = { scope with temporaries = others; loans = [] } in
-  let on_true, on_false =
-    match lends with
-    | For_statement -> (without_lends, without_lends)
-    | For_block -> (without_lends, { scope with bound = names })
-    | For_condition -> (scope, scope)
-  in
-  (value, on_true, on_false, if lends = For_block then (names, lent, loans) else ([], [], []))
+  (value, scope)
 
-let in_value_scope ?provides builder origin (build : unit -> Tree.operand option) =
-  in_scope ?provides builder origin (fun () ->
+let run_in_condition_scope ~binds_lent_part builder evaluate =
+  if binds_lent_part then begin
+    let statement_scope = find_statement_scope builder in
+    let bound_before = statement_scope.bound in
+    let value, scope = run_in_condition_frame builder evaluate in
+    let names =
+      List.filter (fun local -> not (List.mem local bound_before)) statement_scope.bound
+    in
+    statement_scope.bound <- bound_before;
+    let lent_parts, others = partition_lent builder scope.temporaries in
+    {
+      value;
+      ended_if_true = { scope with temporaries = others; loans = [] };
+      ended_if_false = { scope with bound = names };
+      block_scope_if_true =
+        { (make_block_scope ()) with bound = names; loans = scope.loans; temporaries = lent_parts };
+    }
+  end
+  else
+    let value, scope = run_in_condition_frame builder evaluate in
+    {
+      value;
+      ended_if_true = scope;
+      ended_if_false = scope;
+      block_scope_if_true = make_block_scope ();
+    }
+
+let run_in_guard_scope builder origin evaluate =
+  let value, scope = run_in_condition_frame builder evaluate in
+  let lent_parts, others = partition_lent builder scope.temporaries in
+  List.iter (add_temporary builder) (List.rev lent_parts);
+  (match builder.scopes with
+  | enclosing :: _ -> enclosing.loans <- scope.loans @ enclosing.loans
+  | [] -> ());
+  let holds =
+    Option.map
+      (fun value ->
+        let local = allocate_temporary builder Types.bool origin in
+        assign builder (make_local_place local) (Operand value) origin;
+        Tree.Use { place = make_local_place local; type_ = Types.bool; origin })
+      value
+  in
+  end_scope builder { scope with temporaries = others; loans = [] } origin;
+  holds
+
+let run_in_value_scope ?provides builder origin (build : unit -> Tree.operand option) =
+  run_in_scope ?provides builder origin (fun () ->
       let value = build () in
       match (value, builder.scopes) with
       | Some (Use { place = { root = Local local; _ }; type_; _ } as read), scope :: enclosing :: _
@@ -335,7 +365,7 @@ let in_value_scope ?provides builder origin (build : unit -> Tree.operand option
           else value
       | _ -> value)
 
-let looping builder build =
+let run_in_loop builder build =
   builder.loops <-
     { depth = List.length builder.scopes; tasks_around = List.length builder.tasks }
     :: builder.loops;
@@ -358,12 +388,10 @@ let list_tasks_left builder exit =
   | (`Break | `Continue) as exit -> (
       match builder.loops with
       | loop :: _ ->
-          List.filteri
-            (fun index _ -> index < List.length builder.tasks - loop.tasks_around)
-            builder.tasks
+          List.take (List.length builder.tasks - loop.tasks_around) builder.tasks
           |> List.filter_map (fun (task, _) ->
               match (task, exit) with Tree.Iteration _, `Continue -> None | _ -> Some task)
-      | [] -> bug "a loop exit outside a loop")
+      | [] -> raise_bug "a loop exit outside a loop")
 
 let leave_tasks builder tasks exit origin =
   let exit =
@@ -376,7 +404,7 @@ let leave_tasks builder tasks exit origin =
     match (exit, builder.loops) with
     | Exit_return _, _ -> 0
     | (Exit_break | Exit_continue), loop :: _ -> loop.depth
-    | (Exit_break | Exit_continue), [] -> bug "a loop exit outside a loop"
+    | (Exit_break | Exit_continue), [] -> raise_bug "a loop exit outside a loop"
   in
   let rec leave returned = function
     | [] -> (
@@ -389,7 +417,7 @@ let leave_tasks builder tasks exit origin =
         let start =
           match List.assoc_opt task builder.tasks with
           | Some start -> start
-          | None -> bug "an exit from a task that does not enclose it"
+          | None -> raise_bug "an exit from a task that does not enclose it"
         in
         leave_scopes builder ~depth:start origin;
         let group = obtain_group builder task origin in
@@ -401,7 +429,7 @@ let leave_tasks builder tasks exit origin =
         let moved =
           match (returned, slot) with Some value, Some slot -> Some (value, slot) | _ -> None
         in
-        let resumed () =
+        let build_resumed () =
           build_block builder (fun () ->
               leave
                 (Option.map
@@ -416,7 +444,7 @@ let leave_tasks builder tasks exit origin =
                 outer;
               if builder.reaches then Some unit_value else None)
         in
-        group.exits <- group.exits @ [ (slot, resumed) ];
+        group.exits <- group.exits @ [ (slot, build_resumed) ];
         jump builder
           (Cancel
              { task; winner = group.winner; number = List.length group.exits; returned = moved })
@@ -429,7 +457,7 @@ let start_group builder key origin =
   | Some { winner; exits = _ :: _ } ->
       add_temporary builder winner;
       assign builder (make_local_place winner)
-        (Operand (Constant { value = Integer Z.zero; type_ = Types.make_builtin UInt32 }))
+        (Operand (Immediate { value = Integer Z.zero; type_ = Types.make_builtin UInt32 }))
         origin
   | _ -> ()
 
@@ -437,7 +465,9 @@ let resume_group builder key origin =
   match Hashtbl.find_opt builder.groups key with
   | Some { winner; exits = _ :: _ as exits } ->
       let exits =
-        List.map (fun (returned, resumed) -> { Tree.resumed = resumed (); returned }) exits
+        List.map
+          (fun (returned, build_resumed) -> { Tree.resumed = build_resumed (); returned })
+          exits
       in
       emit builder (Resume { winner; exits }) origin
   | _ -> ()
@@ -472,7 +502,7 @@ let with_set : 'value. (unit -> 'value) -> set:(unit -> unit) -> restore:(unit -
   set ();
   Fun.protect ~finally:restore build
 
-let in_old builder build =
+let run_in_old builder build =
   let enclosing = builder.in_old in
   with_set build
     ~set:(fun () -> builder.in_old <- true)
@@ -480,19 +510,19 @@ let in_old builder build =
 
 let reads_entry builder local = builder.in_old && List.mem local builder.entry_locals
 
-let binding_to_statement builder build =
-  let enclosing = builder.binds_into in
+let run_binding_to_statement builder build =
+  let enclosing = builder.binds_to_statement in
   with_set build
-    ~set:(fun () -> builder.binds_into <- Statement)
-    ~restore:(fun () -> builder.binds_into <- enclosing)
+    ~set:(fun () -> builder.binds_to_statement <- true)
+    ~restore:(fun () -> builder.binds_to_statement <- enclosing)
 
-let extending builder extended build =
+let run_extending builder extended build =
   let enclosing = builder.extended in
   with_set build
     ~set:(fun () -> builder.extended <- extended)
     ~restore:(fun () -> builder.extended <- enclosing)
 
-let deferring builder build =
+let run_deferring builder build =
   let enclosing = builder.deferred in
   builder.deferred <- Some [];
   let built = build () in
@@ -534,7 +564,7 @@ let resume_block builder (enclosing : suspended) =
   builder.statements <- enclosing;
   statements
 
-let in_arm_scope builder build =
+let run_in_arm_scope builder build =
   let scope = { frame = Bindings; bound = []; loans = []; temporaries = []; provides = false } in
   builder.scopes <- scope :: builder.scopes;
   Fun.protect ~finally:(fun () -> builder.scopes <- List.tl builder.scopes) (fun () -> build scope)
@@ -545,7 +575,7 @@ let make_dead_statements scope origin =
     ((if scope.bound <> [] then [ Tree.Dead (List.rev scope.bound) ] else [])
     @ if scope.temporaries <> [] then [ Dead (List.rev scope.temporaries) ] else [])
 
-let in_task builder task build =
+let run_in_task builder task build =
   builder.tasks <- (task, List.length builder.scopes) :: builder.tasks;
   Fun.protect ~finally:(fun () -> builder.tasks <- List.tl builder.tasks) build
 
@@ -560,7 +590,7 @@ let break_ builder origin =
       leave_scopes builder ~depth:loop.depth origin;
       jump builder Break origin
   | _ :: _, tasks -> leave_tasks builder tasks Exit_break origin
-  | [], _ -> bug "a `break` outside a loop"
+  | [], _ -> raise_bug "a `break` outside a loop"
 
 let continue_ builder origin =
   match (builder.loops, list_tasks_left builder `Continue) with
@@ -568,10 +598,10 @@ let continue_ builder origin =
       leave_scopes builder ~depth:loop.depth origin;
       jump builder Continue origin
   | _ :: _, tasks -> leave_tasks builder tasks Exit_continue origin
-  | [], _ -> bug "a `continue` outside a loop"
+  | [], _ -> raise_bug "a `continue` outside a loop"
 
 let finish ?(captures = []) ?(is_functional = false) ?value_type builder ~parameters : Tree.body =
-  if builder.reaches then bug "a body whose end control reaches";
+  if builder.reaches then raise_bug "a body whose end control reaches";
   {
     parameters;
     captures;
@@ -584,7 +614,7 @@ let finish ?(captures = []) ?(is_functional = false) ?value_type builder ~parame
 let build_formula builder ~origin ~type_ (build : unit -> Tree.local list * Tree.operand option) :
     Tree.formula =
   let built = ref None in
-  let formula_so_far parameters value =
+  let record_formula parameters value =
     built :=
       Some
         {
@@ -597,15 +627,15 @@ let build_formula builder ~origin ~type_ (build : unit -> Tree.local list * Tree
         }
   in
   let held = ref None in
-  in_scope builder origin (fun () ->
-      in_statement builder origin (fun () ->
+  run_in_scope builder origin (fun () ->
+      run_in_statement builder origin (fun () ->
           let parameters, value = build () in
           match value with
           | Some value when reaches builder ->
-              if is_specification builder then formula_so_far parameters value
+              if is_specification builder then record_formula parameters value
               else held := Some (parameters, hold_past_scopes builder origin value)
-          | _ -> bug "a formula that jumps or gives no value"));
-  Option.iter (fun (parameters, value) -> formula_so_far parameters value) !held;
+          | _ -> raise_bug "a formula that jumps or gives no value"));
+  Option.iter (fun (parameters, value) -> record_formula parameters value) !held;
   match !built with
   | Some formula -> { formula with locals = collect_locals builder; lambdas = lambdas builder }
-  | None -> bug "a formula that was not built"
+  | None -> raise_bug "a formula that was not built"

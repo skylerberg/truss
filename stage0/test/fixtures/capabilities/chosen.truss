@@ -1,0 +1,18 @@
+fn chosen(first: (fn() uses generic Granted), second: (fn() uses generic Allowed)) -> (fn() uses generic Allowed)
+  uses generic Granted
+{
+  first()
+  second
+}
+
+fn shout()
+  uses Console
+{
+  Console.print_line("hi")
+}
+
+fn tick()
+  uses Clock
+{
+  let _ = Clock.now()
+}

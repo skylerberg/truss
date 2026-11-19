@@ -1,0 +1,6 @@
+fn f(items: List[Int64]) -> UInt64 {
+  var labeled = Labeled(view: items[..], name: "a".copy())
+  let labeled_view = labeled
+  labeled = Labeled(view: items[..], name: "b".copy())
+  labeled_view.name.length()
+}

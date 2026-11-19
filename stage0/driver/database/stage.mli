@@ -23,6 +23,7 @@ type t =
   | Test_keys
 
 val all : t list
-val of_part : Part.computed -> t
+val compare : t -> t -> int
+val of_part : Part.any -> t
 val is_lowering : t -> bool
 val drains : through:t -> t -> bool

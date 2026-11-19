@@ -4,8 +4,8 @@ let parse_position text =
       match (int_of_string_opt line, int_of_string_opt column) with
       | Some line, Some column when line > 0 && column > 0 ->
           (String.concat ":" (List.rev file), line, column)
-      | _ -> Outcome.cannot_run "`%s` is not FILE:LINE:COLUMN." text)
-  | _ -> Outcome.cannot_run "`%s` is not FILE:LINE:COLUMN." text
+      | _ -> Outcome.raise_cannot_run "`%s` is not FILE:LINE:COLUMN." text)
+  | _ -> Outcome.raise_cannot_run "`%s` is not FILE:LINE:COLUMN." text
 
 let run ~position =
   let json = Output.json () in
@@ -17,21 +17,21 @@ let run ~position =
       (fun written -> Command_packages.locate_file snapshot written = path)
       (Command_packages.list_files snapshot packages)
   with
-  | None -> Outcome.cannot_run "%s is not a file of a package in this worktree." file
+  | None -> Outcome.raise_cannot_run "%s is not a file of a package in this worktree." file
   | Some written -> (
       let database = Workspace.open_database snapshot in
       let offset =
         Source.compute_offset Source.Scalar_values
-          (Workspace.read_source snapshot written)
+          (Database.read_source database written)
           ~line:(line - 1) ~column:(column - 1)
       in
-      let names = Database.make_name_lookups database packages in
+      let names = Database.make_name_lookups database in
       let symbol_at =
         List.find_map
           (fun (declaration : Resolve.Names.declaration) ->
-            let key = Resolve.Names.make_key declaration in
-            let ({ base; _ } : Resolve.Names.place) = names.place key in
-            let text = names.text key in
+            let key = declaration.key in
+            let ({ base; _ } : Resolve.Names.place) = names.read_place key in
+            let text = names.read_text key in
             if base <= offset && offset <= base + String.length text then
               match Database.read_resolved database key with
               | Some resolved ->
@@ -40,11 +40,11 @@ let run ~position =
                       (fun (checked : Infer.checked) -> checked.tables)
                       (Database.read_checked_body database key)
                   in
-                  Inspect.explain_at ~path:key.path (names.spans key) (names.definition key)
-                    resolved tables ~text (offset - base)
+                  Inspect.explain_at ~path:key.path (names.read_spans key)
+                    (names.read_definition key) resolved tables ~text (offset - base)
               | None -> None
             else None)
-          (names.declarations_in written)
+          (names.list_declarations_in written)
       in
       match symbol_at with
       | None ->

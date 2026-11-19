@@ -26,7 +26,7 @@ type action =
   | Store of { place : Place.t; views : view list; replaces_root : bool }
   | Return_view of view list
   | Drop of dropped_owner list
-  | Bind_lent_part of Types.ty
+  | Bind_lent_part of { scrutinee : Core.origin; lent_part_type : Types.ty }
   | Pass_owned_function of view list
   | Start_loan of { loan : int; loans : loan list }
   | End_loans of int list

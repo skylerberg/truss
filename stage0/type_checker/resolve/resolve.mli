@@ -1,8 +1,23 @@
-module Names = Names
-module Parts = Parts
-module Prelude = Prelude
+module Names : module type of struct
+  include Names
+end
+with module Scope := Names.Scope
 
-type specification_function = Walk.specification_function = Log | Power | Time | Calls
+module Namespace = Namespace
+
+module Parts : sig
+  type part = Parts.part = Header | Body | Member_header of int | Member_body of int
+end
+
+module Prelude : sig
+  val find_type : string -> Path.module_ option
+end
+
+type specification_function = Walk.specification_function =
+  | Log
+  | Power
+  | Call_cost of Metric.t
+  | Calls
 
 type target = Walk.target =
   | Binding

@@ -45,7 +45,7 @@ let () =
           ("UserId", Memory_layout.Record [ Codegen_support.field "number" Codegen_support.int64 ]);
         ]
       in
-      let wrapped = Codegen_support.layout ~extra (Codegen_support.named "UserId") in
+      let wrapped = Codegen_support.lay_out ~extra (Codegen_support.named "UserId") in
       Codegen_support.expect_int ~expected:8 wrapped.size;
       Codegen_support.expect_int ~expected:8 wrapped.alignment);
   Codegen_support.test "fields of zero size take no room" (fun () ->
@@ -104,7 +104,7 @@ let () =
           (List.init 300 (fun index -> Codegen_support.variant (Printf.sprintf "V%d" index) []))
       in
       Codegen_support.expect_int ~expected:2
-        (Codegen_support.layout ~extra:[ ("Many", many) ] (Codegen_support.named "Many")).size);
+        (Codegen_support.lay_out ~extra:[ ("Many", many) ] (Codegen_support.named "Many")).size);
   Codegen_support.test "a sum type is a tag followed by the largest variant's fields" (fun () ->
       let extra =
         [
@@ -135,7 +135,7 @@ let () =
         (Codegen_support.describe (Codegen_support.option Codegen_support.bool)));
   Codegen_support.test "Option of a Character is the size of a Character" (fun () ->
       Codegen_support.expect_int ~expected:4
-        (Codegen_support.layout (Codegen_support.option Codegen_support.character)).size);
+        (Codegen_support.lay_out (Codegen_support.option Codegen_support.character)).size);
   Codegen_support.test "Option of an Option of a Bool uses the next spare value" (fun () ->
       Codegen_support.expect_string
         ~expected:"1/1 niche-encoded(Some; None=3 at value.value) niche value.value 4+252"
@@ -186,7 +186,7 @@ let () =
       in
       let env =
         Memory_layout.create Codegen_support.host
-          ~shape_of:(Codegen_support.shapes [ ("Tree", tree) ])
+          ~compute_shape:(Codegen_support.compute_shape [ ("Tree", tree) ])
       in
       Codegen_support.expect_string ~expected:"24/8 struct(left@0 right@8 value@16)"
         (Memory_layout.For_testing.to_string
@@ -196,7 +196,7 @@ let () =
         (Codegen_support.describe (Codegen_support.array Codegen_support.uint8 32)));
   Codegen_support.test "a List holds a pointer and two 64-bit UInt64 fields" (fun () ->
       Codegen_support.expect_int ~expected:24
-        (Codegen_support.layout (Codegen_support.list Codegen_support.int64)).size);
+        (Codegen_support.lay_out (Codegen_support.list Codegen_support.int64)).size);
   Codegen_support.test "a variant whose fields have zero size counts as having none" (fun () ->
       Codegen_support.expect_string ~expected:"1/1 tag(UInt8: Some None) niche . 2+254"
         (Codegen_support.describe (Codegen_support.option Codegen_support.unit)));
@@ -216,7 +216,7 @@ let () =
   Codegen_support.test "Never has zero size" (fun () ->
       Codegen_support.expect_string ~expected:"0/1 zero" (Codegen_support.describe Never));
   Codegen_support.test "a variant's discriminant is its tag value or its niche value" (fun () ->
-      let layout = Codegen_support.layout (Codegen_support.option Codegen_support.bool) in
+      let layout = Codegen_support.lay_out (Codegen_support.option Codegen_support.bool) in
       (match Memory_layout.compute_discriminant layout "None" with
       | Niche_value { value; _ } when Z.equal value (Z.of_int 2) -> ()
       | _ -> Codegen_support.fail "None is not stored as 2");
@@ -228,19 +228,24 @@ let () =
 let () =
   let int64 = Ground.make_builtin Int64 in
   let bool = Ground.make_builtin Bool in
-  let list element = Codegen_support.standard "list" "List" ~arguments:[ Type element ] () in
-  let option value = Codegen_support.standard "option" "Option" ~arguments:[ Type value ] () in
+  let list element =
+    Codegen_support.make_standard_type "list" "List" ~arguments:[ Type element ] ()
+  in
+  let option value =
+    Codegen_support.make_standard_type "option" "Option" ~arguments:[ Type value ] ()
+  in
   Codegen_support.test "the standard library's Option of a List has no tag" (fun () ->
       Codegen_support.expect_string
         ~expected:"24/8 niche-encoded(Some; None=0 at value.storage.buffer)"
-        (Codegen_support.standard_layout (option (list int64))));
+        (Codegen_support.show_standard_layout (option (list int64))));
   Codegen_support.test "the standard library's Option of a Bool is one byte" (fun () ->
       Codegen_support.expect_int ~expected:1
         (Memory_layout.of_type
            (Memory_layout.create Codegen_support.host
-              ~shape_of:(Monomorphic.compute_shape Codegen_support.standard_context))
+              ~compute_shape:(Monomorphic.compute_shape Codegen_support.standard_context))
            (option bool))
           .size);
   Codegen_support.test "a String is its storage's buffer, length, and capacity" (fun () ->
       Codegen_support.expect_string ~expected:"24/8 struct(storage@0) niche storage.buffer 0+1"
-        (Codegen_support.standard_layout (Codegen_support.standard "text" "String" ())))
+        (Codegen_support.show_standard_layout
+           (Codegen_support.make_standard_type "text" "String" ())))

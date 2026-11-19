@@ -1,0 +1,5 @@
+fn has_zero(numbers: Set[Int64]) -> Bool
+  ensures result == (exists member: Int64 => numbers.model().contains(member) && member == 0)
+{
+  exists number in numbers => number == 0
+}

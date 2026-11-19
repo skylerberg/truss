@@ -1,4 +1,4 @@
-let bug format = Compiler_bug.bug ~stage:"MIR" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"MIR" format
 
 type block = int
 type early_exit = { resume : block; returned : Tree.local option }
@@ -10,7 +10,6 @@ type loop_head = {
   part : Tree.local;
   lent : Tree.lent_element option;
   body : block;
-  binding_count : int;
   blocks : block list;
   after : block;
   loop : Tree.loop;
@@ -18,7 +17,7 @@ type loop_head = {
 
 type terminator =
   | Goto of block
-  | Branch of { condition : Tree.operand; yes : block; no : block; is_if_condition : bool }
+  | Branch of { condition : Tree.operand; yes : block; no : block }
   | For of loop_head
   | Fork of { fork : Core.origin; concurrent : bool; branches : branch list; join : block option }
   | Join of { fork : Core.origin; next : block }
@@ -76,12 +75,12 @@ let canonicalize (blocks : basic_block array) =
   visit 0;
   let renumbered = Array.make (Array.length blocks) None in
   List.iteri (fun index block -> renumbered.(block) <- Some index) !order;
-  let target block =
+  let read_target block =
     match renumbered.(block) with
     | Some index -> index
-    | None -> bug "a jump to block %d, which is unreachable" block
+    | None -> raise_bug "a jump to block %d, which is unreachable" block
   in
-  let reached blocks = List.filter_map (fun block -> renumbered.(block)) blocks in
+  let renumber_blocks blocks = List.filter_map (fun block -> renumbered.(block)) blocks in
   let innermost = Hashtbl.create 4 in
   List.iter
     (fun loop ->
@@ -96,21 +95,22 @@ let canonicalize (blocks : basic_block array) =
             inside
       | _ -> ())
     !order;
-  let loop_of block =
+  let renumber_loop block =
     match Hashtbl.find_opt innermost block with
-    | Some (loop, _) -> target loop
-    | None -> bug "the end of an iteration outside every loop"
+    | Some (loop, _) -> read_target loop
+    | None -> raise_bug "the end of an iteration outside every loop"
   in
   let renumber at = function
-    | Goto block -> Goto (target block)
-    | Branch branch -> Branch { branch with yes = target branch.yes; no = target branch.no }
+    | Goto block -> Goto (read_target block)
+    | Branch branch ->
+        Branch { branch with yes = read_target branch.yes; no = read_target branch.no }
     | For loop ->
         For
           {
             loop with
-            body = target loop.body;
-            blocks = reached loop.blocks;
-            after = target loop.after;
+            body = read_target loop.body;
+            blocks = renumber_blocks loop.blocks;
+            after = read_target loop.after;
           }
     | Fork fork ->
         Fork
@@ -120,13 +120,13 @@ let canonicalize (blocks : basic_block array) =
               List.filter_map
                 (fun (branch : branch) ->
                   Option.map
-                    (fun entry -> { entry; blocks = reached branch.blocks })
+                    (fun entry -> { entry; blocks = renumber_blocks branch.blocks })
                     renumbered.(branch.entry))
                 fork.branches;
             join = Option.bind fork.join (fun join -> renumbered.(join));
           }
-    | Join { fork; next } -> Join { fork; next = target next }
-    | Yield yielded -> Yield { yielded with resume = target yielded.resume }
+    | Join { fork; next } -> Join { fork; next = read_target next }
+    | Yield yielded -> Yield { yielded with resume = read_target yielded.resume }
     | Cancel cancel ->
         Cancel
           {
@@ -137,10 +137,10 @@ let canonicalize (blocks : basic_block array) =
         Resume
           {
             winner;
-            exits = List.map (fun exit -> { exit with resume = target exit.resume }) exits;
-            next = target next;
+            exits = List.map (fun exit -> { exit with resume = read_target exit.resume }) exits;
+            next = read_target next;
           }
-    | Iteration_end _ -> Iteration_end { loop = loop_of at }
+    | Iteration_end _ -> Iteration_end { loop = renumber_loop at }
     | (Return _ | Unreachable | Written_unreachable | Todo) as other -> other
   in
   Array.of_list
@@ -154,7 +154,7 @@ let find_iteration_loop = function Iteration_end { loop } -> Some loop | _ -> No
 let read_loop_head (body : body) loop =
   match body.blocks.(loop).terminator with
   | For head -> head
-  | _ -> bug "the end of an iteration names block %d, which is no loop" loop
+  | _ -> raise_bug "the end of an iteration names block %d, which is no loop" loop
 
 let list_block_successors (body : body) block =
   let terminator = body.blocks.(block).terminator in
@@ -166,5 +166,5 @@ let list_block_successors (body : body) block =
   @ list_successors terminator
 
 module For_testing = struct
-  let successors = list_successors
+  let list_successors = list_successors
 end

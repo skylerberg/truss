@@ -1,4 +1,4 @@
-let truss_blocks text =
+let list_truss_blocks text =
   let rec loop inside current blocks = function
     | [] -> List.rev blocks
     | line :: rest ->
@@ -10,7 +10,7 @@ let truss_blocks text =
         else loop (trimmed = "```truss") [] blocks rest
   in
   let dedent block =
-    let leading line =
+    let count_leading line =
       let rec count index =
         if index < String.length line && line.[index] = ' ' then count (index + 1) else index
       in
@@ -18,36 +18,30 @@ let truss_blocks text =
     in
     let indentation =
       match List.find_opt (fun line -> String.trim line <> "") block with
-      | Some line -> leading line
+      | Some line -> count_leading line
       | None -> 0
     in
-    String.concat "\n"
-      (List.map
-         (fun line ->
-           if String.length line >= indentation then
-             String.sub line indentation (String.length line - indentation)
-           else "")
-         block)
+    String.concat "\n" (List.map (String.drop_first indentation) block)
   in
   List.map dedent (loop false [] [] (String.split_on_char '\n' text))
 
-let block_after document marker =
-  let rec after_marker = function
+let list_block_after document marker =
+  let rec skip_past_marker = function
     | [] -> []
-    | line :: rest -> if String.includes ~affix:marker line then rest else after_marker rest
+    | line :: rest -> if String.includes ~affix:marker line then rest else skip_past_marker rest
   in
-  let rec after_fence = function
+  let rec skip_past_fence = function
     | [] -> []
-    | line :: rest -> if String.starts_with ~prefix:"```" line then rest else after_fence rest
+    | line :: rest -> if String.starts_with ~prefix:"```" line then rest else skip_past_fence rest
   in
-  let rec until_fence lines = function
+  let rec take_until_fence lines = function
     | [] -> List.rev lines
     | line :: rest ->
         if String.starts_with ~prefix:"```" line then List.rev lines
-        else until_fence (line :: lines) rest
+        else take_until_fence (line :: lines) rest
   in
-  until_fence [] (after_fence (after_marker (String.split_on_char '\n' document)))
+  take_until_fence [] (skip_past_fence (skip_past_marker (String.split_on_char '\n' document)))
 
-let words lines =
+let list_words lines =
   List.sort_uniq compare
     (List.filter (( <> ) "") (List.concat_map (String.split_on_char ' ') lines))

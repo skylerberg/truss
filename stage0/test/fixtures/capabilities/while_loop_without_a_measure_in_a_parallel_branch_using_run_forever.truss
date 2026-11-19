@@ -1,0 +1,7 @@
+fn f(count: UInt32)
+  uses RunForever
+{
+  parallel {
+    while count != 0 {}
+  }
+}

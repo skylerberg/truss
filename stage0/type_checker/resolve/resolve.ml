@@ -1,8 +1,13 @@
 module Names = Names
+module Namespace = Namespace
 module Parts = Parts
 module Prelude = Prelude
 
-type specification_function = Walk.specification_function = Log | Power | Time | Calls
+type specification_function = Walk.specification_function =
+  | Log
+  | Power
+  | Call_cost of Metric.t
+  | Calls
 
 type target = Walk.target =
   | Binding
@@ -86,18 +91,18 @@ let find_declared_name (definition : Syntax.definition) : Syntax.name option =
   | Impl _ | Test _ | Definition_error _ -> None
 
 let resolve (lookups : Names.lookups) (key : Names.key) section =
-  let definition = lookups.definition key and spans = lookups.spans key in
+  let definition = lookups.read_definition key and spans = lookups.read_spans key in
   let module_ = key.module_ in
   let state = Walk.create lookups key ~spans ~walked:section in
   let container =
     Option.map
-      (fun (container : Names.key) -> (container.path, lookups.definition container))
-      (lookups.container key)
+      (fun (container : Names.key) -> (container.path, lookups.read_definition container))
+      (lookups.find_container key)
   in
   let is_walked =
     (not (Names.is_broken lookups key Header))
     &&
-    match lookups.container key with
+    match lookups.find_container key with
     | Some container -> not (Names.is_broken lookups container Header)
     | None -> true
   in
@@ -118,21 +123,21 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
                name)
       | _ -> ())
   | _ -> ());
-  if key.ordinal > 0 then begin
+  if key.ordinal > 0 && Path.is_resolved key.path then begin
     let span =
       match find_declared_name definition with
       | Some name -> spans.(name.id)
-      | None -> Source.Definition_span.zero_width spans.(definition.id).start
+      | None -> Source.Definition_span.make_zero_width spans.(definition.id).start
     in
-    let first = lookups.place { key with ordinal = 0 } in
+    let first = lookups.read_place { key with ordinal = 0 } in
     let first =
-      if first.file <> (lookups.place key).file then Path.show_file first.file else "this file"
+      if first.file <> (lookups.read_place key).file then Path.show_file first.file else "this file"
     in
     Walk.report state Duplicate_definition span
       (Printf.sprintf "%s is already defined in %s, so this definition is never used."
          (Path.show key.path) first)
   end;
-  let outcome () =
+  let compute_outcome () =
     let walked = Walk.lookup_section_names state section in
     let resolved =
       {
@@ -156,20 +161,23 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
     | Interface | Contract -> is_walked
     | Body -> is_walked && not (Names.is_broken lookups key Body)
   in
-  if is_parsed || (Walk.lookup_section_names state section).diagnostics <> [] then Some (outcome ())
+  if is_parsed || (Walk.lookup_section_names state section).diagnostics <> [] then
+    Some (compute_outcome ())
   else None
 
 let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
     ~(used : string list option) =
   let module_ = path.module_ in
-  let is_recovered (item : Syntax.definition Syntax.item) =
-    match item.value.kind with Definition_error _ -> true | _ -> item.positions.recovered <> []
+  let has_syntax_error (item : Syntax.definition Syntax.item) =
+    match item.value.kind with
+    | Definition_error _ -> true
+    | _ -> item.positions.syntax_errors <> []
   in
   let used =
     if
       List.exists
         (fun (top_level : Syntax.top_level) ->
-          is_recovered top_level.definition || List.exists is_recovered top_level.methods)
+          has_syntax_error top_level.definition || List.exists has_syntax_error top_level.methods)
         file.definitions
     then None
     else used
@@ -183,12 +191,14 @@ let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : S
        (fun seen (item : Syntax.path Syntax.item) ->
          let span = Source.make_span item.base item.stop in
          let used_module = Names.resolve_used_module lookups ~from:module_ item.value in
-         let last = Names.extract_last_name used_module in
-         if used_module = Intrinsic.module_ && module_.package <> Path.standard_package then
-           report Intrinsic_import span "Only the `standard` package can use `standard::intrinsic`."
+         let last = Names.Scope.extract_last_name used_module in
+         if Names.Scope.is_restricted_module ~from:module_ used_module then
+           report Intrinsic_import span Names.Scope.restricted_module_message
          else if not (Names.is_visible_module lookups ~from:module_ used_module) then
+           let missing = Printf.sprintf "No module `%s` exists." (Path.show_module used_module) in
            report Unknown_module span
-             (Printf.sprintf "No module `%s` exists." (Path.show_module used_module))
+             (if Names.is_visible_package lookups ~from:module_ used_module.package then missing
+              else missing ^ " " ^ Names.Scope.describe_path_start module_)
          else if List.mem last seen then
            report Duplicate_import span
              (Printf.sprintf
@@ -225,15 +235,15 @@ type trait_header = {
 let make_trait_header (definition : Syntax.definition) (resolved : resolved) =
   match definition.kind with
   | Trait { requires; members; _ } ->
-      let member_names select =
+      let list_member_names select =
         List.filter_map (fun (line : Syntax.trait_member Syntax.node) -> select line.kind) members
       in
       Some
         {
           associated =
-            member_names (function Associated_type (name, _) -> Some name.text | _ -> None);
+            list_member_names (function Associated_type (name, _) -> Some name.text | _ -> None);
           capabilities =
-            member_names (function Associated_capability name -> Some name.text | _ -> None);
+            list_member_names (function Associated_capability name -> Some name.text | _ -> None);
           required =
             List.filter_map
               (fun (bound : Syntax.path_type) ->
@@ -241,6 +251,6 @@ let make_trait_header (definition : Syntax.definition) (resolved : resolved) =
                 | Some (Definition (_, path)) -> Some path
                 | _ -> None)
               requires;
-          laws = member_names (function Law law -> Some law.name.text | _ -> None);
+          laws = list_member_names (function Law law -> Some law.name.text | _ -> None);
         }
   | _ -> None

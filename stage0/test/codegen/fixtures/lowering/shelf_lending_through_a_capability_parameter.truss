@@ -1,0 +1,17 @@
+type Shelf(books: List[Int64])
+
+fn Shelf.book(self, index: UInt64, check: (fn() uses generic Mine)) lends Int64
+  uses generic Mine
+{
+  self.pick(index, check)
+}
+
+fn Shelf.pick(self, index: UInt64, check: (fn() uses generic Mine)) lends Int64
+  uses generic Mine
+{
+  self.books[index]
+}
+
+fn read_first_book(shelf: Shelf) -> Int64 {
+  shelf.book(0, check: fn() {})
+}

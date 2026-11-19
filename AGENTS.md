@@ -3,8 +3,11 @@
 ## Writing
 
 These rules apply to everything written in this repository: identifiers,
-code comments, error messages, documents, commit messages, and pull request
-descriptions.
+error messages, documents, commit messages, and pull request descriptions.
+
+Do not write comments, in code or in any other tracked file: CI rejects
+them. A name, the code, or a test states the reason instead, as
+[IMPLEMENTATION.md](IMPLEMENTATION.md#comments) describes.
 
 The reader is a compiler engineer, human or agent. Write what you would say
 to one aloud. Clear writing here means precise terms and direct sentences.

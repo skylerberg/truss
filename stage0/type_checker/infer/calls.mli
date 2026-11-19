@@ -9,23 +9,23 @@ val check_function_value_call :
   Types.ty
 
 val check_argument :
-  State.state -> State.env -> Syntax.expression -> Types.parameter_info -> Types.mode
-
-val match_arguments :
   State.state ->
+  State.env ->
   Syntax.expression ->
-  Types.parameter_info list ->
-  Syntax.argument list ->
-  record:bool ->
-  (Syntax.argument * int) list * string list
+  Types.parameter_info ->
+  has_generic_type:bool ->
+  Types.mode
 
 val check_arguments :
   State.state ->
   State.env ->
+  ?constructor:string ->
+  Syntax.expression ->
   Types.parameter_info list ->
-  (Syntax.argument * int) list ->
-  offset:int ->
-  Tables.argument list
+  declared:Types.parameter_info list ->
+  Syntax.argument list ->
+  has_receiver:bool ->
+  (Tables.argument list * string list, Types.ty) result
 
 val check_named_call :
   State.state ->
@@ -36,6 +36,14 @@ val check_named_call :
   Types.signature ->
   type_arguments:Syntax.bracket_item list ->
   Syntax.argument list ->
+  Types.ty
+
+val check_record_update :
+  State.state ->
+  State.env ->
+  Syntax.expression ->
+  Syntax.expression ->
+  Syntax.update list ->
   Types.ty
 
 val construct :

@@ -1,0 +1,17 @@
+trait Wraps[Source] {
+  fn wrap(source: Source) -> Int64
+}
+
+type Box(size: Int64)
+
+impl Wraps[fn(Int64) -> Int64] for Box {
+  fn wrap(source: fn(Int64) -> Int64) -> Int64 {
+    1
+  }
+}
+
+impl Wraps[fn(Bool) -> Int64] for Box {
+  fn wrap(source: fn(Bool) -> Int64) -> Int64 {
+    2
+  }
+}

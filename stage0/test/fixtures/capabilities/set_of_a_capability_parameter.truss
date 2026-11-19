@@ -1,4 +1,4 @@
-fn f[capability Granted]()
+fn f(visit: (fn() uses generic Granted))
   uses Granted.Uses
 {
 }

@@ -1,10 +1,12 @@
 fn hang() -> Bool
+  uses RunForever
   ensures false
 {
   while true {}
 }
 
 fn f(x: Int64) -> Int64
+  uses RunForever
   ensures result <= 0
 {
   if x > 0 {

@@ -1,0 +1,13 @@
+fn f(items: own List[String]) -> List[String]
+  ensures result.length() == items.length()
+  ensures forall i in 0..items.length() => identical(result.model()[i], items.model()[i])
+{
+  var moved: List[String] = []
+  for item in own items
+    invariant moved.length() == visited.length()
+    invariant forall i in 0..visited.length() => identical(moved.model()[i], visited[i])
+  {
+    mut moved.push(own item)
+  }
+  moved
+}

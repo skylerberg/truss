@@ -1,8 +1,0 @@
-public type Point(column: Int64, row: Int64)
-
-impl Display for Point {
-  fn display(self, output: mut TextBuilder)
-  {
-    mut output.write("a point of a drawing")
-  }
-}

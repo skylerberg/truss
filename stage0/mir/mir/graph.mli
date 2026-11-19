@@ -8,7 +8,6 @@ type loop_head = {
   part : Tree.local;
   lent : Tree.lent_element option;
   body : block;
-  binding_count : int;
   blocks : block list;
   after : block;
   loop : Tree.loop;
@@ -16,7 +15,7 @@ type loop_head = {
 
 type terminator =
   | Goto of block
-  | Branch of { condition : Tree.operand; yes : block; no : block; is_if_condition : bool }
+  | Branch of { condition : Tree.operand; yes : block; no : block }
   | For of loop_head
   | Fork of { fork : Core.origin; concurrent : bool; branches : branch list; join : block option }
   | Join of { fork : Core.origin; next : block }
@@ -56,5 +55,5 @@ val read_loop_head : body -> block -> loop_head
 val list_block_successors : body -> block -> block list
 
 module For_testing : sig
-  val successors : terminator -> block list
+  val list_successors : terminator -> block list
 end

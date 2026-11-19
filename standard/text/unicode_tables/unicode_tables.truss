@@ -196,7 +196,6 @@ fn pool_range_of(index: Slice[UInt32], code: UInt32) -> Option[PoolRange]
 }
 
 fn append_pool_range(output: mut List[UInt32], pool: Slice[UInt32], range: PoolRange)
-  cost time finite
 {
   var at: UInt64 = intrinsic::convert(range.start)
   var remaining = range.length
@@ -210,7 +209,6 @@ fn append_pool_range(output: mut List[UInt32], pool: Slice[UInt32], range: PoolR
 }
 
 internal fn append_canonical_decomposition(output: mut List[UInt32], code: UInt32) -> Bool
-  cost time finite
 {
   match pool_range_of(unicode_data::canonical_decomposition_index[..], code: code) {
     Some(range) => {
@@ -222,7 +220,6 @@ internal fn append_canonical_decomposition(output: mut List[UInt32], code: UInt3
 }
 
 internal fn append_compatibility_decomposition(output: mut List[UInt32], code: UInt32) -> Bool
-  cost time finite
 {
   match pool_range_of(unicode_data::compatibility_decomposition_index[..], code: code) {
     Some(range) => {

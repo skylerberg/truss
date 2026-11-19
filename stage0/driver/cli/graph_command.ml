@@ -1,40 +1,13 @@
 type direction = Dependents | Dependencies
 
-let has_suffix names ~suffix =
-  let skipped = List.length names - List.length suffix in
-  skipped >= 0 && List.filteri (fun index _ -> index >= skipped) names = suffix
-
-let matches (argument : Path_argument.t) (path : Path.t) =
-  let suffix = argument.prefix @ [ argument.last ] in
-  let is_named (module_ : Path.module_) name =
-    has_suffix (Path.list_module_parts module_ @ [ name ]) ~suffix
-  in
-  match (path, argument.member) with
-  | Top { module_; name }, None -> is_named module_ name
-  | (Method { owner; name; _ } | Member_constant { owner; name }), Some member -> (
-      name = member
-      &&
-      match owner with
-      | Top { module_; name } | Impl { for_type = Top { module_; name }; _ } ->
-          is_named module_ name
-      | _ -> false)
-  | (Method { name; _ } | Member_constant { name; _ }), None ->
-      argument.prefix = [] && name = argument.last
-  | _ -> false
-
-let find_definitions snapshot database argument =
+let list_definitions snapshot database argument =
   let packages = List.map snd (Workspace.list_packages snapshot) in
-  let names = Database.make_name_lookups database packages in
-  List.sort_uniq Path.compare
-    (List.concat_map
-       (fun package ->
-         List.filter_map
-           (fun (declaration : Resolve.Names.declaration) ->
-             if declaration.ordinal = 0 && matches argument declaration.path then
-               Some declaration.path
-             else None)
-           (names.package_declarations package))
-       packages)
+  let names = Database.make_name_lookups database in
+  List.filter_map
+    (function
+      | Path_argument.Definition path when Option.is_some (names.find_key path) -> Some path
+      | Package _ | Module _ | Definition _ -> None)
+    (Path_argument.resolve names packages argument)
 
 type line = { reader : Path.t; read_kinds : string list; read : Path.t; reader_kinds : string list }
 
@@ -46,13 +19,13 @@ module Reader_groups = Hashtbl.Make (Structural_key.Make (struct
   type t = Path.t * Path.t * string list
 end))
 
-let group (type group) (module Groups : Hashtbl.S with type key = group) key value items =
+let group (type group) (module Groups : Hashtbl.S with type key = group) key_of value_of items =
   let groups = Groups.create 16 in
   List.iter
     (fun item ->
-      let group = key item in
+      let group = key_of item in
       Groups.replace groups group
-        (value item :: Option.value (Groups.find_opt groups group) ~default:[]))
+        (value_of item :: Option.value (Groups.find_opt groups group) ~default:[]))
     items;
   Groups.fold
     (fun group values groups -> (group, List.sort_uniq compare values) :: groups)
@@ -95,12 +68,12 @@ let describe_line line =
     (Output.show_list line.reader_kinds)
 
 let to_json line =
-  let strings items = Json.List (List.map (fun item -> Json.String item) items) in
+  let encode_strings items = Json.List (List.map (fun item -> Json.String item) items) in
   Json.Object
     [
       ("reader", Json.String (Path.show line.reader));
-      ("parts", strings line.reader_kinds);
-      ("reads", strings line.read_kinds);
+      ("parts", encode_strings line.reader_kinds);
+      ("reads", encode_strings line.read_kinds);
       ("of", Json.String (Path.show line.read));
     ]
 
@@ -108,9 +81,14 @@ let run ~direction ~name =
   let argument = Path_argument.parse name in
   let snapshot, _ = Command_packages.load_current () in
   let database = Workspace.open_database snapshot in
-  match find_definitions snapshot database argument with
-  | [] -> Outcome.cannot_run "No definition named %s in this worktree." name
+  match list_definitions snapshot database argument with
+  | [] -> Outcome.raise_cannot_run "No definition named %s is visible here." name
   | targets ->
+      ignore
+        (Database.prove database
+           (List.concat_map
+              (Workspace.list_package_files snapshot)
+              (List.map snd (Workspace.list_packages snapshot))));
       let lines =
         list_lines
           (match direction with

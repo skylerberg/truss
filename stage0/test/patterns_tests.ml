@@ -1,62 +1,76 @@
 let check packages =
   Database.For_testing.list_diagnostics
     [ Resolve; Interface; Infer; Patterns ]
-    (Support.database packages)
+    (Support.make_database packages)
 
-let one_diagnostic = Support.one_diagnostic ~check
-let fine text = Support.no_diagnostics ~check [ ("app::main", text) ]
+let expect_one_diagnostic = Support.expect_one_diagnostic ~check
+let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
 let priority = Fixtures.Patterns.priority
 
-let message text =
+let read_message text =
   let packages = Support.setup [ ("app::main", text) ] in
-  match check packages (Support.file_of "app::main") with
+  match check packages (Support.parse_file "app::main") with
   | [ diagnostic ] -> diagnostic.message
   | actual -> failwith (Printf.sprintf "%d diagnostics" (List.length actual))
 
 let () =
   Harness.test "a missing case is named" (fun () ->
       let text = priority ^ Fixtures.Patterns.option_match_missing_urgent in
-      let actual = message text in
+      let actual = read_message text in
       let expected = "`Some(Urgent(_))` is not covered" in
       if not (String.includes ~affix:expected actual) then Harness.fail "message %S" actual);
   Harness.test "a missing case's fix adds an arm with todo" (fun () ->
-      one_diagnostic Fixtures.Patterns.bool_match_missing_false "patterns.not_covered"
+      expect_one_diagnostic Fixtures.Patterns.bool_match_missing_false "patterns.not_covered"
         ~fixed:Fixtures.Patterns.bool_match_missing_false_fixed);
   Harness.test "an arm earlier arms cover is an error with a fix that deletes it" (fun () ->
-      one_diagnostic Fixtures.Patterns.wildcard_arm_after_every_case "patterns.unreachable_arm"
-        ~fixed:Fixtures.Patterns.wildcard_arm_after_every_case_fixed);
+      expect_one_diagnostic Fixtures.Patterns.wildcard_arm_after_every_case
+        "patterns.unreachable_arm" ~fixed:Fixtures.Patterns.wildcard_arm_after_every_case_fixed);
   Harness.test "an alternative the alternatives before it cover is an error" (fun () ->
-      one_diagnostic Fixtures.Patterns.repeated_none_alternative "patterns.unreachable_alternative");
+      expect_one_diagnostic Fixtures.Patterns.repeated_none_alternative
+        "patterns.unreachable_alternative");
   Harness.test "an arm with a guard does not cover its pattern" (fun () ->
-      one_diagnostic Fixtures.Patterns.match_with_only_a_guarded_arm "patterns.not_covered");
+      expect_one_diagnostic Fixtures.Patterns.match_with_only_a_guarded_arm "patterns.not_covered");
   Harness.test "integer ranges that cover the type are exhaustive" (fun () ->
-      fine Fixtures.Patterns.byte_ranges_covering_the_type);
+      expect_fine Fixtures.Patterns.byte_ranges_covering_the_type);
   Harness.test "integer ranges that leave a gap name it" (fun () ->
-      let actual = message Fixtures.Patterns.byte_ranges_with_a_gap in
+      let actual = read_message Fixtures.Patterns.byte_ranges_with_a_gap in
       if not (String.includes ~affix:"`100`" actual) then Harness.fail "message %S" actual);
   Harness.test "a match on a string needs a pattern that matches everything" (fun () ->
-      one_diagnostic Fixtures.Patterns.string_match_without_a_wildcard "patterns.not_covered");
+      expect_one_diagnostic Fixtures.Patterns.string_match_without_a_wildcard "patterns.not_covered");
   Harness.test "a match over several values is checked as one" (fun () ->
-      fine Fixtures.Patterns.match_on_two_values_covering_every_pair);
+      expect_fine Fixtures.Patterns.match_on_two_values_covering_every_pair);
   Harness.test "a match over several values misses a combination" (fun () ->
-      one_diagnostic Fixtures.Patterns.match_on_two_values_missing_a_pair "patterns.not_covered");
+      expect_one_diagnostic Fixtures.Patterns.match_on_two_values_missing_a_pair
+        "patterns.not_covered");
   Harness.test "a pattern that can fail cannot be a let's" (fun () ->
-      one_diagnostic Fixtures.Patterns.let_with_a_refutable_pattern "patterns.refutable");
+      expect_one_diagnostic Fixtures.Patterns.let_with_a_refutable_pattern "patterns.refutable");
   Harness.test "a record pattern cannot fail" (fun () ->
-      fine Fixtures.Patterns.let_with_a_record_pattern);
+      expect_fine Fixtures.Patterns.let_with_a_record_pattern);
   Harness.test "a constant in a pattern is its value" (fun () ->
-      fine Fixtures.Patterns.constant_arm)
+      expect_fine Fixtures.Patterns.constant_arm);
+  Harness.test "an arm that a binding with a constant's name covers is fixed by the constant's path"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Patterns.arm_after_a_variant_binding_named_like_a_constant
+        "patterns.unreachable_arm"
+        ~says:
+          "`lucky` in an earlier arm binds a variable, which matches every value. To match the \
+           constant, write `app::main::lucky`."
+        ~fixed:Fixtures.Patterns.arm_after_a_variant_binding_named_like_a_constant_fixed);
+  Harness.test "an arm that the constant also covers is deleted" (fun () ->
+      expect_one_diagnostic Fixtures.Patterns.arm_that_the_constant_also_covers
+        "patterns.unreachable_arm" ~fixed:Fixtures.Patterns.arm_that_the_constant_also_covers_fixed);
+  Harness.test "a field bound by its own name is not read as a constant" (fun () ->
+      expect_one_diagnostic Fixtures.Patterns.arm_after_a_field_bound_by_its_name
+        "patterns.unreachable_arm"
+        ~fixed:Fixtures.Patterns.arm_after_a_field_bound_by_its_name_fixed)
 
 let () =
-  let codes_of text =
+  let list_codes text =
     let packages = Support.setup [ ("app::main", text) ] in
-    (match Support.parse_errors packages (Support.file_of "app::main") with
-    | [] -> ()
-    | errors -> Harness.fail "the test input does not parse: %s" (String.concat " " errors));
-    Support.codes (check packages (Support.file_of "app::main"))
+    Support.list_codes (Support.run_check ~check packages "app::main")
   in
   let expect text expected =
-    match codes_of text with
+    match list_codes text with
     | actual when actual = expected -> ()
     | actual -> Harness.fail "found [%s]" (String.concat "; " actual)
   in
@@ -79,13 +93,15 @@ let () =
       expect Fixtures.Patterns.ranges_from_an_unevaluated_constant [])
 
 let () =
-  let codes_of text =
-    Support.codes (check (Support.setup [ ("app::main", text) ]) (Support.file_of "app::main"))
+  let list_codes text =
+    Support.list_codes
+      (check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main"))
   in
   Harness.test "a record constant covers the record it is" (fun () ->
-      one_diagnostic Fixtures.Patterns.record_constant_and_record_arms "patterns.unreachable_arm");
+      expect_one_diagnostic Fixtures.Patterns.record_constant_and_record_arms
+        "patterns.unreachable_arm");
   Harness.test "a match on a type that failed to parse reports nothing more" (fun () ->
-      match codes_of Fixtures.Patterns.match_on_a_broken_type with
+      match list_codes Fixtures.Patterns.match_on_a_broken_type with
       | actual when List.mem "patterns.not_covered" actual ->
           Harness.fail "found [%s]" (String.concat "; " actual)
       | _ -> ());
@@ -93,7 +109,7 @@ let () =
       List.iter
         (fun argument ->
           match
-            codes_of
+            list_codes
               ("type Entry = {\n\
                \  name: String\n\
                 }\n\n\
@@ -104,20 +120,21 @@ let () =
           | actual -> Harness.fail "found [%s]" (String.concat "; " actual))
         [ "own name"; "\"${name}\"" ]);
   Harness.test "a sub-pattern that failed to type makes no arm unreachable" (fun () ->
-      match codes_of Fixtures.Patterns.arm_with_a_misspelled_variant with
+      match list_codes Fixtures.Patterns.arm_with_a_misspelled_variant with
       | actual when List.exists (fun code -> String.starts_with ~prefix:"patterns." code) actual ->
           Harness.fail "found [%s]" (String.concat "; " actual)
       | _ -> ())
 
 let () =
   Harness.test "an alternative that an earlier arm covers is unreachable, even the first" (fun () ->
-      one_diagnostic Fixtures.Patterns.alternative_an_earlier_arm_covers
+      expect_one_diagnostic Fixtures.Patterns.alternative_an_earlier_arm_covers
         "patterns.unreachable_alternative"
         ~fixed:Fixtures.Patterns.alternative_an_earlier_arm_covers_fixed);
   Harness.test "a nested alternative that the one before covers is unreachable" (fun () ->
-      one_diagnostic Fixtures.Patterns.repeated_nested_alternative
+      expect_one_diagnostic Fixtures.Patterns.repeated_nested_alternative
         "patterns.unreachable_alternative")
 
 let () =
   Harness.test "character literals and ranges cover their values" (fun () ->
-      one_diagnostic Fixtures.Patterns.character_range_and_literal_arms "patterns.unreachable_arm")
+      expect_one_diagnostic Fixtures.Patterns.character_range_and_literal_arms
+        "patterns.unreachable_arm")

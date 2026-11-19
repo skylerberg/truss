@@ -55,7 +55,6 @@ module Code : sig
     | Lends_own
     | Repeated_clause
     | Cost_word
-    | Finite_not_time
     | Loop_cost_bound
     | Function_type_names
     | Misplaced_requires
@@ -109,6 +108,7 @@ module Code : sig
     | Not_a_constant
     | Alternative_bindings
     | Not_a_generic_parameter
+    | Unconstrained_capability_parameter
     | Null
 
   type types =
@@ -129,6 +129,7 @@ module Code : sig
     | Unknown_member
     | Ambiguous_method
     | Private_field
+    | Member_not_visible
     | Not_callable
     | Not_a_value
     | No_impl
@@ -138,6 +139,9 @@ module Code : sig
     | Integer_for_float
     | Negated_unsigned
     | Unused_value
+    | Unbounded_time
+    | Upper_bound_in_exact_bound
+    | Cost_of_other_resource
     | Not_assignable
     | Wrong_try
     | Lambda_needs_type
@@ -153,7 +157,6 @@ module Code : sig
     | Not_a_type
     | Not_a_trait
     | Not_a_capability
-    | Misplaced_capability_parameter
     | Arity
     | Argument_kind
     | Unsatisfied_bound
@@ -163,6 +166,7 @@ module Code : sig
     | Not_constant
     | Constant_overflow
     | Main_signature
+    | No_real_implementation
     | Duplicate_field
     | Cannot_derive
     | Derives_inferred
@@ -173,14 +177,20 @@ module Code : sig
     | Extra_member
     | Signature_mismatch
     | Missing_required_impl
-    | Implements_panic
+    | Implements_built_in_capability
     | Impl_uses
     | Unknown_associated_type
     | Unknown_associated_capability
     | Associated_type_not_fixed
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
-  type usage = Unused_variable | Unreachable_code
+
+  type usage =
+    | Unused_variable
+    | Unused_function
+    | Unused_constant
+    | Unreachable_code
+    | Self_comparison
 
   type ownership =
     | Views_temporary
@@ -198,6 +208,7 @@ module Code : sig
     | Lends_other_parameter
     | Read_only_view
     | Lent_mut_in_variant
+    | Needs_lent_mut
     | Task_outlives_view
 
   type capabilities =
@@ -255,9 +266,11 @@ end
 
 type 'span edit = { span : 'span; replacement : string }
 type 'span fix = { title : string; edits : 'span edit list }
+type severity = Error | Warning
 
 type 'span diagnostic = {
   code : Code.t;
+  severity : severity;
   message : string;
   span : 'span;
   notes : ('span * string) list;
@@ -268,6 +281,7 @@ type t = Source.span diagnostic
 type in_definition = Source.Definition_span.t diagnostic
 
 val make :
+  ?severity:severity ->
   ?notes:('span * string) list ->
   ?fixes:'span fix list ->
   code:Code.t ->
@@ -275,19 +289,19 @@ val make :
   string ->
   'span diagnostic
 
+val is_error : _ diagnostic -> bool
 val fix : string -> 'span edit list -> 'span fix
 val replace : 'span -> string -> 'span edit
 val insert : 'span -> string -> 'span edit
 val delete : 'span -> 'span edit
-val edit_distance : string -> string -> int
-val find_closest : string -> string list -> string option
+val list_spelling_fixes : 'span -> written:string -> string list -> 'span fix list
+val show_count : int -> string -> string -> string
 
 type reported
 
 val make_reported : _ diagnostic -> reported
-val make_recovered : _ -> reported
+val reported_elsewhere : reported
 val map_spans : ('a -> 'b) -> 'a diagnostic -> 'b diagnostic
-val apply_fix : string -> Source.span fix -> string
 val apply_edits : string -> Source.span edit list -> string
 val list_machine_applicable : t list -> t list
 
@@ -302,7 +316,6 @@ end
 
 val select_shown : t list -> t list
 val render : Source.t -> t -> string
-val to_json : Source.t -> t list -> string
 val to_json_object : Source.t -> t -> string
 val encode_json_string : string -> string
 val quote : string -> string

@@ -1,0 +1,12 @@
+test "prints and passes"
+  uses Console
+{
+  Console.print_line("printed by a passing test")
+}
+
+test "prints and fails"
+  uses Console
+{
+  Console.print_line("printed by a failing test")
+  assert 1 + 1 == 3
+}

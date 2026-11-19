@@ -1,0 +1,5 @@
+fn f(x: Int64, y: Int64, z: Int64)
+  requires x > 0 && y > 0 && z > 0
+  ensures x * x * x + y * y * y != z * z * z
+{
+}

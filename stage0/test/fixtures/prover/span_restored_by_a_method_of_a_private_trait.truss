@@ -1,0 +1,16 @@
+trait Restoring {
+  fn restore(mut self)
+}
+
+impl Restoring for Span {
+  fn restore(mut self) {
+    self.low = self.high
+  }
+}
+
+public fn Span.shift(mut self)
+  requires self.high < 1000
+{
+  self.low = self.high + 1
+  mut self.restore()
+}

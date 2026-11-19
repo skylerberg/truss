@@ -25,16 +25,16 @@ type t = {
   mutable previous : token option;
   mutable held : item list;
   mutable semicolons : int list;
-  foreign_escape : t -> Buffer.t -> bool;
+  scan_foreign_escape : t -> Buffer.t -> bool;
 }
 
-let create ~foreign_escape source diagnostics =
+let create ~scan_foreign_escape source diagnostics =
   {
     source;
     text = Source.text source;
     length = String.length (Source.text source);
     diagnostics;
-    position = Source.line_start source 0;
+    position = Source.compute_line_start source 0;
     first_line_break = None;
     blank_line = false;
     line_is_blank = true;
@@ -43,13 +43,13 @@ let create ~foreign_escape source diagnostics =
     previous = None;
     held = [];
     semicolons = [];
-    foreign_escape;
+    scan_foreign_escape;
   }
 
 let is_at_end cursor index = index >= cursor.length
 let lookup_char cursor index = cursor.text.[index]
 let is_at cursor index character = index < cursor.length && cursor.text.[index] = character
-let satisfies cursor index predicate = index < cursor.length && predicate cursor.text.[index]
+let satisfies cursor index is_wanted = index < cursor.length && is_wanted cursor.text.[index]
 
 let report cursor ?notes ?fixes ~code span message =
   Diagnostic.Collector.add cursor.diagnostics
@@ -85,7 +85,7 @@ let list_code_fixes cursor span codes =
       else Some (Diagnostic.fix ("Write `" ^ code ^ "`") [ Diagnostic.replace span code ]))
     codes
 
-let decode cursor index = Unicode.decode cursor.text index
+let decode cursor index = String.get_utf_8_uchar cursor.text index
 
 let run_length cursor index character =
   let rec loop position =
@@ -109,11 +109,11 @@ let measure_line_break cursor index =
   if is_at cursor index '\r' && is_at cursor (index + 1) '\n' then 2 else 1
 
 let extract_indentation cursor offset =
-  let start = Source.line_start cursor.source offset in
+  let start = Source.compute_line_start cursor.source offset in
   String.sub cursor.text start (skip_spaces cursor start - start)
 
 let count_spaces_before cursor offset =
-  let line_start = Source.line_start cursor.source offset in
+  let line_start = Source.compute_line_start cursor.source offset in
   let rec loop position =
     if position > line_start && is_space cursor.text.[position - 1] then loop (position - 1)
     else position
@@ -121,21 +121,22 @@ let count_spaces_before cursor offset =
   loop offset
 
 let has_only_spaces_before cursor offset =
-  count_spaces_before cursor offset = Source.line_start cursor.source offset
+  count_spaces_before cursor offset = Source.compute_line_start cursor.source offset
 
-let describe_code_point value =
-  match Unicode.find_forbidden_name value with
-  | Some name -> Printf.sprintf "U+%04X %s" value name
-  | None -> Printf.sprintf "U+%04X" value
+let describe_code_point scalar_value =
+  let code_point = Uchar.to_int scalar_value in
+  match Unicode.find_forbidden_name scalar_value with
+  | Some name -> Printf.sprintf "U+%04X %s" code_point name
+  | None -> Printf.sprintf "U+%04X" code_point
 
 let show_character cursor index =
   let decoded = decode cursor index in
-  if not (Unicode.Decoded.is_valid decoded) then
+  if not (Uchar.utf_decode_is_valid decoded) then
     Printf.sprintf "the byte 0x%02X" (Char.code cursor.text.[index])
   else
-    let value = Unicode.Decoded.code_point decoded in
-    if value < 0x80 then Printf.sprintf "`%c`" (Char.chr value)
+    let code_point = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
+    if code_point < 0x80 then Printf.sprintf "`%c`" (Char.chr code_point)
     else
       Printf.sprintf "`%s` (U+%04X)"
-        (String.sub cursor.text index (Unicode.Decoded.length decoded))
-        value
+        (String.sub cursor.text index (Uchar.utf_decode_length decoded))
+        code_point

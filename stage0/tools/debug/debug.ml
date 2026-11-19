@@ -30,7 +30,7 @@ and describe_string literal =
     (fun index (text : Token.text) ->
       if index > 0 then Buffer.add_string parts " ${...} ";
       Buffer.add_string parts (Diagnostic.quote text.value))
-    (Token.list_texts literal);
+    (Token.For_testing.list_texts literal);
   Printf.sprintf "%s%s %s" tag form (Buffer.contents parts)
 
 let print_tokens source tokens =
@@ -58,7 +58,9 @@ let print_tokens source tokens =
 
 let show_diagnostics ~json source diagnostics =
   let shown = Diagnostic.select_shown diagnostics in
-  if json then print_string (Diagnostic.to_json source shown)
+  if json then
+    print_string
+      ("[" ^ String.concat ",\n" (List.map (Diagnostic.to_json_object source) shown) ^ "]\n")
   else List.iter (fun diagnostic -> prerr_string (Diagnostic.render source diagnostic)) shown;
   if diagnostics = [] then 0 else 1
 
@@ -67,32 +69,33 @@ let read file =
     prerr_endline (file ^ " does not exist.");
     exit 2
   end;
-  Source.read_file file
+  Source.For_testing.read_file file
 
-let tokens ~file ~json =
+let run_tokens_command ~file ~json =
   let source = read file in
   let tokens, diagnostics = Lexer.lex source in
   if not json then print_tokens source tokens;
   show_diagnostics ~json source diagnostics
 
-let tree ~file ~json =
+let run_tree_command ~file ~json =
   let source = read file in
-  let tokens, lexer_diagnostics = Lexer.lex source in
-  let file, parser_diagnostics = Parser.parse tokens ~lexer_diagnostics in
+  let file, diagnostics = Parser.parse_source source in
   let diagnostics =
     List.stable_sort
       (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span.start right.span.start)
-      (lexer_diagnostics @ parser_diagnostics)
+      diagnostics
   in
-  if not json then print_endline (Syntax_print.file file);
+  if not json then print_endline (Syntax_print.show_file file);
   show_diagnostics ~json source diagnostics
 
 let () =
   match List.tl (Array.to_list Sys.argv) with
-  | [ "tokens"; file ] -> exit (tokens ~file ~json:false)
-  | [ "tokens"; "--json"; file ] | [ "tokens"; file; "--json" ] -> exit (tokens ~file ~json:true)
-  | [ "tree"; file ] -> exit (tree ~file ~json:false)
-  | [ "tree"; "--json"; file ] | [ "tree"; file; "--json" ] -> exit (tree ~file ~json:true)
+  | [ "tokens"; file ] -> exit (run_tokens_command ~file ~json:false)
+  | [ "tokens"; "--json"; file ] | [ "tokens"; file; "--json" ] ->
+      exit (run_tokens_command ~file ~json:true)
+  | [ "tree"; file ] -> exit (run_tree_command ~file ~json:false)
+  | [ "tree"; "--json"; file ] | [ "tree"; file; "--json" ] ->
+      exit (run_tree_command ~file ~json:true)
   | _ ->
       prerr_endline "usage: debug tokens|tree [--json] FILE";
       exit 2

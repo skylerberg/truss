@@ -29,7 +29,8 @@ let table =
     (0x2203, Spelled "exists");
   ]
 
-let find code_point : entry option =
+let find scalar_value : entry option =
+  let code_point = Uchar.to_int scalar_value in
   if code_point >= 0x2000 && code_point <= 0x200A then Some Space
   else List.assoc_opt code_point table
 
@@ -41,17 +42,20 @@ let find_confusable_token spelling : Token.kind option =
 type scanned = Lexed of Token.kind | Spaced
 
 let follows_joining_confusable (cursor : Cursor.t) start replacement =
-  let rec character_start index =
-    if index > 0 && Char.code cursor.text.[index] land 0xC0 = 0x80 then character_start (index - 1)
+  let rec locate_character_start index =
+    if index > 0 && Char.code cursor.text.[index] land 0xC0 = 0x80 then
+      locate_character_start (index - 1)
     else index
   in
   start > 0
   &&
-  match find (Unicode.Decoded.code_point (Cursor.decode cursor (character_start (start - 1)))) with
+  match
+    find (Uchar.utf_decode_uchar (Cursor.decode cursor (locate_character_start (start - 1))))
+  with
   | Some (Spelled spelling) -> Token.joins spelling.[String.length spelling - 1] replacement.[0]
   | Some (Space | Opening_quote _) | None -> false
 
-let scan (cursor : Cursor.t) ~value ~length =
+let scan (cursor : Cursor.t) ~scalar_value ~length =
   let start = cursor.position in
   let report ~replacement ~name =
     Cursor.report cursor ~code:Confusable_character
@@ -66,7 +70,7 @@ let scan (cursor : Cursor.t) ~value ~length =
     cursor.position <- start + length;
     cursor.line_is_blank <- false
   in
-  match find value with
+  match find scalar_value with
   | Some Space ->
       report ~replacement:" " ~name:"the space character";
       Some Spaced

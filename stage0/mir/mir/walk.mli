@@ -2,9 +2,5 @@ val list_nested_blocks : Tree.statement -> Tree.block list
 val iter_places_read : (Tree.place -> unit) -> Tree.block -> unit
 val iter_code : (Tree.statement -> unit) -> Tree.t -> unit
 val iter_formula : (Tree.statement -> unit) -> Tree.formula -> unit
-val iter_code_with_locals : (Tree.local_info array -> Tree.statement -> unit) -> Tree.t -> unit
-
-val iter_formula_with_locals :
-  (Tree.local_info array -> Tree.statement -> unit) -> Tree.formula -> unit
-
+val find_callee : Tree.statement -> Tree.callee option
 val extract_operand_type : Tree.operand -> Types.ty

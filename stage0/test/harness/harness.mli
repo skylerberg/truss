@@ -1,11 +1,12 @@
 val test : string -> (unit -> unit) -> unit
-val always : string -> (unit -> unit) -> unit
-val wanted : string -> bool
+val test_always : string -> (unit -> unit) -> unit
+val share : (int * int) option
+val is_wanted : string -> bool
 val fail : ('a, unit, string, unit) format4 -> 'a
-val scratch : string -> string
+val make_scratch_directory : string -> string
 val write_files : string -> (string * string) list -> unit
 val expect_string : expected:string -> string -> unit
 val expect_strings : expected:string list -> string list -> unit
-val markdown_documents : unit -> string list
-val truss_files : unit -> string list
-val workspace_path : string -> string
+val list_markdown_documents : unit -> string list
+val list_truss_files : unit -> string list
+val make_workspace_path : string -> string

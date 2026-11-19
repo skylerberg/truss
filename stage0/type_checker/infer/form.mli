@@ -19,7 +19,7 @@ val build_range_record :
   inclusive:bool ->
   Core.kind
 
-val find_capability_impls : State.state -> Types.ty -> (Core.provided * Types.impl_interface) list
+val list_capability_impls : State.state -> Types.ty -> (Core.provided * Types.impl_interface) list
 val build_provide : State.state -> Syntax.expression list -> Syntax.block -> Core.kind
 val build_untagged_string : State.state -> origin:Core.origin -> Syntax.string_literal -> Core.kind
 
@@ -34,10 +34,10 @@ val build_range_bound : State.state -> Syntax.range_end -> Core.range_bound
 val build_pattern_fields :
   State.state -> Types.field list -> (string * Syntax.pattern) list -> (string * Core.pattern) list
 
-val convert_to_operation : Syntax.operation -> Intrinsic.operation
+val convert_to_operation : Syntax.operation -> Intrinsic.scalar
 
 val build_operator :
-  State.state -> Syntax.expression -> Intrinsic.operation -> Syntax.expression list -> Core.kind
+  State.state -> Syntax.expression -> Intrinsic.scalar -> Syntax.expression list -> Core.kind
 
 val build_built_in_comparison :
   State.state -> Syntax.comparison -> Syntax.expression -> Syntax.expression -> Core.kind
@@ -92,5 +92,15 @@ val build_try :
 
 val build_collection_literal : State.state -> Syntax.expression -> Core.expression list -> Core.kind
 
-val build_map_literal :
-  State.state -> Syntax.expression -> (Core.expression * Core.expression) list -> Core.kind
+val build_converted_literal :
+  State.state -> Syntax.expression -> element:Types.ty -> Core.expression list -> Core.kind
+
+val build_converted_map_literal :
+  State.state ->
+  Syntax.expression ->
+  key:Types.ty ->
+  value_type:Types.ty ->
+  (Core.expression * Core.expression) list ->
+  Core.kind
+
+val build_declared_local : State.state -> Syntax.id -> Core.local

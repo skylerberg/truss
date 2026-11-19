@@ -24,7 +24,6 @@ public fn Option[Value: Equal].contains(self, value: Value) -> Bool
       Some(held) => held == value
       None => false
     })
-  cost time finite
 {
   match self {
     Some(held) => held == value
@@ -43,12 +42,14 @@ public fn Option[Value].unwrap_or(own self, default: own Value) -> Value
   }
 }
 
-public fn Option[Value].unwrap_or_else[capability Granted](
+public fn Option[Value].unwrap_or_else(
   own self,
-  make: (fn() -> Value uses Granted cost time finite),
+  make: (fn() -> Value uses generic Granted),
 ) -> Value
-  uses Granted
+  uses generic Granted
   cost time O(time(make))
+  cost allocations <= allocations(make)
+  cost allocated_bytes <= allocated_bytes(make)
 {
   match own self {
     Some(value) => value
@@ -56,12 +57,14 @@ public fn Option[Value].unwrap_or_else[capability Granted](
   }
 }
 
-public fn Option[Value].map[Output, capability Granted](
+public fn Option[Value].map[Output](
   own self,
-  transform: (fn(own Value) -> Output uses Granted cost time finite),
+  transform: (fn(own Value) -> Output uses generic Granted),
 ) -> Option[Output]
-  uses Granted
+  uses generic Granted
   cost time O(time(transform))
+  cost allocations <= allocations(transform)
+  cost allocated_bytes <= allocated_bytes(transform)
 {
   match own self {
     Some(value) => Some(transform(own value))
@@ -69,12 +72,14 @@ public fn Option[Value].map[Output, capability Granted](
   }
 }
 
-public fn Option[Value].map[Output, capability Granted](
+public fn Option[Value].map[Output](
   self,
-  transform: (fn(Value) -> Output uses Granted cost time finite),
+  transform: (fn(Value) -> Output uses generic Granted),
 ) -> Option[Output]
-  uses Granted
+  uses generic Granted
   cost time O(time(transform))
+  cost allocations <= allocations(transform)
+  cost allocated_bytes <= allocated_bytes(transform)
 {
   match self {
     Some(value) => Some(transform(value))
@@ -82,12 +87,14 @@ public fn Option[Value].map[Output, capability Granted](
   }
 }
 
-public fn Option[Value].and_then[Output, capability Granted](
+public fn Option[Value].and_then[Output](
   own self,
-  next: (fn(own Value) -> Option[Output] uses Granted cost time finite),
+  next: (fn(own Value) -> Option[Output] uses generic Granted),
 ) -> Option[Output]
-  uses Granted
+  uses generic Granted
   cost time O(time(next))
+  cost allocations <= allocations(next)
+  cost allocated_bytes <= allocated_bytes(next)
 {
   match own self {
     Some(value) => next(own value)
@@ -95,12 +102,14 @@ public fn Option[Value].and_then[Output, capability Granted](
   }
 }
 
-public fn Option[Value].and_then[Output, capability Granted](
+public fn Option[Value].and_then[Output](
   self,
-  next: (fn(Value) -> Option[Output] uses Granted cost time finite),
+  next: (fn(Value) -> Option[Output] uses generic Granted),
 ) -> Option[Output]
-  uses Granted
+  uses generic Granted
   cost time O(time(next))
+  cost allocations <= allocations(next)
+  cost allocated_bytes <= allocated_bytes(next)
 {
   match self {
     Some(value) => next(value)
@@ -108,8 +117,11 @@ public fn Option[Value].and_then[Output, capability Granted](
   }
 }
 
-public fn Option[Value].filter(own self, keep: (fn(Value) -> Bool cost time finite)) -> Option[Value]
+public fn Option[Value].filter(own self, keep: (fn(Value) -> Bool uses generic Granted)) -> Option[Value]
+  uses generic Granted
   cost time O(time(keep))
+  cost allocations <= allocations(keep)
+  cost allocated_bytes <= allocated_bytes(keep)
 {
   match own self {
     Some(value) => if keep(value) { Some(own value) } else { None }
@@ -126,12 +138,14 @@ public fn Option[Value].or(own self, other: own Option[Value]) -> Option[Value]
   }
 }
 
-public fn Option[Value].or_else[capability Granted](
+public fn Option[Value].or_else(
   own self,
-  make: (fn() -> Option[Value] uses Granted cost time finite),
+  make: (fn() -> Option[Value] uses generic Granted),
 ) -> Option[Value]
-  uses Granted
+  uses generic Granted
   cost time O(time(make))
+  cost allocations <= allocations(make)
+  cost allocated_bytes <= allocated_bytes(make)
 {
   match own self {
     Some(value) => Some(own value)
@@ -157,12 +171,14 @@ public fn Option[Value].ok_or[Error](own self, error: own Error) -> Result[Value
   }
 }
 
-public fn Option[Value].ok_or_else[Error, capability Granted](
+public fn Option[Value].ok_or_else[Error](
   own self,
-  make: (fn() -> Error uses Granted cost time finite),
+  make: (fn() -> Error uses generic Granted),
 ) -> Result[Value, Error]
-  uses Granted
+  uses generic Granted
   cost time O(time(make))
+  cost allocations <= allocations(make)
+  cost allocated_bytes <= allocated_bytes(make)
 {
   match own self {
     Some(value) => Ok(own value)
@@ -202,19 +218,23 @@ public fn Option[Value].get_or_insert(mut self, value: own Value) lends mut Valu
   }
 }
 
-public fn Option[Value].unwrap(own self) -> Value
+public fn Option[Value].expect(own self, message: StringSlice) -> Value
   uses Panic
+  ensures self is Some(held) && identical(result, held)
+  cost time O(1)
 {
   match own self {
     Some(value) => value
-    None => Panic.crash("unwrap of None")
+    None => Panic.crash(message)
   }
 }
 
-public fn Option[Value].expect(own self, message: StringSlice) -> Value
+public fn Option[Value].expect(self, message: StringSlice) lends Value
   uses Panic
+  ensures self is Some(held) && identical(result, held)
+  cost time O(1)
 {
-  match own self {
+  match self {
     Some(value) => value
     None => Panic.crash(message)
   }

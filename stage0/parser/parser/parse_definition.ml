@@ -2,7 +2,7 @@ let make_definition_node cursor start visibility kind : Syntax.definition =
   { visibility; kind; id = Cursor.allocate_id_from cursor start }
 
 type written_visibility = {
-  visibility : Syntax.visibility;
+  visibility : Syntax.visibility option;
   tokens : Token.t list;
   opaque : (Token.t * Token.t) option;
 }
@@ -15,13 +15,14 @@ let parse_visibility cursor =
       | Keyword Opaque ->
           let opaque = Cursor.take cursor in
           {
-            visibility = Public_opaque;
+            visibility = Some Public_opaque;
             tokens = [ public; opaque ];
             opaque = Some (public, opaque);
           }
-      | _ -> { visibility = Public; tokens = [ public ]; opaque = None })
-  | Keyword Internal -> { visibility = Internal; tokens = [ Cursor.take cursor ]; opaque = None }
-  | _ -> { visibility = Private; tokens = []; opaque = None }
+      | _ -> { visibility = Some Public; tokens = [ public ]; opaque = None })
+  | Keyword Internal ->
+      { visibility = Some Internal; tokens = [ Cursor.take cursor ]; opaque = None }
+  | _ -> { visibility = None; tokens = []; opaque = None }
 
 let report_misplaced_visibility cursor code (tokens : Token.t list) message =
   match tokens with
@@ -77,7 +78,7 @@ let parse_parameters cursor ~method_ =
   if not (Cursor.is_punctuation cursor (Open Paren)) then
     Cursor.fail cursor "`(` to start the parameters";
   let parameters =
-    Cursor.parse_bracketed cursor ~item:parse_parameter ~recover:(fun span ->
+    Cursor.parse_bracketed cursor ~parse_item:parse_parameter ~recover:(fun span ->
         { kind = Parameter_error; id = Cursor.allocate_id cursor span })
   in
   List.iteri
@@ -138,18 +139,18 @@ let parse_clauses cursor =
             skip ();
             { kind = Clause_error; id = Cursor.allocate_id_from cursor start }
       in
-      let once same message =
-        if List.exists (fun (earlier : Syntax.clause) -> same earlier.kind) clauses then
+      let reject_repeated is_same message =
+        if List.exists (fun (earlier : Syntax.clause) -> is_same earlier.kind) clauses then
           Cursor.report cursor Repeated_clause (Cursor.lookup_token cursor start).span message
       in
       (match clause.kind with
       | Uses _ ->
-          once
+          reject_repeated
             (function Uses _ -> true | _ -> false)
             "A signature has at most one `uses` clause; list every capability in one, separated by \
              commas."
       | Decreases _ ->
-          once
+          reject_repeated
             (function Decreases _ -> true | _ -> false)
             "A signature has at most one `decreases` clause; list several measures in one, \
              separated by commas."
@@ -202,15 +203,15 @@ let parse_function_signature cursor ~name =
   let method_ = match name with Syntax.Member_name _ -> true | Plain_name _ -> false in
   parse_signature cursor ~name ~method_
 
-let parse_members cursor ~member ~error =
+let parse_members cursor ~parse_member ~error =
   Parse_expression.expect_body_opening cursor;
   List.partition_map Fun.id
     (Cursor.parse_lines cursor
-       ~item:(fun cursor ->
+       ~parse_item:(fun cursor ->
          let start = Cursor.index cursor in
          if Cursor.is_keyword cursor Fn then Either.Right (Cursor.skip_piece cursor)
          else
-           let kind = member cursor in
+           let kind = parse_member cursor in
            Either.Left { Syntax.kind; id = Cursor.allocate_id_from cursor start })
        ~recover:(fun span -> Either.Left { kind = error; id = Cursor.allocate_id cursor span }))
 
@@ -231,12 +232,12 @@ let parse_trait_member cursor =
       Cursor.advance cursor;
       let name = Atoms.lower_name cursor "the name of a law" in
       let parameters = parse_parameters cursor ~method_:false in
-      let rec premises list =
+      let rec list_premises list =
         if Cursor.accept_keyword cursor Requires then
-          premises (Parse_expression.parse_expression cursor :: list)
+          list_premises (Parse_expression.parse_expression cursor :: list)
         else List.rev list
       in
-      let requires = premises [] in
+      let requires = list_premises [] in
       Law { name; parameters; requires; body = Parse_expression.parse_body cursor }
   | _ -> Cursor.fail cursor "`fn`, `type`, `capability`, or `law` to start a member of the trait"
 
@@ -284,7 +285,7 @@ let parse_method_kind cursor ~(container : container) ~name =
   if not (Cursor.is_at_end cursor) then Cursor.fail cursor "a line break or `}` after the method";
   kind
 
-let parse_method cursor ~container ~visibility : Syntax.definition =
+let parse_method cursor ~container : Syntax.definition =
   let start = Cursor.index cursor in
   Cursor.advance cursor;
   let intended = Some Syntax.Intended_function in
@@ -297,10 +298,10 @@ let parse_method cursor ~container ~visibility : Syntax.definition =
         | kind -> kind
         | exception Cursor.Failed -> Definition_error { intended; name = Some name })
   in
-  make_definition_node cursor start visibility kind
+  make_definition_node cursor start None kind
 
 let parse_fields cursor : Syntax.field list =
-  let field cursor : Syntax.field =
+  let parse_field cursor : Syntax.field =
     let start = Cursor.index cursor in
     let name = Atoms.lower_name cursor "a field name" in
     Cursor.expect_punctuation cursor Colon;
@@ -311,12 +312,12 @@ let parse_fields cursor : Syntax.field list =
     in
     { kind = Field_declaration { name; type_; default }; id = Cursor.allocate_id_from cursor start }
   in
-  Cursor.parse_bracketed cursor ~item:field ~recover:(fun span ->
+  Cursor.parse_bracketed cursor ~parse_item:parse_field ~recover:(fun span ->
       { kind = Field_error; id = Cursor.allocate_id cursor span })
 
 let parse_variants cursor =
   ignore (Cursor.accept_punctuation cursor Bar);
-  let variant cursor : Syntax.variant =
+  let parse_variant cursor : Syntax.variant =
     let start = Cursor.index cursor in
     let indirect = Cursor.accept_keyword cursor Indirect in
     let name = Atoms.parse_upper_name cursor "the name of a variant" in
@@ -325,28 +326,28 @@ let parse_variants cursor =
     in
     { indirect; name; fields; id = Cursor.allocate_id_from cursor start }
   in
-  Cursor.parse_separated cursor ~separator:Bar variant
+  Cursor.parse_separated cursor ~separator:Bar parse_variant
 
 let parse_type_clauses cursor =
   let rec gather clauses =
     let start = Cursor.index cursor in
-    let clause kind =
+    let parse_clause kind =
       gather (({ kind; id = Cursor.allocate_id_from cursor start } : Syntax.type_clause) :: clauses)
     in
     match Cursor.peek_kind cursor with
     | Keyword Invariant ->
         Cursor.advance cursor;
-        clause (Type_invariant (Parse_expression.parse_expression cursor))
+        parse_clause (Type_invariant (Parse_expression.parse_expression cursor))
     | Keyword Derives ->
         Cursor.advance cursor;
-        clause (Derives (Parse_expression.parse_path_type_list cursor))
+        parse_clause (Derives (Parse_expression.parse_path_type_list cursor))
     | Keyword Cost ->
         Cursor.advance cursor;
         ignore
           (Contextual_keyword.expect cursor ~accepted:[ Potential ]
              ~category:"`potential`; a type's only cost clause is `cost potential expression`"
              ~expected:"`potential`; a type's only cost clause is `cost potential expression`");
-        clause (Potential (Parse_expression.parse_expression cursor))
+        parse_clause (Potential (Parse_expression.parse_expression cursor))
     | _ -> List.rev clauses
   in
   gather []
@@ -367,7 +368,7 @@ let parse_trait cursor ~name =
     if Cursor.accept_punctuation cursor Colon then Parse_expression.parse_bounds cursor else []
   in
   let members, methods =
-    parse_members cursor ~member:parse_trait_member ~error:Trait_member_error
+    parse_members cursor ~parse_member:parse_trait_member ~error:Trait_member_error
   in
   (Syntax.Trait { name; generics; requires; members }, methods)
 
@@ -399,12 +400,14 @@ let parse_impl cursor =
   let uses =
     if Cursor.accept_keyword cursor Uses then Parse_expression.parse_capability_list cursor else []
   in
-  let members, methods = parse_members cursor ~member:parse_impl_member ~error:Impl_member_error in
+  let members, methods =
+    parse_members cursor ~parse_member:parse_impl_member ~error:Impl_member_error
+  in
   (Syntax.Impl { trait_; type_; uses; members }, methods)
 
 let parse_capability cursor ~name =
   let members, methods =
-    parse_members cursor ~member:parse_capability_member ~error:Capability_member_error
+    parse_members cursor ~parse_member:parse_capability_member ~error:Capability_member_error
   in
   (Syntax.Capability { name; members }, methods)
 
@@ -450,17 +453,17 @@ let parse_law_proof cursor =
 
 type empty = |
 
-let parse_top_level cursor ~function_ =
+let parse_top_level cursor ~parse_function =
   let start = Cursor.index cursor in
   let { visibility; tokens = visibility_tokens; opaque } = parse_visibility cursor in
-  let no_visibility construct =
+  let reject_visibility construct =
     report_misplaced_visibility cursor Misplaced_visibility visibility_tokens
       (Printf.sprintf "%s takes no visibility: nothing refers to it by name." construct)
   in
-  let ended kind =
+  let finish_definition kind =
     (match (visibility, opaque, kind) with
     | _, None, _
-    | Public_opaque, Some _, Either.Left (Syntax.Type_definition _, _)
+    | Some Public_opaque, Some _, Either.Left (Syntax.Type_definition _, _)
     | _, Some _, Left ((Impl _ | Test _ | Law_proof _), _) ->
         ()
     | _, Some (public, opaque), _ ->
@@ -473,70 +476,74 @@ let parse_top_level cursor ~function_ =
     if not (Cursor.is_at_end cursor) then Cursor.fail cursor "a line break after the definition";
     kind
   in
-  let failed intended name = Either.Left (Syntax.Definition_error { intended; name }, []) in
-  let unnamed parse =
-    match ended (parse ()) with kind -> kind | exception Cursor.Failed -> failed None None
+  let make_failure intended name = Either.Left (Syntax.Definition_error { intended; name }, []) in
+  let parse_unnamed parse =
+    match finish_definition (parse ()) with
+    | kind -> kind
+    | exception Cursor.Failed -> make_failure None None
   in
-  let named intended ~name ~written ~parse =
+  let parse_named intended ~parse_name ~make_written_name ~parse =
     Cursor.advance cursor;
-    match name () with
-    | exception Cursor.Failed -> failed (Some intended) None
+    match parse_name () with
+    | exception Cursor.Failed -> make_failure (Some intended) None
     | parsed -> (
-        match ended (parse parsed) with
+        match finish_definition (parse parsed) with
         | kind -> kind
-        | exception Cursor.Failed -> failed (Some intended) (Some (written parsed)))
+        | exception Cursor.Failed -> make_failure (Some intended) (Some (make_written_name parsed)))
   in
-  let plain name = Syntax.Plain_name name in
-  let upper expected () = Atoms.parse_upper_name cursor expected in
+  let make_plain name = Syntax.Plain_name name in
+  let parse_upper expected () = Atoms.parse_upper_name cursor expected in
   let kind =
     match Cursor.peek_kind cursor with
     | Keyword Fn ->
-        named Intended_function
-          ~name:(fun () -> parse_definition_name cursor)
-          ~written:Fun.id ~parse:(function_ cursor)
+        parse_named Intended_function
+          ~parse_name:(fun () -> parse_definition_name cursor)
+          ~make_written_name:Fun.id ~parse:(parse_function cursor)
     | Keyword Type ->
-        named Intended_type ~name:(upper "the name of the type") ~written:plain ~parse:(fun name ->
+        parse_named Intended_type ~parse_name:(parse_upper "the name of the type")
+          ~make_written_name:make_plain ~parse:(fun name ->
             Either.Left (parse_type_definition cursor ~name, []))
     | Keyword Trait ->
-        named Intended_trait ~name:(upper "the name of the trait") ~written:plain
-          ~parse:(fun name -> Either.Left (parse_trait cursor ~name))
+        parse_named Intended_trait ~parse_name:(parse_upper "the name of the trait")
+          ~make_written_name:make_plain ~parse:(fun name -> Either.Left (parse_trait cursor ~name))
     | Keyword Impl ->
         report_misplaced_visibility cursor Misplaced_visibility visibility_tokens
           "An `impl` takes no visibility: it applies wherever its trait and the types it names are \
            visible.";
-        unnamed (fun () -> Either.Left (parse_impl cursor))
+        parse_unnamed (fun () -> Either.Left (parse_impl cursor))
     | Keyword Capability ->
-        named Intended_capability ~name:(upper "the name of the capability") ~written:plain
-          ~parse:(fun name -> Either.Left (parse_capability cursor ~name))
+        parse_named Intended_capability ~parse_name:(parse_upper "the name of the capability")
+          ~make_written_name:make_plain ~parse:(fun name ->
+            Either.Left (parse_capability cursor ~name))
     | Keyword Let ->
-        named Intended_constant
-          ~name:(fun () -> parse_definition_name cursor)
-          ~written:Fun.id
+        parse_named Intended_constant
+          ~parse_name:(fun () -> parse_definition_name cursor)
+          ~make_written_name:Fun.id
           ~parse:(fun name -> Either.Left (parse_constant cursor ~name, []))
     | Reserved ((Const | Static) as reserved) ->
         Habits.report_constant_keyword cursor ~token:(Cursor.peek cursor) ~reserved;
-        named Intended_constant
-          ~name:(fun () -> parse_definition_name cursor)
-          ~written:Fun.id
+        parse_named Intended_constant
+          ~parse_name:(fun () -> parse_definition_name cursor)
+          ~make_written_name:Fun.id
           ~parse:(fun name -> Either.Left (parse_constant cursor ~name, []))
     | Keyword Test ->
-        no_visibility "A test";
-        unnamed (fun () -> Either.Left (test cursor, []))
+        reject_visibility "A test";
+        parse_unnamed (fun () -> Either.Left (test cursor, []))
     | Keyword Theorem ->
-        named Intended_theorem
-          ~name:(fun () -> Atoms.lower_name cursor "the name of the theorem")
-          ~written:plain
+        parse_named Intended_theorem
+          ~parse_name:(fun () -> Atoms.lower_name cursor "the name of the theorem")
+          ~make_written_name:make_plain
           ~parse:(fun name -> Either.Left (parse_theorem cursor ~name, []))
     | Keyword Proof ->
-        no_visibility "A law's proof";
-        unnamed (fun () -> Either.Left (parse_law_proof cursor, []))
-    | kind when visibility = Private && Atoms.begins_statement kind ->
-        unnamed (fun () ->
+        reject_visibility "A law's proof";
+        parse_unnamed (fun () -> Either.Left (parse_law_proof cursor, []))
+    | kind when visibility = None && Atoms.begins_statement kind ->
+        parse_unnamed (fun () ->
             Cursor.report cursor Statement_at_top_level (Cursor.peek cursor).span
               "Statements must be inside a function, a test, or another definition with a body.";
             raise Cursor.Failed)
     | _ ->
-        unnamed (fun () ->
+        parse_unnamed (fun () ->
             Cursor.fail cursor
               "a definition: `fn`, `type`, `trait`, `impl`, `capability`, `let`, `test`, \
                `theorem`, or `proof`")
@@ -547,23 +554,25 @@ let parse_top_level cursor ~function_ =
     kind
 
 let parse_definition cursor : Syntax.definition * Split.piece list =
-  let function_ cursor name : (Syntax.definition_kind * Split.piece list, empty) Either.t =
+  let parse_function cursor name : (Syntax.definition_kind * Split.piece list, empty) Either.t =
     let signature = parse_function_signature cursor ~name in
     Left (Function { signature; body = parse_body cursor }, [])
   in
-  match parse_top_level cursor ~function_ with Left definition -> definition | Right (_, _) -> .
+  match parse_top_level cursor ~parse_function with
+  | Left definition -> definition
+  | Right (_, _) -> .
 
 type example =
   | Whole of Syntax.definition * Split.piece list
-  | Signature_alone of Syntax.visibility * Syntax.signature
+  | Signature_alone of Syntax.visibility option * Syntax.signature
 
 let parse_example cursor =
-  let function_ cursor name =
+  let parse_function cursor name =
     let signature = parse_function_signature cursor ~name in
     match parse_optional_body cursor with
     | Some body -> Either.Left (Syntax.Function { signature; body }, [])
     | None -> Right signature
   in
-  match parse_top_level cursor ~function_ with
+  match parse_top_level cursor ~parse_function with
   | Left (definition, methods) -> Whole (definition, methods)
   | Right (visibility, signature) -> Signature_alone (visibility, signature)

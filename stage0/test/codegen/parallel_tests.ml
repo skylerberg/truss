@@ -1,39 +1,38 @@
-let output_with ~workers text =
-  Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
-  let status, output, errors = Codegen_support.run_main text in
-  if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors;
-  output
-
-let same_with_any_workers text ~expected =
+let expect_same_with_any_workers text ~expected =
+  let program = Codegen_support.build_main text in
   List.iter
-    (fun workers -> Codegen_support.expect_string ~expected (output_with ~workers text))
-    Codegen_support.worker_counts
+    (fun workers ->
+      Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
+      let status, output, errors = Process.run program [] in
+      if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors;
+      Codegen_support.expect_string ~expected output)
+    (Codegen_support.list_worker_counts ())
 
 let () =
   Codegen_support.test
     "branches give results through lets, mutate their own parts, and call a lambda" (fun () ->
-      same_with_any_workers ~expected:"2500050000 2500000000 2 n100000 300000\n"
+      expect_same_with_any_workers ~expected:"2500050000 2500000000 2 n100000 300000\n"
         Fixtures.Parallel.parallel_branches_with_totals);
   Codegen_support.test "a branch forks again at every depth of a recursion" (fun () ->
-      same_with_any_workers ~expected:"832040\n" Fixtures.Parallel.parallel_fib);
+      expect_same_with_any_workers ~expected:"832040\n" Fixtures.Parallel.parallel_fib);
   Codegen_support.test
     "one branch moves a field out and another changes a second field, and the first is \
      reinitialized after" (fun () ->
-      same_with_any_workers ~expected:"first taken second!\n"
+      expect_same_with_any_workers ~expected:"first taken second!\n"
         Fixtures.Parallel.parallel_branches_moving_and_changing_a_pair)
 
 let board = Fixtures.Parallel.board
 
 let () =
   Codegen_support.test "a parallel for over a list mutates each element once" (fun () ->
-      same_with_any_workers ~expected:"7905322 same\n"
+      expect_same_with_any_workers ~expected:"7905322 same\n"
         (board ^ Fixtures.Parallel.parallel_for_mutating_a_list));
   Codegen_support.test "a region reads a parameter that the function is passed by pointer"
     (fun () ->
-      same_with_any_workers ~expected:"2 4 6 8\n"
+      expect_same_with_any_workers ~expected:"2 4 6 8\n"
         Fixtures.Parallel.doubled_through_a_pointer_parameter);
   Codegen_support.test "a parallel for over a list leaves each element at its position" (fun () ->
-      same_with_any_workers ~expected:"5050\n"
+      expect_same_with_any_workers ~expected:"5050\n"
         Fixtures.Parallel.parallel_for_over_a_list_by_position);
   Codegen_support.test "a panic in an iteration of a parallel for over a range ends the program"
     (fun () ->
@@ -67,9 +66,11 @@ let () =
         Codegen_support.fail "reported %s" errors)
 
 let () =
-  Codegen_support.passes
-    "a test runs the branches of a parallel block and of a parallel for, in order"
-    (board ^ Fixtures.Parallel.parallel_board_test)
+  Codegen_support.test
+    "a test runs the branches of a parallel block and of a parallel for, in order" (fun () ->
+      Codegen_support.expect_output
+        (board ^ Fixtures.Parallel.parallel_board_test)
+        "test 0 passed\n")
 
 let () =
   Codegen_support.test
@@ -79,44 +80,46 @@ let () =
       let add left right =
         Lowered.Binary (Add, Codegen_support.copy left, Codegen_support.copy right)
       in
-      let env = Codegen_support.shape_env () in
-      let builder = Emit_c.Builder.create env ~key:(Codegen_support.key "entry") in
-      let parameter = Emit_c.Builder.allocate_local builder int in
-      let sum = Emit_c.Builder.allocate_local builder int in
-      let other = Emit_c.Builder.allocate_local builder int in
-      Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
-      Emit_c.Builder.emit builder
+      let env = Codegen_support.make_shape_env () in
+      let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
+      let parameter = Emit_c.Ir_builder.allocate_local builder int in
+      let sum = Emit_c.Ir_builder.allocate_local builder int in
+      let other = Emit_c.Ir_builder.allocate_local builder int in
+      Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
+      Emit_c.Ir_builder.emit builder
         (Assign (Codegen_support.at parameter, Use (Codegen_support.constant_int32 5)));
       let first =
-        Emit_c.Builder.outline builder ~index:0 ~parts:[] (fun () ->
-            let own = Emit_c.Builder.allocate_local builder ~name:"own" int in
-            Emit_c.Builder.emit builder (Assign (Codegen_support.at own, add parameter parameter));
-            Emit_c.Builder.emit builder (Assign (Codegen_support.at sum, add own parameter));
-            Emit_c.Builder.finish builder (Return None))
+        Emit_c.Ir_builder.outline builder ~index:0 ~parts:[] (fun () ->
+            let own = Emit_c.Ir_builder.allocate_local builder ~name:"own" int in
+            Emit_c.Ir_builder.emit builder
+              (Assign (Codegen_support.at own, add parameter parameter));
+            Emit_c.Ir_builder.emit builder (Assign (Codegen_support.at sum, add own parameter));
+            Emit_c.Ir_builder.finish builder (Return None))
       in
       let second =
-        Emit_c.Builder.outline builder ~index:1 ~parts:[] (fun () ->
-            Emit_c.Builder.emit builder
+        Emit_c.Ir_builder.outline builder ~index:1 ~parts:[] (fun () ->
+            Emit_c.Ir_builder.emit builder
               (Assign (Codegen_support.at other, Use (Codegen_support.copy parameter)));
-            Emit_c.Builder.finish builder (Return None))
+            Emit_c.Ir_builder.finish builder (Return None))
       in
-      let address holder =
+      let take_address holder =
         Lowered.Address { place = Codegen_support.at holder; writable = false }
       in
-      Emit_c.Builder.emit builder (Fork { branches = [ (0, address first); (1, address second) ] });
-      Emit_c.Builder.emit builder (Assign (Codegen_support.at sum, add sum other));
-      Emit_c.Builder.finish builder (Return (Some (Codegen_support.copy sum)));
-      let instance =
-        Emit_c.Builder.build builder { parameters = []; result = Some int; returns = true }
+      Emit_c.Ir_builder.emit builder
+        (Fork { branches = [ (0, take_address first); (1, take_address second) ] });
+      Emit_c.Ir_builder.emit builder (Assign (Codegen_support.at sum, add sum other));
+      Emit_c.Ir_builder.finish builder (Return (Some (Codegen_support.copy sum)));
+      let fragment =
+        Emit_c.Ir_builder.build builder { parameters = []; result = Some int; returns = true }
       in
-      let c = Emit_c.For_testing.c (Emit_c.make_fragment env (Code instance)) in
+      let c = Emit_c.For_testing.render_c fragment in
       List.iter
         (fun text ->
           if not (String.includes ~affix:text c) then Codegen_support.fail "no %s in:\n%s" text c)
         [ "f_capture0"; "f_capture1"; "int32_t l6_own;" ];
       if String.includes ~affix:"f_capture2" c then
         Codegen_support.fail "a function reaches three locals:\n%s" c;
-      Codegen_support.expect_status 20 [ Codegen_support.printed instance ])
+      Codegen_support.expect_status 20 [ Codegen_support.make_program_fragment fragment ])
 
 let () =
   Codegen_support.test
@@ -124,8 +127,8 @@ let () =
     (fun () ->
       let work : Ground.function_type =
         {
-          parameters = [ (Read, Codegen_support.named "UInt64") ];
-          result = Codegen_support.named "Unit";
+          parameters = [ (Read, Codegen_support.uint64) ];
+          result = Codegen_support.unit;
           uses = [];
         }
       in
@@ -139,13 +142,13 @@ let () =
       let count = Codegen_support.at ~projections:[ Deref; Field "count"; Deref ] 2 in
       let add amount = Lowered.Assign (count, Binary (Add, Copy count, amount)) in
       let coroutine =
-        Codegen_support.function_ ~parameters:[ 0; 1 ] ~environment
+        Codegen_support.function_ ~parameters:[ 0; 1; 4 ] ~environment
           [
             Codegen_support.local ~name:"environment" (Raw (Nullable_pointer Opaque));
-            Codegen_support.local ~name:"item"
-              (Codegen_support.value (Codegen_support.named "UInt64"));
+            Codegen_support.local ~name:"item" (Codegen_support.value Codegen_support.uint64);
             Codegen_support.local (Pointer { target = Environment 0; writable = false });
             Codegen_support.local (Codegen_support.value Codegen_support.int32);
+            Codegen_support.local ~name:"capabilities" Convention.capabilities;
           ]
           [
             Codegen_support.block
@@ -167,7 +170,7 @@ let () =
             result = Returned (Codegen_support.at into);
           }
       in
-      let plus amount =
+      let add_amount amount =
         Lowered.Assign (Codegen_support.at 6, Binary (Add, Codegen_support.copy 6, amount))
       in
       Codegen_support.expect_status 112
@@ -202,7 +205,14 @@ let () =
                   Call
                     {
                       target = Intrinsic Coroutine_start;
-                      arguments = [ Codegen_support.copy 2; Constant (Integer (UInt64, Z.one)) ];
+                      arguments =
+                        [
+                          Copy (Builtin_records.Function_value.project_code (Codegen_support.at 2));
+                          Copy
+                            (Builtin_records.Function_value.project_environment
+                               (Codegen_support.at 2));
+                          Constant (Integer (UInt64, Z.one));
+                        ];
                       result = Returned (Codegen_support.at 3);
                     };
                   resume 4;
@@ -218,9 +228,9 @@ let () =
                     ( Codegen_support.at 8,
                       Binary (Multiply, Codegen_support.copy 8, Codegen_support.constant_int32 50)
                     );
-                  plus (Codegen_support.copy 0);
-                  plus (Codegen_support.copy 7);
-                  plus (Codegen_support.copy 8);
+                  add_amount (Codegen_support.copy 0);
+                  add_amount (Codegen_support.copy 7);
+                  add_amount (Codegen_support.copy 8);
                 ]
                 (Return (Some (Codegen_support.copy 6)));
             ];

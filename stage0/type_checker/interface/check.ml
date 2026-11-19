@@ -1,7 +1,7 @@
-let list_bound_diagnostics lookups ~package ~bounds ~spans named =
+let list_bound_diagnostics lookups ~package ~list_bounds ~spans named =
   List.concat_map
     (fun (id, (type_ : Types.ty)) ->
-      let diagnostic code message = Diagnostic.make ~code spans.(id) message in
+      let make_diagnostic code message = Diagnostic.make ~code spans.(id) message in
       match type_ with
       | Named { path; arguments } -> (
           match
@@ -9,22 +9,23 @@ let list_bound_diagnostics lookups ~package ~bounds ~spans named =
               (fun (interface : Types.type_interface) ->
                 Impls.list_required_bounds interface.type_generics
                   (Types.make_substitution interface.type_generics arguments))
-              (Definition.read_type_interface lookups path)
+              (Definition.find_type_interface lookups path)
           with
           | Some required ->
               List.concat_map
                 (fun (argument, bound) ->
-                  match Impls.implements lookups ~bounds argument bound with
+                  match Impls.find_evidence lookups ~list_bounds argument bound with
                   | None ->
                       [
-                        diagnostic (Types Unsatisfied_bound)
+                        make_diagnostic (Types Unsatisfied_bound)
                           (Printf.sprintf "`%s` needs `%s: %s`, which does not hold here."
                              (Types.show type_) (Types.show argument) (Types.show_trait bound));
                       ]
                   | Some evidence ->
                       List.map
-                        (diagnostic (Capabilities Not_granted))
-                        (Grants.describe_missing_in_evidence lookups ~package ~bounds evidence))
+                        (make_diagnostic (Capabilities Not_granted))
+                        (Grants.describe_missing_in_impls lookups ~package
+                           (Grants.list_evidence_uses lookups ~list_bounds evidence)))
                 required
           | None -> [])
       | _ -> [])
@@ -33,7 +34,7 @@ let list_bound_diagnostics lookups ~package ~bounds ~spans named =
 let check_bounds (state : Checking.state) =
   state.diagnostics :=
     list_bound_diagnostics state.lookups ~package:state.key.module_.package
-      ~bounds:(Checking.list_bounds state) ~spans:state.spans state.elaborated.named
+      ~list_bounds:(Checking.list_bounds state) ~spans:state.spans state.elaborated.named
     @ !(state.diagnostics)
 
 let rec list_mentioned_paths = function
@@ -47,7 +48,7 @@ let rec list_mentioned_paths = function
 
 and list_argument_paths = function
   | Types.Type type_ -> list_mentioned_paths type_
-  | Types.Value _ | Types.Capabilities _ -> []
+  | Types.Value _ -> []
 
 let find_visibility (state : Checking.state) (path : Path.t) =
   match path with
@@ -107,10 +108,30 @@ let list_signature_types (signature : Types.signature) =
         | _ -> [])
       signature.generics
 
+let check_real_implementations (state : Checking.state) (resolved : Resolve.resolved) ~recipient
+    (uses : Syntax.capability_reference list) =
+  List.iter
+    (fun (capability : Syntax.capability_reference) ->
+      match capability.kind with
+      | Capability_path written -> (
+          match resolved.names.(written.path.last.id) with
+          | Some (Definition (Capability, path))
+            when (not (Types.is_built_in_capability (Capability path)))
+                 && Option.is_none (Definition.find_real_implementation state.lookups path) ->
+              Checking.report state No_real_implementation state.spans.(capability.id)
+                (Printf.sprintf
+                   "`%s` has no real implementation, so the runtime cannot provide it to %s. \
+                    Provide an implementation in the body with `provide`."
+                   (Elaborator.show_path written.path)
+                   recipient)
+          | _ -> ())
+      | Self_capabilities _ | Associated_capabilities _ | Generic_capability _ -> ())
+    uses
+
 let main_message =
   "`main` must have exactly the signature `fn main(arguments: List[String]) -> ExitCode`."
 
-let check_main state (signature : Types.signature) span =
+let check_main state resolved (clauses : Syntax.clause list) (signature : Types.signature) span =
   let list_of_string =
     match signature.parameters with
     | [
@@ -130,7 +151,25 @@ let check_main state (signature : Types.signature) span =
     | _ -> false
   in
   if not (list_of_string && exit_code && signature.generics = [] && signature.receiver = None) then
-    Checking.report state Main_signature span main_message
+    Checking.report state Main_signature span main_message;
+  check_real_implementations state resolved ~recipient:"`main`"
+    (List.concat_map
+       (fun (clause : Syntax.clause) -> match clause.kind with Uses written -> written | _ -> [])
+       clauses)
+
+let make_element_removal (spans : Source.Definition_span.t array)
+    ~(clause : Source.Definition_span.t) (elements : Syntax.id list) (removed : Syntax.id) =
+  let delete start stop = Diagnostic.delete (Source.Definition_span.make start stop) in
+  let rec find_neighbors previous = function
+    | element :: next :: _ when element = removed -> (previous, Some next)
+    | [ element ] when element = removed -> (previous, None)
+    | element :: rest -> find_neighbors (Some element) rest
+    | [] -> Compiler_bug.raise_bug ~stage:"Interface" "the removed element is not in its list"
+  in
+  match find_neighbors None elements with
+  | _, Some next -> delete spans.(removed).start spans.(next).start
+  | Some previous, None -> delete spans.(previous).stop spans.(removed).stop
+  | None, None -> delete clause.start clause.stop
 
 let check_duplicates state member_kind (names : Syntax.name list) =
   ignore
@@ -147,29 +186,6 @@ let list_field_names (fields : Syntax.field list) =
     (fun (field : Syntax.field) ->
       match field.kind with Field_declaration { name; _ } -> Some name | Field_error -> None)
     fields
-
-let make_derive_removal (spans : Source.Definition_span.t array) (clause : Syntax.type_clause)
-    (traits : Syntax.path_type list) (written : Syntax.path_type) =
-  let delete start stop = Diagnostic.delete (Source.Definition_span.make start stop) in
-  match traits with
-  | [ _ ] -> delete spans.(clause.id).start spans.(clause.id).stop
-  | _ -> (
-      let rec find_next = function
-        | (first : Syntax.path_type) :: (next :: _ as rest) ->
-            if first == written then Some next else find_next rest
-        | _ -> None
-      in
-      match find_next traits with
-      | Some next -> delete spans.(written.id).start spans.(next.id).start
-      | None -> (
-          let rec find_previous = function
-            | (previous : Syntax.path_type) :: (next :: _ as rest) ->
-                if next == written then Some previous else find_previous rest
-            | _ -> None
-          in
-          match find_previous traits with
-          | Some previous -> delete spans.(previous.id).stop spans.(written.id).stop
-          | None -> delete spans.(written.id).start spans.(written.id).stop))
 
 let check_derives state (interface : Types.type_interface) (clauses : Syntax.type_clause list)
     resolved =
@@ -210,7 +226,11 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
                         ~fixes:
                           [
                             Diagnostic.fix "Remove the declaration."
-                              [ make_derive_removal state.spans clause traits written ];
+                              [
+                                make_element_removal state.spans ~clause:state.spans.(clause.id)
+                                  (List.map (fun (trait : Syntax.path_type) -> trait.id) traits)
+                                  written.id;
+                              ];
                           ]
                         (Printf.sprintf
                            "Whether `%s` holds for this type is derived from its fields, which are \
@@ -224,10 +244,11 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
                             arguments = Types.list_generic_arguments interface.type_generics;
                           }
                       in
-                      let bounds = list_derived_bounds trait in
+                      let list_bounds = list_derived_bounds trait in
                       let holds =
-                        if Well_known.is Plain trait then Impls.is_plain state.lookups ~bounds self
-                        else Impls.is_copyable state.lookups ~bounds self
+                        if Well_known.is Plain trait then
+                          Impls.is_plain state.lookups ~list_bounds self
+                        else Impls.is_copyable state.lookups ~list_bounds self
                       in
                       if not holds then
                         Checking.report state Cannot_derive state.spans.(written.id)
@@ -265,8 +286,8 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
                         in
                         if
                           Option.is_none
-                            (Impls.implements state.lookups ~bounds:(list_derived_bounds trait)
-                               type_ wanted)
+                            (Impls.find_evidence state.lookups
+                               ~list_bounds:(list_derived_bounds trait) type_ wanted)
                         then
                           Checking.report state Cannot_derive state.spans.(written.id)
                             (Printf.sprintf
@@ -280,26 +301,11 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
       | _ -> ())
     clauses
 
-let check_no_capability_parameter state definition_kind (name : Syntax.name)
-    (generics : Syntax.generic_parameter list) =
-  List.iter
-    (fun (generic : Syntax.generic_parameter) ->
-      match generic.kind with
-      | Capability_parameter parameter ->
-          Checking.report state Misplaced_capability_parameter state.spans.(generic.id)
-            (Printf.sprintf
-               "Only a function can take a capability parameter. No type argument can be written \
-                for `%s`, so no signature or field could name %s `%s` with the capabilities that \
-                it uses. Write the capabilities in the function type, as in `(fn() uses Clock)`."
-               parameter.text definition_kind name.text)
-      | Type_parameter _ | Value_parameter _ | Generic_error -> ())
-    generics
-
 let check_trait_cycle (state : Checking.state) (requires : Syntax.path_type list) =
   let is_required_by required =
     List.exists (Path.equal state.key.path) (Elaborator.list_trait_closure state.lookups required)
   in
-  match state.lookups.trait_header state.key.path with
+  match state.lookups.find_trait_header state.key.path with
   | Some header when List.exists is_required_by header.required -> (
       match requires with
       | first :: _ ->
@@ -315,7 +321,7 @@ let check_redeclared (state : Checking.state) (name : Syntax.name) (receiver : P
       (fun (required : Types.trait_reference) ->
         List.concat_map
           (fun (bound : Types.trait_reference) ->
-            match Definition.read_trait_interface state.lookups bound.trait with
+            match Definition.find_trait_interface state.lookups bound.trait with
             | Some interface ->
                 List.map
                   (fun (method_ : Types.trait_method) ->
@@ -339,19 +345,10 @@ let check_redeclared (state : Checking.state) (name : Syntax.name) (receiver : P
 let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
     (generics : Types.generic list) (impl : Types.impl_interface) =
   if List.length generics = List.length impl.impl_generics then begin
-    let renaming : Types.substitution =
-      List.map2
-        (fun (proof : Types.generic) (of_impl : Types.generic) ->
-          ( proof.generic,
-            match of_impl.kind with
-            | Type_generic _ -> Types.Type (Types.Parameter of_impl.generic)
-            | Value_generic -> Types.Value (Types.Value_parameter of_impl.generic)
-            | Capability_generic ->
-                Types.Capabilities
-                  (Types.make_capability_set [ Types.Capability_parameter of_impl.generic ]) ))
-        generics impl.impl_generics
+    let renaming =
+      Types.make_substitution generics (Types.list_generic_arguments impl.impl_generics)
     in
-    let impl_bounds = Types.list_bounds impl.impl_generics in
+    let list_impl_bounds = Types.list_bounds impl.impl_generics in
     List.iteri
       (fun index ((proof : Types.generic), (of_impl : Types.generic)) ->
         match proof.kind with
@@ -360,7 +357,7 @@ let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
               (fun (bound : Types.trait_reference) ->
                 if
                   Option.is_none
-                    (Impls.implements state.lookups ~bounds:impl_bounds
+                    (Impls.find_evidence state.lookups ~list_bounds:list_impl_bounds
                        (Types.Parameter of_impl.generic)
                        (Types.substitute_trait renaming bound))
                 then
@@ -375,26 +372,28 @@ let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
                         law is proven for every type that the `impl` is for."
                        proof.generic.name (Types.show_trait bound)))
               bounds
-        | Value_generic | Capability_generic -> ())
+        | Value_generic -> ())
       (List.combine generics impl.impl_generics)
   end
 
 let check (state : Checking.state) =
   let lookups = state.lookups in
   let definition = state.definition in
+  let visibility = (lookups.names.read_declaration state.key).visibility in
   let is_broken part = Resolve.Names.is_broken lookups.names state.key part in
   check_bounds state;
-  let resolved = lookups.resolved Interface state.key in
+  let resolved = lookups.read_resolved Interface state.key in
   if not (is_broken Header) then
-    match (lookups.names.container state.key, definition.kind, state.elaborated.interface) with
+    match (lookups.names.find_container state.key, definition.kind, state.elaborated.interface) with
     | ( Some container,
         (Function { signature; _ } | Method_declaration signature),
         Function_interface written ) -> (
         let name = Resolve.Names.extract_signature_name signature in
         match
-          (lookups.names.definition container, (lookups.elaborated_interface container).interface)
+          ( lookups.names.read_definition container,
+            (lookups.read_elaborated_interface container).interface )
         with
-        | { kind = Trait _; visibility; _ }, Trait_interface trait ->
+        | { kind = Trait _; _ }, Trait_interface trait ->
             check_redeclared state name
               (Resolve.Names.classify_receiver signature.parameters)
               ~trait_path:container.path trait;
@@ -404,7 +403,7 @@ let check (state : Checking.state) =
             Impl_checks.check_impl_method state name
               (Resolve.Names.classify_receiver signature.parameters)
               written impl
-              ~trait_span:(lookups.names.spans container).(trait_.id)
+              ~trait_span:(lookups.names.read_spans container).(trait_.id)
               trait_
         | _ -> ())
     | Some _, _, _ -> ()
@@ -412,16 +411,15 @@ let check (state : Checking.state) =
         (match signature.name with
         | Member_name (head, _) -> check_method_location state head
         | Plain_name name ->
-            if name.text = "main" && state.key.module_.modules = [] then
-              check_main state elaborated state.spans.(name.id));
+            if Path.is_entry_point state.key.path then
+              check_main state resolved signature.clauses elaborated state.spans.(name.id));
         let span =
           match signature.name with
           | Plain_name name | Member_name (_, name) -> state.spans.(name.id)
         in
-        check_private_in_public state ~visibility:definition.visibility
-          (list_signature_types elaborated) span
+        check_private_in_public state ~visibility (list_signature_types elaborated) span
     | None, Law_proof { law; type_; _ }, Law_proof_interface { generics; trait; for_type; _ } -> (
-        (match lookups.trait_header trait.trait with
+        (match lookups.find_trait_header trait.trait with
         | Some header when not (List.mem law.text header.laws) ->
             Checking.report state Unknown_member state.spans.(law.id)
               (Printf.sprintf "`%s` has no law `%s`." (Types.show_trait trait) law.text)
@@ -435,7 +433,7 @@ let check (state : Checking.state) =
           | _ -> true
         in
         if arity_matches && not (Types.is_error for_type) then
-          match Checking.implements state for_type trait with
+          match Checking.find_evidence state for_type trait with
           | None ->
               Checking.report state No_impl state.spans.(type_.id)
                 (Printf.sprintf "`%s` does not implement `%s`, so it has no law of it to keep."
@@ -443,10 +441,9 @@ let check (state : Checking.state) =
           | Some (Impls.From_impl { impl; _ }) ->
               Option.iter
                 (check_proof_bounds state type_ generics)
-                (Definition.read_impl_interface lookups impl)
+                (Definition.find_impl_interface lookups impl)
           | Some _ -> ())
-    | None, Type_definition { name; generics; body; clauses }, Type_interface interface ->
-        check_no_capability_parameter state "the type" name generics;
+    | None, Type_definition { name; body; clauses; _ }, Type_interface interface ->
         (match body with
         | Fields fields -> check_duplicates state "field" (list_field_names fields)
         | Variants variants ->
@@ -460,22 +457,22 @@ let check (state : Checking.state) =
               variants
         | Type_todo -> ());
         check_derives state interface clauses resolved;
-        if definition.visibility = Public then
-          check_private_in_public state ~visibility:definition.visibility
+        if visibility = Public then
+          check_private_in_public state ~visibility
             (Types.list_field_types interface)
             state.spans.(name.id)
-    | None, Trait { name; generics; requires; _ }, Trait_interface trait ->
-        check_no_capability_parameter state "the trait" name generics;
+    | None, Trait { name; requires; _ }, Trait_interface trait ->
         check_trait_cycle state requires;
-        check_private_in_public state ~visibility:definition.visibility
+        check_private_in_public state ~visibility
           (List.map (fun (bound : Types.trait_reference) -> Types.Any bound) trait.requires)
           state.spans.(name.id)
     | None, Constant { name = Plain_name name; _ }, Constant_interface constant ->
-        check_private_in_public state ~visibility:definition.visibility [ constant.constant_type ]
-          state.spans.(name.id)
+        check_private_in_public state ~visibility [ constant.constant_type ] state.spans.(name.id)
     | None, Impl { trait_; members; _ }, Impl_interface impl ->
         Impl_checks.check_impl state members impl trait_
     | None, Constant { name = Member_name (head, _); _ }, _ -> check_method_location state head
+    | None, Test { uses; _ }, Test_interface _ ->
+        check_real_implementations state resolved ~recipient:"a test" uses
     | None, _, _ -> ()
 
 let list_diagnostics (lookups : Lookups.t) key =
@@ -483,9 +480,9 @@ let list_diagnostics (lookups : Lookups.t) key =
     {
       Checking.lookups;
       key;
-      definition = lookups.names.definition key;
-      elaborated = lookups.elaborated_interface key;
-      spans = lookups.names.spans key;
+      definition = lookups.names.read_definition key;
+      elaborated = lookups.read_elaborated_interface key;
+      spans = lookups.names.read_spans key;
       diagnostics = ref [];
     }
   in

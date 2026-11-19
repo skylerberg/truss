@@ -1,24 +1,14 @@
-let move_leading_directory = function
-  | program :: "-C" :: directory :: command :: rest
-    when not (String.starts_with ~prefix:"-" command) ->
-      program :: command :: "-C" :: directory :: rest
-  | arguments -> arguments
-
-let extract_program_arguments = function
-  | program :: "run" :: rest ->
-      let rec options = function
-        | "--" :: rest -> "--" :: rest
-        | ("-C" as option) :: value :: rest -> option :: value :: options rest
-        | (("--release" | "--json" | "--no-server" | "--help" | "-h") as option) :: rest ->
-            option :: options rest
+let move_leading_options = function
+  | program :: arguments ->
+      let rec split leading = function
+        | ("-C" as option) :: directory :: rest -> split (directory :: option :: leading) rest
         | option :: rest
-          when String.starts_with ~prefix:"-C" option || String.starts_with ~prefix:"--help=" option
-          ->
-            option :: options rest
-        | [] -> []
-        | first :: rest -> "--" :: first :: rest
+          when option = "--no-server"
+               || (String.length option > 2 && String.starts_with ~prefix:"-C" option) ->
+            split (option :: leading) rest
+        | command :: rest when not (String.starts_with ~prefix:"-" command) ->
+            command :: List.rev_append leading rest
+        | rest -> List.rev_append leading rest
       in
-      program :: "run" :: options rest
-  | arguments -> arguments
-
-let prepare arguments = extract_program_arguments (move_leading_directory arguments)
+      program :: split [] arguments
+  | [] -> []

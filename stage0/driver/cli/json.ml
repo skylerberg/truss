@@ -59,7 +59,7 @@ let parse text =
     | _ -> ()
   in
   let expect character = if peek () = Some character then advance () else raise Malformed in
-  let literal word value =
+  let parse_literal word value =
     let word_length = String.length word in
     if !position + word_length <= length && String.sub text !position word_length = word then begin
       position := !position + word_length;
@@ -67,13 +67,13 @@ let parse text =
     end
     else raise Malformed
   in
-  let hex () =
+  let parse_hex () =
     if !position + 4 > length then raise Malformed;
     let digits = String.sub text !position 4 in
     position := !position + 4;
     match int_of_string_opt ("0x" ^ digits) with Some code -> code | None -> raise Malformed
   in
-  let string_ () =
+  let parse_string () =
     expect '"';
     let buffer = Buffer.create 16 in
     let rec loop () =
@@ -93,7 +93,7 @@ let parse text =
           | Some 't' -> Buffer.add_char buffer '\t'
           | Some 'u' ->
               advance ();
-              let high = hex () in
+              let high = parse_hex () in
               let code =
                 if
                   high >= 0xD800 && high <= 0xDBFF
@@ -102,7 +102,7 @@ let parse text =
                   && text.[!position + 1] = 'u'
                 then begin
                   position := !position + 2;
-                  let low = hex () in
+                  let low = parse_hex () in
                   0x10000 + ((high - 0xD800) lsl 10) + (low - 0xDC00)
                 end
                 else high
@@ -121,7 +121,7 @@ let parse text =
     loop ();
     Buffer.contents buffer
   in
-  let number () =
+  let parse_number () =
     let start = !position in
     let rec loop () =
       match peek () with
@@ -139,7 +139,7 @@ let parse text =
         | Some value -> Int (int_of_float value)
         | None -> raise Malformed)
   in
-  let rec value () =
+  let rec parse_value () =
     skip_space ();
     match peek () with
     | Some '{' ->
@@ -150,23 +150,23 @@ let parse text =
           Object []
         end
         else
-          let rec fields acc =
+          let rec parse_fields acc =
             skip_space ();
-            let name = string_ () in
+            let name = parse_string () in
             skip_space ();
             expect ':';
-            let field = value () in
+            let field = parse_value () in
             skip_space ();
             match peek () with
             | Some ',' ->
                 advance ();
-                fields ((name, field) :: acc)
+                parse_fields ((name, field) :: acc)
             | Some '}' ->
                 advance ();
                 Object (List.rev ((name, field) :: acc))
             | _ -> raise Malformed
           in
-          fields []
+          parse_fields []
     | Some '[' ->
         advance ();
         skip_space ();
@@ -175,27 +175,27 @@ let parse text =
           List []
         end
         else
-          let rec items acc =
-            let item = value () in
+          let rec parse_items acc =
+            let item = parse_value () in
             skip_space ();
             match peek () with
             | Some ',' ->
                 advance ();
-                items (item :: acc)
+                parse_items (item :: acc)
             | Some ']' ->
                 advance ();
                 List (List.rev (item :: acc))
             | _ -> raise Malformed
           in
-          items []
-    | Some '"' -> String (string_ ())
-    | Some 't' -> literal "true" (Bool true)
-    | Some 'f' -> literal "false" (Bool false)
-    | Some 'n' -> literal "null" Null
-    | Some ('-' | '0' .. '9') -> number ()
+          parse_items []
+    | Some '"' -> String (parse_string ())
+    | Some 't' -> parse_literal "true" (Bool true)
+    | Some 'f' -> parse_literal "false" (Bool false)
+    | Some 'n' -> parse_literal "null" Null
+    | Some ('-' | '0' .. '9') -> parse_number ()
     | _ -> raise Malformed
   in
-  let result = value () in
+  let result = parse_value () in
   skip_space ();
   if !position <> length then raise Malformed;
   result

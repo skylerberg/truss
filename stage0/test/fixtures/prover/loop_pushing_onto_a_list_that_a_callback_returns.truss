@@ -1,0 +1,17 @@
+fn f(
+  source: List[Int64],
+  produce: (fn(Int64) -> List[Int64] uses generic Granted),
+) -> List[List[Int64]]
+  uses generic Granted
+  cost time O(source.length() * time(produce))
+{
+  var rows: List[List[Int64]] = []
+  for index in 0..source.length()
+    cost time O(index * time(produce))
+  {
+    var row = produce(source[index])
+    mut row.push(1)
+    mut rows.push(own row)
+  }
+  rows
+}

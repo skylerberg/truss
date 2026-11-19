@@ -17,8 +17,12 @@ let host =
     match Built_for.architecture with "amd64" -> Some X86_64 | "arm64" -> Some Arm64 | _ -> None
   in
   match (os, architecture) with
-  | Some os, Some architecture -> Some { os; architecture }
-  | _ -> None
+  | Some os, Some architecture -> Ok { os; architecture }
+  | _ ->
+      Error
+        (Printf.sprintf "Stage0 builds programs only for %s, on %s."
+           (String.concat " and " (List.map show_os oses))
+           (String.concat " and " (List.map show_architecture architectures)))
 
 type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | Float32 | Float64
 
@@ -199,6 +203,7 @@ type function_ =
   | Read
   | Open
   | Close
+  | Dup2
   | Errno
   | Clock_gettime
   | Getentropy
@@ -285,6 +290,7 @@ let functions =
     Read;
     Open;
     Close;
+    Dup2;
     Errno;
     Clock_gettime;
     Getentropy;
@@ -371,6 +377,7 @@ let show_function = function
   | Read -> "read"
   | Open -> "open"
   | Close -> "close"
+  | Dup2 -> "dup2"
   | Errno -> "errno"
   | Clock_gettime -> "clock_gettime"
   | Getentropy -> "getentropy"
@@ -475,34 +482,37 @@ let mode = choose_by_os (function Linux -> Named "unsigned int" | Macos -> Named
 let offset = choose_by_os (function Linux -> Named "long" | Macos -> Named "long long")
 
 let describe function_ =
-  let row ?(symbol = make_portable_type (show_function function_)) ?variadic_from ?(layout = [])
-      ?(named = []) ?at_most ?(on = fun _ -> true) returns result parameters ~headers =
+  let make_row ?(symbol = make_portable_type (show_function function_)) ?variadic_from
+      ?(layout = []) ?(named = []) ?at_most ?(on = fun _ -> true) returns result parameters ~headers
+      =
     { symbol; returns; result; at_most; on; parameters; variadic_from; headers; layout; named }
   in
-  let counted by = Counted { by; each = 1 } in
+  let make_counted by = Counted { by; each = 1 } in
   match function_ with
   | Write ->
-      row ~at_most:"count"
+      make_row ~at_most:"count"
         (make_portable_type (Named "long"))
         (Returns Int64)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
-          ("bytes", Elements (UInt8, counted "count"), make_portable_type (Pointer (Const Void)));
+          ( "bytes",
+            Elements (UInt8, make_counted "count"),
+            make_portable_type (Pointer (Const Void)) );
           ("count", Value UInt64, size);
         ]
         ~headers:[ "unistd.h" ]
   | Read ->
-      row ~at_most:"count"
+      make_row ~at_most:"count"
         (make_portable_type (Named "long"))
         (Returns Int64)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
-          ("buffer", Room (UInt8, counted "count"), make_portable_type (Pointer Void));
+          ("buffer", Room (UInt8, make_counted "count"), make_portable_type (Pointer Void));
           ("count", Value UInt64, size);
         ]
         ~headers:[ "unistd.h" ]
   | Open ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32) ~variadic_from:2
         [
@@ -514,20 +524,30 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h" ]
   | Close ->
-      row
+      make_row
         (make_portable_type (Named "int32_t"))
         (Returns Int32)
         [ ("descriptor", Value Int32, make_portable_type (Named "int32_t")) ]
         ~symbol:(make_portable_type "t_runtime_close")
         ~headers:[]
+  | Dup2 ->
+      make_row
+        (make_portable_type (Named "int32_t"))
+        (Returns Int32)
+        [
+          ("descriptor", Value Int32, make_portable_type (Named "int32_t"));
+          ("onto", Value Int32, make_portable_type (Named "int32_t"));
+        ]
+        ~symbol:(make_portable_type "t_runtime_dup2")
+        ~headers:[]
   | Errno ->
-      row
+      make_row
         (make_portable_type (Pointer (Named "int")))
         (Points_at Int32) []
         ~symbol:(make_portable_type "t_runtime_errno_address_uncached")
         ~headers:[]
   | Clock_gettime ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -548,7 +568,7 @@ let describe function_ =
             "sizeof(((struct timespec *)0)->tv_nsec) == 8";
           ]
   | Getentropy ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -557,7 +577,7 @@ let describe function_ =
         ]
         ~headers:[ "sys/types.h"; "sys/random.h" ]
   | Getenv ->
-      row
+      make_row
         (make_portable_type (Pointer (Named "char")))
         Text
         [
@@ -567,7 +587,7 @@ let describe function_ =
         ]
         ~headers:[ "stdlib.h" ]
   | Posix_spawnp ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -578,7 +598,6 @@ let describe function_ =
           ( "file_actions",
             Elements (UInt8, Number Spawn_file_actions_size),
             make_portable_type (Pointer (Const Void)) );
-          ("attributes", Always 0, make_portable_type (Pointer (Const Void)));
           ( "arguments",
             Elements (UInt64, Through_zero),
             make_portable_type (Pointer (Const (Pointer (Named "char")))) );
@@ -586,15 +605,12 @@ let describe function_ =
             Elements (UInt64, Through_zero),
             make_portable_type (Pointer (Const (Pointer (Named "char")))) );
         ]
-        ~named:
-          [
-            ("file_actions", Pointer (Const (Named "posix_spawn_file_actions_t")));
-            ("attributes", Pointer (Const (Named "posix_spawnattr_t")));
-          ]
+        ~named:[ ("file_actions", Pointer (Const (Named "posix_spawn_file_actions_t"))) ]
+        ~symbol:(make_portable_type "t_runtime_posix_spawnp")
         ~headers:[ "spawn.h" ]
         ~layout:[ "sizeof(char *) == sizeof(__SIZE_TYPE__)" ]
   | Waitpid ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -604,11 +620,11 @@ let describe function_ =
         ]
         ~headers:[ "sys/wait.h" ]
   | Snprintf ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32) ~variadic_from:3
         [
-          ("buffer", Room (UInt8, counted "size"), make_portable_type (Pointer (Named "char")));
+          ("buffer", Room (UInt8, make_counted "size"), make_portable_type (Pointer (Named "char")));
           ("size", Value UInt64, size);
           ( "format",
             Elements (UInt8, Through_zero),
@@ -618,7 +634,7 @@ let describe function_ =
         ]
         ~headers:[ "stdio.h" ]
   | Strtod ->
-      row
+      make_row
         (make_portable_type (Named "double"))
         (Returns Float64)
         [
@@ -629,7 +645,7 @@ let describe function_ =
         ]
         ~headers:[ "stdlib.h" ]
   | Strtof ->
-      row
+      make_row
         (make_portable_type (Named "float"))
         (Returns Float32)
         [
@@ -639,9 +655,9 @@ let describe function_ =
           ("end", Always 0, make_portable_type (Pointer (Pointer (Named "char"))));
         ]
         ~headers:[ "stdlib.h" ]
-  | Fork -> row (make_portable_type (Named "int")) (Returns Int32) [] ~headers:[ "unistd.h" ]
+  | Fork -> make_row (make_portable_type (Named "int")) (Returns Int32) [] ~headers:[ "unistd.h" ]
   | Pipe ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -651,7 +667,7 @@ let describe function_ =
         ]
         ~headers:[ "unistd.h" ]
   | Poll ->
-      row ~at_most:"count"
+      make_row ~at_most:"count"
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -677,7 +693,7 @@ let describe function_ =
             "__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__";
           ]
   | Kill ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -686,39 +702,41 @@ let describe function_ =
         ]
         ~headers:[ "signal.h" ]
   | Sysconf ->
-      row
+      make_row
         (make_portable_type (Named "long"))
         (Returns Int64)
         [ ("name", Value Int32, make_portable_type (Named "int")) ]
         ~headers:[ "unistd.h" ]
   | Exit ->
-      row (make_portable_type Void) Never
+      make_row (make_portable_type Void) Never
         [ ("status", Value Int32, make_portable_type (Named "int")) ]
         ~symbol:(make_portable_type "_exit") ~headers:[ "unistd.h" ]
   | Pread ->
-      row ~at_most:"count"
+      make_row ~at_most:"count"
         (make_portable_type (Named "long"))
         (Returns Int64)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
-          ("buffer", Room (UInt8, counted "count"), make_portable_type (Pointer Void));
+          ("buffer", Room (UInt8, make_counted "count"), make_portable_type (Pointer Void));
           ("count", Value UInt64, size);
           ("offset", Value Int64, offset);
         ]
         ~headers:[ "unistd.h" ]
   | Pwrite ->
-      row ~at_most:"count"
+      make_row ~at_most:"count"
         (make_portable_type (Named "long"))
         (Returns Int64)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
-          ("bytes", Elements (UInt8, counted "count"), make_portable_type (Pointer (Const Void)));
+          ( "bytes",
+            Elements (UInt8, make_counted "count"),
+            make_portable_type (Pointer (Const Void)) );
           ("count", Value UInt64, size);
           ("offset", Value Int64, offset);
         ]
         ~headers:[ "unistd.h" ]
   | Lseek ->
-      row offset (Returns Int64)
+      make_row offset (Returns Int64)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
           ("offset", Value Int64, offset);
@@ -726,7 +744,7 @@ let describe function_ =
         ]
         ~headers:[ "unistd.h" ]
   | Ftruncate ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -735,13 +753,13 @@ let describe function_ =
         ]
         ~headers:[ "unistd.h" ]
   | Fsync ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [ ("descriptor", Value Int32, make_portable_type (Named "int")) ]
         ~headers:[ "unistd.h" ]
   | Fstat ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -760,7 +778,7 @@ let describe function_ =
             "__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__";
           ]
   | Stat ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -773,7 +791,7 @@ let describe function_ =
         ~named:[ ("status", Pointer (Struct "stat")) ]
         ~headers:[ "sys/stat.h" ]
   | Lstat ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -786,7 +804,7 @@ let describe function_ =
         ~named:[ ("status", Pointer (Struct "stat")) ]
         ~headers:[ "sys/stat.h" ]
   | Mkdir ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -797,7 +815,7 @@ let describe function_ =
         ]
         ~headers:[ "sys/stat.h" ]
   | Remove ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -807,7 +825,7 @@ let describe function_ =
         ]
         ~headers:[ "stdio.h" ]
   | Rename ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -818,7 +836,7 @@ let describe function_ =
         ]
         ~headers:[ "stdio.h" ]
   | Symlink ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -831,7 +849,7 @@ let describe function_ =
         ]
         ~headers:[ "unistd.h" ]
   | Link ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -844,7 +862,7 @@ let describe function_ =
         ]
         ~headers:[ "unistd.h" ]
   | Chmod ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -855,7 +873,7 @@ let describe function_ =
         ]
         ~headers:[ "sys/stat.h" ]
   | Utimensat ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -870,19 +888,19 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h"; "sys/stat.h" ]
   | Readlink ->
-      row ~at_most:"count"
+      make_row ~at_most:"count"
         (make_portable_type (Named "long"))
         (Returns Int64)
         [
           ( "path",
             Elements (UInt8, Through_zero),
             make_portable_type (Pointer (Const (Named "char"))) );
-          ("buffer", Room (UInt8, counted "count"), make_portable_type (Pointer (Named "char")));
+          ("buffer", Room (UInt8, make_counted "count"), make_portable_type (Pointer (Named "char")));
           ("count", Value UInt64, size);
         ]
         ~headers:[ "unistd.h" ]
   | Realpath ->
-      row
+      make_row
         (make_portable_type (Pointer (Named "char")))
         Text
         [
@@ -893,39 +911,39 @@ let describe function_ =
         ]
         ~headers:[ "stdlib.h"; "limits.h" ]
   | Getcwd ->
-      row
+      make_row
         (make_portable_type (Pointer (Named "char")))
         Text
         [
-          ("buffer", Room (UInt8, counted "size"), make_portable_type (Pointer (Named "char")));
+          ("buffer", Room (UInt8, make_counted "size"), make_portable_type (Pointer (Named "char")));
           ("size", Value UInt64, size);
         ]
         ~headers:[ "unistd.h" ]
   | Gethostname ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
           ( "name",
-            Elements_to_change (UInt8, counted "size"),
+            Elements_to_change (UInt8, make_counted "size"),
             make_portable_type (Pointer (Named "char")) );
           ("size", Value UInt64, size);
         ]
         ~headers:[ "unistd.h" ]
-  | Getpid -> row (make_portable_type (Named "int")) (Returns Int32) [] ~headers:[ "unistd.h" ]
+  | Getpid -> make_row (make_portable_type (Named "int")) (Returns Int32) [] ~headers:[ "unistd.h" ]
   | Proc_pidpath ->
-      row ~at_most:"size"
+      make_row ~at_most:"size"
         ~on:(fun os -> os = Macos)
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
           ("process", Value Int32, make_portable_type (Named "int"));
-          ("buffer", Room (UInt8, counted "size"), make_portable_type (Pointer Void));
+          ("buffer", Room (UInt8, make_counted "size"), make_portable_type (Pointer Void));
           ("size", Value UInt64, make_portable_type (Named "unsigned int"));
         ]
         ~headers:[ "libproc.h" ]
   | Fcntl_dupfd_cloexec ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32) ~symbol:(make_portable_type "fcntl") ~variadic_from:2
         [
@@ -935,7 +953,7 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h" ]
   | Fcntl_setfd_cloexec ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32) ~symbol:(make_portable_type "fcntl") ~variadic_from:2
         [
@@ -945,7 +963,7 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h" ]
   | Posix_spawn_file_actions_init ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -956,7 +974,7 @@ let describe function_ =
         ~named:[ ("actions", Pointer (Named "posix_spawn_file_actions_t")) ]
         ~headers:[ "spawn.h" ]
   | Posix_spawn_file_actions_destroy ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -967,7 +985,7 @@ let describe function_ =
         ~named:[ ("actions", Pointer (Named "posix_spawn_file_actions_t")) ]
         ~headers:[ "spawn.h" ]
   | Posix_spawn_file_actions_adddup2 ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -980,7 +998,7 @@ let describe function_ =
         ~named:[ ("actions", Pointer (Named "posix_spawn_file_actions_t")) ]
         ~headers:[ "spawn.h" ]
   | Posix_spawn_file_actions_addopen ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -997,7 +1015,7 @@ let describe function_ =
         ~named:[ ("actions", Pointer (Named "posix_spawn_file_actions_t")) ]
         ~headers:[ "spawn.h" ]
   | Posix_spawn_file_actions_addchdir ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         ~symbol:(make_portable_type "posix_spawn_file_actions_addchdir_np")
@@ -1012,32 +1030,34 @@ let describe function_ =
         ~named:[ ("actions", Pointer (Named "posix_spawn_file_actions_t")) ]
         ~headers:[ "spawn.h" ]
   | Getdents64 ->
-      row ~at_most:"count"
+      make_row ~at_most:"count"
         ~on:(fun os -> os = Linux)
         (make_portable_type (Named "long"))
         (Returns Int64)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
-          ("buffer", Room (UInt8, counted "count"), make_portable_type (Pointer Void));
+          ("buffer", Room (UInt8, make_counted "count"), make_portable_type (Pointer Void));
           ("count", Value UInt64, size);
         ]
         ~headers:[ "dirent.h" ]
   | Getattrlistbulk ->
-      row
+      make_row
         ~on:(fun os -> os = Macos)
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
           ("wanted", Elements (UInt8, Exactly 24), make_portable_type (Pointer Void));
-          ("buffer", Elements_to_change (UInt8, counted "size"), make_portable_type (Pointer Void));
+          ( "buffer",
+            Elements_to_change (UInt8, make_counted "size"),
+            make_portable_type (Pointer Void) );
           ("size", Value UInt64, size);
           ("options", Value UInt64, make_portable_type (Named "unsigned long long"));
         ]
         ~headers:[ "sys/attr.h"; "unistd.h" ]
         ~layout:[ "sizeof(struct attrlist) == 24" ]
   | Ioctl_tiocgwinsz ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32) ~symbol:(make_portable_type "ioctl") ~variadic_from:2
         [
@@ -1053,7 +1073,7 @@ let describe function_ =
             "__builtin_offsetof(struct winsize, ws_col) == 2";
           ]
   | Tcgetattr ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -1065,7 +1085,7 @@ let describe function_ =
         ~named:[ ("settings", Pointer (Struct "termios")) ]
         ~headers:[ "termios.h" ]
   | Tcsetattr ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -1078,7 +1098,7 @@ let describe function_ =
         ~named:[ ("settings", Pointer (Const (Struct "termios"))) ]
         ~headers:[ "termios.h" ]
   | Socket ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -1088,12 +1108,14 @@ let describe function_ =
         ]
         ~headers:[ "sys/socket.h" ]
   | Bind ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
-          ("address", Elements (UInt8, counted "length"), make_portable_type (Pointer (Const Void)));
+          ( "address",
+            Elements (UInt8, make_counted "length"),
+            make_portable_type (Pointer (Const Void)) );
           ("length", Value UInt64, make_portable_type (Named "unsigned int"));
         ]
         ~named:[ ("address", Pointer (Const (Struct "sockaddr"))) ]
@@ -1108,18 +1130,20 @@ let describe function_ =
             "__builtin_offsetof(struct sockaddr_in6, sin6_addr) == 8";
           ]
   | Connect ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
-          ("address", Elements (UInt8, counted "length"), make_portable_type (Pointer (Const Void)));
+          ( "address",
+            Elements (UInt8, make_counted "length"),
+            make_portable_type (Pointer (Const Void)) );
           ("length", Value UInt64, make_portable_type (Named "unsigned int"));
         ]
         ~named:[ ("address", Pointer (Const (Struct "sockaddr"))) ]
         ~headers:[ "sys/socket.h" ]
   | Listen ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -1128,13 +1152,13 @@ let describe function_ =
         ]
         ~headers:[ "sys/socket.h" ]
   | Accept ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
           ( "address",
-            Elements_to_change (UInt8, counted "length"),
+            Elements_to_change (UInt8, make_counted "length"),
             make_portable_type (Pointer Void) );
           ( "length",
             Written (UInt32, [ "length" ]),
@@ -1143,13 +1167,13 @@ let describe function_ =
         ~named:[ ("address", Pointer (Struct "sockaddr")) ]
         ~headers:[ "sys/socket.h" ]
   | Getsockname ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
           ( "address",
-            Elements_to_change (UInt8, counted "length"),
+            Elements_to_change (UInt8, make_counted "length"),
             make_portable_type (Pointer Void) );
           ( "length",
             Written (UInt32, [ "length" ]),
@@ -1158,13 +1182,13 @@ let describe function_ =
         ~named:[ ("address", Pointer (Struct "sockaddr")) ]
         ~headers:[ "sys/socket.h" ]
   | Getpeername ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
           ( "address",
-            Elements_to_change (UInt8, counted "length"),
+            Elements_to_change (UInt8, make_counted "length"),
             make_portable_type (Pointer Void) );
           ( "length",
             Written (UInt32, [ "length" ]),
@@ -1173,7 +1197,7 @@ let describe function_ =
         ~named:[ ("address", Pointer (Struct "sockaddr")) ]
         ~headers:[ "sys/socket.h" ]
   | Shutdown ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
@@ -1182,58 +1206,66 @@ let describe function_ =
         ]
         ~headers:[ "sys/socket.h" ]
   | Setsockopt ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
           ("level", Value Int32, make_portable_type (Named "int"));
           ("option", Value Int32, make_portable_type (Named "int"));
-          ("value", Elements (UInt8, counted "length"), make_portable_type (Pointer (Const Void)));
+          ( "value",
+            Elements (UInt8, make_counted "length"),
+            make_portable_type (Pointer (Const Void)) );
           ("length", Value UInt64, make_portable_type (Named "unsigned int"));
         ]
         ~headers:[ "sys/socket.h"; "sys/time.h" ]
         ~layout:
           [ "sizeof(struct timeval) == 16"; "__builtin_offsetof(struct timeval, tv_usec) == 8" ]
   | Getsockopt ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
           ("level", Value Int32, make_portable_type (Named "int"));
           ("option", Value Int32, make_portable_type (Named "int"));
-          ("value", Elements_to_change (UInt8, counted "length"), make_portable_type (Pointer Void));
+          ( "value",
+            Elements_to_change (UInt8, make_counted "length"),
+            make_portable_type (Pointer Void) );
           ( "length",
             Written (UInt32, [ "length" ]),
             make_portable_type (Pointer (Named "unsigned int")) );
         ]
         ~headers:[ "sys/socket.h" ]
   | Sendto ->
-      row ~at_most:"count"
+      make_row ~at_most:"count"
         (make_portable_type (Named "long"))
         (Returns Int64)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
-          ("bytes", Elements (UInt8, counted "count"), make_portable_type (Pointer (Const Void)));
+          ( "bytes",
+            Elements (UInt8, make_counted "count"),
+            make_portable_type (Pointer (Const Void)) );
           ("count", Value UInt64, size);
           ("flags", Value Int32, make_portable_type (Named "int"));
-          ("address", Elements (UInt8, counted "length"), make_portable_type (Pointer (Const Void)));
+          ( "address",
+            Elements (UInt8, make_counted "length"),
+            make_portable_type (Pointer (Const Void)) );
           ("length", Value UInt64, make_portable_type (Named "unsigned int"));
         ]
         ~named:[ ("address", Pointer (Const (Struct "sockaddr"))) ]
         ~headers:[ "sys/socket.h" ]
   | Recvfrom ->
-      row ~at_most:"count"
+      make_row ~at_most:"count"
         (make_portable_type (Named "long"))
         (Returns Int64)
         [
           ("descriptor", Value Int32, make_portable_type (Named "int"));
-          ("buffer", Room (UInt8, counted "count"), make_portable_type (Pointer Void));
+          ("buffer", Room (UInt8, make_counted "count"), make_portable_type (Pointer Void));
           ("count", Value UInt64, size);
           ("flags", Value Int32, make_portable_type (Named "int"));
           ( "address",
-            Elements_to_change (UInt8, counted "length"),
+            Elements_to_change (UInt8, make_counted "length"),
             make_portable_type (Pointer Void) );
           ( "length",
             Written (UInt32, [ "length" ]),
@@ -1242,7 +1274,7 @@ let describe function_ =
         ~named:[ ("address", Pointer (Struct "sockaddr")) ]
         ~headers:[ "sys/socket.h" ]
   | Fcntl_getfl ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32) ~symbol:(make_portable_type "fcntl") ~variadic_from:2
         [
@@ -1252,7 +1284,7 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h" ]
   | Fcntl_setfl ->
-      row
+      make_row
         (make_portable_type (Named "int"))
         (Returns Int32) ~symbol:(make_portable_type "fcntl") ~variadic_from:2
         [
@@ -1262,7 +1294,7 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h" ]
   | Addresses_of_host ->
-      row ~at_most:"room"
+      make_row ~at_most:"room"
         ~symbol:(make_portable_type "t_runtime_addresses_of_host")
         (make_portable_type (Named "long"))
         (Returns Int64)
@@ -1270,18 +1302,18 @@ let describe function_ =
           ( "host",
             Elements (UInt8, Through_zero),
             make_portable_type (Pointer (Const (Named "char"))) );
-          ("addresses", Room (UInt8, counted "room"), make_portable_type (Pointer Void));
+          ("addresses", Room (UInt8, make_counted "room"), make_portable_type (Pointer Void));
           ("room", Value UInt64, size);
         ]
         ~headers:[]
   | Signals_wait ->
-      row
+      make_row
         ~symbol:(make_portable_type "t_runtime_signals_wait")
         (make_portable_type (Named "int32_t"))
         (Returns Int32)
         [
           ( "signals",
-            Elements (Int32, counted "count"),
+            Elements (Int32, make_counted "count"),
             make_portable_type (Pointer (Const (Named "int32_t"))) );
           ("count", Value UInt64, size);
         ]
@@ -1290,37 +1322,37 @@ let describe function_ =
       let descriptor = ("descriptor", Value Int32, make_portable_type (Named "int32_t")) in
       let writing = ("writing", Value Int32, make_portable_type (Named "int32_t")) in
       if waiting = Descriptor_watch then
-        row
+        make_row
           ~symbol:(make_portable_type "t_runtime_descriptor_watch")
           (make_portable_type (Named "uint64_t"))
           (Returns UInt64) [ descriptor; writing ] ~headers:[]
       else
-        row
+        make_row
           ~symbol:(make_portable_type "t_runtime_descriptor_wait")
           (make_portable_type (Named "int32_t"))
           (Returns Int32)
           [ descriptor; writing; ("ticket", Value UInt64, make_portable_type (Named "uint64_t")) ]
           ~headers:[]
   | Descriptors_watch ->
-      row
+      make_row
         ~symbol:(make_portable_type "t_runtime_descriptors_watch")
         (make_portable_type (Named "uint64_t"))
         (Returns UInt64) [] ~headers:[]
   | Descriptors_wait ->
-      row
+      make_row
         ~symbol:(make_portable_type "t_runtime_descriptors_wait")
         (make_portable_type (Named "int32_t"))
         (Returns Int32)
         [
           ( "descriptors",
-            Elements (Int32, counted "count"),
+            Elements (Int32, make_counted "count"),
             make_portable_type (Pointer (Const (Named "int32_t"))) );
           ("count", Value UInt64, size);
           ("ticket", Value UInt64, make_portable_type (Named "uint64_t"));
         ]
         ~headers:[]
   | Sleep ->
-      row
+      make_row
         ~symbol:(make_portable_type "t_runtime_sleep")
         (make_portable_type (Named "int32_t"))
         (Returns Int32)
@@ -1333,28 +1365,28 @@ let describe function_ =
     | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ) as task -> (
       let handle name = (name, Value UInt64, make_portable_type (Named "uint64_t")) in
       let symbol = make_portable_type ("t_runtime_" ^ show_function task) in
-      let returns_handle =
-        row ~symbol (make_portable_type (Named "uint64_t")) (Returns UInt64) ~headers:[]
+      let make_handle_row =
+        make_row ~symbol (make_portable_type (Named "uint64_t")) (Returns UInt64) ~headers:[]
       in
-      let returns_flag =
-        row ~symbol (make_portable_type (Named "int32_t")) (Returns Int32) ~headers:[]
+      let make_flag_row =
+        make_row ~symbol (make_portable_type (Named "int32_t")) (Returns Int32) ~headers:[]
       in
       match task with
-      | Tasks_open -> returns_handle []
-      | Tasks_watch -> returns_handle [ handle "key" ]
-      | Tasks_join | Tasks_cancel -> returns_flag [ handle "group" ]
-      | Tasks_cancelled | Tasks_yield -> returns_flag []
-      | Tasks_wait -> returns_flag [ handle "key"; handle "ticket" ]
-      | Tasks_wake -> returns_flag [ handle "key" ]
-      | Tasks_lock | Tasks_unlock -> returns_flag [ handle "mutex" ]
-      | _ -> returns_flag [])
+      | Tasks_open -> make_handle_row []
+      | Tasks_watch -> make_handle_row [ handle "key" ]
+      | Tasks_join | Tasks_cancel -> make_flag_row [ handle "group" ]
+      | Tasks_cancelled | Tasks_yield -> make_flag_row []
+      | Tasks_wait -> make_flag_row [ handle "key"; handle "ticket" ]
+      | Tasks_wake -> make_flag_row [ handle "key" ]
+      | Tasks_lock | Tasks_unlock -> make_flag_row [ handle "mutex" ]
+      | _ -> make_flag_row [])
 
 let is_available system function_ = (describe function_).on system.os
 
 let is_blocking = function
   | Write | Read | Pread | Pwrite | Open | Fsync | Waitpid | Poll | Addresses_of_host -> true
-  | Connect | Accept | Sendto | Recvfrom | Close | Errno | Clock_gettime | Getentropy | Getenv
-  | Posix_spawnp | Snprintf | Strtod | Strtof | Fork | Pipe | Kill | Sysconf | Exit | Lseek
+  | Connect | Accept | Sendto | Recvfrom | Close | Dup2 | Errno | Clock_gettime | Getentropy
+  | Getenv | Posix_spawnp | Snprintf | Strtod | Strtof | Fork | Pipe | Kill | Sysconf | Exit | Lseek
   | Ftruncate | Fstat | Stat | Lstat | Mkdir | Remove | Rename | Symlink | Link | Chmod | Utimensat
   | Readlink | Realpath | Getcwd | Gethostname | Getpid | Proc_pidpath | Fcntl_dupfd_cloexec
   | Fcntl_setfd_cloexec | Posix_spawn_file_actions_init | Posix_spawn_file_actions_destroy
@@ -1394,10 +1426,9 @@ let make_declaration system function_ : declaration =
 
 let render_prototype (declaration : declaration) =
   let named =
-    List.filteri
-      (fun index _ ->
-        match declaration.variadic_from with Some first -> index < first | None -> true)
-      declaration.takes
+    match declaration.variadic_from with
+    | Some first -> List.take first declaration.takes
+    | None -> declaration.takes
   in
   let declared =
     List.sort_uniq String.compare (List.concat_map list_structures (declaration.returns :: named))
@@ -1740,7 +1771,7 @@ let list_number_headers = function
   | Path_max -> [ "limits.h" ]
 
 let render_number_expression (system : system) number =
-  let offset_of field = Some (Printf.sprintf "__builtin_offsetof(struct stat, %s)" field) in
+  let render_offset field = Some (Printf.sprintf "__builtin_offsetof(struct stat, %s)" field) in
   match (number, system.os) with
   | Stat_size, _ -> Some "sizeof(struct stat)"
   | Sockaddr_family_offset, _ -> Some "__builtin_offsetof(struct sockaddr, sa_family)"
@@ -1763,15 +1794,15 @@ let render_number_expression (system : system) number =
       Linux ) ->
       None
   | Spawn_file_actions_size, _ -> Some "sizeof(posix_spawn_file_actions_t)"
-  | Stat_mode_offset, _ -> offset_of "st_mode"
+  | Stat_mode_offset, _ -> render_offset "st_mode"
   | Stat_mode_size, _ -> Some "sizeof(((struct stat *)0)->st_mode)"
-  | Stat_length_offset, _ -> offset_of "st_size"
-  | Stat_accessed_offset, Linux -> offset_of "st_atim"
-  | Stat_accessed_offset, Macos -> offset_of "st_atimespec"
-  | Stat_modified_offset, Linux -> offset_of "st_mtim"
-  | Stat_modified_offset, Macos -> offset_of "st_mtimespec"
+  | Stat_length_offset, _ -> render_offset "st_size"
+  | Stat_accessed_offset, Linux -> render_offset "st_atim"
+  | Stat_accessed_offset, Macos -> render_offset "st_atimespec"
+  | Stat_modified_offset, Linux -> render_offset "st_mtim"
+  | Stat_modified_offset, Macos -> render_offset "st_mtimespec"
   | Stat_created_offset, Linux -> None
-  | Stat_created_offset, Macos -> offset_of "st_birthtimespec"
+  | Stat_created_offset, Macos -> render_offset "st_birthtimespec"
   | number, _ -> Some (show_number number)
 
 let evaluate_number (system : system) number =
@@ -1991,10 +2022,12 @@ let check system =
       @ List.concat_map list_number_headers
           (List.filter (fun number -> render_number_expression system number <> None) numbers))
   in
-  let holds message condition = Printf.sprintf "_Static_assert(%s, \"%s\");\n" condition message in
-  let reached symbol c_type count scalar =
+  let render_static_assert message condition =
+    Printf.sprintf "_Static_assert(%s, \"%s\");\n" condition message
+  in
+  let render_reached_assert symbol c_type count scalar =
     let c_type = show_c_type c_type in
-    holds
+    render_static_assert
       (symbol ^ " reaches numbers of another size")
       (Printf.sprintf "sizeof(*(%s)0) == %d || sizeof(*(%s)0) == %d" c_type (measure_scalar scalar)
          c_type
@@ -2013,7 +2046,7 @@ let check system =
         (fun number ->
           Option.map
             (fun expression ->
-              holds (show_number number)
+              render_static_assert (show_number number)
                 (Printf.sprintf "%s == %d" expression (evaluate_number system number)))
             (render_number_expression system number))
         numbers
@@ -2032,15 +2065,19 @@ let check system =
                   row.parameters;
             }
           in
-          (render_prototype as_the_headers_name_it :: List.map (holds declaration.symbol) row.layout)
+          render_prototype as_the_headers_name_it
+          :: List.map (render_static_assert declaration.symbol) row.layout
           @ (match row.result with
-            | Points_at scalar -> [ reached declaration.symbol declaration.returns 1 scalar ]
+            | Points_at scalar ->
+                [ render_reached_assert declaration.symbol declaration.returns 1 scalar ]
             | Returns _ | Text | Never -> [])
           @ List.filter_map
               (fun (_, passes, c_type) ->
                 match passes with
                 | Written (scalar, names) when not (is_void (c_type system)) ->
-                    Some (reached declaration.symbol (c_type system) (List.length names) scalar)
+                    Some
+                      (render_reached_assert declaration.symbol (c_type system) (List.length names)
+                         scalar)
                 | Written _ | Value _ | Elements _ | Room _ | Elements_to_change _ | Always _
                 | Fixed _ ->
                     None)

@@ -5,7 +5,7 @@ val remove_trivia :
 
 val report_forbidden_run : Cursor.t -> context:context -> unit
 val report_invalid_run : Cursor.t -> unit
-val copy_plain : Cursor.t -> Buffer.t -> special:(char -> bool) -> unit
+val copy_plain : Cursor.t -> Buffer.t -> is_special:(char -> bool) -> unit
 val read_character : Cursor.t -> Buffer.t -> context:context -> unit
 val consume_line_break : Cursor.t -> Source.span
 val note_line_break : Cursor.t -> Source.span -> unit

@@ -51,9 +51,10 @@ let all =
 let rank_stage stage =
   match List.find_index (fun candidate -> candidate = stage) all with
   | Some position -> position
-  | None -> Compiler_bug.bug ~stage:"Database" "a stage is missing from the order of stages"
+  | None -> Compiler_bug.raise_bug ~stage:"Database" "a stage is missing from the order of stages"
 
-let precedes earlier later = rank_stage earlier <= rank_stage later
+let compare earlier later = Int.compare (rank_stage earlier) (rank_stage later)
+let precedes earlier later = compare earlier later <= 0
 
 let is_lowering = function
   | Lowered_code | Test_keys -> true
@@ -67,7 +68,8 @@ let drains ~through stage =
   && ((not (is_lowering through))
      || is_lowering stage || precedes stage Mir_call_edges || stage = Call_edges)
 
-let of_part : Part.computed -> t = function
+let of_part (Part.Any part) =
+  match part with
   | Parsed _ -> Parse
   | Namespace _ -> Namespaces
   | Resolved _ | Grant _ -> Resolution
@@ -80,12 +82,13 @@ let of_part : Part.computed -> t = function
   | Type_facts _ -> Type_facts
   | Signature_check _ -> Signature_checks
   | Contract _ -> Contracts
-  | Checked_body _ | Derived_form _ -> Checked_bodies
+  | Checked_body _ -> Checked_bodies
   | Body_mir _ | Contract_mir _ | Generated_mir _ -> Mir
   | Mir_call_edges _ -> Mir_call_edges
   | Patterns _ | Usage _ | Ownership _ -> Body_checks
   | Package_check _ -> Package_checks
   | Call_edges _ -> Call_edges
+  | Recursion_group _ -> Recursion_groups
   | Proof _ -> Proofs
-  | Lowering (Lowered _) -> Lowered_code
-  | Lowering (Test_key _) -> Test_keys
+  | Lowered _ -> Lowered_code
+  | Test_key _ -> Test_keys

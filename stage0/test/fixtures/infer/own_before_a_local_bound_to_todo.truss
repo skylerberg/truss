@@ -1,0 +1,6 @@
+fn keep(items: own List[Int64]) {}
+
+fn f() {
+  let items = todo
+  keep(own items)
+}

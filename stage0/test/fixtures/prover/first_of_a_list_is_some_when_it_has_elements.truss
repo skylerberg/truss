@@ -1,0 +1,5 @@
+fn f(items: List[Int64]) -> Bool
+  ensures result == (items.length() > 0)
+{
+  items.first() is Some(_)
+}

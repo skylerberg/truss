@@ -1,4 +1,4 @@
-val contract_call :
+val call_contract :
   State.context ->
   State.frame ->
   Invocation.site ->
@@ -6,16 +6,18 @@ val contract_call :
   Path.t ->
   State.contract ->
   State.passed list ->
+  recursive_callee:Path.t option ->
   lent_final:(Logic.term -> Logic.term) option ->
   havoc_mut:(State.frame -> State.frame) ->
-  substitution_of:(State.part -> Types.substitution) ->
-  instance:Types.argument list ->
+  substitution_of:(State.clauses -> Types.substitution) ->
+  type_arguments:Types.argument list ->
   State.frame * Logic.term
 
-val make_time_term : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term
+val make_callback_cost :
+  State.context -> State.frame -> Metric.t -> Types.ty -> Logic.term -> Logic.term
 
 val apply_call :
-  ?lent_final:(Logic.term -> Logic.term) ->
+  ?leave_lent:(Logic.term -> Logic.term) ->
   State.context ->
   State.frame ->
   Invocation.site ->

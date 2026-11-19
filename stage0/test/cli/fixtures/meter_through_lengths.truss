@@ -1,3 +1,0 @@
-fn meter() -> Int64 {
-  acme::units::lengths::meter()
-}

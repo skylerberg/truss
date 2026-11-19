@@ -8,7 +8,7 @@ val require :
   at:Source.Definition_span.t ->
   Types.ty ->
   Types.trait_reference ->
-  unmet:(Types.ty -> (string * Types.ty) option -> unit) ->
+  on_unmet:(Types.ty -> (string * Types.ty) option -> unit) ->
   unit
 
 val make_fresh_generic_arguments : State.state -> Types.generic list -> Types.argument list
@@ -20,21 +20,20 @@ val find_static : State.state -> Syntax.expression -> static_ option
 val check_named_type :
   State.state -> Syntax.expression -> Path.t -> Syntax.bracket_item list option -> Types.ty
 
-val check_type_argument : State.state -> Syntax.expression -> Types.argument
-
 val check_written_arguments :
   State.state -> Syntax.bracket_item list -> (Types.argument list, Types.ty) result
 
 type instance = {
+  declared : Types.signature;
   signature : Types.signature;
   substitution : Types.substitution;
-  type_arguments : Types.argument list;
+  instantiation : Types.instantiation;
 }
 
 val instantiate :
   State.state ->
   Source.Definition_span.t ->
-  ?extra:(Types.parameter * Types.argument) list ->
+  ?extra:Types.substitution ->
   Types.signature ->
   instance
 

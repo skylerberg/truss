@@ -8,11 +8,11 @@ let round_float ~precision ~minimum ~maximum ~(significand : Z.t) ~(exponent : Z
       if Z.sign exponent >= 0 then (Z.mul magnitude power, Z.one) else (magnitude, power)
     in
     let estimate = Z.numbits numerator - Z.numbits denominator in
-    let at_least expression =
+    let is_at_least expression =
       if expression >= 0 then Z.geq numerator (Z.mul denominator (Z.shift_left Z.one expression))
       else Z.geq (Z.shift_left numerator (-expression)) denominator
     in
-    let expression = if at_least estimate then estimate else estimate - 1 in
+    let expression = if is_at_least estimate then estimate else estimate - 1 in
     let expression = max expression minimum in
     let scale = expression - precision + 1 in
     let scaled_numerator, scaled_denominator =

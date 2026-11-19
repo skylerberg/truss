@@ -158,7 +158,7 @@ let scan segment =
           in
           segment.scanned <- loop segment.scanned)
 
-let index_path segment_path = Filename.remove_extension segment_path ^ ".index"
+let make_index_path segment_path = Filename.remove_extension segment_path ^ ".index"
 
 let compare_key index position key =
   let rec loop offset =
@@ -195,21 +195,21 @@ let find_in segment key =
 
 let load_segment path =
   let segment = { path; index = None; table = Hashtbl.create 64; scanned = 0; channel = None } in
-  (match File_system.read (index_path path) with
+  (match File_system.read (make_index_path path) with
   | index when String.length index mod entry_width = 0 -> segment.index <- Some index
   | _ | (exception Sys_error _) -> scan segment);
   segment
 
 let refresh cache =
   let directory = make_segments_directory cache in
-  let own = Option.map (fun writer -> writer.segment.path) cache.writer in
+  let written_segment = Option.map (fun writer -> writer.segment.path) cache.writer in
   let present =
     match Sys.readdir directory with
     | entries ->
         Array.to_list entries
         |> List.filter (fun entry -> Filename.check_suffix entry ".segment")
         |> List.map (Filename.concat directory)
-        |> List.filter (fun path -> Some path <> own)
+        |> List.filter (fun path -> Some path <> written_segment)
     | exception Sys_error _ -> []
   in
   let there = Hashtbl.create (List.length present) in
@@ -228,8 +228,8 @@ let refresh cache =
   List.iter
     (fun segment ->
       if segment.index = None then
-        if Sys.file_exists (index_path segment.path) then
-          begin match File_system.read (index_path segment.path) with
+        if Sys.file_exists (make_index_path segment.path) then
+          begin match File_system.read (make_index_path segment.path) with
           | index when String.length index mod entry_width = 0 -> segment.index <- Some index
           | _ | (exception Sys_error _) -> scan segment
           end
@@ -242,7 +242,7 @@ let make_writer_name () =
   Random.self_init ();
   Printf.sprintf "%d-%d-%06x" (Unix.getpid ()) (int_of_float (Unix.time ())) (Random.bits ())
 
-let new_writer cache =
+let create_writer cache =
   File_system.make_directory (make_segments_directory cache);
   let path = Filename.concat (make_segments_directory cache) (make_writer_name () ^ ".segment") in
   let descriptor = Unix.openfile path [ O_WRONLY; O_CREAT; O_EXCL; O_CLOEXEC ] 0o644 in
@@ -280,7 +280,7 @@ let write_index segment =
       Buffer.add_int64_le buffer (Int64.of_int offset);
       Buffer.add_int32_le buffer (Int32.of_int length))
     entries;
-  File_system.write_atomically (index_path segment.path) (Buffer.contents buffer);
+  File_system.write_atomically (make_index_path segment.path) (Buffer.contents buffer);
   segment.index <- Some (Buffer.contents buffer)
 
 let writing : t list ref = ref []
@@ -306,7 +306,7 @@ let obtain_writer cache =
   | Some writer when writer.size < seal_size -> writer
   | full_writer ->
       if Option.is_some full_writer then seal cache;
-      let writer = new_writer cache in
+      let writer = create_writer cache in
       cache.writer <- Some writer;
       writing := cache :: !writing;
       writer
@@ -352,18 +352,18 @@ let read_from segment key location =
   | Some _ | None -> None
   | exception Sys_error _ -> None
 
-let read_own writer key location =
+let read_from_writer writer key location =
   let written = writer.size - Buffer.length writer.pending in
   if location.offset >= written then
     Some (Buffer.sub writer.pending (location.offset - written + record_head_width) location.length)
   else read_from writer.segment key location
 
 let lookup_once cache key =
-  let own =
+  let written_value =
     Option.bind cache.writer (fun writer ->
-        Option.bind (Hashtbl.find_opt writer.segment.table key) (read_own writer key))
+        Option.bind (Hashtbl.find_opt writer.segment.table key) (read_from_writer writer key))
   in
-  match own with
+  match written_value with
   | Some value -> Some value
   | None ->
       List.find_map
@@ -386,17 +386,17 @@ let is_present cache key =
   (match cache.writer with Some writer -> Hashtbl.mem writer.segment.table key | None -> false)
   || List.exists (fun segment -> find_in segment key <> None) cache.segments
 
-let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-12 store result"
+let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-17 cache result key"
 
 type result_kind = Package_database | Test_result | Solver_answer
 
-let show_result_tag = function
-  | Package_database -> "package"
-  | Test_result -> "tests"
-  | Solver_answer -> "solver"
+let show_result_kind = function
+  | Package_database -> "package database"
+  | Test_result -> "test result"
+  | Solver_answer -> "solver answer"
 
 let make_result_key ~kind ~key =
-  derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text (show_result_tag kind); Cbor.Bytes key ]))
+  derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text (show_result_kind kind); Cbor.Bytes key ]))
 
 let find_result cache ~kind ~key =
   let name = make_result_key ~kind ~key in
@@ -449,17 +449,7 @@ let measure_size cache =
   + match cache.writer with Some writer -> writer.size | None -> 0
 
 let is_abandoned segment =
-  segment.index <> None
-  ||
-  match Unix.openfile segment.path [ O_RDWR; O_CLOEXEC ] 0 with
-  | exception Unix.Unix_error _ -> false
-  | descriptor ->
-      Fun.protect
-        ~finally:(fun () -> Unix.close descriptor)
-        (fun () ->
-          match Unix.lockf descriptor F_TEST 0 with
-          | () -> true
-          | exception Unix.Unix_error _ -> false)
+  segment.index <> None || (Sys.file_exists segment.path && not (Lock_file.is_held segment.path))
 
 let list_entries segment =
   match segment.index with
@@ -471,7 +461,7 @@ let list_entries segment =
           (String.sub index position key_width, make_entry_location index position))
   | None -> Hashtbl.fold (fun key location acc -> (key, location) :: acc) segment.table []
 
-let rewrite cache candidates ~keep =
+let rewrite cache candidates ~is_kept =
   List.iter
     (fun segment ->
       List.iter
@@ -479,7 +469,7 @@ let rewrite cache candidates ~keep =
           match read_record (obtain_channel segment) ~offset:location.offset with
           | Some (kind, record_key, value) when record_key = key ->
               if
-                keep key
+                is_kept key
                 && not
                      (match cache.writer with
                      | Some writer -> Hashtbl.mem writer.segment.table key
@@ -494,7 +484,7 @@ let rewrite cache candidates ~keep =
       close_channel segment;
       List.iter
         (fun path -> try Sys.remove path with Sys_error _ -> ())
-        [ segment.path; index_path segment.path ])
+        [ segment.path; make_index_path segment.path ])
     candidates;
   cache.segments <- List.filter (fun segment -> not (List.memq segment candidates)) cache.segments
 
@@ -515,17 +505,18 @@ let collect cache ~budget =
           (fun (path, size, modified) -> (modified, size, Cache_file path))
           (list_evictable_files cache)
     in
-    let rec least_recent freed = function
-      | (_, size, entry) :: rest when freed < excess -> entry :: least_recent (freed + size) rest
+    let rec list_least_recent freed = function
+      | (_, size, entry) :: rest when freed < excess ->
+          entry :: list_least_recent (freed + size) rest
       | _ -> []
     in
     let evicted =
-      least_recent 0
+      list_least_recent 0
         (List.sort (fun (left, _, _) (right, _, _) -> Float.compare left right) entries)
     in
     rewrite cache
       (List.filter_map (function Segment segment -> Some segment | Cache_file _ -> None) evicted)
-      ~keep:(Hashtbl.mem cache.used);
+      ~is_kept:(Hashtbl.mem cache.used);
     List.iter
       (function
         | Cache_file path -> ( try Sys.remove path with Sys_error _ -> ()) | Segment _ -> ())
@@ -542,4 +533,4 @@ let compact cache =
       (fun segment -> measure_file segment.path < small && is_abandoned segment)
       cache.segments
   in
-  if List.length candidates >= many then rewrite cache candidates ~keep:(fun _ -> true)
+  if List.length candidates >= many then rewrite cache candidates ~is_kept:(fun _ -> true)

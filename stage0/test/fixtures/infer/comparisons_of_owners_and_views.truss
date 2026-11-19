@@ -1,0 +1,4 @@
+fn f(items: List[Int64], part: Slice[Int64], fixed: Array[Int64, 2], name: String, view: StringSlice) -> Bool {
+  items == part && part == items && fixed == part && part != fixed && name == view && view == name
+    && items < part && name >= view && part == [1, 2] && [1, 2] == part && "a" == view
+}

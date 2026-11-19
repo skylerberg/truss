@@ -1,0 +1,19 @@
+let limit: Int64 = todo
+
+fn read_limit() -> Int64 {
+  limit
+}
+
+type Settings(retries: Int64 = todo)
+
+fn read_retries() -> Int64 {
+  Settings().retries
+}
+
+fn connect(attempts: Int64 = todo) -> Int64 {
+  attempts
+}
+
+fn connect_by_default() -> Int64 {
+  connect()
+}

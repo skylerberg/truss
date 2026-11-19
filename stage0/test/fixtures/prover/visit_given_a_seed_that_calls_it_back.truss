@@ -1,0 +1,23 @@
+trait Grow {
+  fn grow(self) -> Int64
+}
+
+trait Visit {
+  fn visit[Item: Grow](self, item: Item) -> Int64
+}
+
+type Walker()
+
+type Seed()
+
+impl Visit for Walker {
+  fn visit[Item: Grow](self, item: Item) -> Int64 {
+    item.grow()
+  }
+}
+
+impl Grow for Seed {
+  fn grow(self) -> Int64 {
+    Walker().visit(Seed())
+  }
+}

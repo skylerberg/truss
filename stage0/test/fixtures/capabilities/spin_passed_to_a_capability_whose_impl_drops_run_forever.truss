@@ -1,0 +1,23 @@
+capability Runner {
+  fn run(work: (fn(Int64) uses RunForever))
+}
+
+type Direct()
+
+impl Runner for Direct {
+  fn run(self, work: fn(Int64)) {
+    work(1)
+  }
+}
+
+fn spin(value: Int64)
+  uses RunForever
+{
+  spin(value)
+}
+
+fn f()
+  uses Runner
+{
+  Runner.run(spin)
+}

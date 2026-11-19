@@ -1,0 +1,44 @@
+fn convert[Source, Target: From[Source]](value: own Source) -> Target
+{
+  Target.from(own value)
+}
+
+fn try_convert[Source, Target: TryFrom[Source]](value: own Source) -> Result[Target, Target.Error]
+{
+  Target.try_from(own value)
+}
+
+fn make[Value: Default]() -> Value
+{
+  Value.default()
+}
+
+fn inspect[Value](value: Value)
+  cost time O(1)
+{}
+
+fn adjust[Value](value: mut Value)
+  cost time O(1)
+{}
+
+fn look[Collection: Index](collection: Collection, key: Collection.Key)
+  requires collection.contains_key(key)
+{
+  inspect(collection[key])
+}
+
+fn touch[Collection: IndexMut](collection: mut Collection, key: Collection.Key)
+  requires collection.contains_key(key)
+{
+  adjust(mut collection[key])
+}
+
+fn store[Collection: IndexAssign](
+  collection: mut Collection,
+  key: own Collection.Key,
+  value: own Collection.Output,
+)
+  requires collection.accepts_key(key)
+{
+  collection[own key] = own value
+}

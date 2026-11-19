@@ -10,7 +10,7 @@ type t = {
   mutable index : int;
   mutable nesting_depth : int;
   spans : Source.Definition_span.t Dynarray.t;
-  recoveries : Source.span list ref;
+  syntax_errors : Source.span list ref;
   mutable after_inserted_closer : bool;
   is_unterminated_interpolation : bool;
 }
@@ -44,7 +44,7 @@ let create ~diagnostics ~base tokens ~first ~stop =
     index = first;
     nesting_depth = 0;
     spans = Dynarray.create ();
-    recoveries = ref [];
+    syntax_errors = ref [];
     after_inserted_closer = false;
     is_unterminated_interpolation = false;
   }
@@ -55,7 +55,7 @@ let enter_interpolation cursor (inner : Token.interpolation) =
        ~stop:(Array.length inner.tokens - 1))
     with
     nesting_depth = cursor.nesting_depth;
-    recoveries = cursor.recoveries;
+    syntax_errors = cursor.syntax_errors;
     spans = cursor.spans;
     is_unterminated_interpolation = not inner.is_closed;
   }
@@ -81,13 +81,13 @@ let peek cursor = lookup_token cursor cursor.index
 let peek_kind cursor = (peek cursor).kind
 let peek_ahead cursor count = (lookup_token cursor (cursor.index + count)).kind
 
-let record_recovery cursor ~index (span : Source.span) =
+let record_syntax_error cursor ~index (span : Source.span) =
   let span =
     if span.start = span.stop && index > cursor.first then
       Source.make_span (min span.start (lookup_token cursor (index - 1)).span.start) span.stop
     else span
   in
-  cursor.recoveries := span :: !(cursor.recoveries)
+  cursor.syntax_errors := span :: !(cursor.syntax_errors)
 
 let advance cursor =
   if cursor.index < cursor.stop then begin
@@ -95,7 +95,7 @@ let advance cursor =
     (match token.kind with
     | Punctuation (Close _) when token.is_inserted_closer ->
         cursor.after_inserted_closer <- true;
-        record_recovery cursor ~index:cursor.index token.span
+        record_syntax_error cursor ~index:cursor.index token.span
     | _ -> ());
     cursor.index <- cursor.index + 1
   end
@@ -184,7 +184,7 @@ let spell cursor ?insertions span =
   | tokens -> Token.spell_tokens ?insertions tokens
 
 let joins_neighbors cursor (span : Source.span) code =
-  let adjacent is_adjacent =
+  let find_adjacent is_adjacent =
     let rec search index =
       if index >= cursor.stop then None
       else
@@ -199,9 +199,11 @@ let joins_neighbors cursor (span : Source.span) code =
   let before =
     Option.map
       (fun spelling -> spelling.[String.length spelling - 1])
-      (adjacent (fun token -> token.span.stop = span.start))
+      (find_adjacent (fun token -> token.span.stop = span.start))
   and after =
-    Option.map (fun spelling -> spelling.[0]) (adjacent (fun token -> token.span.start = span.stop))
+    Option.map
+      (fun spelling -> spelling.[0])
+      (find_adjacent (fun token -> token.span.start = span.stop))
   in
   Token.joins_neighbor ~before ~after code
 
@@ -209,8 +211,8 @@ let has_reported cursor = Diagnostic.Collector.to_list cursor.diagnostics <> []
 
 let report cursor ?fixes code span message =
   (match code with
-  | Diagnostic.Code.Missing_body -> cursor.recoveries := span :: !(cursor.recoveries)
-  | _ -> record_recovery cursor ~index:cursor.index span);
+  | Diagnostic.Code.Missing_body -> cursor.syntax_errors := span :: !(cursor.syntax_errors)
+  | _ -> record_syntax_error cursor ~index:cursor.index span);
   Diagnostic.Collector.add cursor.diagnostics
     (Diagnostic.make ?fixes ~code:(Diagnostic.Code.Parser code) span message)
 
@@ -234,7 +236,7 @@ let fail cursor expected =
     || (token.kind = End_of_file && cursor.is_unterminated_interpolation)
   in
   (match token.kind with
-  | _ when is_reported_by_lexer -> record_recovery cursor ~index:cursor.index token.span
+  | _ when is_reported_by_lexer -> record_syntax_error cursor ~index:cursor.index token.span
   | Reserved reserved ->
       report cursor Reserved_word token.span
         (Printf.sprintf "`%s` is reserved for possible later use, and means nothing in Truss yet."
@@ -252,7 +254,7 @@ let expect_keyword cursor keyword =
   if not (accept_keyword cursor keyword) then
     fail cursor (Printf.sprintf "`%s`" (Token.spell_keyword keyword))
 
-let nested cursor parse =
+let run_nested cursor parse =
   if cursor.nesting_depth >= nesting_limit then begin
     report cursor Nesting_too_deep (peek cursor).span
       (Printf.sprintf "This is nested more than %d levels deep." nesting_limit);
@@ -292,9 +294,9 @@ let skip_one cursor =
 let group cursor =
   Array.sub cursor.tokens cursor.index (lookup_closer cursor cursor.index - cursor.index + 1)
 
-let parse_separated cursor ~separator item =
+let parse_separated cursor ~separator parse_item =
   let rec gather items =
-    let items = item cursor :: items in
+    let items = parse_item cursor :: items in
     if accept_punctuation cursor separator then gather items else List.rev items
   in
   gather []
@@ -313,7 +315,7 @@ let skip_line cursor ~closer_index =
     skip_one cursor
   done
 
-let parse_bracketed cursor ~item ~recover =
+let parse_bracketed cursor ~parse_item ~recover =
   let opener = cursor.index in
   let closer_index = lookup_closer cursor opener in
   advance cursor;
@@ -322,7 +324,7 @@ let parse_bracketed cursor ~item ~recover =
     else
       let start = cursor.index in
       match
-        let value = item cursor in
+        let value = parse_item cursor in
         if cursor.index < closer_index then expect_punctuation cursor Comma;
         value
       with
@@ -342,7 +344,7 @@ let parse_bracketed cursor ~item ~recover =
   skip_to cursor (closer_index + 1);
   items
 
-let parse_lines cursor ~item ~recover =
+let parse_lines cursor ~parse_item ~recover =
   let enclosing_after_inserted_closer = cursor.after_inserted_closer in
   let opener = cursor.index in
   let closer_index = lookup_closer cursor opener in
@@ -354,7 +356,7 @@ let parse_lines cursor ~item ~recover =
       let value =
         match
           cursor.after_inserted_closer <- false;
-          let value = item cursor in
+          let value = parse_item cursor in
           let ends_with_comma =
             match find_previous_token cursor with
             | Some { kind = Punctuation Comma; _ } -> true
@@ -382,5 +384,6 @@ let parse_lines cursor ~item ~recover =
 let collect_positions cursor : Syntax.positions =
   {
     spans = Dynarray.to_array cursor.spans;
-    recovered = List.sort_uniq compare (List.map (make_definition_span cursor) !(cursor.recoveries));
+    syntax_errors =
+      List.sort_uniq compare (List.map (make_definition_span cursor) !(cursor.syntax_errors));
   }

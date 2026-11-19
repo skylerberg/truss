@@ -1,35 +1,16 @@
-type t =
-  | Amortized
-  | Time
-  | Allocations
-  | Allocated_bytes
-  | Calls
-  | O
-  | Finite
-  | Potential
-  | By
-  | Bit_vector
+type t = Amortized | Metric of Metric.t | Calls | O | Potential | By | Bit_vector
 
 let spellings =
-  [
-    ("amortized", Amortized);
-    ("time", Time);
-    ("allocations", Allocations);
-    ("allocated_bytes", Allocated_bytes);
-    ("calls", Calls);
-    ("O", O);
-    ("finite", Finite);
-    ("potential", Potential);
-    ("by", By);
-    ("bit_vector", Bit_vector);
-  ]
+  ("amortized", Amortized)
+  :: List.map (fun metric -> (Metric.show metric, Metric metric)) Metric.all
+  @ [ ("calls", Calls); ("O", O); ("potential", Potential); ("by", By); ("bit_vector", Bit_vector) ]
 
 let spell word = fst (List.find (fun (_, candidate) -> candidate = word) spellings)
 
 let of_token (kind : Token.kind) =
   match kind with Lower text | Upper text -> List.assoc_opt text spellings | _ -> None
 
-let resources = [ Time; Allocations; Allocated_bytes; Calls ]
+let resources = List.map (fun metric -> Metric metric) Metric.all @ [ Calls ]
 
 let correct_misspelling cursor (token : Token.t) name ~words ~category =
   let message =
@@ -37,7 +18,7 @@ let correct_misspelling cursor (token : Token.t) name ~words ~category =
       (String.concat ", " (List.map (fun word -> "`" ^ spell word ^ "`") words))
       name
   in
-  match List.filter (fun word -> Diagnostic.edit_distance name (spell word) <= 2) words with
+  match List.filter (fun word -> String.edit_distance name (spell word) <= 2) words with
   | [ word ] ->
       let spelling = spell word in
       Cursor.report cursor Diagnostic.Code.Cost_word token.span message

@@ -1,0 +1,5 @@
+use standard::collections
+
+fn f() {
+  let heap: collections::Heap[Int64] = [3, 1, 2]
+}

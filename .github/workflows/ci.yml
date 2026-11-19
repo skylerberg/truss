@@ -115,10 +115,12 @@ jobs:
           restore-keys: objects-
 
       - name: Test generated code
-        run: opam exec -- dune build @stage0/test/codegen/runtest
+        run: |
+          touch "$RUNNER_TEMP/test-start"
+          opam exec -- dune build @stage0/test/codegen/runtest
 
-      - if: github.event_name == 'push'
-        run: mkdir -p ~/.cache/truss/caches/objects && find ~/.cache/truss/caches/objects -type f -mtime +14 -delete
+      - name: Remove objects that the tests did not use
+        run: find ~/.cache/truss/caches/objects -type f ! -newer "$RUNNER_TEMP/test-start" -delete
 
       - if: github.event_name == 'push'
         uses: actions/cache/save@v6.1.0
@@ -201,14 +203,15 @@ jobs:
         env:
           TRUSS_CFLAGS: -fsanitize=thread -fno-omit-frame-pointer
         run: |
+          touch "$RUNNER_TEMP/test-start"
           opam exec -- dune build stage0/test/codegen/parallel_tests.exe stage0/test/codegen/shared_tests.exe stage0/test/codegen/concurrent_tests.exe
           cd _build/default/stage0/test/codegen
           ./parallel_tests.exe
           TRUSS_TEST="on threads" ./shared_tests.exe
           TRUSS_TEST="on threads" ./concurrent_tests.exe
 
-      - if: github.event_name == 'push'
-        run: mkdir -p ~/.cache/truss/caches/objects && find ~/.cache/truss/caches/objects -type f -mtime +14 -delete
+      - name: Remove objects that the tests did not use
+        run: find ~/.cache/truss/caches/objects -type f ! -newer "$RUNNER_TEMP/test-start" -delete
 
       - if: github.event_name == 'push'
         uses: actions/cache/save@v6.1.0

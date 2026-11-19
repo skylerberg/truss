@@ -16,14 +16,7 @@ val add_source : t -> Core.local -> Tree.local -> unit
 val obtain_free_source : t -> Core.local -> type_:Types.ty -> origin:Core.origin -> Tree.local
 
 val bind_source :
-  name:string ->
-  ?is_var:bool ->
-  t ->
-  Core.local ->
-  Types.mode ->
-  Types.ty ->
-  Core.origin ->
-  Tree.local
+  ?is_var:bool -> t -> Core.local -> Types.mode -> Types.ty -> Core.origin -> Tree.local
 
 val register_binding : t -> Tree.local -> unit
 val note_bound_to_place : t -> Tree.local -> unit
@@ -49,32 +42,39 @@ val start_loan : t -> Tree.operand -> Types.mode -> Tree.loan_duration -> Core.o
 val end_loans : t -> int list -> Core.origin -> unit
 
 type scope
-type held
 
-val in_scope : ?provides:bool -> ?held:held -> t -> Core.origin -> (unit -> 'a) -> 'a
-val in_statement : t -> Core.origin -> (unit -> 'a) -> 'a
+val make_block_scope : ?provides:bool -> unit -> scope
+val run_in_block_scope : t -> scope -> Core.origin -> (unit -> 'a) -> 'a
+val run_in_scope : ?provides:bool -> t -> Core.origin -> (unit -> 'a) -> 'a
+val run_in_statement : t -> Core.origin -> (unit -> 'a) -> 'a
 
-val in_value_scope :
+val run_in_value_scope :
   ?provides:bool -> t -> Core.origin -> (unit -> Tree.operand option) -> Tree.operand option
 
-val in_arm_scope : t -> (scope -> 'a) -> 'a
+val run_in_arm_scope : t -> (scope -> 'a) -> 'a
 val end_scope : t -> scope -> Core.origin -> unit
 val make_dead_statements : scope -> Core.origin -> Tree.statement list
 
-type condition_lends = For_statement | For_block | For_condition
+type lowered_condition = {
+  value : Tree.operand option;
+  ended_if_true : scope;
+  ended_if_false : scope;
+  block_scope_if_true : scope;
+}
 
-val in_condition_scope :
-  lends:condition_lends -> t -> (unit -> 'value) -> 'value * scope * scope * held
+val run_in_condition_scope :
+  binds_lent_part:bool -> t -> (unit -> Tree.operand option) -> lowered_condition
 
-val in_old : t -> (unit -> 'a) -> 'a
+val run_in_guard_scope : t -> Core.origin -> (unit -> Tree.operand option) -> Tree.operand option
+val run_in_old : t -> (unit -> 'a) -> 'a
 val reads_entry : t -> Core.local -> bool
-val binding_to_statement : t -> (unit -> 'a) -> 'a
-val extending : t -> Core.id list -> (unit -> 'a) -> 'a
-val deferring : t -> (unit -> 'a) -> 'a * Tree.local list
+val run_binding_to_statement : t -> (unit -> 'a) -> 'a
+val run_extending : t -> Core.id list -> (unit -> 'a) -> 'a
+val run_deferring : t -> (unit -> 'a) -> 'a * Tree.local list
 val with_compound_target : t -> Tree.place -> (unit -> 'a) -> 'a
 val compound_target : t -> Tree.place option
-val looping : t -> (unit -> unit) -> unit
-val in_task : t -> Tree.task -> (unit -> 'a) -> 'a
+val run_in_loop : t -> (unit -> unit) -> unit
+val run_in_task : t -> Tree.task -> (unit -> 'a) -> 'a
 val start_group : t -> Core.origin -> Core.origin -> unit
 val resume_group : t -> Core.origin -> Core.origin -> unit
 val return_ : t -> Tree.operand option -> Core.origin -> unit

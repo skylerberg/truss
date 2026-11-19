@@ -1,0 +1,9 @@
+trait Owned {
+  fn to_string(self) -> String
+}
+
+impl Owned for String {
+  fn to_string(self) -> String {
+    self.copy()
+  }
+}

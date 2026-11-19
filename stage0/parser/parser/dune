@@ -1,3 +1,12 @@
 (library
  (name parser)
- (libraries source diagnostic token syntax syntax_walk zarith))
+ (libraries
+  source
+  diagnostic
+  compiler_bug
+  token
+  lexer
+  syntax
+  syntax_walk
+  metric
+  zarith))

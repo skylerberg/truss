@@ -1,5 +1,17 @@
+let suite = Filename.remove_extension (Filename.basename Sys.executable_name)
+
 let () =
-  let suite = Filename.remove_extension (Filename.basename Sys.executable_name) in
+  match Array.to_list Sys.argv with
+  | _ :: (_ :: _ as arguments) ->
+      Printf.eprintf
+        "%s takes no arguments, and was given %s. Set TRUSS_TEST to run only the tests whose names \
+         contain its value.\n"
+        suite
+        (String.concat " " (List.map (Printf.sprintf "`%s`") arguments));
+      exit 2
+  | [] | [ _ ] -> ()
+
+let () =
   match Sys.getenv_opt "TRUSS_SKIP_SUITES" with
   | Some names when List.mem suite (String.split_on_char ',' names) ->
       print_endline ("skipped: TRUSS_SKIP_SUITES names " ^ suite);
@@ -27,21 +39,13 @@ let fail format =
       Printf.printf "FAIL %s: %s\n" !current_test message)
     format
 
-let wanted =
+let is_wanted =
   match Sys.getenv_opt "TRUSS_TEST" with
   | None | Some "" -> fun _ -> true
   | Some affix -> String.includes ~affix
 
 let read_environment () =
-  List.filter_map
-    (fun entry ->
-      match String.index_opt entry '=' with
-      | Some equals ->
-          Some
-            ( String.sub entry 0 equals,
-              String.sub entry (equals + 1) (String.length entry - equals - 1) )
-      | None -> None)
-    (Array.to_list (Unix.environment ()))
+  List.filter_map (String.split_first ~sep:"=") (Array.to_list (Unix.environment ()))
 
 let restore_environment saved =
   let current = read_environment () in
@@ -50,7 +54,7 @@ let restore_environment saved =
     (fun (name, value) -> if List.assoc_opt name current <> Some value then Unix.putenv name value)
     saved
 
-let always name body =
+let test_always name body =
   incr count;
   current_test := name;
   let environment = read_environment () in
@@ -63,31 +67,31 @@ let always name body =
 let ordinal = ref 0
 
 let test name body =
-  if wanted name then begin
+  if is_wanted name then begin
     let is_mine =
       match share with Some (index, count) -> !ordinal mod count = index | None -> true
     in
     incr ordinal;
-    if is_mine then always name body
+    if is_mine then test_always name body
   end
 
 let workspace_root =
   lazy
-    (let rec up directory =
+    (let rec search_upward directory =
        if Sys.file_exists (Filename.concat directory "dune-project") then directory
        else
          let parent = Filename.dirname directory in
          if parent = directory then failwith "no dune-project above the test executable"
-         else up parent
+         else search_upward parent
      in
      let executable =
        if Filename.is_relative Sys.executable_name then
          Filename.concat (Sys.getcwd ()) Sys.executable_name
        else Sys.executable_name
      in
-     up (Filename.dirname executable))
+     search_upward (Filename.dirname executable))
 
-let workspace_path path = Filename.concat (Lazy.force workspace_root) path
+let make_workspace_path path = Filename.concat (Lazy.force workspace_root) path
 
 let () =
   at_exit (fun () ->
@@ -105,7 +109,7 @@ let scratch_root =
 
 let scratch_count = ref 0
 
-let scratch name =
+let make_scratch_directory name =
   incr scratch_count;
   let directory =
     Filename.concat (Lazy.force scratch_root) (Printf.sprintf "%s-%d" name !scratch_count)
@@ -121,24 +125,25 @@ let write_files root files =
       File_system.write path text)
     files
 
-let rec files_under ~suffix directory =
-  Sys.readdir (workspace_path directory)
+let rec list_files_under ~suffix directory =
+  Sys.readdir (make_workspace_path directory)
   |> Array.to_list
   |> List.concat_map (fun name ->
       let path = Filename.concat directory name in
-      if Sys.is_directory (workspace_path path) then files_under ~suffix path
+      if Sys.is_directory (make_workspace_path path) then list_files_under ~suffix path
       else if Filename.check_suffix name suffix then [ path ]
       else [])
 
-let markdown_documents () =
-  Sys.readdir (workspace_path ".")
+let list_markdown_documents () =
+  Sys.readdir (make_workspace_path ".")
   |> Array.to_list
   |> List.filter (fun name -> Filename.check_suffix name ".md")
   |> List.sort compare
 
-let truss_files () =
+let list_truss_files () =
   List.sort compare
-    (files_under ~suffix:".truss" "standard" @ files_under ~suffix:".truss" "stage0/test/fixtures")
+    (list_files_under ~suffix:".truss" "standard"
+    @ list_files_under ~suffix:".truss" "stage0/test/fixtures")
 
 let expect_string ~expected actual =
   if not (String.equal expected actual) then fail "expected %S, got %S" expected actual

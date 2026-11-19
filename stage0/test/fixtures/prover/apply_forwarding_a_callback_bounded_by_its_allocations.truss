@@ -1,0 +1,8 @@
+fn f(value: Int64, change: (fn(Int64) -> Int64 uses generic Mine)) -> Int64
+  uses generic Mine
+  cost allocations <= 2 * allocations(change)
+  cost allocated_bytes <= 2 * allocated_bytes(change)
+{
+  let once = apply(value, change)
+  apply(once, change)
+}

@@ -1,0 +1,12 @@
+fn f(visit: (fn(Int64) cost allocations == 1))
+  cost allocations == 2
+{
+  visit(1)
+  visit(2)
+}
+
+fn g(visit: (fn(Int64) cost allocations <= 0))
+  cost allocations == 0
+{
+  visit(1)
+}

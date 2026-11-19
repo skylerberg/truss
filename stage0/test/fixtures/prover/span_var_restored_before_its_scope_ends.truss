@@ -1,0 +1,8 @@
+fn f(high: Int64) -> Int64
+  requires 0 <= high && high < 1000
+{
+  var range = Span(low: 0, high: high)
+  range.low = high + 1
+  range.low = high
+  range.low
+}

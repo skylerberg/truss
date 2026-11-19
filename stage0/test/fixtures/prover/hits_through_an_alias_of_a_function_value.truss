@@ -1,6 +1,5 @@
 capability Hits {
   fn hit()
-    cost time finite
 }
 
 type Counter(count: Int64)
@@ -11,7 +10,7 @@ impl Hits for Counter {
   }
 }
 
-fn f(flag: Bool, visit: (fn() uses Hits cost time finite), other: (fn() uses Hits cost time finite))
+fn f(flag: Bool, visit: (fn() uses Hits), other: (fn() uses Hits))
   uses Hits
   cost calls(visit) == 0
 {

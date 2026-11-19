@@ -1,4 +1,4 @@
-fn each(items: List[UInt32], visit: (fn(UInt32) cost time finite))
+fn each(items: List[UInt32], visit: fn(UInt32))
   cost time O(items.length() * time(visit))
 {
   for item in items {

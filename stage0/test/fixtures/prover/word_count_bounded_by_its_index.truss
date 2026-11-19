@@ -1,0 +1,18 @@
+fn f(words: List[String]) -> Map[String, UInt64] {
+  var counts: Map[String, UInt64] = [:]
+  var index: UInt64 = 0
+  while index < words.length()
+    invariant index <= words.length()
+    invariant forall other: String => counts.model().contains_key(other) ==> counts.model().get(other) <= index
+    decreases words.length() - index
+  {
+    let word = words[index]
+    if counts.get(word) is Some(count) {
+      counts[word.copy()] = count + 1
+    } else {
+      counts[word.copy()] = 1
+    }
+    index += 1
+  }
+  counts
+}

@@ -1,6 +1,7 @@
 (library
  (name mir)
  (libraries
+  metric
   structural_key
   compiler_bug
   path
@@ -8,8 +9,6 @@
   core
   core_walk
   intrinsic
-  well_known
   resolve
-  infer
   interface
   zarith))

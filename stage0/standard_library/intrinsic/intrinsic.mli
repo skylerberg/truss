@@ -25,10 +25,10 @@ type builtin =
 val builtins : builtin list
 val show_builtin : builtin -> string
 val make_builtin_path : builtin -> Path.t
-val builtin_of_path : Path.t -> builtin option
-val builtin_of_libc : Libc.scalar -> builtin
+val find_builtin : Path.t -> builtin option
+val convert_libc_scalar : Libc.scalar -> builtin
 
-type operation =
+type scalar =
   | Add
   | Subtract
   | Multiply
@@ -69,6 +69,8 @@ type operation =
   | Rotate_left
   | Rotate_right
   | Multiply_high
+
+type buffer =
   | Compare_bytes
   | Storage_empty
   | Storage_with_capacity
@@ -85,19 +87,18 @@ type operation =
   | Storage_from_array
   | Array_from_storage
   | Array_view
-  | Array_at_mut
-  | Storage_at
-  | Storage_at_mut
   | Storage_view
   | View_length
-  | View_at
-  | View_at_mut
   | View_swap
   | View_slice
   | Storage_model
   | View_model
   | Array_model
   | View_address
+
+type lend = Storage_at | Storage_at_mut | View_at | View_at_mut | Array_at_mut
+
+type runtime =
   | Crash
   | Handle_from
   | Handle_descriptor
@@ -119,9 +120,10 @@ type operation =
   | Libc of Libc.function_
   | Libc_number of Libc.number
 
+type operation = Scalar of scalar | Buffer of buffer | Lend of lend | Runtime of runtime
+
 val operations : operation list
-val is_primitive : operation -> bool
 val show_operation : operation -> string
 val make_operation_path : operation -> Path.t
-val operation_of_path : Path.t -> operation option
-val uses : operation -> Path.t list
+val find_operation : Path.t -> operation option
+val list_uses : operation -> Path.t list

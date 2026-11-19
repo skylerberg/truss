@@ -1,22 +1,18 @@
-let module_of text : Path.module_ =
+let parse_module text : Path.module_ =
   match Path.parse_names text with
   | Some (name :: modules) -> { package = { owner = None; name }; modules }
   | Some [] | None -> invalid_arg text
 
-let top module_ name : Path.t = Top { module_ = module_of module_; name }
+let make_top_path module_ name : Path.t = Top { module_ = parse_module module_; name }
 
-let file_of text : Path.file =
-  match String.index_opt text '/' with
-  | Some slash ->
-      {
-        module_ = module_of (String.sub text 0 slash);
-        name = String.sub text (slash + 1) (String.length text - slash - 1);
-      }
+let parse_file text : Path.file =
+  match String.split_first ~sep:"/" text with
+  | Some (module_, name) -> { module_ = parse_module module_; name }
   | None ->
-      let module_ = module_of text in
+      let module_ = parse_module text in
       { module_; name = (match List.rev module_.modules with last :: _ -> last | [] -> "main") }
 
-let find_occurrence ~sub ~occurrence text =
+let locate_occurrence ~sub ~occurrence text =
   let rec search start remaining =
     match String.find_first ~sub ~start text with
     | None -> failwith (Printf.sprintf "no occurrence %d of %S" occurrence sub)
@@ -25,10 +21,23 @@ let find_occurrence ~sub ~occurrence text =
   search 0 occurrence
 
 let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
-let database packages = Database.create ~loaded:[ Lazy.force standard_package_database ] packages
+
+let make_database packages =
+  Database.create ~loaded:[ Lazy.force standard_package_database ] packages
+
+let extend_standard_library (packages : Project.package list) =
+  Database.For_testing.extend_package
+    ~loaded:[ Lazy.force standard_package_database ]
+    ~package:Path.standard_package
+    (List.concat_map
+       (fun (package : Project.package) ->
+         if package.name <> Path.standard_package then
+           failwith (Path.show_package package.name ^ " is not the standard package");
+         package.files)
+       packages)
 
 let setup ?(dependencies = []) files : Project.package list =
-  let files = List.map (fun (name, text) -> (file_of name, text)) files in
+  let files = List.map (fun (name, text) -> (parse_file name, text)) files in
   let package_of ((file : Path.file), _) = file.module_.package in
   List.map
     (fun (package : Path.package) : Project.package ->
@@ -51,7 +60,7 @@ let with_dependencies packages name dependencies =
       if package.name = name then { package with dependencies } else package)
     packages
 
-let source packages (file : Path.file) =
+let read_source packages (file : Path.file) =
   match
     List.find_map
       (fun (package : Project.package) -> List.assoc_opt file package.files)
@@ -63,18 +72,53 @@ let source packages (file : Path.file) =
 let parse_errors packages file =
   List.map
     (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-    (let tokens, lexer_diagnostics = Lexer.lex (source packages file) in
-     lexer_diagnostics @ snd (Parser.parse tokens ~lexer_diagnostics))
+    (snd (Parser.parse_source (read_source packages file)))
 
-let diagnostics database (file : Path.file) =
-  Database.check database [ file.module_.package ];
-  Database.list_file_diagnostics database file
-
-let codes diagnostics =
+let list_codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
 
-let checked ~check packages name =
-  let file = file_of name in
+let expect_error ~list_diagnostics ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
+  match list_diagnostics text with
+  | [ (diagnostic : Diagnostic.t) ] -> (
+      let message = diagnostic.message in
+      if
+        message = ""
+        || (not (Char.uppercase_ascii message.[0] = message.[0] && message.[0] <> ' '))
+        || message.[String.length message - 1] <> '.'
+      then Harness.fail "the message %S is not written in sentences" message;
+      if diagnostic.code <> code then
+        Harness.fail "expected %s, got %s" (Diagnostic.Code.name code)
+          (Diagnostic.Code.name diagnostic.code);
+      let expected = locate_occurrence ~sub:at ~occurrence text in
+      if diagnostic.span.start <> expected then
+        Harness.fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
+      let results =
+        List.map
+          (fun (fix : Source.span Diagnostic.fix) -> Diagnostic.apply_edits text fix.edits)
+          diagnostic.fixes
+      in
+      match (fixed, results) with
+      | None, [] -> ()
+      | None, result :: _ -> Harness.fail "expected no fix, got one giving %S" result
+      | Some _, [] -> Harness.fail "expected a fix, got none"
+      | Some fixed, results ->
+          if fixed :: alternatives <> results then
+            Harness.fail "expected the fixes to give [%s], got [%s]"
+              (String.concat "; " (List.map (Printf.sprintf "%S") (fixed :: alternatives)))
+              (String.concat "; " (List.map (Printf.sprintf "%S") results));
+          List.iter
+            (fun result ->
+              List.iter
+                (Harness.fail "the fixed text %S has %s" result)
+                (list_codes (list_diagnostics result)))
+            results)
+  | diagnostics ->
+      Harness.fail "expected one diagnostic, got [%s] for %S"
+        (String.concat "; " (list_codes diagnostics))
+        text
+
+let run_check ~check packages name =
+  let file = parse_file name in
   (match parse_errors packages file with
   | [] -> ()
   | errors -> Harness.fail "the test input does not parse: %s" (String.concat " " errors));
@@ -86,8 +130,8 @@ type core_nodes = {
   patterns : Core.pattern list;
 }
 
-let core_nodes packages (key : Resolve.Names.key) : core_nodes =
-  match Database.read_checked_body (database packages) key with
+let collect_core_nodes packages (key : Resolve.Names.key) : core_nodes =
+  match Database.read_checked_body (make_database packages) key with
   | None -> failwith (Printf.sprintf "%s has no core form" (Resolve.Names.show_key key))
   | Some { form; _ } ->
       let expressions = ref [] and statements = ref [] and patterns = ref [] in
@@ -105,23 +149,21 @@ let core_nodes packages (key : Resolve.Names.key) : core_nodes =
         patterns = List.rev !patterns;
       }
 
-let names packages (package : Path.package) =
-  Database.make_name_lookups (database packages) [ package ]
+let make_names packages = Database.make_name_lookups (make_database packages)
 
-let declarations packages (module_ : Path.module_) =
-  (names packages module_.package).declarations module_
+let list_declarations packages (module_ : Path.module_) =
+  (make_names packages).list_declarations module_
 
-let first_core_nodes text =
+let collect_first_core_nodes text =
   let packages = setup [ ("app::main", text) ] in
-  core_nodes packages
-    (Resolve.Names.make_key (List.hd (declarations packages (module_of "app::main"))))
+  collect_core_nodes packages (List.hd (list_declarations packages (parse_module "app::main"))).key
 
-let no_diagnostics ~check files =
+let expect_no_diagnostics ~check files =
   let packages = setup files in
-  let database = database packages in
+  let database = make_database packages in
   List.iter
     (fun (name, _) ->
-      (match checked ~check packages name with
+      (match run_check ~check packages name with
       | [] -> ()
       | reported ->
           Harness.fail "%s: %s" name
@@ -132,18 +174,18 @@ let no_diagnostics ~check files =
                   reported)));
       ignore
         (Core_lint.check_file
-           (Database.make_interface_lookups database [ (file_of name).module_.package ])
-           ~core:(fun key ->
+           (Database.make_interface_lookups database)
+           ~find_core:(fun key ->
              Option.map
                (fun (checked : Infer.checked) -> checked.form)
                (Database.read_checked_body database key))
-           (file_of name)))
+           (parse_file name)))
     files
 
-let one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app::main") ?(others = [])
-    ?fixed ?says text code =
+let expect_one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app::main")
+    ?(others = []) ?fixed ?says ?at ?notes text code =
   let packages = setup ((file, text) :: others) in
-  match checked ~check packages file with
+  match run_check ~check packages file with
   | [ (diagnostic : Diagnostic.t) ] -> (
       let actual = Diagnostic.Code.name diagnostic.code in
       if actual <> code then Harness.fail "expected %s, got %s: %s" code actual diagnostic.message;
@@ -152,17 +194,47 @@ let one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app::mai
           if not (String.includes ~affix:says diagnostic.message) then
             Harness.fail "expected a message that says %S, got: %s" says diagnostic.message)
         says;
+      Option.iter
+        (fun (written, occurrence) ->
+          let expected = locate_occurrence ~sub:written ~occurrence text in
+          if diagnostic.span.start <> expected then
+            Harness.fail "expected the diagnostic at occurrence %d of %S, offset %d, got offset %d"
+              occurrence written expected diagnostic.span.start)
+        at;
+      Option.iter
+        (fun expected_notes ->
+          let actual_notes =
+            List.map (fun ((span : Source.span), note) -> (note, span.start)) diagnostic.notes
+          in
+          if
+            actual_notes
+            <> List.map
+                 (fun (note, (written, occurrence)) ->
+                   (note, locate_occurrence ~sub:written ~occurrence text))
+                 expected_notes
+          then
+            Harness.fail "expected the notes [%s], got [%s]"
+              (String.concat "; "
+                 (List.map
+                    (fun (note, (written, occurrence)) ->
+                      Printf.sprintf "%S at occurrence %d of %S" note occurrence written)
+                    expected_notes))
+              (String.concat "; "
+                 (List.map
+                    (fun (note, offset) -> Printf.sprintf "%S at offset %d" note offset)
+                    actual_notes)))
+        notes;
       match (fixed, diagnostic.fixes) with
       | None, _ -> ()
       | Some _, [] -> Harness.fail "no fix"
       | Some expected, fix :: _ -> (
-          let after = Diagnostic.apply_fix text fix in
+          let after = Diagnostic.apply_edits text fix.edits in
           if after <> expected then Harness.fail "fixed to %S" after
           else
             let packages = setup ((file, after) :: others) in
-            match checked ~check packages file with
+            match run_check ~check packages file with
             | [] -> ()
-            | left -> Harness.fail "after the fix: %s" (String.concat "; " (codes left))))
+            | left -> Harness.fail "after the fix: %s" (String.concat "; " (list_codes left))))
   | reported ->
       Harness.fail "expected one %s, got [%s]" code
         (String.concat "; "
@@ -179,47 +251,48 @@ let solver =
         prerr_endline message;
         exit 1)
 
-let proven database file = Database.prove database [ file ]
+let prove database file = Database.prove database [ file ]
 
-let toolchain =
+let c_compiler =
   lazy
-    (match Toolchain.find () with
-    | Ok toolchain -> toolchain
+    (match C_compiler.find ~objects:(Cache.make_objects_directory (Workspace.open_cache ())) with
+    | Ok c_compiler -> c_compiler
     | Error message ->
         prerr_endline message;
         exit 1)
-
-let object_cache = lazy (Build.make_cache (Cache.make_objects_directory (Workspace.open_cache ())))
 
 let run_template_checks database (file : Path.file) proofs =
   match Database.list_template_checks proofs with
   | [] -> []
   | checks ->
-      let compiler =
-        Compile.create
-          (Database.make_lowering_requests database [ file.module_.package ])
-          (Lazy.force toolchain) (Lazy.force object_cache)
-          { build = Development; optimization = O1; extra = [] }
+      let backend =
+        Backend.create
+          (match Database.find_lowered_lookups database [ file.module_.package ] with
+          | Ok lookups -> lookups
+          | Error message -> failwith message)
+          (Lazy.force c_compiler) Development
       in
       List.map
-        (fun ({ from_template; literals; clauses } as check : Prover.State.template_check) ->
-          (check, Compile.run_template_check compiler ~from_template ~literals ~clauses))
+        (fun ({ from_template; literals; clauses } as check : Prover.Obligation.template_check) ->
+          (check, Backend.run_template_check backend ~from_template ~literals ~clauses))
         checks
 
-let verdicts database file =
-  let proofs = proven database file in
+let compute_verdicts database file =
+  let proofs = prove database file in
   Prover.decide
     ~runs:(run_template_checks database file proofs)
     (Database.make_proof_lookups database)
     (Lazy.force solver) (Database.list_proofs proofs)
 
-let proof_diagnostics database file = Prover.list_diagnostics (verdicts database file) file
-let proof_states database file = Prover.list_states (verdicts database file) file
+let list_proof_diagnostics database file =
+  Prover.list_diagnostics (compute_verdicts database file) file
 
-let proofs database file =
-  let proofs = proven database file in
+let list_proof_states database file = Prover.list_states (compute_verdicts database file) file
+
+let read_proofs database file =
+  let proofs = prove database file in
   fun key ->
-    match Database.For_testing.read_proof proofs key with
+    match Database.For_testing.find_proof proofs key with
     | Some (Value proof) -> proof
     | Some (Failed _ | Blocked) ->
         failwith ("the proof of " ^ Resolve.Names.show_key key ^ " is blocked")

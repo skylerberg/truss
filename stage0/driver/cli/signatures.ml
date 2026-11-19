@@ -1,9 +1,9 @@
 let list_bodies ~opaque (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
-  let function_body (function_definition : Syntax.function_definition) =
+  let list_body_spans (function_definition : Syntax.function_definition) =
     [ spans.(function_definition.body.id) ]
   in
   match definition.kind with
-  | Function function_definition -> function_body function_definition
+  | Function function_definition -> list_body_spans function_definition
   | Theorem { body; _ } | Test { body; _ } | Law_proof { body; _ } -> [ spans.(body.id) ]
   | Trait { members; _ } ->
       List.concat_map
@@ -40,35 +40,29 @@ let cut text spans =
         else at)
       0 spans
   in
-  Buffer.add_string buffer (String.sub text at (String.length text - at));
+  Buffer.add_string buffer (String.drop_first at text);
   String.split_on_char '\n' (Buffer.contents buffer)
-  |> List.map (fun line ->
-      let rec stop position =
-        if position > 0 && (line.[position - 1] = ' ' || line.[position - 1] = '\t') then
-          stop (position - 1)
-        else position
-      in
-      String.sub line 0 (stop (String.length line)))
+  |> List.map (String.drop_last_while Char.Ascii.is_blank)
   |> List.filter (( <> ) "")
   |> String.concat "\n"
 
 let render_signature (names : Resolve.Names.lookups) ~body ~opaque (key : Resolve.Names.key) =
-  let text = names.text key in
+  let text = names.read_text key in
   if body then String.trim text
   else
-    let base = (names.place key).base in
+    let base = (names.read_place key).base in
     let contained =
       List.concat_map
         (fun member ->
-          let member_base = (names.place member).base in
+          let member_base = (names.read_place member).base in
           List.map
             (fun (span : Source.Definition_span.t) ->
               Source.Definition_span.of_file ~base
                 (Source.Definition_span.to_file ~base:member_base span))
-            (list_bodies ~opaque:false (names.spans member) (names.definition member)))
-        (names.contained key)
+            (list_bodies ~opaque:false (names.read_spans member) (names.read_definition member)))
+        (names.list_contained key)
     in
-    cut text (list_bodies ~opaque (names.spans key) (names.definition key) @ contained)
+    cut text (list_bodies ~opaque (names.read_spans key) (names.read_definition key) @ contained)
 
 let show_kind : Resolve.Names.kind -> string = function
   | Function -> "function"
@@ -84,7 +78,7 @@ let show_kind : Resolve.Names.kind -> string = function
   | Law_proof -> "law proof"
 
 let find_signature (names : Resolve.Names.lookups) path =
-  Option.map (render_signature names ~body:false ~opaque:false) (names.key path)
+  Option.map (render_signature names ~body:false ~opaque:false) (names.find_key path)
 
 let label_signature label signature =
   let indent = String.make (String.length label) ' ' in
@@ -94,17 +88,15 @@ let label_signature label signature =
          Printf.sprintf "    %s %s" (if line_index = 0 then label else indent) line)
        (String.split_on_char '\n' signature))
 
-let is_signature : Database.Part.t -> bool = function
-  | Stored
-      (Computed
-         ( Header _ | Trait_header _ | Constant_value _ | Interface _ | Derived_interface _
-         | Type_facts _ | Signature_check _ | Contract _ | Contract_mir _ )) ->
+let is_signature_part : type a. a Database.Part.stored -> bool = function
+  | Header _ | Trait_header _ | Constant_value _ | Interface _ | Derived_interface _ | Type_facts _
+  | Signature_check _ | Contract _ | Contract_mir _ ->
       true
-  | Stored
-      (Computed
-         ( Parsed _ | Namespace _ | Resolved _ | Grant _ | Checked_body _ | Derived_form _
-         | Body_mir _ | Generated_mir _ | Mir_call_edges _ | Patterns _ | Usage _ | Ownership _
-         | Import_check _ | Package_check _ | Call_edges _ | Proof _ | Lowering _ ))
-  | Stored (Recursion_group _)
-  | Input _ | Name _ ->
+  | Parsed _ | Namespace _ | Resolved _ | Grant _ | Checked_body _ | Body_mir _ | Generated_mir _
+  | Mir_call_edges _ | Patterns _ | Usage _ | Ownership _ | Import_check _ | Package_check _
+  | Call_edges _ | Recursion_group _ | Proof _ | Lowered _ | Test_key _ ->
       false
+
+let is_signature : Database.Part.t -> bool = function
+  | Stored (Any part) -> is_signature_part part
+  | Input _ | Name _ -> false

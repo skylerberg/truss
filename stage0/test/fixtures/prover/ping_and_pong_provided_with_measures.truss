@@ -1,0 +1,23 @@
+trait Ping {
+  fn ping(self, steps: UInt32) -> Int64
+    decreases steps
+  {
+    if steps == 0 { return 0 }
+    self.pong(steps - 1)
+  }
+
+  fn pong(self, steps: UInt32) -> Int64
+    decreases steps
+  {
+    if steps == 0 { return 1 }
+    self.ping(steps - 1)
+  }
+}
+
+type Foo()
+
+impl Ping for Foo {}
+
+fn rally() -> Int64 {
+  Foo().ping(4)
+}

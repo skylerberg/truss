@@ -1,0 +1,10 @@
+fn f(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == items.length()
+{
+  for _ in items
+    cost calls(Meter.tick) == visited.length()
+  {
+    Meter.tick()
+  }
+}

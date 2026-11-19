@@ -1,14 +1,8 @@
 type quantified_range =
   | Range_of_type of Types.ty
   | Range_of_integers of { low : Logic.term; high : Logic.term; inclusive : bool; type_ : Types.ty }
-  | Range_of_collection of {
-      collection_type : Types.ty;
-      collected : Logic.term;
-      element : Types.ty;
-      location : State.location;
-    }
 
-val under_binder :
+val run_under_binder :
   State.context ->
   State.frame ->
   Logic.symbol ->
@@ -33,21 +27,21 @@ val make_finite_function :
   Logic.term
 
 val finite_set_path : Path.t
-val rank_model : State.context -> Types.ty -> model:Types.ty -> Logic.symbol -> unit
+val rank_model : State.context -> Types.ty -> model:Types.ty -> impl:Path.t -> Logic.symbol -> unit
 
 val find_model_function :
   State.context -> Types.ty -> model:Types.ty -> (Logic.term -> Logic.term) option
 
 val find_model : State.context -> Types.ty -> Logic.term -> element:Types.ty -> Logic.term option
 
-val quantified_over :
+val quantify_over :
   State.context ->
   State.frame ->
   Core.quantifier ->
   quantified_range ->
-  bind:(State.frame -> Logic.term -> Types.ty -> Logic.term * State.frame) ->
+  bind:(State.frame -> Logic.term -> Types.ty -> State.frame) ->
   read:(State.frame -> Logic.term -> State.frame * Logic.term) ->
-  (State.frame * Logic.term) option
+  State.frame * Logic.term
 
 val make_value_term : State.context -> State.frame -> Types.value -> Logic.term
 val make_array_model : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term

@@ -68,8 +68,8 @@ let rec check_expression cursor context (value : Syntax.expression) =
   | _ -> check_parts cursor context value
 
 and check_parts cursor context value =
-  Syntax_walk.visit_expression_parts ~expression:(check_expression cursor context)
-    ~statement:(check_statement cursor context) value
+  Syntax_walk.visit_expression_parts ~on_expression:(check_expression cursor context)
+    ~on_statement:(check_statement cursor context) value
 
 and check_loop_exit cursor context (value : Syntax.expression) =
   let word = match value.kind with Break -> "break" | _ -> "continue" in
@@ -167,8 +167,8 @@ and check_statement cursor context (statement : Syntax.statement) =
   | Expression _ | Assignment _ | Statement_error -> check_statement_parts cursor context statement
 
 and check_statement_parts cursor context (parent : Syntax.statement) =
-  Syntax_walk.visit_statement_parts ~expression:(check_expression cursor context)
-    ~statement:(check_statement cursor context) parent
+  Syntax_walk.visit_statement_parts ~on_expression:(check_expression cursor context)
+    ~on_statement:(check_statement cursor context) parent
 
 let check_parameters ?(lends = false) cursor (parameters : Syntax.parameter list) =
   List.iter
