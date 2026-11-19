@@ -1,5 +1,4 @@
 type t = { command : string; identity : string; added_flags : string list; objects : string }
-type optimization = O1 | O2_lto
 
 let command_variable = "TRUSS_CC"
 let flags_variable = "TRUSS_CFLAGS"
@@ -50,24 +49,32 @@ let required_flags =
     "-fno-asynchronous-unwind-tables";
   ]
 
-let list_link_flags compiler = function
-  | O1 -> compiler.added_flags
-  | O2_lto -> (if is_clang compiler then "-flto=thin" else "-flto") :: compiler.added_flags
+let list_link_flags compiler : Profile.t -> string list = function
+  | Development -> compiler.added_flags
+  | Release ->
+      "-O3" :: (if is_clang compiler then "-flto=thin" else "-flto") :: compiler.added_flags
 
-let list_compile_flags compiler optimization =
-  ((match optimization with O1 -> "-O1" | O2_lto -> "-O2") :: required_flags)
-  @ list_link_flags compiler optimization
+let list_profile_flags : Profile.t -> string list = function
+  | Development -> [ "-O1" ]
+  | Release ->
+      [ "-g1"; "-gno-column-info"; "-fno-omit-frame-pointer"; "-mno-omit-leaf-frame-pointer" ]
+
+let list_compile_flags compiler profile =
+  list_profile_flags profile @ required_flags @ list_link_flags compiler profile
+
+let list_compilation_directory_flags : Profile.t -> string list = function
+  | Development -> []
+  | Release -> [ "-fdebug-prefix-map=" ^ Sys.getcwd () ^ "=." ]
 
 let derive_fingerprint = Blake3.derive_key ~context:"truss 2026-11-17 C compiler fingerprint"
 
-let make_fingerprint compiler optimization =
+let make_fingerprint compiler profile =
   derive_fingerprint
     (Cbor.encode
        (Cbor.Array
           [
             Text compiler.identity;
-            Cbor.Array
-              (List.map (fun flag -> Cbor.Text flag) (list_compile_flags compiler optimization));
+            Cbor.Array (List.map (fun flag -> Cbor.Text flag) (list_compile_flags compiler profile));
           ]))
 
 let derive_object_key = Blake3.derive_key ~context:"truss 2026-11-17 object key"
@@ -77,8 +84,10 @@ let make_object_key ~fingerprint text =
 
 let make_object_path compiler key = Filename.concat compiler.objects (key ^ ".o")
 
-let compile compiler flags ~source ~output =
-  match Process.run compiler.command (flags @ [ "-c"; source; "-o"; output ]) with
+let compile compiler flags ~text ~output =
+  match
+    Process.run ~input:text compiler.command (flags @ [ "-x"; "c"; "-c"; "-"; "-o"; output ])
+  with
   | 0, _, _ -> Ok ()
   | _, out, err -> Error (out ^ err)
 
@@ -90,18 +99,17 @@ let compile_unit compiler flags ~on_compiled (name, text, key) =
   end
   else
     let base = Filename.concat compiler.objects (Printf.sprintf "%s.%d" key (Unix.getpid ())) in
-    let source = base ^ ".c" in
-    File_system.write source text;
     let partial = base ^ ".o" in
     let result =
-      match compile compiler flags ~source ~output:partial with
+      match compile compiler flags ~text ~output:partial with
       | Ok () ->
           Sys.rename partial output;
-          (match find_variable kept_source_variable with
-          | None -> Sys.remove source
-          | Some _ -> Sys.rename source (Filename.concat compiler.objects (key ^ ".c")));
+          if Option.is_some (find_variable kept_source_variable) then
+            File_system.write (Filename.concat compiler.objects (key ^ ".c")) text;
           Ok output
       | Error message ->
+          let source = base ^ ".c" in
+          File_system.write source text;
           Error (Printf.sprintf "%s does not compile (kept as %s):\n%s" name source message)
     in
     on_compiled ();
@@ -125,9 +133,9 @@ let run_parallel jobs run_job =
   List.iter Domain.join domains;
   Array.to_list (Array.map Option.get results)
 
-let compile_objects ?report_progress compiler optimization units =
+let compile_objects ?report_progress compiler profile units =
   File_system.make_directory compiler.objects;
-  let fingerprint = make_fingerprint compiler optimization in
+  let fingerprint = make_fingerprint compiler profile in
   let keyed =
     List.map (fun (name, text) -> (name, text, make_object_key ~fingerprint text)) units
   in
@@ -146,7 +154,9 @@ let compile_objects ?report_progress compiler optimization units =
   if missing > 0 then report ();
   let results =
     run_parallel keyed
-      (compile_unit compiler (list_compile_flags compiler optimization) ~on_compiled:(fun () ->
+      (compile_unit compiler
+         (list_compile_flags compiler profile @ list_compilation_directory_flags profile)
+         ~on_compiled:(fun () ->
            Atomic.incr compiled;
            report ()))
   in
@@ -178,10 +188,33 @@ let link compiler flags ~objects ~output =
   (try Sys.remove response with Sys_error _ -> ());
   match result with 0, _, _ -> Ok () | _, out, err -> Error (out ^ err)
 
-let build_executable ?report_progress compiler optimization ~units ~output =
-  match compile_objects ?report_progress compiler optimization units with
+let lto_objects_built = Atomic.make 0
+
+let link_with_dsym_bundle compiler flags ~objects ~output ~bundle =
+  let lto_objects =
+    Filename.concat compiler.objects
+      (Printf.sprintf "lto.%d.%d" (Unix.getpid ()) (Atomic.fetch_and_add lto_objects_built 1))
+  in
+  let result =
+    match link compiler (("-Wl,-object_path_lto," ^ lto_objects) :: flags) ~objects ~output with
+    | Error _ as error -> error
+    | Ok () -> (
+        match Process.run "dsymutil" [ output; "-o"; bundle ] with
+        | 0, _, _ -> Ok ()
+        | _, out, err -> Error (out ^ err)
+        | exception Unix.Unix_error _ -> Error "cannot run dsymutil")
+  in
+  File_system.remove lto_objects;
+  result
+
+let build_executable ?report_progress ?dsym_bundle compiler profile ~units ~output =
+  match compile_objects ?report_progress compiler profile units with
   | Error message -> Error message
-  | Ok objects -> link compiler (list_link_flags compiler optimization) ~objects ~output
+  | Ok objects -> (
+      let flags = list_link_flags compiler profile in
+      match dsym_bundle with
+      | None -> link compiler flags ~objects ~output
+      | Some bundle -> link_with_dsym_bundle compiler flags ~objects ~output ~bundle)
 
 module For_testing = struct
   let reject_warnings compiler =
@@ -204,8 +237,10 @@ module For_testing = struct
   let has_sanitizer compiler =
     List.exists (String.starts_with ~prefix:"-fsanitize=") compiler.added_flags
 
-  let compile compiler optimization ~source ~output =
-    compile compiler (list_compile_flags compiler optimization) ~source ~output
+  let compile compiler profile ~text ~output =
+    compile compiler
+      (list_compile_flags compiler profile @ list_compilation_directory_flags profile)
+      ~text ~output
 
-  let compile_objects compiler optimization units = compile_objects compiler optimization units
+  let compile_objects compiler profile units = compile_objects compiler profile units
 end

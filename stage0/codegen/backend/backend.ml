@@ -1,4 +1,4 @@
-type profile = Emit_c.profile = Development | Release
+type profile = Profile.t = Development | Release
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
 
@@ -53,6 +53,12 @@ let locate_todo_type (lookups : Lowering.lowered_lookups) (path : Path.t) =
 let make_position backend ({ file; line; column } : location) : Emit_c.position =
   { file = backend.show_file file; line; column }
 
+let resolve_position backend site = make_position backend (locate_site backend.lookups site)
+
+let render_code_unit backend env fragment ~copies =
+  Emit_c.render_file env backend.profile ~resolve_position:(resolve_position backend)
+    ((fragment, Emit_c.External) :: List.map (fun copy -> (copy, Emit_c.Internal)) copies)
+
 let show_location backend ({ file; line; column } : location) =
   Printf.sprintf "%s:%d:%d" (backend.show_file file) line column
 
@@ -81,10 +87,6 @@ let make_program_path backend =
   Filename.concat backend.programs
     (Printf.sprintf "program-%d-%d" (Unix.getpid ()) (Atomic.fetch_and_add programs_built 1))
 
-let select_optimization : profile -> C_compiler.optimization = function
-  | Development -> O1
-  | Release -> O2_lto
-
 let show_profile = function Development -> "development" | Release -> "release"
 let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-18 result key"
 
@@ -96,8 +98,7 @@ let make_result_key backend root =
             Cbor.int Emit_c.version;
             Cbor.Text (Libc.show_system backend.lookups.system);
             Cbor.Text (show_profile backend.profile);
-            Bytes
-              (C_compiler.make_fingerprint backend.c_compiler (select_optimization backend.profile));
+            Bytes (C_compiler.make_fingerprint backend.c_compiler backend.profile);
             Bytes (read_test_key backend root);
           ]))
 
@@ -116,7 +117,8 @@ let list_small_callees ~find ~is_worked_on fragment =
         (List.sort_uniq Lowered.Item.compare (Emit_c.called fragment))
   | _ -> []
 
-let rec build ?report_progress ?(tests = false) ?(supplied = []) backend ~roots ~startup ~output =
+let rec build ?report_progress ?(tests = false) ?(supplied = []) ?dsym_bundle backend ~roots
+    ~startup ~output =
   let lookup item =
     match
       List.find_opt (fun fragment -> Lowered.Item.equal (Emit_c.item fragment) item) supplied
@@ -140,24 +142,18 @@ let rec build ?report_progress ?(tests = false) ?(supplied = []) backend ~roots 
   let env = make_env backend in
   let render_unit index fragment =
     ( Printf.sprintf "file %d" index,
-      Emit_c.render_file env backend.profile
-        ((fragment, Emit_c.External)
-        :: List.map (fun copy -> (copy, Emit_c.Internal)) (list_copied fragment)) )
+      render_code_unit backend env fragment ~copies:(list_copied fragment) )
   in
   let units =
     (("the runtime", Startup.render_runtime ~tests) :: List.mapi render_unit linked)
     @ [
         ("startup", startup);
-        ( "sites",
-          Emit_c.render_sites_file
-            ~resolve_position:(fun site -> make_position backend (locate_site backend.lookups site))
-            linked );
+        ("sites", Emit_c.render_sites_file ~resolve_position:(resolve_position backend) linked);
         ("capabilities", Emit_c.render_capabilities_file linked);
       ]
   in
   match
-    C_compiler.build_executable ?report_progress backend.c_compiler
-      (select_optimization backend.profile)
+    C_compiler.build_executable ?report_progress ?dsym_bundle backend.c_compiler backend.profile
       ~units ~output
   with
   | Ok () -> ()
@@ -452,10 +448,15 @@ let make_program_root backend ~main =
                   (Path.show path))
               todo_types))
 
-let build_program backend ~main ~output =
+let build_program backend ~main ~output ~is_kept =
   capture_failure @@ fun () ->
   let root = make_program_root backend ~main in
-  build backend ~roots:[ root ]
+  let dsym_bundle =
+    match (backend.profile, backend.lookups.system.os) with
+    | Release, Macos when is_kept -> Some (output ^ ".dSYM")
+    | _ -> None
+  in
+  build ?dsym_bundle backend ~roots:[ root ]
     ~startup:(Startup.render_program_start (Emit_c.make_symbol root))
     ~output
 
@@ -515,5 +516,9 @@ module For_testing = struct
 
   let build_supplied_tests = build_supplied_tests
   let compile_fragment = compile_fragment
+
+  let render_unit backend item =
+    render_code_unit backend (make_env backend) (compile_fragment backend item) ~copies:[]
+
   let evaluate_call = evaluate_call
 end

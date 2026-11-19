@@ -467,9 +467,35 @@ and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_
         method_ arguments
   | None when Members.list_trait_methods state.lookups trait member.text <> [] ->
       report_unmatched_receiver_mode state env arguments member
-  | None ->
-      State.make_error_type state Unknown_member (State.read_span state member.id)
-        (Printf.sprintf "`%s` has no method `%s`." (Path.show trait) member.text)
+  | None -> (
+      let restated =
+        match Interface.Definition.find_trait_interface state.lookups.interface trait with
+        | Some interface ->
+            List.find_opt
+              (fun (restated : Types.restated_method) ->
+                restated.restated_name = member.text && restated.restated_receiver = wanted)
+              interface.restated
+        | None -> None
+      in
+      match
+        Option.bind restated (fun (restated : Types.restated_method) ->
+            Option.map
+              (fun method_ -> (restated.declared_by, method_))
+              (Interface.Definition.find_trait_method state.lookups.interface restated.declared_by
+                 ~name:member.text ~receiver:wanted))
+      with
+      | Some (declared_by, method_) ->
+          let self_type = State.make_fresh_type state in
+          Solver.require state
+            (Method_call (State.read_span state value.id))
+            self_type
+            (Instantiation.make_fresh_trait_reference state trait);
+          check_trait_method_through_type state env value self_type
+            (Instantiation.make_fresh_trait_reference state declared_by)
+            method_ arguments
+      | None ->
+          State.make_error_type state Unknown_member (State.read_span state member.id)
+            (Printf.sprintf "`%s` has no method `%s`." (Path.show trait) member.text))
 
 and check_capability_call state env (value : Syntax.expression) capability (member : Syntax.name)
     arguments =

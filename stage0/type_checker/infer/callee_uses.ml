@@ -34,7 +34,7 @@ let instantiate (interface : Interface.Lookups.t) (target : Core.operand Core.ta
       match Interface.Definition.find_trait_method interface capability ~name ~receiver:Static with
       | Some method_ ->
           Types.union_capabilities
-            (Types.make_capability_set [ Types.Capability capability ])
+            (Types.make_capability_set [ Types.make_capability capability ])
             (Interface.Definition.read_method_signature interface ~owner:capability method_).uses
       | None -> raise_bug "`%s` has no method `%s`" (Path.show capability) name)
   | Intrinsic { operation; _ } -> (Intrinsic_signatures.make_signature operation).uses

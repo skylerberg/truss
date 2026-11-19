@@ -16,6 +16,7 @@ type t =
   | Index_assign
   | Iterable
   | Cursor
+  | Finite_cursor
   | Model
   | Add
   | Subtract
@@ -53,9 +54,6 @@ type t =
   | Instant
   | Duration
   | File_path
-  | Panic
-  | Run_forever
-  | System
   | Tasks
   | System_error
   | Serialize
@@ -97,6 +95,7 @@ type method_ =
   | Index_mut_at
   | Index_assign_assign
   | Cursor_next
+  | Finite_cursor_remaining
   | Fixed_width_integer_minimum_value
   | Fixed_width_integer_maximum_value
   | Fixed_width_integer_bit_width
@@ -191,6 +190,7 @@ let items =
     (Index_assign, [ "core" ], "IndexAssign");
     (Iterable, [ "core" ], "Iterable");
     (Cursor, [ "core" ], "Cursor");
+    (Finite_cursor, [ "core" ], "FiniteCursor");
     (Model, [ "core" ], "Model");
     (Add, [ "core" ], "Add");
     (Subtract, [ "core" ], "Subtract");
@@ -228,9 +228,6 @@ let items =
     (Instant, [ "time" ], "Instant");
     (Duration, [ "time" ], "Duration");
     (File_path, [ "files" ], "Path");
-    (Panic, [ "capabilities" ], "Panic");
-    (Run_forever, [ "capabilities" ], "RunForever");
-    (System, [ "capabilities" ], "System");
     (Tasks, [ "capabilities" ], "Tasks");
     (System_error, [ "capabilities" ], "SystemError");
     (Serialize, [ "serialization" ], "Serialize");
@@ -274,6 +271,7 @@ let methods =
     (Index_mut_at, Index_mut, "at", Instance Mut);
     (Index_assign_assign, Index_assign, "assign", Instance Mut);
     (Cursor_next, Cursor, "next", Instance Mut);
+    (Finite_cursor_remaining, Finite_cursor, "remaining", Instance Read);
     (Fixed_width_integer_minimum_value, Fixed_width_integer, "minimum_value", Static);
     (Fixed_width_integer_maximum_value, Fixed_width_integer, "maximum_value", Static);
     (Fixed_width_integer_bit_width, Fixed_width_integer, "bit_width", Static);
@@ -418,6 +416,24 @@ let builtin_types_by_path =
           Language.Builtin_type.all))
 
 let find_builtin_type path = Path.Map.find_opt path builtin_types_by_path
+
+let find_view path =
+  if is List path || find_builtin_type path = Some Array then Some (make_path Slice)
+  else if is String path then Some (make_path String_slice)
+  else None
+
+let make_builtin_capability_path builtin_capability =
+  Path.make_standard_path [ "capabilities" ] (Language.Builtin_capability.show builtin_capability)
+
+let builtin_capabilities_by_path =
+  Path.Map.of_seq
+    (List.to_seq
+       (List.map
+          (fun builtin_capability ->
+            (make_builtin_capability_path builtin_capability, builtin_capability))
+          Language.Builtin_capability.all))
+
+let find_builtin_capability path = Path.Map.find_opt path builtin_capabilities_by_path
 
 let is_system_module (module_ : Path.module_) =
   module_.package = Path.standard_package

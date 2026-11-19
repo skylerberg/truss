@@ -1,0 +1,5 @@
+fn count(n: UInt64, flag: Bool) -> UInt64
+  decreases flag
+{
+  if n == 0 { 0 } else { count(n - 1, flag: flag) }
+}

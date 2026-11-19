@@ -1,4 +1,4 @@
-type profile = Emit_c.profile = Development | Release
+type profile = Profile.t = Development | Release
 type t
 type results = { find : string -> string option; add : string -> string -> unit }
 type 'a ran = Ran of 'a | Ran_too_long | Stopped of string
@@ -62,7 +62,7 @@ val list_unshippable : Lowering.lowered_lookups -> main:Path.t -> unshippable li
 val list_reached_definitions : Lowering.lowered_lookups -> Path.t -> Path.t list
 val list_reached_todo_types : Lowering.lowered_lookups -> Path.t -> Path.t list
 val make_program_path : t -> string
-val build_program : t -> main:Path.t -> output:string -> (unit, string) result
+val build_program : t -> main:Path.t -> output:string -> is_kept:bool -> (unit, string) result
 
 val run_template_check :
   t ->
@@ -82,6 +82,7 @@ module For_testing : sig
     (unit, string) result
 
   val compile_fragment : t -> Lowered.Item.t -> Emit_c.fragment
+  val render_unit : t -> Lowered.Item.t -> string
 
   val evaluate_call :
     t -> function_:Path.t -> arguments:Z.t list -> (Lowered.static_value ran, string) result

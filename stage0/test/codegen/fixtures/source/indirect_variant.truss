@@ -1,0 +1,7 @@
+type Boxed =
+  | Empty
+  | indirect Full(value: Int64)
+
+fn box(value: Int64) -> Boxed {
+  Boxed.Full(value)
+}

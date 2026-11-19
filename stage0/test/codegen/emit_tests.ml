@@ -1,5 +1,6 @@
 let render_c_file env program =
   Emit_c.render_file env Development
+    ~resolve_position:(fun _ -> failwith "a development unit resolves no site")
     (List.map (fun (program_fragment, linkage) -> (program_fragment env, linkage)) program)
 
 let () =
@@ -480,6 +481,40 @@ let () =
       in
       Codegen_support.expect_int ~expected:101 status;
       Codegen_support.expect_string ~expected:"panic: boom\n  at test.truss:1:5\n" errors);
+  Codegen_support.test
+    "a failing obligation check stops a development program and does nothing in a release program"
+    (fun () ->
+      let message = "index out of bounds" in
+      let run profile =
+        Codegen_support.run_program ~profile
+          [
+            Codegen_support.entry
+              [ Codegen_support.local (Codegen_support.value Codegen_support.int32) ]
+              [
+                Codegen_support.block
+                  [
+                    Assign (Codegen_support.at 0, Use (Codegen_support.constant_int32 3));
+                    Fail_obligation_when
+                      {
+                        test = (Equal, Codegen_support.copy 0, Codegen_support.constant_int32 3);
+                        message = Constant (Bytes message);
+                        length = Constant (Integer (UInt64, Z.of_int (String.length message)));
+                        site = { definition = Codegen_support.definition "entry"; offset = 4 };
+                        reported = None;
+                        trace = None;
+                      };
+                  ]
+                  (Return (Some (Codegen_support.constant_int32 7)));
+              ];
+          ]
+      in
+      let status, _, errors = run Development in
+      Codegen_support.expect_int ~expected:101 status;
+      Codegen_support.expect_string ~expected:"panic: index out of bounds\n  at test.truss:1:5\n"
+        errors;
+      let status, _, errors = run Release in
+      Codegen_support.expect_int ~expected:7 status;
+      Codegen_support.expect_string ~expected:"" errors);
   Codegen_support.test "a copy of a callee is a static inline function, declared before its caller"
     (fun () ->
       let callee =

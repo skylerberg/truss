@@ -304,17 +304,10 @@ and check_loop_body state env (body : Syntax.block) =
     body.statements
 
 and check_loop_clause state env (clause : Syntax.loop_clause) =
-  let env = { env with specification = true } in
-  Solver.run_in_statement state env (State.read_span state clause.id) (fun () ->
-      match clause.kind with
-      | Invariant value -> Hooks.check state env value Types.bool
-      | Loop_decreases measures ->
-          List.iter (fun measure -> ignore (Hooks.check_expression state env measure)) measures
-      | Loop_cost cost -> (
-          State.check_cost state cost;
-          match cost.bound with
-          | Big_o value | At_most value | Exactly value ->
-              ignore (Hooks.check_expression state env value)))
+  match clause.kind with
+  | Invariant value -> Clauses.check_condition state env value
+  | Loop_decreases measures -> Clauses.check_measures state env measures
+  | Loop_cost cost -> Clauses.check_cost state env cost
 
 and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression)
     =

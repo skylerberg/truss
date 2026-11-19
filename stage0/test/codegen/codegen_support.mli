@@ -72,6 +72,7 @@ val run_program :
   ?extra:(string * Memory_layout.shape) list ->
   ?env:Memory_layout.env ->
   ?input:string ->
+  ?profile:Backend.profile ->
   program_fragment list ->
   int * string * string
 

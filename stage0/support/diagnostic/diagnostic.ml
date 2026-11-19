@@ -172,6 +172,8 @@ module Code = struct
     | Cannot_derive
     | Derives_inferred
     | Redeclared_method
+    | Restated_method_body
+    | Restated_method_clause
     | Trait_cycle
     | Recursion_limit
     | Missing_member
@@ -439,6 +441,8 @@ module Code = struct
     | Cannot_derive -> "cannot_derive"
     | Derives_inferred -> "derives_inferred"
     | Redeclared_method -> "redeclared_method"
+    | Restated_method_body -> "restated_method_body"
+    | Restated_method_clause -> "restated_method_clause"
     | Trait_cycle -> "trait_cycle"
     | Recursion_limit -> "recursion_limit"
     | Missing_member -> "missing_member"

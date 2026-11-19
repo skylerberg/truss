@@ -106,11 +106,38 @@ let list_any_methods (context : Definitions.context) trait =
     (is_callable_through_any context trait)
     (Definitions.read_trait_interface context trait).methods
 
-let lookup_dynamic_method context trait name receiver =
-  lookup_method_slot context ~owner:trait (list_any_methods context trait)
-    ~is_wanted:(fun (declared : Types.trait_method) ->
-      declared.method_name = name && declared.method_receiver = receiver)
-    ~handle_missing:(fun () -> Definitions.raise_bug "%s cannot be called through any" name)
+let list_any_slots (context : Definitions.context) ~self (reference : Types.trait_reference) =
+  let traits =
+    List.fold_left
+      (fun traits (bound : Types.trait_reference) ->
+        if
+          List.exists
+            (fun (listed : Types.trait_reference) -> Path.equal listed.trait bound.trait)
+            traits
+        then traits
+        else traits @ [ bound ])
+      []
+      (Interface.Properties.list_bound_closure context.lookups.interface ~self reference)
+  in
+  List.concat_map
+    (fun (bound : Types.trait_reference) ->
+      List.map (fun trait_method -> (bound, trait_method)) (list_any_methods context bound.trait))
+    traits
+
+let lookup_dynamic_method context ~(any : Types.trait_reference) trait name receiver =
+  let slots = list_any_slots context ~self:(Types.Any any) any in
+  match
+    List.find_index
+      (fun ((bound : Types.trait_reference), (declared : Types.trait_method)) ->
+        Path.equal bound.trait trait && declared.method_name = name
+        && declared.method_receiver = receiver)
+      slots
+  with
+  | Some index ->
+      ( index,
+        Interface.Definition.read_method_signature context.lookups.interface ~owner:trait
+          (snd (List.nth slots index)) )
+  | None -> Definitions.raise_bug "%s cannot be called through any" name
 
 let is_copyable_any (context : Definitions.context) (any : Types.trait_reference) =
   Interface.Impls.is_copyable context.lookups.interface ~list_bounds:Interface.Impls.list_no_bounds
@@ -374,7 +401,7 @@ let lower_call_through_any (state : Lowering.state) ~(any_type : Types.trait_ref
     ~receiver ~(any : Lowered.place)
     ~(arguments : (Language.Mode.t * Ground.ty * Lowered.place) list) ?(lending = []) ~site
     destination =
-  let index, signature = lookup_dynamic_method state.context trait name receiver in
+  let index, signature = lookup_dynamic_method state.context ~any:any_type trait name receiver in
   let slot =
     Drop_and_copy.compute_first_method_slot ~is_copyable:(is_copyable_any state.context any_type)
     + index

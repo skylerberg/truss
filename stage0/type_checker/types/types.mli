@@ -31,6 +31,7 @@ and function_type = {
 and result = Returns of ty | Lends of Language.Mode.t * ty
 
 and capability =
+  | Built_in of Language.Builtin_capability.t
   | Capability of Path.t
   | Capability_parameter of parameter
   | Capability_projection of { base : ty; trait : trait_reference; name : string }
@@ -73,12 +74,10 @@ val is_float_type : ty -> bool
 val make_capability_set : capability list -> capability_set
 val no_capabilities : capability_set
 val union_capabilities : capability_set -> capability_set -> capability_set
-val run_forever : capability
+val make_capability : Path.t -> capability
 val has_capability : capability -> capability_set -> bool
 val exists_capability : (capability -> bool) -> capability_set -> bool
 val list_capabilities : capability_set -> capability list
-val built_in_capabilities : capability_set
-val is_built_in_capability : capability -> bool
 val terminates : capability_set -> bool
 val intersect_capabilities : capability_set list -> capability_set
 val subtract_capabilities : capability_set -> capability_set -> capability_set
@@ -191,12 +190,19 @@ val list_field_types : type_interface -> ty list
 type associated_type = { associated_name : string; associated_bounds : trait_reference list }
 type trait_method = { method_name : string; method_receiver : Path.receiver; provided : bool }
 
+type restated_method = {
+  restated_name : string;
+  restated_receiver : Path.receiver;
+  declared_by : Path.t;
+}
+
 type trait_interface = {
   trait_generics : generic list;
   requires : trait_reference list;
   associated_types : associated_type list;
   associated_capabilities : string list;
   methods : trait_method list;
+  restated : restated_method list;
   laws : (string * (string * ty) list) list;
   is_capability : bool;
 }

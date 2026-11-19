@@ -353,9 +353,8 @@ let project_field context frame ty variant field field_type term =
   let part = Validity.select_field context ty variant field term in
   Amounts.assume_typed context frame (Facts.make_in_range field_type part);
   if context.ranking then begin
-    let below = Models.rank context field_type part in
     Facts.assume context frame
-      Logic.(less_equal (int 0) below &&& less below (Models.rank context ty term))
+      (Logic.less (Models.rank context field_type part) (Models.rank context ty term))
   end;
   part
 

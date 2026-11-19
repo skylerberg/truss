@@ -454,6 +454,14 @@ public trait Cursor {
   }
 }
 
+public trait FiniteCursor: Cursor {
+  fn remaining(self) -> UInt64
+
+  fn next(mut self) -> Option[Self.Element]
+    uses Self.Uses
+    ensures (result is Some(_)) ==> self.remaining() < old(self.remaining())
+}
+
 public trait Countable: Ordered + Plain {
   fn successor(self) -> Option[Self]
     cost time O(1)

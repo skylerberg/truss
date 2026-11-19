@@ -1,3 +1,4 @@
+module Builtin_capability = Builtin_capability
 module Builtin_type = Builtin_type
 module Comparison = Comparison
 module Connective = Connective

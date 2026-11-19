@@ -1,0 +1,12 @@
+type Chain =
+  | End
+  | indirect Link(value: Int64, rest: Chain)
+
+fn length(chain: Chain) -> UInt64
+  decreases chain
+{
+  match chain {
+    End => 0
+    Link(rest, ..) => length(rest).saturating_add(1)
+  }
+}

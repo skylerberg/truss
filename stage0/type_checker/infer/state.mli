@@ -263,7 +263,6 @@ val is_place : state -> Syntax.expression -> bool
 val find_keyword_operation : state -> Syntax.expression -> (Syntax.id * Syntax.expression) option
 val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val find_local_type : state -> Syntax.name -> Types.ty option
-val check_cost : state -> Syntax.cost -> unit
 val find_sequence_element : Types.ty -> Types.ty option
 
 val make_range :
