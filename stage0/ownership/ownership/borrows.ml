@@ -216,16 +216,18 @@ let check_body context (actions : Actions.t) moves =
                         in
                         Context.report context Conflicting_loan
                           (Context.locate_with_mode_keyword context second.origin)
-                          (Printf.sprintf
-                             (if is_yielded then
-                                format_of_string
-                                  "`%s` is lent `mut` to the yielded value, so `%s` cannot be lent \
-                                   to it too."
-                              else
-                                "`%s` is passed `mut` to this call, so the call cannot also use \
-                                 `%s`.")
-                             (Context.show context exclusive.place)
-                             (Context.show context also.place))))
+                          (if is_yielded then
+                             Printf.sprintf
+                               "`%s` is lent `mut` to the yielded value, so `%s` cannot be lent to \
+                                it too."
+                               (Context.show context exclusive.place)
+                               (Context.show context also.place)
+                           else
+                             Printf.sprintf
+                               "`%s` is passed `mut` to %s, so the call cannot also use `%s`."
+                               (Context.show context exclusive.place)
+                               (Context.describe_call context here.origin)
+                               (Context.show context also.place))))
                 borrowed_arguments)
             borrowed_arguments;
           List.iter
@@ -240,9 +242,10 @@ let check_body context (actions : Actions.t) moves =
                             Context.report context Conflicting_loan
                               (Context.locate_with_mode_keyword context argument.origin)
                               (Printf.sprintf
-                                 "`%s` is passed `mut` to this call, so the call cannot also take \
-                                  a view of it."
-                                 (Context.show context passed.place))))
+                                 "`%s` is passed `mut` to %s, so the call cannot also take a view \
+                                  of it."
+                                 (Context.show context passed.place)
+                                 (Context.describe_call context here.origin))))
                       viewed)
                 borrowed_arguments)
             view_arguments

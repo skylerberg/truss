@@ -97,7 +97,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Self_value -> (
       state.locals_read <- state.definition.id :: state.locals_read;
       State.register_expression state value (fun () ->
-          Use (Form.build_self_local state env ~origin:value.id));
+          Use (Form.build_self_local state env ~origin:(Written value.id)));
       match env.self with
       | Some self -> self
       | None ->
@@ -177,28 +177,31 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
             (Interface.Elaborator.elaborate_type state.context written)
             ~binding:Let ~mode:Language.Mode.Read);
       check state { env with in_quantifier = true } body Types.bool;
-      State.register_expression state value (fun () ->
+      State.register_expression_with_origin state value (fun () ->
           let make_quantified binder : Core.kind =
             Quantified { quantifier; binder; body = State.build_expression state body }
           in
           match (binder, state.tables.loops.(value.id)) with
           | Binder_type (bound, _), _ ->
-              make_quantified
-                (Over_type
-                   {
-                     local = Declared { origin = bound.id; name = bound.text };
-                     type_ = Form.read_local_type state bound.id;
-                   })
+              ( Written value.id,
+                make_quantified
+                  (Over_type
+                     {
+                       local = Declared { origin = bound.id; name = bound.text };
+                       type_ = Form.read_local_type state bound.id;
+                     }) )
           | Binder_in (written, collection), Some (Elements { count; element; lends }) ->
               let pattern = State.build_pattern state written in
-              Form.quantify_over_elements state collection ~count ~element ~lends ~origin:value.id
+              Form.quantify_over_elements state value collection ~count ~element ~lends
                 (fun elements -> make_quantified (Over_elements { pattern; elements }))
           | ( Binder_in (written, { kind = Range { start = Some start; stop = Some stop; _ }; _ }),
               Some (Integer_range { inclusive; _ }) ) ->
               let pattern = State.build_pattern state written in
               let start = State.build_expression state start in
-              make_quantified
-                (Over_range { pattern; start; stop = State.build_expression state stop; inclusive })
+              ( Written value.id,
+                make_quantified
+                  (Over_range
+                     { pattern; start; stop = State.build_expression state stop; inclusive }) )
           | Binder_in _, (None | Some (Integer_range _ | Pulled _)) ->
               State.raise_bug "the checker recorded no iteration for a quantifier over a collection");
       Types.bool
@@ -208,26 +211,24 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       type_
   | Return inner ->
       State.reject_in_formula state env (State.read_span state value.id) "`return`";
-      State.register_expression state value (fun () ->
+      State.register_expression_with_origin state value (fun () ->
           match (inner, env.output) with
           | Some inner, Some (Lends (mode, _)) ->
-              let returned =
-                State.make_synthetic_expression state ~origin:value.id Types.Never (Return None)
+              let origin : Core.origin =
+                Desugared { construct = value.id; desugaring = Lending_return }
               in
-              Block
-                {
-                  statements =
-                    Form.lend_statements state mode (State.build_expression state inner)
-                    @ [
-                        {
-                          id = State.allocate_node_id state;
-                          origin = value.id;
-                          kind = Evaluate returned;
-                        };
-                      ];
-                  value = None;
-                }
-          | _ -> Return (Option.map (State.build_expression state) inner));
+              let returned =
+                State.make_synthetic_expression state ~origin Types.Never (Return None)
+              in
+              ( origin,
+                Block
+                  {
+                    statements =
+                      Form.lend_statements state mode (State.build_expression state inner)
+                      @ [ { id = State.allocate_node_id state; origin; kind = Evaluate returned } ];
+                    value = None;
+                  } )
+          | _ -> (Written value.id, Return (Option.map (State.build_expression state) inner)));
       (match (inner, env.output) with
       | Some inner, Some (Returns output) -> check state env inner output
       | Some inner, Some (Lends (_, part)) ->
@@ -281,7 +282,7 @@ and check_member_value state env (value : Syntax.expression) (base : Syntax.expr
                      base = State.make_place (State.build_expression state base);
                      field = member.text;
                      type_ = Form.read_type state value;
-                     origin = value.id;
+                     origin = Written value.id;
                    }));
           Name_lookup.check_field state value base_type member)
 
@@ -337,7 +338,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
           let base = State.make_place (State.build_expression state base) in
           let start = Option.map (State.build_expression state) start in
           let stop = Option.map (State.build_expression state) stop in
-          State.make_range state ~origin:value.id base ~start ~stop
+          State.make_range state ~origin:(Written value.id) base ~start ~stop
             ~inclusive:(match range.kind with Range { inclusive; _ } -> inclusive | _ -> false));
       match (State.find_sequence_element base_type, base_type) with
       | Some element, _ ->
@@ -372,7 +373,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                        base = State.make_place (State.build_expression state base);
                        index = State.build_expression state key;
                        type_ = State.finalize_type state element;
-                       origin = value.id;
+                       origin = Written value.id;
                      }));
             element
         | None, _ -> (

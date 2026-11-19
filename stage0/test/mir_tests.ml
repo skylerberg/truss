@@ -1149,7 +1149,7 @@ let () =
                 Harness.fail "the right operand of `&&` is not computed in its block"
           | values -> Harness.fail "the clause of comparisons holds %d values" (List.length values));
           (match list_choices chosen.clause with
-          | [ Conditional { then_; else_; if_condition = Some _; _ } ] ->
+          | [ Conditional { then_; else_; tested = Written _; _ } ] ->
               if not (computes_a_comparison then_ && computes_a_comparison else_) then
                 Harness.fail "a case of the `if` is not computed in its block"
           | values -> Harness.fail "the clause with an `if` holds %d values" (List.length values));

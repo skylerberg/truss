@@ -368,8 +368,9 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   in
   let quote () =
     match (!at, Lazy.force source) with
-    | Some origin, Some (spans, text) when origin >= 0 && origin < Array.length spans ->
-        let span : Source.Definition_span.t = spans.(origin) in
+    | Some (Core.Written node | Desugared { construct = node; _ }), Some (spans, text)
+      when node >= 0 && node < Array.length spans ->
+        let span : Source.Definition_span.t = spans.(node) in
         Printf.sprintf ", in `%s`" (excerpt (String.sub text span.start (span.stop - span.start)))
     | _ -> ""
   in
@@ -464,9 +465,9 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     | Concurrent _ | For { mode = Concurrent; _ } ->
         if Hashtbl.mem task_origins node.origin then
           report
-            "two `concurrent` statements have the origin %d, so an early exit of a task of one \
-             would end the tasks of the other"
-            node.origin;
+            "two `concurrent` statements have the origin of node %d, so an early exit of a task of \
+             one would end the tasks of the other"
+            (Core_walk.read_located_node node.origin);
         Hashtbl.replace task_origins node.origin ()
     | _ -> ()
   in
@@ -793,8 +794,114 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   at := None;
   check_semantics { interface; report; at; bounds = list_bounds } form
 
+type written_construct =
+  | Written_match
+  | Written_call
+  | Written_lambda
+  | Written_if
+  | Written_return
+  | Written_for
+  | Written_while
+  | Written_let
+  | Written_pattern
+
+let show_written_construct = function
+  | Written_match -> "a `match`"
+  | Written_call -> "a call"
+  | Written_lambda -> "a lambda"
+  | Written_if -> "an `if`"
+  | Written_return -> "a `return`"
+  | Written_for -> "a `for` loop"
+  | Written_while -> "a `while` loop"
+  | Written_let -> "a `let`"
+  | Written_pattern -> "a pattern"
+
+let list_written_constructs (definition : Syntax.definition) =
+  let constructs = Hashtbl.create 64 in
+  let rec visit_pattern (pattern : Syntax.pattern) =
+    Hashtbl.replace constructs pattern.id Written_pattern;
+    match pattern.kind with
+    | Variant { fields = Some fields; _ } | Record fields -> List.iter visit_field fields
+    | Alternatives alternatives -> List.iter visit_pattern alternatives
+    | Wildcard | Binding _ | Qualified_constant _ | Literal _ | Pattern_range _
+    | Variant { fields = None; _ }
+    | Pattern_error ->
+        ()
+  and visit_field (field : Syntax.pattern_field) =
+    match field.kind with
+    | Named_field (_, pattern) | Field pattern -> visit_pattern pattern
+    | Rest -> ()
+  in
+  let rec visit_expression (value : Syntax.expression) =
+    (match value.kind with
+    | Match { arms; _ } ->
+        Hashtbl.replace constructs value.id Written_match;
+        List.iter (fun (arm : Syntax.arm) -> List.iter visit_pattern arm.patterns) arms
+    | Call _ -> Hashtbl.replace constructs value.id Written_call
+    | Lambda { parameters; _ } ->
+        Hashtbl.replace constructs value.id Written_lambda;
+        List.iter visit_pattern parameters
+    | If _ -> Hashtbl.replace constructs value.id Written_if
+    | Return _ -> Hashtbl.replace constructs value.id Written_return
+    | Is { pattern; _ } | Quantified { binder = Binder_in (pattern, _); _ } -> visit_pattern pattern
+    | _ -> ());
+    Syntax_walk.visit_expression_parts ~on_expression:visit_expression ~on_statement:visit_statement
+      value
+  and visit_statement (statement : Syntax.statement) =
+    (match statement.kind with
+    | Let { pattern; _ } ->
+        Hashtbl.replace constructs statement.id Written_let;
+        visit_pattern pattern
+    | For { pattern; _ } ->
+        Hashtbl.replace constructs statement.id Written_for;
+        visit_pattern pattern
+    | While _ -> Hashtbl.replace constructs statement.id Written_while
+    | _ -> ());
+    Syntax_walk.visit_statement_parts ~on_expression:visit_expression ~on_statement:visit_statement
+      statement
+  in
+  Syntax_walk.visit_definition ~on_statement:visit_statement visit_expression definition;
+  constructs
+
+let check_written_origins (interface : Interface.Lookups.t) (key : Resolve.Names.key)
+    (form : Core.t) =
+  let constructs = list_written_constructs (interface.names.read_definition key) in
+  let check_written (origin : Core.origin) expected =
+    match origin with
+    | Written node when Hashtbl.find_opt constructs node <> Some expected ->
+        Harness.fail "%s: %s in the core form has the written origin %d, which is %s"
+          (Resolve.Names.show_key key) (show_written_construct expected) node
+          (match Hashtbl.find_opt constructs node with
+          | Some found -> show_written_construct found
+          | None -> "none of the constructs that messages name")
+    | Written _ | Desugared _ | Derived -> ()
+  in
+  Core_walk.walk_definition
+    {
+      Core_walk.ignore_all with
+      expression =
+        (fun (node : Core.expression) ->
+          match node.kind with
+          | Match _ -> check_written node.origin Written_match
+          | Call _ -> check_written node.origin Written_call
+          | Lambda _ -> check_written node.origin Written_lambda
+          | If _ -> check_written node.origin Written_if
+          | Return _ -> check_written node.origin Written_return
+          | _ -> ());
+      statement =
+        (fun (node : Core.statement) ->
+          match node.kind with
+          | For _ -> check_written node.origin Written_for
+          | While _ -> check_written node.origin Written_while
+          | Let _ -> check_written node.origin Written_let
+          | _ -> ());
+      pattern = (fun (node : Core.pattern) -> check_written node.origin Written_pattern);
+    }
+    form.definition
+
 let check interface (key : Resolve.Names.key) form =
-  check_form interface ~path:key.path ~key:(Some key) form
+  check_form interface ~path:key.path ~key:(Some key) form;
+  check_written_origins interface key form
 
 let check_derived interface path form = check_form interface ~path ~key:None form
 

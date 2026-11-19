@@ -7,6 +7,8 @@ type visit = {
 }
 
 val ignore_all : visit
+val read_located_node : Core.origin -> Syntax.id
+val desugar_origin : Core.origin -> Core.desugaring -> Core.origin
 val compute_place_type : Core.place -> Types.ty
 val compute_place_origin : Core.place -> Core.origin
 val walk_operand : visit -> Core.operand -> unit

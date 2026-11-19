@@ -125,15 +125,24 @@ val make_error_type :
   Types.ty
 
 val quote_span : state -> Source.Definition_span.t -> string
+val read_origin_span : state -> Core.origin -> Source.Definition_span.t
 val allocate_node_id : state -> int
 
 val make_synthetic_expression :
   state -> origin:Core.origin -> Types.ty -> Core.kind -> Core.expression
 
 val register_expression : state -> Syntax.expression -> (unit -> Core.kind) -> unit
+
+val register_expression_with_origin :
+  state -> Syntax.expression -> (unit -> Core.origin * Core.kind) -> unit
+
 val was_hole : state -> (Tables.t -> Types.ty option array) -> Syntax.id -> bool
 val build_expression : state -> Syntax.expression -> Core.expression
 val register_statement : state -> Syntax.statement -> (unit -> Core.statement_kind) -> unit
+
+val register_statement_with_origin :
+  state -> Syntax.statement -> (unit -> Core.origin * Core.statement_kind) -> unit
+
 val build_statement : state -> Syntax.statement -> Core.statement
 val register_pattern : state -> Syntax.pattern -> (unit -> Core.pattern_kind) -> unit
 val build_pattern : state -> Syntax.pattern -> Core.pattern
@@ -263,7 +272,7 @@ val convert :
   env ->
   ?argument:Language.Mode.t ->
   ?takes_view_as_owner:bool ->
-  ?expression:Core.origin ->
+  ?expression:Syntax.id ->
   Source.Definition_span.t ->
   actual:Types.ty ->
   expected:Types.ty ->

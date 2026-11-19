@@ -85,7 +85,7 @@ let list_runnable database =
                     (lookups.interface.names.read_text key)
                     (Source.Definition_span.locate
                        (lookups.interface.names.read_spans key)
-                       requirement.clause.origin)
+                       (Core_walk.read_located_node requirement.clause.origin))
                 ^ ")")
               requires
           in

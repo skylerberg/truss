@@ -118,6 +118,7 @@ let make_error_type state ?fixes code span message =
   Types.Error (add_diagnostic state ?fixes code span message)
 
 let quote_span state span = Source.Definition_span.quote (Lazy.force state.text) span
+let read_origin_span state origin = read_span state (Core_walk.read_located_node origin)
 
 let allocate_node_id state =
   let id = state.form.next_node_id in
@@ -127,15 +128,27 @@ let allocate_node_id state =
 let make_synthetic_expression state ~origin type_ kind : Core.expression =
   { id = allocate_node_id state; origin; type_; kind }
 
-let register_expression state (value : Syntax.expression) make_kind =
+let check_origin_at state (id : Syntax.id) (origin : Core.origin) =
+  match origin with
+  | (Written node | Desugared { construct = node; _ }) when node = id -> origin
+  | Written _ | Desugared _ | Derived ->
+      raise_bug "the node of `%s` names another node as its origin"
+        (quote_span state (read_span state id))
+
+let register_expression_with_origin state (value : Syntax.expression) make =
   state.form.expression_builders.(value.id) <-
     Some
       (fun () ->
         let id = allocate_node_id state in
         match state.tables.types.(value.id) with
-        | Some type_ -> { Core.id; origin = value.id; type_; kind = make_kind () }
+        | Some type_ ->
+            let origin, kind = make () in
+            { Core.id; origin = check_origin_at state value.id origin; type_; kind }
         | None ->
             raise_bug "`%s` has a node and no type" (quote_span state (read_span state value.id)))
+
+let register_expression state (value : Syntax.expression) make_kind =
+  register_expression_with_origin state value (fun () -> (Core.Written value.id, make_kind ()))
 
 let was_hole state (select_table : Tables.t -> Types.ty option array) (id : Syntax.id) =
   match state.form.tables_with_holes with
@@ -172,29 +185,25 @@ let rec build_expression state (value : Syntax.expression) : Core.expression =
       | Lambda _ -> None
       | _ ->
           let node = build_expression state operand in
+          let origin : Core.origin = Desugared { construct = operand.id; desugaring = Hole } in
           Some
             {
               id = allocate_node_id state;
-              origin = operand.id;
+              origin;
               kind =
                 Let
                   {
                     pattern =
-                      {
-                        id = allocate_node_id state;
-                        origin = operand.id;
-                        type_ = node.type_;
-                        kind = Wildcard;
-                      };
+                      { id = allocate_node_id state; origin; type_ = node.type_; kind = Wildcard };
                     value = Operands.build Read node;
                     else_ = None;
                   };
             }
     in
     let statements = List.filter_map evaluate evaluated in
-    let todo = make_synthetic_expression state ~origin:value.id Types.Never Todo in
-    make_synthetic_expression state ~origin:value.id Types.Never
-      (Block { statements; value = Some todo })
+    let origin : Core.origin = Desugared { construct = value.id; desugaring = Hole } in
+    let todo = make_synthetic_expression state ~origin Types.Never Todo in
+    make_synthetic_expression state ~origin Types.Never (Block { statements; value = Some todo })
   end
   else
     match state.form.expression_builders.(value.id) with
@@ -202,9 +211,16 @@ let rec build_expression state (value : Syntax.expression) : Core.expression =
     | None ->
         raise_bug "`%s` has no node in the core form" (quote_span state (read_span state value.id))
 
-let register_statement state (written : Syntax.statement) make_kind =
+let register_statement_with_origin state (written : Syntax.statement) make =
   state.form.statement_builders.(written.id) <-
-    Some (fun () -> { Core.id = allocate_node_id state; origin = written.id; kind = make_kind () })
+    Some
+      (fun () ->
+        let id = allocate_node_id state in
+        let origin, kind = make () in
+        { Core.id; origin = check_origin_at state written.id origin; kind })
+
+let register_statement state (written : Syntax.statement) make_kind =
+  register_statement_with_origin state written (fun () -> (Core.Written written.id, make_kind ()))
 
 let build_statement state (written : Syntax.statement) : Core.statement =
   let rec strip_mode_keyword (value : Syntax.expression) =
@@ -225,7 +241,7 @@ let build_statement state (written : Syntax.statement) : Core.statement =
   | Some value ->
       {
         id = allocate_node_id state;
-        origin = written.id;
+        origin = Desugared { construct = written.id; desugaring = Hole };
         kind = Evaluate (build_expression state value);
       }
   | None -> (
@@ -241,13 +257,18 @@ let register_pattern state (written : Syntax.pattern) make_kind =
       (fun () ->
         let id = allocate_node_id state in
         match state.tables.scrutinee_types.(written.id) with
-        | Some type_ -> { Core.id; origin = written.id; type_; kind = make_kind () }
+        | Some type_ -> { Core.id; origin = Written written.id; type_; kind = make_kind () }
         | None ->
             raise_bug "`%s` has a node and no type" (quote_span state (read_span state written.id)))
 
 let build_pattern state (written : Syntax.pattern) : Core.pattern =
   if was_hole state (fun tables -> tables.scrutinee_types) written.id then
-    { id = allocate_node_id state; origin = written.id; type_ = Types.Never; kind = Wildcard }
+    {
+      id = allocate_node_id state;
+      origin = Desugared { construct = written.id; desugaring = Hole };
+      type_ = Types.Never;
+      kind = Wildcard;
+    }
   else
     match state.form.pattern_builders.(written.id) with
     | Some build -> build ()
@@ -1180,8 +1201,9 @@ let convert state env ?argument ?(takes_view_as_owner = false) ?expression
             (fun build () ->
               let inner : Core.expression = build () in
               let expected = finalize_type state expected in
+              let origin : Core.origin = Desugared { construct = id; desugaring = Conversion } in
               let convert conversion =
-                make_synthetic_expression state ~origin:id expected
+                make_synthetic_expression state ~origin expected
                   (Convert { conversion; value = inner })
               in
               match conversion with
@@ -1196,12 +1218,12 @@ let convert state env ?argument ?(takes_view_as_owner = false) ?expression
                   let base : Core.place =
                     match inner.kind with Use place -> place | _ -> Temporary inner
                   in
-                  make_synthetic_expression state ~origin:id expected
-                    (make_range state ~origin:id base ~start:None ~stop:None ~inclusive:false)
+                  make_synthetic_expression state ~origin expected
+                    (make_range state ~origin base ~start:None ~stop:None ~inclusive:false)
               | Owned_to_view -> (
                   match inner.type_ with
                   | Types.Named { path; arguments } ->
-                      make_synthetic_expression state ~origin:id expected
+                      make_synthetic_expression state ~origin expected
                         (Call
                            (make_call state
                               ~callee:

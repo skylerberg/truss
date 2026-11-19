@@ -29,7 +29,7 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
       state.locals_read <- id :: state.locals_read;
       state.tables.resolutions.(value.id) <- Some (Local_value id);
       State.register_expression state value (fun () ->
-          Form.build_local_use state ~origin:value.id id);
+          Form.build_local_use state ~origin:(Written value.id) id);
       match Hashtbl.find_opt state.locals id with
       | Some local -> local.type_
       | None -> State.raise_bug "the local `%s` has no type" text)
@@ -42,7 +42,7 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
                    {
                      local = Trait_parameter { index; name };
                      type_ = State.finalize_type state type_;
-                     origin = value.id;
+                     origin = Written value.id;
                    }));
           type_
       | None -> State.raise_bug "the law has no parameter `%s`" text)
@@ -78,7 +78,7 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
       state.tables.resolutions.(value.id) <-
         Some (Global { path; instantiation = Types.no_instantiation });
       State.register_expression state value (fun () ->
-          Use (Form.build_constant_place state ~origin:value.id path));
+          Use (Form.build_constant_place state ~origin:(Written value.id) path));
       Interface.Definition.read_constant_type state.lookups.interface path
   | Definition (Type, path) ->
       if Well_known.find_builtin_type path = Some Unit then begin
@@ -109,10 +109,10 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
                       Use
                         (Field
                            {
-                             base = Form.build_self_local state env ~origin:value.id;
+                             base = Form.build_self_local state env ~origin:(Written value.id);
                              field;
                              type_ = Form.read_type state value;
-                             origin = value.id;
+                             origin = Written value.id;
                            }));
                   written.field_type
               | None -> State.raise_bug "the field `%s` is not in its record" field)
@@ -141,7 +141,7 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
 and check_variant_value state (value : Syntax.expression) type_path variant ~arguments =
   let type_ = Types.Named { path = type_path; arguments } in
   state.tables.resolutions.(value.id) <- Some (Variant_value { type_; variant });
-  State.register_expression state value (fun () ->
+  State.register_expression_with_origin state value (fun () ->
       Form.build_variant_value state value type_path variant);
   match Members.find_variants state.lookups type_path arguments with
   | Some variants -> (
@@ -243,7 +243,7 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
             state.tables.resolutions.(value.id) <-
               Some (Global { path = constant; instantiation = Types.no_instantiation });
             State.register_expression state value (fun () ->
-                Use (Form.build_constant_place state ~origin:value.id constant));
+                Use (Form.build_constant_place state ~origin:(Written value.id) constant));
             Interface.Definition.read_constant_type state.lookups.interface constant
         | Visible method_path -> (
             match Instantiation.find_function_signature state method_path with

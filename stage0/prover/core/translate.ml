@@ -412,7 +412,7 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
       (match (returned, output) with
       | Some term, Some output ->
           Lambdas.check_valid context frame Whole_definition output term ~deep:true
-            ~when_:"for the value returned"
+            ~when_:[ Text "for the value returned" ]
       | _ -> ());
       List.iter
         (fun (parameter : Mir.parameter) ->
@@ -423,14 +423,17 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
           | Some term, Some ty ->
               Lambdas.check_valid context frame Whole_definition ty term ~deep:true
                 ~when_:
-                  (Printf.sprintf "for `%s` when the function returns"
-                     (Facts.read_parameter_name parameter))
+                  [
+                    Text
+                      (Printf.sprintf "for `%s` when the function returns"
+                         (Facts.read_parameter_name parameter));
+                  ]
           | _ -> ())
         mut_parameters;
       (match (mut_self, is_update_step, frame.self, frame.self_type) with
       | true, false, Some self, Some self_type ->
           Lambdas.check_valid context frame Whole_definition self_type self ~deep:true
-            ~when_:"for `self` when the method returns"
+            ~when_:[ Text "for `self` when the method returns" ]
       | _ -> ());
       (match (context.yield_ensures, frame.yielded_so_far) with
       | Some (_, at_end), Some yielded_so_far ->

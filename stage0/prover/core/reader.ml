@@ -237,7 +237,8 @@ let write_resolved context frame run (place : Mir.place) new_value =
             | _ :: _ ->
                 Lambdas.check_valid context frame
                   (Facts.locate context frame.source origin)
-                  part_type element ~deep:true ~when_:"for the element changed here");
+                  part_type element ~deep:true
+                  ~when_:[ Text "for the element changed here" ]);
             let after =
               Intrinsics.write_sequence_element context frame base_type whole index element
             in
@@ -627,16 +628,83 @@ let bind_parts context (frame : State.frame) run =
       | _ -> frame)
     frame.aliases frame
 
-let note_decision (context : State.context) (frame : State.frame) origin test =
-  if frame.makes_obligations && frame.source.key = Some context.home then begin
-    let text = Facts.quote_origin context frame origin in
-    context.decisions <-
-      ( Printf.sprintf "`%s` is true" text,
-        Some (Printf.sprintf "`%s` is false" text),
-        frame.condition,
-        test )
-      :: context.decisions
+let is_noted (context : State.context) (frame : State.frame) =
+  frame.makes_obligations && frame.source.key = Some context.home
+
+let record_decision (context : State.context) (frame : State.frame) ~holding ?failing condition =
+  context.decisions <- (holding, failing, frame.condition, condition) :: context.decisions
+
+let note_condition context frame (tested : Core.origin) test =
+  if is_noted context frame then begin
+    let quote () = Facts.quote_origin context frame tested in
+    let note_value () =
+      let text = quote () in
+      record_decision context frame
+        ~holding:(Printf.sprintf "`%s` is true" text)
+        ~failing:(Printf.sprintf "`%s` is false" text)
+        test
+    in
+    match tested with
+    | Written _ -> note_value ()
+    | Desugared { desugaring; _ } -> (
+        match desugaring with
+        | Let_else ->
+            record_decision context frame
+              ~holding:(Printf.sprintf "`%s` does not match, so the `else` runs" (quote ()))
+              (Logic.not_ test)
+        | Try | Quantifier | Operator | Index | Comparison | Final | Conversion | Template
+        | Collection_literal | Range_value | Constructor_function | Hole ->
+            note_value ()
+        | For_loop | Compound_assignment | Index_assignment | Lending_return ->
+            Facts.raise_bug "a condition that a statement's desugaring made")
+    | Derived -> Facts.raise_bug "a condition in a derived method, which has no source"
   end
+
+let note_arm context frame (patterns : Core.origin list) =
+  if is_noted context frame then begin
+    let is_written (pattern : Core.origin) =
+      match pattern with
+      | Written _ | Desugared { desugaring = Hole; _ } -> true
+      | Desugared { desugaring = Try | For_loop | Quantifier; _ } -> false
+      | Desugared
+          {
+            desugaring =
+              ( Let_else | Operator | Index | Index_assignment | Comparison | Compound_assignment
+              | Template | Final | Range_value | Collection_literal | Constructor_function
+              | Lending_return | Conversion );
+            _;
+          }
+      | Derived ->
+          Facts.raise_bug "an arm of a match that neither the source nor a desugaring wrote"
+    in
+    match List.partition is_written patterns with
+    | (_ :: _ as written), [] ->
+        record_decision context frame
+          ~holding:
+            (Printf.sprintf "the arm `%s` is taken"
+               (String.concat ", " (List.map (Facts.quote_origin context frame) written)))
+          (Logic.Boolean true)
+    | [], _ :: _ -> ()
+    | _ -> Facts.raise_bug "an arm whose patterns are partly written and partly desugared"
+  end
+
+let note_return context frame (origin : Core.origin) =
+  if is_noted context frame then
+    match origin with
+    | Desugared { desugaring = Try; _ } ->
+        record_decision context frame
+          ~holding:(Printf.sprintf "`%s` returns early" (Facts.quote_origin context frame origin))
+          (Logic.Boolean true)
+    | Desugared
+        {
+          desugaring =
+            ( For_loop | Quantifier | Let_else | Operator | Index | Index_assignment | Comparison
+            | Compound_assignment | Template | Final | Range_value | Collection_literal
+            | Constructor_function | Lending_return | Conversion | Hole );
+          _;
+        }
+    | Written _ | Derived ->
+        ()
 
 let refresh_place context frame ty (place : State.passed_place) =
   let fresh_value = Facts.arrive context frame "changed" ty in
@@ -678,7 +746,7 @@ let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~han
             term)
         each;
       Lambdas.check_valid context frame location part_type handed ~deep:true
-        ~when_:"for the part lent here";
+        ~when_:[ Text "for the part lent here" ];
       let frame, part_after =
         if mode = Language.Mode.Mut && lends then (
           let part_after = Facts.arrive context frame "lent" part_type in
@@ -885,13 +953,11 @@ and merge_alternatives context ~outer ~condition (entered, read) (entered_otherw
 
 and read_choice context frame run (choice : Mir.choice) =
   match choice with
-  | Conditional { condition; then_; else_; if_condition } -> (
+  | Conditional { condition; then_; else_; tested } -> (
       match read_block context frame run condition with
       | None -> None
       | Some (frame, test) ->
-          (match if_condition with
-          | Some origin -> note_decision context frame origin test
-          | None -> ());
+          note_condition context frame tested test;
           let entered_then = Facts.restrict frame test
           and entered_else = Facts.restrict frame (Logic.not_ test) in
           merge_alternatives context ~outer:frame ~condition:test
@@ -1031,6 +1097,7 @@ and read_statement context frame run (statement : Mir.statement) =
   | Jump jump ->
       (match jump with
       | Return returned ->
+          note_return context frame statement.origin;
           context.returns <-
             (frame, Option.map (read_operand context frame run) returned) :: context.returns
       | Break -> (
@@ -1391,9 +1458,12 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
                   (Facts.substitute_type context frame type_)
                   term ~deep:true
                   ~when_:
-                    (match kind with
-                    | Temporary -> "for the value built here"
-                    | _ -> Printf.sprintf "for %s when its scope ends" (describe_local kind))
+                    [
+                      Text
+                        (match kind with
+                        | Temporary -> "for the value built here"
+                        | _ -> Printf.sprintf "for %s when its scope ends" (describe_local kind));
+                    ]
             | _ -> ())
           locals;
       let frame =
@@ -1464,24 +1534,21 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
   | Proof code ->
       Some (Facts.restrict frame (Logic.not_ (Values.run_ghost_code context frame code)))
   | Matched { patterns } ->
-      if frame.makes_obligations then
-        context.decisions <-
-          ( Printf.sprintf "the arm `%s` is taken"
-              (String.concat ", " (List.map (Facts.quote_origin context frame) patterns)),
-            None,
-            frame.condition,
-            Logic.Boolean true )
-          :: context.decisions;
+      note_arm context frame patterns;
       Some frame
   | Template { destination; literals; call } -> (
       match (call.callee.target, call.arguments) with
       | Trait_method { trait; name; receiver; evidence; _ }, [ Passed { value = template; _ } ] ->
           Facts.reject_uncompared_recursion context frame location
             (snd (Facts.find_recursive_callee context frame location call.callee.target))
-            ~describe:
-              (Printf.sprintf
-                 "This template calls `%s`, which calls back here, and a template passes no \
-                  arguments the prover can compare, so the recursion cannot be shown to end.");
+            ~describe:(fun callee ->
+              [
+                Text
+                  (Printf.sprintf
+                     "This template calls `%s`, which calls back here, and a template passes no \
+                      arguments the prover can compare, so the recursion cannot be shown to end."
+                     (Facts.show_callee callee));
+              ]);
           let frame, tagged =
             Values.apply_template context frame
               { origin = call.origin; type_ = compute_target_type context frame run destination }

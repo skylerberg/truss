@@ -59,7 +59,10 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           let index = State.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
           state.tables.resolutions.(value.id) <- Some Specification_value;
           State.register_expression state value (fun () ->
-              let make = State.make_synthetic_expression state ~origin:value.id in
+              let make =
+                State.make_synthetic_expression state
+                  ~origin:(Desugared { construct = value.id; desugaring = Final })
+              in
               let build_read_argument = Operands.build_argument Read in
               let first =
                 make part

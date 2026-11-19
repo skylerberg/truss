@@ -75,7 +75,9 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
   match literal.tag with
   | None ->
       State.register_expression state value (fun () ->
-          Form.build_untagged_string state ~origin:value.id literal);
+          Form.build_untagged_string state
+            ~origin:(Desugared { construct = value.id; desugaring = Template })
+            literal);
       List.iteri
         (fun index ((part : Syntax.expression), part_type) ->
           State.check_when_final state (fun () ->
@@ -184,7 +186,7 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
     List.iter (Modes.note_owned_value state env) items
   in
   let register_collection () =
-    State.register_expression state value (fun () ->
+    State.register_expression_with_origin state value (fun () ->
         Form.build_collection_literal state value (List.map (State.build_expression state) items))
   in
   let from_elements =
@@ -215,7 +217,7 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
       in
       check_items element;
       record_conversion state value collection from_elements From_elements_from_elements;
-      State.register_expression state value (fun () ->
+      State.register_expression_with_origin state value (fun () ->
           Form.build_converted_literal state value
             ~element:(State.finalize_type state element)
             (List.map (State.build_expression state) items));
@@ -265,7 +267,7 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
       in
       check_entries key value_type;
       record_conversion state value map from_entries From_entries_from_entries;
-      State.register_expression state value (fun () ->
+      State.register_expression_with_origin state value (fun () ->
           Form.build_converted_map_literal state value ~key:(State.finalize_type state key)
             ~value_type:(State.finalize_type state value_type)
             (build_entries ()));
@@ -449,7 +451,6 @@ and match_ state env ?expected (value : Syntax.expression) scrutinees arms =
       in
       Match
         {
-          is_written = true;
           scrutinees;
           arms =
             List.map
@@ -460,7 +461,7 @@ and match_ state env ?expected (value : Syntax.expression) scrutinees arms =
                   patterns;
                   guard;
                   body = State.build_block state { statements = [ arm.body ]; id = arm.body.id };
-                  origin = arm.id;
+                  origin = Written arm.id;
                 })
               arms;
         });

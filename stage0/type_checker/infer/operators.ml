@@ -33,7 +33,7 @@ let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
   let output =
     match env.output with Some (Returns output) -> Some (State.normalize state output) | _ -> None
   in
-  State.register_expression state value (fun () ->
+  State.register_expression_with_origin state value (fun () ->
       match output with
       | Some output -> Form.build_try state value inner ~output:(State.finalize_type state output)
       | None -> State.raise_bug "`?` where nothing is returned");
@@ -263,7 +263,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
             Types.bool
           end
           else begin
-            State.register_expression state value (fun () ->
+            State.register_expression_with_origin state value (fun () ->
                 Form.build_comparison state value comparison left right);
             let compared_type =
               match

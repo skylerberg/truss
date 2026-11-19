@@ -55,7 +55,7 @@ val reject_uncompared_recursion :
   State.frame ->
   Obligation.location ->
   Path.t option ->
-  describe:(string -> string) ->
+  describe:(Path.t -> Obligation.message) ->
   unit
 
 val make_closed_obligation :
@@ -79,8 +79,13 @@ val make_obligation :
   Obligation.t
 
 val locate : State.context -> State.source -> Core.origin -> Obligation.location
-val quote : State.source -> int -> Obligation.piece
+val quote : State.source -> Core.origin -> Obligation.piece
 val quote_span : string -> Source.Definition_span.t -> string
+val capitalize : Obligation.message -> Obligation.message
+
+val describe_call :
+  State.context -> Obligation.location -> ?callee:Path.t -> unit -> Obligation.message
+
 val quote_origin : State.context -> State.frame -> Core.origin -> string
 val find_bounds : Types.ty -> (Z.t * Z.t) option
 val find_float_format : Types.ty -> (int * int) option

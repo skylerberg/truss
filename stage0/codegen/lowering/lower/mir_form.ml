@@ -183,7 +183,11 @@ and lower_basic state (basic : Mir.basic) ~origin =
       and after = Emit_c.Ir_builder.allocate_block state.builder in
       Emit_c.Ir_builder.branch state.builder (Holds holds) ~yes:after ~no:failed;
       Emit_c.Ir_builder.start state.builder failed;
-      let message = "assert " ^ Lowering.quote_span state (Mir_places.read_spans state).(origin) in
+      let message =
+        "assert "
+        ^ Lowering.quote_span state
+            (Mir_places.read_spans state).(Core_walk.read_located_node origin)
+      in
       Emit_c.Ir_builder.finish state.builder
         (Fail
            {

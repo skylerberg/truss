@@ -162,6 +162,12 @@ let add_restated_clauses (context : State.context) ~self_type ~bind trait name r
            ~self_type trait name receiver);
   }
 
+let describe_recursive_call context (location : Obligation.location) ~callee =
+  match location with
+  | Node (Written _) -> [ Obligation.Text "This recursive call" ]
+  | Node (Desugared _ | Derived) | Whole_definition ->
+      Facts.capitalize (Facts.describe_call context location ~callee ())
+
 let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
     path (contract : State.contract) (values : State.passed list) ~recursive_callee ~lent_final
     ~havoc_mut ~substitution_of ~type_arguments =
@@ -268,27 +274,29 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           | names -> "the first of " ^ String.concat " and " names ^ " that it changes"
         in
         Facts.oblige context frame Termination location
-          [
-            Text
-              (Printf.sprintf
-                 "This recursive call may not be on a part of %s: give the function a `decreases` \
-                  clause."
-                 compared);
-          ]
+          (describe_recursive_call context location ~callee:path
+          @ [
+              Text
+                (Printf.sprintf
+                   " may not be on a part of %s: give the function a `decreases` clause." compared);
+            ])
           (Amounts.compare_lexicographically before after)
     | ([], _ | _, []) when context.terminates ->
         Facts.oblige context frame Termination location
-          [
-            Text
-              (if is_self_call then
-                 "This recursive call may not end: give the function a `decreases` clause for the \
-                  prover to show that the recursion ends."
-               else
-                 Printf.sprintf
-                   "This call to `%s` may not end: it calls back here, and both need a `decreases` \
-                    clause for the prover to show that the recursion ends."
-                   (Facts.show_callee path));
-          ]
+          (if is_self_call then
+             describe_recursive_call context location ~callee:path
+             @ [
+                 Text
+                   " may not end: give the function a `decreases` clause for the prover to show \
+                    that the recursion ends.";
+               ]
+           else
+             Facts.capitalize (Facts.describe_call context location ~callee:path ())
+             @ [
+                 Text
+                   " may not end: it calls back here, and both need a `decreases` clause for the \
+                    prover to show that the recursion ends.";
+               ])
           (Logic.Boolean false)
     | (_ :: _ as measures), (_ :: _ as callee_measures) ->
         let current_frame =
@@ -314,13 +322,14 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         in
         let before, after = split_prefix before after in
         Facts.oblige context frame Termination location
-          (Obligation.Text "This call may not decrease `"
-           :: List.concat
-                (List.mapi
-                   (fun index (measure : Mir.formula) ->
-                     (if index = 0 then [] else [ Obligation.Text ", " ])
-                     @ [ Facts.quote caller measure.origin ])
-                   measures)
+          (Facts.capitalize (Facts.describe_call context location ())
+          @ Obligation.Text " may not decrease `"
+            :: List.concat
+                 (List.mapi
+                    (fun index (measure : Mir.formula) ->
+                      (if index = 0 then [] else [ Obligation.Text ", " ])
+                      @ [ Facts.quote caller measure.origin ])
+                    measures)
           @ [ Text "`." ])
           (Amounts.compare_lexicographically before after)
     | [], _ | _, [] -> ()
@@ -339,10 +348,12 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         in
         let message : Obligation.message =
           [
-            Text "`";
+            Obligation.Text "`";
             Facts.quote precondition_clauses.callee clause.origin;
-            Text (Printf.sprintf "` may not hold for this call to `%s`." (Facts.show_callee path));
+            Text "` may not hold for ";
           ]
+          @ Facts.describe_call context location ~callee:path ()
+          @ [ Text "." ]
         in
         Facts.oblige context frame Requires location ?cited ~fixes message term;
         term)
@@ -477,7 +488,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     match left_valid with
     | Some (_, leave) ->
         Lambdas.check_valid context after location result_type (leave result) ~deep:true
-          ~when_:"when the lend of this part ends"
+          ~when_:[ Text "when the lend of this part ends" ]
     | None -> ()
   in
   let is_update_step = calls_update_step context invocation in
@@ -923,7 +934,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         (fun (passed : State.passed) ->
           if not (is_update_step && passed.position = 0) then
             Lambdas.check_valid context frame location passed.type_ passed.term ~deep:true
-              ~when_:"when it is passed to this call")
+              ~when_:(Text "when it is passed to " :: Facts.describe_call context location ()))
         values);
   let havoc_mut frame =
     List.fold_left
@@ -1163,8 +1174,11 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
   | By_contract (frame, result) -> Some (frame, result)
   | Without_contract result ->
       Facts.reject_uncompared_recursion context frame location recursive_callee
-        ~describe:
-          (Printf.sprintf
-             "This call to `%s` may not end: it calls back here, and the prover reads this call \
-              without the callee's `decreases` clause.");
+        ~describe:(fun callee ->
+          Facts.capitalize (Facts.describe_call context location ~callee ())
+          @ [
+              Text
+                " may not end: it calls back here, and the prover reads the call without the \
+                 callee's `decreases` clause.";
+            ]);
       result

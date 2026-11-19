@@ -1,10 +1,14 @@
 val read_evidence : State.state -> Types.ty -> Types.trait_reference -> Core.evidence
 val register_call : ?function_value:Syntax.expression -> State.state -> Syntax.expression -> unit
 val register_index : State.state -> Syntax.expression -> unit
+val register_index_assignment : State.state -> Syntax.expression -> unit
 val build_numeric_literal : State.state -> Syntax.id -> Core.kind
 val read_type : State.state -> Syntax.expression -> Types.ty
 val build_function_value : State.state -> Syntax.expression -> Core.kind
-val build_variant_value : State.state -> Syntax.expression -> Path.t -> string -> Core.kind
+
+val build_variant_value :
+  State.state -> Syntax.expression -> Path.t -> string -> Core.origin * Core.kind
+
 val read_local_type : State.state -> Syntax.id -> Types.ty
 val build_local_use : State.state -> origin:Core.origin -> Syntax.id -> Core.kind
 val read_self_type : State.state -> State.env -> Types.ty
@@ -48,7 +52,7 @@ val build_comparison :
   Language.Comparison.t ->
   Syntax.expression ->
   Syntax.expression ->
-  Core.kind
+  Core.origin * Core.kind
 
 val is_executable : State.state -> Core.expression -> bool
 val binds_lent_part : State.state -> Core.expression -> bool
@@ -67,12 +71,12 @@ val lend_block : State.state -> Language.Mode.t -> Core.block -> Core.block
 val quantify_over_elements :
   State.state ->
   Syntax.expression ->
+  Syntax.expression ->
   count:Tables.call ->
   element:Tables.call ->
   lends:Language.Mode.t ->
-  origin:Core.origin ->
   (Core.elements -> Core.kind) ->
-  Core.kind
+  Core.origin * Core.kind
 
 val build_for_loop :
   State.state ->
@@ -82,18 +86,27 @@ val build_for_loop :
   clauses:Core.loop_clause list ->
   body:Core.block ->
   mode:Language.Loop_mode.t ->
-  Core.statement_kind
+  Core.origin * Core.statement_kind
 
-val build_cost : State.state -> origin:Core.origin -> Syntax.cost -> Core.cost
+val build_cost : State.state -> origin:Syntax.id -> Syntax.cost -> Core.cost
 val build_loop_clause : State.state -> Syntax.loop_clause -> Core.loop_clause
 
 val build_try :
-  State.state -> Syntax.expression -> Syntax.expression -> output:Types.ty -> Core.kind
+  State.state ->
+  Syntax.expression ->
+  Syntax.expression ->
+  output:Types.ty ->
+  Core.origin * Core.kind
 
-val build_collection_literal : State.state -> Syntax.expression -> Core.expression list -> Core.kind
+val build_collection_literal :
+  State.state -> Syntax.expression -> Core.expression list -> Core.origin * Core.kind
 
 val build_converted_literal :
-  State.state -> Syntax.expression -> element:Types.ty -> Core.expression list -> Core.kind
+  State.state ->
+  Syntax.expression ->
+  element:Types.ty ->
+  Core.expression list ->
+  Core.origin * Core.kind
 
 val build_converted_map_literal :
   State.state ->
@@ -101,6 +114,6 @@ val build_converted_map_literal :
   key:Types.ty ->
   value_type:Types.ty ->
   (Core.expression * Core.expression) list ->
-  Core.kind
+  Core.origin * Core.kind
 
 val build_declared_local : State.state -> Syntax.id -> Core.local

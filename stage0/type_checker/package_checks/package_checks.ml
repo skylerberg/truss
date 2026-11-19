@@ -635,14 +635,14 @@ let check_type lookups ~list_contained (declaration : Resolve.Names.declaration)
 
 let read_constant_value (lookups : Lookups.t) path =
   match Option.map lookups.read_core (lookups.interface.names.find_key path) with
-  | Some { definition = Constant (Some value) } -> Some value
+  | Some { definition = Constant (Some value); _ } -> Some value
   | _ -> None
 
 let find_field_default (lookups : Lookups.t) (type_ : Types.ty) variant field =
   match type_ with
   | Named { path; _ } -> (
       match Option.map lookups.read_core (lookups.interface.names.find_key path) with
-      | Some { definition = Type { defaults; _ } } ->
+      | Some { definition = Type { defaults; _ }; _ } ->
           List.find_map
             (fun (default_variant, default_field, value) ->
               if
@@ -743,7 +743,8 @@ let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
         (fun (named : named_constant) ->
           if depends_on_constant named.constant then
             Some
-              (make_diagnostic key Constant_cycle spans.(named.origin)
+              (make_diagnostic key Constant_cycle
+                 spans.(Core_walk.read_located_node named.origin)
                  (describe_constant_cycle ~cyclic:path named))
           else None)
         (list_named_constants lookups value)

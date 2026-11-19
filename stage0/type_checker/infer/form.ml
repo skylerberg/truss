@@ -102,7 +102,8 @@ let read_constructor_fields (state : State.state) type_ variant type_arguments =
   | Some fields -> fields
   | None -> State.raise_bug "`%s` is constructed but has no fields" (Path.show type_)
 
-let build_call_kind ?lends ?function_value state (value : Syntax.expression) : Core.kind =
+let build_call_kind ?lends ?function_value state (value : Syntax.expression) ~(origin : Core.origin)
+    : Core.kind =
   let recorded = read_call state value.id in
   let lends =
     match lends with Some lends -> Some lends | None -> state.tables.lend_modes.(value.id)
@@ -149,19 +150,31 @@ let build_call_kind ?lends ?function_value state (value : Syntax.expression) : C
       let call = Core.Call (build_call state ~lends ?function_value recorded) in
       match lends with
       | Some _ ->
-          Use
-            (Lent
-               (State.make_synthetic_expression state ~origin:value.id recorded.callee_result call))
+          Use (Lent (State.make_synthetic_expression state ~origin recorded.callee_result call))
       | None -> call)
 
+let register_call_at ?function_value state (value : Syntax.expression) (origin : Core.origin) =
+  State.register_expression_with_origin state value (fun () ->
+      (origin, build_call_kind ?function_value state value ~origin))
+
 let register_call ?function_value state (value : Syntax.expression) =
-  State.register_expression state value (fun () -> build_call_kind ?function_value state value)
+  register_call_at ?function_value state value
+    (match value.kind with
+    | Call _ -> Written value.id
+    | Binary _ | Prefix _ -> Desugared { construct = value.id; desugaring = Operator }
+    | _ -> State.raise_bug "a call recorded at an expression that is neither a call nor an operator")
+
+let register_index_assignment state (call : Syntax.expression) =
+  register_call_at state call (Desugared { construct = call.id; desugaring = Index_assignment })
 
 let register_index state (value : Syntax.expression) =
-  State.register_expression state value (fun () ->
-      match (read_call state value.id).callee with
-      | Trait_method { receiver = Instance Mut; _ } -> build_call_kind ~lends:Mut state value
-      | _ -> build_call_kind ~lends:Read state value)
+  let origin : Core.origin = Desugared { construct = value.id; desugaring = Index } in
+  State.register_expression_with_origin state value (fun () ->
+      ( origin,
+        match (read_call state value.id).callee with
+        | Trait_method { receiver = Instance Mut; _ } ->
+            build_call_kind ~lends:Mut state value ~origin
+        | _ -> build_call_kind ~lends:Read state value ~origin ))
 
 let build_numeric_literal (state : State.state) (id : Syntax.id) : Core.kind =
   match state.tables.literals.(id) with
@@ -183,57 +196,58 @@ let build_function_value (state : State.state) (value : Syntax.expression) : Cor
       State.raise_bug "`%s` is not recorded as a function"
         (State.quote_span state (State.read_span state value.id))
 
-let build_variant_value state (value : Syntax.expression) type_path variant : Core.kind =
+let build_variant_value state (value : Syntax.expression) type_path variant :
+    Core.origin * Core.kind =
   match read_type state value with
   | Types.Function { output = Types.Named { arguments; _ } as variant_type; _ } ->
+      let origin : Core.origin =
+        Desugared { construct = value.id; desugaring = Constructor_function }
+      in
       let fields =
         List.map
           (fun (field : Types.field) -> (field, State.allocate_synthetic_local state))
           (read_constructor_fields state type_path (Some variant) arguments)
       in
-      Lambda
-        {
-          parameters =
-            List.map
-              (fun ((field : Types.field), local) : Core.pattern ->
-                {
-                  id = State.allocate_node_id state;
-                  origin = value.id;
-                  type_ = field.field_type;
-                  kind = Bind { local; is_var = false; mode = Own };
-                })
-              fields;
-          captures = [];
-          body =
-            {
-              statements = [];
-              value =
-                Some
-                  (State.make_synthetic_expression state ~origin:value.id variant_type
-                     (Construct
-                        {
-                          variant = Some variant;
-                          fields =
-                            List.map
-                              (fun ((field : Types.field), local) ->
-                                ( field.field_name,
-                                  Some
-                                    (Core.Value
-                                       (State.make_synthetic_expression state ~origin:value.id
-                                          field.field_type
-                                          (Core.Use
-                                             (Local
-                                                {
-                                                  local;
-                                                  type_ = field.field_type;
-                                                  origin = value.id;
-                                                })))) ))
-                              fields;
-                        }));
-            };
-          result = variant_type;
-        }
-  | _ -> Construct { variant = Some variant; fields = [] }
+      ( origin,
+        Lambda
+          {
+            parameters =
+              List.map
+                (fun ((field : Types.field), local) : Core.pattern ->
+                  {
+                    id = State.allocate_node_id state;
+                    origin;
+                    type_ = field.field_type;
+                    kind = Bind { local; is_var = false; mode = Own };
+                  })
+                fields;
+            captures = [];
+            body =
+              {
+                statements = [];
+                value =
+                  Some
+                    (State.make_synthetic_expression state ~origin variant_type
+                       (Construct
+                          {
+                            variant = Some variant;
+                            fields =
+                              List.map
+                                (fun ((field : Types.field), local) ->
+                                  ( field.field_name,
+                                    Some
+                                      (Core.Value
+                                         (State.make_synthetic_expression state ~origin
+                                            field.field_type
+                                            (Core.Use
+                                               (Local { local; type_ = field.field_type; origin }))))
+                                  ))
+                                fields;
+                          }));
+              };
+            result = variant_type;
+          } )
+  | _ -> (Written value.id, Construct { variant = Some variant; fields = [] })
 
 let read_local_type (state : State.state) (id : Syntax.id) =
   match state.tables.local_types.(id) with
@@ -280,7 +294,9 @@ let build_range_record state (value : Syntax.expression) start stop ~inclusive :
       let start = State.build_expression state start in
       let stop = State.build_expression state stop in
       let inclusive =
-        State.make_synthetic_expression state ~origin:value.id Types.bool (Core.Boolean inclusive)
+        State.make_synthetic_expression state
+          ~origin:(Desugared { construct = value.id; desugaring = Range_value })
+          Types.bool (Core.Boolean inclusive)
       in
       build_record [ (Range_start, start); (Range_stop, stop); (Range_inclusive, inclusive) ]
   | _ -> State.raise_bug "a range without both bounds is valid only inside a slice"
@@ -460,11 +476,12 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
     | Some call -> call
     | None -> State.raise_bug "a tagged string has no `from_template`"
   in
-  let make = State.make_synthetic_expression state ~origin:value.id in
+  let origin : Core.origin = Desugared { construct = value.id; desugaring = Template } in
+  let make = State.make_synthetic_expression state ~origin in
   let make_list element elements =
     make
       (Types.make_named (Well_known.make_path List) [ element ])
-      (build_list_literal state ~origin:value.id element elements)
+      (build_list_literal state ~origin element elements)
   in
   let literal_type = Types.make_named (Well_known.make_path Literal) [] in
   let texts =
@@ -485,7 +502,9 @@ let build_tagged_string state (value : Syntax.expression) (literal : Syntax.stri
       (fun ((written : Syntax.expression), _) (conversion : Tables.call option) ->
         match conversion with
         | Some call ->
-            State.make_synthetic_expression state ~origin:written.id call.callee_result
+            State.make_synthetic_expression state
+              ~origin:(Desugared { construct = written.id; desugaring = Template })
+              call.callee_result
               (Call (build_call state ~lends:None call))
         | None -> State.build_expression state written)
       literal.rest recorded.part_conversions
@@ -576,7 +595,9 @@ let build_pattern_fields state (fields : Types.field list)
 let convert_to_integer state (node : Core.expression) : Core.expression =
   if not (State.is_within state node.type_ Types.integer_types) then node
   else
-    State.make_synthetic_expression state ~origin:node.origin Types.Integer
+    State.make_synthetic_expression state
+      ~origin:(Core_walk.desugar_origin node.origin Conversion)
+      Types.Integer
       (Convert { conversion = To_integer; value = node })
 
 let convert_to_operation : Syntax.operation -> Intrinsic.scalar = function
@@ -613,14 +634,15 @@ let build_built_in_comparison state comparison (left : Syntax.expression)
   Compare { comparison; left; right }
 
 let build_comparison state (value : Syntax.expression) comparison (left : Syntax.expression)
-    (right : Syntax.expression) : Core.kind =
+    (right : Syntax.expression) : Core.origin * Core.kind =
   let recorded = read_call state value.id in
   match recorded.callee with
   | Trait_method { self_type; _ } when is_built_in_scalar self_type ->
-      build_built_in_comparison state comparison left right
+      (Written value.id, build_built_in_comparison state comparison left right)
   | _ -> (
+      let origin : Core.origin = Desugared { construct = value.id; desugaring = Comparison } in
       let call =
-        State.make_synthetic_expression state ~origin:value.id recorded.callee_result
+        State.make_synthetic_expression state ~origin recorded.callee_result
           (Call (build_call state ~lends:None recorded))
       in
       let make_matches_variant variant : Core.kind =
@@ -630,22 +652,23 @@ let build_comparison state (value : Syntax.expression) comparison (left : Syntax
             pattern =
               {
                 id = State.allocate_node_id state;
-                origin = value.id;
+                origin;
                 type_ = recorded.callee_result;
                 kind = Variant { variant = Well_known.show_variant variant; fields = [] };
               };
           }
       in
       let make_not kind : Core.kind =
-        Not (State.make_synthetic_expression state ~origin:value.id Types.bool kind)
+        Not (State.make_synthetic_expression state ~origin Types.bool kind)
       in
-      match comparison with
-      | Equal -> call.kind
-      | Not_equal -> Not call
-      | Less -> make_matches_variant Ordering_less
-      | Less_equal -> make_not (make_matches_variant Ordering_greater)
-      | Greater -> make_matches_variant Ordering_greater
-      | Greater_equal -> make_not (make_matches_variant Ordering_less))
+      ( origin,
+        match comparison with
+        | Equal -> call.kind
+        | Not_equal -> Not call
+        | Less -> make_matches_variant Ordering_less
+        | Less_equal -> make_not (make_matches_variant Ordering_greater)
+        | Greater -> make_matches_variant Ordering_greater
+        | Greater_equal -> make_not (make_matches_variant Ordering_less) ))
 
 let binds_lent_part state (condition : Core.expression) =
   let may_alias (pattern : Core.pattern) =
@@ -703,14 +726,18 @@ let build_compound_assign state (written : Syntax.statement) (target : Syntax.ex
     (value : Syntax.expression) operation : Core.statement_kind =
   let place = State.make_place (State.build_expression state target) in
   let target_type = read_type state target in
-  let current =
-    State.make_synthetic_expression state ~origin:written.id target_type Core.Current_target
+  let origin : Core.origin =
+    Desugared { construct = written.id; desugaring = Compound_assignment }
   in
+  let current = State.make_synthetic_expression state ~origin target_type Core.Current_target in
   let right = State.build_expression state value in
   let bound = State.allocate_synthetic_local state in
   let bound_value =
-    State.make_synthetic_expression state ~origin:value.id right.type_
-      (Use (Local { local = bound; type_ = right.type_; origin = value.id }))
+    let origin : Core.origin =
+      Desugared { construct = value.id; desugaring = Compound_assignment }
+    in
+    State.make_synthetic_expression state ~origin right.type_
+      (Use (Local { local = bound; type_ = right.type_; origin }))
   in
   let make_built_in operation : Core.kind * Core.operand =
     (Operator { operation; arguments = [ current; bound_value ] }, Operands.build Own right)
@@ -750,13 +777,19 @@ let build_compound_assign state (written : Syntax.statement) (target : Syntax.ex
       target = place;
       operand = right_operand;
       bound;
-      value = State.make_synthetic_expression state ~origin:written.id target_type kind;
+      value = State.make_synthetic_expression state ~origin target_type kind;
     }
 
 let rec lend_statements state (mode : Language.Mode.t) (value : Core.expression) :
     Core.statement list =
   let make_statement kind : Core.statement list =
-    [ { id = State.allocate_node_id state; origin = value.origin; kind } ]
+    [
+      {
+        id = State.allocate_node_id state;
+        origin = Core_walk.desugar_origin value.origin Lending_return;
+        kind;
+      };
+    ]
   in
   let make_branching kind =
     let type_ = if value.type_ = Types.Never then Types.Never else Types.unit in
@@ -772,11 +805,10 @@ let rec lend_statements state (mode : Language.Mode.t) (value : Core.expression)
              else_ = Some (lend_block state mode else_);
              binds_lent_part;
            })
-  | Match { scrutinees; arms; is_written } ->
+  | Match { scrutinees; arms } ->
       make_branching
         (Match
            {
-             is_written;
              scrutinees;
              arms =
                List.map
@@ -797,13 +829,15 @@ let rec is_fixed_place : Core.place -> bool = function
   | Field { base; _ } -> is_fixed_place base
   | Element _ | Range _ | Lent _ | Temporary _ -> false
 
-let build_collection_place state (iterable : Syntax.expression) (mode : Language.Mode.t) :
+let build_collection_place state (iterable : Syntax.expression) (mode : Language.Mode.t)
+    ~(desugaring : Core.desugaring) :
     Core.place * (type_:Types.ty -> Core.block -> Core.kind) option =
   let collection = State.build_expression state iterable in
   match collection.kind with
   | Use place when is_fixed_place place -> (place, None)
   | _ ->
-      let local = State.allocate_synthetic_local state and origin = iterable.id in
+      let local = State.allocate_synthetic_local state in
+      let origin : Core.origin = Desugared { construct = iterable.id; desugaring } in
       let scrutinee = Operands.build mode collection in
       let pattern : Core.pattern =
         {
@@ -824,7 +858,6 @@ let build_collection_place state (iterable : Syntax.expression) (mode : Language
           (fun ~type_:_ body ->
             Match
               {
-                is_written = false;
                 scrutinees = [ scrutinee ];
                 arms = [ { patterns = [ pattern ]; guard = None; body; origin } ];
               }) )
@@ -872,20 +905,25 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
     lends;
   }
 
-let quantify_over_elements state (collection : Syntax.expression) ~count ~element ~lends ~origin
-    make_quantified : Core.kind =
-  let place, wrap = build_collection_place state collection lends in
+let quantify_over_elements state (quantified : Syntax.expression) (collection : Syntax.expression)
+    ~count ~element ~lends make_quantified : Core.origin * Core.kind =
+  let place, wrap = build_collection_place state collection lends ~desugaring:Quantifier in
   let kind =
-    make_quantified (build_elements state ~origin:collection.id place ~count ~element ~lends)
+    make_quantified
+      (build_elements state
+         ~origin:(Desugared { construct = collection.id; desugaring = Quantifier })
+         place ~count ~element ~lends)
   in
   match wrap with
-  | None -> kind
+  | None -> (Written quantified.id, kind)
   | Some wrap ->
-      wrap ~type_:Types.bool
-        {
-          statements = [];
-          value = Some (State.make_synthetic_expression state ~origin Types.bool kind);
-        }
+      let origin : Core.origin = Desugared { construct = quantified.id; desugaring = Quantifier } in
+      ( origin,
+        wrap ~type_:Types.bool
+          {
+            statements = [];
+            value = Some (State.make_synthetic_expression state ~origin Types.bool kind);
+          } )
 
 let build_cursor_next state (cursor : Types.ty) : Core.callee =
   let { Well_known.owner; name; receiver } = Well_known.locate_method Cursor_next in
@@ -902,33 +940,42 @@ let build_cursor_next state (cursor : Types.ty) : Core.callee =
        })
 
 let build_for_loop (state : State.state) (written : Syntax.statement) (iterable : Syntax.expression)
-    ~pattern ~clauses ~body ~mode : Core.statement_kind =
+    ~pattern ~clauses ~body ~mode : Core.origin * Core.statement_kind =
   let make_loop iteration : Core.statement_kind = For { pattern; iteration; clauses; body; mode } in
+  let loop_origin : Core.origin = Desugared { construct = written.id; desugaring = For_loop } in
+  let iterable_origin : Core.origin =
+    Desugared { construct = iterable.id; desugaring = For_loop }
+  in
+  let wrap_loop wrap (loop : Core.statement_kind) : Core.origin * Core.statement_kind =
+    let statement : Core.statement =
+      { id = State.allocate_node_id state; origin = Written written.id; kind = loop }
+    in
+    ( loop_origin,
+      Evaluate
+        (State.make_synthetic_expression state ~origin:loop_origin Types.unit
+           (wrap ~type_:Types.unit { Core.statements = [ statement ]; value = None })) )
+  in
   match (state.tables.loops.(written.id), iterable.kind) with
   | Some (Integer_range { inclusive; _ }), Range { start = Some start; stop = Some stop; _ } ->
       let start = State.build_expression state start in
-      make_loop (Integer_range { start; stop = State.build_expression state stop; inclusive })
+      ( Written written.id,
+        make_loop (Integer_range { start; stop = State.build_expression state stop; inclusive }) )
   | Some (Elements { count; element; lends }), _ -> (
-      let place, wrap = build_collection_place state iterable lends in
+      let place, wrap = build_collection_place state iterable lends ~desugaring:For_loop in
       let elements_loop =
-        make_loop (Elements (build_elements state ~origin:iterable.id place ~count ~element ~lends))
+        make_loop
+          (Elements (build_elements state ~origin:iterable_origin place ~count ~element ~lends))
       in
       match wrap with
-      | None -> elements_loop
-      | Some wrap ->
-          let statement : Core.statement =
-            { id = State.allocate_node_id state; origin = written.id; kind = elements_loop }
-          in
-          Evaluate
-            (State.make_synthetic_expression state ~origin:written.id Types.unit
-               (wrap ~type_:Types.unit { statements = [ statement ]; value = None })))
+      | None -> (Written written.id, elements_loop)
+      | Some wrap -> wrap_loop wrap elements_loop)
   | Some (Pulled { cursor; cursor_call; remaining }), _ -> (
       let collection = State.build_expression state iterable in
       let pulled =
         match cursor_call with
         | None -> collection
         | Some cursor_call ->
-            State.make_synthetic_expression state ~origin:iterable.id cursor
+            State.make_synthetic_expression state ~origin:iterable_origin cursor
               (Call
                  (State.make_call state
                     ~callee:(convert_callee state cursor_call.callee)
@@ -942,7 +989,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
             (fun (remaining : Tables.call) ->
               Core.Decreases
                 [
-                  State.make_synthetic_expression state ~origin:iterable.id
+                  State.make_synthetic_expression state ~origin:iterable_origin
                     (Types.make_builtin UInt64)
                     (Call
                        (State.make_call state
@@ -962,10 +1009,11 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
           }
       in
       match (pulled.kind, if Core_walk.states_measure clauses then None else remaining) with
-      | Use place, remaining when is_fixed_place place -> make_cursor_loop ?remaining place
-      | _, None -> make_cursor_loop (State.make_place pulled)
+      | Use place, remaining when is_fixed_place place ->
+          (Written written.id, make_cursor_loop ?remaining place)
+      | _, None -> (Written written.id, make_cursor_loop (State.make_place pulled))
       | _, Some remaining ->
-          let local = State.allocate_synthetic_local state and origin = iterable.id in
+          let local = State.allocate_synthetic_local state and origin = iterable_origin in
           let binding : Core.pattern =
             {
               id = State.allocate_node_id state;
@@ -974,29 +1022,14 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
               kind = Bind { local; is_var = true; mode = Own };
             }
           in
-          let statement : Core.statement =
-            {
-              id = State.allocate_node_id state;
-              origin = written.id;
-              kind = make_cursor_loop ~remaining (Local { local; type_ = pulled.type_; origin });
-            }
-          in
-          Evaluate
-            (State.make_synthetic_expression state ~origin:written.id Types.unit
-               (Match
-                  {
-                    is_written = false;
-                    scrutinees = [ Operands.build Own pulled ];
-                    arms =
-                      [
-                        {
-                          patterns = [ binding ];
-                          guard = None;
-                          body = { statements = [ statement ]; value = None };
-                          origin;
-                        };
-                      ];
-                  })))
+          wrap_loop
+            (fun ~type_:_ body ->
+              Match
+                {
+                  scrutinees = [ Operands.build Own pulled ];
+                  arms = [ { patterns = [ binding ]; guard = None; body; origin } ];
+                })
+            (make_cursor_loop ~remaining (Local { local; type_ = pulled.type_; origin })))
   | _ -> State.raise_bug "the checker recorded no iteration for a `for` loop"
 
 let convert_resource state (written : Syntax.resource) : Core.resource =
@@ -1034,7 +1067,8 @@ let build_loop_clause state (clause : Syntax.loop_clause) : Core.loop_clause =
   | Loop_cost written -> Cost (build_cost state ~origin:clause.id written)
 
 let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(output : Types.ty) :
-    Core.kind =
+    Core.origin * Core.kind =
+  let origin : Core.origin = Desugared { construct = value.id; desugaring = Try } in
   let scrutinee = State.build_expression state inner in
   let read_variants (type_ : Types.ty) =
     match type_ with
@@ -1046,7 +1080,7 @@ let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(ou
   in
   let success, failure = read_variants scrutinee.type_ in
   let _, returned_failure = read_variants output in
-  let make = State.make_synthetic_expression state ~origin:value.id in
+  let make = State.make_synthetic_expression state ~origin in
   let bind_fields (variant : Types.variant) : Core.pattern * (string * Core.expression) list =
     let fields =
       List.map
@@ -1055,7 +1089,7 @@ let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(ou
     in
     ( {
         id = State.allocate_node_id state;
-        origin = value.id;
+        origin;
         type_ = scrutinee.type_;
         kind =
           Variant
@@ -1067,7 +1101,7 @@ let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(ou
                     ( field.field_name,
                       {
                         id = State.allocate_node_id state;
-                        origin = value.id;
+                        origin;
                         type_ = field.field_type;
                         kind = Bind { local; is_var = false; mode = Own };
                       } ))
@@ -1077,78 +1111,85 @@ let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(ou
       List.map
         (fun ((field : Types.field), local) ->
           ( field.field_name,
-            make field.field_type
-              (Core.Use (Local { local; type_ = field.field_type; origin = value.id })) ))
+            make field.field_type (Core.Use (Local { local; type_ = field.field_type; origin })) ))
         fields )
   in
   let success_pattern, success_fields = bind_fields success in
   let failure_pattern, failure_fields = bind_fields failure in
-  let make_arm patterns body : Core.arm = { patterns; guard = None; body; origin = value.id } in
-  Match
-    {
-      is_written = false;
-      scrutinees = [ Operands.build Own scrutinee ];
-      arms =
-        [
-          make_arm [ success_pattern ]
-            {
-              statements = [];
-              value = (match success_fields with [ (_, field) ] -> Some field | _ -> None);
-            };
-          make_arm [ failure_pattern ]
-            {
-              statements = [];
-              value =
-                Some
-                  (make Types.Never
-                     (Return
-                        (Some
-                           (make output
-                              (Construct
-                                 {
-                                   variant = Some returned_failure.variant_name;
-                                   fields =
-                                     List.map2
-                                       (fun (field : Types.field) (_, field_value) ->
-                                         (field.field_name, Some (Operands.build Own field_value)))
-                                       (Option.value ~default:[] returned_failure.fields)
-                                       failure_fields;
-                                 })))));
-            };
-        ];
-    }
+  let make_arm patterns body : Core.arm = { patterns; guard = None; body; origin } in
+  ( origin,
+    Match
+      {
+        scrutinees = [ Operands.build Own scrutinee ];
+        arms =
+          [
+            make_arm [ success_pattern ]
+              {
+                statements = [];
+                value = (match success_fields with [ (_, field) ] -> Some field | _ -> None);
+              };
+            make_arm [ failure_pattern ]
+              {
+                statements = [];
+                value =
+                  Some
+                    (make Types.Never
+                       (Return
+                          (Some
+                             (make output
+                                (Construct
+                                   {
+                                     variant = Some returned_failure.variant_name;
+                                     fields =
+                                       List.map2
+                                         (fun (field : Types.field) (_, field_value) ->
+                                           (field.field_name, Some (Operands.build Own field_value)))
+                                         (Option.value ~default:[] returned_failure.fields)
+                                         failure_fields;
+                                   })))));
+              };
+          ];
+      } )
 
 let build_collection_literal state (value : Syntax.expression) (elements : Core.expression list) :
-    Core.kind =
+    Core.origin * Core.kind =
   match read_type state value with
   | Types.Named { path; arguments = [ Types.Type element ] } when Well_known.is List path ->
-      build_list_literal state ~origin:value.id element elements
+      let origin : Core.origin =
+        Desugared { construct = value.id; desugaring = Collection_literal }
+      in
+      (origin, build_list_literal state ~origin element elements)
   | Types.Named { path; _ } when Well_known.find_builtin_type path = Some Array ->
-      Collection_literal { elements; construction = Array }
+      (Written value.id, Collection_literal { elements; construction = Array })
   | Types.Named { path; _ } when Well_known.is Sequence path || Well_known.is Finite_set path ->
-      Collection_literal { elements; construction = Specification_only }
+      (Written value.id, Collection_literal { elements; construction = Specification_only })
   | type_ -> State.raise_bug "a collection literal of type `%s`" (Types.show type_)
 
 let build_converted_literal state (value : Syntax.expression) ~(element : Types.ty)
-    (elements : Core.expression list) : Core.kind =
+    (elements : Core.expression list) : Core.origin * Core.kind =
+  let origin : Core.origin = Desugared { construct = value.id; desugaring = Collection_literal } in
   let recorded = read_call state value.id in
   let list =
-    State.make_synthetic_expression state ~origin:value.id
+    State.make_synthetic_expression state ~origin
       (Types.make_named (Well_known.make_path List) [ element ])
-      (build_list_literal state ~origin:value.id element elements)
+      (build_list_literal state ~origin element elements)
   in
-  Call
-    (State.make_call state
-       ~callee:(convert_callee state recorded.callee)
-       ~arguments:[ Operands.build_argument Own list ]
-       ~lends:None)
+  ( origin,
+    Call
+      (State.make_call state
+         ~callee:(convert_callee state recorded.callee)
+         ~arguments:[ Operands.build_argument Own list ]
+         ~lends:None) )
 
 let build_converted_map_literal state (value : Syntax.expression) ~(key : Types.ty)
-    ~(value_type : Types.ty) (entries : (Core.expression * Core.expression) list) : Core.kind =
+    ~(value_type : Types.ty) (entries : (Core.expression * Core.expression) list) :
+    Core.origin * Core.kind =
   let entry = Types.make_named (Well_known.make_path Entry) [ key; value_type ] in
   build_converted_literal state value ~element:entry
     (List.map
        (fun (entry_key, entry_value) ->
-         State.make_synthetic_expression state ~origin:value.id entry
+         State.make_synthetic_expression state
+           ~origin:(Desugared { construct = value.id; desugaring = Collection_literal })
+           entry
            (build_record [ (Entry_key, entry_key); (Entry_value, entry_value) ]))
        entries)

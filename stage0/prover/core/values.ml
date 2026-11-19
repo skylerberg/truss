@@ -525,7 +525,8 @@ let evaluate_field_default context frame ty variant field =
 let check_built context frame (site : Invocation.site) ty term =
   Lambdas.check_valid context frame
     (Facts.locate context frame.source site.origin)
-    ty term ~deep:false ~when_:"for the value built here"
+    ty term ~deep:false
+    ~when_:[ Text "for the value built here" ]
 
 let is_indirect (context : State.context) (ty : Types.ty) variant =
   match (ty, variant) with

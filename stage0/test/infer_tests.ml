@@ -60,7 +60,8 @@ let list_core_at text written occurrence =
     {
       Core_walk.ignore_all with
       expression =
-        (fun (node : Core.expression) -> if node.origin = value.id then nodes := node :: !nodes);
+        (fun (node : Core.expression) ->
+          if Core_walk.read_located_node node.origin = value.id then nodes := node :: !nodes);
     }
     form.definition;
   List.rev !nodes

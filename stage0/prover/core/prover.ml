@@ -36,7 +36,7 @@ let translate_impl (lookups : Lookups.t) (key : Resolve.Names.key) source =
     | { kind = Impl { trait_; _ }; _ } ->
         [
           Translate.translate_restated_clauses lookups source ~impl:key.path
-            ~trait:interface.implements ~for_type:interface.for_type ~at:trait_.id;
+            ~trait:interface.implements ~for_type:interface.for_type ~at:(Written trait_.id);
         ]
     | _ -> [])
 
@@ -322,7 +322,7 @@ let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
     (location : Obligation.location) =
   Source.Definition_span.locate (names.read_spans key)
     (match location with
-    | Node origin -> origin
+    | Node origin -> Core_walk.read_located_node origin
     | Whole_definition -> (names.read_definition key).id)
 
 let is_word_character character =
@@ -356,8 +356,9 @@ let replace_type_names type_names text =
     Buffer.contents buffer
   end
 
-let substitute_clause text spans clause replacements type_names =
-  let clause_span = Source.Definition_span.locate spans clause in
+let substitute_clause text spans (clause : Core.origin) replacements type_names =
+  let locate origin = Source.Definition_span.locate spans (Core_walk.read_located_node origin) in
+  let clause_span = locate clause in
   let clause_text = Facts.quote_span text clause_span in
   let buffer = Buffer.create (String.length clause_text) in
   let next =
@@ -373,9 +374,7 @@ let substitute_clause text spans clause replacements type_names =
         end)
       0
       (List.sort_uniq compare
-         (List.map
-            (fun (origin, replacement) -> (Source.Definition_span.locate spans origin, replacement))
-            replacements))
+         (List.map (fun (origin, replacement) -> (locate origin, replacement)) replacements))
   in
   Buffer.add_string buffer (replace_type_names type_names (String.drop_first next clause_text));
   Buffer.contents buffer
@@ -388,7 +387,9 @@ let render (lookups : Lookups.t) (message : Obligation.message) =
          | Quote (key, origin) ->
              Facts.quote_span
                (lookups.interface.names.read_text key)
-               (Source.Definition_span.locate (lookups.interface.names.read_spans key) origin)
+               (Source.Definition_span.locate
+                  (lookups.interface.names.read_spans key)
+                  (Core_walk.read_located_node origin))
          | Substituted { key; clause; replacements; type_names } ->
              substitute_clause
                (lookups.interface.names.read_text key)
@@ -403,11 +404,13 @@ let render_fix lookups ({ title; edits } : Obligation.fix) =
          Diagnostic.replace at (render lookups replacement))
        edits)
 
-let locate_citation (lookups : Lookups.t) ((key : Resolve.Names.key), origin) =
+let locate_citation (lookups : Lookups.t) ((key : Resolve.Names.key), (origin : Core.origin)) =
   let place = lookups.interface.names.read_place key in
   ( place,
     Source.Definition_span.to_file ~base:place.base
-      (Source.Definition_span.locate (lookups.interface.names.read_spans key) origin) )
+      (Source.Definition_span.locate
+         (lookups.interface.names.read_spans key)
+         (Core_walk.read_located_node origin)) )
 
 type answer = Solved of Solver.answer | Ran of bool | Run_failed of string
 type 'span site = { code : Diagnostic.Code.prover; span : 'span; shows : string }

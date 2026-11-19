@@ -276,7 +276,9 @@ let check_valid context frame location ty term ~deep ~when_ =
   | Logic.Boolean true -> ()
   | valid ->
       Facts.oblige context frame Invariant location
-        [ Text (Printf.sprintf "The invariant of `%s` may not hold %s." (Types.show ty) when_) ]
+        (Obligation.Text (Printf.sprintf "The invariant of `%s` may not hold " (Types.show ty))
+         :: when_
+        @ [ Text "." ])
         valid
 
 let classify_counting (cost : Mir.cost) : Costs.counting =
@@ -429,7 +431,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               (fun term ->
                 check_valid context exit_ location
                   (Facts.substitute_type context frame function_type.output)
-                  term ~deep:true ~when_:"for the value this lambda returns")
+                  term ~deep:true
+                  ~when_:[ Text "for the value this lambda returns" ])
               returned;
             List.iter2
               (fun parameter (mode, input) ->
@@ -439,7 +442,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                     | Some term ->
                         check_valid context exit_ location
                           (Facts.substitute_type context frame input)
-                          term ~deep:true ~when_:"for a `mut` parameter when this lambda ends"
+                          term ~deep:true
+                          ~when_:[ Text "for a `mut` parameter when this lambda ends" ]
                     | None -> ())
                 | _ -> ())
               written.code.parameters function_type.inputs)

@@ -114,8 +114,8 @@ type context = {
   axiom_clauses : unit Tables.Axiom_clause_table.t;
   mutable open_axioms : open_axiom list;
   axioms_of : open_axiom Tables.Symbol_table.t;
-  disjoint : (int list * int list) list;
-  mutable indexes : (int * place_value) list;
+  disjoint : (Core.origin list * Core.origin list) list;
+  mutable indexes : (Core.origin * place_value) list;
   mutable yielded_part : Types.ty option;
   mutable yield_ensures : (Mir.formula list * Mir.formula list) option;
   home : Resolve.Names.key;

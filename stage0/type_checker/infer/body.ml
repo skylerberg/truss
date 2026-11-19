@@ -2,7 +2,7 @@ type checked = {
   form : Core.t;
   tables : Tables.published;
   used_packages : Path.package list;
-  places_without_keyword : (Core.origin * Language.Mode.t) list;
+  places_without_keyword : (Syntax.id * Language.Mode.t) list;
   mode_keywords : Core.mode_keyword list;
 }
 
@@ -265,7 +265,7 @@ let check_deserialized_invariants state (elaborated : Interface.Environment.elab
         (fun (invariant : Core.condition) ->
           if not invariant.executable then
             State.report state Cannot_derive
-              (State.read_span state invariant.value.origin)
+              (State.read_origin_span state invariant.value.origin)
               "This invariant cannot be checked at run time, so `serialization::Deserialize` \
                cannot be derived: a value read from data might break it. Write the `impl`, which \
                checks the value another way.")
@@ -430,6 +430,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                                 parameters;
                                 requires;
                                 body = State.build_block state law.body;
+                                origin = line.id;
                               };
                             ]
                         | _ -> [])
@@ -776,7 +777,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
     in
     state.tables <- checked;
     state.form.tables_with_holes <- None;
-    { definition }
+    { definition; origin = Written state.definition.id }
   in
   let checked = if is_clean () then Some (build ()) else None in
   (match checked with

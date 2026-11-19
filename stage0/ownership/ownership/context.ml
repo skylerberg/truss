@@ -7,8 +7,8 @@ type context = {
   list_bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
   text : string Lazy.t;
-  mode_keywords : (Core.origin, Core.mode_keyword) Hashtbl.t;
-  places_without_keyword : (Core.origin, Language.Mode.t) Hashtbl.t;
+  mode_keywords : (Syntax.id, Core.mode_keyword) Hashtbl.t;
+  places_without_keyword : (Syntax.id, Language.Mode.t) Hashtbl.t;
   names : string Local_table.t;
   origins : Core.origin Local_table.t;
   binding_modes : Language.Mode.t Local_table.t;
@@ -83,8 +83,33 @@ let stores_function context (callee : Mir.callee) position =
   | Indirect _ -> true
   | _ -> List.exists is_declared (list_callee_signatures context callee)
 
+let locate_node context (node : Syntax.id) : Source.Definition_span.t =
+  Source.Definition_span.locate (Lazy.force context.spans) node
+
 let locate_origin context (origin : Core.origin) : Source.Definition_span.t =
-  Source.Definition_span.locate (Lazy.force context.spans) origin
+  locate_node context (Core_walk.read_located_node origin)
+
+let describe_call context (origin : Core.origin) =
+  match origin with
+  | Written _ -> "this call"
+  | Derived -> "the call that the derived method makes"
+  | Desugared { desugaring; _ } -> (
+      match desugaring with
+      | For_loop -> "the call that this `for` loop makes"
+      | Quantifier -> "the call that this quantifier makes"
+      | Operator | Index | Index_assignment | Comparison | Compound_assignment | Template | Final
+      | Collection_literal | Conversion ->
+          Printf.sprintf "the call that `%s` makes"
+            (Source.Definition_span.quote (Lazy.force context.text) (locate_origin context origin))
+      | Try | Let_else | Range_value | Constructor_function | Lending_return | Hole ->
+          Compiler_bug.raise_bug ~stage:"Ownership"
+            "a call made by a desugaring that makes no calls")
+
+let find_mode_keyword context (place : Core.origin) =
+  Hashtbl.find_opt context.mode_keywords (Core_walk.read_located_node place)
+
+let find_place_without_keyword context (place : Core.origin) =
+  Hashtbl.find_opt context.places_without_keyword (Core_walk.read_located_node place)
 
 let report context ?(fixes = []) ?(notes = []) code (at : Source.Definition_span.t) message =
   let is_reported =
@@ -184,12 +209,12 @@ let collect context (mir : Mir.Graph.t) ~mode_keywords =
          mir.body.parameters)
 
 let copy_edits context (moved : Core.origin) =
-  (match Hashtbl.find_opt context.mode_keywords moved with
+  (match find_mode_keyword context moved with
     | Some { mode = Own; written; operand; _ } ->
         [
           Diagnostic.delete
-            (Source.Definition_span.make (locate_origin context written).start
-               (locate_origin context operand).start);
+            (Source.Definition_span.make (locate_node context written).start
+               (locate_node context operand).start);
         ]
     | Some { mode = Read | Mut; _ } | None -> [])
   @ [
@@ -202,8 +227,8 @@ let copy_fix context title type_ (moved : Core.origin) =
   if is_copyable context type_ then [ Diagnostic.fix title (copy_edits context moved) ] else []
 
 let locate_with_mode_keyword context (place : Core.origin) : Source.Definition_span.t =
-  match Hashtbl.find_opt context.mode_keywords place with
+  match find_mode_keyword context place with
   | Some { written; _ } ->
-      Source.Definition_span.make (locate_origin context written).start
+      Source.Definition_span.make (locate_node context written).start
         (locate_origin context place).stop
   | None -> locate_origin context place

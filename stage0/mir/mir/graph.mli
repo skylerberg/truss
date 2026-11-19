@@ -55,7 +55,7 @@ type body = {
 
 type t = { body : body; lambdas : body array }
 
-val canonicalize : basic_block array -> basic_block array
+val canonicalize : basic_block option array -> basic_block array
 val find_iteration_loop : terminator -> block option
 val read_loop_head : body -> block -> loop_head
 val list_block_successors : body -> block -> block list

@@ -7,7 +7,8 @@ let check_bit_vector_names state (value : Core.expression) =
            (function
            | Local { type_; origin; _ }
              when not (Types.is_builtin Bool type_ || Types.find_integer_range type_ <> None) ->
-               State.report state Not_bit_vector (State.read_span state origin)
+               State.report state Not_bit_vector
+                 (State.read_origin_span state origin)
                  (Printf.sprintf
                     "An assertion `by bit_vector` can name only integers and booleans, and this is \
                      a `%s`."
@@ -201,7 +202,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
         (check_loop_clause state
            { env with loop_element = Option.map (State.resolve state) !loop_element })
         clauses;
-      State.register_statement state written (fun () ->
+      State.register_statement_with_origin state written (fun () ->
           let pattern = State.build_pattern state written_pattern in
           let clauses = List.map (Form.build_loop_clause state) clauses in
           Form.build_for_loop state written inner ~pattern ~clauses
@@ -302,7 +303,7 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
                 omitted_defaults = [];
                 callee_result = Types.unit;
               };
-          Form.register_call state call;
+          Form.register_index_assignment state call;
           State.register_statement state written (fun () ->
               Evaluate (State.build_expression state call));
           true

@@ -90,12 +90,7 @@ type rvalue =
   | Specification of specification
 
 and choice =
-  | Conditional of {
-      condition : block;
-      then_ : block;
-      else_ : block;
-      if_condition : Core.origin option;
-    }
+  | Conditional of { condition : block; then_ : block; else_ : block; tested : Core.origin }
   | Cases of case list
   | Connective of { connective : Language.Connective.t; left : block; right : block }
 

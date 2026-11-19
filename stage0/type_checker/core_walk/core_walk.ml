@@ -9,6 +9,17 @@ type visit = {
 let ignore_all =
   { expression = ignore; statement = ignore; pattern = ignore; callee = ignore; place = ignore }
 
+let read_located_node : Core.origin -> Syntax.id = function
+  | Written node | Desugared { construct = node; _ } -> node
+  | Derived ->
+      Compiler_bug.raise_bug ~stage:"Core_walk"
+        "a position in a derived method, which has no source"
+
+let desugar_origin (origin : Core.origin) desugaring : Core.origin =
+  match origin with
+  | Written construct -> Desugared { construct; desugaring }
+  | Desugared _ | Derived -> origin
+
 let compute_place_type : Core.place -> Types.ty = function
   | Local { type_; _ }
   | Constant { type_; _ }

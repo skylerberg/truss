@@ -379,19 +379,47 @@ let oblige ?template_clause ?cited ?(fixes = []) context (frame : State.frame) c
       assume context frame goal
   | None -> ()
 
+let capitalize : Obligation.message -> Obligation.message = function
+  | Text text :: rest -> Text (String.capitalize_ascii text) :: rest
+  | message -> message
+
+let describe_call (context : State.context) (at : Obligation.location) ?callee () :
+    Obligation.message =
+  let named prefix =
+    match callee with
+    | Some callee -> Printf.sprintf "%s call to `%s`" prefix (show_callee callee)
+    | None -> prefix ^ " call"
+  in
+  match at with
+  | Whole_definition -> [ Text (named "a") ]
+  | Node (Written _) -> [ Text (named "this") ]
+  | Node Derived -> [ Text (named "the" ^ " that the derived method makes") ]
+  | Node (Desugared { desugaring; _ } as origin) -> (
+      match desugaring with
+      | For_loop -> [ Text (named "the" ^ " that this `for` loop makes") ]
+      | Quantifier -> [ Text (named "the" ^ " that this quantifier makes") ]
+      | Operator | Index | Index_assignment | Comparison | Compound_assignment | Template | Final
+      | Collection_literal | Conversion ->
+          [ Text (named "the" ^ " that `"); Quote (context.home, origin); Text "` makes" ]
+      | Try | Let_else | Range_value | Constructor_function | Lending_return | Hole ->
+          raise_bug "a call made by a desugaring that makes no calls")
+
 let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
     (statement : Mir.statement) =
-  let reject text = oblige context frame Termination location [ Text text ] (Logic.Boolean false) in
+  let reject message = oblige context frame Termination location message (Logic.Boolean false) in
   let reject_supply (supplier : Mir.Call_edges.supplier) code =
     let recursive = List.filter (is_in_recursion_group context) code in
     (match supplier with
     | Named_function path when List.exists (Path.equal path) recursive ->
         reject
-          (Printf.sprintf
-             "Naming `%s` as a value reaches back here, and such a use passes no arguments the \
-              prover can compare, so the recursion cannot be shown to end: write it as a direct \
-              call on a part."
-             (Path.show path))
+          [
+            Text
+              (Printf.sprintf
+                 "Naming `%s` as a value reaches back here, and such a use passes no arguments the \
+                  prover can compare, so the recursion cannot be shown to end: write it as a \
+                  direct call on a part."
+                 (Path.show path));
+          ]
     | Named_function _ | Call | Conversion_to_any | Provide -> ());
     List.iter
       (fun owner ->
@@ -399,27 +427,40 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
         reject
           (match supplier with
           | Call ->
-              Printf.sprintf
-                "This call uses `%s` where a bound needs it, and its methods reach back here. Such \
-                 a use passes no arguments the prover can compare, so the recursion cannot be \
-                 shown to end: write it as a direct call on a part."
-                owner
+              capitalize (describe_call context location ())
+              @ [
+                  Text
+                    (Printf.sprintf
+                       " uses `%s` where a bound needs it, and its methods reach back here. Such a \
+                        use passes no arguments the prover can compare, so the recursion cannot be \
+                        shown to end: write it as a direct call on a part."
+                       owner);
+                ]
           | Named_function path ->
-              Printf.sprintf
-                "Naming `%s` as a value uses `%s` where a bound needs it, and its methods reach \
-                 back here. Such a use passes no arguments the prover can compare, so the \
-                 recursion cannot be shown to end."
-                (Path.show path) owner
+              [
+                Text
+                  (Printf.sprintf
+                     "Naming `%s` as a value uses `%s` where a bound needs it, and its methods \
+                      reach back here. Such a use passes no arguments the prover can compare, so \
+                      the recursion cannot be shown to end."
+                     (Path.show path) owner);
+              ]
           | Conversion_to_any ->
-              Printf.sprintf
-                "This conversion to `any` gives `%s`, whose methods call back here, so the prover \
-                 cannot show that the recursion ends."
-                owner
+              [
+                Text
+                  (Printf.sprintf
+                     "This conversion to `any` gives `%s`, whose methods call back here, so the \
+                      prover cannot show that the recursion ends."
+                     owner);
+              ]
           | Provide ->
-              Printf.sprintf
-                "This `provide` gives `%s`, whose methods call back here, so the prover cannot \
-                 show that the recursion ends."
-                owner))
+              [
+                Text
+                  (Printf.sprintf
+                     "This `provide` gives `%s`, whose methods call back here, so the prover \
+                      cannot show that the recursion ends."
+                     owner);
+              ]))
       (List.sort_uniq Path.compare
          (List.filter_map
             (fun (node : Path.t) -> match node with Method { owner; _ } -> Some owner | _ -> None)
@@ -437,13 +478,14 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
   in
   let reject target origin =
     oblige context frame Termination location
-      [
-        Text
-          (Printf.sprintf
-             "This call to `%s` reaches back here through code that its `impl` %s. No measure can \
-              be stated for that code, so the recursion cannot be shown to end."
-             (show_callee target) origin);
-      ]
+      (capitalize (describe_call context location ~callee:target ())
+      @ [
+          Text
+            (Printf.sprintf
+               " reaches back here through code that its `impl` %s. No measure can be stated for \
+                that code, so the recursion cannot be shown to end."
+               origin);
+        ])
       (Logic.Boolean false);
     None
   in
@@ -463,25 +505,28 @@ let reject_uncompared_recursion (context : State.context) frame location recursi
   if context.terminates then
     Option.iter
       (fun callee ->
-        oblige context frame Termination location
-          [ Text (describe (show_callee callee)) ]
-          (Logic.Boolean false))
+        oblige context frame Termination location (describe callee) (Logic.Boolean false))
       recursive_callee
 
-let quote (source : State.source) origin =
-  match source.key with
-  | Some key -> Obligation.Quote (key, origin)
-  | None -> Text "this expression"
+let quote (source : State.source) (origin : Core.origin) =
+  match (source.key, origin) with
+  | Some key, (Written _ | Desugared _) -> Obligation.Quote (key, origin)
+  | None, Derived -> Text "this expression"
+  | Some _, Derived -> raise_bug "a quote of a derived node in %s, which has source" source.name
+  | None, (Written _ | Desugared _) ->
+      raise_bug "a quote of a written node in %s, which has no source" source.name
 
 let quote_span text (span : Source.Definition_span.t) =
-  if span.stop = span.start then "this expression" else Source.Definition_span.quote text span
+  if span.stop = span.start then raise_bug "a quote of an empty span at %d" span.start
+  else Source.Definition_span.quote text span
 
 let quote_origin (context : State.context) (frame : State.frame) origin =
   if frame.source.key <> Some context.home then
     raise_bug "a quote of %s, outside the definition being proven" frame.source.name;
   let names = context.lookups.interface.names in
   quote_span (names.read_text context.home)
-    (Source.Definition_span.locate (names.read_spans context.home) origin)
+    (Source.Definition_span.locate (names.read_spans context.home)
+       (Core_walk.read_located_node origin))
 
 let find_bounds (ty : Types.ty) =
   if Types.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF)

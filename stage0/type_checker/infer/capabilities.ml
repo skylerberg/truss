@@ -6,7 +6,7 @@ type checking = {
 }
 
 let report checking ?(fixes = []) ?(notes = []) code (origin : Core.origin) message =
-  let read_span = State.read_span checking.state in
+  let read_span = State.read_origin_span checking.state in
   checking.state.diagnostics <-
     Diagnostic.make ~fixes
       ~notes:(List.map (fun (cited, note) -> (read_span cited, note)) notes)
@@ -318,7 +318,7 @@ and check_provide checking scope implementations body =
         implementation.value;
       let impls = Form.list_capability_impls state implementation.type_ in
       if impls = [] then
-        report checking Not_an_implementation implementation.origin
+        report checking Not_an_implementation (Written implementation.origin)
           (Printf.sprintf "`%s` implements no capability, so it provides nothing."
              (Types.show implementation.type_));
       let mutates =
@@ -331,7 +331,7 @@ and check_provide checking scope implementations body =
       let is_place = match implementation.value with Place _ -> true | Value _ -> false in
       let start = (State.read_span checking.state implementation.origin).start in
       if is_place && mutates && not provided_mut then
-        report checking Provide_mode implementation.origin
+        report checking Provide_mode (Written implementation.origin)
           ~fixes:
             [
               Diagnostic.fix "Provide it `mut`."
@@ -339,7 +339,7 @@ and check_provide checking scope implementations body =
             ]
           "This implementation mutates its own state, so the place is provided `mut`."
       else if provided_mut && not mutates then
-        report checking Provide_mode implementation.origin
+        report checking Provide_mode (Written implementation.origin)
           ~fixes:
             [
               Diagnostic.fix "Remove the `mut`."
@@ -348,14 +348,14 @@ and check_provide checking scope implementations body =
           "This implementation never mutates its own state, so the place is provided without `mut`.";
       List.iter
         (fun ((provided : Core.provided), (interface : Types.impl_interface)) ->
-          check_grant checking implementation.origin
+          check_grant checking (Written implementation.origin)
             ~subject:
               (Printf.sprintf "The `impl` of `%s` for `%s`" (Path.show provided.capability)
                  (Types.show interface.for_type))
             (Path.locate_package provided.impl)
             interface.impl_uses;
-          require_available checking scope implementation.origin ~subject:"This implementation"
-            interface.impl_uses)
+          require_available checking scope (Written implementation.origin)
+            ~subject:"This implementation" interface.impl_uses)
         impls;
       provided :=
         Types.union_capabilities !provided
@@ -513,7 +513,7 @@ let check_monitor_lock checking ~(read_solved : int -> Types.capability_set) ava
     List.iter
       (fun (implementation : Core.implementation) ->
         if implementation.mode = Mut && not (provides_tasks implementation) then
-          report checking Monitor_needs_tasks implementation.origin
+          report checking Monitor_needs_tasks (Written implementation.origin)
             (Printf.sprintf
                "`%s` is provided `mut`, and the body of this `provide` uses `Tasks`, so two tasks \
                 could call its methods at the same time. Its methods are locked through `Tasks`, \
@@ -549,7 +549,7 @@ let check_monitor_callbacks checking implementations =
                         signature.parameters
                     with
                     | Some parameter ->
-                        report checking Callback_may_deadlock implementation.origin
+                        report checking Callback_may_deadlock (Written implementation.origin)
                           (Printf.sprintf
                              "The body of this `provide` can use `Tasks`, so this implementation \
                               is a monitor: each call of its methods runs to completion before the \

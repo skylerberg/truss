@@ -13,7 +13,7 @@ val check_valid :
   Types.ty ->
   Logic.term ->
   deep:bool ->
-  when_:string ->
+  when_:Obligation.message ->
   unit
 
 val remove_temporaries : 'a Locals.t -> 'a Locals.t
