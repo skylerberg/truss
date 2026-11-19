@@ -1,0 +1,3 @@
+fn f(value: Int64) -> Int8 {
+  Int8.from_integer(value)
+}

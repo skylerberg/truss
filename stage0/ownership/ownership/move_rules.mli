@@ -12,13 +12,6 @@ val decide_move :
   is_captured:bool ->
   verdict
 
-val copy_fix :
-  Context.context ->
-  string ->
-  Types.ty ->
-  Source.Definition_span.t ->
-  Source.Definition_span.t Diagnostic.fix list
-
 val analyse : Context.context -> Mir.Graph.body -> Moves.t
 
 val check :

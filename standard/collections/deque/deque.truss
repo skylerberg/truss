@@ -3,14 +3,6 @@ use standard::intrinsic
 use standard::map
 use standard::list
 
-public fn collections::Deque[Element].new() -> collections::Deque[Element]
-  ensures result.length() == 0
-  cost time O(1)
-  cost allocations == 0
-{
-  collections::Deque(front: [], back: [])
-}
-
 public fn collections::Deque[Element].with_capacity(capacity: UInt64) -> collections::Deque[Element]
   ensures result.length() == 0
 {
@@ -20,7 +12,7 @@ public fn collections::Deque[Element].with_capacity(capacity: UInt64) -> collect
 public fn collections::Deque[Element].collect[Source: Cursor[Element = Element]](
   source: own Source,
 ) -> collections::Deque[Element]
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   collections::Deque(front: [], back: List.collect(own source))
 }
@@ -28,6 +20,7 @@ public fn collections::Deque[Element].collect[Source: Cursor[Element = Element]]
 public fn collections::Deque[Element].length(self) -> UInt64
   ensures result == (self.front.length() + self.back.length())
   cost time O(1)
+  cost allocations == 0
 {
   self.front.length() + self.back.length()
 }
@@ -35,6 +28,7 @@ public fn collections::Deque[Element].length(self) -> UInt64
 public fn collections::Deque[Element].is_empty(self) -> Bool
   ensures result == (self.length() == 0)
   cost time O(1)
+  cost allocations == 0
 {
   self.length() == 0
 }
@@ -44,7 +38,7 @@ public fn collections::Deque[Element].push_front(mut self, item: own Element)
   cost amortized time O(1)
 {
   if self.back.length() == UInt64.maximum - self.front.length() {
-    intrinsic::crash("a deque cannot hold that many items".slice())
+    intrinsic::crash("a deque cannot hold that many items")
   }
   mut self.front.push(own item)
 }
@@ -54,7 +48,7 @@ public fn collections::Deque[Element].push_back(mut self, item: own Element)
   cost amortized time O(1)
 {
   if self.back.length() == UInt64.maximum - self.front.length() {
-    intrinsic::crash("a deque cannot hold that many items".slice())
+    intrinsic::crash("a deque cannot hold that many items")
   }
   mut self.back.push(own item)
 }
@@ -143,7 +137,6 @@ public fn collections::Deque[Element].reserve(mut self, additional: UInt64)
 public fn collections::Deque[Element].rotate_left(mut self, by: UInt64)
   requires by <= self.length()
   ensures self.length() == old(self.length())
-  cost time finite
 {
   for _ in 0..by
     invariant self.length() == old(self.length())
@@ -158,7 +151,6 @@ public fn collections::Deque[Element].rotate_left(mut self, by: UInt64)
 public fn collections::Deque[Element].rotate_right(mut self, by: UInt64)
   requires by <= self.length()
   ensures self.length() == old(self.length())
-  cost time finite
 {
   for _ in 0..by
     invariant self.length() == old(self.length())
@@ -197,7 +189,7 @@ public fn collections::Deque[Element: Equal].contains(self, item: Element) -> Bo
 }
 
 public fn collections::Deque[Element].extend[Source: Cursor[Element = Element]](mut self, items: own Source)
-  uses Source.Uses
+  uses Source.Uses, RunForever
 {
   var cursor = own items
   while mut cursor.next() is Some(item) {
@@ -212,6 +204,7 @@ impl Index for collections::Deque[Element] {
   fn contains_key(self, key: UInt64) -> Bool
     ensures result == (key < self.length())
     cost time O(1)
+    cost allocations == 0
   {
     key < self.length()
   }
@@ -219,6 +212,7 @@ impl Index for collections::Deque[Element] {
   fn at(self, key: UInt64) lends Element
     requires key < self.length()
     cost time O(1)
+    cost allocations == 0
   {
     if key < self.front.length() {
       self.front[self.front.length() - 1 - key]
@@ -232,6 +226,7 @@ impl IndexMut for collections::Deque[Element] {
   fn at(mut self, key: UInt64) lends mut Element
     requires key < self.length()
     cost time O(1)
+    cost allocations == 0
   {
     if key < self.front.length() {
       mut self.front[self.front.length() - 1 - key]
@@ -286,6 +281,7 @@ impl Equal for collections::Deque[Element: Equal] {
   fn equal(self, other: collections::Deque[Element]) -> Bool
     ensures result == (self.length() == other.length()
       && forall i in 0..self.length() => self[i] == other[i])
+    cost allocations <= self.length() * allocations(Element.equal)
   {
     if self.length() != other.length() {
       return false
@@ -295,6 +291,7 @@ impl Equal for collections::Deque[Element: Equal] {
       invariant index <= self.length()
       invariant forall i in 0..index => self[i] == other[i]
       decreases self.length() - index
+      cost allocations <= index * allocations(Element.equal)
     {
       if self[index] != other[index] {
         return false
@@ -306,7 +303,9 @@ impl Equal for collections::Deque[Element: Equal] {
 }
 
 impl Hash for collections::Deque[Element: Hash] {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations <= self.length() * allocations(Element.hash)
+  {
     self.length().hash(mut hasher)
     for index in 0..self.length() {
       self[index].hash(mut hasher)
@@ -316,12 +315,18 @@ impl Hash for collections::Deque[Element: Hash] {
 
 impl Default for collections::Deque[Element] {
   fn default() -> collections::Deque[Element] {
-    collections::Deque.new()
+    []
   }
 }
 
-impl From[List[Element]] for collections::Deque[Element] {
-  fn from(value: own List[Element]) -> collections::Deque[Element] {
-    collections::Deque(front: [], back: own value)
+impl FromElements for collections::Deque[Element] {
+  type Element = Element
+
+  fn from_elements(elements: own List[Element]) -> collections::Deque[Element]
+    ensures result.length() == elements.length()
+    cost time O(1)
+    cost allocations == 0
+  {
+    collections::Deque(front: [], back: own elements)
   }
 }

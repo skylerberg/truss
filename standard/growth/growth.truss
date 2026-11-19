@@ -8,7 +8,7 @@ internal fn reserve[Element](storage: mut intrinsic::Storage[Element], additiona
   let length = intrinsic::storage_length(storage)
   let current = intrinsic::storage_capacity(storage)
   if additional > UInt64.maximum / 2 - length {
-    intrinsic::crash("a storage cannot hold that many elements".slice())
+    intrinsic::crash("a storage cannot hold that many elements")
   }
   let needed = length + additional
   if needed > current {

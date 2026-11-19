@@ -1,0 +1,17 @@
+trait Walk {
+  fn first(self) -> Int64
+
+  fn each(self, visit: fn(Int64)) {
+    visit(self.first())
+  }
+}
+
+type Pair(first: Int64, second: Int64)
+
+impl Walk for Pair {
+  fn first(self) -> Int64 {
+    self.first
+  }
+
+  fn each(self, visit: (fn(Int64) cost time O(1))) {}
+}

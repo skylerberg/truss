@@ -15,7 +15,7 @@ type loop_head = {
 
 type terminator =
   | Goto of block
-  | Branch of { condition : Tree.operand; yes : block; no : block; is_if_condition : bool }
+  | Branch of { condition : Tree.operand; yes : block; no : block }
   | For of loop_head
   | Fork of { fork : Core.origin; concurrent : bool; branches : branch list; join : block option }
   | Join of { fork : Core.origin; next : block }

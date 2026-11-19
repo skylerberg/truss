@@ -9,14 +9,6 @@ type visit = {
 let ignore_all =
   { expression = ignore; statement = ignore; pattern = ignore; callee = ignore; place = ignore }
 
-let make_callee_visitor on_callee =
-  {
-    ignore_all with
-    expression =
-      (fun node -> match node.kind with Call { callee; _ } -> on_callee callee | _ -> ());
-    callee = on_callee;
-  }
-
 let compute_place_type : Core.place -> Types.ty = function
   | Local { type_; _ } | Constant { type_; _ } | Field { type_; _ } -> type_
   | Lent value | Temporary value -> value.type_
@@ -42,9 +34,7 @@ let walk_block visit (body : Core.block) =
   Option.iter visit.expression body.value
 
 let walk_cost visit (cost : Core.cost) =
-  match cost.bound with
-  | Finite -> ()
-  | Order_of value | At_most value | Exactly value -> visit.expression value
+  match cost.bound with Order_of value | At_most value | Exactly value -> visit.expression value
 
 let walk_loop_clause visit = function
   | Core.Invariant value -> visit.expression value
@@ -54,7 +44,7 @@ let walk_loop_clause visit = function
 let walk_expression_children visit (node : Core.expression) =
   match node.kind with
   | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _ | Break
-  | Continue | Todo | Unreachable | Result | Current_target | Yielded | Method_time _ ->
+  | Continue | Todo | Unreachable | Result | Current_target | Yielded | Method_cost _ ->
       ()
   | Template { call; _ } -> visit.expression call
   | Use core_place -> walk_place visit core_place
@@ -81,12 +71,13 @@ let walk_expression_children visit (node : Core.expression) =
         (function Core.Passed { value; _ } -> walk_operand visit value | Default -> ())
         bounds
   | Call call ->
-      (match call.callee with
+      (match call.callee.target with
       | Indirect function_value -> walk_operand visit function_value
       | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> ());
       List.iter
         (function Core.Passed { value; _ } -> walk_operand visit value | Default -> ())
-        call.arguments
+        call.arguments;
+      visit.callee call.callee
   | Operator { arguments; _ } | Specification_function { arguments; _ } ->
       List.iter visit.expression arguments
   | Compare { left; right; _ }
@@ -127,15 +118,24 @@ let walk_expression_children visit (node : Core.expression) =
           visit.expression start;
           visit.expression stop;
           visit.pattern pattern
-      | Over_collection { pattern; collection } ->
-          visit.expression collection;
-          visit.pattern pattern
       | Over_elements { pattern; elements = { count; position; element } } ->
           visit.expression count;
           visit.pattern position;
           walk_place visit element;
           visit.pattern pattern);
       visit.expression body
+
+let walk_iteration visit : Core.iteration -> unit = function
+  | Integer_range { start; stop; _ } ->
+      visit.expression start;
+      visit.expression stop
+  | Elements { count; position; element } ->
+      visit.expression count;
+      visit.pattern position;
+      walk_place visit element
+  | Cursor { cursor; next } ->
+      walk_place visit cursor;
+      visit.callee next
 
 let walk_statement_children visit (node : Core.statement) =
   match node.kind with
@@ -152,17 +152,7 @@ let walk_statement_children visit (node : Core.statement) =
       walk_place visit target;
       visit.expression value
   | For { pattern; iteration; clauses; body; _ } ->
-      (match iteration with
-      | Integer_range { start; stop; _ } ->
-          visit.expression start;
-          visit.expression stop
-      | Elements { count; position; element } ->
-          visit.expression count;
-          visit.pattern position;
-          walk_place visit element
-      | Cursor { cursor; next } ->
-          walk_place visit cursor;
-          visit.callee next);
+      walk_iteration visit iteration;
       visit.pattern pattern;
       List.iter (walk_loop_clause visit) clauses;
       walk_block visit body
@@ -209,7 +199,7 @@ let walk_parameter visit (parameter : Core.parameter) =
     (fun (contract : Core.callback_contract) -> List.iter visit.expression contract.requires)
     parameter.callback_contract
 
-let walk_definition_children visit = function
+let walk_definition_children visit : Core.definition -> unit = function
   | Core.Function { parameters; contract; body } ->
       List.iter (walk_parameter visit) parameters;
       List.iter
@@ -237,6 +227,57 @@ let walk_definition_children visit = function
 let walk_definition visit core_definition =
   walk_definition_children (make_deep_visitor visit) core_definition
 
+let is_functional walk =
+  let fine = ref true in
+  let rec visit =
+    {
+      ignore_all with
+      expression =
+        (fun (node : Core.expression) ->
+          match node.kind with
+          | Return _ | Break | Continue | Todo | Echo _ | Provide _ | Unreachable -> fine := false
+          | _ when node.type_ = Types.Never -> fine := false
+          | Call { arguments; _ } ->
+              if
+                List.exists
+                  (function
+                    | Core.Passed { mode = Types.Mut; _ } -> true
+                    | Core.Passed _ | Core.Default -> false)
+                  arguments
+              then fine := false;
+              walk_expression_children visit node
+          | _ -> walk_expression_children visit node);
+      statement =
+        (fun (node : Core.statement) ->
+          match node.kind with
+          | Let { pattern; else_ = None; _ } when not (binds_variable pattern) ->
+              walk_statement_children visit node
+          | Evaluate _ -> walk_statement_children visit node
+          | _ -> fine := false);
+      pattern = (fun node -> walk_pattern_children visit node);
+    }
+  and binds_variable (pattern : Core.pattern) =
+    let child_binds = ref false in
+    walk_pattern_children
+      { ignore_all with pattern = (fun inner -> if binds_variable inner then child_binds := true) }
+      pattern;
+    !child_binds || match pattern.kind with Bind { is_var; _ } -> is_var | _ -> false
+  in
+  walk visit;
+  !fine
+
+let states_measure (clauses : Core.loop_clause list) =
+  List.exists
+    (function Core.Decreases _ -> true | Core.Invariant _ | Core.Cost _ -> false)
+    clauses
+
+let has_implicit_measure (condition : Core.expression) =
+  match condition.kind with
+  | Compare { comparison = Less | Less_equal | Greater | Greater_equal; left; right } ->
+      is_functional (fun visit -> walk_expression visit left)
+      && is_functional (fun visit -> walk_expression visit right)
+  | _ -> false
+
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 
 let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Types.no_capabilities)
@@ -248,7 +289,7 @@ let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Ty
     | Capability_parameter _ | Capability_projection _ ->
         if !usage = No_tasks then usage := Through_parameter
     | Capability_variable variable ->
-        List.iter mark_used (read_solved variable :> Types.capability list)
+        List.iter mark_used (Types.list_capabilities (read_solved variable))
     | Capability_error _ ->
         Compiler_bug.raise_bug ~stage:"Core_walk" "a core form uses a capability with an error"
   in
@@ -256,11 +297,7 @@ let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Ty
     (make_deep_visitor
        {
          ignore_all with
-         expression =
-           (fun node ->
-             match node.kind with
-             | Call call -> List.iter mark_used (call.uses :> Types.capability list)
-             | _ -> ());
+         callee = (fun callee -> List.iter mark_used (Types.list_capabilities callee.uses));
          statement =
            (fun node ->
              match node.kind with
@@ -277,57 +314,14 @@ let can_use_tasks (body : Core.block) : bool = compute_tasks_use body <> No_task
 
 let traverse_indirect (change : 'a -> 'b option) : 'a Core.target -> 'b Core.target option =
   function
-  | Function { path; type_arguments } -> Some (Function { path; type_arguments })
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence } ->
-      Some (Trait_method { trait; name; receiver; self_type; type_arguments; evidence })
+  | Function { path; instantiation } -> Some (Function { path; instantiation })
+  | Trait_method { trait; name; receiver; self_type; instantiation; evidence } ->
+      Some (Trait_method { trait; name; receiver; self_type; instantiation; evidence })
   | Capability_method { capability; name } -> Some (Capability_method { capability; name })
   | Intrinsic { operation; type_arguments } -> Some (Intrinsic { operation; type_arguments })
   | Indirect value -> Option.map (fun value -> Core.Indirect value) (change value)
 
-module For_testing = struct
-  module Local_table = Hashtbl.Make (Structural_key.Make (struct
-    type t = Core.local
-  end))
-
-  let collect_local_names core_definition =
-    let names = Local_table.create 16 in
-    let visit_parameter (declared : Core.parameter) =
-      Local_table.replace names declared.local declared.name;
-      Option.iter
-        (fun (contract : Core.callback_contract) ->
-          List.iter (fun (input, name) -> Local_table.replace names input name) contract.inputs)
-        declared.callback_contract
-    in
-    (match core_definition with
-    | Core.Function { parameters; _ } | Law_proof { parameters; _ } ->
-        List.iter visit_parameter parameters
-    | Trait laws ->
-        List.iter (fun (law : Core.law) -> List.iter visit_parameter law.parameters) laws
-    | Type _ | Constant _ | Test _ | Empty -> ());
-    walk_definition
-      {
-        ignore_all with
-        pattern =
-          (fun (node : Core.pattern) ->
-            match node.kind with
-            | Bind { local; name; _ } -> Local_table.replace names local name
-            | _ -> ());
-        expression =
-          (fun (node : Core.expression) ->
-            match node.kind with
-            | Quantified { binder = Over_type { local; name; _ }; _ } ->
-                Local_table.replace names local name
-            | _ -> ());
-      }
-      core_definition;
-    names
-
-  exception Found
-
-  let expression_exists is_wanted node =
-    let visit =
-      make_deep_visitor
-        { ignore_all with expression = (fun node -> if is_wanted node then raise Found) }
-    in
-    match visit.expression node with () -> false | exception Found -> true
-end
+let find_local_name : Core.local -> string option = function
+  | Declared { name; _ } | Trait_parameter { name; _ } -> Some name
+  | Self -> Some "self"
+  | Synthetic _ -> None

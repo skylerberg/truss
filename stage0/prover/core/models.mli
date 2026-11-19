@@ -1,12 +1,6 @@
 type quantified_range =
   | Range_of_type of Types.ty
   | Range_of_integers of { low : Logic.term; high : Logic.term; inclusive : bool; type_ : Types.ty }
-  | Range_of_collection of {
-      collection_type : Types.ty;
-      collected : Logic.term;
-      element : Types.ty;
-      location : State.location;
-    }
 
 val run_under_binder :
   State.context ->
@@ -45,9 +39,9 @@ val quantify_over :
   State.frame ->
   Core.quantifier ->
   quantified_range ->
-  bind:(State.frame -> Logic.term -> Types.ty -> Logic.term * State.frame) ->
+  bind:(State.frame -> Logic.term -> Types.ty -> State.frame) ->
   read:(State.frame -> Logic.term -> State.frame * Logic.term) ->
-  (State.frame * Logic.term) option
+  State.frame * Logic.term
 
 val make_value_term : State.context -> State.frame -> Types.value -> Logic.term
 val make_array_model : State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term

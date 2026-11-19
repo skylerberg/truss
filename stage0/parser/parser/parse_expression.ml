@@ -303,13 +303,9 @@ and parse_generic_parameter cursor : Syntax.generic_parameter =
   let start = Cursor.index cursor in
   let kind =
     match Cursor.peek_kind cursor with
-    | Keyword Capability ->
-        Cursor.advance cursor;
-        Syntax.Capability_parameter
-          (Atoms.parse_upper_name cursor "the name of a capability parameter")
     | Upper text ->
         let name = Atoms.make_name cursor (Cursor.take cursor) text in
-        Type_parameter
+        Syntax.Type_parameter
           (name, if Cursor.accept_punctuation cursor Colon then parse_bounds cursor else [])
     | Lower text ->
         let name = Atoms.make_name cursor (Cursor.take cursor) text in
@@ -338,6 +334,9 @@ and parse_capability_reference cursor : Syntax.capability_reference =
         Cursor.advance cursor;
         Associated_capabilities
           (parameter, Atoms.parse_upper_name cursor "an associated capability set")
+    | Lower "generic", Upper _, _ ->
+        Cursor.advance cursor;
+        Generic_capability (Atoms.parse_upper_name cursor "the name of a capability parameter")
     | _ -> Capability_path (parse_path_type cursor)
   in
   { kind; id = Cursor.allocate_id_from cursor start }
@@ -378,35 +377,27 @@ and parse_cost cursor =
   let resource =
     match
       Contextual_keyword.expect cursor ~accepted:Contextual_keyword.resources ~category:"a resource"
-        ~expected:"a resource: `time`, `allocations`, `allocated_bytes`, or `calls(...)`"
+        ~expected:
+          (Printf.sprintf "a resource: %s, or `calls(...)`"
+             (String.concat ", "
+                (List.map (fun metric -> "`" ^ Metric.show metric ^ "`") Metric.all)))
     with
-    | Time -> Syntax.Time
-    | Allocations -> Allocations
-    | Allocated_bytes -> Allocated_bytes
+    | Metric metric -> Syntax.Metric metric
     | _ -> Calls (parse_call_target cursor)
   in
-  let bound_token = Cursor.peek cursor in
   let bound =
-    match bound_token.kind with
+    match Cursor.peek_kind cursor with
     | Punctuation Less_equal ->
         Cursor.advance cursor;
         Syntax.At_most (parse_expression cursor)
     | Punctuation Equal_equal ->
         Cursor.advance cursor;
         Exactly (parse_expression cursor)
-    | _ -> (
-        let suggested = if resource = Time then [ Contextual_keyword.O; Finite ] else [ O ] in
-        match
-          Contextual_keyword.expect cursor ~accepted:[ O; Finite ] ~suggested ~category:"a bound"
-            ~expected:"a bound: `O(...)`, `finite`, `<=`, or `==`"
-        with
-        | O -> Big_o (parse_parenthesized_expression cursor)
-        | _ ->
-            if resource <> Time then
-              Cursor.report cursor Finite_not_time bound_token.span
-                "`finite` is a bound only for `time`; a countable resource takes `O(...)`, `<=`, \
-                 or `==`.";
-            Finite)
+    | _ ->
+        ignore
+          (Contextual_keyword.expect cursor ~accepted:[ O ] ~suggested:[ O ] ~category:"a bound"
+             ~expected:"a bound: `O(...)`, `<=`, or `==`");
+        Big_o (parse_parenthesized_expression cursor)
   in
   { amortized; resource; bound }
 
@@ -1288,17 +1279,10 @@ and parse_loop_clauses cursor =
     | Keyword Cost ->
         let keyword = Cursor.take cursor in
         let cost = parse_cost cursor in
-        if cost.amortized || cost.bound = Finite then
+        if cost.amortized then
           Cursor.report cursor Loop_cost_bound keyword.span
-            (Printf.sprintf
-               "A loop's `cost` bounds the loop's cost so far, so it takes `O(...)`, `<=`, or \
-                `==`%s. %s"
-               (if cost.bound = Finite then "" else ", and is never `amortized`")
-               (if cost.bound = Finite then
-                  "A loop shows that it ends with `decreases`, not with `time finite`."
-                else
-                  "Potential belongs to the values the loop mutates, which the function's own \
-                   `cost` accounts for."));
+            "A loop's `cost` bounds the loop's cost so far, so it is never `amortized`. Potential \
+             belongs to the values the loop mutates, which the function's own `cost` accounts for.";
         gather
           (({ kind = Loop_cost cost; id = Cursor.allocate_id_from cursor start }
              : Syntax.loop_clause)

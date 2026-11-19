@@ -81,49 +81,8 @@ let make_server_paths identity key =
       let server_path = make_server_path directory identity key in
       Result.map (fun path -> (directory, server_path, path)) (make_socket_path server_path))
 
-let is_locked path =
-  match Unix.openfile path [ O_RDWR; O_CLOEXEC ] 0 with
-  | exception Unix.Unix_error _ -> false
-  | descriptor ->
-      Fun.protect
-        ~finally:(fun () -> Unix.close descriptor)
-        (fun () ->
-          match Unix.lockf descriptor F_TEST 0 with
-          | () -> false
-          | exception Unix.Unix_error _ -> true)
-
-let is_current descriptor path =
-  match (Unix.fstat descriptor, Unix.stat path) with
-  | held, named -> held.st_dev = named.st_dev && held.st_ino = named.st_ino
-  | exception Unix.Unix_error (ENOENT, _, _) -> false
-
-let rec acquire path =
-  let descriptor = Unix.openfile path [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644 in
-  match Unix.lockf descriptor F_LOCK 0 with
-  | () when is_current descriptor path -> descriptor
-  | () ->
-      Unix.close descriptor;
-      acquire path
-  | exception failure ->
-      Unix.close descriptor;
-      raise failure
-
-let with_start_lock server_path work =
-  let path = server_path ^ ".start" in
-  let descriptor = acquire path in
-  Fun.protect
-    ~finally:(fun () ->
-      (try Unix.unlink path with Unix.Unix_error (ENOENT, _, _) -> ());
-      Unix.close descriptor)
-    work
-
-let wait_until_released path =
-  match Unix.openfile path [ O_RDWR; O_CLOEXEC ] 0 with
-  | exception Unix.Unix_error (ENOENT, _, _) -> ()
-  | descriptor ->
-      Fun.protect
-        ~finally:(fun () -> Unix.close descriptor)
-        (fun () -> Unix.lockf descriptor F_LOCK 0)
+let wait_for_server_to_end server_path =
+  Lock_file.release (Lock_file.acquire (server_path ^ ".lock"))
 
 let served : string option ref = ref None
 
@@ -132,7 +91,8 @@ let list_other_servers directory ~suffix =
   |> List.filter_map (fun entry ->
       if Filename.check_suffix entry (suffix ^ ".key") then
         let server_path = Filename.concat directory (Filename.chop_suffix entry ".key") in
-        if !served <> Some server_path && is_locked (server_path ^ ".lock") then Some server_path
+        if !served <> Some server_path && Lock_file.is_held (server_path ^ ".lock") then
+          Some server_path
         else None
       else None)
 
@@ -158,15 +118,15 @@ let stop_servers ?key ~wait () =
         (fun server_path ->
           try Unix.unlink (locate_socket server_path) with Unix.Unix_error (ENOENT, _, _) -> ())
         running;
-      if wait then
-        List.iter (fun server_path -> wait_until_released (server_path ^ ".lock")) running;
+      if wait then List.iter wait_for_server_to_end running;
       running <> []
 
 let idle_limit = 3. *. 3600.
+let collection_interval = 60.
 let backlog = 128
 
 let bind server_path path =
-  wait_until_released (server_path ^ ".lock");
+  wait_for_server_to_end server_path;
   (try Unix.unlink path with Unix.Unix_error _ -> ());
   let socket = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
   match
@@ -181,7 +141,8 @@ let bind server_path path =
 let listen ~key =
   Result.bind
     (make_server_paths (compute_executable_identity ()) key)
-    (fun (_, server_path, path) -> with_start_lock server_path (fun () -> bind server_path path))
+    (fun (_, server_path, path) ->
+      Lock_file.with_lock (server_path ^ ".start") (fun () -> bind server_path path))
 
 let connect path =
   let socket = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
@@ -190,16 +151,6 @@ let connect path =
   | exception Unix.Unix_error _ ->
       Unix.close socket;
       None
-
-type claim = Claimed of Unix.file_descr | Held_elsewhere
-
-let claim_without_waiting path =
-  let descriptor = Unix.openfile path [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644 in
-  match Unix.lockf descriptor F_TLOCK 0 with
-  | () when is_current descriptor path -> Claimed descriptor
-  | () | (exception Unix.Unix_error ((EAGAIN | EACCES), _, _)) ->
-      Unix.close descriptor;
-      Held_elsewhere
 
 let remove_if_present path = try Unix.unlink path with Unix.Unix_error (ENOENT, _, _) -> ()
 
@@ -222,24 +173,21 @@ let list_server_paths directory =
   |> List.sort_uniq String.compare
 
 let remove_ended_server server_path =
-  match claim_without_waiting (server_path ^ ".start") with
-  | Held_elsewhere -> ()
-  | Claimed start ->
+  match Lock_file.acquire_if_free (server_path ^ ".start") with
+  | None -> ()
+  | Some start ->
       Fun.protect
-        ~finally:(fun () ->
-          remove_if_present (server_path ^ ".start");
-          Unix.close start)
+        ~finally:(fun () -> Lock_file.release start)
         (fun () ->
-          match claim_without_waiting (server_path ^ ".lock") with
-          | Held_elsewhere -> ()
-          | Claimed lock ->
+          match Lock_file.acquire_if_free (server_path ^ ".lock") with
+          | None -> ()
+          | Some lock ->
               Fun.protect
-                ~finally:(fun () -> Unix.close lock)
+                ~finally:(fun () -> Lock_file.release lock)
                 (fun () ->
                   let socket = locate_socket server_path in
                   if not (accepts_connections socket) then
-                    List.iter remove_if_present
-                      [ server_path ^ ".key"; socket; server_path ^ ".lock" ]))
+                    List.iter remove_if_present [ server_path ^ ".key"; socket ]))
 
 let remove_ended_servers directory =
   List.iter
@@ -256,25 +204,18 @@ type 'response message = Progress of string | Final of 'response
 
 let serve_on ~key ~identity ~is_alive ~collect ~list_watcher_descriptors ~propagate ~handle ~save
     ~close server_path path socket =
-  let lock = acquire (server_path ^ ".lock") in
+  let lock = Lock_file.acquire (server_path ^ ".lock") in
   served := Some server_path;
   Out_channel.with_open_bin (server_path ^ ".key") (fun out -> output_string out key);
   let last = ref (Unix.time ()) in
-  let last_collection = ref 0. in
+  let next_collection = ref (Unix.time ()) in
   let is_replaced = ref false in
   while
     (not !is_replaced) && Unix.time () -. !last < idle_limit && is_alive () && Sys.file_exists path
   do
-    match Unix.select (socket :: list_watcher_descriptors ()) [] [] 1.0 with
+    (match Unix.select (socket :: list_watcher_descriptors ()) [] [] 1.0 with
     | exception Unix.Unix_error (EINTR, _, _) -> ()
-    | [], _, _ ->
-        let now = Unix.time () in
-        if now -. !last_collection > 60. then begin
-          last_collection := now;
-          is_replaced := compute_executable_identity () <> identity;
-          collect ();
-          remove_ended_servers (Filename.dirname server_path)
-        end
+    | [], _, _ -> ()
     | ready, _, _ when not (List.mem socket ready) -> List.iter propagate ready
     | _ -> (
         match Unix.accept ~cloexec:true socket with
@@ -289,14 +230,20 @@ let serve_on ~key ~identity ~is_alive ~collect ~list_watcher_descriptors ~propag
                send output (Final (handle ~report_progress request))
              with _ -> ());
             (try Unix.close client with Unix.Unix_error _ -> ());
-            try save () with failure -> prerr_endline (Printexc.to_string failure)))
+            try save () with failure -> prerr_endline (Printexc.to_string failure))));
+    let now = Unix.time () in
+    if now >= !next_collection then begin
+      next_collection := now +. collection_interval;
+      is_replaced := compute_executable_identity () <> identity;
+      collect ();
+      remove_ended_servers (Filename.dirname server_path)
+    end
   done;
   (try Unix.unlink path with Unix.Unix_error _ -> ());
   Unix.close socket;
   close ();
   (try Sys.remove (server_path ^ ".key") with Sys_error _ -> ());
-  (try Unix.unlink (server_path ^ ".lock") with Unix.Unix_error _ -> ());
-  Unix.close lock;
+  Lock_file.release lock;
   served := None
 
 let find_inherited_socket () =
@@ -342,10 +289,10 @@ let connect_or_start ~program ~key directory server_path path =
   match connect path with
   | Some socket -> Ok socket
   | None ->
-      with_start_lock server_path (fun () ->
+      Lock_file.with_lock (server_path ^ ".start") (fun () ->
           match connect path with
           | Some socket -> Ok socket
-          | None when Sys.file_exists path && is_locked (server_path ^ ".lock") ->
+          | None when Sys.file_exists path && Lock_file.is_held (server_path ^ ".lock") ->
               Error "The background process refused the connection; try again, or try --no-server."
           | None ->
               Result.bind (bind server_path path) (fun listening ->

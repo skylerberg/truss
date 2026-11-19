@@ -193,8 +193,8 @@ fn parameters_of(extension: StringSlice) -> List[Parameter] {
 }
 
 fn is_window_bits(value: StringSlice) -> Bool {
-  value == "8".slice() || value == "9".slice() || value == "10".slice() || value == "11".slice() || value == "12".slice()
-    || value == "13".slice() || value == "14".slice() || value == "15".slice()
+  value == "8" || value == "9" || value == "10" || value == "11" || value == "12"
+    || value == "13" || value == "14" || value == "15"
 }
 
 type DeflateParameters(server_window: Option[String], client_window: Option[String], keeps_server_context: Bool)
@@ -206,34 +206,34 @@ fn deflate_parameters(parameters: Slice[Parameter], is_response: Bool) -> Option
     let parameter = parameters[index]
     let name = parameter.name.slice()
     for earlier in seen {
-      if earlier.slice() == name {
+      if earlier == name {
         return None
       }
     }
     mut seen.push(parameter.name.copy())
-    if name == "server_no_context_takeover".slice() || name == "client_no_context_takeover".slice() {
+    if name == "server_no_context_takeover" || name == "client_no_context_takeover" {
       if parameter.value is Some(_) {
         return None
       }
-      if name == "server_no_context_takeover".slice() {
+      if name == "server_no_context_takeover" {
         settings.keeps_server_context = false
       }
-    } else if name == "server_max_window_bits".slice() || name == "client_max_window_bits".slice() {
+    } else if name == "server_max_window_bits" || name == "client_max_window_bits" {
       let value = match parameter.value {
         Some(value) => {
-          if !is_window_bits(value.slice()) {
+          if !is_window_bits(value) {
             return None
           }
           Some(value.copy())
         }
         None => {
-          if is_response || name == "server_max_window_bits".slice() {
+          if is_response || name == "server_max_window_bits" {
             return None
           }
           None
         }
       }
-      if name == "server_max_window_bits".slice() {
+      if name == "server_max_window_bits" {
         settings.server_window = own value
       } else {
         settings.client_window = own value
@@ -252,7 +252,7 @@ internal fn accepted_deflate(offers: Option[StringSlice]) -> Option[DeflateAccep
   }
   for extension in header.split(",") {
     let parameters = parameters_of(extension)
-    if !parameters.is_empty() && parameters[0].name.slice() == "permessage-deflate".slice() {
+    if !parameters.is_empty() && parameters[0].name == "permessage-deflate" {
       match deflate_parameters(parameters.slice(), is_response: false) {
         Some(settings) => {
           var response = deflate_offer.copy()
@@ -260,8 +260,8 @@ internal fn accepted_deflate(offers: Option[StringSlice]) -> Option[DeflateAccep
           match settings.server_window {
             Some(bits) => {
               mut response.push("; server_max_window_bits=")
-              mut response.push(bits.slice())
-              compresses = bits.slice() == "15".slice()
+              mut response.push(bits)
+              compresses = bits == "15"
             }
             None => {}
           }
@@ -283,7 +283,7 @@ internal fn agreed_deflate(response: Option[StringSlice], is_offered: Bool) -> R
     return Ok(None)
   }
   let parameters = parameters_of(header)
-  if !is_offered || header.contains(",") || parameters.is_empty() || parameters[0].name.slice() != "permessage-deflate".slice() {
+  if !is_offered || header.contains(",") || parameters.is_empty() || parameters[0].name != "permessage-deflate" {
     return Err("a WebSocket extension that was not offered")
   }
   let settings = match deflate_parameters(parameters.slice(), is_response: true) {
@@ -294,7 +294,7 @@ internal fn agreed_deflate(response: Option[StringSlice], is_offered: Bool) -> R
     return Err("a permessage-deflate response without server_no_context_takeover")
   }
   let compresses = match settings.client_window {
-    Some(bits) => bits.slice() == "15".slice()
+    Some(bits) => bits == "15"
     None => true
   }
   Ok(Some(Deflate(compresses: compresses)))

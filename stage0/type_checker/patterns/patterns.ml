@@ -412,7 +412,7 @@ let has_error context type_ =
   contains_error [] type_
 
 let read_indentation text (position : int) =
-  let line_start = Source.fragment_line_start text position in
+  let line_start = Source.compute_fragment_line_start text position in
   let indentation_end =
     Option.value ~default:(String.length text)
       (String.find_first_index (Fun.negate Char.Ascii.is_blank) ~start:line_start text)

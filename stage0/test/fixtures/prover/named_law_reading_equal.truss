@@ -1,6 +1,5 @@
 trait Named: Equal {
   fn name(self) -> List[UInt64]
-    cost time finite
 
   law named_by_its_name(first: Self, second: Self) {
     (first.name() == second.name()) == (first == second)
@@ -20,7 +19,6 @@ impl Equal for Wrapped[Item: Equal] {
 impl Named for Wrapped[Item: Equal] {
   fn name(self) -> List[UInt64]
     ensures identical(result, self.name)
-    cost time finite
   {
     self.name.copy()
   }

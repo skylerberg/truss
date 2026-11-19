@@ -19,12 +19,12 @@ public type ParseError(message: String, line: UInt64, column: UInt64)
   derives Equal
 
 impl Display for ParseError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write(self.message.slice())
-    mut output.write(" at line ")
+    mut output.push(self.message)
+    mut output.push(" at line ")
     self.line.display(mut output)
-    mut output.write(", column ")
+    mut output.push(", column ")
     self.column.display(mut output)
   }
 }
@@ -35,7 +35,7 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       Parse(error) => error.display(mut output)
@@ -48,9 +48,9 @@ public type EncodeError(message: String)
   derives Equal
 
 impl Display for EncodeError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write(self.message.slice())
+    mut output.push(self.message)
   }
 }
 
@@ -60,7 +60,9 @@ fn failure_at(message: StringSlice, offset: UInt64) -> Failure {
   Failure(message: message.to_string(), offset: offset)
 }
 
-fn with_position(text: StringSlice, failure: Failure) -> ParseError {
+fn with_position(text: StringSlice, failure: Failure) -> ParseError
+  uses RunForever
+{
   var line: UInt64 = 1
   var column: UInt64 = 1
   var index: UInt64 = 0
@@ -91,13 +93,17 @@ fn is_digit(byte: UInt8) -> Bool {
   48 <= byte && byte <= 57
 }
 
-fn skip_spaces(text: StringSlice, at: mut UInt64) {
+fn skip_spaces(text: StringSlice, at: mut UInt64)
+  uses RunForever
+{
   while peek(text, at: at) is Some(byte) && (byte == 32 || byte == 9) {
     at += 1
   }
 }
 
-fn skip_comment(text: StringSlice, at: mut UInt64) -> Result[Unit, Failure] {
+fn skip_comment(text: StringSlice, at: mut UInt64) -> Result[Unit, Failure]
+  uses RunForever
+{
   if peek(text, at: at) != Some(35) {
     return Ok(Unit)
   }
@@ -127,7 +133,9 @@ fn skip_newline(text: StringSlice, at: mut UInt64) -> Bool {
   }
 }
 
-fn skip_blank(text: StringSlice, at: mut UInt64) -> Result[Unit, Failure] {
+fn skip_blank(text: StringSlice, at: mut UInt64) -> Result[Unit, Failure]
+  uses RunForever
+{
   while true {
     skip_spaces(text, at: mut at)
     skip_comment(text, at: mut at)?
@@ -137,7 +145,9 @@ fn skip_blank(text: StringSlice, at: mut UInt64) -> Result[Unit, Failure] {
   }
 }
 
-fn end_of_line(text: StringSlice, at: mut UInt64) -> Result[Unit, Failure] {
+fn end_of_line(text: StringSlice, at: mut UInt64) -> Result[Unit, Failure]
+  uses RunForever
+{
   skip_spaces(text, at: mut at)
   skip_comment(text, at: mut at)?
   if peek(text, at: at) is None || skip_newline(text, at: mut at) {
@@ -148,7 +158,7 @@ fn end_of_line(text: StringSlice, at: mut UInt64) -> Result[Unit, Failure] {
 }
 
 fn push_code(output: mut String, code: UInt32, at: UInt64) -> Result[Unit, Failure] {
-  match Character.try_from(code) {
+  match Character.try_from_code(code) {
     Ok(character) => {
       mut output.push_character(character)
       Ok(Unit)
@@ -226,7 +236,9 @@ fn is_forbidden_in_string(byte: UInt8, multiline: Bool) -> Bool {
   byte < 32 || byte == 127
 }
 
-fn basic_string(text: StringSlice, at: mut UInt64) -> Result[String, Failure] {
+fn basic_string(text: StringSlice, at: mut UInt64) -> Result[String, Failure]
+  uses RunForever
+{
   let start = at
   at = at.saturating_add(1)
   var output = ""
@@ -254,7 +266,9 @@ fn basic_string(text: StringSlice, at: mut UInt64) -> Result[String, Failure] {
   }
 }
 
-fn literal_string(text: StringSlice, at: mut UInt64) -> Result[String, Failure] {
+fn literal_string(text: StringSlice, at: mut UInt64) -> Result[String, Failure]
+  uses RunForever
+{
   let start = at
   at = at.saturating_add(1)
   let from = at
@@ -281,7 +295,9 @@ fn starts_with_three(text: StringSlice, at: UInt64, byte: UInt8) -> Bool {
   peek(text, at: at) == Some(byte) && peek(text, at: at.saturating_add(1)) == Some(byte) && peek(text, at: at.saturating_add(2)) == Some(byte)
 }
 
-fn multiline_string(text: StringSlice, at: mut UInt64, quote: UInt8) -> Result[String, Failure] {
+fn multiline_string(text: StringSlice, at: mut UInt64, quote: UInt8) -> Result[String, Failure]
+  uses RunForever
+{
   let start = at
   at = at.saturating_add(3)
   let _ = skip_newline(text, at: mut at)
@@ -330,7 +346,9 @@ fn multiline_string(text: StringSlice, at: mut UInt64, quote: UInt8) -> Result[S
   }
 }
 
-fn simple_key(text: StringSlice, at: mut UInt64) -> Result[String, Failure] {
+fn simple_key(text: StringSlice, at: mut UInt64) -> Result[String, Failure]
+  uses RunForever
+{
   match peek(text, at: at) {
     Some(byte) => {
       if byte == 34 {
@@ -354,7 +372,9 @@ fn simple_key(text: StringSlice, at: mut UInt64) -> Result[String, Failure] {
   }
 }
 
-fn dotted_key(text: StringSlice, at: mut UInt64) -> Result[List[String], Failure] {
+fn dotted_key(text: StringSlice, at: mut UInt64) -> Result[List[String], Failure]
+  uses RunForever
+{
   var keys: List[String] = []
   while true {
     skip_spaces(text, at: mut at)
@@ -369,6 +389,7 @@ fn dotted_key(text: StringSlice, at: mut UInt64) -> Result[List[String], Failure
 
 fn token_end(text: StringSlice, from: UInt64) -> UInt64
   ensures result >= from
+  uses RunForever
 {
   var at = from
   while peek(text, at: at) is Some(byte)
@@ -396,7 +417,9 @@ fn is_time_at(text: StringSlice, at: UInt64) -> Bool {
     && peek(text, at: at.saturating_add(2)) == Some(58)
 }
 
-fn date_time_value(text: StringSlice, at: mut UInt64) -> Result[Value, Failure] {
+fn date_time_value(text: StringSlice, at: mut UInt64) -> Result[Value, Failure]
+  uses RunForever
+{
   let start = at
   var end = token_end(text, from: at)
   if is_date_at(text, at: start) && end == start.saturating_add(10) && peek(text, at: end) == Some(32)
@@ -478,7 +501,9 @@ fn without_underscores(token: StringSlice, start: UInt64, hexadecimal: Bool) -> 
   Ok(own digits)
 }
 
-fn number_value(text: StringSlice, at: mut UInt64) -> Result[Value, Failure] {
+fn number_value(text: StringSlice, at: mut UInt64) -> Result[Value, Failure]
+  uses RunForever
+{
   let start = at
   let end = token_end(text, from: at)
   if end > text.length() || end <= start {
@@ -489,10 +514,10 @@ fn number_value(text: StringSlice, at: mut UInt64) -> Result[Value, Failure] {
   let signed = token.byte(0) == 43 || token.byte(0) == 45
   let negative = token.byte(0) == 45
   let body = if signed { text.part(start + 1, to: end) } else { token }
-  if body == "inf".slice() {
+  if body == "inf" {
     return Ok(Value.Float(value: if negative { Float64.negative_infinity } else { Float64.infinity }))
   }
-  if body == "nan".slice() {
+  if body == "nan" {
     return Ok(Value.Float(value: Float64.not_a_number))
   }
   if body.length() >= 2 && (body.starts_with("0x") || body.starts_with("0o") || body.starts_with("0b")) {
@@ -504,7 +529,7 @@ fn number_value(text: StringSlice, at: mut UInt64) -> Result[Value, Failure] {
     if digits.is_empty() || digits.slice().starts_with("+") || digits.slice().starts_with("-") {
       return Err(failure_at("a number with no digits", offset: start))
     }
-    return match Int64.parse_radix(digits.slice(), radix: radix) {
+    return match Int64.parse_radix(digits, radix: radix) {
       Ok(number) => Ok(Value.Integer(value: number))
       Err(_) => Err(failure_at("a number that does not fit a 64-bit integer", offset: start))
     }
@@ -560,6 +585,7 @@ fn after_element(text: StringSlice, at: mut UInt64, closing: UInt8, inside: Stri
 
 fn array_value(text: StringSlice, at: mut UInt64, depth: UInt64) -> Result[Value, Failure]
   requires depth <= 128
+  uses RunForever
 {
   at = at.saturating_add(1)
   var items: List[Value] = []
@@ -579,7 +605,9 @@ fn array_value(text: StringSlice, at: mut UInt64, depth: UInt64) -> Result[Value
 }
 
 
-fn parse_value(text: StringSlice, at: mut UInt64, depth: UInt64) -> Result[Value, Failure] {
+fn parse_value(text: StringSlice, at: mut UInt64, depth: UInt64) -> Result[Value, Failure]
+  uses RunForever
+{
   if depth > 128 {
     return Err(failure_at("values nested too deeply", offset: at))
   }
@@ -606,11 +634,11 @@ fn parse_value(text: StringSlice, at: mut UInt64, depth: UInt64) -> Result[Value
       let end = token_end(text, from: at)
       if end <= text.length() {
         let token = text.part(at, to: end)
-        if token == "true".slice() {
+        if token == "true" {
           at = end
           return Ok(Value.Boolean(value: true))
         }
-        if token == "false".slice() {
+        if token == "false" {
           at = end
           return Ok(Value.Boolean(value: false))
         }
@@ -787,7 +815,9 @@ fn open_header(document: mut Document, keys: Slice[String], array: Bool, at: UIn
   }
 }
 
-fn build(document: Document, leaves: mut Map[UInt64, Value], index: UInt64) -> Value {
+fn build(document: Document, leaves: mut Map[UInt64, Value], index: UInt64) -> Value
+  uses RunForever
+{
   match document.kind(index) {
     Some(Leaf) => match mut leaves.take(index) {
       Some(value) => own value
@@ -805,7 +835,7 @@ fn build(document: Document, leaves: mut Map[UInt64, Value], index: UInt64) -> V
       let names = if index < document.names.length() { document.names[index].copy() } else { [] }
       var entries: Map[String, Value] = Map.with_capacity(names.length())
       for name in own names {
-        match document.child(index, key: name.slice()) {
+        match document.child(index, key: name) {
           Some(child) => {
             let built = build(document, leaves: mut leaves, index: child)
             let _ = mut entries.replace(own name, value: own built)
@@ -818,7 +848,9 @@ fn build(document: Document, leaves: mut Map[UInt64, Value], index: UInt64) -> V
   }
 }
 
-fn Document.finish(own self) -> Map[String, Value] {
+fn Document.finish(own self) -> Map[String, Value]
+  uses RunForever
+{
   var document = own self
   var leaves: Map[UInt64, Value] = [:]
   var index: UInt64 = 0
@@ -840,6 +872,7 @@ fn Document.finish(own self) -> Map[String, Value] {
 
 fn inline_table_value(text: StringSlice, at: mut UInt64, depth: UInt64) -> Result[Value, Failure]
   requires depth <= 128
+  uses RunForever
 {
   at = at.saturating_add(1)
   var document = Document.new()
@@ -865,14 +898,18 @@ fn inline_table_value(text: StringSlice, at: mut UInt64, depth: UInt64) -> Resul
   Ok(Value.Table(entries: own document.finish()))
 }
 
-public fn parse(text: StringSlice) -> Result[Map[String, Value], ParseError] {
+public fn parse(text: StringSlice) -> Result[Map[String, Value], ParseError]
+  uses RunForever
+{
   match parse_document(text) {
     Ok(document) => Ok(own document)
     Err(problem) => Err(with_position(text, failure: problem))
   }
 }
 
-fn header_line(text: StringSlice, at: mut UInt64, document: mut Document) -> Result[UInt64, Failure] {
+fn header_line(text: StringSlice, at: mut UInt64, document: mut Document) -> Result[UInt64, Failure]
+  uses RunForever
+{
   let line_at = at
   let array = peek(text, at: at.saturating_add(1)) == Some(91)
   at = at.saturating_add(if array { 2 } else { 1 })
@@ -892,7 +929,9 @@ fn header_line(text: StringSlice, at: mut UInt64, document: mut Document) -> Res
   Ok(table)
 }
 
-fn key_value_line(text: StringSlice, at: mut UInt64, document: mut Document, table: UInt64) -> Result[Unit, Failure] {
+fn key_value_line(text: StringSlice, at: mut UInt64, document: mut Document, table: UInt64) -> Result[Unit, Failure]
+  uses RunForever
+{
   let line_at = at
   let keys = dotted_key(text, at: mut at)?
   if peek(text, at: at) != Some(61) {
@@ -905,7 +944,9 @@ fn key_value_line(text: StringSlice, at: mut UInt64, document: mut Document, tab
   end_of_line(text, at: mut at)
 }
 
-fn parse_document(text: StringSlice) -> Result[Map[String, Value], Failure] {
+fn parse_document(text: StringSlice) -> Result[Map[String, Value], Failure]
+  uses RunForever
+{
   var document = Document.new()
   var table: UInt64 = 0
   var at: UInt64 = 0
@@ -1000,7 +1041,7 @@ impl serialization::Tree for Value {
   }
 
   fn from_unsigned(value: UInt64) -> Option[Value] {
-    match Int64.try_from(value) {
+    match Int64.try_from_integer(value) {
       Ok(integer) => Some(Value.Integer(value: integer))
       Err(_) => None
     }
@@ -1038,7 +1079,9 @@ public fn to_table[Item: serialization::Serialize](
 public fn from_table[Item: serialization::Deserialize](
   table: own Map[String, Value],
   names: serialization::Names = serialization::Names.AsWritten,
-) -> Result[Item, serialization::Error] {
+) -> Result[Item, serialization::Error]
+  uses RunForever
+{
   var reader = serialization::TreeReader.new(Value.Table(entries: own table), names: names)
   Item.deserialize(mut reader)
 }
@@ -1046,7 +1089,9 @@ public fn from_table[Item: serialization::Deserialize](
 public fn decode[Item: serialization::Deserialize](
   text: StringSlice,
   names: serialization::Names = serialization::Names.AsWritten,
-) -> Result[Item, Error] {
+) -> Result[Item, Error]
+  uses RunForever
+{
   match parse(text) {
     Ok(table) => match from_table[Item](own table, names: names) {
       Ok(item) => Ok(own item)
@@ -1059,7 +1104,9 @@ public fn decode[Item: serialization::Deserialize](
 public fn encode[Item: serialization::Serialize](
   item: Item,
   names: serialization::Names = serialization::Names.AsWritten,
-) -> Result[String, serialization::Error] {
+) -> Result[String, serialization::Error]
+  uses RunForever
+{
   Ok(to_text(to_table(item, names: names)?))
 }
 
@@ -1075,74 +1122,76 @@ fn is_bare_key(key: StringSlice) -> Bool {
   true
 }
 
-fn write_key(output: mut TextBuilder, key: StringSlice) {
+fn write_key(output: mut String, key: StringSlice) {
   if is_bare_key(key) {
-    mut output.write(key)
+    mut output.push(key)
   } else {
     write_string(mut output, text: key)
   }
 }
 
-fn write_string(output: mut TextBuilder, text: StringSlice) {
-  mut output.write("\"")
+fn write_string(output: mut String, text: StringSlice) {
+  mut output.push("\"")
   for character in text.characters() {
     let code = character.code()
     if code == 34 {
-      mut output.write("\\\"")
+      mut output.push("\\\"")
     } else if code == 92 {
-      mut output.write("\\\\")
+      mut output.push("\\\\")
     } else if code == 10 {
-      mut output.write("\\n")
+      mut output.push("\\n")
     } else if code == 9 {
-      mut output.write("\\t")
+      mut output.push("\\t")
     } else if code == 13 {
-      mut output.write("\\r")
+      mut output.push("\\r")
     } else if code < 32 || code == 127 {
-      mut output.write("\\u00")
+      mut output.push("\\u00")
       write_hex_digit(mut output, value: code / 16)
       write_hex_digit(mut output, value: code % 16)
     } else {
-      mut output.write_character(character)
+      mut output.push_character(character)
     }
   }
-  mut output.write("\"")
+  mut output.push("\"")
 }
 
-fn write_hex_digit(output: mut TextBuilder, value: UInt32) {
+fn write_hex_digit(output: mut String, value: UInt32) {
   let digit: UInt8 = intrinsic::convert(value % 16)
-  mut output.write_byte(if digit < 10 { 48 + digit } else { 87 + digit })
+  mut output.push_byte(if digit < 10 { 48 + digit } else { 87 + digit })
 }
 
-fn write_float(output: mut TextBuilder, value: Float64) {
+fn write_float(output: mut String, value: Float64) {
   if value.is_nan() {
-    mut output.write("nan")
+    mut output.push("nan")
     return
   }
   if value == Float64.infinity {
-    mut output.write("inf")
+    mut output.push("inf")
     return
   }
   if value == Float64.negative_infinity {
-    mut output.write("-inf")
+    mut output.push("-inf")
     return
   }
   let text = "${value}"
-  mut output.write(text.slice())
+  mut output.push(text)
   if !text.slice().contains(".") && !text.slice().contains("e") && !text.slice().contains("E") {
-    mut output.write(".0")
+    mut output.push(".0")
   }
 }
 
-fn write_inline(output: mut TextBuilder, value: Value) {
+fn write_inline(output: mut String, value: Value)
+  uses RunForever
+{
   match value {
-    String(text) => write_string(mut output, text: text.slice())
+    String(text) => write_string(mut output, text: text)
     Integer(number) => number.display(mut output)
     Float(number) => write_float(mut output, value: number)
     Boolean(flag) => {
       if flag {
-        mut output.write("true")
+        mut output.push("true")
       } else {
-        mut output.write("false")
+        mut output.push("false")
       }
     }
     OffsetDateTime(instant) => instant.display(mut output)
@@ -1150,34 +1199,34 @@ fn write_inline(output: mut TextBuilder, value: Value) {
     LocalDate(date) => date.display(mut output)
     LocalTime(time) => time.display(mut output)
     Array(items) => {
-      mut output.write("[")
+      mut output.push("[")
       var first = true
       for item in items {
         if !first {
-          mut output.write(", ")
+          mut output.push(", ")
         }
         first = false
         write_inline(mut output, value: item)
       }
-      mut output.write("]")
+      mut output.push("]")
     }
     Table(entries) => {
       if entries.is_empty() {
-        mut output.write("{}")
+        mut output.push("{}")
         return
       }
-      mut output.write("{ ")
+      mut output.push("{ ")
       var first = true
       for entry in entries {
         if !first {
-          mut output.write(", ")
+          mut output.push(", ")
         }
         first = false
-        write_key(mut output, key: entry.key.slice())
-        mut output.write(" = ")
+        write_key(mut output, key: entry.key)
+        mut output.push(" = ")
         write_inline(mut output, value: entry.value)
       }
-      mut output.write(" }")
+      mut output.push(" }")
     }
   }
 }
@@ -1199,28 +1248,30 @@ fn is_array_of_tables(value: Value) -> Bool {
   }
 }
 
-fn write_header(output: mut TextBuilder, path: Slice[String], opening: StringSlice, closing: StringSlice) {
-  mut output.write("\n")
-  mut output.write(opening)
+fn write_header(output: mut String, path: Slice[String], opening: StringSlice, closing: StringSlice) {
+  mut output.push("\n")
+  mut output.push(opening)
   var first = true
   for key in path {
     if !first {
-      mut output.write(".")
+      mut output.push(".")
     }
     first = false
-    write_key(mut output, key: key.slice())
+    write_key(mut output, key: key)
   }
-  mut output.write(closing)
-  mut output.write("\n")
+  mut output.push(closing)
+  mut output.push("\n")
 }
 
-fn write_table(output: mut TextBuilder, table: Map[String, Value], path: mut List[String]) {
+fn write_table(output: mut String, table: Map[String, Value], path: mut List[String])
+  uses RunForever
+{
   for entry in table {
     if !(entry.value is Table(_)) && !is_array_of_tables(entry.value) {
-      write_key(mut output, key: entry.key.slice())
-      mut output.write(" = ")
+      write_key(mut output, key: entry.key)
+      mut output.push(" = ")
       write_inline(mut output, value: entry.value)
-      mut output.write("\n")
+      mut output.push("\n")
     }
   }
   for entry in table {
@@ -1251,11 +1302,12 @@ fn write_table(output: mut TextBuilder, table: Map[String, Value], path: mut Lis
   }
 }
 
-public fn to_text(table: Map[String, Value]) -> String {
-  var output = TextBuilder.new()
+public fn to_text(table: Map[String, Value]) -> String
+  uses RunForever
+{
+  var text = ""
   var path: List[String] = []
-  write_table(mut output, table: table, path: mut path)
-  let text = own output.finish()
+  write_table(mut text, table: table, path: mut path)
   if text.length() > 0 && text.slice().starts_with("\n") {
     text.slice().part(1, to: text.length()).to_string()
   } else {

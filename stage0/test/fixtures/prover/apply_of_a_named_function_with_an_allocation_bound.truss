@@ -1,0 +1,6 @@
+fn f(value: Int64) -> Int64
+  cost allocations <= 0
+  cost allocated_bytes <= 0
+{
+  apply(value, change: quiet)
+}

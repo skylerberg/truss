@@ -1,0 +1,9 @@
+capability Runner {
+  fn run(work: fn(Int64))
+}
+
+type Direct()
+
+impl Runner for Direct {
+  fn run(self, work: (fn(Int64) cost time O(1))) {}
+}

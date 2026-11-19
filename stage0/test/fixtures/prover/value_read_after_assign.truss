@@ -1,0 +1,11 @@
+fn f(table: Map[String, Int64], key: String) -> Int64
+  ensures result == 7
+{
+  var copy = table.copy()
+  copy[key.copy()] = 7
+  if copy.get(key) is Some(value) {
+    value
+  } else {
+    0
+  }
+}

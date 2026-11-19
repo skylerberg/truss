@@ -1,0 +1,10 @@
+fn f(value: Float64) -> Int16 {
+  if value >= 0.0 && value <= 100.0 && value == value.floor() {
+    match Int16.try_from_float64(value) {
+      Ok(whole) => whole + 32667
+      Err(_) => unreachable
+    }
+  } else {
+    0
+  }
+}

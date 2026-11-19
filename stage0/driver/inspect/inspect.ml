@@ -79,7 +79,8 @@ let describe_target (target : Resolve.target) =
   | Local _ -> ("a local variable or parameter", None)
   | Law_parameter _ -> ("a parameter of the law that this proves", None)
   | Binding -> ("a name bound here", None)
-  | Type_parameter _ | Capability_parameter _ | Value_parameter _ -> ("a generic parameter", None)
+  | Type_parameter _ | Value_parameter _ -> ("a generic parameter", None)
+  | Capability_parameter _ -> ("a capability parameter", None)
   | Variant (path, name) -> (Printf.sprintf "the variant %s of %s" name (Path.show path), None)
   | Module module_ -> (Printf.sprintf "the module %s" (Path.show_module module_), None)
   | Field name -> (Printf.sprintf "the field %s" name, None)
@@ -99,7 +100,7 @@ let explain_resolved (resolved : Resolve.resolved) (name : Syntax.name) =
   | None -> (None, None)
 
 let explain_definition path = (Some (Printf.sprintf "the definition %s" (Path.show path)), Some path)
-let contains (span : Source.Definition_span.t) offset = span.start <= offset && offset <= span.stop
+let is_inside (span : Source.Definition_span.t) offset = span.start <= offset && offset <= span.stop
 
 let find_known_type (tables : Infer.tables) id =
   Option.map (fun _ -> show_type tables id) (find_at tables.types id)
@@ -125,7 +126,7 @@ let explain_at ~path (spans : Source.Definition_span.t array) (definition : Synt
   let innermost = ref None in
   let calls = Hashtbl.create 8 in
   let rec visit (value : Syntax.expression) =
-    if contains spans.(value.id) offset then begin
+    if is_inside spans.(value.id) offset then begin
       (match value.kind with
       | Call (({ kind = Member _; _ } as callee), _) -> Hashtbl.replace calls callee.id value.id
       | _ -> ());
@@ -138,7 +139,7 @@ let explain_at ~path (spans : Source.Definition_span.t array) (definition : Synt
   Syntax_walk.visit_definition visit definition;
   let name_at =
     List.find_opt
-      (fun (name : Syntax.name) -> contains spans.(name.id) offset)
+      (fun (name : Syntax.name) -> is_inside spans.(name.id) offset)
       (Syntax_walk.collect_names spans definition)
   in
   let is_written_in (value : Syntax.expression) (name : Syntax.name) =

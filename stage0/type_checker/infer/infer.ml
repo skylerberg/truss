@@ -2,7 +2,7 @@ module Lookups = Lookups
 
 type resolution = Tables.resolution =
   | Local_value of Syntax.id
-  | Global of { path : Path.t; type_arguments : Types.argument list }
+  | Global of { path : Path.t; instantiation : Types.instantiation }
   | Field_access of { type_ : Types.ty; field : string }
   | Variant_value of { type_ : Types.ty; variant : string }
   | Type_name of Types.ty
@@ -20,7 +20,8 @@ type checked = Body.checked = {
   form : Core.t;
   tables : tables;
   used_packages : Path.package list;
-  places_without_own : Core.origin list;
+  places_without_keyword : (Core.origin * Types.mode) list;
+  mode_keywords : Core.mode_keyword list;
 }
 
 let check lookups (key : Resolve.Names.key) ~checks_body =
@@ -42,6 +43,7 @@ let check_body (lookups : Lookups.t) key =
   check lookups key ~checks_body:true
 
 let derive_form = Derived.derive_form
+let derives = Derived.derives
 let show_resolution = Tables.show_resolution
 
 let statement_diverges (tables : tables) =
@@ -55,15 +57,15 @@ type form_origin =
 
 let find_form_origin (interface : Interface.Lookups.t) ~is_derived (path : Path.t) =
   match (interface.names.find_key path, path) with
-  | Some key, _ -> Some (Written key, [])
+  | Some key, _ -> Some (Written key, Types.no_substitution)
   | None, Method { owner = Derived { type_; _ }; _ } when is_derived path ->
-      Option.map (fun type_key -> (Derived type_key, [])) (interface.names.find_key type_)
-  | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
-      Option.bind (Interface.Definition.find_impl_interface interface owner)
-        (fun (impl : Types.impl_interface) ->
-          Option.bind (Interface.Impls.make_impl_substitution interface owner) (fun substitution ->
-              Option.map
-                (fun key -> (Inherited key, substitution))
-                (interface.names.find_key
-                   (Path.Method { owner = impl.implements.trait; name; receiver }))))
+      Option.map
+        (fun type_key -> (Derived type_key, Types.no_substitution))
+        (interface.names.find_key type_)
+  | None, Method { owner = Impl _ | Derived _; _ } ->
+      Option.bind (Interface.Impls.find_implemented_method interface path)
+        (fun (implemented : Interface.Impls.implemented_method) ->
+          Option.map
+            (fun key -> (Inherited key, implemented.implementation.substitution))
+            (interface.names.find_key implemented.declaration))
   | None, _ -> None

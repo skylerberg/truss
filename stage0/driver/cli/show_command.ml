@@ -5,137 +5,105 @@ type shown_definition = {
   text : string;
 }
 
-let find_module (names : Resolve.Names.lookups) written : Path.module_ option =
-  match names.split_module written with
-  | Some module_ when names.module_exists module_ -> Some module_
-  | Some _ | None -> None
+let list_top_level (names : Resolve.Names.lookups) declarations =
+  List.filter
+    (fun (declaration : Resolve.Names.declaration) ->
+      declaration.key.ordinal = 0 && names.find_container declaration.key = None)
+    declarations
 
-let list_module_declarations database (module_ : Path.module_) =
-  (Database.make_name_lookups database [ module_.package ]).list_declarations module_
-  |> List.filter (fun (declaration : Resolve.Names.declaration) -> declaration.ordinal = 0)
+let list_type_parts declarations (type_ : Path.t) =
+  let is_member (declaration : Resolve.Names.declaration) =
+    match declaration.key.path with
+    | Method { owner; _ } | Member_constant { owner; _ } -> Path.equal owner type_
+    | _ -> false
+  and is_impl (declaration : Resolve.Names.declaration) =
+    match declaration.key.path with Impl { for_type; _ } -> Path.equal for_type type_ | _ -> false
+  in
+  List.filter is_member declarations @ List.filter is_impl declarations
 
-let list_package_declarations database package =
-  (Database.make_name_lookups database [ package ]).list_package_declarations package
-  |> List.filter (fun (declaration : Resolve.Names.declaration) -> declaration.ordinal = 0)
-
-let is_visible packages (declaration : Resolve.Names.declaration) =
-  List.mem declaration.module_.package packages || Resolve.Names.is_public declaration.visibility
-
-let resolve database packages text =
-  let names = Database.make_name_lookups database packages in
-  let argument = Path_argument.parse text in
-  let written = argument.prefix @ [ argument.last ] in
-  let module_ = if argument.member = None then find_module names written else None in
-  match (names.split_module written, module_, argument.member) with
-  | Some { package; modules = [] }, _, None ->
+let list_target_declarations (names : Resolve.Names.lookups) packages :
+    Path_argument.target -> Resolve.Names.declaration list = function
+  | Package package ->
       List.filter
         (fun (declaration : Resolve.Names.declaration) ->
           Resolve.Names.is_public declaration.visibility)
-        (list_package_declarations database package)
-  | _, Some module_, _ ->
-      List.filter (is_visible packages) (list_module_declarations database module_)
-  | _, None, member -> (
-      match find_module names argument.prefix with
-      | None -> []
-      | Some module_ -> (
-          match member with
-          | None -> (
-              let path : Path.t = Top { module_; name = argument.last } in
-              match
-                List.filter
-                  (fun (declaration : Resolve.Names.declaration) ->
-                    Path.equal declaration.path path)
-                  (list_module_declarations database module_)
-              with
-              | [ declaration ] when declaration.kind = Type ->
-                  let package_declarations = list_package_declarations database module_.package in
-                  let impls =
-                    List.map snd
-                      ((Database.make_name_lookups database [ module_.package ]).list_impls_of_type
-                         module_.package path)
-                  in
-                  declaration
-                  :: List.filter
-                       (fun (declaration : Resolve.Names.declaration) ->
-                         match declaration.path with
-                         | Method { owner; _ } | Member_constant { owner; _ } ->
-                             Path.equal owner path
-                         | _ -> false)
-                       package_declarations
-                  @ List.filter
-                      (fun (declaration : Resolve.Names.declaration) ->
-                        List.exists (Path.equal declaration.path) impls)
-                      package_declarations
-                  |> List.filter (is_visible packages)
-              | declarations -> List.filter (is_visible packages) declarations)
-          | Some member ->
-              let owner : Path.t = Top { module_; name = argument.last } in
-              list_package_declarations database module_.package
-              |> List.filter (fun (declaration : Resolve.Names.declaration) ->
-                  match declaration.path with
-                  | Method { owner = owning_path; name; _ }
-                  | Member_constant { owner = owning_path; name } ->
-                      Path.equal owning_path owner && name = member
-                  | _ -> false)
-              |> List.filter (is_visible packages)))
+        (list_top_level names (names.list_package_declarations package))
+  | Module module_ ->
+      List.filter (Path_argument.is_shown packages)
+        (list_top_level names (names.list_declarations module_))
+  | Definition path -> (
+      let declared = Option.to_list (Option.map names.read_declaration (names.find_key path)) in
+      match Resolve.Names.find_kind names path with
+      | Some Type ->
+          declared @ list_type_parts (Path_argument.list_shown_declarations names packages) path
+      | Some (Function | Trait | Capability | Constant | Theorem) | None -> declared)
 
-let find snapshot database packages ~body text =
-  List.map
-    (fun (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.make_key declaration in
-      let opaque =
-        declaration.visibility = Public_opaque
-        && not (List.mem declaration.module_.package packages)
-      in
-      let names = Database.make_name_lookups database [ key.module_.package ] in
-      let ({ file = written; base } : Resolve.Names.place) = names.read_place key in
-      let source = Command_packages.read_source snapshot packages written in
-      {
-        declaration;
-        file = Source.path source;
-        line = fst (Source.compute_position source base);
-        text = Signatures.render_signature names ~body ~opaque key;
-      })
-    (resolve database packages text)
+let show_definition snapshot database (names : Resolve.Names.lookups) packages ~body
+    (declaration : Resolve.Names.declaration) =
+  let key = declaration.key in
+  let opaque =
+    declaration.visibility = Public_opaque && not (List.mem key.module_.package packages)
+  in
+  let ({ file = written; base } : Resolve.Names.place) = names.read_place key in
+  let source = Command_packages.read_source snapshot database packages written in
+  {
+    declaration;
+    file = Source.path source;
+    line = fst (Source.compute_position source base);
+    text = Signatures.render_signature names ~body ~opaque key;
+  }
+
+let find snapshot database names packages ~body text =
+  match Path_argument.resolve names packages (Path_argument.parse text) with
+  | [] -> None
+  | targets ->
+      Some
+        (List.map
+           (show_definition snapshot database names packages ~body)
+           (List.concat_map (list_target_declarations names packages) targets))
 
 let run ~paths ~body =
   let snapshot, packages = Command_packages.load_current () in
   let database = Workspace.open_database snapshot in
-  let results = List.map (fun path -> (path, find snapshot database packages ~body path)) paths in
-  let missing = List.filter (fun (_, definitions) -> definitions = []) results in
+  let names = Database.make_name_lookups database in
+  let results =
+    List.map (fun path -> (path, find snapshot database names packages ~body path)) paths
+  in
+  let missing = List.filter (fun (_, definitions) -> definitions = None) results in
+  let list_definitions (_, definitions) = Option.value ~default:[] definitions in
   if Output.json () then
     Json.print
       (Json.make_document ~diagnostics:[]
          [
            ( "definitions",
              Json.List
-               (List.concat_map
-                  (fun (_, definitions) ->
-                    List.map
-                      (fun definition ->
-                        Json.Object
-                          [
-                            ("path", Json.String (Path.show definition.declaration.path));
-                            ("kind", Json.String (Signatures.show_kind definition.declaration.kind));
-                            ("file", Json.String definition.file);
-                            ("line", Json.Int definition.line);
-                            ("text", Json.String definition.text);
-                          ])
-                      definitions)
-                  results) );
+               (List.map
+                  (fun definition ->
+                    Json.Object
+                      [
+                        ("path", Json.String (Path.show definition.declaration.key.path));
+                        ("kind", Json.String (Signatures.show_kind definition.declaration.kind));
+                        ("file", Json.String definition.file);
+                        ("line", Json.Int definition.line);
+                        ("text", Json.String definition.text);
+                      ])
+                  (List.concat_map list_definitions results)) );
            ("not_found", Json.List (List.map (fun (path, _) -> Json.String path) missing));
          ])
   else begin
     let first = ref true in
     List.iter
-      (fun (_, definitions) ->
-        List.iter
-          (fun definition ->
-            if not !first then Output.print_line "";
-            first := false;
-            Output.printf "%s:%d\n%s\n" definition.file definition.line definition.text)
-          definitions)
-      results;
-    List.iter (fun (path, _) -> Output.eprintf "Nothing named `%s` is visible here.\n" path) missing
+      (fun definition ->
+        if not !first then Output.print_line "";
+        first := false;
+        Output.printf "%s:%d\n%s\n" definition.file definition.line definition.text)
+      (List.concat_map list_definitions results);
+    List.iter
+      (fun (path, definitions) ->
+        match definitions with
+        | None -> Output.eprintf "Nothing named `%s` is visible here.\n" path
+        | Some [] -> Output.eprintf "`%s` is visible here but has no definition to show.\n" path
+        | Some (_ :: _) -> ())
+      results
   end;
   if missing = [] then 0 else 2

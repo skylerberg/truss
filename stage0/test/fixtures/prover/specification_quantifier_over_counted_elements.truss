@@ -1,0 +1,23 @@
+type Twins(value: Int64)
+
+fn Twins.count(self) -> UInt64
+  ensures result == 2
+  cost time O(1)
+{
+  2
+}
+
+fn Twins.element(self, position: UInt64) lends Int64
+  requires position < self.count()
+  ensures result == self.value
+  cost time O(1)
+{
+  self.value
+}
+
+fn first_twin_positive(twins: Twins) -> Bool
+  requires forall value in twins => value > 0
+  ensures result
+{
+  twins.element(0) > 0
+}

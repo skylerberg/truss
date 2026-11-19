@@ -35,17 +35,12 @@ let read_cache_budget () =
 let collect () =
   let cache = open_cache () in
   Cache.compact cache;
-  let lock =
-    Unix.openfile
-      (Filename.concat (Cache.directory cache) "collect.lock")
-      [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
-  in
-  Fun.protect
-    ~finally:(fun () -> Unix.close lock)
-    (fun () ->
-      match Unix.lockf lock F_TLOCK 0 with
-      | () -> Cache.collect cache ~budget:(read_cache_budget ())
-      | exception Unix.Unix_error _ -> ())
+  match Lock_file.acquire_if_free (Filename.concat (Cache.directory cache) "collect.lock") with
+  | None -> ()
+  | Some lock ->
+      Fun.protect
+        ~finally:(fun () -> Lock_file.release lock)
+        (fun () -> Cache.collect cache ~budget:(read_cache_budget ()))
 
 type loaded = {
   package : Path.package;
@@ -70,16 +65,7 @@ let make_package_database_key ~hash ~visible =
        ])
 
 let run_exclusively name work =
-  let lock =
-    Unix.openfile
-      (Filename.concat (Cache.directory (open_cache ())) name)
-      [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
-  in
-  Fun.protect
-    ~finally:(fun () -> Unix.close lock)
-    (fun () ->
-      Unix.lockf lock F_LOCK 0;
-      work ())
+  Lock_file.with_lock (Filename.concat (Cache.directory (open_cache ())) name) work
 
 let load_package_database (package : Project.package) ~hash ~visible =
   let key = make_package_database_key ~hash ~visible in
@@ -100,11 +86,9 @@ let load_package_database (package : Project.package) ~hash ~visible =
                 | Some package_database -> package_database
                 | None ->
                     let package_database =
-                      Database.read_package_database
-                        (Database.create
-                           ~loaded:(List.map (fun visible -> visible.package_database) visible)
-                           [ package ])
-                        package.name
+                      Database.build_package_database
+                        ~loaded:(List.map (fun visible -> visible.package_database) visible)
+                        package
                     in
                     Cache.add_result (open_cache ()) ~kind:Package_database ~key
                       (Marshal.to_string package_database []);
@@ -118,36 +102,25 @@ let load_package_database (package : Project.package) ~hash ~visible =
 let standard_package : Project.package =
   { name = Path.standard_package; dependencies = []; files = Standard_library.files }
 
-let checked_standard_package : loaded option ref = ref None
+let standard_hash =
+  lazy
+    (Registry.Content.hash
+       (List.map
+          (fun (file, text) -> (Project.make_file_path ~directory:"" file, text))
+          Standard_library.files))
 
 let load_standard_package () =
-  match !checked_standard_package with
-  | Some standard -> standard
-  | None ->
-      let standard =
-        load_package_database standard_package ~visible:[]
-          ~hash:
-            (Registry.Content.hash
-               (List.map
-                  (fun (file, text) -> (Project.make_file_path ~directory:"" file, text))
-                  Standard_library.files))
-      in
-      let database = Database.create ~loaded:[ standard.package_database ] [] in
-      let rendered =
-        List.concat_map
-          (fun ((file : Path.file), text) ->
-            match Database.list_file_diagnostics database file with
-            | [] -> []
-            | diagnostics ->
-                let source = Source.create ~path:(Path.show_file file) text in
-                List.map (Diagnostic.render source) diagnostics)
-          Standard_library.files
-      in
-      if rendered <> [] then
-        Compiler_bug.raise_bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
-          (String.concat "" rendered);
-      checked_standard_package := Some standard;
-      standard
+  let standard =
+    load_package_database standard_package ~visible:[] ~hash:(Lazy.force standard_hash)
+  in
+  match Database.list_package_diagnostics standard.package_database with
+  | [] -> standard
+  | failed ->
+      Compiler_bug.raise_bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
+        (String.concat ""
+           (List.concat_map
+              (fun (source, diagnostics) -> List.map (Diagnostic.render source) diagnostics)
+              failed))
 
 let list_package_databases () =
   List.sort compare
@@ -156,11 +129,7 @@ let list_package_databases () =
          Printf.sprintf "%s %s" (Path.show_package package) (String.sub hash 0 16) :: lines)
        loaded_package_databases [])
 
-type kind =
-  | Worktree of string
-  | Trial of { root : string; database : Database.t Lazy.t }
-  | Published
-
+type kind = Worktree of string | Trial of { root : string; database : Database.t Lazy.t }
 type snapshot = { kind : kind; files : (string * string) list; project : Project.t }
 
 let fetch name version ~hash =
@@ -187,21 +156,21 @@ let index_files (files : (string * string) list) =
   List.iter (fun (path, text) -> Hashtbl.replace table path text) files;
   (List.sort compare (List.map fst files), table)
 
-let project_of files =
-  let own = index_files files in
+let load_project files =
+  let project_files = index_files files in
   let registry = Hashtbl.create 4 and unavailable = Hashtbl.create 4 in
-  let find_root = function
-    | Project.Project -> Some own
+  let find_indexed_files = function
+    | Project.Project -> Some project_files
     | Registry hash -> Hashtbl.find_opt registry hash
   in
   let rec settle () =
     let project =
-      Project.of_files
+      Project.lay_out_project
         {
-          find_tree = (fun name -> Option.map fst (find_root name));
+          find_tree = (fun root -> Option.map fst (find_indexed_files root));
           find_text =
-            (fun name path ->
-              Option.bind (find_root name) (fun (_, texts) -> Hashtbl.find_opt texts path));
+            (fun root path ->
+              Option.bind (find_indexed_files root) (fun (_, texts) -> Hashtbl.find_opt texts path));
           find_unavailable_reason = Hashtbl.find_opt unavailable;
         }
     in
@@ -220,10 +189,12 @@ let project_of files =
   in
   settle ()
 
-let snapshot_of_files kind files = { kind; files; project = project_of files }
-let replace_files (snapshot : snapshot) files = { snapshot with files; project = project_of files }
+let make_snapshot kind files = { kind; files; project = load_project files }
 
-let find_root directory =
+let replace_files (snapshot : snapshot) files =
+  { snapshot with files; project = load_project files }
+
+let find_project_root directory =
   let directory = try Unix.realpath directory with Unix.Unix_error _ -> directory in
   let has_project_table manifest =
     try Manifest.has_project_table (In_channel.with_open_bin manifest In_channel.input_all)
@@ -251,7 +222,7 @@ let make_relative_to root directory =
 let list_packages snapshot =
   List.map
     (fun (directory, (package : Manifest.package)) -> (directory, package.name))
-    snapshot.project.own.packages
+    snapshot.project.project_layout.packages
 
 let list_target_packages snapshot requested =
   let packages = list_packages snapshot in
@@ -282,18 +253,7 @@ let list_dependency_names snapshot name =
       List.map (fun (dependency : Manifest.dependency) -> dependency.package) package.dependencies
   | None -> []
 
-let read_source snapshot (file : Path.file) =
-  match
-    Option.bind (find_package snapshot file.module_.package) (fun package ->
-        List.assoc_opt file package.files)
-  with
-  | Some text -> Source.create ~path:(Path.show_file file) text
-  | None -> Compiler_bug.raise_bug ~stage:"Workspace" "%s is not a file" (Path.show_file file)
-
-let locate_root snapshot =
-  match snapshot.kind with
-  | Worktree root | Trial { root; _ } -> root
-  | Published -> Compiler_bug.raise_bug ~stage:"Workspace" "only a worktree's snapshot has a root"
+let locate_root snapshot = match snapshot.kind with Worktree root | Trial { root; _ } -> root
 
 let list_registry_packages snapshot =
   List.map
@@ -333,7 +293,50 @@ let load_package_databases snapshot =
         Package_table.replace loaded_by_name name loaded;
         loaded
   in
-  standard :: List.map (fun (name, _) -> load_named name) hashes
+  let rec depends_on_project seen name =
+    (not (List.mem name seen))
+    && List.exists
+         (fun dependency ->
+           (not (List.mem_assoc dependency hashes)) || depends_on_project (name :: seen) dependency)
+         (list_dependency_names snapshot name)
+  in
+  standard
+  :: List.filter_map
+       (fun (name, _) -> if depends_on_project [] name then None else Some (load_named name))
+       hashes
+
+let describe_failed_dependency name version ~is_loaded failed =
+  match failed with
+  | (source, (first : Diagnostic.t) :: _) :: _ ->
+      let line, column = Source.compute_position source first.span.start in
+      Printf.sprintf "`%s` %s does not check %s. It has %s; the first is at %s:%d:%d: %s"
+        (Path.show_package name) (Registry.Version.show version)
+        (if is_loaded then "with this toolchain" else "against this project's packages")
+        (Diagnostic.show_count
+           (List.fold_left (fun total (_, diagnostics) -> total + List.length diagnostics) 0 failed)
+           "error" "errors")
+        (Source.path source) line column first.message
+  | _ -> Compiler_bug.raise_bug ~stage:"Workspace" "a failed package lists no diagnostic"
+
+let list_dependency_problems snapshot database =
+  let loaded =
+    List.map (fun (loaded : loaded) -> loaded.package) (load_package_databases snapshot)
+  in
+  List.filter_map
+    (fun (name, version, _) ->
+      match Database.list_dependency_diagnostics database name with
+      | [] -> None
+      | failed ->
+          Some
+            {
+              Project.file = Project.lock_file;
+              line = None;
+              message =
+                describe_failed_dependency name version ~is_loaded:(List.mem name loaded) failed;
+            })
+    (List.filter
+       (fun (name, _, _) -> Option.is_some (find_package snapshot name))
+       (list_registry_packages snapshot))
 
 let load_layout snapshot =
   let loaded = load_package_databases snapshot in
@@ -346,9 +349,9 @@ let load_layout snapshot =
 let extract_package_databases loaded =
   List.map (fun (loaded : loaded) -> loaded.package_database) loaded
 
-let build_cold_database ~checks snapshot =
+let build_cold_database snapshot =
   let loaded, packages = load_layout snapshot in
-  Database.create ~checks ~loaded:(extract_package_databases loaded) packages
+  Database.create ~loaded:(extract_package_databases loaded) packages
 
 let database_directory = ".truss"
 let compiler_line = "compiler " ^ Compiler_version.digest
@@ -356,7 +359,7 @@ let compiler_line = "compiler " ^ Compiler_version.digest
 let make_header loaded =
   compiler_line :: List.map (fun (loaded : loaded) -> "loaded " ^ Blake3.to_hex loaded.key) loaded
 
-let of_hex hex =
+let decode_hex hex =
   if String.length hex mod 2 <> 0 || not (String.for_all Char.Ascii.is_hex_digit hex) then None
   else
     let read_byte_at index =
@@ -387,12 +390,12 @@ let find_saved_package_databases segments ~current =
               | [ "loaded"; hex ] ->
                   Option.map
                     (fun package_database -> package_database :: package_databases)
-                    (Option.bind (of_hex hex) (find_saved_package_database ~current))
+                    (Option.bind (decode_hex hex) (find_saved_package_database ~current))
               | _ -> None))
         loaded_lines (Some [])
   | Some _ | None -> None
 
-let project_texts snapshot =
+let make_text_lookup snapshot =
   let texts = File_table.create 256 in
   List.iter
     (fun (package : Project.package) ->
@@ -413,11 +416,11 @@ let restore_database segments snapshot =
         match Segments.read_entries segments with
         | None -> start_cold ()
         | Some entries -> (
-            match Database.restore ~loaded:saved ~find_text:(project_texts snapshot) entries with
-            | database ->
-                Database.relayout database ~loaded:(extract_package_databases loaded) packages;
-                database
-            | exception (Failure _ | Invalid_argument _ | End_of_file) -> start_cold ()))
+            try
+              Database.restore ~saved ~find_text:(make_text_lookup snapshot)
+                ~loaded:(extract_package_databases loaded)
+                packages entries
+            with Failure _ | Invalid_argument _ | End_of_file -> start_cold ()))
   in
   (database, loaded)
 
@@ -482,13 +485,13 @@ let find_file_changes (before : snapshot) (after : snapshot) =
               if File_table.mem current file then changes else (file, None) :: changes)
             previous []))
 
-let apply_changes database (after : snapshot) = function
+let apply_changes ?on_bug database (after : snapshot) = function
   | Some changes ->
-      Database.update database changes;
+      Database.update ?on_bug database changes;
       None
   | None ->
       let loaded, packages = load_layout after in
-      Database.relayout database ~loaded:(extract_package_databases loaded) packages;
+      Database.relayout ?on_bug database ~loaded:(extract_package_databases loaded) packages;
       Some loaded
 
 let copy_database root (trial : snapshot) =
@@ -497,7 +500,7 @@ let copy_database root (trial : snapshot) =
       let database = Database.copy worktree.database in
       ignore (apply_changes database trial (find_file_changes worktree.snapshot trial));
       database
-  | None -> build_cold_database ~checks:true trial
+  | None -> build_cold_database trial
 
 let make_trial snapshot changes =
   let root = locate_root snapshot in
@@ -508,20 +511,13 @@ let make_trial snapshot changes =
   in
   { trial with kind = Trial { root; database = lazy (copy_database root trial) } }
 
-let open_database ?(checks = true) snapshot =
+let open_database snapshot =
   match snapshot.kind with
-  | Worktree root when checks -> (
+  | Worktree root -> (
       match Hashtbl.find_opt worktrees root with
       | Some worktree when worktree.snapshot == snapshot -> worktree.database
       | Some _ | None -> copy_database root snapshot)
-  | Trial { database; _ } when checks -> Lazy.force database
-  | Worktree _ | Trial _ | Published -> build_cold_database ~checks snapshot
-
-let is_watched relative =
-  List.for_all
-    (fun part -> not (Registry.Content.is_skipped part))
-    (String.split_on_char '/' relative)
-  || relative = ""
+  | Trial { database; _ } -> Lazy.force database
 
 let is_under prefix path =
   prefix = "" || path = prefix || String.starts_with ~prefix:(prefix ^ "/") path
@@ -530,7 +526,7 @@ let list_changed_files root files paths =
   let prefixes =
     List.filter
       (fun path -> not (List.exists (fun other -> other <> path && is_under other path) paths))
-      (List.sort_uniq compare (List.filter is_watched paths))
+      (List.sort_uniq compare paths)
   in
   let list_with_prefix prefix =
     let absolute = if prefix = "" then root else Filename.concat root prefix in
@@ -549,7 +545,7 @@ let list_changed_files root files paths =
     files
   @ List.concat_map list_with_prefix prefixes
 
-let refresh worktree =
+let refresh ?on_bug ~(read : Watcher.t -> Watcher.changes) worktree =
   let root = worktree.root in
   let update files =
     let before = worktree.snapshot in
@@ -560,12 +556,12 @@ let refresh worktree =
     | changes ->
         Option.iter
           (fun loaded -> worktree.loaded <- loaded)
-          (apply_changes worktree.database after changes);
+          (apply_changes ?on_bug worktree.database after changes);
         `Changed
   in
-  match Option.map Watcher.read_changes worktree.watcher with
+  match Option.map read worktree.watcher with
   | Some Removed -> `Removed
-  | Some Overflow | None -> update (Registry.Content.list_input_files root)
+  | Some Rescan | None -> update (Registry.Content.list_input_files root)
   | Some (Changed []) -> `Unchanged
   | Some (Changed paths) -> update (list_changed_files root worktree.snapshot.files paths)
 
@@ -590,7 +586,7 @@ let open_worktree root =
         else None
       in
       match
-        let snapshot = snapshot_of_files (Worktree root) (Registry.Content.list_input_files root) in
+        let snapshot = make_snapshot (Worktree root) (Registry.Content.list_input_files root) in
         (snapshot, restore_database segments snapshot)
       with
       | snapshot, (database, loaded) ->
@@ -606,7 +602,7 @@ let rec load_worktree_snapshot root =
   match Hashtbl.find_opt worktrees root with
   | None -> Result.map (fun worktree -> worktree.snapshot) (open_worktree root)
   | Some worktree -> (
-      match refresh worktree with
+      match refresh ~read:Watcher.read_changes worktree with
       | `Removed ->
           close worktree;
           load_worktree_snapshot root
@@ -615,7 +611,7 @@ let rec load_worktree_snapshot root =
 let take_snapshot directory =
   if not (Sys.file_exists directory) then Error (directory ^ ": no such directory.")
   else
-    match find_root directory with
+    match find_project_root directory with
     | None ->
         Error
           (Printf.sprintf "No `truss.toml` in %s or any directory above it, so it is in no project."
@@ -627,23 +623,19 @@ let take_snapshot directory =
           (load_worktree_snapshot root)
 
 let retake snapshot =
-  match snapshot.kind with
-  | Worktree root -> load_worktree_snapshot root
-  | Trial _ | Published -> Ok snapshot
+  match snapshot.kind with Worktree root -> load_worktree_snapshot root | Trial _ -> Ok snapshot
 
 let propagate_changes descriptor =
   Hashtbl.iter
     (fun _ worktree ->
       if Option.map Watcher.extract_descriptor worktree.watcher = Some descriptor then
-        match refresh worktree with
+        match refresh ~on_bug:log_bug ~read:Watcher.read_pending_changes worktree with
         | `Removed -> close worktree
         | `Unchanged -> ()
-        | `Changed -> (
-            match Database.propagate ~on_bug:log_bug worktree.database with
-            | () -> commit worktree
-            | exception Compiler_bug.Bug bug ->
-                log_bug bug;
-                close worktree))
+        | `Changed -> commit worktree
+        | exception Compiler_bug.Bug bug ->
+            log_bug bug;
+            close worktree)
     (Hashtbl.copy worktrees)
 
 let problems snapshot = snapshot.project.problems
@@ -653,7 +645,7 @@ let locate_file snapshot (file : Path.file) =
   | Some { root = Project.Project; directory; _ } -> Project.make_file_path ~directory file
   | _ -> Path.show_file file
 
-let time_limit_ms snapshot = snapshot.project.own.time_limit_ms
+let time_limit_ms snapshot = snapshot.project.project_layout.time_limit_ms
 let lock_fix snapshot = snapshot.project.selection.lock_fix
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
@@ -712,7 +704,7 @@ let plan_lock snapshot ~set ~all =
                   not (List.exists (fun (name, _, _) -> name = entry.name) wanted))
                 before
           in
-          let manifests = List.map snd snapshot.project.own.packages in
+          let manifests = List.map snd snapshot.project.project_layout.packages in
           let is_local name =
             List.exists (fun (package : Manifest.package) -> package.name = name) manifests
           in
@@ -743,35 +735,6 @@ let plan_lock snapshot ~set ~all =
             in
             Ok { text = Registry.Lock.print after; before; after })
 
-let fetch_published name version =
-  match
-    Option.bind (Registry.Index.find_current_registry ()) (fun registry ->
-        Registry.Index.hash_of registry name version)
-  with
-  | None ->
-      Error
-        (Printf.sprintf "The registry has no `%s` %s." (Path.show_package name)
-           (Registry.Version.show version))
-  | Some hash -> (
-      let refuse reason =
-        Error
-          (Printf.sprintf "`%s` %s cannot be read: %s." (Path.show_package name)
-             (Registry.Version.show version) reason)
-      in
-      match load_published name version ~hash with
-      | Error reason -> refuse reason
-      | Ok _ -> (
-          let snapshot =
-            snapshot_of_files Published
-              (Registry.Content.list_input_files
-                 (Filename.concat (Cache.make_packages_directory (open_cache ())) hash))
-          in
-          match problems snapshot with
-          | [] -> Ok snapshot
-          | problem :: _ -> refuse (Project.show_problem problem)))
-
-let make_server_key directory = Option.value (find_root directory) ~default:""
-
 let close_all () =
   List.iter
     (fun worktree ->
@@ -786,7 +749,7 @@ let flush () =
 let serve ~key ~handle =
   is_serving := true;
   Server.serve ~key
-    ~is_alive:(fun () -> key = "" || Sys.file_exists key)
+    ~is_alive:(fun () -> Sys.file_exists key)
     ~collect
     ~list_watcher_descriptors:(fun () ->
       Hashtbl.fold
@@ -803,11 +766,22 @@ let serve ~key ~handle =
 
 let call = Server.call
 let list_servers = Server.list_servers
-let stop_servers () = Server.stop_servers ~wait:true ()
+let stop_servers ?key () = Server.stop_servers ?key ~wait:true ()
 
 module For_testing = struct
   let load_standard_package_database () = (load_standard_package ()).package_database
-  let build_cold_database = build_cold_database ~checks:true
+
+  let copy_standard_package_database ~into =
+    let standard = load_standard_package () in
+    match Cache.open_ into with
+    | Error message -> raise (Unusable_cache message)
+    | Ok cache ->
+        Cache.add_result cache ~kind:Package_database ~key:standard.key
+          (Marshal.to_string standard.package_database []);
+        Cache.flush cache;
+        Cache.close cache
+
+  let build_cold_database = build_cold_database
   let collect_cache = collect
   let listen = Server.listen
   let call_starting = Server.For_testing.call_starting

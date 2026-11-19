@@ -15,12 +15,12 @@ public type ParseError =
   derives Equal
 
 impl Display for ParseError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      InvalidLength => mut output.write("a UUID is 32 hexadecimal digits, or 36 characters with its hyphens")
+      InvalidLength => mut output.push("a UUID is 32 hexadecimal digits, or 36 characters with its hyphens")
       InvalidCharacter(offset) => {
-        mut output.write("the text is not a UUID at offset ")
+        mut output.push("the text is not a UUID at offset ")
         offset.display(mut output)
       }
     }
@@ -96,20 +96,20 @@ public fn Uuid.is_nil(self) -> Bool
 }
 
 impl Display for Uuid {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     let bytes = self.bytes()
     let digits = hex::encode(bytes[..])
     let text = digits.slice()
-    mut output.write(text.part(0, to: 8))
-    mut output.write("-")
-    mut output.write(text.part(8, to: 12))
-    mut output.write("-")
-    mut output.write(text.part(12, to: 16))
-    mut output.write("-")
-    mut output.write(text.part(16, to: 20))
-    mut output.write("-")
-    mut output.write(text.part(20, to: 32))
+    mut output.push(text.part(0, to: 8))
+    mut output.push("-")
+    mut output.push(text.part(8, to: 12))
+    mut output.push("-")
+    mut output.push(text.part(12, to: 16))
+    mut output.push("-")
+    mut output.push(text.part(16, to: 20))
+    mut output.push("-")
+    mut output.push(text.part(20, to: 32))
   }
 }
 

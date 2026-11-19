@@ -63,10 +63,10 @@ public fn Terminal.set_raw_mode(mut self, enabled: Bool) -> Result[Unit, SystemE
   Handles.set_raw_mode(self.handle, enabled: enabled)
 }
 
-public fn with_raw_mode[Returned, capability Granted](
-  run: (fn() -> Returned uses Granted),
+public fn with_raw_mode[Returned](
+  run: (fn() -> Returned uses generic Granted),
 ) -> Result[Returned, SystemError]
-  uses Console, Handles, Granted
+  uses Console, Handles, generic Granted
 {
   var terminal = Console.terminal()
   mut terminal.set_raw_mode(true)?
@@ -85,7 +85,7 @@ fn remove_last_character(line: mut List[UInt8]) {
 }
 
 fn hidden_line(terminal: Terminal) -> Result[Option[String], SystemError]
-  uses Handles
+  uses Handles, RunForever
 {
   var line: List[UInt8] = []
   var typed: List[UInt8] = []
@@ -114,7 +114,7 @@ fn hidden_line(terminal: Terminal) -> Result[Option[String], SystemError]
 }
 
 public fn read_secret(prompt: StringSlice) -> Result[Option[String], SystemError]
-  uses Console, Handles
+  uses Console, Handles, RunForever
 {
   Console.print(prompt)
   var terminal = Console.terminal()
@@ -157,6 +157,7 @@ public type Style(
   italic: Bool = false,
   underline: Bool = false,
 )
+  derives Equal
 
 internal fn Color.named_offset(self) -> UInt8
   ensures result <= 67

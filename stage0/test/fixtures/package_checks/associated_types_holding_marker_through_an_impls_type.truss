@@ -5,5 +5,5 @@ impl Shown for Box[Inner: Shown] {
 }
 
 impl Shown for Marker {
-  type Part = (fn(Kept[Box[Marker]]) -> Bool cost time finite)
+  type Part = fn(Kept[Box[Marker]]) -> Bool
 }

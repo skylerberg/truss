@@ -1,0 +1,3 @@
+fn f(values: Array[Int64, 3], names: List[String]) -> UInt64 {
+  values.zip[String](names).count()
+}

@@ -1,5 +1,5 @@
 fn main(arguments: List[String]) -> ExitCode
-  uses Console
+  uses Console, RunForever
 {
   var count: UInt8 = 0
   while Console.read_line() is Some(line) {

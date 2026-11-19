@@ -9,7 +9,7 @@ let make_zero_width position = make_span position position
 module Definition_span = struct
   type t = { start : int; stop : int }
 
-  let make start stop =
+  let make start stop : t =
     if start < 0 || stop < start then
       invalid_arg (Printf.sprintf "Source.Definition_span.make %d %d" start stop);
     { start; stop }
@@ -28,7 +28,7 @@ module Definition_span = struct
            (Array.length spans));
     spans.(origin)
 
-  let quote text span =
+  let quote text (span : t) =
     if span.stop > String.length text then
       invalid_arg
         (Printf.sprintf "Source.Definition_span.quote: %d..%d is past a text of %d" span.start
@@ -57,11 +57,10 @@ let compute_line_starts text =
   Dynarray.to_array starts
 
 let create ~path text = { path; text; line_starts = compute_line_starts text }
-let read_file path = create ~path (In_channel.with_open_bin path In_channel.input_all)
 let path source = source.path
 let text source = source.text
 
-let line_index source offset =
+let compute_line_index source offset =
   let starts = source.line_starts in
   let rec search low high =
     if low >= high then low
@@ -71,16 +70,16 @@ let line_index source offset =
   in
   search 0 (Array.length starts - 1)
 
-let line_start source offset = source.line_starts.(line_index source offset)
+let compute_line_start source offset = source.line_starts.(compute_line_index source offset)
 
-let fragment_line_start text offset =
+let compute_fragment_line_start text offset =
   let rec scan_back at =
     if at > 0 && text.[at - 1] <> '\n' && text.[at - 1] <> '\r' then scan_back (at - 1) else at
   in
   scan_back (min offset (String.length text))
 
-let line_end source offset =
-  let index = line_index source offset in
+let compute_line_end source offset =
+  let index = compute_line_index source offset in
   if index + 1 < Array.length source.line_starts then
     let next = source.line_starts.(index + 1) in
     if next >= 2 && source.text.[next - 2] = '\r' && source.text.[next - 1] = '\n' then next - 2
@@ -100,7 +99,7 @@ let step units text at =
 
 let compute_location units source offset =
   let offset = max 0 (min offset (String.length source.text)) in
-  let index = line_index source offset in
+  let index = compute_line_index source offset in
   let rec count at column =
     if at >= offset then column
     else
@@ -116,7 +115,7 @@ let compute_position source offset =
 let compute_offset units source ~line ~column =
   if line >= Array.length source.line_starts then String.length source.text
   else
-    let stop = line_end source source.line_starts.(line) in
+    let stop = compute_line_end source source.line_starts.(line) in
     let rec walk at counted =
       if at >= stop || counted >= column then at
       else
@@ -125,4 +124,8 @@ let compute_offset units source ~line ~column =
     in
     walk source.line_starts.(line) 0
 
-let starts_line source offset = offset = line_start source offset
+let starts_line source offset = offset = compute_line_start source offset
+
+module For_testing = struct
+  let read_file path = create ~path (In_channel.with_open_bin path In_channel.input_all)
+end

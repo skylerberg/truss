@@ -1,3 +1,4 @@
+val read_version : string -> Registry.Version.t
 val parse_wanted : string -> Path.package * Registry.Version.t option
 
 type change =

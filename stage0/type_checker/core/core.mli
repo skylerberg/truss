@@ -1,8 +1,15 @@
 type id = int
 type origin = int
-type local = Named of origin | Self | Synthetic of int
+type mode_keyword = { mode : Types.mode; written : origin; operand : origin; place : origin }
+
+type local =
+  | Declared of { origin : origin; name : string }
+  | Trait_parameter of { index : int; name : string }
+  | Self
+  | Synthetic of int
+
 type quantifier = Forall | Exists
-type evidence = Impl of { impl : Path.t; arguments : Types.substitution } | Bound | Dynamic
+type evidence = Impl of { impl : Path.t; substitution : Types.substitution } | Bound | Dynamic
 
 type pattern_constant =
   | Boolean_constant of bool
@@ -13,33 +20,22 @@ type pattern_constant =
 type range_bound = Integer_bound of Z.t | Constant_bound of Path.t
 
 type 'indirect target =
-  | Function of { path : Path.t; type_arguments : Types.argument list }
+  | Function of { path : Path.t; instantiation : Types.instantiation }
   | Trait_method of {
       trait : Types.trait_reference;
       name : string;
       receiver : Path.receiver;
       self_type : Types.ty;
-      type_arguments : Types.argument list;
+      instantiation : Types.instantiation;
       evidence : evidence;
     }
   | Capability_method of { capability : Path.t; name : string }
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
   | Indirect of 'indirect
 
-type callee = operand target
-
-and call = {
-  callee : callee;
-  arguments : argument list;
-  lends : Types.mode option;
-  uses : Types.capability_set;
-}
-
-and argument =
-  | Passed of { mode : Types.mode; value : operand; mode_keyword : mode_keyword option }
-  | Default
-
-and mode_keyword = { written : origin; operand : origin }
+type callee = { target : operand target; uses : Types.capability_set }
+and call = { callee : callee; arguments : argument list; lends : Types.mode option }
+and argument = Passed of { mode : Types.mode; value : operand } | Default
 and operand = Place of place | Value of expression
 
 and place =
@@ -59,7 +55,7 @@ and kind =
   | Template of { literals : string list; call : expression }
   | Use of place
   | Copy of operand
-  | Function_value of { path : Path.t; type_arguments : Types.argument list }
+  | Function_value of { path : Path.t; instantiation : Types.instantiation }
   | Value_parameter of Types.parameter
   | Lambda of {
       parameters : pattern list;
@@ -99,18 +95,17 @@ and kind =
   | Yielded
   | Identical of expression * expression
   | Specification_function of { function_ : specification_function; arguments : expression list }
-  | Method_time of callee
+  | Method_cost of { metric : Metric.t; method_ : operand target }
 
 and capture = { local : local; type_ : Types.ty }
-and specification_function = Log | Power | Time | Calls
+and specification_function = Log | Power | Callback_cost of Metric.t | Calls
 and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
 and construction = Array | Specification_only
-and conversion = Widen | To_integer | From_integer
+and conversion = Widen | To_integer | From_integer | View_to_owned
 
 and binder =
-  | Over_type of { local : local; name : string; type_ : Types.ty }
+  | Over_type of { local : local; type_ : Types.ty }
   | Over_range of { pattern : pattern; start : expression; stop : expression; inclusive : bool }
-  | Over_collection of { pattern : pattern; collection : expression }
   | Over_elements of { pattern : pattern; elements : elements }
 
 and implementation = {
@@ -159,21 +154,21 @@ and iteration =
 and elements = { count : expression; position : pattern; element : place }
 and loop_clause = Invariant of expression | Decreases of expression list | Cost of cost
 and cost = { origin : origin; amortized : bool; resource : resource; bound : bound }
-and resource = Time | Allocations | Allocated_bytes | Calls of calls_target
+and resource = Metric of Metric.t | Calls of calls_target
 
 and calls_target =
   | Function_parameter of local
   | Capability of Path.t
   | Capability_method of Path.t * string
 
-and bound = Finite | Order_of of expression | At_most of expression | Exactly of expression
+and bound = Order_of of expression | At_most of expression | Exactly of expression
 and condition = { value : expression; executable : bool }
 and arm = { patterns : pattern list; guard : expression option; body : block; origin : origin }
 and pattern = { id : id; origin : origin; type_ : Types.ty; kind : pattern_kind }
 
 and pattern_kind =
   | Wildcard
-  | Bind of { local : local; name : string; is_var : bool; mode : Types.mode }
+  | Bind of { local : local; is_var : bool; mode : Types.mode }
   | Variant of { variant : string; fields : (string * pattern) list }
   | Record of (string * pattern) list
   | Literal of pattern_constant
@@ -183,14 +178,13 @@ and pattern_kind =
 
 type parameter = {
   local : local;
-  name : string;
   mode : Types.mode;
   type_ : Types.ty;
   default : expression option;
   callback_contract : callback_contract option;
 }
 
-and callback_contract = { inputs : (local * string) list; requires : expression list }
+and callback_contract = { inputs : local list; requires : expression list }
 
 type contract = {
   requires : condition list;

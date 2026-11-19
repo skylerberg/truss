@@ -1,0 +1,6 @@
+fn f(steps: UInt32) -> UInt32
+  uses RunForever
+  decreases steps
+{
+  f(steps)
+}

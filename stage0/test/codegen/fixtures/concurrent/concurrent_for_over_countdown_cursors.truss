@@ -1,10 +1,14 @@
-type Countdown(left: Int64)
+type Countdown(left: UInt64)
+
+fn Countdown.remaining(self) -> UInt64 {
+  self.left
+}
 
 impl Cursor for Countdown {
   type Element = String
 
   fn next(mut self) -> Option[String] {
-    if self.left <= 0 {
+    if self.left == 0 {
       return None
     }
     self.left -= 1
@@ -12,7 +16,7 @@ impl Cursor for Countdown {
   }
 }
 
-fn countdown(from: Int64) -> Countdown {
+fn countdown(from: UInt64) -> Countdown {
   Countdown(left: from)
 }
 

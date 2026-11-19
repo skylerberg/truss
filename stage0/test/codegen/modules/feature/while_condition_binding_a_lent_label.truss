@@ -1,0 +1,16 @@
+type Holder(id: Int64)
+
+fn Holder.label(self) lends Option[String] {
+  let text = "label ${self.id}"
+  Some(text)
+}
+
+test "a name that a `while` condition binds from a lent value lives until the body ends" uses RunForever {
+  let holder = Holder(id: 1)
+  var count: UInt64 = 0
+  while count < 3 && holder.label() is Some(text) {
+    assert text == "label 1"
+    count = count.saturating_add(1)
+  }
+  assert count == 3
+}

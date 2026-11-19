@@ -1,0 +1,28 @@
+fn with_a_clause(start: Countdown) -> UInt8
+  uses Meter, RunForever
+  cost calls(Meter.tick) == start.left + 1
+{
+  var left = start
+  var last: UInt8 = 0
+  for value in left
+    invariant visited.length() + left.left == start.left
+    cost calls(Meter.tick) == visited.length()
+  {
+    last = value
+  }
+  last
+}
+
+fn without_a_clause(start: Countdown) -> UInt8
+  uses Meter, RunForever
+  cost calls(Meter.tick) == start.left + 1
+{
+  var left = start
+  var last: UInt8 = 0
+  for value in left
+    invariant visited.length() + left.left == start.left
+  {
+    last = value
+  }
+  last
+}

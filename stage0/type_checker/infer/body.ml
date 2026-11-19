@@ -2,7 +2,8 @@ type checked = {
   form : Core.t;
   tables : Tables.published;
   used_packages : Path.package list;
-  places_without_own : Core.origin list;
+  places_without_keyword : (Core.origin * Types.mode) list;
+  mode_keywords : Core.mode_keyword list;
 }
 
 let no_output : State.env =
@@ -84,14 +85,14 @@ let list_clause_expressions (clauses : Syntax.clause list) =
       | Decreases measures -> List.map (fun measure -> (measure, `Cost_function)) measures
       | Cost { bound = Big_o value | At_most value | Exactly value; _ } ->
           [ (value, `Cost_function) ]
-      | Cost { bound = Finite; _ } | Uses _ | Clause_error -> [])
+      | Uses _ | Clause_error -> [])
     clauses
 
 let check_clauses state env (clauses : Syntax.clause list) =
   let env = { env with State.specification = true } in
   List.iter
     (fun (clause : Syntax.clause) ->
-      match clause.kind with Cost { resource; _ } -> State.check_resource state resource | _ -> ())
+      match clause.kind with Cost cost -> State.check_cost state cost | _ -> ())
     clauses;
   List.iter
     (fun ((value : Syntax.expression), kind) ->
@@ -138,20 +139,23 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
   List.iter
     (fun (parameter : Syntax.parameter) ->
       match parameter.kind with
-      | Named_parameter { name; default = Some value; _ } -> (
+      | Named_parameter { name; default; _ } -> (
           match
-            List.find_opt
-              (fun (info : Types.parameter_info) -> info.name = name.text)
-              signature.parameters
+            ( List.find_opt
+                (fun (info : Types.parameter_info) -> info.name = name.text)
+                signature.parameters,
+              default )
           with
-          | Some info ->
+          | Some info, Some value ->
               State.run_in_statement state env (State.read_span state value.id) (fun () ->
                   let actual = Expressions.check_expression state env ~expected:info.type_ value in
                   Name_lookup.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
               Constant.check state ~default:true value
-          | None -> ())
-      | _ -> ())
+          | Some { has_default = true; _ }, None ->
+              State.raise_bug "`%s` has no default, and its signature has one" name.text
+          | (Some _ | None), _ -> ())
+      | Self_parameter _ | Parameter_error -> ())
     written
 
 let build_core_contract state (clauses : Syntax.clause list) : Core.contract =
@@ -196,7 +200,6 @@ let build_core_parameters state (written : Syntax.parameter list) (signature : T
             (fun ((receiver : Path.receiver), type_) : Core.parameter ->
               {
                 local = Self;
-                name = "self";
                 mode = (match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read);
                 type_;
                 default = None;
@@ -208,8 +211,7 @@ let build_core_parameters state (written : Syntax.parameter list) (signature : T
             (fun (info : Types.parameter_info) : Core.parameter ->
               let default = Option.map (State.build_expression state) default in
               {
-                local = Named name.id;
-                name = name.text;
+                local = Declared { origin = name.id; name = name.text };
                 mode = info.mode;
                 type_ = info.type_;
                 default;
@@ -225,8 +227,8 @@ let build_core_parameters state (written : Syntax.parameter list) (signature : T
                             List.filter_map
                               (fun (input : Syntax.function_input) ->
                                 Option.map
-                                  (fun (input_name : Syntax.name) : (Core.local * string) ->
-                                    (Named input_name.id, input_name.text))
+                                  (fun (input_name : Syntax.name) : Core.local ->
+                                    Declared { origin = input_name.id; name = input_name.text })
                                   input.name)
                               inputs;
                           requires =
@@ -301,13 +303,18 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
     Resolve.Names.is_broken state.lookups.interface.names state.key part
     || (part = Body && not checks_body)
   in
+  let read_effective_signature () =
+    match Interface.Impls.read_signature state.lookups.interface state.key.path with
+    | Some signature -> signature
+    | None -> State.raise_bug "a function with an interface has no signature"
+  in
   if not (is_broken Header) then
     match (definition.kind, elaborated.interface) with
-    | Function { signature; body = written }, Function_interface lowered_signature ->
+    | Function { signature; body = written }, Function_interface _ ->
         check_function state ~broken_body:(is_broken Body) signature (Some written)
-          lowered_signature
-    | Method_declaration signature, Function_interface lowered_signature ->
-        check_function state ~broken_body:true signature None lowered_signature
+          (read_effective_signature ())
+    | Method_declaration signature, Function_interface _ ->
+        check_function state ~broken_body:true signature None (read_effective_signature ())
     | Type_definition { body = type_body; clauses; _ }, Type_interface interface -> (
         let self =
           Types.Named
@@ -431,8 +438,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                                   | Named_parameter { name; _ } ->
                                       Some
                                         {
-                                          local = Named name.id;
-                                          name = name.text;
+                                          local = Declared { origin = name.id; name = name.text };
                                           mode = Read;
                                           type_ = Form.read_local_type state name.id;
                                           default = None;
@@ -522,7 +528,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
         (match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
         | Some interface ->
             let substitution =
-              Interface.Properties.make_trait_substitution interface ~self:for_type trait
+              Types.make_trait_substitution interface.trait_generics ~self:for_type trait
             in
             state.law_parameters <-
               List.map
@@ -536,8 +542,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                 List.mapi
                   (fun index (name, type_) : Core.parameter ->
                     {
-                      local = Synthetic index;
-                      name;
+                      local = Trait_parameter { index; name };
                       mode = Read;
                       type_ = State.finalize_type state type_;
                       default = None;
@@ -545,7 +550,6 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                     })
                   state.law_parameters
               in
-              state.form.next_synthetic_local <- List.length parameters;
               Law_proof
                 {
                   parameters;
@@ -572,7 +576,8 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
 
 let finalize (state : State.state) =
   let finalize_type = State.finalize_type state
-  and finalize_argument = State.finalize_argument state in
+  and finalize_argument = State.finalize_argument state
+  and finalize_instantiation = State.finalize_instantiation state in
   let finalize_trait (reference : Types.trait_reference) =
     {
       reference with
@@ -581,12 +586,14 @@ let finalize (state : State.state) =
     }
   in
   let finalize_evidence : Tables.evidence -> Tables.evidence = function
-    | Impl { impl; arguments } ->
+    | Impl { impl; substitution } ->
         Impl
           {
             impl;
-            arguments =
-              List.map (fun (parameter, value) -> (parameter, finalize_argument value)) arguments;
+            substitution =
+              Types.map_substitution ~argument:finalize_argument
+                ~capabilities:(State.finalize_capabilities state)
+                substitution;
           }
     | other -> other
   in
@@ -595,15 +602,15 @@ let finalize (state : State.state) =
       written with
       callee =
         (match written.callee with
-        | Function { path; type_arguments } ->
-            Function { path; type_arguments = List.map finalize_argument type_arguments }
+        | Function { path; instantiation } ->
+            Function { path; instantiation = finalize_instantiation instantiation }
         | Trait_method method_ ->
             Trait_method
               {
                 method_ with
                 trait = finalize_trait method_.trait;
                 self_type = finalize_type method_.self_type;
-                type_arguments = List.map finalize_argument method_.type_arguments;
+                instantiation = finalize_instantiation method_.instantiation;
                 evidence = finalize_evidence method_.evidence;
               }
         | Constructor constructor ->
@@ -619,7 +626,6 @@ let finalize (state : State.state) =
                 type_arguments = List.map finalize_argument intrinsic.type_arguments;
               }
         | other -> other);
-      uses = State.finalize_capabilities state written.uses;
       callee_result = finalize_type written.callee_result;
     }
   in
@@ -632,8 +638,8 @@ let finalize (state : State.state) =
   update tables.scrutinee_types finalize_type;
   update tables.calls finalize_call;
   update tables.resolutions (function
-    | Tables.Global { path; type_arguments } ->
-        Tables.Global { path; type_arguments = List.map finalize_argument type_arguments }
+    | Tables.Global { path; instantiation } ->
+        Tables.Global { path; instantiation = finalize_instantiation instantiation }
     | Field_access { type_; field } -> Field_access { type_ = finalize_type type_; field }
     | Variant_value { type_; variant } -> Variant_value { type_ = finalize_type type_; variant }
     | Type_name type_ -> Type_name (finalize_type type_)
@@ -683,13 +689,21 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
   in
   let called = ref evidence_packages in
   Core_walk.walk_definition
-    (Core_walk.make_callee_visitor (function
-      | Trait_method { trait; evidence; _ } ->
-          called :=
-            Path.locate_package trait.trait
-            :: (match evidence with Impl { impl; _ } -> [ Path.locate_package impl ] | _ -> [])
-            @ !called
-      | _ -> ()))
+    {
+      Core_walk.ignore_all with
+      callee =
+        (fun callee ->
+          match callee.target with
+          | Trait_method { trait; evidence; _ } ->
+              called :=
+                Path.locate_package trait.trait
+                ::
+                (match evidence with
+                | Impl { impl; _ } -> [ Path.locate_package impl ]
+                | _ -> [])
+                @ !called
+          | _ -> ());
+    }
     form.definition;
   List.sort_uniq compare (named @ !called)
 
@@ -704,7 +718,10 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   let module_ = key.module_ in
   let definition = lookups.interface.names.read_definition key in
   let spans = lookups.interface.names.read_spans key in
-  let context = Interface.Elaborator.create lookups.interface resolved ~spans elaborated.scope in
+  let context =
+    Interface.Elaborator.create lookups.interface resolved ~spans
+      (Interface.Impls.read_scope lookups.interface key)
+  in
   let text = lazy (lookups.interface.names.read_text key) in
   let state : State.state =
     {
@@ -732,8 +749,9 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       law_parameters = [];
       frames = [];
       locals_read = [];
-      receiver_modes = [];
-      places_without_own = [];
+      keyword_modes = [];
+      places_without_keyword = [];
+      mode_keywords = [];
       yielded = Hashtbl.create 4;
       lent_tails = Hashtbl.create 4;
       lambdas = [];
@@ -820,7 +838,8 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
           tables = Tables.publish state.tables;
           used_packages =
             list_used_packages resolved ~evidence_packages:state.evidence_packages form;
-          places_without_own = state.places_without_own;
+          places_without_keyword = state.places_without_keyword;
+          mode_keywords = state.mode_keywords;
         }
   | _ ->
       Error

@@ -1,6 +1,6 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
 
-let gives (trait : Path.t) name =
+let derives (trait : Path.t) name =
   match (Well_known.of_path trait, name) with
   | Some Equal, "equal"
   | Some Hash, "hash"
@@ -23,7 +23,7 @@ let collapse_spaces text =
 
 let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
   match path with
-  | Method { owner = Derived { type_; trait } as impl; name; receiver = _ } when gives trait name
+  | Method { owner = Derived { type_; trait } as impl; name; receiver = _ } when derives trait name
     -> (
       match
         ( Interface.Definition.find_impl_interface lookups.interface impl,
@@ -64,7 +64,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   [
                     {
                       Core.local = Self;
-                      name = "self";
                       mode = (match receiver with Mut -> Mut | Own -> Own | _ -> Read);
                       type_;
                       default = None;
@@ -72,11 +71,10 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                     };
                   ]
               | Some (Static, _) | None -> [])
-            @ List.map
-                (fun (info : Types.parameter_info) : Core.parameter ->
+            @ List.mapi
+                (fun index (info : Types.parameter_info) : Core.parameter ->
                   {
-                    local = make_local ();
-                    name = info.name;
+                    local = Trait_parameter { index; name = info.name };
                     mode = info.mode;
                     type_ = info.type_;
                     default = None;
@@ -100,7 +98,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
               match
                 Interface.Impls.find_evidence lookups.interface ~list_bounds of_type reference
               with
-              | Some (From_impl { impl; substitution }) -> Impl { impl; arguments = substitution }
+              | Some (From_impl { impl; substitution }) -> Impl { impl; substitution }
               | Some From_bound -> Bound
               | Some From_any -> Dynamic
               | Some Built_in | Some (Accepted _) | None ->
@@ -109,40 +107,34 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             in
             node type_
               (Call
-                 {
-                   callee =
-                     Trait_method
-                       {
-                         trait = reference;
-                         name;
-                         receiver;
-                         self_type = of_type;
-                         type_arguments;
-                         evidence;
-                       };
-                   arguments;
-                   lends = None;
-                   uses = Types.no_capabilities;
-                 })
+                 (Callee_uses.make_call lookups.interface ~list_bounds
+                    ~callee:
+                      (Trait_method
+                         {
+                           trait = reference;
+                           name;
+                           receiver;
+                           self_type = of_type;
+                           instantiation = { Types.no_instantiation with type_arguments };
+                           evidence;
+                         })
+                    ~arguments ~lends:None))
           in
           let trait_call ~trait ~name ~receiver ~self_type ~evidence arguments type_ =
             node type_
               (Call
-                 {
-                   callee =
-                     Trait_method
-                       {
-                         trait = { trait; trait_arguments = []; associated = [] };
-                         name;
-                         receiver;
-                         self_type;
-                         type_arguments = [];
-                         evidence;
-                       };
-                   arguments;
-                   lends = None;
-                   uses = Types.no_capabilities;
-                 })
+                 (Callee_uses.make_call lookups.interface ~list_bounds
+                    ~callee:
+                      (Trait_method
+                         {
+                           trait = { trait; trait_arguments = []; associated = [] };
+                           name;
+                           receiver;
+                           self_type;
+                           instantiation = Types.no_instantiation;
+                           evidence;
+                         })
+                    ~arguments ~lends:None))
           in
           let text_argument text =
             Operands.build_argument Read
@@ -152,9 +144,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             Operands.build_argument Read
               (node (Types.make_builtin UInt64) (Integer (Z.of_int count)))
           in
-          let read place : Core.argument =
-            Passed { mode = Read; value = Place place; mode_keyword = None }
-          in
+          let read place : Core.argument = Passed { mode = Read; value = Place place } in
           let variants =
             match shape with
             | Sum variants ->
@@ -180,10 +170,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   Core.Field { base; field = field.field_name; type_ = field.field_type; origin } ))
               (record_fields ())
           in
-          let list_bound name_field (fields : Types.field list) =
-            List.map
-              (fun (field : Types.field) -> (field, make_local (), name_field field.field_name))
-              fields
+          let list_bound (fields : Types.field list) =
+            List.map (fun (field : Types.field) -> (field, make_local ())) fields
           in
           let binding variant bound : Core.pattern =
             pattern self_type
@@ -192,16 +180,15 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                    variant;
                    fields =
                      List.map
-                       (fun ((field : Types.field), local, name) ->
+                       (fun ((field : Types.field), local) ->
                          ( field.field_name,
-                           pattern field.field_type
-                             (Bind { local; name; is_var = false; mode = Read }) ))
+                           pattern field.field_type (Bind { local; is_var = false; mode = Read }) ))
                        bound;
                  })
           in
           let list_parts bound =
             List.map
-              (fun ((field : Types.field), local, _) ->
+              (fun ((field : Types.field), local) ->
                 (field, Core.Local { local; type_ = field.field_type; origin }))
               bound
           in
@@ -222,7 +209,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           arms =
                             List.mapi
                               (fun index (variant, fields) ->
-                                let mine = list_bound Fun.id fields in
+                                let mine = list_bound fields in
                                 arm (binding variant mine)
                                   (each (Some variant) index (list_parts mine)))
                               variants;
@@ -233,7 +220,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             match variant with
             | None -> build_same (record_parts other)
             | Some variant ->
-                let theirs = list_bound (fun name -> "other_" ^ name) (List.map fst mine) in
+                let theirs = list_bound (List.map fst mine) in
                 node type_
                   (Match
                      {
@@ -293,39 +280,34 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   | Named { path; _ } -> path
                   | _ -> raise_bug "a hasher that is not a named type"
                 in
-                let changed : Core.argument =
-                  Passed { mode = Mut; value = Place hasher; mode_keyword = None }
-                in
+                let changed : Core.argument = Passed { mode = Mut; value = Place hasher } in
                 let write number =
                   statement
                     (Evaluate
                        (node unit
                           (Call
-                             {
-                               callee =
-                                 Function
-                                   {
-                                     path =
-                                       Method
-                                         { owner = hasher_path; name = "write"; receiver = Mut };
-                                     type_arguments = [];
-                                   };
-                               arguments =
-                                 [
-                                   changed;
-                                   Passed
+                             (Callee_uses.make_call lookups.interface ~list_bounds
+                                ~callee:
+                                  (Function
                                      {
-                                       mode = Read;
-                                       value =
-                                         Value
-                                           (node (Types.make_builtin UInt64)
-                                              (Integer (Z.of_int number)));
-                                       mode_keyword = None;
-                                     };
-                                 ];
-                               lends = None;
-                               uses = Types.no_capabilities;
-                             })))
+                                       path =
+                                         Method
+                                           { owner = hasher_path; name = "write"; receiver = Mut };
+                                       instantiation = Types.no_instantiation;
+                                     })
+                                ~arguments:
+                                  [
+                                    changed;
+                                    Passed
+                                      {
+                                        mode = Read;
+                                        value =
+                                          Value
+                                            (node (Types.make_builtin UInt64)
+                                               (Integer (Z.of_int number)));
+                                      };
+                                  ]
+                                ~lends:None))))
                 in
                 of_self unit (fun variant index mine ->
                     {
@@ -375,13 +357,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                        (make_giving_block (compare_in_turn rest rest_of_theirs));
                                      arm
                                        (pattern result
-                                          (Bind
-                                             {
-                                               local = decided;
-                                               name = "decided";
-                                               is_var = false;
-                                               mode = Own;
-                                             }))
+                                          (Bind { local = decided; is_var = false; mode = Own }))
                                        (make_giving_block
                                           (node result
                                              (Use
@@ -451,13 +427,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                {
                                  pattern =
                                    pattern number
-                                     (Bind
-                                        {
-                                          local = theirs;
-                                          name = "theirs";
-                                          is_var = false;
-                                          mode = Own;
-                                        });
+                                     (Bind { local = theirs; is_var = false; mode = Own });
                                  value = Operands.build Own numbered;
                                  else_ = None;
                                });
@@ -488,9 +458,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       (Core.Local { local; type_; origin }, type_)
                   | [] -> raise_bug "`serialize` takes a serializer"
                 in
-                let sink_argument : Core.argument =
-                  Passed { mode = Mut; value = Place sink; mode_keyword = None }
-                in
+                let sink_argument : Core.argument = Passed { mode = Mut; value = Place sink } in
                 let serializer = Well_known.make_path Serializer in
                 let call name arguments =
                   statement
@@ -539,7 +507,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   | _ -> raise_bug "`deserialize` takes a deserializer"
                 in
                 let make_source_argument mode : Core.argument =
-                  Passed { mode; value = Place source; mode_keyword = None }
+                  Passed { mode; value = Place source }
                 in
                 let deserializer = Well_known.make_path Deserializer in
                 let error_type =
@@ -574,13 +542,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                          [
                                            ( "value",
                                              pattern ok
-                                               (Bind
-                                                  {
-                                                    local = value;
-                                                    name = "value";
-                                                    is_var = false;
-                                                    mode = Own;
-                                                  }) );
+                                               (Bind { local = value; is_var = false; mode = Own })
+                                           );
                                          ];
                                      }))
                                (make_giving_block
@@ -594,13 +557,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                          [
                                            ( "error",
                                              pattern error_type
-                                               (Bind
-                                                  {
-                                                    local = error;
-                                                    name = "error";
-                                                    is_var = false;
-                                                    mode = Own;
-                                                  }) );
+                                               (Bind { local = error; is_var = false; mode = Own })
+                                           );
                                          ];
                                      }))
                                (make_giving_block
@@ -633,18 +591,20 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   make_attempt ok
                     (node (make_result_type ok)
                        (Call
-                          {
-                            callee =
-                              Function
-                                {
-                                  path = Well_known.make_path function_;
-                                  type_arguments =
-                                    [ Types.Type field.field_type; Types.Type source_type ];
-                                };
-                            arguments = [ make_source_argument Mut; text_argument field.field_name ];
-                            lends = None;
-                            uses = Types.no_capabilities;
-                          }))
+                          (Callee_uses.make_call lookups.interface ~list_bounds
+                             ~callee:
+                               (Function
+                                  {
+                                    path = Well_known.make_path function_;
+                                    instantiation =
+                                      {
+                                        Types.no_instantiation with
+                                        type_arguments =
+                                          [ Types.Type field.field_type; Types.Type source_type ];
+                                      };
+                                  })
+                             ~arguments:[ make_source_argument Mut; text_argument field.field_name ]
+                             ~lends:None)))
                 in
                 let invariant_clauses =
                   match lookups.interface.names.find_key type_ with
@@ -673,22 +633,20 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   let holds =
                     node bool
                       (Call
-                         {
-                           callee =
-                             Intrinsic
-                               {
-                                 operation = Runtime Holds_invariant;
-                                 type_arguments = [ Types.Type self_type ];
-                               };
-                           arguments =
-                             [
-                               Passed
-                                 { mode = Read; value = Place built_place; mode_keyword = None };
-                               Operands.build_argument Read (node uint64 (Integer (Z.of_int index)));
-                             ];
-                           lends = None;
-                           uses = Types.no_capabilities;
-                         })
+                         (Callee_uses.make_call lookups.interface ~list_bounds
+                            ~callee:
+                              (Intrinsic
+                                 {
+                                   operation = Runtime Holds_invariant;
+                                   type_arguments = [ Types.Type self_type ];
+                                 })
+                            ~arguments:
+                              [
+                                Passed { mode = Read; value = Place built_place };
+                                Operands.build_argument Read
+                                  (node uint64 (Integer (Z.of_int index)));
+                              ]
+                            ~lends:None))
                   in
                   let error =
                     trait_call ~trait:deserializer ~name:"error" ~receiver:Read
@@ -722,11 +680,11 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                binds_lent_part = false;
                              })))
                 in
-                let bind_local local name type_ ~is_var value =
+                let bind_local local type_ ~is_var value =
                   statement
                     (Let
                        {
-                         pattern = pattern type_ (Bind { local; name; is_var; mode = Own });
+                         pattern = pattern type_ (Bind { local; is_var; mode = Own });
                          value = Operands.build Own value;
                          else_ = None;
                        })
@@ -750,7 +708,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   let lets =
                     List.map
                       (fun ((field : Types.field), local) ->
-                        bind_local local field.field_name field.field_type ~is_var:false
+                        bind_local local field.field_type ~is_var:false
                           (read_field Deserialize_required field field.field_type))
                       read
                   in
@@ -805,7 +763,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                            (Bind
                                                               {
                                                                 local = present;
-                                                                name = field.field_name;
                                                                 is_var = false;
                                                                 mode = Own;
                                                               }) );
@@ -852,7 +809,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   {
                     statements =
                       lets
-                      @ [ bind_local built "built" self_type ~is_var:(defaulted <> []) construct ]
+                      @ [ bind_local built self_type ~is_var:(defaulted <> []) construct ]
                       @ updates
                       @ [ finish end_ ]
                       @ List.map (make_invariant_check built_place) invariant_clauses;
@@ -898,15 +855,16 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           reference
                       with
                       | Some (From_impl { impl; substitution }) ->
-                          Core.Trait_method
-                            {
-                              trait = reference;
-                              name = "equal";
-                              receiver = Read;
-                              self_type = string_type;
-                              type_arguments = [];
-                              evidence = Impl { impl; arguments = substitution };
-                            }
+                          Callee_uses.make_callee lookups.interface ~list_bounds
+                            (Trait_method
+                               {
+                                 trait = reference;
+                                 name = "equal";
+                                 receiver = Read;
+                                 self_type = string_type;
+                                 instantiation = Types.no_instantiation;
+                                 evidence = Impl { impl; substitution };
+                               })
                       | _ -> raise_bug "`String` has no `Equal`"
                     in
                     let unknown =
@@ -924,31 +882,34 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                               (Core.Value
                                                  (node error_type
                                                     (Call
-                                                       {
-                                                         callee =
-                                                           Function
-                                                             {
-                                                               path =
-                                                                 Well_known.make_path
-                                                                   Unknown_variant;
-                                                               type_arguments =
-                                                                 [ Types.Type source_type ];
-                                                             };
-                                                         arguments =
-                                                           [
-                                                             make_source_argument Read;
-                                                             read name_place;
-                                                           ];
-                                                         lends = None;
-                                                         uses = Types.no_capabilities;
-                                                       }))) );
+                                                       (Callee_uses.make_call lookups.interface
+                                                          ~list_bounds
+                                                          ~callee:
+                                                            (Function
+                                                               {
+                                                                 path =
+                                                                   Well_known.make_path
+                                                                     Unknown_variant;
+                                                                 instantiation =
+                                                                   {
+                                                                     Types.no_instantiation with
+                                                                     type_arguments =
+                                                                       [ Types.Type source_type ];
+                                                                   };
+                                                               })
+                                                          ~arguments:
+                                                            [
+                                                              make_source_argument Read;
+                                                              read name_place;
+                                                            ]
+                                                          ~lends:None)))) );
                                         ];
                                     }))))
                     in
                     {
                       statements =
                         [
-                          bind_local name "name" string_type ~is_var:false
+                          bind_local name string_type ~is_var:false
                             (make_attempt string_type
                                (make_source_call "variant" [] (make_result_type string_type)));
                         ];

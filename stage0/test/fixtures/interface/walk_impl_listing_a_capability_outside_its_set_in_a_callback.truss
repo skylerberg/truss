@@ -1,0 +1,17 @@
+trait Walk {
+  capability Uses
+
+  fn each(self, visit: (fn(Int64) uses Self.Uses))
+    uses Self.Uses
+}
+
+type Pair(first: Int64, second: Int64)
+
+impl Walk for Pair {
+  capability Uses = Log
+
+  fn each(self, visit: (fn(Int64) uses Clock))
+    uses Self.Uses
+  {
+  }
+}

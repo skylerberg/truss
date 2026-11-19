@@ -1,0 +1,9 @@
+fn spin()
+  uses RunForever
+{
+  while true {}
+}
+
+fn start() {
+  spin()
+}

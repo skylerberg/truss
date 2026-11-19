@@ -1,0 +1,52 @@
+use standard::collections
+
+fn same_text(first: String, second: String) -> Bool
+  cost allocations == 0
+{
+  first == second
+}
+
+fn earlier_text(first: StringSlice, second: StringSlice) -> Bool
+  cost allocations == 0
+{
+  first < second
+}
+
+fn same_numbers(first: List[Int64], second: List[Int64]) -> Bool
+  cost allocations == 0
+{
+  first == second
+}
+
+fn hashed(text: String, hasher: mut Hasher)
+  cost allocations == 0
+{
+  text.hash(mut hasher)
+}
+
+fn has_name(names: Set[String], name: String) -> Bool
+  cost allocations == 0
+{
+  names.contains(name)
+}
+
+fn port_of(ports: Map[String, Int64], name: String) -> Int64
+  cost allocations == 0
+{
+  match ports.get(name) {
+    Some(port) => port
+    None => 0
+  }
+}
+
+fn has_sorted_key(ports: collections::SortedMap[String, Int64], name: String) -> Bool
+  cost allocations == 0
+{
+  ports.contains(name)
+}
+
+fn has_member[Element: Hash + Ordered](members: Set[Element], member: Element) -> Bool
+  cost allocations <= members.length() * allocations(Element.equal)
+{
+  members.contains(member)
+}

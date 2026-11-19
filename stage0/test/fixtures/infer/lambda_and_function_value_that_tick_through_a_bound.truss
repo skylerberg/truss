@@ -1,0 +1,26 @@
+trait Ticker {
+  fn tick(mut self) -> UInt64
+}
+
+fn advance[Inner: Ticker](ticker: mut Inner) -> UInt64
+  cost time O(time(Inner.tick))
+{
+  mut ticker.tick()
+}
+
+fn step_with[Source](
+  ticker: mut Source,
+  step: (fn(mut Source) -> UInt64 uses generic Granted),
+) -> UInt64
+  uses generic Granted
+  cost time O(time(step))
+{
+  step(mut ticker)
+}
+
+fn f[Inner: Ticker](ticker: mut Inner) -> UInt64
+  cost time O(time(Inner.tick))
+{
+  let first = step_with(mut ticker, step: fn(source) { mut source.tick() })
+  first.saturating_add(step_with(mut ticker, step: advance))
+}

@@ -1,0 +1,11 @@
+fn f[Output](items: own List[Output]) -> List[Output]
+  cost time O(items.length())
+{
+  var results: List[Output] = []
+  for item in own items
+    cost time O(visited.length())
+  {
+    mut results.push(own item)
+  }
+  results
+}

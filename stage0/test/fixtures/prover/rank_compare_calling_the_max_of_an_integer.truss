@@ -1,0 +1,11 @@
+trait Ranked {
+  fn outranks(self, other: Self) -> Bool
+}
+
+type Rank(value: Int64)
+
+impl Ranked for Rank {
+  fn outranks(self, other: Rank) -> Bool {
+    self.value.max(0).compare(other.value.max(0)) == Ordering.Greater
+  }
+}

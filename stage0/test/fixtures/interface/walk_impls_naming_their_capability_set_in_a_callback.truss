@@ -1,0 +1,54 @@
+trait Walk {
+  capability Uses
+
+  fn each(self, visit: (fn(Int64) uses Self.Uses))
+    uses Self.Uses
+}
+
+type Logged(first: Int64)
+
+impl Walk for Logged {
+  capability Uses = Log
+
+  fn each(self, visit: (fn(Int64) uses Self.Uses))
+    uses Self.Uses
+  {
+  }
+}
+
+type Listed(first: Int64)
+
+impl Walk for Listed {
+  capability Uses = Log
+
+  fn each(self, visit: (fn(Int64) uses Log))
+    uses Log
+  {
+  }
+}
+
+type Quiet(first: Int64)
+
+impl Walk for Quiet {
+  fn each(self, visit: (fn(Int64) uses Self.Uses))
+    uses Self.Uses
+  {
+  }
+}
+
+type Bare(first: Int64)
+
+impl Walk for Bare {
+  fn each(self, visit: fn(Int64)) {}
+}
+
+type Wrapper[Inner](inner: Inner)
+
+impl Walk for Wrapper[Inner: Walk] {
+  capability Uses = Inner.Uses
+
+  fn each(self, visit: (fn(Int64) uses Inner.Uses))
+    uses Inner.Uses
+  {
+  }
+}

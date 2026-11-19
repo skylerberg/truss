@@ -12,7 +12,7 @@ fn read(grid: Grid) -> Int64
   grid.broken() + 1
 }
 
-test "reads" {
+test "reads" uses Panic {
   let grid = Grid(cells: [1])
   assert read(grid) == 2
 }

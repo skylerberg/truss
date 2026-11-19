@@ -21,6 +21,22 @@ public trait FixedWidthInteger:
   fn bit_width() -> UInt64
     cost time O(1)
 
+  fn from_integer[Source: FixedWidthInteger](value: Source) -> Self
+    requires Self.minimum_value() <= value && value <= Self.maximum_value()
+    ensures result == value
+    cost time O(1)
+  {
+    intrinsic::convert(value)
+  }
+
+  fn try_from_integer[Source: FixedWidthInteger](value: Source) -> Result[Self, core::ConversionError]
+    ensures (result is Ok(_)) == (Self.minimum_value() <= value && value <= Self.maximum_value())
+    ensures !(result is Ok(converted) && converted != value)
+    cost time O(1)
+  {
+    if intrinsic::fits[Source, Self](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
+  }
+
   fn checked_power(self, exponent: UInt32) -> Option[Self]
     cost time O(log(exponent))
   {
@@ -60,18 +76,44 @@ public trait FixedWidthInteger:
   }
 
   fn to_float64(self) -> Float64
+    ensures identical(result, intrinsic::convert[Self, Float64](self))
     cost time O(1)
   {
     intrinsic::convert(self)
   }
 
   fn to_float32(self) -> Float32
+    ensures identical(result, intrinsic::convert[Self, Float32](self))
     cost time O(1)
   {
     intrinsic::convert(self)
   }
 
-  fn saturating_from(value: Float64) -> Self
+  fn try_from_float64(value: Float64) -> Result[Self, core::ConversionError]
+    ensures (result is Ok(_)) == (value == intrinsic::truncate(value) && intrinsic::fits[Float64, Self](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float64, Self](value))
+    cost time O(1)
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Self](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
+  }
+
+  fn try_from_float32(value: Float32) -> Result[Self, core::ConversionError]
+    ensures (result is Ok(_)) == (value == intrinsic::truncate(value) && intrinsic::fits[Float32, Self](value))
+    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float32, Self](value))
+    cost time O(1)
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Self](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
+  }
+
+  fn saturating_from_float64(value: Float64) -> Self
     cost time O(1)
   {
     if intrinsic::fits[Float64, Self](value) {
@@ -87,7 +129,6 @@ public trait FixedWidthInteger:
 
   fn exact_sum(items: Slice[Self]) -> Integer
     ensures result == items.model().sum(fn(item) { item })
-    cost time finite
   {
     items.model().sum(fn(item) { item })
   }

@@ -6,6 +6,7 @@ public trait Serialize {
 
 public trait Deserialize {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[Self, Error]
+    uses RunForever
 }
 
 public trait Serializer {
@@ -56,18 +57,20 @@ public type Error(path: String, message: String)
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     if self.path.length() > 0 {
-      mut output.write("at ")
-      mut output.write(self.path.slice())
-      mut output.write(": ")
+      mut output.push("at ")
+      mut output.push(self.path)
+      mut output.push(": ")
     }
-    mut output.write(self.message.slice())
+    mut output.push(self.message)
   }
 }
 
-public fn required[Field: Deserialize, Source: Deserializer](source: mut Source, name: StringSlice) -> Result[Field, Error] {
+public fn required[Field: Deserialize, Source: Deserializer](source: mut Source, name: StringSlice) -> Result[Field, Error]
+  uses RunForever
+{
   let _ = mut source.field(name)
   Field.deserialize(mut source)
 }
@@ -75,7 +78,9 @@ public fn required[Field: Deserialize, Source: Deserializer](source: mut Source,
 public fn optional[Field: Deserialize, Source: Deserializer](
   source: mut Source,
   name: StringSlice,
-) -> Result[Option[Field], Error] {
+) -> Result[Option[Field], Error]
+  uses RunForever
+{
   if !mut source.field(name) {
     return Ok(None)
   }
@@ -87,16 +92,16 @@ public fn optional[Field: Deserialize, Source: Deserializer](
 
 public fn unknown_variant[Source: Deserializer](source: Source, name: String) -> Error {
   var message = "there is no variant `"
-  mut message.push(name.slice())
+  mut message.push(name)
   mut message.push("`")
-  source.error(message.slice())
+  source.error(message)
 }
 
 fn out_of_range[Source: Deserializer](source: Source, type_name: StringSlice) -> Error {
   var message = "expected a number that fits `"
   mut message.push(type_name)
   mut message.push("`")
-  source.error(message.slice())
+  source.error(message)
 }
 
 impl Serialize for Bool {
@@ -113,13 +118,13 @@ impl Deserialize for Bool {
 
 impl Serialize for Int8 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.integer(Int64.from(self))
+    mut sink.integer(Int64.from_integer(self))
   }
 }
 
 impl Deserialize for Int8 {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[Int8, Error] {
-    match Int8.try_from(mut source.integer()?) {
+    match Int8.try_from_integer(mut source.integer()?) {
       Ok(number) => Ok(number)
       Err(_) => Err(out_of_range(source, type_name: "Int8"))
     }
@@ -128,13 +133,13 @@ impl Deserialize for Int8 {
 
 impl Serialize for Int16 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.integer(Int64.from(self))
+    mut sink.integer(Int64.from_integer(self))
   }
 }
 
 impl Deserialize for Int16 {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[Int16, Error] {
-    match Int16.try_from(mut source.integer()?) {
+    match Int16.try_from_integer(mut source.integer()?) {
       Ok(number) => Ok(number)
       Err(_) => Err(out_of_range(source, type_name: "Int16"))
     }
@@ -143,13 +148,13 @@ impl Deserialize for Int16 {
 
 impl Serialize for Int32 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.integer(Int64.from(self))
+    mut sink.integer(Int64.from_integer(self))
   }
 }
 
 impl Deserialize for Int32 {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[Int32, Error] {
-    match Int32.try_from(mut source.integer()?) {
+    match Int32.try_from_integer(mut source.integer()?) {
       Ok(number) => Ok(number)
       Err(_) => Err(out_of_range(source, type_name: "Int32"))
     }
@@ -170,13 +175,13 @@ impl Deserialize for Int64 {
 
 impl Serialize for UInt8 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.unsigned(UInt64.from(self))
+    mut sink.unsigned(UInt64.from_integer(self))
   }
 }
 
 impl Deserialize for UInt8 {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[UInt8, Error] {
-    match UInt8.try_from(mut source.unsigned()?) {
+    match UInt8.try_from_integer(mut source.unsigned()?) {
       Ok(number) => Ok(number)
       Err(_) => Err(out_of_range(source, type_name: "UInt8"))
     }
@@ -185,13 +190,13 @@ impl Deserialize for UInt8 {
 
 impl Serialize for UInt16 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.unsigned(UInt64.from(self))
+    mut sink.unsigned(UInt64.from_integer(self))
   }
 }
 
 impl Deserialize for UInt16 {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[UInt16, Error] {
-    match UInt16.try_from(mut source.unsigned()?) {
+    match UInt16.try_from_integer(mut source.unsigned()?) {
       Ok(number) => Ok(number)
       Err(_) => Err(out_of_range(source, type_name: "UInt16"))
     }
@@ -200,13 +205,13 @@ impl Deserialize for UInt16 {
 
 impl Serialize for UInt32 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.unsigned(UInt64.from(self))
+    mut sink.unsigned(UInt64.from_integer(self))
   }
 }
 
 impl Deserialize for UInt32 {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[UInt32, Error] {
-    match UInt32.try_from(mut source.unsigned()?) {
+    match UInt32.try_from_integer(mut source.unsigned()?) {
       Ok(number) => Ok(number)
       Err(_) => Err(out_of_range(source, type_name: "UInt32"))
     }
@@ -227,7 +232,7 @@ impl Deserialize for UInt64 {
 
 impl Serialize for Float32 {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.float(Float64.from(self))
+    mut sink.float(self.to_float64())
   }
 }
 
@@ -252,7 +257,7 @@ impl Deserialize for Float64 {
 
 impl Serialize for String {
   fn serialize[Sink: Serializer](self, sink: mut Sink) {
-    mut sink.text(self.slice())
+    mut sink.text(self)
   }
 }
 
@@ -273,7 +278,9 @@ impl Serialize for List[Element: Serialize] {
 }
 
 impl Deserialize for List[Element: Deserialize] {
-  fn deserialize[Source: Deserializer](source: mut Source) -> Result[List[Element], Error] {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[List[Element], Error]
+    uses RunForever
+  {
     mut source.begin_list()?
     var items: List[Element] = []
     while mut source.next_element() {
@@ -294,7 +301,9 @@ impl Serialize for Option[Inner: Serialize] {
 }
 
 impl Deserialize for Option[Inner: Deserialize] {
-  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Option[Inner], Error] {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Option[Inner], Error]
+    uses RunForever
+  {
     let kind = source.kind()
     if kind == Kind.Absent || kind == Kind.Null {
       mut source.skip()
@@ -312,7 +321,7 @@ impl Serialize for Map[Key: Hash + Ordered + Display, Member: Serialize] {
     mut sink.begin_map(self.length())
     for entry in self {
       let key = "${entry.key}"
-      mut sink.key(key.slice())
+      mut sink.key(key)
       entry.value.serialize(mut sink)
     }
     mut sink.end_map()
@@ -320,12 +329,14 @@ impl Serialize for Map[Key: Hash + Ordered + Display, Member: Serialize] {
 }
 
 impl Deserialize for Map[Key: Hash + Ordered + text::Parse, Member: Deserialize] {
-  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Map[Key, Member], Error] {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Map[Key, Member], Error]
+    uses RunForever
+  {
     mut source.begin_map()?
     var members: Map[Key, Member] = [:]
     while true {
       match mut source.next_key() {
-        Some(name) => match Key.parse(name.slice()) {
+        Some(name) => match Key.parse(name) {
           Ok(key) => mut members.insert(own key, value: Member.deserialize(mut source)?)
           Err(_) => return Err(source.error("expected a key of the map's type"))
         }
@@ -339,7 +350,7 @@ impl Deserialize for Map[Key: Hash + Ordered + text::Parse, Member: Deserialize]
 
 public fn serialize_text[Item: Display, Sink: Serializer](item: Item, sink: mut Sink) {
   let text = "${item}"
-  mut sink.text(text.slice())
+  mut sink.text(text)
 }
 
 public fn deserialize_text[Item: text::Parse, Source: Deserializer](
@@ -347,12 +358,12 @@ public fn deserialize_text[Item: text::Parse, Source: Deserializer](
   expected: StringSlice,
 ) -> Result[Item, Error] {
   let text = mut source.text()?
-  match Item.parse(text.slice()) {
+  match Item.parse(text) {
     Ok(item) => Ok(own item)
     Err(_) => {
       var message = "expected "
       mut message.push(expected)
-      Err(source.error(message.slice()))
+      Err(source.error(message))
     }
   }
 }
@@ -623,7 +634,7 @@ fn name_top[Node: Tree](reader: mut TreeReader[Node], name: own String) {
 fn expected_error[Node: Tree](reader: TreeReader[Node], expected: StringSlice) -> Error {
   var message = "expected "
   mut message.push(expected)
-  reader.error(message.slice())
+  reader.error(message)
 }
 
 fn mismatch_error[Node: Tree](reader: TreeReader[Node], expected: StringSlice) -> Error {
@@ -679,7 +690,7 @@ impl Deserializer for TreeReader[Node: Tree] {
       None => None
     }
     match found {
-      Some(integer) => match UInt64.try_from(integer) {
+      Some(integer) => match UInt64.try_from_integer(integer) {
         Ok(unsigned) => {
           self.current = None
           Ok(unsigned)
@@ -936,7 +947,7 @@ impl Deserializer for TreeReader[Node: Tree] {
     for segment in self.path {
       if segment.length() > 0 {
         mut path.push("/")
-        mut path.push(segment.slice())
+        mut path.push(segment)
       }
     }
     Error(path: own path, message: message.to_string())

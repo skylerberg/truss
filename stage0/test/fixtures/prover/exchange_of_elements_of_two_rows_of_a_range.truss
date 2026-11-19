@@ -1,0 +1,5 @@
+fn f(rows: mut List[List[Int64]])
+  requires rows.length() >= 2 && rows[0].length() >= 2 && rows[1].length() >= 1
+{
+  exchange(mut rows[..][0][1], second: mut rows[..][1][0])
+}

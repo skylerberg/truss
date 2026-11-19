@@ -1,0 +1,10 @@
+type Meters(length: Int64)
+
+type Wrapped(meters: Meters)
+  derives Equal
+
+impl Equal for Meters {
+  fn equal(self, other: Meters) -> Bool {
+    Wrapped(meters: Meters(length: self.length)) == Wrapped(meters: Meters(length: other.length))
+  }
+}

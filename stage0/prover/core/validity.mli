@@ -16,27 +16,28 @@ val make_validity :
   State.frame ->
   assuming:bool ->
   ?deep:bool ->
-  ?own:bool ->
+  ?includes_invariants:bool ->
   ?seen:Types.ty list ->
   Types.ty ->
   Logic.term ->
   Logic.term
+
+val find_parts_in_range :
+  State.context -> ?seen:Types.ty list -> Types.ty -> Logic.term -> Logic.term option
 
 val assume_valid : State.context -> State.frame -> Types.ty -> Logic.term -> unit
 
 val declare_callback_arguments :
   State.context -> State.frame -> ('a * Types.ty) list -> Logic.term list
 
-val make_callback_contract_frame :
-  State.frame -> (Core.local * 'a) list -> Logic.term list -> State.frame
-
+val make_callback_contract_frame : State.frame -> Core.local list -> Logic.term list -> State.frame
 val find_own_callback : State.context -> Core.local -> (string * Mir.callback) option
 val check_escaping_callback : State.context -> State.frame -> Core.local -> unit
 val run_reading_callback : State.context -> (unit -> 'a) -> 'a
 
-val bind_part_arguments :
+val bind_arguments :
   State.frame ->
-  State.part ->
+  State.clauses ->
   arguments:(int * Logic.term) list ->
   substitution:Types.substitution ->
   State.frame

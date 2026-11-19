@@ -20,7 +20,7 @@ and visit_type_argument on_expression = function
 and visit_capability_reference on_expression (reference : Syntax.capability_reference) =
   match reference.kind with
   | Capability_path path -> visit_path_type on_expression path
-  | Self_capabilities _ | Associated_capabilities _ -> ()
+  | Self_capabilities _ | Associated_capabilities _ | Generic_capability _ -> ()
 
 and visit_clause on_expression (clause : Syntax.clause) =
   match clause.kind with
@@ -28,9 +28,7 @@ and visit_clause on_expression (clause : Syntax.clause) =
   | Requires value | Ensures value -> on_expression value
   | Decreases measures -> List.iter on_expression measures
   | Cost cost -> (
-      match cost.bound with
-      | Big_o value | At_most value | Exactly value -> on_expression value
-      | Finite -> ())
+      match cost.bound with Big_o value | At_most value | Exactly value -> on_expression value)
   | Clause_error -> ()
 
 and visit_loop_clause on_expression (clause : Syntax.loop_clause) =
@@ -38,9 +36,7 @@ and visit_loop_clause on_expression (clause : Syntax.loop_clause) =
   | Invariant value -> on_expression value
   | Loop_decreases measures -> List.iter on_expression measures
   | Loop_cost cost -> (
-      match cost.bound with
-      | Big_o value | At_most value | Exactly value -> on_expression value
-      | Finite -> ())
+      match cost.bound with Big_o value | At_most value | Exactly value -> on_expression value)
 
 and visit_string_literal on_expression (literal : Syntax.string_literal) =
   List.iter (fun (value, _) -> on_expression value) literal.rest
@@ -172,7 +168,7 @@ let visit_generic_parameter on_expression (parameter : Syntax.generic_parameter)
   match parameter.kind with
   | Type_parameter (_, bounds) -> List.iter (visit_path_type on_expression) bounds
   | Value_parameter (_, type_) -> visit_type_expression on_expression type_
-  | Capability_parameter _ | Generic_error -> ()
+  | Generic_error -> ()
 
 let visit_type_head on_expression (head : Syntax.type_head) =
   List.iter (visit_generic_parameter on_expression) head.generics
@@ -315,7 +311,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
   and walk_capability (reference : Syntax.capability_reference) =
     match reference.kind with
     | Capability_path path -> walk_path_type path
-    | Self_capabilities name -> on_name name
+    | Self_capabilities name | Generic_capability name -> on_name name
     | Associated_capabilities (base, name) ->
         on_name base;
         on_name name
@@ -331,10 +327,8 @@ let walk_names ~on_name (definition : Syntax.definition) =
         | Calls (Call_method (capability, name)) ->
             walk_path_type capability;
             on_name name
-        | Time | Allocations | Allocated_bytes -> ());
-        match cost.bound with
-        | Big_o value | At_most value | Exactly value -> walk_expression value
-        | Finite -> ())
+        | Metric _ -> ());
+        match cost.bound with Big_o value | At_most value | Exactly value -> walk_expression value)
     | Clause_error -> ()
   and walk_string_literal (literal : Syntax.string_literal) =
     Option.iter walk_path literal.tag;
@@ -455,7 +449,6 @@ let walk_names ~on_name (definition : Syntax.definition) =
     | Value_parameter (name, type_) ->
         on_name name;
         walk_type type_
-    | Capability_parameter name -> on_name name
     | Generic_error -> ()
   in
   let walk_head (head : Syntax.type_head) =

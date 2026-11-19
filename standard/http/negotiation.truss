@@ -62,7 +62,7 @@ fn media_specificity(range: StringSlice, offered_type: StringSlice) -> Option[UI
     Some(at) => offered_type.split_at(at).first.trim()
     None => offered_type
   }
-  if range == "*/*".slice() {
+  if range == "*/*" {
     return Some(0)
   }
   if range.ends_with("/*") {
@@ -73,7 +73,7 @@ fn media_specificity(range: StringSlice, offered_type: StringSlice) -> Option[UI
 }
 
 fn language_specificity(range: StringSlice, offered: StringSlice) -> Option[UInt8] {
-  if range == "*".slice() {
+  if range == "*" {
     return Some(0)
   }
   if range == offered {
@@ -87,7 +87,7 @@ fn language_specificity(range: StringSlice, offered: StringSlice) -> Option[UInt
 }
 
 fn coding_specificity(range: StringSlice, offered: StringSlice) -> Option[UInt8] {
-  if range == "*".slice() {
+  if range == "*" {
     Some(0)
   } else if range == offered {
     Some(1)
@@ -100,7 +100,7 @@ fn quality_for(listed: Slice[Preference], offered: StringSlice, specificity: fn(
   var best: Option[UInt8] = None
   var quality: Option[UInt16] = None
   for preference in listed {
-    match specificity(preference.name.slice(), offered) {
+    match specificity(preference.name, offered) {
       Some(level) => {
         let is_better = match best {
           Some(current) => level > current
@@ -126,7 +126,7 @@ fn chosen(header: Option[StringSlice], offered: Slice[String], specificity: fn(S
   var winning: UInt16 = 0
   for option in offered {
     let name = option.slice().to_ascii_lowercase()
-    let quality = quality_for(listed.slice(), offered: name.slice(), specificity: specificity).unwrap_or(unlisted)
+    let quality = quality_for(listed.slice(), offered: name, specificity: specificity).unwrap_or(unlisted)
     if quality > winning {
       winning = quality
       winner = Some(option.copy())
@@ -159,7 +159,7 @@ public fn Request.preferred_encoding(self, offered: Slice[String]) -> Option[Str
         let quality = if name == "identity" {
           identity_quality(listed.slice())
         } else {
-          quality_for(listed.slice(), offered: name.slice(), specificity: coding_specificity).unwrap_or(0)
+          quality_for(listed.slice(), offered: name, specificity: coding_specificity).unwrap_or(0)
         }
         if quality > winning {
           winning = quality

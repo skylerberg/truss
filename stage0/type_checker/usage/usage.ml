@@ -130,7 +130,9 @@ let check_block context (written : Syntax.block) =
         if Infer.statement_diverges context.tables first then begin
           let last = List.nth rest (List.length rest - 1) in
           let unreachable = context.spans.(next.id) in
-          let line_start = Source.fragment_line_start (Lazy.force context.text) unreachable.start in
+          let line_start =
+            Source.compute_fragment_line_start (Lazy.force context.text) unreachable.start
+          in
           let deletion_start = if line_start > 0 then line_start - 1 else line_start in
           report context Unreachable_code unreachable
             ~fixes:
@@ -182,6 +184,124 @@ let check_unreachable context (definition : Syntax.definition) =
   List.iter (check_block context) bodies;
   Syntax_walk.visit_definition ~on_statement:visit_statement visit_expression definition
 
+type place =
+  | Self_place
+  | Local_place of Syntax.id
+  | Constant_place of Path.t
+  | Field_place of place * string
+  | Index_place of place * index_key
+
+and index_key = Literal_key of Z.t | Place_key of place
+
+let rec find_place context (value : Syntax.expression) =
+  match value.kind with
+  | Parenthesized inner -> find_place context inner
+  | Self_value -> Some Self_place
+  | Name path -> (
+      match (context.tables.resolutions.(value.id), context.resolved.names.(path.last.id)) with
+      | Some (Local_value id), _ -> Some (Local_place id)
+      | _, Some (Definition (Constant, constant)) -> Some (Constant_place constant)
+      | _ -> None)
+  | Member (base, _) -> (
+      match context.tables.resolutions.(value.id) with
+      | Some (Field_access { field; _ }) ->
+          Option.map (fun place -> Field_place (place, field)) (find_place context base)
+      | _ -> None)
+  | Bracket (base, [ Item key ]) when context.resolved.brackets.(value.id) = Some Index -> (
+      match (find_place context base, find_index_key context key) with
+      | Some place, Some index -> Some (Index_place (place, index))
+      | _ -> None)
+  | _ -> None
+
+and find_index_key context (key : Syntax.expression) =
+  match key.kind with
+  | Integer value -> Some (Literal_key value)
+  | _ -> Option.map (fun place -> Place_key place) (find_place context key)
+
+let rec is_same_place left right =
+  match (left, right) with
+  | Self_place, Self_place -> true
+  | Local_place left, Local_place right -> left = right
+  | Constant_place left, Constant_place right -> Path.equal left right
+  | Field_place (left_base, left_field), Field_place (right_base, right_field) ->
+      left_field = right_field && is_same_place left_base right_base
+  | Index_place (left_base, left_key), Index_place (right_base, right_key) ->
+      is_same_place left_base right_base && is_same_index_key left_key right_key
+  | _ -> false
+
+and is_same_index_key left right =
+  match (left, right) with
+  | Literal_key left, Literal_key right -> Z.equal left right
+  | Place_key left, Place_key right -> is_same_place left right
+  | _ -> false
+
+let describe_comparison (comparison : Syntax.comparison) =
+  match comparison with
+  | Equal -> ("==", true)
+  | Not_equal -> ("!=", false)
+  | Less -> ("<", false)
+  | Less_equal -> ("<=", true)
+  | Greater -> (">", false)
+  | Greater_equal -> (">=", true)
+
+let check_comparison context (value : Syntax.expression) comparison (left : Syntax.expression) right
+    =
+  match (find_place context left, find_place context right) with
+  | Some left_place, Some right_place when is_same_place left_place right_place ->
+      let text = Lazy.force context.text in
+      let span = context.spans.(value.id) in
+      let operand = Source.Definition_span.quote text context.spans.(left.id) in
+      let operator, is_always_true = describe_comparison comparison in
+      let outcome =
+        Printf.sprintf "`%s %s %s` compares a value with itself, so it is always %b." operand
+          operator operand is_always_true
+      in
+      let is_float =
+        match context.tables.types.(left.id) with
+        | Some type_ -> Types.is_float_type type_
+        | None -> false
+      in
+      begin match comparison with
+      | (Equal | Not_equal) when is_float ->
+          let test = operand ^ ".is_nan()" in
+          let replacement = if comparison = Equal then "!" ^ test else test in
+          report context Self_comparison span
+            ~fixes:
+              [
+                Diagnostic.fix
+                  (Printf.sprintf "Write `%s`." replacement)
+                  [ Diagnostic.replace span replacement ];
+              ]
+            (Printf.sprintf
+               "%s `==` treats every NaN as equal to itself, so a test for NaN calls `%s`." outcome
+               test)
+      | _ -> report context Self_comparison span ~fixes:[] outcome
+      end
+  | _ -> ()
+
+let check_self_comparisons context (definition : Syntax.definition) =
+  let rec visit_expression (value : Syntax.expression) =
+    (match value.kind with
+    | Binary { operator = Comparison comparison; left; right; _ } ->
+        check_comparison context value comparison left right
+    | _ -> ());
+    Syntax_walk.visit_expression_parts ~on_expression:visit_expression ~on_statement:visit_statement
+      value
+  and visit_statement (written : Syntax.statement) =
+    match written.kind with
+    | For { iterable; body; _ } ->
+        visit_expression iterable;
+        visit_block body
+    | While { condition; body; _ } ->
+        visit_expression condition;
+        visit_block body
+    | Proof _ -> ()
+    | _ ->
+        Syntax_walk.visit_statement_parts ~on_expression:visit_expression
+          ~on_statement:visit_statement written
+  and visit_block (block : Syntax.block) = List.iter visit_statement block.statements in
+  match definition.kind with Function { body; _ } | Test { body; _ } -> visit_block body | _ -> ()
+
 let check (lookups : Lookups.t) key =
   let definition = lookups.names.read_definition key in
   let context =
@@ -195,6 +315,7 @@ let check (lookups : Lookups.t) key =
   in
   check_unused context definition;
   check_unreachable context definition;
+  check_self_comparisons context definition;
   List.sort
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare left.span right.span)

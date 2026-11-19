@@ -1,0 +1,14 @@
+fn f[Output](
+  results: mut List[Output],
+  source: List[Int64],
+  transform: (fn(Int64) -> Output uses generic Granted),
+)
+  uses generic Granted
+  cost amortized time O(source.length() * time(transform))
+{
+  for index in 0..source.length()
+    cost time O(index * time(transform))
+  {
+    mut results.push(transform(source[index]))
+  }
+}

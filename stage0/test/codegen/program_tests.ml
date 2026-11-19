@@ -1,18 +1,20 @@
 let () =
   Codegen_support.test
     "a passing test's result is kept by its key, and only a changed test runs again" (fun () ->
-      incr Codegen_support.counter;
       let table = Hashtbl.create 4 in
-      let results : Compile.results =
+      let results : Backend.results =
         { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
       in
       let run text =
-        let database, compile = Codegen_support.load ~results text in
+        let database, backend = Codegen_support.load ~results text in
         match
-          Compile.run_tests compile ~time_limit_ms:2000 (Codegen_support.list_tests database)
+          Backend.run_tests backend ~time_limit_ms:2000 (Codegen_support.list_tests database)
         with
         | Ok records ->
-            ( (if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records
+            ( (if
+                 List.for_all
+                   (fun (record : Backend.Test_report.record) -> record.outcome = Passed)
+                   records
                then 0
                else 1),
               Codegen_support.render_records records )
@@ -33,15 +35,15 @@ let () =
   Codegen_support.test
     "an external test gets the real capabilities it uses, and its result is never kept" (fun () ->
       let table = Hashtbl.create 4 in
-      let results : Compile.results =
+      let results : Backend.results =
         { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
       in
-      let database, compile =
+      let database, backend =
         Codegen_support.load ~results Fixtures.Program.test_reading_the_clock
       in
       let run () =
         match
-          Compile.run_tests compile ~time_limit_ms:2000 (Codegen_support.list_tests database)
+          Backend.run_tests backend ~time_limit_ms:2000 (Codegen_support.list_tests database)
         with
         | Ok records -> records
         | Error message -> failwith message
@@ -55,14 +57,14 @@ let () =
 let () =
   Codegen_support.test
     "a test's standard output and standard error come back whole in its own record" (fun () ->
-      let database, compile = Codegen_support.load Fixtures.Program.tests_writing_to_the_console in
+      let database, backend = Codegen_support.load Fixtures.Program.tests_writing_to_the_console in
       let tests = Codegen_support.list_tests database in
-      match Compile.run_tests compile ~time_limit_ms:2000 tests with
+      match Backend.run_tests backend ~time_limit_ms:2000 tests with
       | Error message -> Codegen_support.fail "%s" message
       | Ok records -> (
           let results_by_name =
             List.map2
-              (fun (test : Path.t) (record : Compile.record) ->
+              (fun (test : Path.t) (record : Backend.Test_report.record) ->
                 match test with
                 | Test { name; _ } -> (name, (record.outcome, record.output))
                 | _ -> failwith "list_tests gave a path that is not a test")
@@ -107,12 +109,12 @@ let with_standard_input text work =
 let () =
   Codegen_support.test
     "a test's standard input is empty, whatever the runner's standard input holds" (fun () ->
-      let database, compile =
+      let database, backend =
         Codegen_support.load Fixtures.Program.test_reading_its_standard_input
       in
       match
         with_standard_input "typed at the terminal\n" (fun () ->
-            Compile.run_tests compile ~time_limit_ms:2000 (Codegen_support.list_tests database))
+            Backend.run_tests backend ~time_limit_ms:2000 (Codegen_support.list_tests database))
       with
       | Ok [ { outcome = Passed; _ } ] -> ()
       | Ok records -> Codegen_support.fail "%s" (Codegen_support.render_records records)
@@ -156,18 +158,11 @@ let () =
   Codegen_support.test
     "a release build stops a function that declares `uses Panic` at an operation that fails"
     (fun () ->
-      let _, compile =
-        Codegen_support.load ~checks:false Fixtures.Program.operations_that_stop_the_program
+      let program =
+        Codegen_support.build_main ~profile:Release
+          Fixtures.Program.operations_that_stop_the_program
       in
-      let run operation =
-        match
-          Compile.For_testing.run_program compile
-            ~main:(Top { module_ = Codegen_support.example; name = "main" })
-            ~arguments:[ operation ]
-        with
-        | Ok result -> result
-        | Error message -> failwith message
-      in
+      let run operation = Process.run program [ operation ] in
       List.iter
         (fun (operation, failure) ->
           let status, _, errors = run operation in
@@ -181,10 +176,12 @@ let () =
           ("index", "index out of bounds");
           ("slice", "slice out of bounds");
           ("key", "index out of bounds");
+          ("assignment", "index out of bounds");
+          ("inherited", "index out of bounds");
         ];
       let status, output, _ = run "none" in
       Codegen_support.expect_int ~expected:0 status;
-      Codegen_support.expect_string ~expected:"9223372036854775807 0 1\n" output)
+      Codegen_support.expect_string ~expected:"9223372036854775807 0 1 1 5\n" output)
 
 let () =
   Codegen_support.test "a program writes a file, reads it back, and reports a missing one"
@@ -374,15 +371,7 @@ let () =
   Codegen_support.test
     "a program finds its terminal, makes it raw, and restores it, or finds it has none" (fun () ->
       let directory = Lazy.force Codegen_support.scratch in
-      let program = Filename.concat directory "terminal-program" in
-      let _, compile = Codegen_support.load Fixtures.Program.raw_terminal in
-      (match
-         Compile.build_program compile
-           ~main:(Top { module_ = Codegen_support.example; name = "main" })
-           ~output:program
-       with
-      | Ok () -> ()
-      | Error message -> failwith message);
+      let program = Codegen_support.build_main Fixtures.Program.raw_terminal in
       let report name =
         let path = Filename.concat directory name in
         (path, fun () -> In_channel.with_open_text path In_channel.input_all)
@@ -642,12 +631,12 @@ let () =
       Codegen_support.expect_string ~expected:"150000\n5\n150000\n" output);
   Codegen_support.test "the console a program is given is a value its start owns and drops"
     (fun () ->
-      let _, compile = Codegen_support.load Fixtures.Program.main_using_the_console in
+      let _, backend = Codegen_support.load Fixtures.Program.main_using_the_console in
       let fragment =
-        Compile.For_testing.compile_fragment compile
-          (Generated (Program_main (Top { module_ = Codegen_support.example; name = "main" })))
+        Backend.For_testing.compile_fragment backend
+          (Generated (Program_main Codegen_support.example_main))
       in
-      let is_console_drop : Instance.key -> bool = function
+      let is_console_drop : Lowered.Item.t -> bool = function
         | Drop (Named { path = Top { name = "SystemConsole"; _ }; _ }) -> true
         | _ -> false
       in
@@ -673,7 +662,7 @@ let () =
             Codegen_support.make_example_package [ (Codegen_support.example_file, text) ]
           in
           if
-            Codegen_support.list_diagnostics
+            Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
               (Codegen_support.make_database packages)
               Codegen_support.example_file
             = []
@@ -682,32 +671,41 @@ let () =
               (Printf.sprintf "%s block %d lowers, and its tests pass" name (index + 1))
               (fun () ->
                 let checked = Codegen_support.make_database packages in
-                let interface =
-                  Database.make_interface_lookups checked
-                    [ Codegen_support.example_file.module_.package ]
-                in
+                let interface = Database.make_interface_lookups checked in
                 let functions =
                   List.filter_map
                     (fun (declaration : Resolve.Names.declaration) ->
                       match
-                        ( declaration.path,
-                          Interface.Definition.find_declared_signature interface declaration.path )
+                        ( declaration.key.path,
+                          Interface.Definition.find_declared_signature interface
+                            declaration.key.path )
                       with
-                      | Top _, Some { generics = []; specification_only = false; _ } ->
-                          Some (Instance.Code { path = declaration.path; type_arguments = [] })
+                      | ( Top _,
+                          Some
+                            {
+                              generics = [];
+                              capability_parameters = [];
+                              specification_only = false;
+                              _;
+                            } ) ->
+                          Some
+                            (Lowered.Item.Code
+                               {
+                                 path = declaration.key.path;
+                                 instantiation = Ground.no_instantiation;
+                               })
                       | _ -> None)
-                    ((Database.make_name_lookups checked [ Codegen_support.example.package ])
-                       .list_declarations Codegen_support.example)
+                    ((Database.make_name_lookups checked).list_declarations Codegen_support.example)
                 in
-                let database, compile = Codegen_support.load ~roots:functions text in
+                let database, backend = Codegen_support.load ~roots:functions text in
                 List.iter
-                  (fun key -> ignore (Compile.For_testing.compile_fragment compile key))
+                  (fun item -> ignore (Backend.For_testing.compile_fragment backend item))
                   functions;
                 match Codegen_support.list_tests database with
                 | [] -> ()
                 | tests ->
                     String.split_on_char '\n'
-                      (match Compile.run_tests compile ~time_limit_ms:2000 tests with
+                      (match Backend.run_tests backend ~time_limit_ms:2000 tests with
                       | Ok records -> Codegen_support.render_records records
                       | Error message -> failwith message)
                     |> List.iter (fun line ->
@@ -720,11 +718,11 @@ let () =
 let () =
   Codegen_support.test "a function value whose type uses Panic is called without evidence for Panic"
     (fun () ->
-      let source = Fixtures.Program.function_value_using_panic in
-      (match Codegen_support.run_main source with
+      let program = Codegen_support.build_main Fixtures.Program.function_value_using_panic in
+      (match Process.run program [] with
       | 0, output, _ -> Codegen_support.expect_string ~expected:"counted 1\ndone 3\n" output
       | status, _, errors -> Codegen_support.fail "ended with status %d: %s" status errors);
-      match Codegen_support.run_main ~arguments:[ "a"; "b"; "c"; "d" ] source with
+      match Process.run program [ "a"; "b"; "c"; "d" ] with
       | 101, output, errors ->
           Codegen_support.expect_string ~expected:"counted 5\n" output;
           if not (String.includes ~affix:"many arguments" errors) then
@@ -733,16 +731,65 @@ let () =
 
 let () =
   Codegen_support.test "a program whose capability method lends is not built yet" (fun () ->
-      let _, compile = Codegen_support.load Fixtures.Program.store_lending_its_value in
-      match
-        Compile.For_testing.run_program compile
-          ~main:(Top { module_ = Codegen_support.example; name = "main" })
-          ~arguments:[]
-      with
-      | Ok _ -> Codegen_support.fail "the program ran"
+      let _, backend = Codegen_support.load Fixtures.Program.store_lending_its_value in
+      match Codegen_support.build_program backend ~main:Codegen_support.example_main with
+      | Ok _ -> Codegen_support.fail "the program was built"
       | Error message ->
           if
             not
               (String.includes ~affix:"Stage0 cannot build this yet" message
               && String.includes ~affix:"a capability method that lends" message)
           then Codegen_support.fail "failed with: %s" message)
+
+let expect_panic_with fixture lines =
+  let status, _, errors = Codegen_support.run_main fixture in
+  Codegen_support.expect_int ~expected:101 status;
+  let expected = String.concat "\n" lines in
+  if not (String.includes ~affix:expected errors) then
+    Codegen_support.fail "%S is not in the error output:\n%s" expected errors
+
+let () =
+  Codegen_support.test "a panic prints the site of each call that led to it" (fun () ->
+      expect_panic_with Fixtures.Program.expect_failing_three_calls_deep
+        [ "panic: the values are not empty"; "  at standard/option/option.truss:" ];
+      expect_panic_with Fixtures.Program.expect_failing_three_calls_deep
+        [
+          "  called at example/main.truss:4:3";
+          "  called at example/main.truss:10:3";
+          "  called at example/main.truss:16:3";
+          "  called at example/main.truss:23:6";
+        ]);
+  Codegen_support.test "a panic in an impl's method prints the provide of the impl" (fun () ->
+      expect_panic_with Fixtures.Program.crash_in_an_impl_that_main_provides
+        [
+          "panic: the counter has no next value";
+          "  at example/main.truss:9:5";
+          "  called at example/main.truss:22:17";
+        ]);
+  Codegen_support.test "a pure function value can be passed where its function type allows Panic"
+    (fun () ->
+      let status, _, errors =
+        Codegen_support.run_main
+          Fixtures.Program.pure_function_variable_passed_where_panic_is_allowed
+      in
+      if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors)
+
+let () =
+  Codegen_support.test
+    "a function value is called with the capabilities of a type that allows more than it uses"
+    (fun () ->
+      let status, output, errors =
+        Codegen_support.run_main
+          Fixtures.Program.function_values_passed_where_more_capabilities_are_allowed
+      in
+      if status <> 0 then Codegen_support.fail "ended with status %d: %s" status errors;
+      Codegen_support.expect_string ~expected:"12\n" output);
+  Codegen_support.test "a panic's call chain continues through a call of a function value"
+    (fun () ->
+      expect_panic_with Fixtures.Program.crash_in_a_lambda_called_through_a_function_value
+        [
+          "panic: the lambda got more than 1";
+          "  at example/main.truss:12:7";
+          "  called at example/main.truss:4:3";
+          "  called at example/main.truss:10:16";
+        ])

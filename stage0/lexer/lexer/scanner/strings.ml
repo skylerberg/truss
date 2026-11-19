@@ -535,7 +535,7 @@ and compute_common_indentation lines =
   |> Option.value ~default:""
 
 and guess_raw_string_end cursor ~literal_start ~line_end =
-  let opener_line = Source.line_start cursor.source literal_start in
+  let opener_line = Source.compute_line_start cursor.source literal_start in
   let opener_indentation = Cursor.skip_spaces cursor opener_line - opener_line in
   let rec search position =
     if position >= cursor.length then None
@@ -584,9 +584,8 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
           in
           let next = stop index in
           let count = next - index in
-          Printf.sprintf "%d %s%s" count
-            (if character = '\t' then "tab" else "space")
-            (if count = 1 then "" else "s")
+          (if character = '\t' then Diagnostic.show_count count "tab" "tabs"
+           else Diagnostic.show_count count "space" "spaces")
           :: list_groups next
       in
       String.concat " then " (list_groups 0)

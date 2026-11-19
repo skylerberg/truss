@@ -1,0 +1,27 @@
+trait Convert[Target] {
+  fn convert(self) -> Target
+}
+
+trait Feeds {
+  fn feed[Item: Convert[Int64]](self, item: Item) -> UInt64
+}
+
+type Reader()
+
+impl Feeds for Reader {
+  fn feed[Item: Convert[String]](self, item: Item) -> UInt64 {
+    item.convert().length()
+  }
+}
+
+type Meters(value: Int64)
+
+impl Convert[Int64] for Meters {
+  fn convert(self) -> Int64 {
+    self.value
+  }
+}
+
+fn f(reader: Reader) -> UInt64 {
+  reader.feed(Meters(value: 3))
+}

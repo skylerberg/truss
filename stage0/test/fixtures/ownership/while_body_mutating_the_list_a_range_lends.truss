@@ -1,0 +1,10 @@
+fn show(text: String) {}
+
+fn f(names: mut List[String])
+  uses RunForever
+{
+  while names[..].last() is Some(name) {
+    mut names.clear()
+    show(name)
+  }
+}

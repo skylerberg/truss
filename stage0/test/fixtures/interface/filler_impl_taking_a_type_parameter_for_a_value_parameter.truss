@@ -1,0 +1,9 @@
+trait Filler {
+  fn fill[count: UInt64](self) -> Array[Int64, count]
+}
+
+type Thing()
+
+impl Filler for Thing {
+  fn fill[Count](self) -> Array[Int64, 4] { todo }
+}

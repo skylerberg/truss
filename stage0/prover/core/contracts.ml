@@ -17,11 +17,11 @@ let find_source (lookups : Lookups.t) (path : Path.t) =
     (lookups.mir.find_form_origin path)
 
 let make_trait_substitution (lookups : Lookups.t) (trait : Types.trait_reference) (ty : Types.ty) =
-  Interface.Properties.make_trait_substitution
-    (Interface.Definition.read_trait_interface lookups.interface trait.trait)
+  Types.make_trait_substitution
+    (Interface.Definition.read_trait_interface lookups.interface trait.trait).trait_generics
     ~self:ty trait
 
-let find_part ?(inherited = false) (lookups : Lookups.t) path callee =
+let find_clauses (lookups : Lookups.t) path callee =
   Option.map
     (fun (contract : Mir.contract) ->
       {
@@ -30,13 +30,9 @@ let find_part ?(inherited = false) (lookups : Lookups.t) path callee =
         requires = contract.requires;
         ensures = contract.ensures;
         decreases = contract.decreases;
-        costs =
-          List.filter
-            (fun (cost : Mir.cost) ->
-              match cost with { resource = Time; bound = Finite; _ } -> false | _ -> true)
-            contract.costs;
+        costs = contract.costs;
         callbacks = contract.callbacks;
-        inherited;
+        inherited = false;
       })
     (Option.map
        (fun ({ form; _ } : Mir.contract Mir.sourced) -> form)
@@ -74,7 +70,9 @@ let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference
           let variables =
             List.map (fun (generic : Types.generic) -> generic.generic) proven.generics
           in
-          match Interface.Impls.match_type ~variables [] proven.for_type for_type with
+          match
+            Interface.Impls.match_type ~variables Types.no_substitution proven.for_type for_type
+          with
           | Some renaming
             when List.equal is_same_argument
                    (List.map (Types.substitute_argument renaming) proven.trait.trait_arguments)
@@ -98,13 +96,19 @@ let is_law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_re
            (list_law_proofs lookups (Path.locate_package impl) trait for_type)
   | None -> false
 
-let make_contract (lookups : Lookups.t) path ~own ~others =
+let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
   let signature = Interface.Impls.read_signature lookups.interface path in
   let is_logic_function =
     match signature with
     | Some (signature : Types.signature) -> (
-        signature.uses = Types.no_capabilities
-        && signature.terminates
+        (not
+           (Types.exists_capability
+              (function
+                | Types.Capability_parameter _ -> false
+                | Types.Capability _ | Types.Capability_projection _ | Types.Capability_variable _
+                | Types.Capability_error _ ->
+                    true)
+              signature.uses))
         && List.for_all
              (fun (info : Types.parameter_info) -> info.mode <> Types.Mut)
              signature.parameters
@@ -112,54 +116,57 @@ let make_contract (lookups : Lookups.t) path ~own ~others =
     | None -> false
   in
   let result_kind = match signature with Some { output = Lends _; _ } -> `Lends | _ -> `Returns in
-  { State.parts = own :: others; is_logic_function; result_kind }
+  { State.callee_clauses; trait_clauses; is_logic_function; result_kind }
+
+let list_declared_clauses (contract : State.contract) =
+  contract.callee_clauses :: Option.to_list contract.trait_clauses
+
+let select_precondition_clauses (contract : State.contract) =
+  match contract.trait_clauses with
+  | Some trait_clauses when contract.callee_clauses.requires = [] -> trait_clauses
+  | Some _ | None -> contract.callee_clauses
 
 let find_function_contract lookups (path : Path.t) =
   Option.bind (find_source lookups path) (fun (callee, _, _) ->
-      Option.map
-        (fun own -> make_contract lookups path ~own ~others:[])
-        (find_part lookups path callee))
+      Option.map (make_contract lookups path) (find_clauses lookups path callee))
 
-let find_trait_part lookups (trait : Path.t) name receiver =
-  let path = Path.Method { owner = trait; name; receiver } in
-  Option.bind (find_source lookups path) (fun (callee, _, _) ->
-      find_part ~inherited:true lookups path callee)
+let find_declared_clauses lookups path =
+  Option.bind (find_source lookups path) (fun (callee, _, _) -> find_clauses lookups path callee)
+
+let find_trait_clauses lookups (trait : Path.t) name receiver =
+  Option.map
+    (fun (clauses : State.clauses) -> { clauses with inherited = true })
+    (find_declared_clauses lookups (Path.Method { owner = trait; name; receiver }))
 
 let find_capability_contract lookups (capability : Path.t) name =
   let path = Path.make_capability_method capability name in
   Option.bind (find_source lookups path) (fun (callee, _, _) ->
       Option.map
-        (fun own -> { (make_contract lookups path ~own ~others:[]) with is_logic_function = false })
-        (find_part lookups path callee))
+        (fun callee_clauses ->
+          { (make_contract lookups path callee_clauses) with is_logic_function = false })
+        (find_clauses lookups path callee))
 
-let find_capability_part lookups (capability : Path.t) name =
-  let path = Path.make_capability_method capability name in
-  Option.bind (find_source lookups path) (fun (callee, _, _) -> find_part lookups path callee)
+let find_capability_clauses lookups (capability : Path.t) name =
+  find_declared_clauses lookups (Path.make_capability_method capability name)
 
 let find_method_contract lookups (trait : Types.trait_reference) name receiver
     (evidence : Core.evidence) =
-  let trait_side = find_trait_part lookups trait.trait name receiver in
+  let trait_clauses = find_trait_clauses lookups trait.trait name receiver in
   match evidence with
   | Impl { impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
       match find_source lookups path with
       | Some (callee, _, (Written _ | Derived _)) ->
-          Option.map
-            (fun own -> make_contract lookups path ~own ~others:(Option.to_list trait_side))
-            (find_part lookups path callee)
-      | Some (_, _, Inherited _) | None ->
-          Option.map (fun own -> make_contract lookups path ~own ~others:[]) trait_side)
+          Option.map (make_contract ?trait_clauses lookups path) (find_clauses lookups path callee)
+      | Some (_, _, Inherited _) | None -> Option.map (make_contract lookups path) trait_clauses)
   | Bound | Dynamic ->
       Option.map
-        (fun own ->
-          make_contract lookups
-            (Path.Method { owner = trait.trait; name; receiver })
-            ~own ~others:[])
-        trait_side
+        (make_contract lookups (Path.Method { owner = trait.trait; name; receiver }))
+        trait_clauses
 
 let find_integer_literal (formula : Mir.formula) =
   match formula.value with
-  | { statements = []; value = Some (Constant { value = Integer number; _ }) } -> Some number
+  | { statements = []; value = Some (Immediate { value = Integer number; _ }) } -> Some number
   | _ -> None
 
 let deduplicate_counters counters =
@@ -169,31 +176,13 @@ let deduplicate_counters counters =
 
 let find_resource (cost : Mir.cost) ~locals : Costs.resource option =
   match cost.resource with
-  | Time -> Some Time
-  | Allocations -> Some Allocations
-  | Allocated_bytes -> Some Allocated_bytes
+  | Metric metric -> Some (Metric metric)
   | Calls (Function_parameter local) ->
       Option.map
         (fun term -> Costs.Calls (Through term))
         (Locals.find_opt (Core_local local) locals)
   | Calls (Capability path) -> Some (Calls (Capability path))
   | Calls (Capability_method (path, name)) -> Some (Calls (Capability_method (path, name)))
-
-let is_updating_helper (lookups : Lookups.t) (path : Path.t) =
-  match path with
-  | Method { receiver = Mut; _ } -> (
-      match
-        Option.map lookups.interface.names.read_definition (lookups.interface.names.find_key path)
-      with
-      | Some
-          {
-            visibility = Private;
-            kind = Function { signature = { name = Member_name _; _ }; _ };
-            _;
-          } ->
-          true
-      | _ -> false)
-  | _ -> false
 
 let find_comparison_operator (comparison : Core.comparison) =
   match comparison with

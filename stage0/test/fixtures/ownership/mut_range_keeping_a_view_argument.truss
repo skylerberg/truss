@@ -1,0 +1,12 @@
+fn keep(held: mut Slice[Slice[Int64]], view: Slice[Int64]) {
+  held[0] = view
+}
+
+fn f() -> UInt64 {
+  var data: List[Int64] = [1, 2, 3]
+  let other: List[Int64] = [4]
+  var views: List[Slice[Int64]] = [other[..]]
+  keep(mut views[..], view: data[0..2])
+  mut data.push(4)
+  views.length()
+}

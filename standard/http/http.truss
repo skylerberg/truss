@@ -33,28 +33,27 @@ public type Method =
   | Connect
   | Trace
   | Other(name: String)
-  derives Equal
+  derives Equal, Hash, Ordered
 
 public fn Method.from_name(name: StringSlice) -> Method
-  cost time finite
 {
-  if name == "GET".slice() {
+  if name == "GET" {
     Method.Get
-  } else if name == "HEAD".slice() {
+  } else if name == "HEAD" {
     Method.Head
-  } else if name == "POST".slice() {
+  } else if name == "POST" {
     Method.Post
-  } else if name == "PUT".slice() {
+  } else if name == "PUT" {
     Method.Put
-  } else if name == "PATCH".slice() {
+  } else if name == "PATCH" {
     Method.Patch
-  } else if name == "DELETE".slice() {
+  } else if name == "DELETE" {
     Method.Delete
-  } else if name == "OPTIONS".slice() {
+  } else if name == "OPTIONS" {
     Method.Options
-  } else if name == "CONNECT".slice() {
+  } else if name == "CONNECT" {
     Method.Connect
-  } else if name == "TRACE".slice() {
+  } else if name == "TRACE" {
     Method.Trace
   } else {
     Method.Other(name: name.to_string())
@@ -62,19 +61,19 @@ public fn Method.from_name(name: StringSlice) -> Method
 }
 
 impl Display for Method {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Get => mut output.write("GET")
-      Head => mut output.write("HEAD")
-      Post => mut output.write("POST")
-      Put => mut output.write("PUT")
-      Patch => mut output.write("PATCH")
-      Delete => mut output.write("DELETE")
-      Options => mut output.write("OPTIONS")
-      Connect => mut output.write("CONNECT")
-      Trace => mut output.write("TRACE")
-      Other(name) => mut output.write(name.slice())
+      Get => mut output.push("GET")
+      Head => mut output.push("HEAD")
+      Post => mut output.push("POST")
+      Put => mut output.push("PUT")
+      Patch => mut output.push("PATCH")
+      Delete => mut output.push("DELETE")
+      Options => mut output.push("OPTIONS")
+      Connect => mut output.push("CONNECT")
+      Trace => mut output.push("TRACE")
+      Other(name) => mut output.push(name)
     }
   }
 }
@@ -162,24 +161,6 @@ public type Header(name: String, value: String)
 public opaque type Headers(entries: List[Header])
   derives Equal, Copyable
 
-fn same_name(first: StringSlice, second: StringSlice) -> Bool
-  cost time finite
-{
-  if first.length() != second.length() {
-    return false
-  }
-  for index in 0..first.length() {
-    let a = first.byte(index)
-    let b = second.byte(index)
-    let lower_a = if 65 <= a && a <= 90 { a + 32 } else { a }
-    let lower_b = if 65 <= b && b <= 90 { b + 32 } else { b }
-    if lower_a != lower_b {
-      return false
-    }
-  }
-  true
-}
-
 public fn Headers.new() -> Headers {
   Headers(entries: [])
 }
@@ -194,7 +175,7 @@ public fn Headers.entries(self) -> Slice[Header] {
 
 public fn Headers.get(self, name: StringSlice) -> Option[StringSlice] {
   for entry in self.entries {
-    if same_name(entry.name.slice(), second: name) {
+    if entry.name.equal_ignoring_ascii_case(name) {
       return Some(entry.value.slice())
     }
   }
@@ -210,7 +191,7 @@ public fn Headers.add(mut self, name: StringSlice, value: StringSlice) {
 }
 
 public fn Headers.remove(mut self, name: StringSlice) {
-  mut self.entries.retain(fn(entry) { !same_name(entry.name.slice(), second: name) })
+  mut self.entries.retain(fn(entry) { !entry.name.equal_ignoring_ascii_case(name) })
 }
 
 public fn Headers.set(mut self, name: StringSlice, value: StringSlice) {
@@ -222,7 +203,7 @@ fn has_token(header: Option[StringSlice], token: StringSlice) -> Bool {
   match header {
     Some(value) => {
       for part in value.split(",") {
-        if same_name(part.trim(), second: token) {
+        if part.trim().equal_ignoring_ascii_case(token) {
           return true
         }
       }
@@ -261,7 +242,7 @@ public fn Request.query_parameter(self, name: StringSlice) -> Option[String] {
     Some(query) => match url::decode_query(query) {
       Ok(parameters) => {
         for parameter in parameters {
-          if parameter.name.slice() == name {
+          if parameter.name == name {
             return Some(parameter.value.copy())
           }
         }
@@ -278,14 +259,14 @@ public fn Request.header(self, name: StringSlice) -> Option[StringSlice] {
 }
 
 public fn Request.bytes(own self) -> Result[List[UInt8], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var body = own self.body
   mut body.read_all()
 }
 
 public fn Request.text(own self) -> Result[String, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   match String.from_utf8(own self.bytes()?) {
     Ok(text) => Ok(own text)
@@ -294,7 +275,7 @@ public fn Request.text(own self) -> Result[String, Error]
 }
 
 public fn Request.json[Item: serialization::Deserialize](own self) -> Result[Item, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let bytes = own self.bytes()?
   match json::parse_bytes(bytes.slice()) {
@@ -333,7 +314,7 @@ fn channel_body(chunks: tasks::Channel[flow::Chunk], credit: own Option[Credit],
 }
 
 fn next_chunk(source: mut Source) -> Result[Option[List[UInt8]], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   match mut source {
     Memory(bytes, position) => {
@@ -402,7 +383,7 @@ fn next_chunk(source: mut Source) -> Result[Option[List[UInt8]], Error]
 }
 
 public fn Body.read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
   ensures !(result is Ok(count) && (count > limit || buffer.length() != old(buffer.length()) + count))
 {
   if limit == 0 {
@@ -428,7 +409,7 @@ public fn Body.read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[
 }
 
 public fn Body.read_all(mut self) -> Result[List[UInt8], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var bytes = map::exchange(mut self.pending, value: [])
   while true {
@@ -446,7 +427,7 @@ public fn Body.read_all(mut self) -> Result[List[UInt8], Error]
 }
 
 public fn Body.copy_to[Sink: streams::Writer](mut self, sink: mut Sink) -> Result[UInt64, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let first = map::exchange(mut self.pending, value: [])
   system(mut sink.write_all(first.slice()))?
@@ -496,7 +477,7 @@ fn new_responder(outbound: tasks::Channel[flow::Outbound], stream: UInt32, is_he
 fn fields_of(headers: Headers, has_length: Bool) -> List[hpack::Field] {
   var fields: List[hpack::Field] = []
   for entry in headers.entries() {
-    if !is_connection_specific(entry.name.slice()) && !(has_length && same_name(entry.name.slice(), second: "content-length")) {
+    if !is_connection_specific(entry.name) && !(has_length && entry.name.equal_ignoring_ascii_case("content-length")) {
       mut fields.push(hpack::Field(name: entry.name.copy(), value: entry.value.copy()))
     }
   }
@@ -506,7 +487,7 @@ fn fields_of(headers: Headers, has_length: Bool) -> List[hpack::Field] {
 fn merged_fields(preset: Headers, headers: Headers, has_length: Bool) -> List[hpack::Field] {
   var fields = fields_of(headers, has_length: has_length)
   for entry in preset.entries() {
-    if !headers.contains(entry.name.slice()) && !is_connection_specific(entry.name.slice()) {
+    if !headers.contains(entry.name) && !is_connection_specific(entry.name) {
       mut fields.push(hpack::Field(name: entry.name.copy(), value: entry.value.copy()))
     }
   }
@@ -536,7 +517,7 @@ fn refuse_if_cancelled() -> Result[Unit, Error]
 }
 
 fn deliver(responder: Responder, message: own flow::Outbound) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   refuse_if_cancelled()?
   if responder.outbound.send(own message) is Err(_) {
@@ -553,7 +534,7 @@ public fn Responder.is_started(self) -> Bool {
 }
 
 public fn Responder.start(mut self, status: Status, headers: Headers = Headers(entries: [])) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   refuse_if_cancelled()?
   if self.phase != Phase.Waiting {
@@ -572,7 +553,7 @@ public fn Responder.start(mut self, status: Status, headers: Headers = Headers(e
 }
 
 fn Responder.switch_protocols(mut self, fields: own List[hpack::Field]) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   refuse_if_cancelled()?
   if self.phase != Phase.Waiting {
@@ -584,7 +565,7 @@ fn Responder.switch_protocols(mut self, fields: own List[hpack::Field]) -> Resul
 }
 
 public fn Responder.write(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   if self.phase == Phase.Waiting {
     mut self.start(Status.ok)?
@@ -600,7 +581,7 @@ public fn Responder.write(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
 }
 
 public fn Responder.finish(mut self) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   if self.phase == Phase.Waiting {
     return mut self.send(Response.new())
@@ -613,7 +594,7 @@ public fn Responder.finish(mut self) -> Result[Unit, Error]
 }
 
 public fn Responder.send(mut self, response: own Response) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   refuse_if_cancelled()?
   if self.phase != Phase.Waiting {
@@ -641,7 +622,7 @@ public fn Responder.stream[Input: streams::Reader](
   status: Status = Status.ok,
   headers: Headers = Headers(entries: []),
 ) -> Result[Unit, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   mut self.start(status, headers: headers)?
   var buffer: List[UInt8] = []
@@ -656,6 +637,7 @@ public fn Responder.stream[Input: streams::Reader](
 }
 
 public type Response(status: Status, headers: Headers = Headers(entries: []), body: List[UInt8] = [])
+  derives Equal
 
 public fn Response.new(status: Status = Status.ok) -> Response {
   Response(status: status)
@@ -689,8 +671,10 @@ fn is_compressible(content_type: Option[StringSlice]) -> Bool {
   }
 }
 
-internal fn encoded_body(bytes: Slice[UInt8], coding: StringSlice) -> List[UInt8] {
-  if coding == "zstd".slice() {
+internal fn encoded_body(bytes: Slice[UInt8], coding: StringSlice) -> List[UInt8]
+  uses RunForever
+{
+  if coding == "zstd" {
     zstd::compress(bytes)
   } else {
     compression::compress(bytes, format: compression::Format.Gzip, level: compression::Level.Fastest)
@@ -705,7 +689,9 @@ internal fn coding_on_the_fly(request: Request) -> Option[String] {
   request.preferred_encoding(offered.slice())
 }
 
-public fn Response.compressed(own self, request: Request) -> Response {
+public fn Response.compressed(own self, request: Request) -> Response
+  uses RunForever
+{
   var response = own self
   if response.body.length() < 1024 || response.headers.contains("Content-Encoding") || !is_compressible(response.headers.get("Content-Type")) {
     return response
@@ -713,8 +699,8 @@ public fn Response.compressed(own self, request: Request) -> Response {
   mut response.headers.add("Vary", value: "Accept-Encoding")
   match coding_on_the_fly(request) {
     Some(coding) => {
-      response.body = encoded_body(response.body.slice(), coding: coding.slice())
-      mut response.headers.set("Content-Encoding", value: coding.slice())
+      response.body = encoded_body(response.body.slice(), coding: coding)
+      mut response.headers.set("Content-Encoding", value: coding)
     }
     None => {}
   }
@@ -744,21 +730,21 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
       Malformed(message) => {
-        mut output.write("malformed HTTP: ")
-        mut output.write(message.slice())
+        mut output.push("malformed HTTP: ")
+        mut output.push(message)
       }
-      HeadTooLarge => mut output.write("the request line and headers are too large")
-      BodyTooLarge => mut output.write("the body is too large")
-      Closed => mut output.write("the connection closed before the message ended")
+      HeadTooLarge => mut output.push("the request line and headers are too large")
+      BodyTooLarge => mut output.push("the body is too large")
+      Closed => mut output.push("the connection closed before the message ended")
       System(error) => error.display(mut output)
       Tls(error) => error.display(mut output)
       Json(error) => error.display(mut output)
-      Unsupported(message) => mut output.write(message.slice())
-      TooManyRedirects => mut output.write("the server redirected more times than the client follows")
+      Unsupported(message) => mut output.push(message)
+      TooManyRedirects => mut output.push("the server redirected more times than the client follows")
     }
   }
 }
@@ -802,7 +788,7 @@ fn line_text(bytes: own List[UInt8]) -> Result[String, Error] {
 }
 
 fn fill[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox) -> Result[UInt64, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   system(connection.receive(mut inbox.bytes, limit: 16384))
 }
@@ -819,7 +805,7 @@ fn read_line[Stream: streams::Duplex](
   inbox: mut two::Inbox,
   budget: mut UInt64,
 ) -> Result[Option[String], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var searched: UInt64 = 0
   while true {
@@ -868,7 +854,7 @@ fn read_headers[Stream: streams::Duplex](
   inbox: mut two::Inbox,
   budget: mut UInt64,
 ) -> Result[Headers, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var headers = Headers.new()
   while true {
@@ -903,7 +889,7 @@ fn read_head[Stream: streams::Duplex](
   inbox: mut two::Inbox,
   limits: Limits,
 ) -> Result[Option[Head], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var budget = limits.head_bytes
   var request_line = ""
@@ -922,14 +908,14 @@ fn read_head[Stream: streams::Duplex](
     return Err(malformed("a request line that is not a method, a target, and a version"))
   }
   let version = parts[2]
-  if version != "HTTP/1.1".slice() && version != "HTTP/1.0".slice() {
+  if version != "HTTP/1.1" && version != "HTTP/1.0" {
     return Err(Error.Unsupported(message: "an HTTP version other than 1.0 and 1.1"))
   }
   let headers = read_headers(connection, inbox: mut inbox, budget: mut budget)?
   Ok(Some(Head(
     method: Method.from_name(parts[0]),
     target: parts[1].to_string(),
-    version_one_zero: version == "HTTP/1.0".slice(),
+    version_one_zero: version == "HTTP/1.0",
     headers: own headers,
   )))
 }
@@ -937,7 +923,7 @@ fn read_head[Stream: streams::Duplex](
 fn content_length(headers: Headers) -> Result[Option[UInt64], Error] {
   var declared: Option[UInt64] = None
   for entry in headers.entries() {
-    if same_name(entry.name.slice(), second: "Content-Length") {
+    if entry.name.equal_ignoring_ascii_case("Content-Length") {
       let digits = entry.value.slice()
       var digits_only = !digits.is_empty()
       for byte in digits.bytes() {
@@ -978,7 +964,7 @@ fn framing_of(headers: Headers, is_response: Bool) -> Result[Framing, Error] {
       let codings: List[StringSlice] = coding.split(",")
       match codings.last() {
         Some(last) => {
-          if !same_name(last.trim(), second: "chunked") {
+          if !last.trim().equal_ignoring_ascii_case("chunked") {
             return Err(Error.Unsupported(message: "a transfer coding other than chunked"))
           }
         }
@@ -994,7 +980,7 @@ fn framing_of(headers: Headers, is_response: Bool) -> Result[Framing, Error] {
 }
 
 fn take_some[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox, limit: UInt64) -> Result[List[UInt8], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if inbox.bytes.is_empty() {
     if fill(connection, inbox: mut inbox)? == 0 {
@@ -1010,7 +996,7 @@ fn next_piece[Stream: streams::Duplex](
   inbox: mut two::Inbox,
   framing: mut Framing,
 ) -> Result[Option[List[UInt8]], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while true {
     match mut framing {
@@ -1088,7 +1074,7 @@ fn pump_body[Stream: streams::Duplex](
   chunks: tasks::Channel[flow::Chunk],
   limit: UInt64,
 ) -> Bool
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var remaining = own framing
   var is_listening = true
@@ -1135,26 +1121,26 @@ fn head_bytes(status: UInt16, fields: Slice[hpack::Field], is_end: Bool, version
   uses Clock
 {
   var head: List[UInt8] = List.with_capacity(256)
-  push_text(mut head, text: "HTTP/1.1 ${status} ".slice())
+  push_text(mut head, text: "HTTP/1.1 ${status} ")
   push_text(mut head, text: Status(code: status).reason())
   push_text(mut head, text: "\r\n")
   var has_date = false
   var has_length = false
   for field in fields {
-    if same_name(field.name.slice(), second: "Date") {
+    if field.name.equal_ignoring_ascii_case("Date") {
       has_date = true
     }
-    if same_name(field.name.slice(), second: "Content-Length") {
+    if field.name.equal_ignoring_ascii_case("Content-Length") {
       has_length = true
     }
-    push_text(mut head, text: field.name.slice())
+    push_text(mut head, text: field.name)
     push_text(mut head, text: ": ")
-    push_text(mut head, text: field.value.slice())
+    push_text(mut head, text: field.value)
     push_text(mut head, text: "\r\n")
   }
   if !has_date {
     push_text(mut head, text: "Date: ")
-    push_text(mut head, text: format_date(Clock.now()).slice())
+    push_text(mut head, text: format_date(Clock.now()))
     push_text(mut head, text: "\r\n")
   }
   let has_payload = has_body(Status(code: status))
@@ -1173,7 +1159,7 @@ fn head_bytes(status: UInt16, fields: Slice[hpack::Field], is_end: Bool, version
 }
 
 fn collect_response(outbound: tasks::Channel[flow::Outbound]) -> Response
-  uses Tasks
+  uses Tasks, RunForever
 {
   var received = Status.ok
   var headers = Headers.new()
@@ -1183,7 +1169,7 @@ fn collect_response(outbound: tasks::Channel[flow::Outbound]) -> Response
       Head(status, fields, ack, ..) => {
         received = Status(code: status)
         for field in fields {
-          mut headers.add(field.name.slice(), value: field.value.slice())
+          mut headers.add(field.name, value: field.value)
         }
         let _ = ack.send(true)
       }
@@ -1197,11 +1183,11 @@ fn collect_response(outbound: tasks::Channel[flow::Outbound]) -> Response
   Response(status: received, headers: own headers, body: own body)
 }
 
-public fn respond[capability Granted](
-  handler: (fn(own Request, mut Responder) uses Granted),
+public fn respond(
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   request: own Request,
 ) -> Response
-  uses Tasks, Granted
+  uses Tasks, generic Granted, RunForever
 {
   let outbound = tasks::Channel[flow::Outbound].new(capacity: 2)
   let is_head = request.method == Method.Head
@@ -1225,7 +1211,7 @@ fn write_one[Stream: streams::Duplex](
   close: Bool,
   stopping: tasks::Channel[Unit],
 ) -> Bool
-  uses Handles, Tasks, Clock
+  uses Handles, Tasks, Clock, RunForever
 {
   var is_chunked = false
   var can_continue = true
@@ -1235,7 +1221,7 @@ fn write_one[Stream: streams::Duplex](
       Head(status, fields, is_end, ack, ..) => {
         var has_length = false
         for field in fields {
-          if same_name(field.name.slice(), second: "Content-Length") {
+          if field.name.equal_ignoring_ascii_case("Content-Length") {
             has_length = true
           }
         }
@@ -1254,7 +1240,7 @@ fn write_one[Stream: streams::Duplex](
         var framed: List[UInt8] = []
         if is_chunked {
           if !bytes.is_empty() {
-            push_text(mut framed, text: bytes.length().format(radix: 16).slice())
+            push_text(mut framed, text: bytes.length().format(radix: 16))
             push_text(mut framed, text: "\r\n")
             mut framed.append_slice(bytes.slice())
             push_text(mut framed, text: "\r\n")
@@ -1336,7 +1322,7 @@ fn forwarded_hops(headers: Headers) -> List[StringSlice] {
         var hop: Option[StringSlice] = None
         for pair in element.split(";") {
           let trimmed = pair.trim()
-          if trimmed.length() > 4 && same_name(trimmed.part(0, to: 4), second: "for=") {
+          if trimmed.length() > 4 && trimmed.part(0, to: 4).equal_ignoring_ascii_case("for=") {
             hop = Some(trimmed.part(4, to: trimmed.length()))
           }
         }
@@ -1381,7 +1367,7 @@ fn client_of(peer: Option[network::SocketAddress], headers: Headers, trusted: Sl
 }
 
 fn read_head_within[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox, limits: Limits, seconds: Int64) -> Result[Option[Head], Error]
-  uses Handles, Tasks, Clock
+  uses Handles, Tasks, Clock, RunForever
 {
   let limit = match timeout_of(seconds) {
     Some(limit) => limit
@@ -1399,14 +1385,14 @@ fn read_head_within[Stream: streams::Duplex](connection: Stream, inbox: mut two:
 type Handled = Completed | Disconnected | TimedOut
   derives Equal
 
-fn run_handler[capability Granted](
-  handler: (fn(own Request, mut Responder) uses Granted),
+fn run_handler(
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   request: own Request,
   responder: mut Responder,
   gone: tasks::Channel[Unit],
   seconds: Int64,
 ) -> Handled
-  uses Tasks, Clock, Granted
+  uses Tasks, Clock, generic Granted, RunForever
 {
   concurrent {
     {
@@ -1430,7 +1416,7 @@ fn run_handler[capability Granted](
 }
 
 fn watch_for_disconnect[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox, gone: tasks::Channel[Unit], handled: tasks::Channel[Unit])
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   concurrent {
     {
@@ -1470,7 +1456,7 @@ public fn Shutdown.is_begun(self) -> Bool
 }
 
 public fn Shutdown.wait(self)
-  uses Tasks
+  uses Tasks, RunForever
 {
   let _ = self.closing.receive()
 }
@@ -1499,7 +1485,7 @@ fn prepare(connection: mut network::Connection, options: ServerOptions)
 }
 
 fn refuse[Stream: streams::Duplex](connection: Stream, error: Error)
-  uses Handles, Tasks, Clock
+  uses Handles, Tasks, Clock, RunForever
 {
   let status = error_status(error)
   let text = "${error}"
@@ -1508,12 +1494,12 @@ fn refuse[Stream: streams::Duplex](connection: Stream, error: Error)
     hpack::Field(name: "Content-Length", value: "${text.length()}"),
   ]
   var bytes = head_bytes(status.code, fields: fields.slice(), is_end: false, version_one_zero: false, close: true)
-  push_text(mut bytes, text: text.slice())
+  push_text(mut bytes, text: text)
   let _ = connection.send_all(bytes.slice())
 }
 
 fn await_request[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox, stopping: tasks::Channel[Unit]) -> Bool
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   concurrent {
     {
@@ -1529,16 +1515,16 @@ fn await_request[Stream: streams::Duplex](connection: Stream, inbox: mut two::In
   }
 }
 
-fn serve_one[Stream: streams::Duplex, capability Granted](
+fn serve_one[Stream: streams::Duplex](
   connection: Stream,
   inbox: own two::Inbox,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   stopping: tasks::Channel[Unit],
   peer: Option[network::SocketAddress],
   certificates: Slice[x509::Certificate],
 )
-  uses Tasks, Handles, Clock, Granted
+  uses Tasks, Handles, Clock, generic Granted, RunForever
 {
   var unread = own inbox
   while true {
@@ -1628,8 +1614,8 @@ fn serve_one[Stream: streams::Duplex, capability Granted](
 }
 
 fn is_connection_specific(name: StringSlice) -> Bool {
-  same_name(name, second: "connection") || same_name(name, second: "keep-alive") || same_name(name, second: "proxy-connection")
-    || same_name(name, second: "transfer-encoding") || same_name(name, second: "upgrade")
+  name.equal_ignoring_ascii_case("connection") || name.equal_ignoring_ascii_case("keep-alive") || name.equal_ignoring_ascii_case("proxy-connection")
+    || name.equal_ignoring_ascii_case("transfer-encoding") || name.equal_ignoring_ascii_case("upgrade")
 }
 
 fn has_uppercase(name: StringSlice) -> Bool {
@@ -1657,26 +1643,26 @@ fn arrived_of(fields: Slice[hpack::Field]) -> Result[Arrived, Status] {
       if is_regular {
         return Err(Status.bad_request)
       }
-      if name == ":method".slice() && method is None {
+      if name == ":method" && method is None {
         method = Some(field.value.copy())
-      } else if name == ":path".slice() && path is None && !field.value.is_empty() {
+      } else if name == ":path" && path is None && !field.value.is_empty() {
         path = Some(field.value.copy())
-      } else if name == ":authority".slice() && authority is None {
+      } else if name == ":authority" && authority is None {
         authority = Some(field.value.copy())
-      } else if name == ":scheme".slice() && !has_scheme {
+      } else if name == ":scheme" && !has_scheme {
         has_scheme = true
       } else {
         return Err(Status.bad_request)
       }
     } else {
       is_regular = true
-      if has_uppercase(name) || is_connection_specific(name) || (name == "te".slice() && field.value != "trailers") {
+      if has_uppercase(name) || is_connection_specific(name) || (name == "te" && field.value != "trailers") {
         return Err(Status.bad_request)
       }
-      if name == "cookie".slice() {
+      if name == "cookie" {
         mut cookies.push(field.value.copy())
       } else {
-        mut headers.add(name, value: field.value.slice())
+        mut headers.add(name, value: field.value)
       }
     }
   }
@@ -1694,14 +1680,14 @@ fn arrived_of(fields: Slice[hpack::Field]) -> Result[Arrived, Status] {
       if !joined.is_empty() {
         mut joined.push("; ")
       }
-      mut joined.push(cookie.slice())
+      mut joined.push(cookie)
     }
-    mut headers.add("cookie", value: joined.slice())
+    mut headers.add("cookie", value: joined)
   }
   match authority {
     Some(host) => {
       if !headers.contains("host") {
-        mut headers.add("host", value: host.slice())
+        mut headers.add("host", value: host)
       }
     }
     None => {}
@@ -1709,17 +1695,17 @@ fn arrived_of(fields: Slice[hpack::Field]) -> Result[Arrived, Status] {
   if content_length(headers) is Err(_) {
     return Err(Status.bad_request)
   }
-  Ok(Arrived(method: Method.from_name(method_name.slice()), target: own target, headers: own headers))
+  Ok(Arrived(method: Method.from_name(method_name), target: own target, headers: own headers))
 }
 
-fn answer_arrival[capability Granted](
+fn answer_arrival(
   arrival: own two::Arrival,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   peer: Option[network::SocketAddress],
   certificates: Slice[x509::Certificate],
 )
-  uses Tasks, Clock, Granted
+  uses Tasks, Clock, generic Granted, RunForever
 {
   let limits = options.limits
   let stream = arrival.stream
@@ -1755,13 +1741,13 @@ fn answer_arrival[capability Granted](
   arrival.chunks.close()
 }
 
-fn serve_connection[capability Granted](
+fn serve_connection(
   connection: own network::Connection,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   stopping: tasks::Channel[Unit],
 )
-  uses Tasks, Handles, Clock, Granted
+  uses Tasks, Handles, Clock, generic Granted, RunForever
 {
   var opened = own connection
   prepare(mut opened, options: options)
@@ -1785,7 +1771,7 @@ fn serve_connection[capability Granted](
 }
 
 fn accept_within(connection: own network::Connection, config: tls::ServerConfig, seconds: Int64) -> Option[tls::Connection[network::Connection]]
-  uses Tasks, Handles, Clock, Random, Panic
+  uses Tasks, Handles, Clock, Random, Panic, RunForever
 {
   let limit = match timeout_of(seconds) {
     Some(limit) => limit
@@ -1800,14 +1786,14 @@ fn accept_within(connection: own network::Connection, config: tls::ServerConfig,
   }
 }
 
-fn serve_secured[capability Granted](
+fn serve_secured(
   connection: own network::Connection,
   config: tls::ServerConfig,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   stopping: tasks::Channel[Unit],
 )
-  uses Tasks, Handles, Clock, Random, Panic, Granted
+  uses Tasks, Handles, Clock, Random, Panic, generic Granted, RunForever
 {
   var opened = own connection
   prepare(mut opened, options: options)
@@ -1832,7 +1818,7 @@ fn accept_until(
   stopping: tasks::Channel[Unit],
   slots: tasks::Channel[Unit],
 )
-  uses Tasks, Handles, Clock
+  uses Tasks, Handles, Clock, RunForever
 {
   concurrent {
     {
@@ -1861,13 +1847,13 @@ fn accept_until(
   }
 }
 
-fn drain_until[capability Work](
+fn drain_until(
   connections: tasks::Channel[network::Connection],
   stopping: tasks::Channel[Unit],
   grace_seconds: Int64,
-  serve_each: (fn(own network::Connection) uses Work),
+  serve_each: (fn(own network::Connection) uses generic Work),
 )
-  uses Tasks, Clock, Work
+  uses Tasks, Clock, generic Work, RunForever
 {
   concurrent {
     {
@@ -1886,13 +1872,13 @@ fn drain_until[capability Work](
   }
 }
 
-fn run[capability Work](
+fn run(
   listener: mut network::Listener,
   stopping: tasks::Channel[Unit],
   options: ServerOptions,
-  serve_each: (fn(own network::Connection) uses Work),
+  serve_each: (fn(own network::Connection) uses generic Work),
 )
-  uses Tasks, Handles, Clock, Work
+  uses Tasks, Handles, Clock, generic Work, RunForever
 {
   let connections = tasks::Channel[network::Connection].new()
   let slots = tasks::Channel[Unit].new(capacity: if options.connection_limit == 0 { 1 } else { options.connection_limit })
@@ -1908,13 +1894,13 @@ fn run[capability Work](
   }
 }
 
-public fn serve[capability Granted](
+public fn serve(
   listener: mut network::Listener,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions = ServerOptions(),
   shutdown: Option[Shutdown] = None,
 )
-  uses Tasks, Handles, Clock, Granted
+  uses Tasks, Handles, Clock, generic Granted, RunForever
 {
   let stopping = stopping_of(shutdown)
   run(mut listener, stopping: stopping, options: options, serve_each: fn(connection) {
@@ -1922,14 +1908,14 @@ public fn serve[capability Granted](
   })
 }
 
-public fn serve_tls[capability Granted](
+public fn serve_tls(
   listener: mut network::Listener,
   config: tls::ServerConfig,
-  handler: (fn(own Request, mut Responder) uses Granted),
+  handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions = ServerOptions(),
   shutdown: Option[Shutdown] = None,
 )
-  uses Tasks, Handles, Clock, Random, Panic, Granted
+  uses Tasks, Handles, Clock, Random, Panic, generic Granted, RunForever
 {
   var configured = config.copy()
   if configured.protocols.is_empty() {
@@ -1955,7 +1941,7 @@ public opaque type Parameters(names: List[String], values: List[String])
 
 public fn Parameters.get(self, name: StringSlice) -> Option[StringSlice] {
   for index in 0..self.names.length() {
-    if self.names[index].slice() == name && index < self.values.length() {
+    if self.names[index] == name && index < self.values.length() {
       return Some(self.values[index].slice())
     }
   }
@@ -1963,7 +1949,6 @@ public fn Parameters.get(self, name: StringSlice) -> Option[StringSlice] {
 }
 
 fn path_pieces(path: StringSlice) -> List[StringSlice]
-  cost time finite
 {
   var pieces: List[StringSlice] = []
   var start: UInt64 = 0
@@ -1982,7 +1967,6 @@ fn path_pieces(path: StringSlice) -> List[StringSlice]
 }
 
 fn is_parameter_name(name: StringSlice) -> Bool
-  cost time finite
 {
   if name.is_empty() {
     return false
@@ -1996,7 +1980,6 @@ fn is_parameter_name(name: StringSlice) -> Bool
 }
 
 fn parse_route(text: StringSlice) -> Option[Route]
-  cost time finite
 {
   var method: Option[Method] = None
   var path = text
@@ -2033,7 +2016,7 @@ fn parse_route(text: StringSlice) -> Option[Route]
         return None
       }
       for known in names {
-        if known.slice() == name {
+        if known == name {
           return None
         }
       }
@@ -2054,7 +2037,6 @@ public fn Route.parse(text: StringSlice) -> Option[Route] {
 }
 
 public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
-  cost time finite
 {
   literals.length() == 1 && parse_route(literals[0].text()) is Some(_)
 }
@@ -2099,7 +2081,7 @@ public fn Request.matches(self, route: Route) -> Option[Parameters] {
   for segment in route.segments {
     match segment {
       Fixed(text) => {
-        if index >= pieces.length() || pieces[index] != text.slice() {
+        if index >= pieces.length() || pieces[index] != text {
           return None
         }
         index += 1
@@ -2160,7 +2142,7 @@ fn first_variable(names: Slice[String]) -> Option[String]
   uses Environment
 {
   for name in names {
-    match Environment.variable(name.slice()) {
+    match Environment.variable(name) {
       Some(value) => {
         if !value.slice().trim().is_empty() {
           return Some(value.slice().trim().to_string())
@@ -2178,7 +2160,7 @@ fn proxy_url(text: own Option[String]) -> Option[url::Url] {
     None => return None
   }
   let full = if value.slice().contains("://") { own value } else { "http://${value}" }
-  url::parse(full.slice()).ok()
+  url::parse(full).ok()
 }
 
 public fn proxy_from_environment() -> Option[Proxy]
@@ -2217,12 +2199,12 @@ fn is_excluded(excluded: Slice[String], host: StringSlice) -> Bool {
   let bare = name.strip_suffix("]").unwrap_or(name).to_ascii_lowercase()
   for entry in excluded {
     let listed = entry.slice()
-    if listed == "*".slice() {
+    if listed == "*" {
       return true
     }
     match network_of(listed) {
       Some(network) => {
-        match network::parse_address(bare.slice()) {
+        match network::parse_address(bare) {
           Ok(address) => {
             if network.contains(address) {
               return true
@@ -2235,7 +2217,7 @@ fn is_excluded(excluded: Slice[String], host: StringSlice) -> Bool {
       None => {}
     }
     let suffix = listed.strip_prefix(".").unwrap_or(listed)
-    if bare.slice() == suffix || (bare.slice().ends_with(suffix) && bare.slice().ends_with(".${suffix}".slice())) {
+    if bare == suffix || (bare.slice().ends_with(suffix) && bare.slice().ends_with(".${suffix}")) {
       return true
     }
   }
@@ -2269,11 +2251,11 @@ fn basic_authorization(proxy: url::Url) -> Option[String] {
 type Forwarding(authorization: Option[String])
 
 fn tunnel(connection: mut network::Connection, host: StringSlice, port: UInt16, authorization: Option[String], limits: Limits) -> Result[Unit, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var request = "CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\n"
   match authorization {
-    Some(value) => mut request.push("Proxy-Authorization: ${value}\r\n".slice())
+    Some(value) => mut request.push("Proxy-Authorization: ${value}\r\n")
     None => {}
   }
   mut request.push("\r\n")
@@ -2295,7 +2277,7 @@ fn content_codings(header: Option[StringSlice]) -> List[String] {
     Some(value) => {
       for part in value.split(",") {
         let coding = part.trim().to_ascii_lowercase()
-        if !coding.is_empty() && coding.slice() != "identity".slice() {
+        if !coding.is_empty() && coding != "identity" {
           mut codings.push(own coding)
         }
       }
@@ -2306,18 +2288,20 @@ fn content_codings(header: Option[StringSlice]) -> List[String] {
 }
 
 fn is_decodable(coding: StringSlice) -> Bool {
-  coding == "gzip".slice() || coding == "x-gzip".slice() || coding == "br".slice() || coding == "zstd".slice()
+  coding == "gzip" || coding == "x-gzip" || coding == "br" || coding == "zstd"
 }
 
-fn decoded_body(bytes: Slice[UInt8], coding: StringSlice, limit: UInt64) -> Result[List[UInt8], Error] {
-  if coding == "br".slice() {
+fn decoded_body(bytes: Slice[UInt8], coding: StringSlice, limit: UInt64) -> Result[List[UInt8], Error]
+  uses RunForever
+{
+  if coding == "br" {
     return match brotli::decompress(bytes, limit: limit) {
       Ok(plain) => Ok(own plain)
       Err(TooLarge(_)) => Err(Error.BodyTooLarge)
       Err(_) => Err(malformed("a Brotli body that does not decompress"))
     }
   }
-  if coding == "zstd".slice() {
+  if coding == "zstd" {
     return match zstd::decompress(bytes, limit: limit) {
       Ok(plain) => Ok(own plain)
       Err(TooLarge(_)) => Err(Error.BodyTooLarge)
@@ -2331,11 +2315,13 @@ fn decoded_body(bytes: Slice[UInt8], coding: StringSlice, limit: UInt64) -> Resu
   }
 }
 
-fn decoded(status: Status, headers: own Headers, body: own List[UInt8], limits: Limits) -> Result[Response, Error] {
+fn decoded(status: Status, headers: own Headers, body: own List[UInt8], limits: Limits) -> Result[Response, Error]
+  uses RunForever
+{
   let codings = content_codings(headers.get("Content-Encoding"))
   var is_known = !codings.is_empty()
   for coding in codings {
-    if !is_decodable(coding.slice()) {
+    if !is_decodable(coding) {
       is_known = false
     }
   }
@@ -2349,7 +2335,7 @@ fn decoded(status: Status, headers: own Headers, body: own List[UInt8], limits: 
     decreases index
   {
     index -= 1
-    plain = decoded_body(plain.slice(), coding: codings[index].slice(), limit: limits.body_bytes)?
+    plain = decoded_body(plain.slice(), coding: codings[index], limit: limits.body_bytes)?
   }
   var plain_headers = own headers
   mut plain_headers.remove("Content-Encoding")
@@ -2374,11 +2360,11 @@ fn request_target(url: url::Url) -> String {
 fn authority_of(url: url::Url) -> String {
   var authority = ""
   match url.host() {
-    Some(host) => mut authority.push("${host}".slice())
+    Some(host) => host.display(mut authority)
     None => {}
   }
   match url.port() {
-    Some(port) => mut authority.push(":${port}".slice())
+    Some(port) => mut authority.push(":${port}")
     None => {}
   }
   authority
@@ -2390,42 +2376,42 @@ fn sends_length(method: Method, body_length: UInt64) -> Bool {
 
 fn request_head(method: Method, url: url::Url, headers: Headers, body_length: UInt64, forwarding: Option[Forwarding] = None) -> List[UInt8] {
   var head: List[UInt8] = List.with_capacity(256)
-  push_text(mut head, text: "${method} ".slice())
+  push_text(mut head, text: "${method} ")
   match forwarding {
     Some(forward) => {
-      push_text(mut head, text: "${url.scheme()}://${authority_of(url)}".slice())
-      push_text(mut head, text: request_target(url).slice())
+      push_text(mut head, text: "${url.scheme()}://${authority_of(url)}")
+      push_text(mut head, text: request_target(url))
       push_text(mut head, text: " HTTP/1.1\r\n")
       match forward.authorization {
         Some(value) => {
           push_text(mut head, text: "Proxy-Authorization: ")
-          push_text(mut head, text: value.slice())
+          push_text(mut head, text: value)
           push_text(mut head, text: "\r\n")
         }
         None => {}
       }
     }
     None => {
-      push_text(mut head, text: request_target(url).slice())
+      push_text(mut head, text: request_target(url))
       push_text(mut head, text: " HTTP/1.1\r\n")
     }
   }
   if !headers.contains("Host") {
     push_text(mut head, text: "Host: ")
-    push_text(mut head, text: authority_of(url).slice())
+    push_text(mut head, text: authority_of(url))
     push_text(mut head, text: "\r\n")
   }
   for entry in headers.entries() {
-    if !same_name(entry.name.slice(), second: "Content-Length") && !same_name(entry.name.slice(), second: "Connection") {
-      push_text(mut head, text: entry.name.slice())
+    if !entry.name.equal_ignoring_ascii_case("Content-Length") && !entry.name.equal_ignoring_ascii_case("Connection") {
+      push_text(mut head, text: entry.name)
       push_text(mut head, text: ": ")
-      push_text(mut head, text: entry.value.slice())
+      push_text(mut head, text: entry.value)
       push_text(mut head, text: "\r\n")
     }
   }
   if sends_length(method, body_length: body_length) {
     push_text(mut head, text: "Content-Length: ")
-    push_text(mut head, text: "${body_length}".slice())
+    push_text(mut head, text: "${body_length}")
     push_text(mut head, text: "\r\n")
   }
   push_text(mut head, text: "\r\n")
@@ -2444,7 +2430,7 @@ fn request_fields(method: Method, url: url::Url, headers: Headers, body_length: 
   ]
   for entry in headers.entries() {
     let name = entry.name.slice().to_ascii_lowercase()
-    if !is_connection_specific(name.slice()) && name != "host" && name != "content-length" {
+    if !is_connection_specific(name) && name != "host" && name != "content-length" {
       mut fields.push(hpack::Field(name: own name, value: entry.value.copy()))
     }
   }
@@ -2490,7 +2476,7 @@ fn read_status[Stream: streams::Duplex](
   inbox: mut two::Inbox,
   limits: Limits,
 ) -> Result[Opening, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var budget = limits.head_bytes
   while true {
@@ -2516,7 +2502,7 @@ fn read_status[Stream: streams::Duplex](
 }
 
 fn start_plain(link: own Link, method: Method, url: url::Url, headers: Headers, body: Slice[UInt8], limits: Limits) -> Result[Started, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let forwarding = match link {
     Plain(forwarding, ..) => forwarding.copy()
@@ -2552,7 +2538,7 @@ fn start_plain(link: own Link, method: Method, url: url::Url, headers: Headers, 
 }
 
 fn begin_exchange(link: own Link, method: Method, url: url::Url, headers: Headers, body: Slice[UInt8], limits: Limits) -> Result[Started, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var opened = own link
   match mut opened {
@@ -2570,9 +2556,9 @@ fn begin_exchange(link: own Link, method: Method, url: url::Url, headers: Header
       var response_headers = Headers.new()
       for field in answer {
         if field.name == ":status" {
-          status = UInt16.parse(field.value.slice()).ok()
+          status = UInt16.parse(field.value).ok()
         } else if !field.name.slice().starts_with(":") {
-          mut response_headers.add(field.name.slice(), value: field.value.slice())
+          mut response_headers.add(field.name, value: field.value)
         }
       }
       let code = match status {
@@ -2592,7 +2578,7 @@ fn begin_exchange(link: own Link, method: Method, url: url::Url, headers: Header
 }
 
 fn reclaim(body: own Body) -> Option[Link]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   match own body.source {
     Remote(link, stream, is_reusable, is_ended, ..) => {
@@ -2619,20 +2605,20 @@ fn open_link(
   options: ClientOptions,
   protocols: own List[String],
 ) -> Result[Link, Error]
-  uses NetworkClient, Handles, Tasks, Random, Clock, Panic
+  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, RunForever
 {
   let timeout = timeout_of(options.timeout_seconds)
   let route = proxy_for(options, host: host, is_secure: is_secure)
   var connection = match route {
     Some(proxy) => {
-      if proxy.scheme() != "http".slice() {
+      if proxy.scheme() != "http" {
         return Err(Error.Unsupported(message: "a proxy whose scheme is not http"))
       }
       let proxy_host = match proxy.host() {
         Some(name) => "${name}"
         None => return Err(malformed("a proxy URL with no host"))
       }
-      system(network::connect(proxy_host.slice(), port: proxy.port().unwrap_or(80), timeout: timeout))?
+      system(network::connect(proxy_host, port: proxy.port().unwrap_or(80), timeout: timeout))?
     }
     None => system(network::connect(host, port: port, timeout: timeout))?
   }
@@ -2673,7 +2659,7 @@ fn is_idempotent(method: Method) -> Bool {
 
 fn take_pooled(pool: mut List[Pooled], origin: StringSlice) -> Option[Link] {
   for index in 0..pool.length() {
-    if index < pool.length() && pool[index].origin.slice() == origin {
+    if index < pool.length() && pool[index].origin == origin {
       let pooled = mut pool.remove_at(index)
       return Some(own pooled.link)
     }
@@ -2699,8 +2685,8 @@ fn keep(pool: mut List[Pooled], origin: own String, link: own Option[Link], limi
 type Target(is_secure: Bool, host: String, port: UInt16, origin: String)
 
 fn target_of(address: url::Url) -> Result[Target, Error] {
-  let is_secure = address.scheme() == "https".slice()
-  if !is_secure && address.scheme() != "http".slice() {
+  let is_secure = address.scheme() == "https"
+  if !is_secure && address.scheme() != "http" {
     return Err(Error.Unsupported(message: "a URL whose scheme is not http or https"))
   }
   let host = match address.host() {
@@ -2713,9 +2699,9 @@ fn target_of(address: url::Url) -> Result[Target, Error] {
 }
 
 fn Client.start(mut self, method: Method, address: url::Url, headers: Headers, body: Slice[UInt8], target: Target) -> Result[Started, Error]
-  uses NetworkClient, Handles, Tasks, Random, Clock, Panic
+  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, RunForever
 {
-  match take_pooled(mut self.pool, origin: target.origin.slice()) {
+  match take_pooled(mut self.pool, origin: target.origin) {
     Some(link) => {
       match begin_exchange(own link, method: method, url: address, headers: headers, body: body, limits: self.options.limits) {
         Ok(started) => return Ok(own started)
@@ -2729,12 +2715,12 @@ fn Client.start(mut self, method: Method, address: url::Url, headers: Headers, b
     }
     None => {}
   }
-  let link = open_link(target.host.slice(), port: target.port, is_secure: target.is_secure, roots: self.roots, options: self.options, protocols: ["h2", "http/1.1"])?
+  let link = open_link(target.host, port: target.port, is_secure: target.is_secure, roots: self.roots, options: self.options, protocols: ["h2", "http/1.1"])?
   begin_exchange(own link, method: method, url: address, headers: headers, body: body, limits: self.options.limits)
 }
 
 fn Client.discard(mut self, origin: own String, body: own Body)
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var remaining = own body
   var total: UInt64 = 0
@@ -2819,33 +2805,33 @@ fn retry_after_milliseconds(headers: Headers, now: Instant) -> Option[Int64] {
 }
 
 fn is_body_header(name: StringSlice) -> Bool {
-  same_name(name, second: "Content-Type") || same_name(name, second: "Content-Encoding")
-    || same_name(name, second: "Content-Language") || same_name(name, second: "Content-Location")
+  name.equal_ignoring_ascii_case("Content-Type") || name.equal_ignoring_ascii_case("Content-Encoding")
+    || name.equal_ignoring_ascii_case("Content-Language") || name.equal_ignoring_ascii_case("Content-Location")
 }
 
 fn is_credential_header(name: StringSlice) -> Bool {
-  same_name(name, second: "Authorization") || same_name(name, second: "Cookie") || same_name(name, second: "Proxy-Authorization")
+  name.equal_ignoring_ascii_case("Authorization") || name.equal_ignoring_ascii_case("Cookie") || name.equal_ignoring_ascii_case("Proxy-Authorization")
 }
 
 fn without_headers(headers: Headers, drops: fn(StringSlice) -> Bool) -> Headers {
   var kept = Headers.new()
   for entry in headers.entries() {
-    if !drops(entry.name.slice()) {
-      mut kept.add(entry.name.slice(), value: entry.value.slice())
+    if !drops(entry.name) {
+      mut kept.add(entry.name, value: entry.value)
     }
   }
   kept
 }
 
-public fn Client.stream[Output, capability Granted](
+public fn Client.stream[Output](
   mut self,
   method: Method,
   url: url::Url,
-  receive: (fn(Status, Headers, mut Body) -> Output uses Granted),
+  receive: (fn(Status, Headers, mut Body) -> Output uses generic Granted),
   headers: Headers = Headers(entries: []),
   body: List[UInt8] = [],
 ) -> Result[Output, Error]
-  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, Granted
+  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, generic Granted, RunForever
 {
   var current_method = method.copy()
   var address = url.copy()
@@ -2863,7 +2849,7 @@ public fn Client.stream[Output, capability Granted](
             Some(explicit) => "${explicit}; ${stored}"
             None => own stored
           }
-          mut sent.set("Cookie", value: combined.slice())
+          mut sent.set("Cookie", value: combined)
         }
         None => {}
       }
@@ -2882,8 +2868,8 @@ public fn Client.stream[Output, capability Granted](
     if self.options.stores_cookies {
       let now = Clock.now().unix_seconds()
       for entry in opened.headers.entries() {
-        if same_name(entry.name.slice(), second: "Set-Cookie") {
-          mut self.jar.store(address, set_cookie: entry.value.slice(), now: now)
+        if entry.name.equal_ignoring_ascii_case("Set-Cookie") {
+          mut self.jar.store(address, set_cookie: entry.value, now: now)
         }
       }
     }
@@ -2897,7 +2883,7 @@ public fn Client.stream[Output, capability Granted](
         if redirects_left == 0 {
           return Err(Error.TooManyRedirects)
         }
-        match address.join(reference.slice()) {
+        match address.join(reference) {
           Ok(next) => {
             mut self.discard(target.origin.copy(), body: own opened.body)
             let next_method = redirected_method(code, method: current_method)
@@ -2945,7 +2931,7 @@ public fn Client.send(
   headers: Headers = Headers(entries: []),
   body: List[UInt8] = [],
 ) -> Result[Response, Error]
-  uses NetworkClient, Handles, Tasks, Random, Clock, Panic
+  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, RunForever
 {
   let limits = self.options.limits
   var asked = headers.copy()
@@ -2962,7 +2948,7 @@ public fn Client.send(
 }
 
 public fn Client.get(mut self, address: StringSlice) -> Result[Response, Error]
-  uses NetworkClient, Handles, Tasks, Random, Clock, Panic
+  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, RunForever
 {
   match url::parse(address) {
     Ok(parsed) => mut self.send(Method.Get, url: parsed)
@@ -2977,14 +2963,14 @@ public fn send(
   body: List[UInt8] = [],
   options: ClientOptions = ClientOptions(),
 ) -> Result[Response, Error]
-  uses NetworkClient, Handles, Tasks, FileRead, Random, Clock, Panic
+  uses NetworkClient, Handles, Tasks, FileRead, Random, Clock, Panic, RunForever
 {
   var client = Client.new(options)
   mut client.send(method, url: url, headers: headers, body: body)
 }
 
 public fn get(address: StringSlice, options: ClientOptions = ClientOptions()) -> Result[Response, Error]
-  uses NetworkClient, Handles, Tasks, FileRead, Random, Clock, Panic
+  uses NetworkClient, Handles, Tasks, FileRead, Random, Clock, Panic, RunForever
 {
   var client = Client.new(options)
   mut client.get(address)
@@ -2998,7 +2984,7 @@ public type Message =
 type Sending(outbound: tasks::Channel[flow::Outbound], ack: tasks::Channel[Bool], masks: Option[random::Generator], is_closed: Bool)
 
 fn send_frame(sending: mut Sending, opcode: UInt8, payload: Slice[UInt8], is_final: Bool, is_compressed: Bool = false) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   if sending.is_closed {
     return Err(Error.Closed)
@@ -3046,7 +3032,7 @@ public opaque type WebSocketWriter(sending: Sending, compresses: Bool)
 let compression_minimum: UInt64 = 256
 
 fn send_message(sending: mut Sending, opcode: UInt8, payload: Slice[UInt8], compresses: Bool) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   if compresses && payload.length() >= compression_minimum {
     var packed = compression::compress(payload, format: compression::Format.Deflate, level: compression::Level.Fastest)
@@ -3063,16 +3049,16 @@ public type WebSocketParts(reader: WebSocketReader, writer: WebSocketWriter)
 public opaque type WebSocket(reader: WebSocketReader, writer: WebSocketWriter, protocol: Option[String])
 
 fn fail_socket(reader: mut WebSocketReader, code: UInt16, reason: own String) -> Error
-  uses Tasks
+  uses Tasks, RunForever
 {
-  let payload = websocket::close_payload(code, reason: reason.slice())
+  let payload = websocket::close_payload(code, reason: reason)
   let _ = send_frame(mut reader.sending, opcode: websocket::close_opcode, payload: payload.slice(), is_final: true)
   reader.close_code = Some(code)
   Error.Malformed(message: own reason)
 }
 
 public fn WebSocketReader.receive(mut self) -> Result[Option[Message], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if self.close_code is Some(_) {
     return Ok(None)
@@ -3153,7 +3139,7 @@ public fn WebSocketReader.close_code(self) -> Option[UInt16] {
 }
 
 public fn WebSocketWriter.send(mut self, message: Message) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   match message {
     Text(text) => send_message(mut self.sending, opcode: websocket::text_opcode, payload: text.slice().bytes(), compresses: self.compresses)
@@ -3162,26 +3148,26 @@ public fn WebSocketWriter.send(mut self, message: Message) -> Result[Unit, Error
 }
 
 public fn WebSocketWriter.send_text(mut self, text: StringSlice) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   send_message(mut self.sending, opcode: websocket::text_opcode, payload: text.bytes(), compresses: self.compresses)
 }
 
 public fn WebSocketWriter.send_binary(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   send_message(mut self.sending, opcode: websocket::binary_opcode, payload: bytes, compresses: self.compresses)
 }
 
 public fn WebSocketWriter.ping(mut self, payload: Slice[UInt8] = []) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   let length = if payload.length() > 125 { 125 } else { payload.length() }
   send_frame(mut self.sending, opcode: websocket::ping_opcode, payload: payload[0..length], is_final: true)
 }
 
 public fn WebSocketWriter.close(mut self, code: UInt16 = 1000, reason: StringSlice = "") -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   if self.sending.is_closed {
     return Ok(Unit)
@@ -3198,31 +3184,31 @@ public fn WebSocket.protocol(self) -> Option[StringSlice] {
 }
 
 public fn WebSocket.receive(mut self) -> Result[Option[Message], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   mut self.reader.receive()
 }
 
 public fn WebSocket.send(mut self, message: Message) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   mut self.writer.send(message)
 }
 
 public fn WebSocket.send_text(mut self, text: StringSlice) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   mut self.writer.send_text(text)
 }
 
 public fn WebSocket.send_binary(mut self, bytes: Slice[UInt8]) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   mut self.writer.send_binary(bytes)
 }
 
 public fn WebSocket.close(mut self, code: UInt16 = 1000, reason: StringSlice = "") -> Result[Unit, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   mut self.writer.close(code, reason: reason)?
   while mut self.reader.receive()? is Some(_) {}
@@ -3275,7 +3261,7 @@ fn offered_protocol(header: Option[StringSlice], protocols: Slice[String]) -> Op
       for part in value.split(",") {
         let name = part.trim()
         for protocol in protocols {
-          if protocol.slice() == name {
+          if protocol == name {
             return Some(protocol.copy())
           }
         }
@@ -3293,16 +3279,16 @@ public fn websocket(
   message_limit: UInt64 = 16777216,
   compresses: Bool = true,
 ) -> Result[WebSocket, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   let is_upgrade = request.method == Method.Get && has_token(request.headers.get("Connection"), token: "upgrade")
     && has_token(request.headers.get("Upgrade"), token: "websocket")
   let key = request.headers.get("Sec-WebSocket-Key").unwrap_or("".slice()).trim().to_string()
-  if !is_upgrade || !websocket::is_valid_key(key.slice()) {
+  if !is_upgrade || !websocket::is_valid_key(key) {
     let _ = mut responder.send(Response.text("a WebSocket upgrade is expected here", status: Status.bad_request))
     return Err(malformed("a request that is not a WebSocket upgrade"))
   }
-  if request.headers.get("Sec-WebSocket-Version").unwrap_or("".slice()).trim() != "13".slice() {
+  if request.headers.get("Sec-WebSocket-Version").unwrap_or("".slice()).trim() != "13" {
     let refused = Response.text("only WebSocket version 13 is supported", status: Status(code: 426)).with_header("Sec-WebSocket-Version", value: "13")
     let _ = mut responder.send(own refused)
     return Err(Error.Unsupported(message: "a WebSocket version other than 13"))
@@ -3311,7 +3297,7 @@ public fn websocket(
   var fields: List[hpack::Field] = [
     hpack::Field(name: "Upgrade", value: "websocket"),
     hpack::Field(name: "Connection", value: "Upgrade"),
-    hpack::Field(name: "Sec-WebSocket-Accept", value: websocket::accept_key(key.slice())),
+    hpack::Field(name: "Sec-WebSocket-Accept", value: websocket::accept_key(key)),
   ]
   match protocol {
     Some(name) => mut fields.push(hpack::Field(name: "Sec-WebSocket-Protocol", value: name.copy()))
@@ -3333,7 +3319,7 @@ public type Event(data: String, name: Option[String] = None, id: Option[String] 
   derives Equal
 
 public fn Responder.start_events(mut self, headers: Headers = Headers(entries: [])) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   var all = headers.copy()
   mut all.set("Content-Type", value: "text/event-stream")
@@ -3349,19 +3335,19 @@ fn push_field(output: mut String, name: StringSlice, value: StringSlice) {
 }
 
 public fn Responder.send_event(mut self, event: Event) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   var text = ""
   match event.name {
-    Some(name) => push_field(mut text, name: "event", value: name.slice())
+    Some(name) => push_field(mut text, name: "event", value: name)
     None => {}
   }
   match event.id {
-    Some(id) => push_field(mut text, name: "id", value: id.slice())
+    Some(id) => push_field(mut text, name: "id", value: id)
     None => {}
   }
   match event.retry_milliseconds {
-    Some(retry) => push_field(mut text, name: "retry", value: "${retry}".slice())
+    Some(retry) => push_field(mut text, name: "retry", value: "${retry}")
     None => {}
   }
   for line in event.data.slice().split("\n") {
@@ -3372,7 +3358,7 @@ public fn Responder.send_event(mut self, event: Event) -> Result[Unit, Error]
 }
 
 public fn Responder.send_comment(mut self, comment: StringSlice) -> Result[Unit, Error]
-  uses Tasks
+  uses Tasks, RunForever
 {
   var text = ""
   for line in comment.split("\n") {
@@ -3436,19 +3422,19 @@ fn parse_field(parser: mut EventParser, line: StringSlice) {
   if value.starts_with(" ") {
     value = value.part(1, to: value.length())
   }
-  if field == "data".slice() {
+  if field == "data" {
     if parser.has_data {
       mut parser.data.push("\n")
     }
     mut parser.data.push(value)
     parser.has_data = true
-  } else if field == "event".slice() {
+  } else if field == "event" {
     parser.name = Some(value.to_string())
-  } else if field == "id".slice() {
+  } else if field == "id" {
     if !value.contains("\u{0}") {
       parser.id = Some(value.to_string())
     }
-  } else if field == "retry".slice() {
+  } else if field == "retry" {
     match UInt64.parse(value) {
       Ok(milliseconds) => parser.retry = Some(milliseconds)
       Err(_) => {}
@@ -3457,7 +3443,7 @@ fn parse_field(parser: mut EventParser, line: StringSlice) {
 }
 
 public fn EventParser.next(mut self, body: mut Body) -> Result[Option[Event], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while true {
     match line_end(self.pending.slice()) {
@@ -3488,7 +3474,7 @@ public fn EventParser.next(mut self, body: mut Body) -> Result[Option[Event], Er
             None => {}
           }
         } else {
-          parse_field(mut self, line: line.slice())
+          parse_field(mut self, line: line)
         }
       }
       None => {
@@ -3502,7 +3488,7 @@ public fn EventParser.next(mut self, body: mut Body) -> Result[Option[Event], Er
 }
 
 fn write_raw[Stream: streams::Duplex](connection: Stream, outbound: tasks::Channel[flow::Outbound])
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   for message in outbound.messages() {
     match own message {
@@ -3518,7 +3504,7 @@ fn write_raw[Stream: streams::Duplex](connection: Stream, outbound: tasks::Chann
   let _ = connection.close_sending()
 }
 
-fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
+fn run_websocket[Stream: streams::Duplex, Output](
   connection: Stream,
   inbox: own two::Inbox,
   request: Slice[UInt8],
@@ -3528,9 +3514,9 @@ fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
   message_limit: UInt64,
   is_deflate_offered: Bool,
   seed: UInt64,
-  session: (fn(mut WebSocket) -> Output uses Granted),
+  session: (fn(mut WebSocket) -> Output uses generic Granted),
 ) -> Result[Output, Error]
-  uses Handles, Tasks, Granted
+  uses Handles, Tasks, generic Granted, RunForever
 {
   var unread = own inbox
   system(connection.send_all(request))?
@@ -3551,7 +3537,7 @@ fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
   }
   let deflate = match websocket::agreed_deflate(opening.headers.get("Sec-WebSocket-Extensions"), is_offered: is_deflate_offered) {
     Ok(agreed) => agreed
-    Err(reason) => return Err(malformed(reason.slice()))
+    Err(reason) => return Err(malformed(reason))
   }
   let unlimited: UInt64 = 18446744073709551615
   let chunks = tasks::Channel[flow::Chunk].new(capacity: 16)
@@ -3579,19 +3565,19 @@ fn run_websocket[Stream: streams::Duplex, Output, capability Granted](
   }
 }
 
-public fn Client.websocket[Output, capability Granted](
+public fn Client.websocket[Output](
   mut self,
   url: url::Url,
-  session: (fn(mut WebSocket) -> Output uses Granted),
+  session: (fn(mut WebSocket) -> Output uses generic Granted),
   headers: Headers = Headers(entries: []),
   protocols: List[String] = [],
   message_limit: UInt64 = 16777216,
   compresses: Bool = true,
 ) -> Result[Output, Error]
-  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, Granted
+  uses NetworkClient, Handles, Tasks, Random, Clock, Panic, generic Granted, RunForever
 {
-  let is_secure = url.scheme() == "wss".slice()
-  if !is_secure && url.scheme() != "ws".slice() {
+  let is_secure = url.scheme() == "wss"
+  if !is_secure && url.scheme() != "ws" {
     return Err(Error.Unsupported(message: "a WebSocket URL whose scheme is not ws or wss"))
   }
   let host = match url.host() {
@@ -3610,7 +3596,7 @@ public fn Client.websocket[Output, capability Granted](
   let key = base64::encode(key_bytes.slice())
   var upgrade = headers.copy()
   mut upgrade.set("Upgrade", value: "websocket")
-  mut upgrade.set("Sec-WebSocket-Key", value: key.slice())
+  mut upgrade.set("Sec-WebSocket-Key", value: key)
   mut upgrade.set("Sec-WebSocket-Version", value: "13")
   if !protocols.is_empty() {
     var offered = ""
@@ -3618,27 +3604,27 @@ public fn Client.websocket[Output, capability Granted](
       if !offered.is_empty() {
         mut offered.push(", ")
       }
-      mut offered.push(protocol.slice())
+      mut offered.push(protocol)
     }
-    mut upgrade.set("Sec-WebSocket-Protocol", value: offered.slice())
+    mut upgrade.set("Sec-WebSocket-Protocol", value: offered)
   }
   if compresses {
-    mut upgrade.set("Sec-WebSocket-Extensions", value: websocket::deflate_offer.slice())
+    mut upgrade.set("Sec-WebSocket-Extensions", value: websocket::deflate_offer)
   }
   var request = request_head(Method.Get, url: url, headers: upgrade, body_length: 0)
   let ending = request.length().saturating_subtract(2)
   mut request.truncate(ending)
   push_text(mut request, text: "Connection: Upgrade\r\n\r\n")
-  let link = open_link(host.slice(), port: port, is_secure: is_secure, roots: self.roots, options: self.options, protocols: ["http/1.1"])?
+  let link = open_link(host, port: port, is_secure: is_secure, roots: self.roots, options: self.options, protocols: ["http/1.1"])?
   let seed = Random.next()
   match own link {
     Plain(connection, inbox, forwarding) => {
       if forwarding is Some(_) {
         return Err(Error.Unsupported(message: "a ws:// WebSocket through an HTTP proxy"))
       }
-      run_websocket(connection, inbox: own inbox, request: request.slice(), key: key.slice(), protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
+      run_websocket(connection, inbox: own inbox, request: request.slice(), key: key, protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
     }
-    Secure(connection, inbox) => run_websocket(connection, inbox: own inbox, request: request.slice(), key: key.slice(), protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
+    Secure(connection, inbox) => run_websocket(connection, inbox: own inbox, request: request.slice(), key: key, protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
     Multiplexed(..) => Err(Error.Unsupported(message: "a WebSocket over HTTP/2"))
   }
 }

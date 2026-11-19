@@ -4,6 +4,7 @@ type key =
   | Code of Ground.function_type
   | Environment of string * int
   | Evidence of int
+  | Capabilities of int
 
 module Keys : Map.S with type key = key
 
@@ -16,35 +17,21 @@ type definition =
 
 type defined = { definition : definition; references : key list }
 
-type context = {
+type t = {
   env : Memory_layout.env;
-  prefix : string;
   mutable order : key list;
   mutable registered : unit Keys.t;
   mutable environments : (string * Lowered.ty) list Keys.t;
-  bytes : (string, int) Hashtbl.t;
-  mutable prototypes : (string * string) list;
-  mutable sites : Lowered.site list;
   mutable references : key list option;
-  mutable helpers_used : string list;
-  mutable statics : string list;
-  mutable instances : Instance.key list;
-  mutable called : Instance.key list;
-  mutable calls : (Path.t * int) list;
-  mutable failures : (C_runtime.failure * Lowered.site) list;
 }
 
-val make_context : Memory_layout.env -> string -> context
-val refer : context -> Instance.key -> unit
-val use_helper : context -> string -> string
-val register : context -> Keys.key -> unit
-val compute_layout : context -> Ground.ty -> Memory_layout.t
-val is_struct : context -> Ground.ty -> bool
-val render_value_type : context -> Ground.ty -> string
-val render_scalar_type : context -> Memory_layout.scalar -> string
-val render_type : context -> string -> Lowered.ty -> string
-
-val render_signature_parameters :
-  context -> string -> Lowered.ty list -> string list option -> string
-
-val define : context -> Keys.key -> defined
+val create : Memory_layout.env -> t
+val add_environment : t -> key -> (string * Lowered.ty) list -> unit
+val register : t -> Keys.key -> unit
+val compute_layout : t -> Ground.ty -> Memory_layout.t
+val is_struct : t -> Ground.ty -> bool
+val render_value_type : t -> Ground.ty -> string
+val render_scalar_type : t -> Memory_layout.scalar -> string
+val render_type : t -> string -> Lowered.ty -> string
+val render_signature_parameters : t -> string -> Lowered.ty list -> string list option -> string
+val define : t -> Keys.key -> defined

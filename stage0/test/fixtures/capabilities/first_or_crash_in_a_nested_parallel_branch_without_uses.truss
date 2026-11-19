@@ -1,0 +1,12 @@
+fn f(left: Slice[Int64], right: Slice[Int64]) -> Bool {
+  parallel {
+    let first = {
+      parallel {
+        let inner = first_or_crash(left)
+      }
+      inner
+    }
+    let count = right.length()
+  }
+  first == 0 && count == 0
+}

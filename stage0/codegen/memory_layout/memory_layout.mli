@@ -48,7 +48,7 @@ exception Infinite_size of Ground.ty
 
 val create : Libc.system -> compute_shape:(Ground.ty -> shape) -> env
 val system : env -> Libc.system
-val shape : env -> Ground.ty -> shape
+val compute_shape : env -> Ground.ty -> shape
 val of_type : env -> Ground.ty -> t
 val has_zero_size : env -> Ground.ty -> bool
 val lay_out_block : env -> Ground.ty -> string -> t

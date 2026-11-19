@@ -1,0 +1,6 @@
+fn show(text: String) {}
+
+fn f(grid: Grid) {
+  let name = grid.cell(0).name.copy()
+  show(name)
+}

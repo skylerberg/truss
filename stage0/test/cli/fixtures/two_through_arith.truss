@@ -1,5 +1,0 @@
-use lib::arith
-
-fn two() -> UInt8 {
-  arith::bump(1)
-}

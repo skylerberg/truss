@@ -21,7 +21,7 @@ impl Report for Seen {
 }
 
 fn blocked()
-  uses Tasks, Report
+  uses Tasks, Report, RunForever
 {
   var waiting = true
   while waiting {
@@ -39,7 +39,7 @@ fn blocked()
 }
 
 fn race() -> Int64
-  uses Tasks, Report
+  uses Tasks, Report, RunForever
 {
   concurrent {
     blocked()
@@ -51,7 +51,7 @@ fn race() -> Int64
 }
 
 fn main(arguments: List[String]) -> ExitCode
-  uses Tasks, Console
+  uses Tasks, Console, RunForever
 {
   var seen = Seen(outer: false, nested: false)
   provide mut seen {

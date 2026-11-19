@@ -3,15 +3,16 @@ type sort = Int | Bool | Float of int * int | Type_sort of Types.ty | Function_s
 module Symbol = struct
   type 'term t =
     | Variable of { label : string; numbers : int list }
-    | Function of { callee : Path.t; instance : Types.argument list }
-    | Limited of { callee : Path.t; instance : Types.argument list }
-    | Function_value of { callee : Path.t; instance : Types.argument list }
+    | Function of { callee : Path.t; type_arguments : Types.argument list }
+    | Limited of { callee : Path.t; type_arguments : Types.argument list }
+    | Function_value of { callee : Path.t; type_arguments : Types.argument list }
     | Constant of Path.t
     | Generic_value of { owner : Path.t; name : string }
     | Text_literal of { type_ : Types.ty; text : string }
     | Named_term of 'term
     | Lambda of { sorts : sort list; definition : 'term }
     | Lifted of 'term t
+    | Unspecified of 'term t
     | Constructor of { type_ : Types.ty; variant : string option }
     | Field of { type_ : Types.ty; variant : string option; field : string }
     | Unit
@@ -20,13 +21,15 @@ module Symbol = struct
     | Valid of Types.ty
     | Rank of Types.ty
     | Capacity of Types.ty
+    | Owner_of_view of Types.ty
     | Model of Types.ty
     | Slack of Types.ty
     | Potential of Types.ty
     | Potential_measure of Types.ty
     | Block_bytes of { type_ : Types.ty; variant : string option }
-    | Time of sort
-    | Method_time of {
+    | Callback_cost of { metric : Metric.t; sort : sort }
+    | Method_cost of {
+        metric : Metric.t;
         method_ : Path.t;
         trait_arguments : Types.argument list;
         self_type : Types.ty;
@@ -64,6 +67,7 @@ and symbol = term Symbol.t
 type declaration =
   | Constant of symbol * sort
   | Function of symbol * sort list * sort
+  | Definition of { symbol : symbol; parameters : (symbol * sort) list; result : sort; body : term }
   | Datatype of Types.ty * (symbol * (symbol * sort) list) list
 
 type query = { declarations : declaration list; facts : term list; goal : term }
@@ -94,7 +98,7 @@ let show_sort = function
   | Type_sort ty -> Types.show ty
   | Function_sort arity -> Printf.sprintf "function/%d" arity
 
-let show_instance = function
+let show_type_arguments = function
   | [] -> ""
   | arguments -> "[" ^ String.concat ", " (List.map Types.show_argument arguments) ^ "]"
 
@@ -102,15 +106,19 @@ let show_variant = Option.value ~default:"record"
 
 let rec show_symbol : symbol -> string = function
   | Variable { label; numbers } -> String.concat "." (label :: List.map string_of_int numbers)
-  | Function { callee; instance } -> "function." ^ Path.show callee ^ show_instance instance
-  | Limited { callee; instance } -> "limited." ^ Path.show callee ^ show_instance instance
-  | Function_value { callee; instance } -> "named." ^ Path.show callee ^ show_instance instance
+  | Function { callee; type_arguments } ->
+      "function." ^ Path.show callee ^ show_type_arguments type_arguments
+  | Limited { callee; type_arguments } ->
+      "limited." ^ Path.show callee ^ show_type_arguments type_arguments
+  | Function_value { callee; type_arguments } ->
+      "named." ^ Path.show callee ^ show_type_arguments type_arguments
   | Constant path -> "constant." ^ Path.show path
   | Generic_value { owner; name } -> Printf.sprintf "generic.%s.%s" (Path.show owner) name
   | Text_literal { type_; text } -> Printf.sprintf "text_literal.%s.%S" (Types.show type_) text
   | Named_term term -> "named_term(" ^ show_term term ^ ")"
   | Lambda { definition; _ } -> "lambda(" ^ show_term definition ^ ")"
   | Lifted symbol -> show_symbol symbol ^ ".lifted"
+  | Unspecified symbol -> show_symbol symbol ^ ".unspecified"
   | Constructor { type_; variant } -> "constructor." ^ Types.show type_ ^ "." ^ show_variant variant
   | Field { type_; variant; field } ->
       "field." ^ Types.show type_ ^ "." ^ show_variant variant ^ "." ^ field
@@ -120,14 +128,16 @@ let rec show_symbol : symbol -> string = function
   | Valid ty -> "valid." ^ Types.show ty
   | Rank ty -> "rank." ^ Types.show ty
   | Capacity ty -> "capacity." ^ Types.show ty
+  | Owner_of_view owner -> "owner_of_view." ^ Types.show owner
   | Model ty -> "model." ^ Types.show ty
   | Slack ty -> "slack." ^ Types.show ty
   | Potential ty -> "potential." ^ Types.show ty
   | Potential_measure ty -> "potential.measure." ^ Types.show ty
   | Block_bytes { type_; variant } -> "bytes." ^ Types.show type_ ^ "." ^ show_variant variant
-  | Time sort -> "time." ^ show_sort sort
-  | Method_time { method_; trait_arguments; self_type } ->
-      Printf.sprintf "time.method.%s%s[%s]" (Path.show method_) (show_instance trait_arguments)
+  | Callback_cost { metric; sort } -> Metric.show metric ^ "." ^ show_sort sort
+  | Method_cost { metric; method_; trait_arguments; self_type } ->
+      Printf.sprintf "%s.method.%s%s[%s]" (Metric.show metric) (Path.show method_)
+        (show_type_arguments trait_arguments)
         (Types.show self_type)
   | Opaque_operation { operation; type_; _ } ->
       Printf.sprintf "operation.%s.%s"
@@ -236,6 +246,15 @@ let truncated_divide left right =
 
 let truncated_remainder left right =
   Operation ("-", [ left; Operation ("*", [ right; truncated_divide left right ]) ])
+
+let integer_of_bits ~is_signed ~width bits =
+  let unsigned = Operation ("bv2nat", [ bits ]) in
+  if is_signed then
+    ite
+      (Operation (">=", [ unsigned; Integer (Z.shift_left Z.one (width - 1)) ]))
+      (Operation ("-", [ unsigned; Integer (Z.shift_left Z.one width) ]))
+      unsigned
+  else unsigned
 
 let rec mentions symbols = function
   | Symbol name -> List.mem name symbols
@@ -423,7 +442,12 @@ let make_triggering_test declarations =
               Symbol_table.replace functions constructor ();
               List.iter (fun (selector, _) -> Symbol_table.replace functions selector ()) fields)
             constructors
-      | Constant _ -> ())
+      | Constant _ | Definition _ -> ())
+    declarations;
+  List.iter
+    (function
+      | Definition { symbol; _ } -> Symbol_table.remove functions symbol
+      | Constant _ | Function _ | Datatype _ -> ())
     declarations;
   Symbol_table.mem functions
 
@@ -457,13 +481,27 @@ let list_declared_symbols declared term =
 
 let prune query =
   let declared = Symbol_table.create 64 in
+  let bodies = Symbol_table.create 8 in
   List.iter
     (function
       | Constant (name, _) | Function (name, _, _) -> Symbol_table.replace declared name ()
+      | Definition { symbol; body; _ } ->
+          Symbol_table.replace declared symbol ();
+          Symbol_table.replace bodies symbol body
       | Datatype _ -> ())
     query.declarations;
   let reached = Symbol_table.create 64 in
-  let reach symbols = List.iter (fun symbol -> Symbol_table.replace reached symbol ()) symbols in
+  let rec reach symbols =
+    List.iter
+      (fun symbol ->
+        if not (Symbol_table.mem reached symbol) then begin
+          Symbol_table.replace reached symbol ();
+          Option.iter
+            (fun body -> reach (list_declared_symbols declared body))
+            (Symbol_table.find_opt bodies symbol)
+        end)
+      symbols
+  in
   reach (list_declared_symbols declared query.goal);
   let is_triggering = make_triggering_test query.declarations in
   let rec needs fact symbols =
@@ -518,6 +556,7 @@ type numbering = {
   is_triggering : symbol -> bool;
   symbol_names : string Symbol_table.t;
   symbol_order : symbol Dynarray.t;
+  definition_bodies : string Symbol_table.t;
   sort_names : string Sort_table.t;
   sort_order : sort Dynarray.t;
 }
@@ -542,7 +581,7 @@ let rec render_sort_name numbering = function
           | None -> ());
           canonical)
 
-let render_symbol_name numbering name =
+let rec render_symbol_name numbering name =
   match Symbol_table.find_opt numbering.symbol_names name with
   | Some canonical -> Some canonical
   | None -> (
@@ -551,21 +590,31 @@ let render_symbol_name numbering name =
       | Some declaration ->
           let canonical = Printf.sprintf "x%d" (Symbol_table.length numbering.symbol_names) in
           Symbol_table.replace numbering.symbol_names name canonical;
-          Dynarray.add_last numbering.symbol_order name;
           (match declaration with
           | Constant (_, sort) -> ignore (render_sort_name numbering sort)
           | Function (_, inputs, output) ->
               List.iter (fun sort -> ignore (render_sort_name numbering sort)) inputs;
               ignore (render_sort_name numbering output)
+          | Definition { parameters; result; body; _ } ->
+              List.iter (fun (_, sort) -> ignore (render_sort_name numbering sort)) parameters;
+              ignore (render_sort_name numbering result);
+              let buffer = Buffer.create 128 in
+              print numbering
+                (List.mapi
+                   (fun index (parameter, _) -> (parameter, Printf.sprintf "b%d" index))
+                   parameters)
+                buffer body;
+              Symbol_table.replace numbering.definition_bodies name (Buffer.contents buffer)
           | Datatype _ -> ());
+          Dynarray.add_last numbering.symbol_order name;
           Some canonical)
 
-let render_member_name numbering name =
+and render_member_name numbering name =
   Option.map
     (fun (datatype, suffix) -> render_sort_name numbering datatype ^ suffix)
     (Symbol_table.find_opt numbering.member_of name)
 
-let render_function_name numbering name =
+and render_function_name numbering name =
   match render_member_name numbering name with
   | Some canonical -> canonical
   | None -> (
@@ -573,7 +622,7 @@ let render_function_name numbering name =
       | Some canonical -> canonical
       | None -> invalid_arg ("Logic.text: undeclared symbol " ^ show_symbol name))
 
-let rec print numbering bound buffer term =
+and print numbering bound buffer term =
   let add = Buffer.add_string buffer in
   match term with
   | Symbol name -> (
@@ -650,7 +699,8 @@ let number_symbols query =
   List.iter
     (fun declaration ->
       match declaration with
-      | Constant (name, _) | Function (name, _, _) -> Symbol_table.replace declared name declaration
+      | Constant (name, _) | Function (name, _, _) | Definition { symbol = name; _ } ->
+          Symbol_table.replace declared name declaration
       | Datatype (ty, constructors) ->
           let sort = Type_sort ty in
           Sort_table.replace datatypes sort constructors;
@@ -672,6 +722,7 @@ let number_symbols query =
     is_triggering = make_triggering_test query.declarations;
     symbol_names = Symbol_table.create 64;
     symbol_order = Dynarray.create ();
+    definition_bodies = Symbol_table.create 8;
     sort_names = Sort_table.create 8;
     sort_order = Dynarray.create ();
   }
@@ -707,6 +758,15 @@ let render_with ~cardinality_bound query =
             Printf.sprintf "(declare-fun %s (%s) %s)\n" canonical
               (String.concat " " (List.map (render_sort_name numbering) inputs))
               (render_sort_name numbering output)
+        | Definition { parameters; result; _ } ->
+            Printf.sprintf "(define-fun %s (%s) %s %s)\n" canonical
+              (String.concat " "
+                 (List.mapi
+                    (fun index (_, sort) ->
+                      Printf.sprintf "(b%d %s)" index (render_sort_name numbering sort))
+                    parameters))
+              (render_sort_name numbering result)
+              (Symbol_table.find numbering.definition_bodies name)
         | Datatype _ -> "")
       (Dynarray.to_list numbering.symbol_order)
   in

@@ -1,0 +1,5 @@
+fn f(items: own List[Int64]) {
+  keep(own items)
+  let held = items
+  look(held)
+}

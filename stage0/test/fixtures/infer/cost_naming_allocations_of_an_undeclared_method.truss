@@ -1,0 +1,4 @@
+fn f[Element: Equal](item: Element)
+  cost allocations <= allocations(Element.compare)
+{
+}

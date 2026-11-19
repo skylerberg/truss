@@ -1,0 +1,5 @@
+fn run(action: (fn() -> Int64 uses generic Granted)) -> Int64
+  uses generic Granted
+{
+  action()
+}

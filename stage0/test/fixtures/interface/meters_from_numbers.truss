@@ -1,0 +1,13 @@
+type Meters(value: Float64)
+
+impl From[Int64] for Meters {
+  fn from(value: own Int64) -> Meters {
+    Meters(value: value.to_float64())
+  }
+}
+
+impl From[Float64] for Meters {
+  fn from(value: own Float64) -> Meters {
+    Meters(value: value)
+  }
+}

@@ -16,4 +16,4 @@ val list_uses :
   Syntax.path Syntax.item list ->
   (Path.module_ * Source.span) list
 
-val names_definition : Path.t -> target -> bool
+val is_named_by : Path.t -> target -> bool

@@ -15,7 +15,7 @@ type ty =
   | Hole
   | Error of Diagnostic.reported
 
-and argument = Type of ty | Value of value | Capabilities of capability_set
+and argument = Type of ty | Value of value
 and value = Known of Z.t | Value_parameter of parameter | Value_variable of int
 
 and trait_reference = {
@@ -42,37 +42,53 @@ and capability =
 
 and capability_set = capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
+and resource = Metric of Metric.t | Calls of { capability : Path.t; method_ : string option }
+and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
-and resource =
-  | Time
-  | Allocations
-  | Allocated_bytes
-  | Calls of { capability : Path.t; method_ : string option }
-
-and cost_bound = Finite_cost | Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
-
+let panic : capability = Capability (Well_known.make_path Panic)
 let make_capability_set capabilities : capability_set = List.sort_uniq compare capabilities
 let no_capabilities : capability_set = []
 
 let union_capabilities (left : capability_set) (right : capability_set) =
   make_capability_set (left @ right)
 
-let has_capability_error (capabilities : capability_set) =
-  List.exists (function Capability_error _ -> true | _ -> false) capabilities
+let run_forever : capability = Capability (Well_known.make_path Run_forever)
+let has_capability capability (set : capability_set) = List.mem capability set
+let exists_capability predicate (set : capability_set) = List.exists predicate set
+let list_capabilities (set : capability_set) : capability list = set
+let built_in_capabilities = make_capability_set [ panic; run_forever ]
+let is_built_in_capability capability = has_capability capability built_in_capabilities
+let terminates set = not (has_capability run_forever set)
 
-let is_capability_subset (smaller : capability_set) (larger : capability_set) =
-  has_capability_error smaller || has_capability_error larger
-  || List.for_all (fun capability -> List.mem capability larger) smaller
+let contains_capability_error (capabilities : capability_set) =
+  List.exists (function Capability_error _ -> true | _ -> false) capabilities
 
 let subtract_capabilities (left : capability_set) (right : capability_set) =
   List.filter (fun capability -> not (List.mem capability right)) left
 
+let is_capability_subset (smaller : capability_set) (larger : capability_set) =
+  contains_capability_error smaller || contains_capability_error larger
+  || subtract_capabilities smaller larger = []
+
+let intersect_capabilities (sets : capability_set list) : capability_set =
+  make_capability_set
+    (List.filter
+       (fun capability -> List.for_all (fun set -> List.mem capability set) sets)
+       (List.concat sets))
+
 let compute_missing_capabilities ~(required : capability_set) ~(available : capability_set) =
-  if has_capability_error required || has_capability_error available then no_capabilities
+  if contains_capability_error required || contains_capability_error available then no_capabilities
   else subtract_capabilities required available
 
-let flat_map_capabilities f (set : capability_set) = make_capability_set (List.concat_map f set)
-let make_builtin builtin = Named { path = Intrinsic.make_builtin_path builtin; arguments = [] }
+let replace_capabilities find_replacement (set : capability_set) =
+  make_capability_set
+    (List.concat_map
+       (fun capability -> Option.value ~default:[ capability ] (find_replacement capability))
+       set)
+
+let make_builtin ?(arguments = []) builtin =
+  Named { path = Intrinsic.make_builtin_path builtin; arguments }
+
 let unit = make_builtin Unit
 let bool = make_builtin Bool
 let make_self_parameter trait = { owner = trait; name = "Self" }
@@ -82,15 +98,25 @@ let make_named path arguments =
   Named { path; arguments = List.map (fun type_ -> Type type_) arguments }
 
 let find_builtin = function
-  | Named { path; arguments = [] } -> Intrinsic.builtin_of_path path
+  | Named { path; arguments = [] } -> Intrinsic.find_builtin path
   | Named { path; _ } -> (
-      match Intrinsic.builtin_of_path path with
+      match Intrinsic.find_builtin path with
       | Some (Array | Storage | View | Shared) as builtin -> builtin
       | _ -> None)
   | _ -> None
 
 let is_builtin wanted type_ = find_builtin type_ = Some wanted
 let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
+
+let find_view = function
+  | Named { path; arguments } when Well_known.is List path ->
+      Some (Named { path = Well_known.make_path Slice; arguments })
+  | Named { path; arguments = [] } when Well_known.is String path ->
+      Some (Named { path = Well_known.make_path String_slice; arguments = [] })
+  | Named { arguments = element :: _; _ } as array when is_builtin Array array ->
+      Some (Named { path = Well_known.make_path Slice; arguments = [ element ] })
+  | _ -> None
+
 let signed_integer_types : Intrinsic.builtin list = [ Int8; Int16; Int32; Int64 ]
 let unsigned_integer_types : Intrinsic.builtin list = [ UInt8; UInt16; UInt32; UInt64 ]
 let integer_types = signed_integer_types @ unsigned_integer_types
@@ -140,18 +166,40 @@ let is_signed type_ =
 let is_float_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin float_types | None -> false
 
-type substitution = (parameter * argument) list
+type substitution = {
+  arguments : (parameter * argument) list;
+  capability_arguments : (parameter * capability_set) list;
+}
+
+let no_substitution = { arguments = []; capability_arguments = [] }
+let is_empty_substitution substitution = substitution = no_substitution
+
+let combine_substitutions left right =
+  {
+    arguments = left.arguments @ right.arguments;
+    capability_arguments = left.capability_arguments @ right.capability_arguments;
+  }
+
+let bind_argument parameter argument substitution =
+  { substitution with arguments = (parameter, argument) :: substitution.arguments }
+
+let find_argument parameter substitution = List.assoc_opt parameter substitution.arguments
+
+let list_type_arguments substitution =
+  List.filter_map
+    (function parameter, Type ty -> Some (parameter, ty) | _, Value _ -> None)
+    substitution.arguments
 
 let rec substitute substitution type_ =
-  if substitution = [] then type_
+  if is_empty_substitution substitution then type_
   else
     match type_ with
     | Named { path; arguments } ->
         Named { path; arguments = List.map (substitute_argument substitution) arguments }
     | Parameter parameter -> (
-        match List.assoc_opt parameter substitution with
+        match find_argument parameter substitution with
         | Some (Type replacement) -> replacement
-        | Some (Value _ | Capabilities _) | None -> type_)
+        | Some (Value _) | None -> type_)
     | Projection { base; trait; name } -> (
         let base = substitute substitution base and trait = substitute_trait substitution trait in
         match List.assoc_opt name trait.associated with
@@ -164,29 +212,26 @@ let rec substitute substitution type_ =
 and substitute_argument substitution = function
   | Type type_ -> Type (substitute substitution type_)
   | Value (Value_parameter parameter) as value -> (
-      match List.assoc_opt parameter substitution with
+      match find_argument parameter substitution with
       | Some (Value _ as replacement) -> replacement
       | _ -> value)
   | Value _ as value -> value
-  | Capabilities capabilities -> Capabilities (substitute_capabilities substitution capabilities)
 
 and substitute_capabilities substitution capabilities =
-  flat_map_capabilities
+  replace_capabilities
     (function
-      | Capability_parameter parameter as capability -> (
-          match List.assoc_opt parameter substitution with
-          | Some (Capabilities replacement) -> (replacement :> capability list)
-          | _ -> [ capability ])
+      | Capability_parameter parameter -> List.assoc_opt parameter substitution.capability_arguments
       | Capability_projection { base; trait; name } ->
-          [
-            Capability_projection
-              {
-                base = substitute substitution base;
-                trait = substitute_trait substitution trait;
-                name;
-              };
-          ]
-      | (Capability _ | Capability_variable _ | Capability_error _) as capability -> [ capability ])
+          Some
+            [
+              Capability_projection
+                {
+                  base = substitute substitution base;
+                  trait = substitute_trait substitution trait;
+                  name;
+                };
+            ]
+      | Capability _ | Capability_variable _ | Capability_error _ -> None)
     capabilities
 
 and substitute_trait substitution (trait : trait_reference) =
@@ -206,6 +251,20 @@ and substitute_function substitution (function_type : function_type) =
     costs = function_type.costs;
   }
 
+let map_substitution ~argument ~capabilities substitution =
+  {
+    arguments =
+      List.map (fun (parameter, bound) -> (parameter, argument bound)) substitution.arguments;
+    capability_arguments =
+      List.map
+        (fun (parameter, bound) -> (parameter, capabilities bound))
+        substitution.capability_arguments;
+  }
+
+let substitute_substitution outer =
+  map_substitution ~argument:(substitute_argument outer)
+    ~capabilities:(substitute_capabilities outer)
+
 let extract_result_type = function Returns type_ | Lends (_, type_) -> type_
 let show_mode = function Read -> "" | Mut -> "mut " | Own -> "own "
 
@@ -214,11 +273,7 @@ let rec map ?(map_capabilities = Fun.id) transform type_ =
   | Some replacement -> replacement
   | None -> (
       let map = map ~map_capabilities transform in
-      let map_argument = function
-        | Type type_ -> Type (map type_)
-        | Capabilities set -> Capabilities (map_capabilities set)
-        | Value _ as value -> value
-      in
+      let map_argument = function Type type_ -> Type (map type_) | Value _ as value -> value in
       let map_trait (reference : trait_reference) =
         {
           reference with
@@ -244,7 +299,7 @@ let rec map ?(map_capabilities = Fun.id) transform type_ =
 let rec exists ?(resolve = Fun.id) transform type_ =
   let type_ = resolve type_ in
   let exists = exists ~resolve transform in
-  let argument_exists = function Type type_ -> exists type_ | Value _ | Capabilities _ -> false in
+  let argument_exists = function Type type_ -> exists type_ | Value _ -> false in
   let trait_exists (reference : trait_reference) =
     List.exists argument_exists reference.trait_arguments
     || List.exists (fun (_, type_) -> exists type_) reference.associated
@@ -274,15 +329,12 @@ let find_specification_only_type type_ =
        type_);
   !specification_type
 
-let has_capability_variable capabilities =
+let contains_capability_variable capabilities =
   List.exists (function Capability_variable _ -> true | _ -> false) capabilities
 
-let may_panic capabilities =
-  List.exists (function Capability path -> Well_known.is Panic path | _ -> false) capabilities
-
 let equal left right = left = right
-let is_error = function Error _ -> true | _ -> false
-let is_open_type = function Error _ | Variable _ | Hole -> true | _ -> false
+let is_error : ty -> bool = function Error _ -> true | _ -> false
+let is_open_type : ty -> bool = function Error _ | Variable _ | Hole -> true | _ -> false
 
 let rec contains_unsolved = function
   | Variable _ | Literal _ | Hole -> true
@@ -296,7 +348,7 @@ let rec contains_unsolved = function
 and is_unsolved_argument = function
   | Type type_ -> contains_unsolved type_
   | Value (Value_variable _) -> true
-  | Value _ | Capabilities _ -> false
+  | Value _ -> false
 
 and is_unsolved_trait trait =
   List.exists is_unsolved_argument trait.trait_arguments
@@ -310,15 +362,11 @@ let has_unsolved_capabilities capabilities =
       | Capability _ | Capability_parameter _ | Capability_error _ -> false)
     capabilities
 
-let terminates (function_type : function_type) =
-  List.exists (fun (cost : cost) -> cost.resource = Time) function_type.costs
-
 let has_same_clauses (left : function_type) (right : function_type) =
   left.uses = right.uses && List.sort_uniq compare left.costs = List.sort_uniq compare right.costs
 
 let bound_implies (provided : cost_bound) (required : cost_bound) =
   match (provided, required) with
-  | _, Finite_cost -> true
   | (Order_of | No_more_than _ | Exactly_cost _), Order_of -> true
   | (No_more_than (Some provided) | Exactly_cost (Some provided)), No_more_than (Some required) ->
       Z.leq provided required
@@ -336,26 +384,22 @@ let costs_imply ~(provided : cost list) ~(required : cost list) =
         provided)
     required
 
-let show_path_name = function Path.Top { name; _ } -> name | path -> Path.show path
-
 let show_resource = function
-  | Time -> "time"
-  | Allocations -> "allocations"
-  | Allocated_bytes -> "allocated_bytes"
+  | Metric metric -> Metric.show metric
   | Calls { capability; method_ } ->
-      Printf.sprintf "calls(%s%s)" (show_path_name capability)
+      Printf.sprintf "calls(%s%s)" (Path.show_name capability)
         (match method_ with Some method_ -> "." ^ method_ | None -> "")
 
 let rec show_capability = function
-  | Capability path -> show_path_name path
-  | Capability_parameter { name; _ } -> name
+  | Capability path -> Path.show_name path
+  | Capability_parameter { name; _ } -> "generic " ^ name
   | Capability_projection { base; name; _ } -> show base ^ "." ^ name
   | Capability_variable _ | Capability_error _ -> "_"
 
 and show = function
-  | Named { path; arguments = [] } -> show_path_name path
+  | Named { path; arguments = [] } -> Path.show_name path
   | Named { path; arguments } ->
-      Printf.sprintf "%s[%s]" (show_path_name path)
+      Printf.sprintf "%s[%s]" (Path.show_name path)
         (String.concat ", " (List.map show_argument arguments))
   | Parameter { name; _ } -> name
   | Projection { base; name; _ } -> show base ^ "." ^ name
@@ -363,26 +407,29 @@ and show = function
   | Any trait -> "any " ^ show_trait trait
   | Never -> "Never"
   | Integer -> "Integer"
-  | Variable _ -> "_"
-  | Literal (Integer_literal, _) -> "an integer"
-  | Literal (Float_literal, _) -> "a float"
-  | Hole -> "an undecided type"
-  | Error _ -> "_"
+  | Variable _ | Literal _ | Hole | Error _ -> "_"
 
 and show_argument = function
   | Type type_ -> show type_
   | Value (Known value) -> Z.to_string value
   | Value (Value_parameter { name; _ }) -> name
   | Value (Value_variable _) -> "_"
-  | Capabilities capabilities ->
-      "{" ^ String.concat ", " (List.map show_capability capabilities) ^ "}"
+
+and show_capabilities capabilities =
+  let names =
+    List.fold_left
+      (fun names name -> if List.mem name names then names else names @ [ name ])
+      []
+      (List.map show_capability capabilities)
+  in
+  "{" ^ String.concat ", " names ^ "}"
 
 and show_trait trait =
   let arguments = List.map show_argument trait.trait_arguments in
   let associated = List.map (fun (name, type_) -> name ^ " = " ^ show type_) trait.associated in
   match arguments @ associated with
-  | [] -> show_path_name trait.trait
-  | all -> Printf.sprintf "%s[%s]" (show_path_name trait.trait) (String.concat ", " all)
+  | [] -> Path.show_name trait.trait
+  | all -> Printf.sprintf "%s[%s]" (Path.show_name trait.trait) (String.concat ", " all)
 
 and show_output = function
   | Returns type_ when type_ = unit -> ""
@@ -401,14 +448,15 @@ and show_function (function_type : function_type) =
       (fun (cost : cost) ->
         let bound =
           match cost.bound with
-          | Finite_cost -> "finite"
           | Order_of -> "O(...)"
           | No_more_than (Some value) -> "<= " ^ Z.to_string value
           | No_more_than None -> "<= ..."
           | Exactly_cost (Some value) -> "== " ^ Z.to_string value
           | Exactly_cost None -> "== ..."
         in
-        "cost " ^ show_resource cost.resource ^ " " ^ bound)
+        Printf.sprintf "cost %s%s %s"
+          (if cost.amortized then "amortized " else "")
+          (show_resource cost.resource) bound)
       function_type.costs
   in
   match (uses, costs) with
@@ -418,7 +466,12 @@ and show_function (function_type : function_type) =
         (if uses = [] then "" else " uses " ^ String.concat ", " uses)
         (String.concat "" (List.map (fun cost -> " " ^ cost) costs))
 
-type generic_kind = Type_generic of trait_reference list | Value_generic | Capability_generic
+let describe = function
+  | Literal (Integer_literal, _) -> "an integer"
+  | Literal (Float_literal, _) -> "a float"
+  | type_ -> "`" ^ show type_ ^ "`"
+
+type generic_kind = Type_generic of trait_reference list | Value_generic
 type generic = { generic : parameter; kind : generic_kind }
 
 let list_generic_arguments generics =
@@ -426,9 +479,13 @@ let list_generic_arguments generics =
     (fun generic ->
       match generic.kind with
       | Value_generic -> Value (Value_parameter generic.generic)
-      | Type_generic _ -> Type (Parameter generic.generic)
-      | Capability_generic -> Capabilities [ Capability_parameter generic.generic ])
+      | Type_generic _ -> Type (Parameter generic.generic))
     generics
+
+let list_capability_arguments parameters =
+  List.map
+    (fun parameter -> (parameter.name, make_capability_set [ Capability_parameter parameter ]))
+    parameters
 
 let list_bounds generics parameter =
   List.concat_map
@@ -440,27 +497,105 @@ let list_bounds generics parameter =
 
 let make_substitution (generics : generic list) arguments : substitution =
   if List.length generics = List.length arguments then
-    List.combine (List.map (fun generic -> generic.generic) generics) arguments
+    {
+      arguments = List.combine (List.map (fun generic -> generic.generic) generics) arguments;
+      capability_arguments = [];
+    }
   else
     Compiler_bug.raise_bug ~stage:"Types" "a substitution of %d arguments for %d generics"
       (List.length arguments) (List.length generics)
 
+let make_capability_substitution (parameters : parameter list) arguments : substitution =
+  {
+    arguments = [];
+    capability_arguments =
+      List.filter_map
+        (fun parameter ->
+          Option.map
+            (fun argument -> (parameter, argument))
+            (List.assoc_opt parameter.name arguments))
+        parameters;
+  }
+
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
+
+let list_capture_free_parameters parameters =
+  List.filter_map
+    (fun parameter ->
+      match (parameter.mode, parameter.type_) with
+      | Own, Function _ -> Some parameter.name
+      | _ -> None)
+    parameters
+
+let mentions_specification_only_type parameters output =
+  List.exists
+    (fun type_ -> Option.is_some (find_specification_only_type type_))
+    (extract_result_type output :: List.map (fun parameter -> parameter.type_) parameters)
 
 type signature = {
   generics : generic list;
+  capability_parameters : parameter list;
   receiver : (Path.receiver * ty) option;
   parameters : parameter_info list;
   output : result;
   uses : capability_set;
-  terminates : bool;
+  costs : cost list;
   specification_only : bool;
+  is_update_step : bool;
   capture_free_parameters : string list;
 }
 
+type instantiation = {
+  type_arguments : argument list;
+  capability_arguments : (string * capability_set) list;
+}
+
+let no_instantiation = { type_arguments = []; capability_arguments = [] }
+
+let substitute_instantiation substitution instantiation =
+  {
+    type_arguments = List.map (substitute_argument substitution) instantiation.type_arguments;
+    capability_arguments =
+      List.map
+        (fun (name, argument) -> (name, substitute_capabilities substitution argument))
+        instantiation.capability_arguments;
+  }
+
+let make_signature_substitution (signature : signature) instantiation =
+  combine_substitutions
+    (make_substitution signature.generics instantiation.type_arguments)
+    (make_capability_substitution signature.capability_parameters instantiation.capability_arguments)
+
+let make_trait_substitution generics ~self (reference : trait_reference) =
+  bind_argument
+    (make_self_parameter reference.trait)
+    (Type self)
+    (make_substitution generics reference.trait_arguments)
+
+let map_bounds transform generics =
+  List.map
+    (fun generic ->
+      match generic.kind with
+      | Type_generic bounds -> { generic with kind = Type_generic (transform bounds) }
+      | Value_generic -> generic)
+    generics
+
 let map_signature transform (signature : signature) =
+  let transform_argument = function
+    | Type type_ -> Type (transform type_)
+    | Value _ as value -> value
+  in
   {
     signature with
+    generics =
+      map_bounds
+        (List.map (fun (bound : trait_reference) ->
+             {
+               bound with
+               trait_arguments = List.map transform_argument bound.trait_arguments;
+               associated = List.map (fun (name, type_) -> (name, transform type_)) bound.associated;
+             }))
+        signature.generics;
     receiver = Option.map (fun (receiver, type_) -> (receiver, transform type_)) signature.receiver;
     parameters =
       List.map
@@ -473,17 +608,9 @@ let map_signature transform (signature : signature) =
   }
 
 let substitute_signature substitution (signature : signature) =
-  let signature = map_signature (substitute substitution) signature in
   {
-    signature with
-    generics =
-      List.map
-        (fun (generic : generic) ->
-          match generic.kind with
-          | Type_generic bounds ->
-              { generic with kind = Type_generic (List.map (substitute_trait substitution) bounds) }
-          | Value_generic | Capability_generic -> generic)
-        signature.generics;
+    (map_signature (substitute substitution) signature) with
+    generics = map_bounds (List.map (substitute_trait substitution)) signature.generics;
     uses = substitute_capabilities substitution signature.uses;
   }
 
@@ -512,10 +639,7 @@ let make_function_type (signature : signature) =
             @ List.map (fun parameter -> (parameter.mode, parameter.type_)) signature.parameters;
           output;
           uses = signature.uses;
-          costs =
-            (if signature.terminates then
-               [ { amortized = false; resource = Time; bound = Finite_cost } ]
-             else []);
+          costs = signature.costs;
         }
 
 type field = { field_name : string; field_type : ty; field_has_default : bool }
@@ -600,3 +724,7 @@ let find_implementing_receiver trait (impl : impl_interface) declared =
        impl.impl_methods)
 
 type constant_interface = { constant_type : ty }
+
+module For_testing = struct
+  let list_arguments substitution = substitution.arguments
+end
