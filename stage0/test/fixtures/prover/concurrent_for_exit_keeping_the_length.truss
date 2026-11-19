@@ -1,0 +1,12 @@
+fn first_five(items: mut List[Int64]) -> Bool
+  uses Tasks
+  ensures items.length() == old(items.length())
+{
+  concurrent for item in mut items {
+    if item == 5 {
+      return true
+    }
+    item = 0
+  }
+  false
+}
