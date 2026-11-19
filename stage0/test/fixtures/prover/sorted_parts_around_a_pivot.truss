@@ -1,6 +1,7 @@
 fn sort_part[Element: Ordered](items: mut Slice[Element])
   ensures items.is_sorted()
   ensures items.model().is_permutation_of(old(items.model()))
+  ensures forall i in 0..items.length() => old(items.model()).contains(items[i])
 {
   todo
 }

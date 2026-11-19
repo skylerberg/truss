@@ -82,6 +82,9 @@ public fn Sequence[Element].to_map[Key, Value](
 public fn Sequence[Element].sum(self, measure: fn(Element) -> Integer) -> Integer
   ensures self.length() == 0 ==> result == 0
   ensures (forall i in 0..self.length() => measure(self[i]) >= 0) ==> result >= 0
+  ensures (forall i in 0..self.length() => measure(self[i]) <= 0) ==> result <= 0
+  ensures (forall i in 0..self.length() => measure(self[i]) >= 0)
+    && (exists i in 0..self.length() => measure(self[i]) > 0) ==> result > 0
 {
   todo
 }
@@ -89,10 +92,41 @@ public fn Sequence[Element].sum(self, measure: fn(Element) -> Integer) -> Intege
 public fn Sequence[Element].is_permutation_of(self, other: Sequence[Element]) -> Bool
   ensures result == (forall measure: fn(Element) -> Integer => self.sum(measure) == other.sum(measure))
   ensures result ==> self.length() == other.length()
-  ensures result ==> forall i in 0..self.length() => other.contains(self[i])
-  ensures result ==> forall i in 0..other.length() => self.contains(other[i])
 {
   todo
+}
+
+theorem element_of_a_permutation[Element](permuted: Sequence[Element], original: Sequence[Element], index: Integer)
+  requires permuted.is_permutation_of(original)
+  requires 0 <= index && index < permuted.length()
+  ensures original.contains(permuted[index])
+{
+  let occurrences: fn(Element) -> Integer = fn(value) { if identical(value, permuted[index]) { 1 } else { 0 } }
+  assert permuted.sum(occurrences) > 0
+  assert original.sum(occurrences) > 0
+}
+
+theorem elements_of_a_permutation_below[Element](
+  permuted: Sequence[Element],
+  original: Sequence[Element],
+  bound: Integer,
+)
+  requires permuted.is_permutation_of(original)
+  requires 0 <= bound && bound <= permuted.length()
+  ensures forall i in 0..bound => original.contains(permuted[i])
+  decreases bound
+{
+  if bound > 0 {
+    elements_of_a_permutation_below(permuted, original: original, bound: bound - 1)
+    element_of_a_permutation(permuted, original: original, index: bound - 1)
+  }
+}
+
+public theorem elements_of_a_permutation[Element](permuted: Sequence[Element], original: Sequence[Element])
+  requires permuted.is_permutation_of(original)
+  ensures forall i in 0..permuted.length() => original.contains(permuted[i])
+{
+  elements_of_a_permutation_below(permuted, original: original, bound: permuted.length())
 }
 
 impl Index for Sequence[Element] {
