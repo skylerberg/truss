@@ -1307,8 +1307,8 @@ and lower_for_loop ?cursor_type ?(elements = ref None) ?matched builder ~origin
                              bind_or_match ?matched ~owned:true builder pattern
                                (Emitter.make_local_place part) ~origin
                          | Pull _ ->
-                             bind_or_match ?matched builder pattern
-                               (Emitter.make_local_place part) ~origin);
+                             bind_or_match ?matched builder pattern (Emitter.make_local_place part)
+                               ~origin);
                          Some Emitter.unit_value))));
         if Emitter.reaches builder then Some Emitter.unit_value else None)
   in

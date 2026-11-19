@@ -1228,7 +1228,7 @@ and read_statement context frame run (statement : Mir.statement) =
         let breaks =
           match loop.schedule with
           | Concurrent ->
-              let changed = compute_changes run inside [ body ] in
+              let changed = compute_changes run inside [ loop_bindings; body ] in
               List.map
                 (fun exited ->
                   let forgotten = Loops.havoc context exited changed in
