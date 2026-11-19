@@ -272,6 +272,7 @@ val find_keyword_operation : state -> Syntax.expression -> (Syntax.id * Syntax.e
 val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val find_local_type : state -> Syntax.name -> Types.ty option
 val find_sequence_element : Types.ty -> Types.ty option
+val find_specification_sequence_element : Types.ty -> Types.ty option
 
 val make_range :
   state ->

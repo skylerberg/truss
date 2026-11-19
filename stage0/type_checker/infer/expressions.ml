@@ -325,29 +325,31 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
   in
   match items with
   | [ Item ({ kind = Range { start; stop; _ }; _ } as range) ] -> (
-      Option.iter (fun start -> check state env start (Types.make_builtin UInt64)) start;
-      Option.iter (fun stop -> check state env stop (Types.make_builtin UInt64)) stop;
+      let model_element = State.find_specification_sequence_element base_type in
+      let bound_type =
+        match model_element with Some _ -> Types.Integer | None -> Types.make_builtin UInt64
+      in
+      Option.iter (fun start -> check state env start bound_type) start;
+      Option.iter (fun stop -> check state env stop bound_type) stop;
       State.record state range
-        (Types.Named
-           {
-             path = Well_known.make_path Range;
-             arguments = [ Types.Type (Types.make_builtin UInt64) ];
-           });
+        (Types.Named { path = Well_known.make_path Range; arguments = [ Types.Type bound_type ] });
       State.register_expression state value (fun () ->
           let base = State.make_place (State.build_expression state base) in
           let start = Option.map (State.build_expression state) start in
           let stop = Option.map (State.build_expression state) stop in
           State.make_range state ~origin:value.id base ~start ~stop
             ~inclusive:(match range.kind with Range { inclusive; _ } -> inclusive | _ -> false));
-      match (State.find_sequence_element base_type, base_type) with
-      | Some element, _ ->
+      match (model_element, State.find_sequence_element base_type, base_type) with
+      | Some element, _, _ ->
+          Types.Named { path = Well_known.make_path Sequence; arguments = [ Types.Type element ] }
+      | None, Some element, _ ->
           Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] }
-      | None, Types.Named { path; _ }
+      | None, None, Types.Named { path; _ }
         when Well_known.is String path || Well_known.is String_slice path ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
             "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
-      | None, (Types.Error _ | Types.Hole) -> base_type
-      | None, _ ->
+      | None, None, (Types.Error _ | Types.Hole) -> base_type
+      | None, None, _ ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
             (Printf.sprintf "%s cannot be sliced."
                (String.capitalize_ascii (State.describe state base_type))))

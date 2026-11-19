@@ -902,7 +902,10 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
     uses;
     costs = list_constant_costs written.clauses;
     specification_only =
-      Well_known.is Model owner || Types.mentions_specification_only_type parameters output;
+      Well_known.is Model owner
+      || Types.mentions_specification_only_type parameters output
+      || Option.is_some
+           (Option.bind receiver (fun (_, self) -> Types.find_specification_only_type self));
     is_update_step = false;
     capture_free_parameters = Types.list_capture_free_parameters parameters;
   }

@@ -1568,6 +1568,8 @@ fn List[Element].push(mut self, item: own Element)
 |---|---|
 | The equality of the mathematical types is identity. | The prover substitutes through a model where the collection's own `Equal` is hand-written. |
 | An opaque type has a model. | Other packages reason about the type through its model, without its fields. |
+| `standard::specification` trusts only the structure of its types. Its `todo` bodies are its axioms: `Sequence`'s constructors `empty` and `append`, with `length` and indexing, and the operations of `FiniteSet` and `FiniteMap`. Every other function there has a body, so its `ensures` are proven. | An axiom is trusted, not proven, and a false one would let every program be proven. Proving each fact that follows from others keeps the axioms few enough to check by reading. A proven `ensures` reaches each call as an axiom's does, so callers lose nothing. |
+| The `sum` clause of `empty` and of `append` restates `sum`'s body at that constructor, and a theorem that names neither constructor proves it. | The prover builds sums of its own, such as the sum of a list's element potentials, and a fact reaches those only as a clause of the constructor that made the sequence. A theorem that named the constructor would assume the clause it proves. |
 | `identical(a, b)` is identity, and is separate from `==`. | A generic contract must say that an element is a given value, whatever its type. `==` cannot say that: it is the type's `Equal`, which `List[Element]` does not require, and which is an equivalence and not identity for a set stored as an unsorted list. `==` therefore keeps one meaning everywhere. |
 
 ### What proofs do not model

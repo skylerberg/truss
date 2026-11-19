@@ -3,15 +3,6 @@ let run_code context frame (code : Mir.t) ~type_ =
   | Some returned -> returned
   | None -> (frame, Facts.arrive context frame "unfinished" type_)
 
-let make_empty_parts context frame element =
-  let parts =
-    Facts.declare_fresh context frame "parts"
-      (Facts.declare_sort context (Models.make_sequence_type element))
-  in
-  Facts.assume context frame
-    (Logic.equal (Models.make_sequence_length context element parts) (Logic.int 0));
-  parts
-
 let holds_specification (formula : Mir.formula) is_one =
   let holds = ref false in
   let visit (statement : Mir.statement) =
