@@ -378,7 +378,7 @@ let list_call_edges = function
 
 let list_lowered_references = function
   | Some (Value (Ok lowered)) ->
-      List.sort_uniq Lowered.Item.compare (Backend.list_references lowered)
+      List.sort_uniq Lowered.Item.compare (Lowering.list_references lowered)
   | Some (Value (Error _) | Failed _ | Blocked) | None -> []
 
 let update_indexes (type a) database (part : a Part.stored) ~(before : a part option)
@@ -726,7 +726,7 @@ let type_check run lookups key =
   | exception Reads_failed_part -> Blocked
 
 let make_form_origin database note =
-  Infer.find_form_origin (make_recording_interface_lookups database note ~is_checked:true)
+  Interface.find_form_origin (make_recording_interface_lookups database note ~is_checked:true)
     ~is_derived:(fun path -> Option.is_some (find_part database note (Generated_mir path)))
 
 let read_body_mir database note key = read_value database note (Body_mir key)
@@ -834,13 +834,13 @@ let make_recording_proof_lookups database note : Prover.Lookups.t =
     list_recursion_group = read_recursion_group database note;
   }
 
-let make_recording_lowering_lookups database note : Backend.Lookups.t =
+let make_recording_lowering_lookups database note : Lowering.Lookups.t =
   {
     interface = make_recording_interface_lookups database note ~is_checked:true;
     mir = make_recording_mir_lookups database note;
   }
 
-exception Reaches_unsupported of Backend.unsupported
+exception Reaches_unsupported of Lowering.unsupported
 
 let compute_test_keys database items =
   let outcome =
@@ -852,7 +852,7 @@ let compute_test_keys database items =
           | Error unsupported -> raise (Reaches_unsupported unsupported)
         in
         match
-          Backend.derive_test_keys
+          Lowering.derive_test_keys
             ~read_lowered:(fun item -> require_supported (read_value database note (Lowered item)))
             ~read_known_key:(fun item ->
               require_supported (read_value database note (Test_key item)))
@@ -1047,7 +1047,7 @@ let find_entry_point (names : Resolve.Names.lookups) package =
 let claim_lowering_roots database (names : Resolve.Names.lookups) package =
   if Result.is_ok Libc.host then
     claim_roots database (Stored (Any (Namespace package)))
-      (Backend.list_roots
+      (Lowering.list_roots
          ~tests:
            (List.filter_map
               (fun (declaration : Resolve.Names.declaration) ->
@@ -1369,11 +1369,11 @@ let compute_part database (Part.Any typed as part) =
   | Lowered key ->
       compute_value (Lowered key) (fun note ->
           match
-            Backend.lower (read_host_system ()) (make_recording_lowering_lookups database note) key
+            Lowering.lower (read_host_system ()) (make_recording_lowering_lookups database note) key
           with
           | lowered -> Value lowered
           | exception Reads_failed_part -> Blocked
-          | exception (Backend.Todo_type _ | Backend.Infinite_size _) -> Failed []);
+          | exception (Lowering.Todo_type _ | Lowering.Infinite_size _) -> Failed []);
       settle_references database
   | Test_key key -> compute_test_keys database [ key ]
 
@@ -2298,7 +2298,7 @@ let check_calls database interface viewers key = function
       List.iter
         (fun calling_package ->
           if Package_table.mem database.graphs calling_package then
-            Backend.check_calls interface
+            Lowering.check_calls interface
               ~find_call_edges:(fun path ->
                 match
                   find_part database (note_untracked_read database)
@@ -2350,7 +2350,7 @@ let list_reached_todo_types database key =
   in
   List.sort_uniq Path.compare (visit [] (Stored (Any (Test_key key))))
 
-let find_lowered_lookups database packages : (Backend.lowered_lookups, string) result =
+let find_lowered_lookups database packages : (Lowering.lowered_lookups, string) result =
   match Libc.host with
   | Error message -> Error message
   | Ok system ->
@@ -2418,7 +2418,7 @@ module For_testing = struct
         Option.map
           (fun form -> (form, substitution))
           (match origin with
-          | Infer.Written key | Inherited key ->
+          | Interface.Written key | Inherited key ->
               Option.map
                 (fun (checked : Infer.checked) -> checked.form)
                 (read_checked_body database key)

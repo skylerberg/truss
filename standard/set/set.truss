@@ -390,10 +390,6 @@ impl Iterable for Set[Element: Hash + Ordered] {
         (exists position in 0..result => identical(self.element(position), member))
     cost time O(1)
   {
-    proof {
-      assert forall position in 0..self.elements.length() =>
-        identical(self.element(position), self.elements.model()[position])
-    }
     self.elements.length()
   }
 
