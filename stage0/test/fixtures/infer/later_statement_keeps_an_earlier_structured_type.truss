@@ -1,0 +1,33 @@
+type Span(ticks: Int64)
+type Label(text: String)
+
+impl Multiply[Int64] for Span {
+  type Output = Span
+
+  fn multiply_is_defined(self, right: Int64) -> Bool {
+    true
+  }
+
+  fn multiply(self, right: Int64) -> Span {
+    Span(ticks: self.ticks)
+  }
+}
+
+impl Multiply[UInt8] for Span {
+  type Output = Label
+
+  fn multiply_is_defined(self, right: UInt8) -> Bool {
+    true
+  }
+
+  fn multiply(self, right: UInt8) -> Label {
+    Label(text: "label")
+  }
+}
+
+fn f(span: Span, small: UInt8) -> Int64 {
+  let count = 2
+  let scaled = span * count
+  let same = small == count
+  scaled.ticks
+}

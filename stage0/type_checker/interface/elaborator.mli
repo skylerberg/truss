@@ -45,6 +45,8 @@ type cost_operand = {
 val list_cost_operands : t -> Syntax.expression -> cost_operand list
 val show_path : Syntax.path -> string
 val elaborate_type : t -> Syntax.type_expression -> Types.ty
+val elaborate_condition : t -> Syntax.condition -> Types.condition
+val with_added_bounds : t -> Types.condition -> (unit -> 'a) -> 'a
 
 val elaborate_header :
   Lookups.t -> Resolve.Names.key -> (Environment.header, Diagnostic.in_definition list) result

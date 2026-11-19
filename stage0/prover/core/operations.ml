@@ -104,26 +104,28 @@ let convert_to_any context frame (site : Invocation.site) =
   in
   (frame, Facts.arrive context frame "any" (Facts.substitute_type context frame site.type_))
 
-let compute_current_bounds (context : State.context) : Interface.Impls.bounds =
-  let list_impl_generics path =
-    match Interface.Definition.find_impl_interface context.lookups.interface path with
-    | Some interface -> interface.impl_generics
-    | None -> []
-  in
-  let generics =
-    match context.current with
-    | Method { owner; _ } -> (
-        list_impl_generics owner
-        @
-        match Interface.Impls.read_signature context.lookups.interface context.current with
-        | Some signature -> signature.generics
-        | None -> [])
-    | current -> (
-        match Interface.Impls.read_signature context.lookups.interface current with
-        | Some signature -> signature.generics
-        | None -> list_impl_generics current)
-  in
-  fun parameter -> Types.list_bounds generics parameter
+let compute_bounds_with_self ?(bounds : Interface.Impls.bounds option) (context : State.context) :
+    Interface.Impls.bounds =
+  let list_current_bounds = Option.value bounds ~default:context.bounds in
+  fun parameter ->
+    match
+      if Types.is_self_parameter parameter then
+        Interface.Definition.find_trait_interface context.lookups.interface parameter.owner
+      else None
+    with
+    | Some interface ->
+        {
+          Types.trait = parameter.owner;
+          trait_arguments = Types.list_generic_arguments interface.trait_generics;
+          associated = [];
+        }
+        :: list_current_bounds parameter
+    | None -> list_current_bounds parameter
+
+let list_impl_packages (context : State.context) (ty : Types.ty) =
+  List.sort_uniq compare
+    ((match ty with Types.Named { path; _ } -> [ Path.locate_package path ] | _ -> [])
+    @ [ Path.locate_package context.current; Path.standard_package ])
 
 let find_concrete_impl (context : State.context) (trait : Types.trait_reference) (ty : Types.ty) =
   match ty with
@@ -132,7 +134,7 @@ let find_concrete_impl (context : State.context) (trait : Types.trait_reference)
         Path.equal impl context.current
         || match context.current with Method { owner; _ } -> Path.equal owner impl | _ -> false
       in
-      let list_bounds = compute_current_bounds context in
+      let list_bounds = context.bounds in
       let packages =
         List.sort_uniq compare [ Path.locate_package context.current; Path.locate_package path ]
       in

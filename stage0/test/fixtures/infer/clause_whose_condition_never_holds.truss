@@ -1,0 +1,11 @@
+type Ones(count: UInt64)
+
+impl Cursor for Ones {
+  type Element = UInt64
+
+  fn next(mut self) -> Option[UInt64]
+    ensures result is Some(_) when Self: FiniteCursor
+  {
+    Some(1)
+  }
+}

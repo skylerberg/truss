@@ -284,7 +284,7 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
         let else_ = lower_arm lowered.ended_if_false (Emitter.make_block_scope ()) else_ in
         lower_choice builder node [ then_; else_ ]
           (Tree.Conditional { condition; then_; else_; if_condition = Some tested.origin })
-    | Match { scrutinees; arms } -> match_ builder node scrutinees arms
+    | Match { scrutinees; arms; is_written } -> match_ builder node scrutinees arms ~is_written
     | Block inner -> Emitter.run_in_value_scope builder origin (fun () -> lower_block builder inner)
     | Provide { implementations; body } ->
         let* provided =
@@ -766,9 +766,10 @@ and match_patterns ?(covers = false) ?owned builder (patterns : Core.pattern lis
   in
   lower_alternatives (expand_patterns patterns)
 
-and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : Tree.operand option
-    =
+and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) ~is_written :
+    Tree.operand option =
   let origin = node.origin in
+  let is_decision = is_written && List.compare_length_with arms 1 > 0 in
   let* scrutinee_values =
     In_order.run builder
       (In_order.all
@@ -819,7 +820,7 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
     in
     let value =
       Emitter.build_block builder (fun () ->
-          if arm.patterns <> [] then
+          if is_decision && arm.patterns <> [] then
             Emitter.emit builder
               (Basic
                  (Matched
@@ -1585,18 +1586,21 @@ and of_law_statement ~entry_locals (written : Core.block) =
 and lower_attached_formula builder (written : Core.expression) =
   of_specification ~entry_locals:(Emitter.entry_locals builder) written
 
-and lower_loop_clauses builder (clauses : Core.loop_clause list) : Tree.loop_clause list =
+and lower_loop_clauses builder (clauses : Core.loop_clause Core.conditional list) :
+    Tree.loop_clause list =
   let lower_bound : Core.bound -> Tree.bound = function
     | Order_of amount -> Order_of (lower_attached_formula builder amount)
     | At_most amount -> At_most (lower_attached_formula builder amount)
     | Exactly amount -> Exactly (lower_attached_formula builder amount)
   in
   List.map
-    (function
-      | Core.Invariant invariant -> Tree.Invariant (lower_attached_formula builder invariant)
-      | Decreases measures -> Decreases (List.map (lower_attached_formula builder) measures)
+    (fun ({ holds_when; clause } : Core.loop_clause Core.conditional) ->
+      let lower_formula written = { (lower_attached_formula builder written) with holds_when } in
+      match clause with
+      | Core.Invariant invariant -> Tree.Invariant (lower_formula invariant)
+      | Decreases measures -> Decreases (List.map lower_formula measures)
       | Cost { origin; amortized; resource; bound = written } ->
-          Cost { origin; amortized; resource; bound = lower_bound written })
+          Cost { origin; amortized; resource; bound = lower_bound written; holds_when })
     clauses
 
 let of_expression (written : Core.expression) =

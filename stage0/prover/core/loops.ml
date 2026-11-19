@@ -58,6 +58,15 @@ type for_loop = {
   bind_parts : State.frame -> State.frame;
 }
 
+let find_clause_condition : Mir.loop_clause -> Types.condition = function
+  | Invariant invariant -> invariant.holds_when
+  | Decreases (measure :: _) -> measure.holds_when
+  | Decreases [] -> []
+  | Cost cost -> cost.holds_when
+
+let keep_holding_clauses context (clauses : Mir.loop_clause list) =
+  List.filter (fun clause -> Conditions.holds_here context (find_clause_condition clause)) clauses
+
 let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause list) ~held_gains =
   List.map
     (fun (counter : Costs.counter) ->
@@ -429,8 +438,11 @@ let check_preserved_validity context end_ location preserved =
 let check_invariants context frame clauses ~when_ =
   List.iter
     (fun (invariant : Mir.formula) ->
-      let _, term = Validity.read_specification context frame invariant in
-      Facts.oblige context frame Invariant
+      let _, term =
+        Conditions.with_obligation_condition context invariant.holds_when (fun () ->
+            Validity.read_specification context frame invariant)
+      in
+      Facts.oblige context frame Invariant ~holds_when:invariant.holds_when
         (Facts.locate context frame.source invariant.origin)
         [
           Text "The loop invariant `";
@@ -672,16 +684,23 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   let entry_model = find_model frame in
   let trait, evidence =
     match next.callee with
-    | Trait_method { trait; evidence = Impl _ as evidence; _ } -> (trait, evidence)
-    | _ ->
-        Facts.raise_unsupported location "a loop over `%s`, whose `Cursor` the prover cannot find"
-          (Types.show cursor_type)
+    | Trait_method { trait; evidence; _ } -> (trait, evidence)
+    | _ -> Facts.raise_bug "a loop over `%s` pulls no `Cursor`" (Types.show cursor_type)
   in
-  let impl, impl_arguments =
+  let self_type = Facts.substitute_type context frame cursor_type in
+  let self_binding =
+    Types.bind_argument
+      (Types.make_self_parameter cursor_trait)
+      (Types.Type cursor_type) Types.no_substitution
+  in
+  let path, callee_substitution =
     match evidence with
     | Impl { impl; substitution } ->
-        (impl, Types.substitute_substitution frame.substitution substitution)
-    | _ -> Facts.raise_bug "a cursor's evidence is not an impl"
+        ( Well_known.make_impl_method_path Cursor_next ~impl,
+          Types.combine_substitutions
+            (Types.substitute_substitution frame.substitution substitution)
+            self_binding )
+    | Bound | Dynamic -> (Well_known.make_method_path Cursor_next, self_binding)
   in
   let cursor_next = Well_known.locate_method Cursor_next in
   let contract =
@@ -689,12 +708,15 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       Contracts.find_method_contract context.lookups trait cursor_next.name cursor_next.receiver
         evidence
     with
-    | Some contract -> contract
+    | Some contract ->
+        Calls.add_restated_clauses context ~self_type
+          ~bind:(fun subtrait _ ->
+            Contracts.make_trait_substitution context.lookups subtrait self_type)
+          cursor_trait cursor_next.name cursor_next.receiver contract
     | None ->
         Facts.raise_unsupported location "a loop over `%s`, whose `next` the prover cannot read"
           (Types.show cursor_type)
   in
-  let path = Well_known.make_impl_method_path Cursor_next ~impl in
   let option_type =
     Types.Named { path = Well_known.make_path Option; arguments = [ Types.Type element_type ] }
   in
@@ -773,11 +795,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
             };
           ]
           ~havoc_mut
-          ~substitution_of:(fun _ ->
-            Types.combine_substitutions impl_arguments
-              (Types.bind_argument
-                 (Types.make_self_parameter cursor_trait)
-                 (Types.Type cursor_type) Types.no_substitution))
+          ~substitution_of:(fun _ -> callee_substitution)
           ~type_arguments:[ Types.Type cursor_type ]
       in
       let some_variant = Some (Well_known.show_variant Option_some) in

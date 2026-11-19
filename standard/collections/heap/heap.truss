@@ -173,10 +173,12 @@ public fn collections::Heap[Element: Ordered].reserve(mut self, additional: UInt
 }
 
 public fn collections::Heap[Element: Ordered].extend[Source: Cursor[Element = Element]](mut self, items: own Source)
-  uses Source.Uses, RunForever
+  uses Source.Uses, RunForever unless Source: FiniteCursor
 {
   var cursor = own items
-  while mut cursor.next() is Some(item) {
+  while mut cursor.next() is Some(item)
+    decreases cursor.remaining() when Source: FiniteCursor
+  {
     mut self.push(own item)
   }
 }
@@ -203,11 +205,13 @@ public fn collections::Heap[Element: Ordered].to_sorted_list(own self) -> List[E
   items
 }
 
-public fn collections::HeapCursor[Element: Ordered].remaining(self) -> UInt64
-  ensures result == self.heap.length()
-  cost time O(1)
-{
-  self.heap.length()
+impl FiniteCursor for collections::HeapCursor[Element: Ordered] {
+  fn remaining(self) -> UInt64
+    ensures result == self.heap.length()
+    cost time O(1)
+  {
+    self.heap.length()
+  }
 }
 
 impl Cursor for collections::HeapCursor[Element: Ordered] {

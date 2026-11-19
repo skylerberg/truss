@@ -1,0 +1,9 @@
+let size: Int64 = 3
+
+fn width[count: UInt64]() -> UInt64 {
+  count
+}
+
+fn measured() -> UInt64 {
+  width[size]()
+}

@@ -1,9 +1,11 @@
 type Stuck(left: UInt64)
 
-fn Stuck.remaining(self) -> UInt64
-  ensures result == self.left
-{
-  self.left
+impl FiniteCursor for Stuck {
+  fn remaining(self) -> UInt64
+    ensures result == self.left
+  {
+    self.left
+  }
 }
 
 impl Cursor for Stuck {

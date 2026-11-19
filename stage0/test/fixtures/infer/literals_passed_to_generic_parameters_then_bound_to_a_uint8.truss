@@ -1,0 +1,9 @@
+fn chosen[Value](first: own Value, second: own Value) -> Value {
+  first
+}
+
+fn f() -> UInt8 {
+  let count = chosen(3, second: 4)
+  let small: UInt8 = count
+  small
+}

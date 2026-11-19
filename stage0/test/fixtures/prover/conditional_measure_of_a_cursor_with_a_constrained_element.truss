@@ -1,0 +1,10 @@
+fn append[Element, Source: Cursor[Element = Element]](items: mut List[Element], source: own Source)
+  uses Source.Uses, RunForever unless Source: FiniteCursor
+{
+  var cursor = own source
+  while mut cursor.next() is Some(item)
+    decreases cursor.remaining() when Source: FiniteCursor
+  {
+    mut items.push(own item)
+  }
+}

@@ -1,0 +1,13 @@
+type Ones(count: UInt64)
+
+impl Cursor for Ones {
+  type Element = UInt64
+
+  fn next(mut self) -> Option[UInt64] {
+    Some(1)
+  }
+}
+
+fn gather() -> List[UInt64] {
+  List.collect(Ones(count: 0))
+}

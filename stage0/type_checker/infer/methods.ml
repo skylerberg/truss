@@ -168,8 +168,12 @@ and check_callee_cost state env (value : Syntax.expression) (metric : Language.M
       match Interface.Elaborator.find_bounded_type state.context base with
       | Some type_ -> check_method_cost state value metric type_ member
       | None -> report_not_a_callee "its operand is neither")
-  | [ { value = { kind = Name { modules = []; last }; _ }; _ } ] -> (
-      match (State.find_target state last, State.find_local_type state last) with
+  | [ { value = { kind = Name { modules = []; last }; _ } as operand; _ } ] -> (
+      match
+        ( State.find_target state last,
+          Option.map (Conversions.read_actual_head state operand) (State.find_local_type state last)
+        )
+      with
       | ( Some (Local _),
           (Some (Types.Function _ | Types.Variable _ | Types.Hole | Types.Error _) | None) )
       | Some (Unknown _), _ ->
@@ -225,26 +229,30 @@ and report_unknown_static_method state ?expected (value : Syntax.expression) typ
     else None
   in
   let is_expected =
-    match (Option.map (State.normalize state) expected, type_) with
+    match (Option.map (Conversions.read_expected_head state) expected, type_) with
     | Some (Types.Named { path = expected; _ }), Types.Named { path; _ } -> Path.equal expected path
     | _ -> false
   in
-  match empty_literal with
-  | Some literal ->
-      State.make_error_type state Unknown_member (State.read_span state member.id)
-        ~fixes:
-          (if is_expected then
-             [
-               State.fix
-                 (Printf.sprintf "Write `%s`." literal)
-                 [ State.replace (State.read_span state value.id) literal ];
-             ]
-           else [])
-        (Printf.sprintf "`%s` has no method `new`. The literal `%s` is an empty `%s`."
-           (State.show state type_) literal (State.show state type_))
-  | None ->
-      State.make_error_type state Unknown_member (State.read_span state member.id)
-        (Name_lookup.describe_missing_method state type_ member.text)
+  let error =
+    match empty_literal with
+    | Some literal ->
+        State.make_error_type state Unknown_member (State.read_span state member.id)
+          ~fixes:
+            (if is_expected then
+               [
+                 State.fix
+                   (Printf.sprintf "Write `%s`." literal)
+                   [ State.replace (State.read_span state value.id) literal ];
+               ]
+             else [])
+          (Printf.sprintf "`%s` has no method `new`. The literal `%s` is an empty `%s`."
+             (State.show state type_) literal (State.show state type_))
+    | None ->
+        State.make_error_type state Unknown_member (State.read_span state member.id)
+          (Name_lookup.describe_missing_method state type_ member.text)
+  in
+  ignore (State.unify state type_ error);
+  error
 
 and check_static_call state env ?expected (value : Syntax.expression) type_ (member : Syntax.name)
     arguments =
@@ -322,6 +330,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                         | _ -> receiver.value
                       in
                       let receiver_type = Hooks.check_expression state env inner in
+                      let receiver_head = Conversions.read_actual_head state inner receiver_type in
                       if inner != receiver.value then begin
                         State.record state receiver.value receiver_type;
                         State.alias_expression state receiver.value inner
@@ -330,7 +339,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                         not
                           (State.unify state
                              (Option.value ~default:receiver_type
-                                (State.find_view_as state ~owned:receiver_type ~view:type_))
+                                (Conversions.find_view_as ~owned:receiver_head ~view:type_))
                              type_)
                       then
                         State.report_mismatch state (State.read_span state inner.id) ~expected:type_
@@ -405,7 +414,7 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
       check_trait_method_call state env value self_type trait method_ arguments ~trait_arguments
   | None ->
       check_trait_method_call state env value self_type trait method_ arguments
-        ~trait_arguments:(Instantiation.make_fresh_generic_arguments state trait_generics)
+        ~trait_arguments:(State.make_fresh_generic_arguments state trait_generics)
 
 and check_trait_method_call state env (value : Syntax.expression) self_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) arguments ~trait_arguments =
@@ -426,7 +435,8 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
               Calls.check_argument state env first.value parameter ~has_generic_type:false
             in
             ignore
-              (State.decide_default_literal state ~at:(State.read_span state value.id) self_type);
+              (Solver.decide_default state ~site:Method_call ~at:(State.read_span state value.id)
+                 self_type);
             ([ { Tables.expression = first.value.id; core_argument_index = 0; mode } ], rest)
         | [] -> ([], []))
     | None -> ([], arguments)
@@ -449,7 +459,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
             callee_result = result;
           };
       Form.register_call state value;
-      Name_lookup.check_implements state (State.read_span state value.id) self_type reference;
+      Solver.require state (Method_call (State.read_span state value.id)) self_type reference;
       State.normalize state result
 
 and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_arguments
@@ -467,9 +477,35 @@ and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_
         method_ arguments
   | None when Members.list_trait_methods state.lookups trait member.text <> [] ->
       report_unmatched_receiver_mode state env arguments member
-  | None ->
-      State.make_error_type state Unknown_member (State.read_span state member.id)
-        (Printf.sprintf "`%s` has no method `%s`." (Path.show trait) member.text)
+  | None -> (
+      let restated =
+        match Interface.Definition.find_trait_interface state.lookups.interface trait with
+        | Some interface ->
+            List.find_opt
+              (fun (restated : Types.restated_method) ->
+                restated.restated_name = member.text && restated.restated_receiver = wanted)
+              interface.restated
+        | None -> None
+      in
+      match
+        Option.bind restated (fun (restated : Types.restated_method) ->
+            Option.map
+              (fun method_ -> (restated.declared_by, method_))
+              (Interface.Definition.find_trait_method state.lookups.interface restated.declared_by
+                 ~name:member.text ~receiver:wanted))
+      with
+      | Some (declared_by, method_) ->
+          let self_type = State.make_fresh_type state in
+          Solver.require state
+            (Method_call (State.read_span state value.id))
+            self_type
+            (Instantiation.make_fresh_trait_reference state trait);
+          check_trait_method_through_type state env value self_type
+            (Instantiation.make_fresh_trait_reference state declared_by)
+            method_ arguments
+      | None ->
+          State.make_error_type state Unknown_member (State.read_span state member.id)
+            (Printf.sprintf "`%s` has no method `%s`." (Path.show trait) member.text))
 
 and check_capability_call state env (value : Syntax.expression) capability (member : Syntax.name)
     arguments =
@@ -507,8 +543,8 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
 and check_method_call state env ?expected (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) ~type_arguments arguments =
   let receiver_type =
-    State.decide_default_literal state ~at:(State.read_span state value.id)
-      (State.normalize state (Hooks.check_expression state env base))
+    Solver.decide_default state ~site:Method_call ~at:(State.read_span state value.id)
+      (Conversions.read_checked_head state env base)
   in
   let has_mode_keyword = List.mem_assoc value.id state.keyword_modes in
   let lent_mode = if has_mode_keyword then None else Modes.find_lent_mode state base in
@@ -659,9 +695,10 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
       | Ok () -> (
           (match instance.signature.receiver with
           | Some (mode, self_type) -> (
-              match State.find_view_as state ~owned:receiver_type ~view:self_type with
+              let receiver_head = Conversions.read_actual_head state receiver receiver_type in
+              match Conversions.find_view_as ~owned:receiver_head ~view:self_type with
               | Some _ ->
-                  Name_lookup.coerce state env ~argument:mode receiver ~actual:receiver_type
+                  Conversions.coerce state env ~argument:mode receiver ~actual:receiver_type
                     ~expected:self_type
               | None ->
                   if not (State.unify state self_type receiver_type) then
@@ -752,6 +789,7 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                     callee_result = result;
                   };
               Form.register_call state value;
-              Name_lookup.check_implements state (State.read_span state value.id) receiver_type
-                trait;
+              Solver.require state
+                (Method_call (State.read_span state value.id))
+                receiver_type trait;
               State.normalize state result))

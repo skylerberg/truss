@@ -58,6 +58,7 @@ module Code = struct
     | Loop_cost_bound
     | Function_type_names
     | Misplaced_requires
+    | Misplaced_condition
     | Misplaced_function_type
     | Misplaced_associated_type
     | Misplaced_constraint
@@ -160,6 +161,7 @@ module Code = struct
     | Not_a_capability
     | Arity
     | Argument_kind
+    | Wrong_value_parameter_type
     | Unsatisfied_bound
     | Private_in_public
     | Method_outside_package
@@ -172,6 +174,9 @@ module Code = struct
     | Cannot_derive
     | Derives_inferred
     | Redeclared_method
+    | Restated_method_body
+    | Restated_method_clause
+    | Decided_condition
     | Trait_cycle
     | Recursion_limit
     | Missing_member
@@ -323,6 +328,7 @@ module Code = struct
     | Loop_cost_bound -> "loop_cost_bound"
     | Function_type_names -> "function_type_names"
     | Misplaced_requires -> "misplaced_requires"
+    | Misplaced_condition -> "misplaced_condition"
     | Misplaced_function_type -> "misplaced_function_type"
     | Misplaced_associated_type -> "misplaced_associated_type"
     | Misplaced_constraint -> "misplaced_constraint"
@@ -427,6 +433,7 @@ module Code = struct
     | Not_a_capability -> "not_a_capability"
     | Arity -> "arity"
     | Argument_kind -> "argument_kind"
+    | Wrong_value_parameter_type -> "wrong_value_parameter_type"
     | Unsatisfied_bound -> "unsatisfied_bound"
     | Private_in_public -> "private_in_public"
     | Method_outside_package -> "method_outside_package"
@@ -439,6 +446,9 @@ module Code = struct
     | Cannot_derive -> "cannot_derive"
     | Derives_inferred -> "derives_inferred"
     | Redeclared_method -> "redeclared_method"
+    | Restated_method_body -> "restated_method_body"
+    | Restated_method_clause -> "restated_method_clause"
+    | Decided_condition -> "decided_condition"
     | Trait_cycle -> "trait_cycle"
     | Recursion_limit -> "recursion_limit"
     | Missing_member -> "missing_member"

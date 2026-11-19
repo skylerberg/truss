@@ -1,0 +1,15 @@
+trait Tagged {
+  fn tag(self) -> UInt8
+}
+
+impl Tagged for UInt64 {
+  fn tag(self) -> UInt8 { 1 }
+}
+
+fn tagged[Value: Tagged](value: Value) -> UInt8 {
+  value.tag()
+}
+
+fn f() -> UInt8 {
+  tagged(3)
+}

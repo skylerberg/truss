@@ -3,12 +3,17 @@ let require_home (source : State.source) =
   | Some key -> key
   | None -> Facts.raise_bug "%s has no definition key" source.name
 
-let make_context ?node (lookups : Lookups.t) ~home ~current ~terminates ~measures
-    ~inherits_precondition =
+let make_context ?node ?(condition = []) ?(keeps_termination = true) (lookups : Lookups.t) ~home
+    ~current ~terminates ~measures ~inherits_precondition =
   let node = Option.value node ~default:current in
   let rec context =
     {
-      State.run_body = (fun frame ~lambdas body -> Reader.read_body context frame ~lambdas body);
+      State.condition;
+      bounds = Facts.list_definition_bounds lookups ~current ~condition;
+      keeps_termination;
+      obligation_condition = [];
+      skipped_conditions = [];
+      run_body = (fun frame ~lambdas body -> Reader.read_body context frame ~lambdas body);
       read_formula =
         (fun frame formula ~arguments -> Reader.read_formula context frame formula ~arguments);
       home;
@@ -134,8 +139,13 @@ let show_promiser_kind (lookups : Lookups.t) (source : State.source) =
       "capability"
   | _ -> "trait"
 
-let keep_promise context (frame : State.frame) (promise : promise) ~(at : State.frame) ~location
-    ~compute_change =
+let describe_difference (promise : promise) =
+  match promise.counter.counting with
+  | Units | At_most -> ("more than", "allows")
+  | Exactly -> ("more or less than", "states")
+
+let keep_promise ?message context (frame : State.frame) (promise : promise) ~(at : State.frame)
+    ~location ~compute_change =
   let spent =
     match List.assoc_opt promise.counter frame.spent with Some term -> term | None -> Costs.zero
   in
@@ -151,25 +161,24 @@ let keep_promise context (frame : State.frame) (promise : promise) ~(at : State.
     | Exactly -> Logic.equal spent amount
     | At_most -> Logic.less_equal spent amount
   in
-  let difference, verb =
-    match promise.counter.counting with
-    | Units | At_most -> ("more than", "allows")
-    | Exactly -> ("more or less than", "states")
-  in
-  Facts.oblige context frame Cost location
-    [
-      Text
-        (if promise.inherited then
-           Printf.sprintf "This method may spend %s its %s's `" difference
-             (show_promiser_kind context.lookups promise.written_in)
-         else Printf.sprintf "This may spend %s `" difference);
-      Facts.quote promise.written_in promise.clause.origin;
-      Text (Printf.sprintf "` %s." verb);
-    ]
+  let difference, verb = describe_difference promise in
+  Facts.oblige context frame Cost location ~holds_when:promise.clause.holds_when
+    (match message with
+    | Some message -> message
+    | None ->
+        [
+          Text
+            (if promise.inherited then
+               Printf.sprintf "This method may spend %s its %s's `" difference
+                 (show_promiser_kind context.lookups promise.written_in)
+             else Printf.sprintf "This may spend %s `" difference);
+          Facts.quote promise.written_in promise.clause.origin;
+          Text (Printf.sprintf "` %s." verb);
+        ])
     goal
 
-let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_substitution)
-    (lookups : Lookups.t) (source : State.source) ~path =
+let translate_run ~proof ?inherited ~substitution ~condition (lookups : Lookups.t)
+    (source : State.source) ~path =
   let contract =
     match Mir.read_contract lookups.mir path with
     | Some { form; _ } -> form
@@ -186,12 +195,14 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
     | Some (signature : Types.signature) -> signature.is_update_step
     | None -> false
   in
-  let terminates =
-    proof
-    ||
+  let uses =
     match signature with
-    | Some (signature : Types.signature) -> Types.terminates signature.uses
-    | None -> false
+    | Some (signature : Types.signature) -> signature.uses
+    | None -> Types.make_capability_set [ Built_in Run_forever ]
+  in
+  let terminates = proof || Types.terminates_when condition uses in
+  let keeps_termination =
+    condition = [] || Types.find_unless (Built_in Run_forever) uses = Some condition
   in
   let pair_up terms =
     match (inherited, parameters, terms) with
@@ -218,13 +229,71 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
     | Some _ | None -> true
   in
   let home = require_home source in
+  let measures =
+    List.filter
+      (fun (measure : Mir.formula) -> Types.implies_condition condition measure.holds_when)
+      contract.decreases
+  in
   let context =
-    make_context lookups ~home ~current:path
+    make_context lookups ~condition ~keeps_termination ~home ~current:path
       ~node:
         (Mir.Call_edges.resolve_node
            { interface = lookups.interface; mir = lookups.mir }
            path substitution)
-      ~terminates ~measures:contract.decreases ~inherits_precondition
+      ~terminates ~measures ~inherits_precondition
+  in
+  List.iter
+    (fun (measure : Mir.formula) ->
+      ignore (Conditions.decide context ~substitution:Types.no_substitution measure.holds_when))
+    contract.decreases;
+  let keep_clauses ~substitution (clauses : State.clauses) =
+    let decide holds_when =
+      Conditions.find_obligation_condition (Conditions.decide context ~substitution holds_when)
+    in
+    {
+      clauses with
+      requires =
+        List.filter_map
+          (fun (requirement : Mir.requirement) ->
+            Option.map
+              (fun holds_when ->
+                { requirement with clause = { requirement.clause with holds_when } })
+              (decide requirement.clause.holds_when))
+          clauses.requires;
+      ensures =
+        List.filter_map
+          (fun (clause : Mir.formula) ->
+            Option.map (fun holds_when -> { clause with holds_when }) (decide clause.holds_when))
+          clauses.ensures;
+      costs =
+        List.filter_map
+          (fun (cost : Mir.cost) ->
+            Option.map (fun holds_when -> { cost with holds_when }) (decide cost.holds_when))
+          clauses.costs;
+    }
+  in
+  let contract =
+    let kept =
+      keep_clauses ~substitution:Types.no_substitution
+        {
+          callee = source;
+          parameters = contract.parameters;
+          requires = contract.requires;
+          ensures = contract.ensures;
+          decreases = [];
+          costs = contract.costs;
+          callbacks = contract.callbacks;
+          inherited = false;
+          bindings = Types.no_substitution;
+        }
+    in
+    { contract with requires = kept.requires; ensures = kept.ensures; costs = kept.costs }
+  in
+  let inherited =
+    Option.map
+      (fun ((clauses : State.clauses), substitution) ->
+        (keep_clauses ~substitution clauses, substitution))
+      inherited
   in
   context.callbacks <-
     List.filter_map
@@ -358,8 +427,11 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
       ignore
         (List.fold_left
            (fun frame (requirement : Mir.formula) ->
-             let frame, term = Validity.read_specification context frame requirement in
-             Facts.oblige context frame Requires
+             let frame, term =
+               Conditions.with_obligation_condition context requirement.holds_when (fun () ->
+                   Validity.read_specification context frame requirement)
+             in
+             Facts.oblige context frame Requires ~holds_when:requirement.holds_when
                (Facts.locate context frame.source requirement.origin)
                [
                  Text "`";
@@ -374,8 +446,11 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
            declared_requires);
   let start =
     List.fold_left
-      (fun frame requirement ->
-        let frame, term = Validity.read_specification context frame requirement in
+      (fun frame (requirement : Mir.formula) ->
+        let frame, term =
+          Conditions.with_obligation_condition context requirement.holds_when (fun () ->
+              Validity.read_specification context frame requirement)
+        in
         Facts.assume context frame term;
         frame)
       start declared_requires
@@ -386,7 +461,8 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
         match promise.clause.bound with
         | Order_of amount | At_most amount | Exactly amount ->
             let result = Option.map (Facts.arrive context start "result") output in
-            ignore (Validity.read_specification context { start with result } amount))
+            Conditions.with_obligation_condition context promise.clause.holds_when (fun () ->
+                ignore (Validity.read_specification context { start with result } amount)))
     promised;
   Reader.read_body context start ~lambdas:mir.lambdas mir.body;
   let returns = List.rev context.returns in
@@ -437,7 +513,7 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
                   { frame with yielded = Some yielded_so_far }
                   ensured
               in
-              Facts.oblige context frame Ensures
+              Facts.oblige context frame Ensures ~holds_when:ensured.holds_when
                 (Facts.locate context frame.source ensured.origin)
                 [
                   Text "`";
@@ -449,8 +525,11 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
       | _ ->
           List.iter
             (fun (ensured : Mir.formula) ->
-              let _, term = Validity.read_specification context frame ensured in
-              Facts.oblige context frame Ensures
+              let _, term =
+                Conditions.with_obligation_condition context ensured.holds_when (fun () ->
+                    Validity.read_specification context frame ensured)
+              in
+              Facts.oblige context frame Ensures ~holds_when:ensured.holds_when
                 (Facts.locate context frame.source ensured.origin)
                 [
                   Text "`";
@@ -519,7 +598,8 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
           List.iter
             (fun (clause : Mir.formula) ->
               let _, term = Validity.read_specification context inside clause in
-              Facts.oblige context under_trait Ensures Whole_definition
+              Facts.oblige context under_trait Ensures ~holds_when:clause.holds_when
+                Whole_definition
                 [
                   Text (Printf.sprintf "The %s's `" (show_promiser_kind lookups clauses.callee));
                   Facts.quote clauses.callee clause.origin;
@@ -529,7 +609,35 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
             clauses.ensures
       | _ -> ())
     returns;
-  make_outcome context
+  (make_outcome context, context.skipped_conditions)
+
+let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_substitution)
+    (lookups : Lookups.t) (source : State.source) ~path =
+  let run condition =
+    translate_run ~proof ?inherited ~substitution ~condition lookups source ~path
+  in
+  let base, skipped = run [] in
+  let terminating_condition =
+    match Interface.Impls.read_signature lookups.interface path with
+    | Some signature when not (Types.has_capability (Built_in Run_forever) signature.uses) ->
+        Option.to_list
+          (Types.find_unless (Built_in Run_forever)
+             (Types.substitute_capabilities substitution signature.uses))
+    | Some _ | None -> []
+  in
+  let outcomes =
+    base
+    :: List.map
+         (fun condition -> fst (run condition))
+         (List.sort_uniq compare (terminating_condition @ skipped))
+  in
+  {
+    Obligation.obligations =
+      List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
+    holes =
+      List.sort_uniq compare
+        (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
+  }
 
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at
     =
@@ -614,6 +722,257 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
           holds
       end)
     (Laws.list_laws context trait.trait);
+  make_outcome context
+
+let prove_restated_method context (start : State.frame) ~at ~impl_interface ~trait ~for_type
+    (restated : Types.restated_method) (clauses : State.clauses) =
+  let lookups = context.State.lookups in
+  let name = restated.restated_name and receiver = restated.restated_receiver in
+  let restated_path = Path.Method { owner = trait.Types.trait; name; receiver } in
+  let list_bounds = Types.list_bounds impl_interface.Types.impl_generics in
+  let declared =
+    match
+      List.find_opt
+        (fun (bound : Types.trait_reference) -> Path.equal bound.trait restated.declared_by)
+        (Interface.Properties.list_bound_closure lookups.interface ~self:for_type trait)
+    with
+    | Some declared -> declared
+    | None ->
+        Facts.raise_bug "`%s` restates a method of `%s`, which it does not require"
+          (Path.show trait.trait) (Path.show restated.declared_by)
+  in
+  match Interface.Impls.find_evidence lookups.interface ~list_bounds for_type declared with
+  | Some (From_impl { impl; substitution }) -> (
+      let evidence : Core.evidence = Impl { impl; substitution } in
+      let signature =
+        match Interface.Impls.read_signature lookups.interface restated_path with
+        | Some signature -> signature
+        | None ->
+            Facts.raise_bug "the restated method `%s` has no signature" (Path.show restated_path)
+      in
+      let subtrait_substitution = Contracts.make_trait_substitution lookups trait for_type in
+      let method_path = Path.Method { owner = impl; name; receiver } in
+      let generic_arguments =
+        List.map
+          (fun (generic : Types.generic) -> Types.Type (Types.Parameter generic.generic))
+          signature.generics
+      in
+      let callee_substitution =
+        let generics =
+          match Interface.Impls.read_signature lookups.interface method_path with
+          | Some (implemented : Types.signature) ->
+              List.map (fun (generic : Types.generic) -> generic.generic) implemented.generics
+          | None -> []
+        in
+        let fixed =
+          Types.combine_substitutions substitution
+            (Contracts.make_trait_substitution lookups declared for_type)
+        in
+        let unbound =
+          List.filter (fun generic -> Option.is_none (Types.find_argument generic fixed)) generics
+        in
+        if List.length unbound <> List.length generic_arguments then
+          Facts.raise_bug "`%s` and the method `%s` that it restates take different generics"
+            (Path.show restated_path) (Path.show method_path);
+        List.fold_left2
+          (fun substitution parameter argument ->
+            Types.bind_argument parameter argument substitution)
+          fixed unbound generic_arguments
+      in
+      match Contracts.find_method_contract lookups declared name receiver evidence with
+      | None -> Facts.raise_bug "`%s` has no contract" (Path.show method_path)
+      | Some contract ->
+          let read_place (parameter : Mir.parameter) (frame : State.frame) =
+            match parameter.local with
+            | Self -> Option.get frame.self
+            | local -> Option.get (Locals.find_opt (Core_local local) frame.locals)
+          and write_place (parameter : Mir.parameter) (frame : State.frame) term =
+            match parameter.local with
+            | Self -> { frame with self = Some term }
+            | local -> { frame with locals = Locals.add (Core_local local) term frame.locals }
+          in
+          let entry =
+            List.fold_left
+              (fun (frame : State.frame) (parameter : Mir.parameter) ->
+                let ty = Types.substitute subtrait_substitution parameter.type_ in
+                let term =
+                  Facts.arrive context frame ("parameter." ^ Facts.read_parameter_name parameter) ty
+                in
+                Validity.assume_valid context frame ty term;
+                write_place parameter frame term)
+              start clauses.parameters
+          in
+          let list_arguments (frame : State.frame) =
+            List.mapi
+              (fun position parameter -> (position, read_place parameter frame))
+              clauses.parameters
+          in
+          let reading (frame : State.frame) =
+            Validity.bind_arguments frame clauses ~arguments:(list_arguments frame)
+              ~substitution:subtrait_substitution
+          in
+          let promised =
+            list_promises context clauses.callee (reading entry).locals clauses.costs
+              ~inherited:true
+          in
+          context.counters <-
+            Contracts.deduplicate_counters (List.map (fun promise -> promise.counter) promised);
+          let entry =
+            { entry with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
+          in
+          let result_type =
+            Types.substitute subtrait_substitution (Types.extract_result_type signature.output)
+          in
+          let invocation : Invocation.t =
+            {
+              callee =
+                Trait_method
+                  {
+                    trait = declared;
+                    name;
+                    receiver;
+                    self_type = for_type;
+                    instantiation =
+                      { type_arguments = generic_arguments; capability_arguments = [] };
+                    evidence;
+                  };
+              lends =
+                (match signature.output with Lends (mode, _) -> Some mode | Returns _ -> None);
+              uses = Types.substitute_capabilities subtrait_substitution signature.uses;
+            }
+          in
+          let after, result =
+            Calls.call_contract context entry
+              { origin = at; type_ = result_type }
+              invocation method_path contract
+              (List.mapi
+                 (fun position (parameter : Mir.parameter) : State.passed ->
+                   {
+                     position;
+                     mode = parameter.mode;
+                     shape = Other;
+                     origin = None;
+                     passed_place =
+                       (match parameter.mode with
+                       | Language.Mode.Mut ->
+                           Some
+                             {
+                               read = read_place parameter;
+                               write = write_place parameter;
+                               note_changed_in_place = (fun () -> ());
+                             }
+                       | Read | Own -> None);
+                     type_ = Types.substitute subtrait_substitution parameter.type_;
+                     term = read_place parameter entry;
+                   })
+                 clauses.parameters)
+              ~recursive_callee:None ~lent_final:None
+              ~havoc_mut:(fun frame ->
+                List.fold_left
+                  (fun frame (parameter : Mir.parameter) ->
+                    match parameter.mode with
+                    | Language.Mode.Mut ->
+                        write_place parameter frame
+                          (Facts.arrive context frame "changed"
+                             (Types.substitute subtrait_substitution parameter.type_))
+                    | Read | Own -> frame)
+                  frame clauses.parameters)
+              ~substitution_of:(fun _ -> callee_substitution)
+              ~type_arguments:
+                (Facts.list_method_type_arguments ~self_type:for_type generic_arguments)
+          in
+          let exit_ = reading after and entry_reading = reading entry in
+          let ensuring =
+            {
+              exit_ with
+              old_locals = entry_reading.locals;
+              old_self = entry_reading.self;
+              result = Some result;
+            }
+          in
+          let location = Facts.locate context start.source at in
+          List.iter
+            (fun (clause : Mir.formula) ->
+              let _, term = Validity.read_specification context ensuring clause in
+              Facts.oblige context after Ensures location
+                [
+                  Text
+                    (Printf.sprintf "The contract of `%s`'s `%s` may not imply `"
+                       (Types.show for_type) name);
+                  Facts.quote clauses.callee clause.origin;
+                  Text
+                    (Printf.sprintf "`, which `%s` adds to `%s.%s`." (Types.show_trait trait)
+                       (Types.show_trait declared) name);
+                ]
+                term)
+            clauses.ensures;
+          List.iter
+            (fun promise ->
+              let difference, verb = describe_difference promise in
+              keep_promise context after promise ~at:entry_reading ~location
+                ~compute_change:(fun () ->
+                  List.fold_left
+                    (fun total (parameter : Mir.parameter) ->
+                      let ty = Types.substitute subtrait_substitution parameter.type_ in
+                      let before =
+                        Amounts.compute_potential context after ty (read_place parameter entry)
+                      in
+                      match parameter.mode with
+                      | Language.Mode.Mut ->
+                          Costs.plus total
+                            (Costs.minus
+                               (Amounts.compute_potential context after ty
+                                  (read_place parameter after))
+                               before)
+                      | Own -> Costs.minus total before
+                      | Read -> total)
+                    (Amounts.compute_potential context after result_type result)
+                    clauses.parameters)
+                ~message:
+                  [
+                    Text
+                      (Printf.sprintf "The contract of `%s`'s `%s` may spend %s `"
+                         (Types.show for_type) name difference);
+                    Facts.quote clauses.callee promise.clause.origin;
+                    Text
+                      (Printf.sprintf "`, which `%s` adds to `%s.%s`, %s." (Types.show_trait trait)
+                         (Types.show_trait declared) name verb);
+                  ])
+            promised)
+  | Some Built_in ->
+      Facts.raise_unsupported
+        (Facts.locate context start.source at)
+        "a method that `%s` restates from `%s`, which the compiler implements"
+        (Types.show_trait trait) (Path.show restated.declared_by)
+  | Some (From_bound | From_any) ->
+      Facts.raise_bug "`%s` implements `%s` through a bound or `any`" (Types.show for_type)
+        (Types.show_trait declared)
+  | Some (Accepted _) | None -> ()
+
+let translate_restated_clauses (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type
+    ~at =
+  let home = require_home source in
+  let context =
+    make_context lookups ~home ~current:impl ~terminates:false ~measures:[]
+      ~inherits_precondition:false
+  in
+  let impl_interface = Interface.Definition.read_impl_interface lookups.interface impl in
+  List.iter
+    (fun (restated : Types.restated_method) ->
+      let path =
+        Path.Method
+          {
+            owner = trait.Types.trait;
+            name = restated.restated_name;
+            receiver = restated.restated_receiver;
+          }
+      in
+      match Contracts.find_declared_clauses lookups path with
+      | Some clauses ->
+          prove_restated_method context (make_empty_frame source) ~at ~impl_interface ~trait
+            ~for_type restated clauses
+      | None -> Facts.raise_bug "the restated method `%s` has no contract" (Path.show path))
+    (Interface.Definition.read_trait_interface lookups.interface trait.trait).restated;
   make_outcome context
 
 let translate_type (lookups : Lookups.t) (source : State.source) ~path =

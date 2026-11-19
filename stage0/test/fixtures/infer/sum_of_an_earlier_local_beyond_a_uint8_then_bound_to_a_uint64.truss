@@ -1,0 +1,6 @@
+fn f(small: UInt8) -> Bool {
+  let big = 300
+  let sum = big + small
+  let wide: UInt64 = big
+  true
+}

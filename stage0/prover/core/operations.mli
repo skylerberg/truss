@@ -7,7 +7,11 @@ val convert_from_integer :
 val spend : State.context -> State.frame -> (Costs.counter -> Logic.term) -> State.frame
 val declare_unknown_amount : State.context -> State.frame -> Costs.counter -> Logic.term
 val convert_to_any : State.context -> State.frame -> Invocation.site -> State.frame * Logic.term
-val compute_current_bounds : State.context -> Interface.Impls.bounds
+
+val compute_bounds_with_self :
+  ?bounds:Interface.Impls.bounds -> State.context -> Interface.Impls.bounds
+
+val list_impl_packages : State.context -> Types.ty -> Path.package list
 
 val find_concrete_impl :
   State.context -> Types.trait_reference -> Types.ty -> (Path.t * Types.substitution) option

@@ -291,7 +291,12 @@ let show_truss_goal context term =
     printed
   else None
 
-let add_requires context (frame : State.frame) (required : Obligation.message) =
+let add_requires (context : State.context) (frame : State.frame) (required : Obligation.message) =
+  let required =
+    match context.condition with
+    | [] -> required
+    | condition -> required @ [ Obligation.Text (" when " ^ Types.show_condition condition) ]
+  in
   match frame.condition with
   | Logic.Boolean true -> make_requires_fix context required
   | condition -> (
@@ -358,26 +363,33 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
     template_clause;
   }
 
-let oblige ?template_clause ?cited ?(fixes = []) context (frame : State.frame) code location message
-    goal =
-  match
-    make_closed_obligation ?template_clause context frame code location message
-      (add_quantifier_facts
-         ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
-         context goal)
-  with
-  | Some obligation ->
-      let fixes =
-        match fixes with
-        | [] when frame.source.key = Some context.home && frame.makes_obligations -> (
-            match show_truss_goal context goal with
-            | Some required -> add_requires context frame [ Text required ]
-            | None -> [])
-        | fixes -> fixes
-      in
-      context.obligations <- { obligation with cited; fixes } :: context.obligations;
-      assume context frame goal
-  | None -> ()
+let oblige ?template_clause ?cited ?(fixes = []) ?holds_when (context : State.context)
+    (frame : State.frame) code location message goal =
+  let holds_when = Option.value holds_when ~default:context.obligation_condition in
+  if
+    not
+      (holds_when = context.condition
+      || (code = Diagnostic.Code.Termination && context.keeps_termination))
+  then assume context frame goal
+  else
+    match
+      make_closed_obligation ?template_clause context frame code location message
+        (add_quantifier_facts
+           ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
+           context goal)
+    with
+    | Some obligation ->
+        let fixes =
+          match fixes with
+          | [] when frame.source.key = Some context.home && frame.makes_obligations -> (
+              match show_truss_goal context goal with
+              | Some required -> add_requires context frame [ Text required ]
+              | None -> [])
+          | fixes -> fixes
+        in
+        context.obligations <- { obligation with cited; fixes } :: context.obligations;
+        assume context frame goal
+    | None -> ()
 
 let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
     (statement : Mir.statement) =
@@ -620,8 +632,37 @@ let bind (frame : State.frame) local ty term =
     types = Locals.add local ty frame.types;
   }
 
+let list_definition_bounds (lookups : Lookups.t) ~(current : Path.t) ~(condition : Types.condition)
+    : Interface.Impls.bounds =
+  let list_impl_generics path =
+    match Interface.Definition.find_impl_interface lookups.interface path with
+    | Some interface -> interface.impl_generics
+    | None -> []
+  in
+  let generics =
+    match current with
+    | Method { owner; _ } -> (
+        list_impl_generics owner
+        @
+        match Interface.Impls.read_signature lookups.interface current with
+        | Some signature -> signature.generics
+        | None -> [])
+    | _ -> (
+        match Interface.Impls.read_signature lookups.interface current with
+        | Some signature -> signature.generics
+        | None -> list_impl_generics current)
+  in
+  fun parameter ->
+    Types.list_bounds generics parameter
+    @ List.filter_map
+        (fun (bound : Types.bound_condition) ->
+          match bound.subject with
+          | Types.Parameter subject when subject = parameter -> Some bound.bound
+          | _ -> None)
+        condition
+
 let substitute_type (context : State.context) (frame : State.frame) ty =
-  (Interface.Impls.normalize context.lookups.interface ~list_bounds:Interface.Impls.list_no_bounds)
+  (Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)
     (Types.substitute frame.substitution ty)
 
 let find_local_type context frame local =

@@ -160,7 +160,7 @@ and render_constant (emission : Emission.t) : Lowered.constant -> C_text.t * Low
         (match item with
         | Table _ -> Text "extern const void *const " ++ symbol ++ Text "[];\n"
         | Any_drop _ -> Text "void " ++ symbol ++ Text "(void *);\n"
-        | _ -> Text "extern const struct t_evidence " ++ symbol ++ Text ";\n");
+        | _ -> Text "extern const struct truss_evidence " ++ symbol ++ Text ";\n");
       (render_address (Text "&" ++ symbol), Raw (Pointer Opaque))
 
 let classify_scalar (emission : Emission.t) : Lowered.ty -> Memory_layout.scalar = function

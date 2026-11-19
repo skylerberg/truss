@@ -94,7 +94,8 @@ Reserved everywhere:
 any assert break capability concurrent continue cost decreases derives echo else
 ensures exists false fn for forall if impl in indirect internal invariant is law
 lends let match mut opaque own parallel proof provide public requires return self
-Self test theorem todo trait true type unreachable use uses var while with
+Self test theorem todo trait true type unless unreachable use uses var when
+while with
 ```
 
 Reserved for later use, and an error if written:
@@ -175,10 +176,20 @@ decides it: after `let limit = 10`, `count < limit` with a `UInt8` count makes
 - A literal whose type is a type parameter bounded by an integer trait fits
   every type that implements the trait: -128 to 127 under `SignedInteger`, 0
   to 255 under `UnsignedInteger`, and 0 to 127 under `FixedWidthInteger`.
-- A literal meets a bound once its type is decided. Until then, a lookup
-  proceeds as if the bound is met: after `let range = 0..3`,
-  `for index in range` finds `Range`'s `Iterable`, and the loop's body may
-  still decide the type, which must then meet `Countable`.
+- A literal meets a bound of a sealed number trait that every type it may
+  have implements. A sealed bound that only some of those types implement
+  narrows the literal to them: `kept(3)` with `Value: UnsignedInteger` makes
+  the `3` a `UInt64`. A literal meets any other bound once its type is
+  decided. Until then, a lookup proceeds as if the bound is met: after
+  `let range = 0..3`, `for index in range` finds `Range`'s `Iterable`, and
+  the loop's body may still decide the type, which must then meet
+  `Countable`.
+- A statement whose type depends on an undecided literal through an
+  operator's or a trait's result gives the literal its default type at the
+  statement's end, and so does reading a member, an index, or a method of
+  such a result: after `let count = 2`, `let scaled = span * count` and
+  `(span * count).ticks` make `count` an `Int64` when `Span` implements
+  `Multiply[Int64]`.
 
 ### String literals
 
@@ -255,9 +266,6 @@ These sequences are errors:
 //  /*  #  ;  '  `  @  ++  --  ===  !==
 ```
 
-`--` is rejected even where it could be two negations, and `//` is never two
-divisions.
-
 ### Line breaks
 
 A line feed becomes a `NEWLINE` token exactly when the token before it can
@@ -282,8 +290,8 @@ end a statement and the token after it can begin one, outside `(` and `[`:
 
 So no `NEWLINE` comes before a closing `}`, and statements, arms, and members
 are separated by `NEWLINE`s. A `NEWLINE` before a `{` that must open a body
-is ignored. A line that starts with `.`, `else`, a clause keyword, or a
-binary operator other than `-` continues the line before:
+is ignored. A line that starts with `.`, `else`, a clause keyword, `when`,
+`unless`, or a binary operator other than `-` continues the line before:
 
 ```truss
 let active_names = users
@@ -406,7 +414,7 @@ type Expression =
   Building one costs one allocation, which `cost` clauses count; mutating or
   moving its fields allocates nothing.
 - Every cycle of types that contain each other passes through an `indirect`
-  variant or a collection. A record cannot contain itself.
+  variant or a collection.
 - A variant that is not recursive may be `indirect` too.
 - In its own fields, at any depth, a type does not occur in the input of a
   function type without `RunForever`: `type Knot(run: fn(Knot) -> Bool)` is
@@ -566,7 +574,7 @@ fn Option[Value].take(mut self) -> Option[Value] {
   the target can assign the operand's place. The variable of a `for` loop is
   not copied: the loop lends its collection for the body.
 - **`Copyable` types have `copy()`,** whose result is identical to the
-  original. An implicit copy never allocates.
+  original.
 - **Handles are not `Copyable`,** nor is a type that holds one.
 - `Copyable` and `Plain` are prelude traits that the compiler implements and
   no `impl` can, and `Plain` requires `Copyable`. The compiler derives them
@@ -751,8 +759,6 @@ let connection = connect(host, port: 8080)?
   may come in any order, evaluated in the order written, and only a record
   or variant with exactly one field takes a bare value, as in `Some(3)`.
 - A call through a function value passes its arguments by position.
-- An `UpperCamelCase` name before `(` is always a type or a variant being
-  built.
 
 ### Explicit type arguments
 
@@ -775,11 +781,12 @@ function's name.
 ### Clauses
 
 ```ebnf
-clause               = "uses" capability_list
-                     | "requires" expression
-                     | "ensures" expression
-                     | "decreases" expression { "," expression }
-                     | "cost" cost ;
+clause               = "uses" capability_use { "," capability_use }
+                     | "requires" expression [ "when" condition ]
+                     | "ensures" expression [ "when" condition ]
+                     | "decreases" expression { "," expression } [ "when" condition ]
+                     | "cost" cost [ "when" condition ] ;
+capability_use       = capability_reference [ "unless" condition ] ;
 capability_list      = capability_reference { "," capability_reference } ;
 capability_reference = path_type
                      | "Self" "." UPPER_NAME
@@ -811,12 +818,72 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 
 - Repeated clauses all hold. Each `requires` may rely on the `requires`
   before it, and each `ensures` on every `requires` and the `ensures`
-  before it.
+  before it. A clause with a condition relies only on the clauses whose
+  conditions its own implies.
 - A function's *contract* is its `requires`, `ensures`, `decreases`, and
   `cost` clauses.
 - No clause is evaluated when the program runs.
 - `Self.Uses` and `Source.Uses` name an associated capability set (see
   [Associated capability sets](#associated-capability-sets)).
+- Every clause but `uses` can end with `when` and a condition, and each
+  capability in `uses` with `unless` and a condition (see
+  [Conditions](#conditions)).
+
+### Conditions
+
+```ebnf
+condition       = bound_condition { "&&" bound_condition } ;
+bound_condition = ( UPPER_NAME | "Self" ) ":" bound ;
+```
+
+```truss
+public fn List[Element].collect[Source: Cursor[Element = Element]](source: own Source) -> List[Element]
+  uses Source.Uses, RunForever unless Source: FiniteCursor
+  ensures result.length() <= old(source.remaining()) when Source: FiniteCursor
+```
+
+A *condition* states that type arguments implement traits. A clause with a
+condition holds for the instantiations that meet it.
+
+- `T: Trait` holds where the type argument for `T` implements `Trait`, and
+  `T: First + Second` where it implements both. `&&` joins conditions that
+  all hold.
+- A condition names a type parameter of its definition or of the
+  definition's type or `impl`, or `Self` in a trait or an `impl`.
+- A clause holds where its `when` condition holds, and a capability in
+  `uses` is used only where its `unless` condition does not hold. Every
+  clause of a function and of a loop takes a condition: `requires`,
+  `ensures`, `decreases`, `cost`, and `invariant`.
+- **A clause is checked with its condition's bounds,** so it can call the
+  methods of the condition's traits: the `ensures` above calls
+  `source.remaining()`, a method of `FiniteCursor`. The body is checked
+  without them, because it runs for every instantiation.
+- **A clause with a condition is proven where the condition holds.** An
+  `ensures`, a `cost`, an `invariant`, and a measure are proven for the body
+  with the condition's bounds: a call through them has their traits'
+  contracts, and a callee's clause holds where the bounds imply its
+  condition.
+- **A call has each clause of its callee whose condition holds for the
+  call's type arguments.** A condition holds where an `impl` gives it, as a
+  bound does, or where the caller's bounds or the condition of the caller's
+  own clause imply it. `List.collect(word.characters())` uses no
+  `RunForever`, since `Characters` implements `FiniteCursor`.
+  `List.collect(channel.messages())` uses `RunForever`. In a function generic
+  over `Items: Cursor`, `List.collect(own items)` uses
+  `RunForever unless Items: FiniteCursor`.
+- A call whose type arguments leave the condition of a `requires` undecided
+  proves the `requires` with the condition's bounds.
+- A condition on a type built from type parameters holds where an `impl`
+  gives it: `Skip[Source]: FiniteCursor` holds where `Source: FiniteCursor`
+  does, by `impl FiniteCursor for Skip[Source: FiniteCursor]`.
+- A capability that code uses `unless` a condition is available where the
+  function's `uses` names it with no condition, or `unless` a condition that
+  implies the code's.
+- A written function type takes no condition. The type of a function named
+  as a value keeps each condition that its type arguments do not decide.
+- A condition that names neither a type parameter nor `Self` is an error,
+  since it is decided where it is written, and so is a clause whose
+  condition no instantiation meets.
 
 ### Termination
 
@@ -830,24 +897,28 @@ fn serve(listener: mut Listener)
 }
 ```
 
-- **A function terminates unless its `uses` names `RunForever`.** A loop
-  without a measure uses `RunForever` (see [Loops](#loops)), and so does a
-  call of a function that uses it. `RunForever` is otherwise a capability
-  like any other: a function type without it takes only functions that
-  terminate, and a capability parameter holds it where a function passed for
-  the parameter may run forever (see
-  [Capability parameters](#capability-parameters)).
+- **A function terminates unless its `uses` names `RunForever`.** One whose
+  `uses` names `RunForever unless C` terminates where `C` holds (see
+  [Conditions](#conditions)). A loop without a measure uses `RunForever`
+  (see [Loops](#loops)), and so does a call of a function that uses it.
+  `RunForever` is otherwise a capability like any other: a function type
+  without it takes only functions that terminate, and a capability
+  parameter holds it where a function passed for the parameter may run
+  forever (see [Capability parameters](#capability-parameters)).
 - `RunForever` has no methods, and nothing implements it, since a `provide`
   of it would let a function that does not declare it run forever. A
   `parallel` branch or a quantifier may run forever where its function may.
-- A function that uses `RunForever` has no `time` clause.
+- A function that uses `RunForever` has no `time` clause. One that uses
+  `RunForever unless C` states its `time` clause `when` a condition that
+  implies `C`.
 - A call of a capability's method terminates unless the method's `uses`
   names `RunForever`. A method that waits for the world, such as
   `Console.read_line`, returns once the world answers, so waiting is not
   running forever. An implementation whose method may run forever declares
   `uses RunForever` on its `impl`, and providing it requires `RunForever`.
-- A trait's method runs forever only where its `uses` names `RunForever`, or
-  names an associated capability set that an `impl` puts `RunForever` in
+- A trait's method runs forever only where its `uses` names `RunForever` and
+  no `unless` condition of it holds, or names an associated capability set
+  that an `impl` puts `RunForever` in
   (see [Associated capability sets](#associated-capability-sets)). `any`
   fixes those sets to the empty set, so a method called through `any`
   terminates unless its trait's method names `RunForever`.
@@ -866,6 +937,22 @@ fn serve(listener: mut Listener)
   }
   ```
 
+- The parameters whose types are declared with `type` are compared in the
+  order they are declared, as a list of measures is. The first of them that
+  a recursive call does not pass unchanged must be passed a part of itself,
+  and the parameters after it may be any value. The recursive call below
+  needs nothing written because `chain` is declared before `reversed`. Declared in the
+  other order, the function would have to state `decreases`:
+
+  ```truss
+  fn reverse_onto(chain: Chain, reversed: own Chain) -> Chain {
+    match chain {
+      End => reversed
+      Link(value, rest) => reverse_onto(rest, reversed: Chain.Link(value, rest: own reversed))
+    }
+  }
+  ```
+
 - Other recursion in a function without `RunForever` states `decreases`: an
   integer measure over the parameters that stays at or above zero and that
   every recursive call makes smaller. A list of measures is compared in
@@ -873,6 +960,9 @@ fn serve(listener: mut Listener)
 - A function that uses `RunForever` may state `decreases` as well. Each of
   its recursive calls to a function that states one then makes the measure
   smaller.
+- A function whose `decreases` has a condition `C` uses
+  `RunForever unless C`, and its recursion is proven to end where `C` holds,
+  as with `decreases source.remaining() when Source: FiniteCursor`.
 - **A recursion is followed through each call to the code that the call
   runs.** The callee decides which code that is:
 
@@ -947,7 +1037,6 @@ public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
 - `O(f)` means that the cost is at most `c * f + d` for every input, for
   some constants `c` and `d`.
 - `time` counts abstract steps: each primitive operation and each call is one.
-- A caller's cost is proven from its callees' cost clauses.
 
 A bound is an expression on exact integers. It can use the parameters,
 `self`, their fields, pure methods, `result`, `+`, `*`, and `/` and `-`
@@ -1300,7 +1389,9 @@ type Countdown(left: UInt64)
 impl Cursor for Countdown {
   type Element = UInt64
 
-  fn next(mut self) -> Option[UInt64] {
+  fn next(mut self) -> Option[UInt64]
+    ensures (result is Some(_)) ==> self.left < old(self.left)
+  {
     if self.left == 0 {
       return None
     }
@@ -1314,6 +1405,34 @@ impl Cursor for Countdown {
   `None` when the cursor has no more.
 - `Uses` is the set of capabilities that `next` uses. Each `next` uses the
   implementations provided where it is called.
+
+A cursor whose values run out implements the prelude trait `FiniteCursor`:
+
+```truss
+trait FiniteCursor: Cursor {
+  fn remaining(self) -> UInt64
+
+  fn next(mut self) -> Option[Self.Element]
+    uses Self.Uses
+    ensures (result is Some(_)) ==> self.remaining() < old(self.remaining())
+}
+
+impl FiniteCursor for Countdown {
+  fn remaining(self) -> UInt64
+    ensures result == self.left
+  {
+    self.left
+  }
+}
+```
+
+- `FiniteCursor` restates `next` to promise that each `next` that returns
+  `Some` makes `remaining()` smaller (see
+  [Traits and laws](#traits-and-laws)). `impl FiniteCursor for Countdown`
+  proves it from the `ensures` of `Countdown`'s `next` and `remaining`.
+- A loop over a `FiniteCursor` therefore terminates with no measure written
+  (see [Loops](#loops)). A cursor that may give values forever, such as a
+  channel's `Messages`, implements only `Cursor`.
 
 ## Statements and blocks
 
@@ -1334,8 +1453,8 @@ statement = "let" pattern [ ":" type ] "=" expression [ "else" block ]
 
 assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
                     | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
-loop_clause = "invariant" expression | "decreases" expression { "," expression }
-            | "cost" cost ;
+loop_clause = ( "invariant" expression | "decreases" expression { "," expression }
+              | "cost" cost ) [ "when" condition ] ;
 ```
 
 ```truss
@@ -1588,14 +1707,17 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 - A `while` whose condition is the literal `true`, and that no `break`
   exits, has type `Never`.
 - `invariant` holds at the start of every iteration and when the loop ends.
-- `decreases` names a measure that every iteration makes smaller and that
-  never goes below zero. It holds in every function, including one that
-  uses `RunForever`. A `while` compares its measure before each evaluation
-  of its condition, so a change that the condition makes counts toward the
-  iteration.
-- Where a `for` loop over a cursor states no measure, and the cursor's type
-  has a `remaining(self) -> UInt64` method, that method's value is the
-  loop's measure, and it holds as a written one does.
+- `decreases` names an integer measure that every iteration makes smaller
+  and that never goes below zero. It holds in every function, including
+  one that uses `RunForever`. A `while` compares its measure before each
+  evaluation of its condition, so a change that the condition makes counts
+  toward the iteration.
+- A loop whose measure has a condition `C` uses `RunForever unless C`.
+- Where a `for` loop over a `cursor` of type `T` states no measure, it has
+  `decreases cursor.remaining() when T: FiniteCursor`, which holds as a
+  written measure does. A loop over a `ListCursor` therefore terminates, and
+  a loop over a cursor of type `Items: Cursor` uses
+  `RunForever unless Items: FiniteCursor`.
 - In a function without `RunForever`, a `while` loop that states no measure,
   and whose condition compares two sides that mutate nothing with `<`, `<=`,
   `>`, or `>=`, has the distance between them as its measure.
@@ -2260,9 +2382,17 @@ trait Ordered: Equal {
   bound or `any` against the trait's.
 - An `impl`'s method without a `time` clause has its trait's.
 - **Required traits:** a type implements the traits a trait requires before
-  it implements the trait, and a bound includes them. A trait cannot
-  redeclare a method of a trait it requires, but can add an overload in
-  another mode. Traits cannot require each other in a cycle.
+  it implements the trait, and a bound includes them. A trait can add an
+  overload of a required trait's method in another mode. Traits cannot
+  require each other in a cycle.
+- **A trait can restate a method of a trait it requires, to promise more.**
+  The restated method has the required trait's signature, adds `ensures`
+  and `cost` clauses, and has no body. It is the same method: an `impl` of
+  the trait does not write it, and each `impl` proves the added clauses
+  from the contract of the method in its type's `impl` of the required
+  trait. A call through a bound of the trait, and a call on a type that
+  implements it, has the added clauses. `FiniteCursor` restates
+  `Cursor.next` (see [Cursors](#cursors)).
 - **A method with a body** is provided to every implementation. An `impl` can
   override it with a method that keeps the trait's contract for it, as it
   keeps the contract of every other method.
@@ -2503,7 +2633,8 @@ proof Ordered.transitive for Box[Item: Ordered] {
 - Every callee is known to its callers' proofs by its contract, in every
   package: a function, a method of a type, a trait's method, and an
   `impl`'s method alike.
-- An `impl`'s laws are proven from the contracts of its methods.
+- An `impl`'s laws, and the clauses that its trait adds to a required
+  trait's method, are proven from the contracts of its type's methods.
 - A derived `Ordered` states its comparison in its `ensures`.
 - A clause applies only where every name that it mentions is visible.
 - A function with a `requires` is defined only where it holds.
@@ -2553,8 +2684,8 @@ an invariant, a law, or a proof.
   specification, so `invariant small <= limit` with a `UInt8` `small` leaves
   the type of `limit` to the code. A use that would decide the type of a
   float literal of the code, or join or bind a type that the code left open,
-  is the error `types.decided_in_specification`. Declaring the local with a
-  type, as in `let ratio: Float32 = 0.75`, removes the error.
+  is an error. Declaring the local with a type, as in
+  `let ratio: Float32 = 0.75`, removes the error.
 - A function whose signature mentions a type that exists only in
   specifications is for specifications only: it is called only from
   specifications, never compiled, and its body and defaults are
@@ -2651,13 +2782,11 @@ beside the package's manifest are its root module, `weather`.
 - The files of a module share one namespace: each names the others'
   definitions without a module, private ones included. Two files of a
   module cannot define one name.
-- A file's name says nothing about its definitions. Moving a definition to
-  another file of its module changes no path.
 - A module's subdirectory is a module of its own: `forecast/hourly/` is
   `weather::forecast::hourly`, which names `weather::forecast` with `::`
   like any other module.
 - Every path starts with a package name, including inside the package.
-- There are no relative paths, and a path holds no version.
+- A path holds no version.
 - The modules of a package may use each other in a cycle.
 
 ### The prelude
@@ -2669,8 +2798,8 @@ The prelude is in scope in every file, and all its names are
   `Set`
 - the core traits, such as `Equal`, `Ordered`, `From`, `TryFrom`, `Default`,
   `Copyable`, `Plain`, `Storable`, `Index`, `IndexMut`, `IndexAssign`,
-  `Iterable`, `Cursor`, `FromTemplate`, `FromElements`, `FromEntries`,
-  `Model`, and the arithmetic traits
+  `Iterable`, `Cursor`, `FiniteCursor`, `FromTemplate`, `FromElements`,
+  `FromEntries`, `Model`, and the arithmetic traits
 - `Integer`, `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`
 - the standard capabilities, and `Path`, `Instant`, `Duration`, and
   `SystemError`

@@ -1,0 +1,25 @@
+type Span(ticks: Int64)
+
+impl Multiply[Float64] for Span {
+  type Output = Span
+
+  fn multiply_is_defined(self, right: Float64) -> Bool {
+    true
+  }
+
+  fn multiply(self, right: Float64) -> Span {
+    todo
+  }
+}
+
+fn f(span: Span) -> Float32 {
+  let ratio = 1.5
+  var index: UInt64 = 0
+  while index < 3
+    invariant (span * ratio).ticks > 0
+  {
+    index = index + 1
+  }
+  let small: Float32 = ratio
+  small
+}

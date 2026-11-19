@@ -1,0 +1,20 @@
+type Vector[Element](first: Element)
+
+impl Multiply[Int64] for Vector[Element: UnsignedInteger] {
+  type Output = Vector[Element]
+
+  fn multiply_is_defined(self, right: Int64) -> Bool {
+    true
+  }
+
+  fn multiply(self, right: Int64) -> Vector[Element] {
+    self
+  }
+}
+
+fn f(factor: Int64) -> Int8 {
+  let one = 1
+  let scaled = Vector(first: one) * factor
+  let small: Int8 = one
+  small
+}

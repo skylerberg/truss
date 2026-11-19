@@ -1,0 +1,29 @@
+trait QuickCursor: Cursor {
+  fn next(mut self) -> Option[Self.Element]
+    uses Self.Uses
+    cost time O(1)
+}
+
+fn spin(count: UInt64)
+  cost time O(count)
+{
+  var left = count
+  while left > 0 {
+    left -= 1
+  }
+}
+
+type Walk(left: UInt64)
+
+impl Cursor for Walk {
+  type Element = UInt64
+
+  fn next(mut self) -> Option[UInt64]
+    cost time O(self.left)
+  {
+    spin(self.left)
+    None
+  }
+}
+
+impl QuickCursor for Walk {}

@@ -191,12 +191,14 @@ public fn StringSlice.is_boundary(self, offset: UInt64) -> Bool
 public type Characters(text: StringSlice, offset: UInt64)
   invariant offset <= text.length()
 
-public fn Characters.remaining(self) -> UInt64
-  ensures result == self.text.length() - self.offset
-  cost time O(1)
-  cost allocations == 0
-{
-  self.text.length() - self.offset
+impl FiniteCursor for Characters {
+  fn remaining(self) -> UInt64
+    ensures result == self.text.length() - self.offset
+    cost time O(1)
+    cost allocations == 0
+  {
+    self.text.length() - self.offset
+  }
 }
 
 impl Cursor for Characters {
@@ -230,12 +232,14 @@ public fn StringSlice.characters(self) -> Characters
 public type CharactersWithOffsets(text: StringSlice, offset: UInt64)
   invariant offset <= text.length()
 
-public fn CharactersWithOffsets.remaining(self) -> UInt64
-  ensures result == self.text.length() - self.offset
-  cost time O(1)
-  cost allocations == 0
-{
-  self.text.length() - self.offset
+impl FiniteCursor for CharactersWithOffsets {
+  fn remaining(self) -> UInt64
+    ensures result == self.text.length() - self.offset
+    cost time O(1)
+    cost allocations == 0
+  {
+    self.text.length() - self.offset
+  }
 }
 
 impl Cursor for CharactersWithOffsets {

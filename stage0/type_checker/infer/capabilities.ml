@@ -155,12 +155,13 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
                  subject shown description (show_exceptions scope.allowed) reason)
         | Function_body { path; _ } ->
             let can_provide =
-              match capability with
+              match Types.find_base capability with
               | Types.Capability _ -> true
               | Built_in _ | Capability_parameter _ | Capability_projection _
               | Capability_variable _ ->
                   false
               | Capability_error _ -> State.raise_bug "a capability with an error is missing"
+              | Capability_unless _ -> State.raise_bug "a capability's base has a condition"
             in
             report checking Not_available origin
               (match
@@ -214,6 +215,14 @@ let require_run_forever_of_unmeasured_loop checking scope (origin : Core.origin)
   require_available checking scope origin ~subject:"This loop has no measure, so it" ~alternative
     (Types.make_capability_set [ Built_in Run_forever ])
 
+let require_run_forever_unless checking scope (origin : Core.origin) condition =
+  require_available checking scope origin
+    ~subject:
+      (Printf.sprintf "This loop's measure holds only when %s, so the loop"
+         (Types.show_condition condition))
+    (Types.make_capability_set
+       (Option.to_list (Types.make_unless (Built_in Run_forever) condition)))
+
 let compute_node_origin = function
   | `Expression (inner : Core.expression) -> inner.origin
   | `Statement (inner : Core.statement) -> inner.origin
@@ -265,15 +274,22 @@ and check_statement checking scope (statement : Core.statement) =
       List.iter (check_statement checking scope) branches
   | For { mode; pattern; iteration; clauses; body } ->
       Core_walk.walk_iteration (make_visitor checking scope (`Statement statement)) iteration;
-      (match iteration with
-      | Cursor { cursor; _ } when not (Core_walk.states_measure clauses) ->
+      (match (iteration, Core_walk.find_measure_condition clauses) with
+      | Cursor { cursor; _ }, None ->
+          let cursor_type =
+            State.finalize_type checking.state (Core_walk.compute_place_type cursor)
+          in
           require_run_forever_of_unmeasured_loop checking scope statement.origin
             ~alternative:
-              (Printf.sprintf
-                 "give the loop a `decreases` clause, or `%s` a `remaining(self) -> UInt64` method"
-                 (Types.show
-                    (State.finalize_type checking.state (Core_walk.compute_place_type cursor))))
-      | Integer_range _ | Elements _ | Cursor _ -> ());
+              (Printf.sprintf "give the loop a `decreases` clause, or %s"
+                 (match cursor_type with
+                 | Types.Parameter _ | Projection _ ->
+                     Printf.sprintf "bound `%s` by `FiniteCursor`" (Types.show cursor_type)
+                 | _ -> Printf.sprintf "implement `FiniteCursor` for `%s`" (Types.show cursor_type)))
+      | _, Some (_ :: _ as condition) ->
+          require_run_forever_unless checking scope statement.origin condition
+      | (Integer_range _ | Elements _ | Cursor _), Some [] | (Integer_range _ | Elements _), None ->
+          ());
       check_children checking scope (`Pattern pattern);
       check_loop_clauses checking clauses;
       check_block checking
@@ -285,9 +301,14 @@ and check_statement checking scope (statement : Core.statement) =
             scope)
         body
   | While { condition; clauses; body; _ } ->
-      if not (Core_walk.states_measure clauses || Core_walk.has_implicit_measure condition) then
-        require_run_forever_of_unmeasured_loop checking scope statement.origin
-          ~alternative:"give the loop a `decreases` clause";
+      (match Core_walk.find_measure_condition clauses with
+      | Some [] -> ()
+      | _ when Core_walk.has_implicit_measure condition -> ()
+      | Some measured_when ->
+          require_run_forever_unless checking scope statement.origin measured_when
+      | None ->
+          require_run_forever_of_unmeasured_loop checking scope statement.origin
+            ~alternative:"give the loop a `decreases` clause");
       check_expression checking scope condition;
       check_loop_clauses checking clauses;
       check_block checking scope body
@@ -295,7 +316,7 @@ and check_statement checking scope (statement : Core.statement) =
   | Let _ | Evaluate _ | Assign _ | Compound_assign _ | Assert _ | Yield _ ->
       check_children checking scope (`Statement statement)
 
-and check_loop_clauses checking (clauses : Core.loop_clause list) =
+and check_loop_clauses checking (clauses : Core.loop_clause Core.conditional list) =
   List.iter
     (Core_walk.walk_loop_clause
        {
@@ -435,6 +456,7 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
       | Built_in _ -> false
       | Capability _ | Capability_parameter _ | Capability_variable _ -> true
       | Capability_error _ -> State.raise_bug "a trait's method uses a capability with an error"
+      | Capability_unless _ -> State.raise_bug "a capability's base has a condition"
     in
     List.exists
       (fun (bound : Types.trait_reference) ->
@@ -462,7 +484,8 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
           | Types.Built_in _ -> false
           | Capability _ | Capability_parameter _ | Capability_projection _ | Capability_variable _
           | Capability_error _ ->
-              true)
+              true
+          | Capability_unless _ -> State.raise_bug "a capability's base has a condition")
         uses
       || List.exists (fun (_, input) -> can_call_inside input) inputs
       || can_call_inside output
@@ -591,13 +614,18 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
             parameter.callback_contract)
         parameters;
       List.iter
-        (fun (condition : Core.condition) -> check_specification condition.value)
+        (fun (requirement : Core.condition Core.conditional) ->
+          check_specification requirement.clause.value)
         contract.requires;
-      List.iter check_specification contract.ensures;
-      List.iter check_specification contract.decreases;
       List.iter
-        (fun (cost : Core.cost) ->
-          match cost.bound with
+        (fun (promise : Core.expression Core.conditional) -> check_specification promise.clause)
+        contract.ensures;
+      List.iter
+        (fun (measure : Core.expression Core.conditional) -> check_specification measure.clause)
+        contract.decreases;
+      List.iter
+        (fun (cost : Core.cost Core.conditional) ->
+          match cost.clause.bound with
           | Order_of value | At_most value | Exactly value -> check_specification value)
         contract.costs
   | Type { invariants; potential; _ } ->

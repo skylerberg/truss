@@ -20,36 +20,41 @@ type subset_constraint = {
   report_missing : Types.capability_set -> unit;
 }
 
+type requirement = Implements of Types.trait_reference | Within of Language.Builtin_type.t list
+
+type cause =
+  | Bound of { at : Source.Definition_span.t; of_type : Types.ty option }
+  | Operator of {
+      at : Source.Definition_span.t;
+      operands : (Source.Definition_span.t * Source.Definition_span.t) option;
+    }
+  | Method_call of Source.Definition_span.t
+  | Loop of Source.Definition_span.t
+  | Any_conversion of { at : Source.Definition_span.t; any_type : Types.ty }
+  | Excluded of (Types.ty -> Diagnostic.reported)
+
+type goal = {
+  subject : Types.ty;
+  requirement : requirement;
+  outputs : (string * Types.ty) list;
+  cause : cause;
+  is_specification : bool;
+  condition_bounds : Types.condition;
+}
+
 type frame = {
   first_variable : int;
   mutable recorded_expressions : int list;
-  mutable recorded_loops : (Syntax.id * Syntax.id) list;
   mutable bindings : int list;
-  mutable declared : int list;
-  mutable deferred_checks : (unit -> bool) list;
-  mutable reported_unmet_bounds : (Types.ty * Types.trait_reference) list;
+  mutable reported_unmet_bounds : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
   mutable compiled_expressions : int list;
   mutable compiled_bindings : int list;
   mutable specification_only_report : Diagnostic.reported option;
-  frame_specification : bool;
   span : Source.Definition_span.t;
 }
 
-type undecided_literal = { index : int; local : Syntax.id; owner : frame }
-
-type narrowing = {
-  narrowed : Types.ty;
-  allowed : Language.Builtin_type.t list;
-  report_excluded : Types.ty -> Diagnostic.reported;
-}
-
-type literal_decision = {
-  decided_local : Syntax.id;
-  decided_type : Types.ty;
-  decided_at : Source.Definition_span.t;
-  is_default : bool;
-  mutable decision_report : Diagnostic.reported option;
-}
+type decision_site = Use | Statement_end | Actual_head | Method_call
+type logged
 
 type form = {
   expression_builders : (unit -> Core.expression) option array;
@@ -76,6 +81,7 @@ type state = {
   locals : (Syntax.id, local) Hashtbl.t;
   mutable law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
+  mutable goals : goal list;
   mutable locals_read : Syntax.id list;
   mutable keyword_modes : (Syntax.id * Language.Mode.t) list;
   mutable places_without_keyword : (Syntax.id * Language.Mode.t) list;
@@ -88,10 +94,12 @@ type state = {
   mutable capability_solution : (int, Types.capability_set) Hashtbl.t option;
   mutable evidence_packages : Path.package list;
   mutable final_type_checks : (unit -> unit) list;
-  mutable undecided : undecided_literal list;
-  decisions : (int, literal_decision) Hashtbl.t;
+  mutable log : logged list;
+  mutable condition_bounds : Types.condition;
   annotatable : (Syntax.id, unit) Hashtbl.t;
-  mutable narrowings : narrowing list;
+  assumed_types : (Syntax.id * Types.ty) list;
+  mutable unchecked_fixes :
+    (Source.Definition_span.t Diagnostic.fix * (Syntax.id * Types.ty) list) list;
 }
 
 val add_diagnostic :
@@ -148,42 +156,53 @@ val fix :
 
 val replace : Source.Definition_span.t -> string -> Source.Definition_span.t Diagnostic.edit
 val insert : int -> string -> Source.Definition_span.t Diagnostic.edit
-val find_current_frame : state -> frame option
+val read_current_frame : state -> frame
 val record : state -> Syntax.expression -> Types.ty -> unit
-val record_loop : state -> loop:Syntax.id -> iterable:Syntax.expression -> Tables.loop -> unit
 val note_compiled_expression : state -> env -> Syntax.expression -> unit
 val report_specification_only : state -> Source.Definition_span.t -> string -> Diagnostic.reported
-val defer : state -> (unit -> bool) -> unit
+val check_compiled_binding : state -> Syntax.id -> unit
+val check_compiled_expression : state -> Syntax.id -> unit
+val reduce_condition : state -> Types.condition -> Types.condition option
+val record_condition : state -> Syntax.id -> Syntax.condition option -> Types.condition option
+val find_condition : state -> Syntax.id -> Types.condition option
+val apply_condition_bounds : state -> Types.condition -> (unit -> 'a) -> 'a
 val check_when_final : state -> (unit -> unit) -> unit
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty
 val make_fresh_type : state -> Types.ty
+val make_fresh_generic_arguments : state -> Types.generic list -> Types.argument list
 val lookup_bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Types.ty -> Types.ty
+val find_domain : state -> Types.ty -> Language.Builtin_type.t list option
 val is_within : state -> Types.ty -> Language.Builtin_type.t list -> bool
 val read_integer_range : state -> Types.ty -> Z.t * Z.t
 
 val make_literal_type :
   state ->
+  Syntax.expression ->
   Language.Builtin_type.t list ->
   report_excluded:(Types.ty -> Diagnostic.reported) ->
   Types.ty
 
-val narrow :
+val record_narrowing :
   state ->
-  Types.ty ->
-  Language.Builtin_type.t list ->
+  int ->
+  allowed:Language.Builtin_type.t list ->
   report_excluded:(Types.ty -> Diagnostic.reported) ->
-  Types.ty
+  unit
 
+val record_decided :
+  state -> int -> site:decision_site -> decided_type:Types.ty -> at:Source.Definition_span.t -> unit
+
+val resolve_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_type : state -> Types.ty -> Types.ty
 val finalize_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_argument : state -> Types.argument -> Types.argument
 val finalize_instantiation : state -> Types.instantiation -> Types.instantiation
 val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
+val normalize_trait : state -> Types.trait_reference -> Types.trait_reference
 val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impls.evidence option
-val solve_trait_arguments : state -> Types.ty -> Types.trait_reference -> Types.trait_reference
 
 val decide_property :
   state -> Interface.Properties.property -> Types.ty -> Interface.Properties.decision
@@ -211,9 +230,12 @@ val make_call :
 
 val make_trait_reference : arguments:Types.argument list -> Path.t -> Types.trait_reference
 val string_type : Types.ty
-val run_in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) -> 'a
+val find_refused_class : state -> sides:(Types.ty * Types.ty) list -> int option
+
+val report_decided_in_specification :
+  state -> Source.Definition_span.t -> int -> Diagnostic.reported
+
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
-val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
 val declare : state -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
@@ -221,10 +243,10 @@ val declare_compiled :
   state -> env -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
 val find_target : state -> Syntax.name -> Resolve.target option
-val decide_default_literal : state -> at:Source.Definition_span.t -> Types.ty -> Types.ty
 val find_head : state -> Syntax.expression -> Resolve.head option
 val show : state -> Types.ty -> string
 val describe : state -> Types.ty -> string
+val list_class_pairs : state -> Types.ty * Types.ty -> (int * Types.ty) list
 
 val add_mismatch_diagnostic :
   state ->
@@ -235,8 +257,12 @@ val add_mismatch_diagnostic :
   string ->
   Diagnostic.reported
 
-val add_mismatch :
-  state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> Diagnostic.reported
+val add_operand_mismatch :
+  state ->
+  at:Source.Definition_span.t ->
+  left:Source.Definition_span.t * Types.ty ->
+  right:Source.Definition_span.t * Types.ty ->
+  Diagnostic.reported
 
 val report_mismatch :
   state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> unit
@@ -245,7 +271,6 @@ val is_place : state -> Syntax.expression -> bool
 val find_keyword_operation : state -> Syntax.expression -> (Syntax.id * Syntax.expression) option
 val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val find_local_type : state -> Syntax.name -> Types.ty option
-val check_cost : state -> Syntax.cost -> unit
 val find_sequence_element : Types.ty -> Types.ty option
 
 val make_range :
@@ -256,16 +281,3 @@ val make_range :
   stop:Core.expression option ->
   inclusive:bool ->
   Core.kind
-
-val find_view_as : state -> owned:Types.ty -> view:Types.ty -> Types.ty option
-
-val convert :
-  state ->
-  env ->
-  ?argument:Language.Mode.t ->
-  ?takes_view_as_owner:bool ->
-  ?expression:Core.origin ->
-  Source.Definition_span.t ->
-  actual:Types.ty ->
-  expected:Types.ty ->
-  unit

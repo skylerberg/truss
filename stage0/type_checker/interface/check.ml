@@ -162,7 +162,10 @@ let check_main state resolved (clauses : Syntax.clause list) (signature : Types.
     Checking.report state Main_signature span main_message;
   check_real_implementations state resolved ~recipient:"`main`"
     (List.concat_map
-       (fun (clause : Syntax.clause) -> match clause.kind with Uses written -> written | _ -> [])
+       (fun (clause : Syntax.clause) ->
+         match clause.kind with
+         | Uses uses -> List.map (fun (use : Syntax.capability_use) -> use.capability) uses
+         | _ -> [])
        clauses)
 
 let make_element_removal (spans : Source.Definition_span.t array)
@@ -322,33 +325,131 @@ let check_trait_cycle (state : Checking.state) (requires : Syntax.path_type list
       | [] -> ())
   | _ -> ()
 
-let check_redeclared (state : Checking.state) (name : Syntax.name) (receiver : Path.receiver)
-    ~(trait_path : Path.t) (trait : Types.trait_interface) =
-  let inherited =
-    List.concat_map
-      (fun (required : Types.trait_reference) ->
-        List.concat_map
-          (fun (bound : Types.trait_reference) ->
-            match Definition.find_trait_interface state.lookups bound.trait with
-            | Some interface ->
-                List.map
-                  (fun (method_ : Types.trait_method) ->
-                    ((method_.method_name, method_.method_receiver), bound.trait))
-                  interface.methods
-            | None -> [])
-          (Properties.list_bound_closure state.lookups
-             ~self:(Types.Parameter (Types.make_self_parameter trait_path))
-             required))
-      trait.requires
-  in
-  match List.assoc_opt (name.text, receiver) inherited with
-  | Some from ->
-      Checking.report state Redeclared_method state.spans.(name.id)
-        (Printf.sprintf
-           "`%s` already declares a `%s` that takes %s, so a trait that requires it cannot declare \
-            it again."
-           (Path.show from) name.text (Path.show_receiver receiver))
+let rec name_declaring_traits lookups (type_ : Types.ty) =
+  Types.map
+    ~map_capabilities:(name_declaring_capability_traits lookups)
+    (function
+      | Types.Projection { base; trait; name } ->
+          let base = name_declaring_traits lookups base in
+          Some
+            (Types.Projection
+               {
+                 base;
+                 trait =
+                   Option.value ~default:trait
+                     (Properties.find_trait_declaring_type lookups ~base trait name);
+                 name;
+               })
+      | _ -> None)
+    type_
+
+and name_declaring_capability_traits lookups capabilities =
+  Types.replace_capabilities
+    (function
+      | Types.Capability_projection { base; trait; name } ->
+          let base = name_declaring_traits lookups base in
+          Some
+            (Types.make_capability_set
+               [
+                 Types.Capability_projection
+                   {
+                     base;
+                     trait =
+                       Option.value ~default:trait
+                         (Properties.find_trait_declaring_capability_set lookups ~base trait name);
+                     name;
+                   };
+               ])
+      | _ -> None)
+    capabilities
+
+let name_signature_declaring_traits lookups (signature : Types.signature) =
+  let signature = Types.map_signature (name_declaring_traits lookups) signature in
+  { signature with uses = name_declaring_capability_traits lookups signature.uses }
+
+let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_body
+    (written : Types.signature) ~(trait_path : Path.t) (trait : Types.trait_interface) =
+  let name = Resolve.Names.extract_signature_name signature in
+  let receiver = Resolve.Names.classify_receiver signature.parameters in
+  match
+    List.find_opt
+      (fun (restated : Types.restated_method) ->
+        restated.restated_name = name.text && restated.restated_receiver = receiver)
+      trait.restated
+  with
   | None -> ()
+  | Some restated ->
+      let declared_by = Path.show restated.declared_by in
+      let is_added (clause : Syntax.clause) =
+        match clause.kind with Ensures _ | Cost _ -> true | _ -> false
+      in
+      List.iter
+        (fun (clause : Syntax.clause) ->
+          match clause.kind with
+          | Requires _ ->
+              Checking.report state Restated_method_clause state.spans.(clause.id)
+                (Printf.sprintf
+                   "`%s` restates `%s.%s`, so it adds only `ensures` and `cost` clauses. A caller \
+                    through `%s` would never prove this `requires`."
+                   name.text declared_by name.text declared_by)
+          | Decreases _ ->
+              Checking.report state Restated_method_clause state.spans.(clause.id)
+                (Printf.sprintf
+                   "`%s` restates `%s.%s`, so it adds only `ensures` and `cost` clauses. It has no \
+                    body, so it has no recursion to measure."
+                   name.text declared_by name.text)
+          | Ensures _ | Cost _ | Uses _ | Clause_error -> ())
+        signature.clauses;
+      if has_body then
+        Checking.report state Restated_method_body state.spans.(name.id)
+          (Printf.sprintf
+             "`%s` restates `%s.%s`, so it has no body: each type's `impl` of `%s` gives the body."
+             name.text declared_by name.text declared_by)
+      else if not (List.exists is_added signature.clauses) then
+        Checking.report state Redeclared_method state.spans.(name.id)
+          (Printf.sprintf
+             "`%s` already declares a `%s` that takes %s, and this restatement adds no `ensures` \
+              or `cost` clause. Add the clauses that the trait promises, or delete the method."
+             declared_by name.text (Path.show_receiver receiver))
+      else
+        let original =
+          Definition.read_method_signature state.lookups ~owner:restated.declared_by
+            { method_name = name.text; method_receiver = receiver; provided = false }
+        in
+        let self = Types.Parameter (Types.make_self_parameter trait_path) in
+        let substitution =
+          match
+            List.find_opt
+              (fun (bound : Types.trait_reference) -> Path.equal bound.trait restated.declared_by)
+              (List.concat_map (Properties.list_bound_closure state.lookups ~self) trait.requires)
+          with
+          | Some reference ->
+              Types.make_trait_substitution
+                (Definition.read_trait_interface state.lookups restated.declared_by).trait_generics
+                ~self reference
+          | None ->
+              Compiler_bug.raise_bug ~stage:"Interface"
+                "`%s` restates a method of `%s`, which it does not require" (Path.show trait_path)
+                declared_by
+        in
+        let expected =
+          name_signature_declaring_traits state.lookups
+            (Types.substitute_signature substitution original)
+        and written = name_signature_declaring_traits state.lookups written in
+        if
+          not
+            (Impl_checks.signatures_agree expected written
+            && Types.is_capability_subset expected.uses written.uses
+            && Types.is_capability_subset written.uses expected.uses)
+        then
+          Checking.report state Signature_mismatch state.spans.(name.id)
+            (Printf.sprintf "`%s` restates `%s.%s`, so it has the signature `%s%s%s`." name.text
+               declared_by name.text name.text
+               (Impl_checks.show_signature expected)
+               (match Types.list_capabilities expected.uses with
+               | [] -> ""
+               | capabilities ->
+                   " uses " ^ String.concat ", " (List.map Types.show_capability capabilities)))
 
 let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
     (generics : Types.generic list) (impl : Types.impl_interface) =
@@ -402,9 +503,9 @@ let check (state : Checking.state) =
             (lookups.read_elaborated_interface container).interface )
         with
         | { kind = Trait _; _ }, Trait_interface trait ->
-            check_redeclared state name
-              (Resolve.Names.classify_receiver signature.parameters)
-              ~trait_path:container.path trait;
+            check_restated state signature
+              ~has_body:(match definition.kind with Function _ -> true | _ -> false)
+              written ~trait_path:container.path trait;
             check_private_in_public state ~visibility (list_signature_types written)
               state.spans.(name.id)
         | { kind = Impl { trait_; _ }; _ }, Impl_interface impl ->

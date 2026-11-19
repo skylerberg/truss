@@ -264,6 +264,16 @@ Rules: [Generic parameters](SPECIFICATION.md#generic-parameters).
 Generic code is monomorphized, so a generic function costs nothing at run
 time. Monomorphization rules out polymorphic recursion.
 
+**A value parameter is a `UInt64`.** A type depends on a value only where
+the value fixes the type's layout or identity, as the length of
+`Array[UInt8, 32]` does. Each such value is a count, and the body compares
+it with lengths, which are `UInt64`. A choice among a few cases is a type
+parameter over marker types, which can carry an impl for each case. A
+signed value parameter would serve only arithmetic on type arguments, such
+as the exponents of units of measure, and a type argument holds no
+arithmetic. The parameter's type is still written, as `count: UInt64`, so
+the declaration states the type that the body sees.
+
 ### Invariants
 
 Rules: [Invariants](SPECIFICATION.md#invariants).
@@ -297,9 +307,9 @@ Rules: [Values and ownership](SPECIFICATION.md#values-and-ownership).
 
 Truss has mutable value semantics: every variable holds its own value, and
 no two names alias a value that either can mutate. A value is freed when its
-owner's scope ends, so there is no garbage collector and no runtime beyond
-libc. There is no mutable global state either: a top-level `let` is a
-constant, so tests can share one process.
+owner's scope ends, so there is no garbage collector. There is no mutable
+global state either: a top-level `let` is a constant, so tests can share one
+process.
 
 Four guarantees made elsewhere in the design depend on this:
 
@@ -509,6 +519,9 @@ be stored, passed, and returned.
 |---|---|
 | A cursor never holds `mut` access. | `mut` access is never stored. A `mut` loop mutates elements in place, by position. |
 | A tree is visited by recursion, by `fold`, or by a cursor that holds an explicit stack. | *Nothing hidden.* The stack's allocations are written. C# and Python allocate the same stack behind a recursive generator. |
+| A cursor whose values run out implements `FiniteCursor`, which adds `remaining()` and promises that each `next` that returns `Some` makes it smaller. | A loop over it terminates with no measure written, and generic code reaches the measure through a bound or a condition. A method found by its name, the alternative, cannot be named in a bound, so neither generic code nor an adapter such as `Take` could use it. |
+| `Zip` is a `FiniteCursor` where its first cursor is. | A type has one `impl` of each trait, so `Zip` cannot also be one where only its second cursor is. |
+| `Chain` and `Peekable` are not `FiniteCursor`s. | Each measure would add two counts: the `remaining()` of both cursors, or of the cursor and its peeked value. A sum of two `UInt64`s can overflow, and a sum that saturates need not decrease. |
 
 ### Lambdas
 
@@ -583,7 +596,6 @@ Rules: [Constants](SPECIFICATION.md#constants).
 | Rule | Reason |
 |---|---|
 | A constant expression calls no function. | A constant can appear in a type, as in `Array[UInt8, digest_size]`, so type checking never waits for code to run. |
-| Code that runs at compile time is compiled and run as a test is, not interpreted. | Truss then has one implementation of its semantics, and a result computed at compile time equals the result in the compiled program. Such code only discharges proofs and produces static data, so type checking never depends on it. |
 
 ## Functions
 
@@ -647,6 +659,27 @@ less-than operator. Brackets have no such conflict. The kind of the name
 before the brackets decides between the two readings, and the rules of
 [Scope](#scope) keep that kind easy to see.
 
+### Conditions
+
+Rules: [Conditions](SPECIFICATION.md#conditions).
+
+**A clause can hold for some instantiations, and then says which.** Whether
+`List.collect` terminates depends on the cursor it is given, and a written
+clause always holds, so the clause carries the condition:
+`uses RunForever unless Source: FiniteCursor`. The alternative is a function
+for each case, and then every generic caller needs one for each case too,
+which is the function coloring problem. `uses Source.Uses` already passes on
+the capabilities of the code that a function calls. A condition covers the
+other case: a capability that the function's own code needs for some type
+arguments only.
+
+| Rule | Reason |
+|---|---|
+| A condition is a conjunction of bounds. | A bound is decided by the `impl` lookup that a call's bounds already use, so the capability check decides a condition without the prover. A condition on values, as in a planned `uses Panic unless index < self.length()`, extends the same syntax. |
+| Every clause of a function and of a loop takes a condition. | A clause with a condition is proven through the body's loops and recursion, and their invariants and measures name the methods that the clause names: an `ensures` of `extend` that counts the elements `when Source: FiniteCursor` needs a loop `invariant` that names `remaining()`, and a recursion over a cursor needs `decreases source.remaining() when Source: FiniteCursor`. A call decides the condition of a `requires` by the `impl` lookup that decides every other clause's. |
+| A clause with a condition is checked and proven with the condition's bounds, and the body without them. | The body runs for every instantiation, so it calls only methods that every instantiation has. The clause describes the instantiations that meet the condition, so it can call the methods of the condition's traits, such as `source.remaining()`. |
+| The condition follows `when` or `unless`. | A line that starts with `if` begins a statement, so `if` could not put a condition on the line after a long `ensures`. `where` stays an error, because Rust's `where` states a bound that the caller must meet (*LLM habits*). |
+
 ### Termination
 
 Rules: [Termination](SPECIFICATION.md#termination), [Loops](SPECIFICATION.md#loops),
@@ -695,12 +728,12 @@ not.
 | Structural recursion needs no annotation, and other recursion states `decreases`. | Lean accepts structural recursion in the same way. Dafny infers a measure. A structural check with an explicit clause is more predictable than an inference that may fail. |
 | Code that supplies other code to a callee answers for the calls made to the supplied code. The suppliers are a type argument's `impl` given to a bound, a function named as a value, a value converted to `any`, and a provided `impl`. A recursion through supplied code is rejected. | A generic callee is checked once, for every type argument, so it cannot know the code that it is given, and a call through a bound passes the supplier no arguments to compare with a measure. If neither side answered, an `impl`'s method could call a generic function that calls the method back, and each termination proof would assume the other: a function without `RunForever` would never return. |
 | A recursion through a method that an `impl` derives or inherits is rejected. | A derived method is generated, and an inherited method is the trait's provided body, which is checked once for every `impl`. Neither states a measure for the `impl`, so a caller on the cycle has nothing to compare, and accepting the call would assume that the cycle ends. A method written in the `impl` states the measure. The alternative is to check each provided body again for each `impl` that inherits it, which proves the same code once per `impl` and gives a trait's author errors in code that the author did not write. |
-| A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` has the distance between them as its default measure, and a `for` loop over a cursor has the cursor's `remaining()`. | Most loops count toward a bound that their condition names, so `decreases high - low` would only repeat the condition. The default is one measure read from the loop's own code, never chosen by a search among candidates, so a reader knows the measure that the proof uses. Dafny takes the same default for a loop. A cursor's `remaining()` states its measure once, in its type, for every loop over it. |
-| A written measure holds in every function, including one that uses `RunForever`. | A reader takes a written `decreases` as a fact. If `RunForever` switched measures off, a function that declares it for one loop would leave the measures of its other loops unchecked. A cursor's `remaining()` is written too, in the cursor's type, and no loop body can change the cursor. |
+| A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` has the distance between them as its default measure, and a `for` loop over a `FiniteCursor` has the cursor's `remaining()`. | Most loops count toward a bound that their condition names, so `decreases high - low` would only repeat the condition. The default is one measure read from the loop's own code, never chosen by a search among candidates, so a reader knows the measure that the proof uses. Dafny takes the same default for a loop. A cursor's `remaining()` states its measure once, in its `impl` of `FiniteCursor`, for every loop over it. |
+| A written measure holds in every function, including one that uses `RunForever`. | A reader takes a written `decreases` as a fact. If `RunForever` switched measures off, a function that declares it for one loop would leave the measures of its other loops unchecked. A cursor's `remaining()` is written too, in its `impl` of `FiniteCursor`, and no loop body can change the cursor. |
 | A `while` loop's default measure and structural recursion are checked only in a function without `RunForever`. | Both are inferred from code that may not be meant to end. A loop that draws samples until it has accepted enough, as `sample_ntt` does, compares toward a bound that an iteration may not approach. |
 | A loop without a measure uses `RunForever`. | The capability check then covers the loop in every body, as it covers a call. A lambda's loop needs no rule of its own: the lambda's capabilities are inferred from its body. |
 | Nothing implements `RunForever`. | A `provide` of it would let a function that does not declare `RunForever` run forever. |
-| A function that uses `RunForever` has no `time` clause. | A written clause holds, and the time of a function that may run forever has no bound. |
+| A function that uses `RunForever` has no `time` clause, and one that uses `RunForever unless C` states its `time` clause `when` a condition that implies `C`. | A written clause holds, and the time of a function that may run forever has no bound. Where `C` holds, the function terminates, and its time has a bound. |
 | A manifest grants `RunForever` to a dependency as it grants any other capability. | A dependency that is granted nothing then terminates, as well as reaching nothing outside its arguments. |
 | A capability method that waits for the world terminates unless it declares `RunForever`. | A capability method returns to its caller once the world answers. If waiting counted as running forever, nearly every function that reads input would declare `RunForever`, and the capability would no longer separate a loop that has no measure from one that has. |
 
@@ -747,10 +780,6 @@ A function type puts its clauses after its result, inside parentheses, as in
 `(fn(Request) -> Response uses Database, Log cost time O(1))`. Truss has
 whole clauses, not one or two effect keywords, so the clauses come in the
 order they have in a definition, and the parentheses mark where they end.
-
-| Rule | Reason |
-|---|---|
-| A call of a function value passes the caller's capabilities as one table, and the function finds each capability it uses in the table by the address of the capability's symbol. | A value of `fn()` can be passed where `(fn() uses Clock)` is allowed, and stored or returned there, with no wrapper and no change to how it is called. A wrapper would need storage that lives as long as the value, which a function value that captures nothing does not have. |
 
 ## Methods
 
@@ -1117,10 +1146,6 @@ that is already called more capabilities unnoticed: each caller's `uses` must
 name them, so the upgrade fails to compile until the caller's author adds
 them.
 
-Grants cannot stop a wrong answer: a pure dependency can still return a
-result that its user acts on. Contracts narrow that risk, and a project's
-dependencies still need review.
-
 ## Parallelism
 
 Rules: [Parallelism](SPECIFICATION.md#parallelism).
@@ -1299,8 +1324,17 @@ stronger postcondition, which is behavioral subtyping. `Index` can then say
 nothing about the lent part, while the `impl` for `List` says which element
 it is.
 
+**A trait can promise more about a method of a trait it requires.**
+`FiniteCursor` restates `Cursor.next` with an `ensures` that `remaining()`
+decreases. The author of `Cursor` did not anticipate it and need not: any
+package can define a trait that strengthens the contract of another
+package's trait. This is behavioral subtyping between traits, as an `impl`'s
+added clauses are between an `impl` and its trait.
+
 | Rule | Reason |
 |---|---|
+| Each `impl` proves a restated method's added clauses from the contract of its type's method, not from the method's body. | Laws are proven the same way, and proofs stay modular. A release may change a body within its contract ([Versions](#versions)), so a proof that read another package's body could break with a compatible release. A generic `impl` whose method promises more under a stronger bound says so with a condition: `Skip`'s `next` ensures that `remaining()` decreases `when Source: FiniteCursor`. |
+| A restated method adds only `ensures` and `cost`, and has no body. | A caller through the required trait keeps every obligation it had. A weaker `requires` cannot be proven from a contract, which states the `impl`'s own `requires`, and a body would give one method two implementations. |
 | A trait can require other traits. | A law can then span traits. `Ordered` requires `Equal`, so its law `agrees_with_equal` states that `compare` returns `Ordering.Equal` exactly when `==` holds. Rust's `Ord` requires `Eq` too, but that agreement is only documentation. |
 | `Hash` has no law relating it to `Equal`. | A law is a specification, and a specification cannot call `hash`, which mutates its `Hasher`. Stating the law would take a `hash` that returns its hash, which gives up a keyed hasher provided through a capability, or a specification form for the state a mutating call leaves. A derived `Hash` agrees with a derived `Equal` by construction. |
 | A type has one `impl` of each trait. | Two traits that both require `Equal` share that `impl`, so there is no diamond problem. |
@@ -1498,10 +1532,9 @@ only, to state the definition.
 | Rule | Reason |
 |---|---|
 | A method of a trait or of an `impl` is known by its contract too. | An `impl` states what it adds to the trait's contract in its own `ensures`: `Int64.compare` ensures the order of the integers. An edit to a provided body then changes no fact that callers know. An edit to an `impl`'s body re-proves that method and the `impl`'s laws alone. |
-| An `ensures` that fixes a pure function's result is the call's value: `identical(result, e)`, or `result == e` where `==` is identity, as on integers. An `e` that calls the function itself is not used. | A fact about a call then needs no term of the call to take effect. `List.element` ensures `identical(result, self.model()[position])`, so a quantifier over a list's elements is a quantifier over its model, which code that indexes the list instantiates. A hand-written `Equal` is not identity, and neither is a structural equality such as `String`'s, under which two equal strings can differ in `capacity()`, so neither fixes a value. A recursive definition is not unfolded. |
 | A clause applies only where every name it mentions is visible. | An `ensures` that reads the fields of an opaque type is a fact inside the type's package and no fact elsewhere, so `opaque` hides the representation from proofs too. |
 | A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The proofs of callers in other packages read a `requires` and a `cost`, and a clause applies only where every name it mentions is visible. The `ensures` lets callers inside the package know a result in terms of private helpers. |
-| A bit-level fact is requested with `assert ... by bit_vector`. | Bit-blasting is slow on most queries, so only the assertion that asks for it is proven that way, as with Verus's `by (bit_vector)`. Every other query knows a bitwise operation by a few facts, and no query falls back to bit-blasting. |
+| A bit-level fact is requested with `assert ... by bit_vector`. | Bit-blasting is slow on most queries, so only the assertion that asks for it is proven that way, as with Verus's `by (bit_vector)`. |
 | A quantifier over a range or a collection is also an expression in code. | The binder carries its range, so the body may rely on it. A lambda passed to a method would know nothing about its argument. The standard library therefore has no `all` or `any` methods, and a test of every element has *one spelling*. |
 
 ### Writing specifications
@@ -1650,10 +1683,9 @@ reasons:
 3. Freedom to change the representation. A compatible release may change
    everything inside an opaque type ([Versions](#versions)).
 
-A public type that is not opaque exposes its fields. The exposure is visible
-in review, because the fields are written in the public declaration. The
-fields of an opaque type are accessible throughout its package, not only in
-one file, because the methods of a type can live in any file of the package.
+The fields of an opaque type are accessible throughout its package, not only
+in one file, because the methods of a type can live in any file of the
+package.
 
 **An `internal` definition that nothing in its package uses is an error,**
 as an unused variable is. No other package can call it, so it is dead code,
@@ -1850,20 +1882,14 @@ contract, so a typo in a body blocks no caller.
 |---|---|
 | The database keeps no earlier version of a failing part. | An earlier version would make the database depend on the order of the edits. A caller checked against an earlier signature would also report errors that the files do not hold. |
 | A build, a test run, or a template check requires that no definition it reaches has errors. | No run executes code that the files do not hold, and a test whose code is correct runs while unrelated code is broken. |
-| A constant's value belongs to its contract. | A pattern that names a constant covers the constant's value, and a contract can hold a pattern. The check of that contract reads the value, as a caller's proof reads a callee's contract. |
 
 ### Caches
 
-The user's cache holds the results that are expensive to compute: solver
-answers, object files, test results, the databases of the standard library
-and of registry packages, and fetched packages. Each is keyed by its whole
-input.
-
-A cache never makes a result wrong: deleting it only makes the next build
-slower. Every worktree and CI share the caches. The database itself caches
-nothing, so a revert or a branch switch is a change to the files like any
-other. The database computes the cheap stages again, and the solver, the C
-compiler, and the tests are cache hits.
+The user's cache holds the results that are expensive to compute, each
+keyed by its whole input, and every worktree and CI share it. The database
+itself caches nothing, so a revert or a branch switch is a change to the
+files like any other: the database computes the cheap stages again, and the
+expensive results are cache hits.
 
 ## Omitted features
 
@@ -1871,7 +1897,8 @@ compiler, and the tests are cache hits.
 |---|---|
 | Comments | [Comments](#comments) |
 | Numeric literal suffixes | [Number literals](#number-literals) |
-| Tuples and type aliases | [Type definitions](#type-definitions) |
+| Tuples | Naming by position lets users mix up which is which. Destructuring a record suffices. |
+| Type aliases | A type name always means one type. |
 | A garbage collector, lifetimes, stored references, and mutable global state | [Values and ownership](#values-and-ownership) |
 | Destructors | [Handles](#handles) |
 | Generators and coroutines | [Lending methods](#lending-methods) and [Loops](#loops) |
@@ -1897,5 +1924,3 @@ compiler, and the tests are cache hits.
 | A separate list of dependencies for tests | The dependencies that only tests reach are computed when a package is published. |
 | A dependency on a git repository or a directory | Unpublished code is worked on in the project that uses it. |
 | Build scripts, install scripts, and code generators | [Grants](#grants) |
-| Tuples | Naming by position allows users to mix up which is which. destructuring suffices |
-| Type aliases | A type name always means one type |

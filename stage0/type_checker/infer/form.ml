@@ -772,10 +772,11 @@ let rec lend_statements state (mode : Language.Mode.t) (value : Core.expression)
              else_ = Some (lend_block state mode else_);
              binds_lent_part;
            })
-  | Match { scrutinees; arms } ->
+  | Match { scrutinees; arms; is_written } ->
       make_branching
         (Match
            {
+             is_written;
              scrutinees;
              arms =
                List.map
@@ -823,6 +824,7 @@ let build_collection_place state (iterable : Syntax.expression) (mode : Language
           (fun ~type_:_ body ->
             Match
               {
+                is_written = false;
                 scrutinees = [ scrutinee ];
                 arms = [ { patterns = [ pattern ]; guard = None; body; origin } ];
               }) )
@@ -937,17 +939,22 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
       let make_cursor_loop ?remaining (place : Core.place) : Core.statement_kind =
         let measure =
           Option.map
-            (fun (remaining : Tables.call) ->
-              Core.Decreases
-                [
-                  State.make_synthetic_expression state ~origin:iterable.id
-                    (Types.make_builtin UInt64)
-                    (Call
-                       (State.make_call state
-                          ~callee:(convert_callee state remaining.callee)
-                          ~arguments:[ Passed { mode = Read; value = Place place } ]
-                          ~lends:None));
-                ])
+            (fun (holds_when, (remaining : Tables.call)) : Core.loop_clause Core.conditional ->
+              {
+                holds_when;
+                clause =
+                  State.apply_condition_bounds state holds_when (fun () ->
+                      Core.Decreases
+                        [
+                          State.make_synthetic_expression state ~origin:iterable.id
+                            (Types.make_builtin UInt64)
+                            (Call
+                               (State.make_call state
+                                  ~callee:(convert_callee state remaining.callee)
+                                  ~arguments:[ Passed { mode = Read; value = Place place } ]
+                                  ~lends:None));
+                        ]);
+              })
             remaining
         in
         For
@@ -959,7 +966,10 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
             mode;
           }
       in
-      match (pulled.kind, if Core_walk.states_measure clauses then None else remaining) with
+      match
+        ( pulled.kind,
+          if Option.is_some (Core_walk.find_measure_condition clauses) then None else remaining )
+      with
       | Use place, remaining when is_fixed_place place -> make_cursor_loop ?remaining place
       | _, None -> make_cursor_loop (State.make_place pulled)
       | _, Some remaining ->
@@ -983,6 +993,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
             (State.make_synthetic_expression state ~origin:written.id Types.unit
                (Match
                   {
+                    is_written = false;
                     scrutinees = [ Operands.build Own pulled ];
                     arms =
                       [
@@ -1083,6 +1094,7 @@ let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(ou
   let make_arm patterns body : Core.arm = { patterns; guard = None; body; origin = value.id } in
   Match
     {
+      is_written = false;
       scrutinees = [ Operands.build Own scrutinee ];
       arms =
         [

@@ -8,11 +8,14 @@ impl Cursor for Skip[Source: Cursor] {
 
   fn next(mut self) -> Option[Source.Element]
     uses Self.Uses
+    ensures (result is Some(_)) ==> self.source.remaining() < old(self.source.remaining())
+      when Source: FiniteCursor
     cost amortized time O((self.left + 1) * time(Source.next))
   {
     let skipped = self.left
     while self.left > 0
       invariant self.left <= skipped
+      invariant self.source.remaining() <= old(self.source.remaining()) when Source: FiniteCursor
       cost time O((skipped - self.left) * time(Source.next))
     {
       self.left -= 1
@@ -25,6 +28,14 @@ impl Cursor for Skip[Source: Cursor] {
   }
 }
 
+impl FiniteCursor for Skip[Source: FiniteCursor] {
+  fn remaining(self) -> UInt64
+    ensures result == self.source.remaining()
+  {
+    self.source.remaining()
+  }
+}
+
 public opaque type Take[Source: Cursor](source: Source, left: UInt64)
 
 impl Cursor for Take[Source: Cursor] {
@@ -33,6 +44,7 @@ impl Cursor for Take[Source: Cursor] {
 
   fn next(mut self) -> Option[Source.Element]
     uses Self.Uses
+    ensures (result is Some(_)) ==> self.left < old(self.left)
     cost time O(time(Source.next))
   {
     if self.left == 0 {
@@ -40,6 +52,16 @@ impl Cursor for Take[Source: Cursor] {
     }
     self.left -= 1
     mut self.source.next()
+  }
+}
+
+impl FiniteCursor for Take[Source: Cursor] {
+  fn remaining(self) -> UInt64
+    ensures result == self.left
+    cost time O(1)
+    cost allocations == 0
+  {
+    self.left
   }
 }
 
@@ -51,6 +73,8 @@ impl Cursor for StepBy[Source: Cursor] {
 
   fn next(mut self) -> Option[Source.Element]
     uses Self.Uses
+    ensures (result is Some(_)) ==> self.source.remaining() < old(self.source.remaining())
+      when Source: FiniteCursor
     cost amortized time O((self.step + 1) * time(Source.next))
   {
     if !self.started {
@@ -61,6 +85,7 @@ impl Cursor for StepBy[Source: Cursor] {
     var left = step
     while left > 1
       invariant left <= step
+      invariant self.source.remaining() <= old(self.source.remaining()) when Source: FiniteCursor
       cost time O((step - left) * time(Source.next))
     {
       left -= 1
@@ -70,6 +95,14 @@ impl Cursor for StepBy[Source: Cursor] {
       }
     }
     mut self.source.next()
+  }
+}
+
+impl FiniteCursor for StepBy[Source: FiniteCursor] {
+  fn remaining(self) -> UInt64
+    ensures result == self.source.remaining()
+  {
+    self.source.remaining()
   }
 }
 
@@ -107,6 +140,8 @@ impl Cursor for Zip[First: Cursor, Second: Cursor] {
 
   fn next(mut self) -> Option[core::Pair[First.Element, Second.Element]]
     uses Self.Uses
+    ensures (result is Some(_)) ==> self.first.remaining() < old(self.first.remaining())
+      when First: FiniteCursor
     cost time O(time(First.next) + time(Second.next))
   {
     match mut self.first.next() {
@@ -119,6 +154,14 @@ impl Cursor for Zip[First: Cursor, Second: Cursor] {
   }
 }
 
+impl FiniteCursor for Zip[First: FiniteCursor, Second: Cursor] {
+  fn remaining(self) -> UInt64
+    ensures result == self.first.remaining()
+  {
+    self.first.remaining()
+  }
+}
+
 public opaque type Enumerate[Source: Cursor](source: Source, index: UInt64)
 
 impl Cursor for Enumerate[Source: Cursor] {
@@ -127,6 +170,8 @@ impl Cursor for Enumerate[Source: Cursor] {
 
   fn next(mut self) -> Option[core::Indexed[Source.Element]]
     uses Self.Uses
+    ensures (result is Some(_)) ==> self.source.remaining() < old(self.source.remaining())
+      when Source: FiniteCursor
     cost time O(time(Source.next))
   {
     match mut self.source.next() {
@@ -139,6 +184,14 @@ impl Cursor for Enumerate[Source: Cursor] {
       }
       None => None
     }
+  }
+}
+
+impl FiniteCursor for Enumerate[Source: FiniteCursor] {
+  fn remaining(self) -> UInt64
+    ensures result == self.source.remaining()
+  {
+    self.source.remaining()
   }
 }
 

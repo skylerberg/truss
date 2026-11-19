@@ -9,11 +9,13 @@ type clauses = {
   costs : Mir.cost list;
   callbacks : (int * Mir.callback) list;
   inherited : bool;
+  bindings : Types.substitution;
 }
 
 type contract = {
   callee_clauses : clauses;
   trait_clauses : clauses option;
+  restated_clauses : clauses list;
   is_logic_function : bool;
   result_kind : [ `Returns | `Lends ];
 }
@@ -84,6 +86,7 @@ type stated = Tables.stated =
   | Array_length of Logic.symbol
   | Ranked_model of Logic.symbol
   | Ranked_elements of Types.ty
+  | Non_negative_rank of Types.ty
 
 type context = {
   lookups : Lookups.t;
@@ -142,6 +145,11 @@ type context = {
   quantifier_facts : Logic.term list Tables.Term_table.t;
   mutable quantifier_symbols : Logic.symbol list;
   mutable validating : Types.ty list;
+  condition : Types.condition;
+  bounds : Interface.Impls.bounds;
+  keeps_termination : bool;
+  mutable obligation_condition : Types.condition;
+  mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;
   read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
 }

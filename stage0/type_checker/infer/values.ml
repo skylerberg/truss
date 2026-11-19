@@ -28,7 +28,7 @@ let record_conversion (state : State.state) (value : Syntax.expression) (collect
         omitted_defaults = [];
         callee_result = collection;
       };
-  Name_lookup.check_implements state (State.read_span state value.id) collection trait
+  Solver.require state (Method_call (State.read_span state value.id)) collection trait
 
 let rec check_string_literal state env ?expected (value : Syntax.expression)
     (literal : Syntax.string_literal) =
@@ -95,7 +95,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
       let is_view_expected =
         parts = []
         &&
-        match Option.map (State.normalize state) expected with
+        match Option.map (Conversions.read_expected_head state) expected with
         | Some expected -> Types.is_well_known String_slice expected
         | None -> false
       in
@@ -190,7 +190,7 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
   let from_elements =
     State.make_trait_reference ~arguments:[] (Well_known.make_path From_elements)
   in
-  match Option.map (State.normalize state) expected with
+  match Option.map (Conversions.read_expected_head state) expected with
   | Some (Types.Named { path; arguments = [ Types.Type element ] } as collection)
     when Well_known.is List path || Well_known.is Sequence path || Well_known.is Finite_set path ->
       check_items element;
@@ -244,7 +244,7 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
       entries
   in
   let from_entries = State.make_trait_reference ~arguments:[] (Well_known.make_path From_entries) in
-  match Option.map (State.normalize state) expected with
+  match Option.map (Conversions.read_expected_head state) expected with
   | Some (Types.Named { path; arguments = [ Types.Type key; Types.Type value_type ] } as map)
     when Well_known.is Finite_map path ->
       check_entries key value_type;
@@ -274,7 +274,7 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
 and check_lambda (state : State.state) env ?expected (value : Syntax.expression) parameters body =
   let locals_read_before = state.locals_read in
   state.lambdas <- State.read_span state value.id :: state.lambdas;
-  let expected = Option.map (State.normalize state) expected in
+  let expected = Option.map (Conversions.read_expected_head state) expected in
   let make_untyped unknown =
     List.iter
       (fun written ->
@@ -294,7 +294,7 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
         let output = function_type.output in
         let lambda_env = { env with output = Some (Returns output) } in
         let body_type = Statements.check_block_value state lambda_env ~expected:output body in
-        State.convert state lambda_env ?expression:(find_block_value_id body)
+        Conversions.convert state lambda_env ?expression:(find_block_value_id body)
           (State.read_span state body.id) ~actual:body_type ~expected:output;
         Types.Function function_type
     | Some (Types.Function function_type) ->
@@ -356,10 +356,10 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
 and check_if state env ?expected (value : Syntax.expression) (test : Syntax.expression) then_ else_
     =
   let condition_type =
-    State.run_in_statement state env (State.read_span state test.id) (fun () ->
+    Solver.run_in_statement state env (State.read_span state test.id) (fun () ->
         Hooks.check_expression state env test)
   in
-  Name_lookup.coerce state env test ~actual:condition_type ~expected:Types.bool;
+  Conversions.coerce state env test ~actual:condition_type ~expected:Types.bool;
   State.register_expression state value (fun () ->
       let condition = State.build_expression state test in
       let then_ = State.build_block state then_ in
@@ -380,7 +380,7 @@ and check_if state env ?expected (value : Syntax.expression) (test : Syntax.expr
   match else_ with
   | None ->
       let then_type = Statements.check_block_value state env ~expected:Types.unit then_ in
-      (match State.resolve state then_type with
+      (match Conversions.read_expected_head state then_type with
       | Types.Never -> ()
       | _ ->
           if not (State.unify state then_type Types.unit) then
@@ -412,13 +412,17 @@ and find_block_value_id (written : Syntax.block) =
   | _ -> None
 
 and join state env ~expected branches =
-  let live = List.filter (fun (type_, _, _) -> State.resolve state type_ <> Types.Never) branches in
+  let live =
+    List.filter
+      (fun (type_, _, _) -> Conversions.read_expected_head state type_ <> Types.Never)
+      branches
+  in
   match (live, expected) with
   | [], _ -> Types.Never
   | _, Some expected ->
       List.iter
         (fun (actual, span, expression) ->
-          State.convert state env ?expression span ~actual ~expected)
+          Conversions.convert state env ?expression span ~actual ~expected)
         live;
       expected
   | (first, _, _) :: rest, None ->
@@ -434,7 +438,7 @@ and match_ state env ?expected (value : Syntax.expression) scrutinees arms =
     List.map
       (fun (scrutinee : Syntax.expression) ->
         ( scrutinee,
-          State.run_in_statement state env (State.read_span state scrutinee.id) (fun () ->
+          Solver.run_in_statement state env (State.read_span state scrutinee.id) (fun () ->
               Hooks.check_expression state env scrutinee) ))
       scrutinees
   in
@@ -449,6 +453,7 @@ and match_ state env ?expected (value : Syntax.expression) scrutinees arms =
       in
       Match
         {
+          is_written = true;
           scrutinees;
           arms =
             List.map
@@ -499,7 +504,7 @@ and check_arm_value state env ?expected (body : Syntax.statement) =
 
 and check_collection_element state env ~(quantifier : Syntax.expression)
     (collection : Syntax.expression) =
-  let collection_type = State.normalize state (Hooks.check_expression state env collection) in
+  let collection_type = Conversions.read_checked_head state env collection in
   match (collection.kind, collection_type) with
   | ( Range { start = Some _; stop = Some _; inclusive; _ },
       Types.Named { path; arguments = [ Types.Type element ] } )
@@ -509,13 +514,9 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
       element
   | _, (Types.Error _ | Types.Hole) -> collection_type
   | _ -> (
-      match
-        Name_lookup.find_elements_calls state
-          (State.read_span state collection.id)
-          collection_type Language.Mode.Read
-      with
+      match Name_lookup.find_elements_calls state collection collection_type Language.Mode.Read with
       | Visible (loop, element, _) ->
-          State.record_loop state ~loop:quantifier.id ~iterable:collection loop;
+          state.tables.loops.(quantifier.id) <- Some loop;
           element
       | Hidden hidden ->
           Members.make_hidden_error state (State.read_span state collection.id) hidden

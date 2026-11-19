@@ -1,0 +1,49 @@
+trait Shown {
+  fn shown(self) -> String
+}
+
+trait Counted {
+  fn counted(self) -> UInt64
+}
+
+trait First {
+  fn describe(self) -> String
+}
+
+trait Second {
+  fn describe(self) -> String
+}
+
+type Simple(value: Int64)
+
+impl Shown for Simple {
+  fn shown(self) -> String {
+    "plain"
+  }
+}
+
+type Box[Item](item: Item)
+
+impl First for Box[Item: Shown] {
+  fn describe(self) -> String {
+    self.item.shown()
+  }
+}
+
+impl Second for Box[Item: Counted] {
+  fn describe(self) -> String {
+    "counted"
+  }
+}
+
+fn build[Item](item: own Item) -> Box[Item] {
+  Box(item: own item)
+}
+
+fn f(box: Box[Simple]) -> String {
+  box.describe()
+}
+
+fn g() -> String {
+  build(Simple(value: 1)).describe()
+}

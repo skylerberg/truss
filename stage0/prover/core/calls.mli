@@ -1,3 +1,13 @@
+val add_restated_clauses :
+  State.context ->
+  self_type:Types.ty ->
+  bind:(Types.trait_reference -> Path.t -> Types.substitution) ->
+  Path.t ->
+  string ->
+  Path.receiver ->
+  State.contract ->
+  State.contract
+
 val call_contract :
   State.context ->
   State.frame ->

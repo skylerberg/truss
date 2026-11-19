@@ -1,0 +1,5 @@
+fn f() -> Int64
+  ensures result == 1 when Int64: Display
+{
+  1
+}
