@@ -1,0 +1,5 @@
+fn f(value: UInt8) {
+  let amount = 3
+  let shifted = value << amount
+  let small: UInt8 = amount
+}

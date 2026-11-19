@@ -28,7 +28,7 @@ let record_conversion (state : State.state) (value : Syntax.expression) (collect
         omitted_defaults = [];
         callee_result = collection;
       };
-  Name_lookup.check_implements state value collection trait
+  Name_lookup.check_implements state (State.read_span state value.id) collection trait
 
 let rec check_string_literal state env ?expected (value : Syntax.expression)
     (literal : Syntax.string_literal) =

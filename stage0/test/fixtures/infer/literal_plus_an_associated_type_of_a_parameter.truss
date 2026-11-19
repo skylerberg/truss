@@ -1,0 +1,4 @@
+fn f[Value: SignedInteger](value: Value) -> Value.Unsigned {
+  let magnitude = value.unsigned_absolute()
+  magnitude + 1
+}

@@ -43,7 +43,7 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
           Form.build_constant_pattern state written.id
             (Form.build_literal_constant state written.id literal));
       check_literal_pattern state written.id (State.read_span state written.id) literal type_
-  | Pattern_range { start; stop; inclusive } ->
+  | Pattern_range { start; stop; inclusive } -> (
       State.register_pattern state written (fun () ->
           Range
             {
@@ -51,37 +51,27 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
               stop = Form.build_range_bound state stop;
               inclusive;
             });
-      let rejects_ranges (resolved : Types.ty) =
-        match resolved with
-        | Types.Named _ | Types.Function _ | Types.Any _ | Types.Parameter _ ->
-            not (State.is_integer_type state resolved || Types.is_builtin Character resolved)
-        | _ -> false
-      in
-      let report_not_range_type resolved =
-        State.report state Mismatch
-          (State.read_span state written.id)
-          (Printf.sprintf "A range pattern matches an integer or a `Character`, not `%s`."
-             (State.show state resolved))
-      in
-      let resolved = State.resolve state type_ in
-      if rejects_ranges resolved then report_not_range_type resolved
-      else begin
-        List.iter
-          (fun (bound : Syntax.range_end) ->
-            match bound.kind with
-            | End_literal literal ->
-                check_literal_pattern state bound.id (State.read_span state bound.id) literal type_
-            | End_constant constant ->
-                check_qualified_constant state bound.id (State.read_span state bound.id) constant
-                  type_)
-          [ start; stop ];
-        State.defer state (fun () ->
-            match State.resolve state type_ with
-            | Types.Literal _ | Types.Variable _ -> false
-            | resolved ->
-                if rejects_ranges resolved then report_not_range_type resolved;
-                true)
-      end
+      match
+        State.narrow state type_
+          (Types.integer_types @ [ Intrinsic.Character; Integer ])
+          ~report_excluded:(fun excluded ->
+            State.add_diagnostic state Mismatch
+              (State.read_span state written.id)
+              (Printf.sprintf "A range pattern matches an integer or a `Character`, not %s."
+                 (State.describe state excluded)))
+      with
+      | Types.Error _ when not (Types.is_error type_) -> ()
+      | _ ->
+          List.iter
+            (fun (bound : Syntax.range_end) ->
+              match bound.kind with
+              | End_literal literal ->
+                  check_literal_pattern state bound.id (State.read_span state bound.id) literal
+                    type_
+              | End_constant constant ->
+                  check_qualified_constant state bound.id (State.read_span state bound.id) constant
+                    type_)
+            [ start; stop ])
   | Variant { name = variant_name; fields } -> (
       match type_ with
       | Types.Named { path; arguments } -> (
@@ -302,9 +292,9 @@ and check_constant_pattern (state : State.state) id span path type_ =
 
 and is_structural ?(seen = []) state (type_ : Types.ty) =
   if
-    State.is_integer_type state type_ || Types.is_builtin Bool type_
-    || Types.is_builtin Character type_ || Types.is_builtin Unit type_
-    || Types.is_well_known String type_
+    State.is_within state type_ Types.integer_types
+    || Types.is_builtin Bool type_ || Types.is_builtin Character type_
+    || Types.is_builtin Unit type_ || Types.is_well_known String type_
   then true
   else if Types.is_float_type type_ then false
   else if List.exists (Types.equal type_) seen then true
@@ -358,22 +348,34 @@ and check_qualified_constant state id span constant type_ =
   | Hidden hidden -> ignore (Members.make_hidden_error state span hidden)
   | Absent -> State.report state Unknown_member span "This names no constant."
 
-and check_literal_fits state (value : Syntax.expression) number type_ =
-  State.defer state (fun () ->
-      match State.resolve state type_ with
-      | Types.Literal _ | Types.Variable _ -> false
-      | resolved ->
-          (match
-             match resolved with
-             | Types.Parameter _ | Types.Projection _ -> state.unifier.find_integer_range resolved
-             | _ -> Types.find_integer_range resolved
-           with
-          | Some (low, high) when Z.lt number low || Z.gt number high ->
-              State.report state Literal_out_of_range (State.read_span state value.id)
-                (Printf.sprintf "`%s` does not fit in `%s`, which holds %s to %s."
-                   (Z.to_string number) (Types.show resolved) (Z.to_string low) (Z.to_string high))
-          | _ -> ());
-          true)
+and report_out_of_range state span number excluded =
+  let low, high = State.read_integer_range state excluded in
+  State.add_diagnostic state Literal_out_of_range span
+    (Printf.sprintf "`%s` does not fit in %s, which holds %s to %s." (Z.to_string number)
+       (State.describe state excluded) (Z.to_string low) (Z.to_string high))
+
+and report_negated_unsigned state (value : Syntax.expression) excluded =
+  State.add_diagnostic state Negated_unsigned (State.read_span state value.id)
+    (Printf.sprintf "%s %s unsigned, so it cannot be negated."
+       (String.capitalize_ascii (State.describe state excluded))
+       (if State.is_within state excluded Types.unsigned_integer_types then "is" else "may be"))
+
+and check_integer_literal state (env : State.env) ?expected (value : Syntax.expression) number =
+  let span = State.read_span state value.id in
+  match
+    ( Option.map (State.resolve state) expected,
+      Types.list_fitting_integer_types number
+      @ if env.specification then [ Intrinsic.Integer ] else [] )
+  with
+  | Some Types.Integer, _ -> Types.Integer
+  | _, [] ->
+      State.make_error_type state Literal_out_of_range span
+        (Printf.sprintf "`%s` does not fit in any integer type." (Z.to_string number))
+  | _, allowed ->
+      State.make_literal_type state allowed ~report_excluded:(fun excluded ->
+          if Z.sign number < 0 && not (State.is_within state excluded Types.signed_integer_types)
+          then report_negated_unsigned state value excluded
+          else report_out_of_range state span number excluded)
 
 and find_character_tag state (literal : Syntax.string_literal) =
   match literal.tag with
@@ -420,29 +422,17 @@ and check_character_literal state id literal builtin =
 
 and check_literal_pattern state id (span : Source.Definition_span.t) literal type_ =
   match literal with
-  | Literal_integer number -> (
+  | Literal_integer number ->
       state.tables.literals.(id) <- Some (Integer_value number);
-      let check type_ =
-        if not (State.is_integer_type state type_ || Types.is_error type_ || type_ = Types.Hole)
-        then
-          State.report state Mismatch span
-            (Printf.sprintf "An integer pattern matches an integer, not `%s`." (Types.show type_))
-        else
-          match Types.find_integer_range type_ with
-          | Some (low, high) when Z.lt number low || Z.gt number high ->
-              State.report state Literal_out_of_range span
-                (Printf.sprintf "`%s` does not fit in `%s`." (Z.to_string number) (Types.show type_))
-          | _ -> ()
-      in
-      match State.resolve state type_ with
-      | Types.Literal (Integer_literal, _) ->
-          State.defer state (fun () ->
-              match State.resolve state type_ with
-              | Types.Literal _ | Types.Variable _ -> false
-              | resolved ->
-                  check resolved;
-                  true)
-      | _ -> check type_)
+      ignore
+        (State.narrow state type_ (Types.list_fitting_integer_types number)
+           ~report_excluded:(fun excluded ->
+             if State.is_within state excluded Types.integer_types then
+               report_out_of_range state span number excluded
+             else
+               State.add_diagnostic state Mismatch span
+                 (Printf.sprintf "An integer pattern matches an integer, not %s."
+                    (State.describe state excluded))))
   | Literal_true | Literal_false ->
       if not (State.unify state type_ Types.bool) then
         State.report_mismatch state span ~expected:type_ ~actual:Types.bool

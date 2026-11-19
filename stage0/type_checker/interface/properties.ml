@@ -159,7 +159,7 @@ let rec compute_conditions lookups ~facts_of ~resolve ~compute_leaf ?(in_progres
       (compute_conditions lookups ~facts_of ~resolve ~compute_leaf ~in_progress property)
   in
   match type_ with
-  | Types.Never | Types.Literal _ | Types.Integer -> Some []
+  | Types.Never | Types.Integer -> Some []
   | Types.Error _ | Types.Hole | Types.Variable _ -> Some [ type_ ]
   | Types.Function _ -> (
       match property with View | Holds_function -> None | Copyable | Plain -> Some [])
@@ -258,7 +258,7 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
                 List.iter (step_inside Indirect) (list_type_arguments arguments)
             | None, _ -> ()))
     | Types.Never | Types.Integer -> ()
-    | Types.Error _ | Types.Hole | Types.Variable _ | Types.Literal _ ->
+    | Types.Error _ | Types.Hole | Types.Variable _ ->
         raise_bug "the contents of the inference type `%s` are listed" (Types.show type_)
   in
   visit ~enclosing:[] In_place type_;

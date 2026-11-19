@@ -1,0 +1,3 @@
+fn f[Value: FixedWidthInteger](value: Value, amount: Value) -> Value {
+  value << amount
+}

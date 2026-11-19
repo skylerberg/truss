@@ -1,0 +1,3 @@
+fn f[Value: SignedInteger](value: Value, amount: Value) -> Value {
+  value << amount
+}

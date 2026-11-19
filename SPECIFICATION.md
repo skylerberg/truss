@@ -155,25 +155,30 @@ A literal takes its type from its context, as in `let small: UInt8 = 3`. A
 local declared from literals alone takes its type from its first use that
 decides it: after `let limit = 10`, `count < limit` with a `UInt8` count makes
 `limit` a `UInt8`, and so does `let digit: UInt8 = index` in the body of
-`for index in 0..10`. When nothing decides it, an integer literal is an
-`Int64` and a float literal a `Float64`.
+`for index in 0..10`. When nothing decides it, a literal has the first of
+`Int64`, `UInt64`, and `Float64` that its value fits and its uses allow, so
+`9223372036854775808` is a `UInt64`.
 
 - A literal operand of an arithmetic operator, a comparison, or a range takes
-  the other operand's type when it can be that type: in `count + 1` with a
-  `UInt8` count, the `1` is a `UInt8`. Otherwise it has its default type, as
-  the `2` in `duration * 2` does. An expression made only of literals waits
-  for the same decision.
-- A literal shift amount is a `UInt64`.
+  the other operand's type when its value fits that type: in `count + 1` with
+  a `UInt8` count, the `1` is a `UInt8`. Otherwise it has its default type, as
+  the `2` in `duration * 2` does. Two literal operands have one type, so an
+  integer literal and a float literal are an error. An expression made only
+  of literals waits for the same decision. In a specification, a literal that
+  fits neither operand's type is an `Integer`, and `Integer` is its default,
+  so `span * 2` there needs a literal with a type.
+- A shift amount is an unsigned integer, and a literal one is a `UInt64` when
+  nothing else decides it.
 - An integer literal is never a float.
 - A literal that does not fit its type is an error. A negated literal is
   checked after the negation, so `-128` fits an `Int8`.
 - A literal whose type is a type parameter bounded by an integer trait fits
   every type that implements the trait: -128 to 127 under `SignedInteger`, 0
   to 255 under `UnsignedInteger`, and 0 to 127 under `FixedWidthInteger`.
-- Until its type is decided, a literal meets a bound that every type of its
-  kind meets: after `let range = 0..3`, `for index in range` finds
-  `Range`'s `Iterable`, whose bound `Countable` every integer type meets,
-  and the loop's body may still decide the type.
+- A literal meets a bound once its type is decided. Until then, a lookup
+  proceeds as if the bound is met: after `let range = 0..3`,
+  `for index in range` finds `Range`'s `Iterable`, and the loop's body may
+  still decide the type, which must then meet `Countable`.
 
 ### String literals
 

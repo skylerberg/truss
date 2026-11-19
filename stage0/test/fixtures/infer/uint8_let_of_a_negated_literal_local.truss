@@ -1,0 +1,5 @@
+fn f() -> UInt8 {
+  let limit = 5
+  let small: UInt8 = -limit
+  small
+}

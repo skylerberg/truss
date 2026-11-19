@@ -4,25 +4,24 @@ type t = {
   value_solutions : (int, Types.value) Hashtbl.t;
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
-  mutable find_integer_range : Types.ty -> (Z.t * Z.t) option;
-  code_literals : (int, unit) Hashtbl.t;
+  domains : (int, Intrinsic.builtin list) Hashtbl.t;
+  list_rigid_members : Types.ty -> Intrinsic.builtin list;
 }
 
-val create : unit -> t
+val create : list_rigid_members:(Types.ty -> Intrinsic.builtin list) -> t
 val make_fresh_type : t -> Types.ty
-val make_fresh_literal : t -> Types.literal_kind -> Types.ty
+val make_fresh_number : t -> Intrinsic.builtin list -> Types.ty
 val make_fresh_value : t -> Types.value
 val make_fresh_capability_variable : t -> Types.capability_set
 val resolve : t -> Types.ty -> Types.ty
 val resolve_value : t -> Types.value -> Types.value
 val zonk : t -> Types.ty -> Types.ty
 val zonk_trait : t -> Types.trait_reference -> Types.trait_reference
-val literal_fits : t -> Types.literal_kind -> Types.ty -> bool
+val find_domain : t -> int -> Intrinsic.builtin list option
+val list_possible_members : t -> Types.ty -> Intrinsic.builtin list
+val is_within : t -> Types.ty -> Intrinsic.builtin list -> bool
 
-type unknown =
-  | Unknown_type of int
-  | Unknown_literal of Types.literal_kind * int
-  | Unknown_value of int
+type unknown = Unknown_type of int | Unknown_value of int
 
 val list_unknowns : t -> Types.ty -> unknown list
 val list_argument_unknowns : t -> Types.argument -> unknown list

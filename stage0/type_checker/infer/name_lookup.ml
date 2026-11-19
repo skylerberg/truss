@@ -21,11 +21,6 @@ let rec coerce state env ?argument ?takes_view_as_owner (value : Syntax.expressi
   State.convert state env ?argument ?takes_view_as_owner ~expression:value.id
     (State.read_span state value.id) ~actual ~expected
 
-and infer_literal_type state ~expected kind =
-  match Option.map (State.resolve state) expected with
-  | Some expected when Unify.literal_fits state.unifier kind expected -> expected
-  | _ -> Unify.make_fresh_literal state.unifier kind
-
 and check_name (state : State.state) (env : State.env) (value : Syntax.expression)
     ({ name; target; type_arguments } : Resolve.head) =
   let text = name.text in
@@ -380,8 +375,8 @@ and list_trait_static_methods (state : State.state) path name receiver =
     (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
        ~from:state.key.module_ name)
 
-and check_implements state (value : Syntax.expression) self_type (reference : Types.trait_reference)
-    =
+and check_implements ?(code : Diagnostic.Code.types = No_impl) state
+    (span : Source.Definition_span.t) self_type (reference : Types.trait_reference) =
   State.defer state (fun () ->
       let self_type = State.zonk state self_type in
       let reference = State.solve_trait_arguments state self_type reference in
@@ -394,7 +389,7 @@ and check_implements state (value : Syntax.expression) self_type (reference : Ty
           Option.is_none (State.find_evidence state self_type reference)
           && not (Types.is_error self_type)
         then
-          State.report state No_impl (State.read_span state value.id)
+          State.report state code span
             (Printf.sprintf "`%s` does not implement `%s`." (Types.show self_type)
                (Types.show_trait reference));
         true
@@ -531,6 +526,7 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
           let instance, callee =
             instantiate_trait_method state span ~self_type:type_ trait method_
           in
+          check_implements ~code:Not_indexable state span type_ trait;
           Visible (callee, (instance : Instantiation.instance).signature)
       | Some (View_overload _) | None -> Absent)
 

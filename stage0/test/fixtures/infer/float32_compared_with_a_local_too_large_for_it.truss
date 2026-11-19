@@ -1,0 +1,4 @@
+fn f(narrow: Float32) -> Bool {
+  let huge = 1.0e39
+  narrow < huge
+}

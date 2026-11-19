@@ -1,0 +1,5 @@
+fn f() -> Int8 {
+  let magnitude = 128
+  let lowest: Int8 = -magnitude
+  lowest
+}
