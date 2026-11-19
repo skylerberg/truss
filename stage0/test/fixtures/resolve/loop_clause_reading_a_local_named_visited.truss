@@ -1,0 +1,7 @@
+fn f(items: List[Int64]) {
+  let visited = 0
+  for item in items
+    invariant visited >= 0
+  {
+  }
+}

@@ -339,6 +339,46 @@ let () =
   Harness.test "log in a cost bound is the specification function" (fun () ->
       expect_reference Fixtures.Resolve.cost_logarithmic_in_a_count ~name:("log", 1)
         "specification function");
+  Harness.test "a call of log in a cost bound is the specification function despite a local"
+    (fun () ->
+      expect_reference Fixtures.Resolve.cost_calling_log_on_a_parameter_named_log ~name:("log", 2)
+        "specification function";
+      expect_binding_reference Fixtures.Resolve.cost_calling_log_on_a_parameter_named_log
+        ~use:("log", 3) ~binding:("log", 1));
+  Harness.test "a cost function's name in a cost bound is a local where it is not called" (fun () ->
+      expect_binding_reference Fixtures.Resolve.cost_bound_reading_a_parameter_named_time
+        ~use:("time", 3) ~binding:("time", 1));
+  Harness.test "a local named log takes precedence over log in a specification" (fun () ->
+      expect_binding_reference Fixtures.Resolve.requires_calling_a_parameter_named_log
+        ~use:("log", 2) ~binding:("log", 1));
+  Harness.test "a function of the module named log takes precedence over log in a specification"
+    (fun () ->
+      expect_reference Fixtures.Resolve.requires_calling_a_function_named_log ~name:("log", 2)
+        "app::main::log");
+  Harness.test "log in a specification is the specification function where it is not called"
+    (fun () ->
+      expect_reference Fixtures.Resolve.requires_naming_log_without_arguments ~name:("log", 1)
+        "specification function");
+  Harness.test "visited in a for loop's clauses is the values of the iterations before" (fun () ->
+      expect_reference Fixtures.Resolve.loop_clause_reading_visited ~name:("visited", 1) "visited");
+  Harness.test "a local named visited shadows the word in a for loop's clauses" (fun () ->
+      expect_binding_reference Fixtures.Resolve.loop_clause_reading_a_local_named_visited
+        ~use:("visited", 2) ~binding:("visited", 1));
+  Harness.test "a quantifier's binding named result shadows the return value in ensures" (fun () ->
+      expect_binding_reference Fixtures.Resolve.ensures_binding_result_in_a_quantifier
+        ~use:("result", 2) ~binding:("result", 1));
+  Harness.test "a function type's requires in an ensures does not name the return value" (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.function_type_requires_naming_result_in_an_ensures
+        "resolve.unknown_name" ~at:("result", 1));
+  Harness.test "a function type's requires in a loop invariant does not name visited" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Resolve.function_type_requires_naming_visited_in_a_loop_invariant
+        "resolve.unknown_name" ~at:("visited", 1));
+  Harness.test "a function type's input named log shadows log in its requires in a cost bound"
+    (fun () ->
+      expect_binding_reference
+        Fixtures.Resolve.function_type_requires_calling_its_input_log_in_a_cost_bound
+        ~use:("log", 2) ~binding:("log", 1));
   Harness.test "a record's fields are in scope in its invariant" (fun () ->
       expect_reference "type Range(low: Int64, high: Int64)\n  invariant low <= high\n"
         ~name:("low", 2) "field low")
