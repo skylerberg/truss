@@ -1013,14 +1013,15 @@ division by zero, an index out of bounds, a shift that is too large, and
 the fact locally, requires the fact of its caller, or calls a checked variant
 that returns an `Option` or a `Result`.
 
-**`Panic` permits a crash and changes nothing else.** `uses Panic` lets code
-call `Panic.crash`, directly or through a callee such as `expect`, as
-`uses Clock` lets it call `Clock`. The body's operations are proven as
-anywhere else. Code that crashes on a failure writes the crash where it
-happens: `total.checked_add(price).expect("the total fits Int64")`
-(*nothing hidden*). If declaring `Panic` turned unproven operations into
-run-time checks, the declaration would stand in for every proof in the body,
-and a crash would hide at each operator.
+**In code that has `Panic`, an integer operation that fails panics.** Code
+without `Panic` proves the operation, and its release build checks nothing.
+
+| Rule | Reason |
+|---|---|
+| A failing overflow, division, or shift panics where `Panic` is available. | `uses Panic` declares that the function may crash, so the signature already says what a caller needs to know. A call to a function that panics on bad input is not marked at the call site either. Writing `checked_add(...).expect(...)` at each operator adds only a message, and the panic already names the failure and its location. |
+| Code that uses `Panic unless C` proves its integer operations where `C` holds. | A function that declares `Panic` for one `expect` would otherwise lose the compile-time check of every other operation. The condition keeps the check for the instantiations that never panic. |
+| A lambda whose capabilities are inferred takes `Panic` for an integer operation where the code it is written in has `Panic`. | A lambda passed to `map` would otherwise have to prove what the code around it need not. A lambda passed as a function type without `Panic` still proves its operations, since its caller relies on that type. |
+| Indexing, slicing, and `unreachable` are proven in code that has `Panic` too. | They are methods with a `requires` and a claim, not integer operations. A crash at `unreachable` would contradict the claim that the point is not reached. |
 
 **A panic cannot be caught.** Code that caught a panic could hold a value
 whose invariant was broken partway through an update. A program that must

@@ -13,6 +13,7 @@
   types
   core
   resolve
+  syntax
   interface
   diagnostic
   mir
