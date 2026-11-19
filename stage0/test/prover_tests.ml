@@ -35,6 +35,9 @@ let expect_one_termination_failure ~says text =
         Harness.fail "expected a message that says %S, got: %s" says message
   | messages -> Harness.fail "%d termination failures" (List.length messages)
 
+let list_diagnostics text =
+  check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main")
+
 let read_message text =
   let packages = Support.setup [ ("app::main", text) ] in
   match check packages (Support.parse_file "app::main") with
@@ -110,39 +113,75 @@ let () =
       expect_not_proven Fixtures.Prover.unreachable_that_can_be_reached "prover.unreachable");
   Harness.test "an unreachable after a check" (fun () ->
       expect_proven Fixtures.Prover.unreachable_after_a_check);
-  Harness.test "an overflow's message offers a guard or the checked operation, not `Panic`"
+  Harness.test "an overflow offers a guard, the checked operation, `requires`, or `uses Panic`"
     (fun () ->
       let actual = read_message Fixtures.Prover.addition_that_can_overflow in
       if
-        (not
-           (String.includes
-              ~affix:
-                "It can also be checked first with an `if`, or done with the checked operation."
-              actual))
-        || String.includes ~affix:"Panic" actual
-      then Harness.fail "message %S" actual);
-  Harness.test "a function that declares `uses Panic` proves each operation that could fail"
+        not
+          (String.includes
+             ~affix:"It can also be checked first with an `if`, or done with the checked operation."
+             actual)
+      then Harness.fail "message %S" actual;
+      Support.expect_error ~list_diagnostics Fixtures.Prover.addition_that_can_overflow
+        ~code:(Prover Overflow) ~at:"count + 1"
+        ~fixed:
+          "fn f(count: UInt8) -> UInt8\n  requires count <= UInt8.maximum - 1\n{\n  count + 1\n}\n"
+        ~alternatives:[ "fn f(count: UInt8) -> UInt8\n  uses Panic\n{\n  count + 1\n}\n" ]);
+  Harness.test "the `uses Panic` fix joins the function's `uses` clause" (fun () ->
+      Support.expect_error ~list_diagnostics
+        Fixtures.Prover.overflow_in_a_function_with_other_clauses ~code:(Prover Overflow)
+        ~at:"value + 1"
+        ~fixed:
+          "fn increment(value: UInt8) -> UInt8\n\
+          \  uses Clock\n\
+          \  ensures true\n\
+          \  requires value <= UInt8.maximum - 1\n\
+           {\n\
+          \  value + 1\n\
+           }\n"
+        ~alternatives:
+          [
+            "fn increment(value: UInt8) -> UInt8\n\
+            \  uses Clock, Panic\n\
+            \  ensures true\n\
+             {\n\
+            \  value + 1\n\
+             }\n";
+          ]);
+  Harness.test "a function that declares `uses Panic` lets its integer operations panic" (fun () ->
+      expect_only_code Fixtures.Prover.failing_operations_of_a_function_that_may_panic
+        "prover.requires");
+  Harness.test "a function that uses `Panic unless` a bound proves its operations where it holds"
     (fun () ->
-      let codes = list_codes Fixtures.Prover.failing_operations_of_a_function_that_may_panic in
-      List.iter
-        (fun code ->
-          if not (List.mem code codes) then
-            Harness.fail "%s is not reported, only %s" code (String.concat ", " codes))
-        [ "prover.overflow"; "prover.division"; "prover.shift"; "prover.requires" ]);
+      expect_not_proven Fixtures.Prover.operation_that_panics_unless_a_bound_holds "prover.overflow";
+      expect_proven Fixtures.Prover.operation_proven_where_a_bound_holds);
   Harness.test "expect returns the payload of an Option or a Result" (fun () ->
       expect_proven Fixtures.Prover.payloads_through_expect);
   Harness.test "expect lends the payload of an Option it is lent" (fun () ->
       expect_proven Fixtures.Prover.elements_lent_through_expect);
-  Harness.test "a test that declares `Panic` proves its operations, as a function does" (fun () ->
-      let codes = list_codes Fixtures.Prover.test_indexing_by_a_sum_from_a_loop in
-      if not (List.mem "prover.overflow" codes) then
-        Harness.fail "the overflow is not reported, only %s" (String.concat ", " codes));
-  Harness.test "a lambda in a function that declares `uses Panic` proves its operations" (fun () ->
-      let actual = read_message Fixtures.Prover.overflow_in_a_lambda_of_a_function_that_may_panic in
-      if
-        (not (String.includes ~affix:"may overflow `UInt8`" actual))
-        || String.includes ~affix:"uses Panic" actual
-      then Harness.fail "message %S" actual);
+  Harness.test "a test that declares `Panic` lets its integer operations panic, as a function does"
+    (fun () ->
+      expect_only_code Fixtures.Prover.test_indexing_by_a_sum_from_a_loop "prover.requires");
+  Harness.test "a lambda passed as a function type without `Panic` proves its operations" (fun () ->
+      match
+        check
+          (Support.setup
+             [ ("app::main", Fixtures.Prover.overflow_in_a_lambda_of_a_function_that_may_panic) ])
+          (Support.parse_file "app::main")
+      with
+      | [ diagnostic ] ->
+          if
+            (not (String.includes ~affix:"may overflow `UInt8`" diagnostic.message))
+            || List.exists
+                 (fun (fix : Source.span Diagnostic.fix) -> fix.title = "Add `uses Panic`")
+                 diagnostic.fixes
+          then Harness.fail "message %S" diagnostic.message
+      | diagnostics -> Harness.fail "%s" (String.concat ", " (Support.list_codes diagnostics)));
+  Harness.test "a lambda whose capabilities are inferred takes `Panic` for an operation that fails"
+    (fun () ->
+      expect_proven Fixtures.Prover.overflow_in_a_lambda_passed_where_its_capabilities_are_inferred;
+      expect_not_proven Fixtures.Prover.overflow_in_a_lambda_of_a_function_without_panic
+        "prover.overflow");
   Harness.test "a lambda in a test proves its operations" (fun () ->
       expect_not_proven Fixtures.Prover.overflow_in_a_lambda_of_a_test "prover.overflow");
   Harness.test "an index through a bound is proven in a function that declares `uses Panic`"
@@ -1796,7 +1835,7 @@ let () =
       let text = Fixtures.Prover.negation_of_a_negated_parameter in
       let packages = Support.setup [ ("app::main", text) ] in
       match check packages (Support.parse_file "app::main") with
-      | [ { fixes = [ fix ]; _ } ] ->
+      | [ { fixes = [ fix; { title = "Add `uses Panic`"; _ } ]; _ } ] ->
           if fix.title <> "Add `requires value <= Int64.maximum - 1`" then
             Harness.fail "%s" fix.title;
           expect_proven (Diagnostic.apply_edits text fix.edits)
@@ -1884,17 +1923,17 @@ let () =
                   actual)));
   Harness.test "a divisor that may be zero offers a requires that it is not" (fun () ->
       match fix_titles Fixtures.Prover.halves_of_an_unchecked_divisor with
-      | [ "Add `requires parts != 0`" ] -> ()
+      | [ "Add `requires parts != 0`"; "Add `uses Panic`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "a shift amount that may be too large offers a requires below the width" (fun () ->
       match fix_titles Fixtures.Prover.shifted_by_an_unbounded_amount with
-      | [ "Add `requires by < 64`" ] -> ()
+      | [ "Add `requires by < 64`"; "Add `uses Panic`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "an overflow with a literal offers the bound as a requires" (fun () ->
       let packages = Support.setup [ ("app::main", Fixtures.Prover.next_count) ] in
       match check packages (Support.parse_file "app::main") with
-      | [ { fixes = [ { title; _ } ]; _ } ] when title = "Add `requires count <= UInt8.maximum - 1`"
-        ->
+      | [ { fixes = [ { title; _ }; { title = "Add `uses Panic`"; _ } ]; _ } ]
+        when title = "Add `requires count <= UInt8.maximum - 1`" ->
           ()
       | actual ->
           Harness.fail "%s"
@@ -1918,7 +1957,7 @@ let () =
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "an overflow of a local offers the bound on the parameter it holds" (fun () ->
       match fix_titles Fixtures.Prover.bumped_local with
-      | [ "Add `requires start <= Int64.maximum - 1`" ] -> ()
+      | [ "Add `requires start <= Int64.maximum - 1`"; "Add `uses Panic`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "a callee's requires through a local names the caller's parameter" (fun () ->
       match fix_titles Fixtures.Prover.halve_of_a_local with
@@ -1926,44 +1965,49 @@ let () =
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "an unsigned sum that may overflow offers only its upper bound" (fun () ->
       match fix_titles Fixtures.Prover.total_of_two_bytes with
-      | [ "Add `requires count + other <= UInt8.maximum`" ] -> ()
+      | [ "Add `requires count + other <= UInt8.maximum`"; "Add `uses Panic`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "an unsigned difference that may overflow offers only its lower bound" (fun () ->
       match fix_titles Fixtures.Prover.gap with
-      | [ "Add `requires 0 <= high - low`" ] -> ()
+      | [ "Add `requires 0 <= high - low`"; "Add `uses Panic`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "a signed product that may overflow offers both limits by name" (fun () ->
       match fix_titles Fixtures.Prover.scaled_count with
-      | [ "Add `requires Int64.minimum <= count * 1000 && count * 1000 <= Int64.maximum`" ] -> ()
+      | [
+       "Add `requires Int64.minimum <= count * 1000 && count * 1000 <= Int64.maximum`";
+       "Add `uses Panic`";
+      ] ->
+          ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "an overflow under an if offers the if's condition as a premise" (fun () ->
       match fix_titles Fixtures.Prover.product_under_an_if with
       | [
        "Add `requires (flag) ==> (Int64.minimum <= left * right && left * right <= Int64.maximum)`";
+       "Add `uses Panic`";
       ] ->
           ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "a negation that may overflow offers to exclude the least value" (fun () ->
       match fix_titles Fixtures.Prover.negated_value with
-      | [ "Add `requires value != Int64.minimum`" ] -> ()
+      | [ "Add `requires value != Int64.minimum`"; "Add `uses Panic`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "a signed quotient that may overflow offers to exclude the least value over -1"
     (fun () ->
       match fix_titles Fixtures.Prover.signed_quotient with
-      | [ "Add `requires dividend != Int64.minimum || divisor != -1`" ] -> ()
+      | [ "Add `requires dividend != Int64.minimum || divisor != -1`"; "Add `uses Panic`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "an overflow with a literal under an if offers the if's condition as a premise"
     (fun () ->
       match fix_titles Fixtures.Prover.next_count_under_an_if with
-      | [ "Add `requires (flag) ==> (count <= UInt8.maximum - 1)`" ] -> ()
+      | [ "Add `requires (flag) ==> (count <= UInt8.maximum - 1)`"; "Add `uses Panic`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "a divisor under an if offers the if's condition as a premise" (fun () ->
       match fix_titles Fixtures.Prover.divisor_under_an_if with
-      | [ "Add `requires (flag) ==> (parts != 0)`" ] -> ()
+      | [ "Add `requires (flag) ==> (parts != 0)`"; "Add `uses Panic`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "a shift amount under an if offers the if's condition as a premise" (fun () ->
       match fix_titles Fixtures.Prover.shift_under_an_if with
-      | [ "Add `requires (flag) ==> (by < 64)`" ] -> ()
+      | [ "Add `requires (flag) ==> (by < 64)`"; "Add `uses Panic`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "a callee's requires under an if offers the if's condition as a premise" (fun () ->
       match fix_titles Fixtures.Prover.call_under_an_if with
@@ -1972,7 +2016,7 @@ let () =
   Harness.test "a condition with no spelling in the parameters leaves the requires unconditional"
     (fun () ->
       match fix_titles Fixtures.Prover.next_count_under_a_quotient with
-      | [ "Add `requires count <= UInt8.maximum - 1`" ] -> ()
+      | [ "Add `requires count <= UInt8.maximum - 1`"; "Add `uses Panic`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "a failed assert about a call's result offers no requires" (fun () ->
       let packages = Support.setup [ ("app::main", Fixtures.Prover.assert_on_a_list_length) ] in

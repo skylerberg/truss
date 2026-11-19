@@ -1,0 +1,6 @@
+fn increment(value: UInt8) -> UInt8
+  uses Clock
+  ensures true
+{
+  value + 1
+}

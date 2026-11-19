@@ -1,0 +1,48 @@
+fn total(items: Slice[Int64]) -> Int64
+  uses Panic
+{
+  var sum: Int64 = 0
+  for item in items {
+    sum = sum + item
+  }
+  sum
+}
+
+fn quotient(dividend: Int64, divisor: Int64) -> Int64
+  uses Panic
+{
+  dividend / divisor
+}
+
+fn shifted(value: UInt64, amount: UInt64) -> UInt64
+  uses Panic
+{
+  value << amount
+}
+
+fn negated(value: Int64) -> Int64
+  uses Panic
+{
+  -value
+}
+
+fn incremented(values: List[UInt8]) -> List[UInt8]
+  uses Panic
+{
+  values.map(fn(value) { value + 1 })
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Panic
+{
+  let count = arguments.length()
+  match arguments[1].slice() {
+    "overflow" => Console.print_line("${total([9223372036854775807, 1])}")
+    "division" => Console.print_line("${quotient(100, divisor: Int64.try_from_integer(count).unwrap_or(0) - 2)}")
+    "shift" => Console.print_line("${shifted(count, amount: count * 32)}")
+    "negation" => Console.print_line("${negated(Int64.minimum)}")
+    "lambda" => Console.print_line("${incremented([255]).length()}")
+    _ => Console.print_line("${total([1, 2])} ${quotient(9, divisor: 2)} ${shifted(1, amount: 3)} ${negated(5)} ${incremented([1]).length()}")
+  }
+  ExitCode.success
+}

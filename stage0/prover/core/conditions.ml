@@ -5,6 +5,13 @@ let implies (lookups : Lookups.t) ~current premise conclusion =
     ~list_bounds:(Facts.list_definition_bounds lookups ~current ~condition:[])
     premise conclusion
 
+let may_panic lookups ~current ~condition (uses : Types.capability_set) =
+  Types.has_capability (Built_in Panic) uses
+  ||
+  match Types.find_unless (Built_in Panic) uses with
+  | Some unless -> not (implies lookups ~current condition unless)
+  | None -> false
+
 let decide (context : State.context) ~substitution (holds_when : Types.condition) =
   match holds_when with
   | [] -> Always
