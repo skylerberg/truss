@@ -56,6 +56,15 @@ let find_contract (definition : Core.definition) =
       Some
         {
           parameters = List.map make_parameter parameters;
+          panics_unless =
+            List.map
+              (fun value ->
+                {
+                  clause = Builder.of_clause ~parameters value;
+                  is_executable = false;
+                  names = Builder.list_names value;
+                })
+              contract.panics_unless;
           requires =
             List.map
               (fun ({ holds_when; clause = written } : Core.condition Core.conditional) ->
@@ -105,7 +114,15 @@ let find_contract (definition : Core.definition) =
         }
   | Test _ ->
       Some
-        { parameters = []; requires = []; ensures = []; decreases = []; costs = []; callbacks = [] }
+        {
+          parameters = [];
+          panics_unless = [];
+          requires = [];
+          ensures = [];
+          decreases = [];
+          costs = [];
+          callbacks = [];
+        }
   | Type _ | Trait _ | Constant _ | Law_proof _ | Empty -> None
 
 let list_laws (definition : Core.definition) =

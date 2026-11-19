@@ -255,6 +255,14 @@ let lookup_evidence (state : Lowering.state) capability =
 let pass_evidence (state : Lowering.state) ~site capability =
   extend_evidence state ~site capability (lookup_evidence state capability)
 
+let pass_callee_evidence (state : Lowering.state) ~site (uses : Types.capability_set) capability =
+  if
+    Path.equal capability Definitions.panic_path
+    && Types.has_capability (Capability_unless_values (Built_in Panic)) uses
+    && Option.is_none (Lowering.find_panic_trace state)
+  then Lowered.Constant Null
+  else pass_evidence state ~site capability
+
 let pass_capabilities (state : Lowering.state) ~site capabilities =
   match capabilities with
   | [] -> Lowered.Constant Null
@@ -536,7 +544,8 @@ let lower_item_call (state : Lowering.state) item ~(signature : Types.signature)
     (if Definitions.has_defaults signature then
        [ Lowering.make_int_constant UInt64 (Z.of_int mask) ]
      else [])
-    @ List.map (pass_evidence state ~site)
+    @ List.map
+        (pass_callee_evidence state ~site signature.uses)
         (Definitions.list_evidence state.context substitution signature.uses)
   in
   let target = Lowered.Direct { function_ = Item item; signature = c_signature } in

@@ -347,7 +347,8 @@ and resolve_clause_condition state scope (condition : Syntax.condition) =
 
 and resolve_capability_use state scope (use : Syntax.capability_use) =
   resolve_capability_reference state scope use.capability;
-  Option.iter (resolve_clause_condition state scope) use.unless
+  Option.iter (resolve_clause_condition state scope) use.unless;
+  List.iter (resolve_expression state (enter_specification scope)) use.unless_values
 
 and resolve_clause state scope (clause : Syntax.clause) =
   Option.iter (resolve_clause_condition state scope) clause.condition;

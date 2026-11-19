@@ -67,7 +67,12 @@ and clause_kind =
   | Cost of cost
   | Clause_error
 
-and capability_use = { capability : capability_reference; unless : condition option }
+and capability_use = {
+  capability : capability_reference;
+  unless : condition option;
+  unless_values : expression list;
+}
+
 and condition = bound_condition list
 and bound_condition = { subject : type_expression; bounds : path_type list; id : id }
 and cost = { amortized : bool; resource : resource; bound : bound }

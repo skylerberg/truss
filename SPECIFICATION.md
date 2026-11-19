@@ -782,7 +782,7 @@ clause               = "uses" capability_use { "," capability_use }
                      | "ensures" expression [ "when" condition ]
                      | "decreases" expression { "," expression } [ "when" condition ]
                      | "cost" cost [ "when" condition ] ;
-capability_use       = capability_reference [ "unless" condition ] ;
+capability_use       = capability_reference [ "unless" unless_condition ] ;
 capability_list      = capability_reference { "," capability_reference } ;
 capability_reference = path_type
                      | "Self" "." UPPER_NAME
@@ -828,8 +828,10 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 ### Conditions
 
 ```ebnf
-condition       = bound_condition { "&&" bound_condition } ;
-bound_condition = ( UPPER_NAME | "Self" ) ":" bound ;
+condition        = bound_condition { "&&" bound_condition } ;
+unless_condition = unless_atom { "&&" unless_atom } ;
+unless_atom      = bound_condition | comparison ;
+bound_condition  = ( UPPER_NAME | "Self" ) ":" bound ;
 ```
 
 ```truss
@@ -885,6 +887,28 @@ condition holds for the instantiations that meet it.
 - A condition that names neither a type parameter nor `Self` is an error,
   since it is decided where it is written, and so is a clause whose
   condition no instantiation meets.
+
+#### Conditions on values
+
+```truss
+public fn Option[Value].expect(own self, message: StringSlice) -> Value
+  uses Panic unless self is Some(_)
+  ensures self is Some(held) && identical(result, held)
+```
+
+- **`Panic` can be `unless` a condition on the arguments.** The condition
+  is a `&&` of `Bool` expressions over the parameters, read at entry, as a
+  `requires` is. No other capability takes one, and it is not joined with a
+  bound.
+- **A caller without `Panic` proves the condition, as it proves a
+  `requires`.** A caller that has `Panic` proves nothing. A caller that uses
+  `Panic unless C` proves the condition where `C` holds.
+- **The body is proven twice.** It is proven once with `Panic`. It is
+  proven again assuming the condition, without `Panic`: every operation that
+  could fail is proven not to, and every call that uses `Panic` is proven
+  unreachable.
+- A trait's method, a written function type, and a `when` condition take no
+  condition on values. A function named as a value uses `Panic`.
 
 ### Termination
 

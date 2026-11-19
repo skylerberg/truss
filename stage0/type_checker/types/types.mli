@@ -38,6 +38,7 @@ and capability =
   | Capability_variable of int
   | Capability_error of Diagnostic.reported
   | Capability_unless of { capability : capability; unless : condition }
+  | Capability_unless_values of capability
 
 and condition = bound_condition list
 and bound_condition = { subject : ty; bound : trait_reference }

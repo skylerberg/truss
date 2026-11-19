@@ -38,6 +38,7 @@ and capability =
   | Capability_variable of int
   | Capability_error of Diagnostic.reported
   | Capability_unless of { capability : capability; unless : condition }
+  | Capability_unless_values of capability
 
 and condition = bound_condition list
 and bound_condition = { subject : ty; bound : trait_reference }
@@ -61,13 +62,22 @@ let rec make_unless capability unless =
       | unless -> Some (Capability_unless { capability; unless }))
 
 let find_base = function
-  | Capability_unless { capability; _ } -> capability
+  | Capability_unless { capability; _ } | Capability_unless_values capability -> capability
   | capability -> capability
 
 let make_capability_set capabilities : capability_set =
   let capabilities = List.sort_uniq compare capabilities in
   let unconditional =
-    List.filter (function Capability_unless _ -> false | _ -> true) capabilities
+    List.filter
+      (function Capability_unless _ | Capability_unless_values _ -> false | _ -> true)
+      capabilities
+  in
+  let unless_values =
+    List.filter
+      (function
+        | Capability_unless_values capability -> not (List.mem capability unconditional)
+        | _ -> false)
+      capabilities
   in
   let conditional =
     List.fold_left
@@ -81,7 +91,7 @@ let make_capability_set capabilities : capability_set =
       [] capabilities
   in
   List.sort_uniq compare
-    (unconditional
+    (unconditional @ unless_values
     @ List.filter_map (fun (capability, unless) -> make_unless capability unless) conditional)
 
 let no_capabilities : capability_set = []
@@ -125,16 +135,23 @@ let contains_capability_error (capabilities : capability_set) =
     capabilities
 
 let is_covered ~implies (available : capability_set) capability =
+  let has_base base =
+    List.exists
+      (function
+        | Capability_unless_values covering -> covering = base | covering -> covering = base)
+      available
+  in
   match capability with
   | Capability_unless { capability = base; unless } ->
-      List.mem base available
+      has_base base
       || List.exists
            (function
              | Capability_unless { capability = covering; unless = covering_unless } ->
                  covering = base && implies covering_unless unless
              | _ -> false)
            available
-  | _ -> List.mem capability available
+  | Capability_unless_values base -> has_base base
+  | _ -> has_base capability
 
 let subtract_capabilities ~implies (left : capability_set) (right : capability_set) =
   List.filter (fun capability -> not (is_covered ~implies right capability)) left
@@ -337,7 +354,7 @@ and substitute_capabilities substitution capabilities =
                 };
             ]
       | Built_in _ | Capability _ | Capability_variable _ | Capability_error _ | Capability_unless _
-        ->
+      | Capability_unless_values _ ->
           None)
     (map_conditions (substitute_condition substitution) capabilities)
 
@@ -480,6 +497,7 @@ let rec is_unsolved_capability = function
            (fun (bound : bound_condition) ->
              contains_unsolved bound.subject || is_unsolved_trait bound.bound)
            unless
+  | Capability_unless_values capability -> is_unsolved_capability capability
   | Built_in _ | Capability _ | Capability_parameter _ | Capability_error _ -> false
 
 let has_unsolved_capabilities capabilities = List.exists is_unsolved_capability capabilities
@@ -520,6 +538,8 @@ let rec show_capability = function
   | Capability_variable _ | Capability_error _ -> "_"
   | Capability_unless { capability; unless } ->
       show_capability capability ^ " unless " ^ show_condition unless
+  | Capability_unless_values capability ->
+      show_capability capability ^ " unless a condition on its arguments"
 
 and show_condition condition =
   String.concat " && "
@@ -759,7 +779,10 @@ let make_function_type (signature : signature) =
             Option.to_list signature.receiver
             @ List.map (fun parameter -> (parameter.mode, parameter.type_)) signature.parameters;
           output;
-          uses = signature.uses;
+          uses =
+            replace_capabilities
+              (function Capability_unless_values capability -> Some [ capability ] | _ -> None)
+              signature.uses;
           costs = signature.costs;
         }
 

@@ -3,6 +3,7 @@ type source = { key : Resolve.Names.key option; name : string }
 type clauses = {
   callee : source;
   parameters : Mir.parameter list;
+  panics_unless : Mir.requirement list;
   requires : Mir.requirement list;
   ensures : Mir.formula list;
   decreases : Mir.formula list;
@@ -151,6 +152,7 @@ type context = {
   keeps_failures : bool;
   mutable panics : bool;
   mutable can_declare_panic : bool;
+  panic_condition : Obligation.message option;
   mutable obligation_condition : Types.condition;
   mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;

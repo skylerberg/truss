@@ -1,0 +1,4 @@
+fn spin(count: Int64)
+  uses RunForever unless count < 10
+{
+}

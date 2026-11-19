@@ -1,0 +1,11 @@
+fn first(values: List[Int64]) -> Int64
+  requires values.length() > 0
+{
+  values.first().expect("the list is not empty")
+}
+
+fn total(left: UInt8, right: UInt8) -> UInt8
+  requires left <= 100 && right <= 100
+{
+  left.checked_add(right).expect("the sum fits in a UInt8")
+}

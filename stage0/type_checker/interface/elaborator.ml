@@ -529,14 +529,38 @@ and elaborate_uses context clauses =
        clauses)
 
 and elaborate_capability_uses context uses =
+  let is_in_trait =
+    match context.self_type with
+    | Some (Types.Parameter parameter) -> Types.is_self_parameter parameter
+    | _ -> false
+  in
   List.concat_map
     (fun (use : Syntax.capability_use) ->
       let capabilities = elaborate_capability context use.capability in
-      match use.unless with
-      | None -> capabilities
-      | Some unless ->
+      match (use.unless, use.unless_values) with
+      | None, [] -> capabilities
+      | Some unless, [] ->
           let unless = elaborate_condition context unless in
-          List.filter_map (fun capability -> Types.make_unless capability unless) capabilities)
+          List.filter_map (fun capability -> Types.make_unless capability unless) capabilities
+      | unless, (first :: _ : Syntax.expression list) ->
+          let report message =
+            ignore
+              (record_diagnostic context.diagnostics Misplaced_value_condition
+                 context.spans.(first.id) message);
+            capabilities
+          in
+          if is_in_trait then
+            report
+              "A trait's method takes no condition on its arguments: each `impl` would have to \
+               prove that the trait's condition implies its own."
+          else if Option.is_some unless then
+            report "A condition on the arguments cannot be joined with a bound with `&&`."
+          else if capabilities <> [ Built_in Panic ] then
+            report
+              (Printf.sprintf
+                 "A condition on the arguments applies only to `Panic`, and `%s` is not `Panic`."
+                 (String.concat ", " (List.map Types.show_capability capabilities)))
+          else [ Types.Capability_unless_values (Built_in Panic) ])
     uses
 
 and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Stdlib.result =

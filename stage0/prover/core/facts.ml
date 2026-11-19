@@ -391,19 +391,20 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
     template_clause;
   }
 
-let is_failing_operation : Diagnostic.Code.prover -> bool = function
-  | Overflow | Division | Shift -> true
+let is_panic_obligation : Diagnostic.Code.prover -> bool = function
+  | Overflow | Division | Shift | Panic -> true
   | _ -> false
 
 let oblige ?template_clause ?cited ?(fixes = []) ?holds_when (context : State.context)
     (frame : State.frame) code location message goal =
   let holds_when = Option.value holds_when ~default:context.obligation_condition in
   if
-    (is_failing_operation code && context.panics)
+    (is_panic_obligation code && context.panics)
+    || (Option.is_some context.panic_condition && not (is_panic_obligation code))
     || not
          (holds_when = context.condition
          || (code = Diagnostic.Code.Termination && context.keeps_termination)
-         || (is_failing_operation code && context.keeps_failures))
+         || (is_panic_obligation code && context.keeps_failures))
   then assume context frame goal
   else
     match
@@ -423,7 +424,7 @@ let oblige ?template_clause ?cited ?(fixes = []) ?holds_when (context : State.co
           | fixes -> fixes
         in
         let fixes =
-          if is_failing_operation code && context.can_declare_panic && is_home_body then
+          if is_panic_obligation code && context.can_declare_panic && is_home_body then
             fixes @ make_panic_fix context
           else fixes
         in

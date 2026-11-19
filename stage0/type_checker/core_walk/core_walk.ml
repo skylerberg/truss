@@ -210,6 +210,7 @@ let walk_parameter visit (parameter : Core.parameter) =
 let walk_definition_children visit : Core.definition -> unit = function
   | Core.Function { parameters; contract; body } ->
       List.iter (walk_parameter visit) parameters;
+      List.iter visit.expression contract.panics_unless;
       List.iter
         (fun (requirement : Core.condition Core.conditional) ->
           visit.expression requirement.clause.value)
@@ -311,7 +312,8 @@ let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Ty
         List.iter mark_used (Types.list_capabilities (read_solved variable))
     | Capability_error _ ->
         Compiler_bug.raise_bug ~stage:"Core_walk" "a core form uses a capability with an error"
-    | Capability_unless { capability; _ } -> mark_used capability
+    | Capability_unless { capability; _ } | Capability_unless_values capability ->
+        mark_used capability
   in
   walk_block
     (make_deep_visitor

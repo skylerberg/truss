@@ -2479,10 +2479,13 @@ $ echo $?
 101
 ```
 
-- **`expect(message)` and `unwrap()`** take the value out of an `Option` or
-  a `Result`, and stop the program when there is none. `third` writes
+- **`expect(message)`** takes the value out of an `Option` or a `Result`,
+  and stops the program when there is none. `third` writes
   `items.get(2).expect(...)` where `items[2]` would need a proof that the
   list is long enough.
+- **`expect` declares `uses Panic unless self is Some(_)`.** A function that
+  proves the value present calls `expect` without `uses Panic`. One that
+  cannot declares `uses Panic`, as `third` does.
 - **`Panic.crash(message)`** stops the program on purpose. The panic's
   message goes to standard error with where it happened and the chain of
   calls that led there, and the program exits with status 101.

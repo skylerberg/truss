@@ -171,6 +171,22 @@ let () =
       Codegen_support.expect_string ~expected:"3 4 8 -5 1\n" output)
 
 let () =
+  Codegen_support.test
+    "a release build runs a callee with a condition on values from code with and without `Panic`"
+    (fun () ->
+      let program =
+        Codegen_support.build_main ~profile:Release
+          Fixtures.Program.conditions_on_values_at_run_time
+      in
+      let status, output, _ = Process.run program [ "none" ] in
+      Codegen_support.expect_int ~expected:0 status;
+      Codegen_support.expect_string ~expected:"5000 7\n" output;
+      let status, _, errors = Process.run program [ "overflow" ] in
+      Codegen_support.expect_int ~expected:101 status;
+      if not (String.includes ~affix:"panic: arithmetic overflow" errors) then
+        Codegen_support.fail "stopped with %S" errors)
+
+let () =
   Codegen_support.test "a program prints through the real console and exits with its code"
     (fun () ->
       let status, output, _ =

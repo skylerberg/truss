@@ -376,6 +376,27 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       precondition_clauses.requires
   in
   let required = Logic.conjunction required in
+  if not context.panics then begin
+    let clauses = contract.callee_clauses in
+    let entry = read_entry_frame clauses in
+    List.iter
+      (fun (requirement : Mir.requirement) ->
+        let _, term = Validity.read_specification context entry requirement.clause in
+        let fixes =
+          list_required_fixes context frame clauses requirement term values
+            ~type_names:(list_type_names (substitution_of clauses))
+        in
+        Facts.oblige context frame Panic location ~fixes
+          [
+            Text "`";
+            Facts.quote clauses.callee requirement.clause.origin;
+            Text
+              (Printf.sprintf "` may not hold for this call to `%s`, so the call may panic."
+                 (Facts.show_callee path));
+          ]
+          term)
+      clauses.panics_unless
+  end;
   let compute_required (clauses : State.clauses) =
     if clauses == precondition_clauses then required
     else
@@ -924,6 +945,16 @@ type modelled =
 let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site)
     (invocation : Invocation.t) ~through (values : State.passed list) =
   let location = Facts.locate context frame.source site.origin in
+  (match context.panic_condition with
+  | Some condition
+    when (not context.panics)
+         && Conditions.may_panic_for_every_value context.lookups ~current:context.current
+              ~condition:context.condition invocation.uses ->
+      Facts.oblige context frame Panic location
+        ((Obligation.Text "This call may panic where `" :: condition)
+        @ [ Text "` holds, which the function's `uses Panic unless` rules out." ])
+        (Logic.Boolean false)
+  | Some _ | None -> ());
   List.iter
     (fun (passed : State.passed) ->
       match passed.shape with

@@ -177,6 +177,7 @@ module Code = struct
     | Restated_method_body
     | Restated_method_clause
     | Decided_condition
+    | Misplaced_value_condition
     | Trait_cycle
     | Recursion_limit
     | Missing_member
@@ -235,6 +236,7 @@ module Code = struct
     | Ensures
     | Invariant
     | Termination
+    | Panic
     | Assertion
     | Law
     | Cost
@@ -449,6 +451,7 @@ module Code = struct
     | Restated_method_body -> "restated_method_body"
     | Restated_method_clause -> "restated_method_clause"
     | Decided_condition -> "decided_condition"
+    | Misplaced_value_condition -> "misplaced_value_condition"
     | Trait_cycle -> "trait_cycle"
     | Recursion_limit -> "recursion_limit"
     | Missing_member -> "missing_member"
@@ -529,6 +532,7 @@ module Code = struct
     | Ensures -> "ensures"
     | Invariant -> "invariant"
     | Termination -> "termination"
+    | Panic -> "panic"
     | Assertion -> "assertion"
     | Law -> "law"
     | Cost -> "cost"

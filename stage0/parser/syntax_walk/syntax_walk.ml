@@ -31,7 +31,8 @@ and visit_condition on_expression (condition : Syntax.condition) =
 
 and visit_capability_use on_expression (use : Syntax.capability_use) =
   visit_capability_reference on_expression use.capability;
-  Option.iter (visit_condition on_expression) use.unless
+  Option.iter (visit_condition on_expression) use.unless;
+  List.iter on_expression use.unless_values
 
 and visit_clause on_expression (clause : Syntax.clause) =
   Option.iter (visit_condition on_expression) clause.condition;
@@ -334,7 +335,8 @@ let walk_names ~on_name (definition : Syntax.definition) =
       condition
   and walk_capability_use (use : Syntax.capability_use) =
     walk_capability use.capability;
-    Option.iter walk_condition use.unless
+    Option.iter walk_condition use.unless;
+    List.iter walk_expression use.unless_values
   and walk_loop_clause (clause : Syntax.loop_clause) =
     Option.iter walk_condition clause.condition;
     visit_loop_clause walk_expression { clause with condition = None }

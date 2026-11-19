@@ -968,6 +968,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                     parameters;
                     contract =
                       {
+                        panics_unless = [];
                         requires = [];
                         ensures =
                           List.map
