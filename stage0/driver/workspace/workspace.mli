@@ -60,4 +60,5 @@ module For_testing : sig
 
   val remove_ended_servers : unit -> unit
   val interrupt_commit : string -> unit
+  val compiler_digest : string
 end

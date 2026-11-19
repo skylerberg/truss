@@ -130,7 +130,7 @@ let select_optimization : profile -> C_compiler.optimization = function
   | Release -> O2_lto
 
 let show_profile = function Development -> "development" | Release -> "release"
-let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-17 result key"
+let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-18 result key"
 
 let make_result_key backend root =
   derive_result_key
@@ -346,10 +346,10 @@ let find_stored results key =
         microseconds;
         cached = true;
       })
-    (Option.bind (results.find key) int_of_string_opt)
+    (Option.bind (Option.bind (results.find key) Cbor.decode) Cbor.find_int)
 
 let store results key (record : Test_report.record) =
-  results.add key (string_of_int record.microseconds)
+  results.add key (Cbor.encode (Cbor.int record.microseconds))
 
 type progress =
   | Lowering
@@ -429,13 +429,14 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
           | _ -> ());
           report_progress (Ended { test = index; record }))
     in
-    let _, report, errors =
+    let status, _, errors =
       Fun.protect
         ~finally:(fun () -> try Sys.remove output with Sys_error _ -> ())
         (fun () -> Process.run ~input:"" ~on_output:(Test_report.feed reader) output [])
     in
     if Array.exists Option.is_none fresh then
-      raise_cannot_build "The test program ended before reporting every test:\n%s%s" report errors
+      raise_cannot_build "The test program ended with status %d before reporting every test:\n%s"
+        status errors
   end;
   let fresh = ref (List.filter_map Fun.id (Array.to_list fresh)) in
   List.map

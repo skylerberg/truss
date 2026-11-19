@@ -8,6 +8,7 @@
   compiler_bug_tests
   process_tests
   lock_file_tests
+  file_system_tests
   cache_tests
   resolve_tests
   standard_library_tests

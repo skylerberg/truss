@@ -69,6 +69,75 @@ let () =
       | _ -> Harness.fail "encoded"
       | exception Invalid_argument _ -> ())
 
+let decode_hex hex =
+  String.init
+    (String.length hex / 2)
+    (fun index -> Char.chr (int_of_string ("0x" ^ String.sub hex (2 * index) 2)))
+
+let expect_rejected name hex =
+  Harness.test name (fun () ->
+      if Cbor.decode (decode_hex hex) <> None then Harness.fail "decoded %s" hex)
+
+let () =
+  Harness.test "decoding an encoding gives back its value" (fun () ->
+      List.iter
+        (fun value ->
+          match Cbor.decode (Cbor.encode value) with
+          | Some decoded when decoded = value -> ()
+          | Some _ -> Harness.fail "%s decoded to another value" (encode_hex (Cbor.encode value))
+          | None -> Harness.fail "%s did not decode" (encode_hex (Cbor.encode value)))
+        [
+          Cbor.int 0;
+          Cbor.int 23;
+          Cbor.int 24;
+          Cbor.int 1000;
+          Cbor.int 1000000;
+          Cbor.Integer (Z.of_string "18446744073709551615");
+          Cbor.Integer (Z.of_string "18446744073709551616");
+          Cbor.int (-1);
+          Cbor.Integer (Z.of_string "-18446744073709551616");
+          Cbor.Integer (Z.of_string "-18446744073709551617");
+          Cbor.Float 1.5;
+          Cbor.Float (Float.ldexp 1023.0 (-24));
+          Cbor.Float 65520.0;
+          Cbor.Float (Float.ldexp 1.0 (-149));
+          Cbor.Float 1.1;
+          Cbor.Float Float.neg_infinity;
+          Cbor.Bool true;
+          Cbor.Null;
+          Cbor.Text "IETF";
+          Cbor.Bytes "\x00\xff";
+          Cbor.Array [ Cbor.int 1; Cbor.Array [ Cbor.int 2; Cbor.Text "" ] ];
+          Cbor.Map [ (Cbor.int 10, Cbor.int 1); (Cbor.Text "a", Cbor.Null) ];
+          Cbor.Tag (1, Cbor.int 1363896240);
+        ]);
+  Harness.test "-0.0 keeps its sign through decoding" (fun () ->
+      match Cbor.decode (decode_hex "f98000") with
+      | Some (Cbor.Float value) when value = 0.0 && Float.sign_bit value -> ()
+      | _ -> Harness.fail "not -0.0");
+  Harness.test "a NaN decodes to a NaN" (fun () ->
+      match Cbor.decode (decode_hex "f97e00") with
+      | Some (Cbor.Float value) when Float.is_nan value -> ()
+      | _ -> Harness.fail "not a NaN");
+  expect_rejected "decoding rejects bytes after the item" "0000";
+  expect_rejected "decoding rejects an item cut short" "1903";
+  expect_rejected "decoding rejects an array with fewer items than its count" "830102";
+  expect_rejected "decoding rejects a length longer than the input" "5bffffffffffffffff00";
+  expect_rejected "decoding rejects an indefinite length" "9f01ff";
+  expect_rejected "decoding rejects a reserved argument width" "1c";
+  expect_rejected "decoding rejects a simple value with no constructor" "f7";
+  expect_rejected "decoding rejects empty input" "";
+  Harness.test "a list is found only when every item decodes" (fun () ->
+      let find_texts = Cbor.find_list (function Cbor.Text text -> Some text | _ -> None) in
+      if find_texts (Cbor.Array [ Cbor.Text "a"; Cbor.Text "b" ]) <> Some [ "a"; "b" ] then
+        Harness.fail "the texts were not found";
+      if find_texts (Cbor.Array [ Cbor.Text "a"; Cbor.int 1 ]) <> None then
+        Harness.fail "found a list with an item that does not decode");
+  Harness.test "an integer is found only when it fits an int" (fun () ->
+      if Cbor.find_int (Cbor.int (-5)) <> Some (-5) then Harness.fail "-5 was not found";
+      if Cbor.find_int (Cbor.Integer (Z.of_string "18446744073709551616")) <> None then
+        Harness.fail "found 2^64")
+
 let blake3_repository_context = "BLAKE3 2019-12-27 16:29:52 test vectors context"
 
 let blake3_repository_vectors =
