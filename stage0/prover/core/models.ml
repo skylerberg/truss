@@ -69,10 +69,9 @@ let rec index_sequence (context : State.context) element term index =
               Logic.forall
                 ( [ (each, Facts.declare_sort context sequence); (index, Logic.Int) ],
                   Logic.(
-                    Operation ("<=", [ int 0; position ])
-                    &&& Operation ("<", [ position; make_sequence_length context element ranked ])
-                    ==> (Operation ("<=", [ int 0; below ])
-                        &&& Operation ("<", [ below; rank context sequence ranked ]))) )
+                    less_equal (int 0) position
+                    &&& less position (make_sequence_length context element ranked)
+                    ==> (less_equal (int 0) below &&& less below (rank context sequence ranked))) )
             in
             Facts.add_fact context fact);
       Some (at term index)
@@ -145,12 +144,9 @@ let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) ~im
         let fact =
           Logic.forall
             ( [ (each, Facts.declare_sort context ty) ],
-              Logic.Operation
-                ( "<=",
-                  [
-                    rank context model (Logic.Apply (symbol, [ Logic.Symbol each ]));
-                    rank context ty (Logic.Symbol each);
-                  ] ) )
+              Logic.less_equal
+                (rank context model (Logic.Apply (symbol, [ Logic.Symbol each ])))
+                (rank context ty (Logic.Symbol each)) )
         in
         Facts.add_fact context fact)
 
@@ -267,9 +263,7 @@ let quantify_over (context : State.context) (frame : State.frame) (quantifier : 
   | Range_of_integers { low; high; inclusive; type_ } ->
       let inner = bind inner each type_ in
       let premise =
-        Logic.(
-          Operation ("<=", [ low; each ])
-          &&& Operation ((if inclusive then "<=" else "<"), [ each; high ]))
+        Logic.(less_equal low each &&& (if inclusive then less_equal else less) each high)
       in
       let count =
         if inclusive then Costs.plus (Costs.minus high low) (Logic.int 1) else Costs.minus high low

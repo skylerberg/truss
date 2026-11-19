@@ -322,7 +322,7 @@ let make_float_literal (exponent, significand) value =
   in
   let fraction = significand - 1 in
   Logic.Operation
-    ( "fp",
+    ( Fp,
       [
         Logic.Bits (1, Z.extract bits (exponent + fraction) 1);
         Logic.Bits (exponent, Z.extract bits fraction exponent);

@@ -33,4 +33,3 @@ val find_method_contract :
 val find_integer_literal : Mir.formula -> Z.t option
 val deduplicate_counters : 'a list -> 'a list
 val find_resource : Mir.cost -> locals:Logic.term Locals.t -> Costs.resource option
-val find_comparison_operator : Core.comparison -> string option

@@ -137,9 +137,11 @@ let rec has_application_of symbol (term : Logic.term) =
 
 let find_definition ~symbol result (term : Logic.term) =
   match term with
-  | Operation ("=", [ left; right ]) when left = result && not (has_application_of symbol right) ->
+  | Operation (Equal, [ left; right ]) when left = result && not (has_application_of symbol right)
+    ->
       Some right
-  | Operation ("=", [ left; right ]) when right = result && not (has_application_of symbol left) ->
+  | Operation (Equal, [ left; right ]) when right = result && not (has_application_of symbol left)
+    ->
       Some left
   | _ -> None
 
@@ -241,8 +243,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                `decreases` clause.";
           ]
           Logic.(
-            conjunction
-              (List.map (fun right_term -> Operation ("<=", [ int 0; right_term ])) before)
+            conjunction (List.map (fun right_term -> less_equal (int 0) right_term) before)
             &&& Amounts.compare_lexicographically before after)
     | ([], _ | _, []) when context.terminates ->
         Facts.oblige context frame Termination location
@@ -566,7 +567,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                 match (is_triggered, facts, readable_clauses) with
                 | ( true,
                     Logic.Boolean true,
-                    [ (_, required, [ (_, Logic.Operation ("=", [ left; right ])) ]) ] ) -> (
+                    [ (_, required, [ (_, Logic.Operation (Equal, [ left; right ])) ]) ] ) -> (
                     let defined_by body =
                       if
                         Logic.mentions [ symbol ] body
@@ -786,7 +787,7 @@ let make_callback_cost (context : State.context) frame (metric : Metric.t) (ty :
       Facts.declare context (Logic.Function (symbol, [ sort ], Logic.Int));
       let cost = Logic.Apply (symbol, [ term ]) in
       let least = Costs.least_amount (Metric metric) in
-      Facts.add_frame_fact context frame (Logic.Operation ("<=", [ least; cost ]));
+      Facts.add_frame_fact context frame (Logic.less_equal least cost);
       let state_value value =
         Facts.add_frame_fact context frame (Logic.equal cost (Costs.larger least value))
       in
