@@ -21,7 +21,7 @@
   mir
   ownership
   package_checks
-  backend
+  lowering
   lowered
   ground
   libc

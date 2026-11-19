@@ -94,6 +94,7 @@
   diagnostic
   source
   backend
+  lowering
   database
   strongly_connected
   prover
