@@ -159,9 +159,8 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
             if State.unify state start_type stop_type then start_type
             else if env.specification && is_integer start_type && is_integer stop_type then begin
               List.iter
-                (fun ((bound : Syntax.expression), actual) ->
-                  State.convert state env ~expression:bound.id (State.read_span state bound.id)
-                    ~actual ~expected:Types.Integer)
+                (fun (bound, actual) ->
+                  Conversions.coerce state env bound ~actual ~expected:Types.Integer)
                 [ (start, start_type); (stop, stop_type) ];
               Types.Integer
             end
