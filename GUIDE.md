@@ -6,9 +6,9 @@ Truss is a programming language in which the compiler proves that a program
 does what its signatures say. When `truss check` accepts a program, no
 integer in it overflows, no index is out of bounds, no value is used after
 it is freed, no two parallel branches race on one value, and every function
-meets the contract it states. The compiler also knows every effect a function can
-have, such as reading a file or printing, because each effect is a
-*capability* that the function declares.
+meets the contract it states and terminates. The compiler also knows every
+effect a function can have, such as reading a file, printing, or running
+forever, because each effect is a *capability* that the function declares.
 
 This guide teaches the language from the beginning. It assumes that you
 have programmed before, in any language, but not that you know Truss or
@@ -38,8 +38,9 @@ Four decisions shape the language, and you will meet each of them early.
   deterministic.
 - **Every operation that can fail is a proof obligation.** Where the
   compiler cannot prove that an addition fits its type, the code does not
-  compile until you show why it fits, handle the case where it does not, or
-  declare that the program may stop.
+  compile until you show why it fits or handle the case where it does not.
+  Stopping the program is one way to handle it, which the code writes out
+  and declares with `uses Panic`.
 
 Truss has no comments. A comment can go stale without the compiler
 noticing, so what a comment would say lives in a form the compiler checks:
@@ -84,6 +85,7 @@ Appendices: [A. Keywords](#appendix-a-keywords),
 [C. The truss Command](#appendix-c-the-truss-command),
 [D. Common Diagnostics](#appendix-d-common-diagnostics), and
 [E. The Standard Library](#appendix-e-the-standard-library).
+
 ## 1. Getting Started
 
 ### Installation
@@ -96,7 +98,8 @@ runs Truss code. It needs two other programs on your `PATH`:
 | A C compiler, `clang` or `cc` | Building programs | `TRUSS_CC` |
 | Z3 5.3.3, as `z3` | Proving programs correct | `TRUSS_Z3` |
 
-Truss builds programs for Linux and macOS. Check that the toolchain runs:
+Truss builds programs for Linux and macOS. [README.md](README.md) says how
+to build `truss` from this repository. Check that the toolchain runs:
 
 ```text
 $ truss --version
@@ -174,8 +177,10 @@ $ ./hello
 Hello, world!
 ```
 
-`truss check` prints nothing when the code has no errors. It is the command
-that matters most: **code is finished when `truss check` reports nothing.**
+`truss check` prints nothing when the code has no errors or warnings. It is
+the command that matters most: **code is finished when `truss check` reports
+no errors.** A warning, such as for a private function nothing uses, points
+at code to clean up, but it does not stop a build.
 `truss run` and `truss test` build the program without waiting for the
 prover, so a program can run while one of its proofs still fails. `truss
 build` waits for every proof.
@@ -203,6 +208,7 @@ A diagnostic gives the file, line, and column; a code, such as
 that says how to fix it. Many diagnostics also carry a `fix:`, an edit that
 makes the code compile. `truss check --fix` applies every fix that is its
 diagnostic's only fix, then reports what is left.
+
 ## 2. Programming a Guessing Game
 
 This chapter builds a small program to show how a Truss program comes
@@ -300,7 +306,7 @@ main.truss:6:16: error[capabilities.not_available]: This call uses `Random`, whi
 
 ```text
 $ truss show standard::random::below
-standard/random/random.truss:259
+standard/random/random.truss:258
 public fn below(bound: UInt64) -> UInt64
   uses Random
   requires bound > 0
@@ -380,13 +386,28 @@ Too big!
 ### Guessing until right
 
 A `while true` loop asks again until the guess is right. `break` leaves the
-loop, and `continue` starts the next guess when the text is not a number:
+loop, and `continue` starts the next guess when the text is not a number.
+Written with only `uses Console, Random`, the loop does not compile:
+
+```text
+main.truss:8:3: error[capabilities.not_available]: This loop has no measure, so it uses `RunForever`, which is not available here. Declare it with `uses RunForever`, or give the loop a `decreases` clause.
+  |   while true {
+  |   ^^^^^^^^^^^^
+1 error
+```
+
+Nothing guarantees that the player ever guesses right, so this loop may run
+forever. **In Truss, every function terminates unless it says otherwise**, and
+running forever is a capability like printing: a function that may do it
+declares `uses RunForever`. A loop that the compiler can see ends, such as a
+`for` loop over a range, needs nothing. [Chapter 13](#termination) covers
+termination.
 
 ```truss
 use standard::random
 
 fn main(arguments: List[String]) -> ExitCode
-  uses Console, Random
+  uses Console, Random, RunForever
 {
   Console.print_line("Guess the number!")
   let secret = random::below(100) + 1
@@ -441,7 +462,7 @@ test "the secret itself wins" {
 }
 
 fn main(arguments: List[String]) -> ExitCode
-  uses Console, Random
+  uses Console, Random, RunForever
 {
   Console.print_line("Guess the number!")
   let secret = random::below(100) + 1
@@ -468,14 +489,16 @@ $ truss test
 2 passed in 0.2s (check 0.0s, build 0.1s, tests 0.0s)
 ```
 
-`verdict` has no `uses` clause, so it is pure: it cannot print, read, or
-pick a random number, and its tests give the same answer every run. Notice
+`verdict` has no `uses` clause, so it is pure: it cannot print, read, pick
+a random number, or run forever, and its tests give the same answer every
+run. Notice
 the call `verdict(10, secret: 50)`. Every argument after the first names its
 parameter, unless it is a variable with the parameter's name, as in
 `verdict(guess, secret)`.
 
 You have now used variables, functions, `match`, loops, options, results,
-capabilities, and tests. The next chapter covers the basics in detail.
+capabilities, termination, and tests. The next chapter covers the basics in detail.
+
 ## 3. Common Programming Concepts
 
 This chapter covers what most languages have: variables, types, functions,
@@ -583,22 +606,28 @@ main.truss:2:3: error[types.mismatched_integers]: Integer types never convert im
   |   small + large
   |   ^^^^^^^^^^^^^
   fix: Convert the left side to `UInt64`.
-    replace "small" with "UInt64.from(small)" at main.truss:2:3
+    replace "small" with "UInt64.from_integer(small)" at main.truss:2:3
 1 error
 ```
 
-`From` converts where every value fits, and `TryFrom` where some may not, so
-it returns a `Result`:
+A conversion between built-in number types is a method of the target type.
+`from_integer` converts a value that the prover can show fits, which a value
+of a narrower type always does, and `try_from_integer` returns a `Result` for
+a value that may not:
 
 ```truss
 test "conversions" {
   let small: UInt8 = 200
-  let wide = UInt64.from(small)
+  let wide = UInt64.from_integer(small)
   assert wide == 200
-  assert UInt8.try_from(wide).is_ok()
-  assert UInt8.try_from(wide * 2).is_err()
+  assert UInt8.try_from_integer(wide).is_ok()
+  assert UInt8.try_from_integer(wide * 2).is_err()
+  assert wide.to_float64() == 200.0
 }
 ```
+
+`to_float64` and `to_float32` turn an integer into a float, and
+`Int64.try_from_float64` turns a float back into an integer when it fits.
 
 #### Integer overflow
 
@@ -613,7 +642,7 @@ fn add(left: UInt8, right: UInt8) -> UInt8 {
 ```
 
 ```text
-main.truss:2:3: error[prover.overflow]: `left + right` may overflow `UInt8`. For example, when `left` is 255, `right` is 1. It can also be checked first with an `if`, done with the checked operation, or allowed to stop the program with `uses Panic`.
+main.truss:2:3: error[prover.overflow]: `left + right` may overflow `UInt8`. For example, when `left` is 255, `right` is 1. It can also be checked first with an `if`, or done with the checked operation.
   |   left + right
   |   ^^^^^^^^^^^^
   fix: Add `requires left + right <= UInt8.maximum`
@@ -650,10 +679,10 @@ fn add_wrapping(left: UInt8, right: UInt8) -> UInt8 {
 fn add_or_stop(left: UInt8, right: UInt8) -> UInt8
   uses Panic
 {
-  left + right
+  left.checked_add(right).expect("the sum of two small numbers fits in a UInt8")
 }
 
-test "the ways an addition can fit" {
+test "the ways an addition can fit" uses Panic {
   assert add_small(100, right: 100) == 200
   assert add_or_stay(200, right: 100) == 200
   assert add_saturating(200, right: 100) == 255
@@ -670,11 +699,13 @@ test "the ways an addition can fit" {
 | `add_saturating` | The result stops at the type's maximum |
 | `add_checked` | The result is `None` when the sum does not fit |
 | `add_wrapping` | The result wraps around, as hardware arithmetic does |
-| `add_or_stop` | The program stops with "arithmetic overflow" when the sum does not fit |
+| `add_or_stop` | The program stops, with the message given to `expect`, when the sum does not fit |
 
-`uses Panic` declares that a function may stop the program. Inside such a
-function, an operation the compiler cannot prove safe is checked when it
-runs instead. [Chapter 8](#8-error-handling) covers failure in detail.
+`uses Panic` declares that a function may stop the program, and the test
+that calls `add_or_stop` declares it too. It changes nothing about what is
+proven: the addition is still checked, by `checked_add`, and `expect` stops
+the program when the check fails. [Chapter 8](#8-error-handling) covers
+failure in detail.
 
 Division by zero, an index out of bounds, and a shift by too many bits are
 proof obligations in the same way.
@@ -906,6 +937,7 @@ test "match on a number" {
 
 A `match` covers every possible value, and `_` matches anything. [Chapter
 5](#pattern-matching) covers patterns fully.
+
 ## 4. Ownership
 
 Ownership is how Truss manages memory and keeps code from changing a value
@@ -992,12 +1024,12 @@ Leaving out `own` is an error too, because a move or a copy is always
 written where it happens:
 
 ```text
-main.truss:2:18: error[types.missing_mode]: `item` takes ownership of its argument. Move the place with `own`, or pass a copy.
+main.truss:2:18: error[ownership.needs_owned]: An owned value is needed here, and `name` is a place. Pass it `own` to move it, or copy it.
   |   mut names.push(name)
   |                  ^^^^
   fix: Move it with `own`.
     insert "own " at main.truss:2:18
-  fix: Pass a copy.
+  fix: Copy it.
     insert ".copy()" at main.truss:2:22
 1 error
 ```
@@ -1067,8 +1099,8 @@ fn tail(items: Slice[Int64]) -> Slice[Int64]
 test "a slice views part of a list" {
   let items = [1, 2, 3, 4]
   let middle = items[1..3]
-  assert middle.to_list() == [2, 3]
-  assert tail(items).to_list() == [2, 3, 4]
+  assert middle == [2, 3]
+  assert tail(items) == [2, 3, 4]
 }
 ```
 
@@ -1092,7 +1124,7 @@ fn grow(items: mut List[Int64]) -> UInt64 {
 ```
 
 ```text
-main.truss:3:7: error[ownership.mutated_while_viewed]: `items` cannot be borrowed `mut` while `middle`, which views it, is still live.
+main.truss:3:7: error[ownership.mutated_while_viewed]: `items` cannot be passed `mut` while `middle`, which views it, is still live.
   |   mut items.push(9)
   |       ^^^^^
 1 error
@@ -1127,12 +1159,15 @@ public fn Slice[Element].get(self, index: UInt64) lends Option[Element]
 ```
 
 The lent part is the caller's to use **for the rest of the statement**, not
-to keep. Binding it to a name is an error:
+to keep. Binding it to a name is an error, whose fix copies the part:
 
 ```text
 main.truss:2:7: error[ownership.lent_part_escapes]: This part is lent only until the statement ends, so it cannot be bound to a name. Use it in this statement, or copy it.
   |   let first = names.get(0)
   |       ^^^^^
+  fix: Copy the scrutinee.
+    insert ".copy()" at main.truss:2:27
+1 error
 ```
 
 Use the part within the statement, or copy it:
@@ -1201,6 +1236,7 @@ be used, because `middle` views it.
 | A dangling pointer into a grown list | A list cannot change while a view of it is live |
 | A data race | Parallel branches cannot share a value that one of them mutates ([Chapter 14](#14-parallelism-and-concurrency)) |
 | A hidden expensive copy | A non-`Plain` value copies only where `copy()` is written |
+
 ## 5. Records and Sum Types
 
 Truss has two ways to define a type. A *record* has named fields, like a
@@ -1466,9 +1502,35 @@ test "patterns" {
 | `pattern if condition` | The pattern, when the guard is also true |
 
 `match left, right` matches two values at once, one pattern for each in
-every arm. A bare name always binds, which is why a constant in a pattern is
-written with its module or type: adding a constant to a module never changes
-what a pattern means.
+every arm.
+
+**A bare name in a pattern always binds a variable.** A constant in a
+pattern is written with its module or its type, so adding a constant to a
+module never changes what a pattern means. Writing a constant of the root
+module bare, in a package named `lottery`, binds a new variable instead, and
+the compiler says how to match the constant:
+
+```text
+main.truss:1:5: warning[usage.unused_constant]: Nothing in `lottery` uses the private constant `lottery::lucky`. Delete it.
+  | let lucky: Int64 = 7
+  |     ^^^^^
+main.truss:5:5: error[usage.unused_variable]: `lucky` is never used. A bare name in a pattern binds a variable, which matches every value. To match the constant, write `lottery::lucky`.
+  |     lucky => "lucky"
+  |     ^^^^^
+  fix: Write `lottery::lucky`.
+    replace "lucky" with "lottery::lucky" at main.truss:5:5
+  fix: Write `_`.
+    replace "lucky" with "_" at main.truss:5:5
+main.truss:6:5: error[patterns.unreachable_arm]: Earlier arms already match everything this arm matches, so it is never reached. `lucky` in an earlier arm binds a variable, which matches every value. To match the constant, write `lottery::lucky`.
+  |     _ => "plain"
+  |     ^^^^^^^^^^^^
+  fix: Write `lottery::lucky`.
+    replace "lucky" with "lottery::lucky" at main.truss:5:5
+2 errors and 1 warning
+```
+
+A constant of a type, such as `Config.quiet`, is written with its type, as
+in `Config.quiet => ...`.
 
 The compiler checks two things about every `match`. It covers every case,
 and every arm can be reached:
@@ -1498,6 +1560,8 @@ binds can be used where the test is known to be true: later in an `&&`
 chain, and in the block of the `if` or `while`:
 
 ```truss
+use standard::console
+
 fn first_long_word(words: Slice[String]) -> Option[UInt64] {
   if words.get(0) is Some(word) && word.length() > 3 {
     return Some(word.length())
@@ -1505,20 +1569,28 @@ fn first_long_word(words: Slice[String]) -> Option[UInt64] {
   None
 }
 
-fn drain(queue: own List[Int64]) -> UInt64 {
-  var items = own queue
+fn count_lines() -> UInt64
+  uses Console, RunForever
+{
   var count: UInt64 = 0
-  while mut items.pop() is Some(_) {
+  while Console.read_line() is Some(_) {
     count = count.saturating_add(1)
   }
   count
 }
 
-test "is" {
+test "is" uses RunForever {
   assert first_long_word(["truss", "go"]) == Some(5)
-  assert drain([1, 2, 3]) == 3
+  var screen = console::CapturedConsole.new(input: ["first", "second"])
+  let count = provide mut screen {
+    count_lines()
+  }
+  assert count == 2
 }
 ```
+
+`count_lines` reads until the input ends, which nothing guarantees will
+happen, so it declares `uses RunForever`, and so does its test.
 
 #### let else
 
@@ -1544,6 +1616,7 @@ test "let else" {
 A pattern in a plain `let`, a `var`, a `for`, or a lambda's parameters
 matches every value of its type, as `let (x, y) = point` did. For a pattern
 that can fail, use `match`, `is`, or `let ... else`.
+
 ## 6. Packages and Modules
 
 As a program grows, you split it into modules, and modules into packages:
@@ -1647,8 +1720,14 @@ a private definition from elsewhere is an error:
 app/main.truss:8:54: error[resolve.not_visible]: `geometry::origin` is private to its module, so it cannot be used here.
   |   Console.print_line("${measure::manhattan(geometry::origin(), to: corner)}")
   |                                                      ^^^^^^
-1 error
+geometry/point.truss:4:4: warning[usage.unused_function]: Nothing in `geometry` uses the private function `geometry::origin`. Delete it.
+  | fn origin() -> Point {
+  |    ^^^^^^
+1 error and 1 warning
 ```
+
+The warning comes with it: a private definition that nothing in its package
+uses is dead code.
 
 An *opaque* type hides its representation outside its package, so the
 package can change the representation without breaking anyone. Other
@@ -1767,14 +1846,16 @@ Packages from the registry are named with their owner, as in
 `acme::geometry`. `truss add acme::geometry` adds one to the manifest, with
 no capabilities granted, and records its version in the project's lock
 file, `truss.lock`. `truss upgrade` moves to newer versions, and `truss
-publish` publishes a package that is finished: no errors, every proof done,
-no `todo`, and every test without `uses` passing.
+publish 1.4.2` publishes a package that is finished, as version 1.4.2: no
+errors, every proof done, no `todo`, and every deterministic test passing.
 
-Every release under one name is compatible with the ones before it, and the
-registry checks that from the signatures. An incompatible change is a new
-package, named with `_v2` after the old name, so both versions can be used
-in one build. [PACKAGES.md](PACKAGES.md) defines packages, versions, and the
+Every release under one name is compatible with the ones before it, which its
+author promises: a public definition stays at its path, a `requires` gets no
+stronger, an `ensures` no weaker, and a cost no greater. An incompatible
+change is a new package, named with `_v2` after the old name, so both
+versions can be used in one build. [PACKAGES.md](PACKAGES.md) defines packages, versions, and the
 registry in full.
+
 ## 7. Collections
 
 The prelude has four collections, `List`, `Map`, `Set`, and `String`, and
@@ -1833,7 +1914,7 @@ test "reading elements" {
   assert numbers.index_of(3) == Some(1)
   assert numbers.sorted() == [3, 8, 9]
   assert numbers.join(", ") == "9, 3, 8"
-  assert numbers[1..].to_list() == [3, 8]
+  assert numbers[1..] == [3, 8]
 }
 ```
 
@@ -1906,8 +1987,9 @@ always visits each position once.
 
 #### Transforming a list
 
-`filter` keeps the elements for which a function returns `true`. To compute
-a new value from each element, build the new list in a loop:
+A list, a slice, an array, a range, and a map are *iterable*: each
+implements the prelude trait `Iterable`, which gives them methods that
+transform every element at once:
 
 ```truss
 fn evens(numbers: Slice[Int64]) -> List[Int64] {
@@ -1915,21 +1997,41 @@ fn evens(numbers: Slice[Int64]) -> List[Int64] {
 }
 
 fn lengths(words: Slice[String]) -> List[UInt64] {
-  var result: List[UInt64] = List.with_capacity(words.length())
-  for word in words {
-    mut result.push(word.length())
-  }
-  result
+  words.map(fn(word) { word.length() })
+}
+
+fn parsed(texts: Slice[String]) -> List[Int64] {
+  texts.filter_map(fn(text) { Int64.parse(text).ok() })
+}
+
+fn total_length(words: Slice[String]) -> UInt64 {
+  words.fold[UInt64](0, combine: fn(total, word) { total.saturating_add(word.length()) })
 }
 
 test "transforming" {
   assert evens([1, 2, 3, 4]) == [2, 4]
   assert lengths(["a", "abc"]) == [1, 3]
+  assert parsed(["1", "x", "3"]) == [1, 3]
+  assert total_length(["ab", "cde"]) == 5
 }
 ```
 
-`fn(number) { number % 2 == 0 }` is a lambda, a function written in place.
-[Chapter 10](#10-lambdas-and-function-types) covers lambdas.
+| Method | Result |
+|---|---|
+| `map(transform)` | A list of the transformed elements, as long as the original |
+| `filter(keep)` | The elements for which `keep` returns `true` |
+| `filter_map(transform)` | The `Some` values that `transform` returns |
+| `flat_map(transform)` | The lists that `transform` returns, joined |
+| `fold(initial, combine)` | One value, combined from each element in turn |
+
+- `fn(number) { number % 2 == 0 }` is a lambda, a function written in place.
+  [Chapter 10](#10-lambdas-and-function-types) covers lambdas.
+- `fold[UInt64](0, ...)` gives the type argument because the literal `0`
+  alone would be an `Int64`.
+- **A lambda knows nothing about the element it is given** beyond its type.
+  In `numbers.map(fn(number) { number * 2 })`, the prover cannot show the
+  multiplication fits, so use `saturating_multiply`, or a loop with an
+  invariant ([Chapter 13](#loops)).
 
 ### Strings
 
@@ -1942,17 +2044,42 @@ Truss has two text types:
 
 A string literal is a `String`, or a `StringSlice` where one is expected. A
 function that only reads text takes a `StringSlice`, and a `String` passes
-to it as a view. Comparing the two needs one type on both sides:
+to it as a view. A `String` and a `StringSlice` compare with `==` directly,
+as a `List` and a `Slice` do. `viewed.to_string()` copies a `StringSlice`
+into a new `String`, and `owned.slice()` views a whole `String`.
 
-```text
-main.truss:2:12: error[types.mismatch]: Expected `String`, found `StringSlice`.
-  |   owned == viewed
-  |            ^^^^^^
-1 error
+**A string literal is a constant,** so reading it and binding it with `let`
+cost nothing: the `let` views the constant's text. Where an owned `String`
+is needed, as in a `var`, an `own` argument, or a returned value, the
+literal is copied:
+
+```truss
+fn keep(text: own String) -> String {
+  text
+}
+
+test "a literal is copied where a String is owned" {
+  let name = "Ada"
+  assert keep(name.copy()) == "Ada"
+  assert keep("Grace") == "Grace"
+  var greeting = "Hello"
+  mut greeting.push(", world")
+  assert keep(own greeting) == "Hello, world"
+}
 ```
 
-`owned.slice() == viewed` compares them, and `viewed.to_string()` copies a
-`StringSlice` into a new `String`.
+A `let` of a literal is a view, so it cannot be moved. With
+`keep(own name)` in place of `keep(name.copy())`:
+
+```text
+main.truss:7:19: error[ownership.not_owned]: `name` views a string literal, so it cannot be moved: its new owner would free the literal's static buffer. Copy it instead.
+  |   assert keep(own name) == "Ada"
+  |                   ^^^^
+  fix: Copy it.
+    delete "own " at main.truss:7:15
+    insert ".copy()" at main.truss:7:23
+1 error
+```
 
 #### Building text
 
@@ -2039,12 +2166,12 @@ which keys were first inserted, so a program that walks a map gives the same
 output every run.
 
 ```truss
-fn count_words(text: StringSlice) -> Map[String, UInt64]
-  uses Panic
-{
+fn count_words(text: StringSlice) -> Map[String, UInt64] {
   var counts: Map[String, UInt64] = [:]
   for word in text.split_whitespace() {
-    mut counts.get_or_insert(word.to_string(), default: 0) += 1
+    mut counts.update(word.to_string(), default: 0, change: fn(count) {
+      count = count.saturating_add(1)
+    })
   }
   counts
 }
@@ -2073,9 +2200,11 @@ test "maps" {
 - `ports["ssh"] = 22` inserts a key or replaces its value. `ports[key]`
   reads a value, and the compiler proves the key is present; `get` returns
   an `Option`.
-- `get_or_insert` lends the value for a key, inserting the default when the
-  key is missing, so `+= 1` updates it in place. `count_words` declares
-  `uses Panic` because a count could, in principle, overflow.
+- `update` changes the value for a key in place, inserting the default
+  first when the key is missing. Its lambda takes the value `mut`. Nothing
+  bounds how often a word repeats, so the count saturates rather than
+  overflowing. `get_or_insert` lends the value for a key `mut` instead, for
+  the rest of the statement.
 - A `for` loop over a map visits entries, records with the fields `key` and
   `value`, so `(key, value)` takes them apart.
 
@@ -2124,7 +2253,7 @@ Inserting an element twice keeps one.
 use standard::collections
 
 test "a deque" {
-  var queue: collections::Deque[String] = collections::Deque.new()
+  var queue: collections::Deque[String] = []
   mut queue.push_back("first")
   mut queue.push_back("second")
   mut queue.push_front("zeroth")
@@ -2132,6 +2261,7 @@ test "a deque" {
   assert queue.length() == 2
 }
 ```
+
 ## 8. Error Handling
 
 Truss has no exceptions. An operation that can fail in a way the caller
@@ -2152,10 +2282,10 @@ type SettingError =
   derives Equal
 
 impl Display for SettingError {
-  fn display(self, output: mut TextBuilder) {
+  fn display(self, output: mut String) {
     match self {
-      MissingEquals(line) => mut output.write("no `=` in `${line}`")
-      BadNumber(name, text) => mut output.write("`${name}` is not a number: `${text}`")
+      MissingEquals(line) => mut output.push("no `=` in `${line}`")
+      BadNumber(name, text) => mut output.push("`${name}` is not a number: `${text}`")
     }
   }
 }
@@ -2265,19 +2395,23 @@ combine results without a `match`:
 Some operations fail not because the input was bad but because the program
 has a bug: an integer overflows, a divisor is zero, an index is out of
 bounds, a slice runs past the end of its list, or a shift amount is at least
-the width of its type. In Truss, **each of these is a proof obligation.**
-The compiler proves the operation is safe, or the code is an error.
+the width of its type. In Truss, **each of these is a proof obligation, in
+every function and every test.** The compiler proves the operation is safe,
+or the code is an error.
 
 You saw the overflow in [Chapter 3](#integer-overflow). Wherever the
-compiler cannot prove such an operation safe, one of these makes the code
-compile:
+compiler cannot prove such an operation safe, one of three changes makes the
+code compile:
 
 | Approach | Example |
 |---|---|
 | Establish the fact locally, with an `if` | `if index < items.length() { items[index] } else { 0 }` |
 | Require it of every caller, with `requires` | `requires divisor != 0` |
 | Call a method that returns an `Option` or a `Result` | `items.get(index)`, `total.checked_add(item)` |
-| Declare that the program may stop, with `uses Panic` | `uses Panic` on the function |
+
+The third approach hands the failure back as a value, and the code decides
+what to do with it, including stopping the program, as the next section
+shows.
 
 `unreachable` marks code that should never run. It is a proof obligation
 too, and only the first approach meets it: you must show the point cannot be
@@ -2297,11 +2431,15 @@ signature declares `uses Panic`.** A caller can see from a signature that a
 call may end the program, and a server that must keep running can require
 handlers whose types have no `Panic`.
 
+`uses Panic` permits a crash, and nothing else: it does not excuse an
+operation from its proof. Code that should stop when an operation fails
+writes the stop, with the checked form of the operation:
+
 ```truss
 fn third(items: Slice[Int64]) -> Int64
   uses Panic
 {
-  items[2]
+  items.get(2).expect("the list holds at least three items")
 }
 
 fn parse_known_port(text: StringSlice) -> UInt16
@@ -2331,34 +2469,26 @@ fn main(arguments: List[String]) -> ExitCode
 ```text
 $ truss run
 8080 3
-panic: index out of bounds
-  at main.truss:4:3
+panic: the list holds at least three items
+  at standard/option/option.truss:239:13
+  called at main.truss:4:3
+  called at main.truss:26:25
 $ echo $?
 101
 ```
 
-- **In a function that declares `uses Panic`, an operation that is not
-  proven safe is checked when it runs,** in every build, and stops the
-  program when it fails. `third` compiles even though its caller might pass
-  a short list, and the program stops at the index.
 - **`expect(message)` and `unwrap()`** take the value out of an `Option` or
-  a `Result`, and stop the program when there is none.
-- **`Panic.crash(message)`** stops the program on purpose. Its message and
-  location go to standard error, and the program exits with a nonzero
-  status.
+  a `Result`, and stop the program when there is none. `third` writes
+  `items.get(2).expect(...)` where `items[2]` would need a proof that the
+  list is long enough.
+- **`Panic.crash(message)`** stops the program on purpose. The panic's
+  message goes to standard error with where it happened and the chain of
+  calls that led there, and the program exits with status 101.
 - **A panic cannot be caught.** Code that caught one could go on with a
   value whose invariant was broken partway through an update. A program that
   must not stop proves that it cannot panic instead.
-- **A lambda proves its operations,** even inside a function that declares
-  `uses Panic`: a lambda's capabilities come from its body, not a signature.
-  The compiler's hint says so by leaving `uses Panic` out:
-
-  ```text
-  main.truss:4:27: error[prover.overflow]: `item + 1` may overflow `UInt8`. It can also be checked first with an `if`, or done with the checked operation.
-    |   items.filter(fn(item) { item + 1 > 3 })
-    |                           ^^^^^^^^
-  1 error
-  ```
+- **A test that calls code that may panic declares `uses Panic`**, as
+  [Chapter 12](#12-writing-tests) shows.
 
 ### Choosing an approach
 
@@ -2368,11 +2498,12 @@ $ echo $?
 | A value may be absent as a normal case | Return an `Option` |
 | The caller can be expected to know the fact | `requires`, so every caller proves it |
 | The code just checked the fact | Nothing: the prover knows it |
-| A failure would be a bug, and proving otherwise is not worth it | `uses Panic` |
+| A failure would be a bug, and proving otherwise is not worth it | The checked operation and `expect`, in a function with `uses Panic` |
 
-`uses Panic` is a fine choice for a script or a prototype. Code that others
+`expect` is a fine choice for a script or a prototype. Code that others
 depend on usually proves its operations safe, since `Panic` in a signature
 spreads to every caller.
+
 ## 9. Generics, Traits, and Laws
 
 Generics let one definition work for many types. Traits say what a type can
@@ -2462,10 +2593,8 @@ it.
 ```truss
 trait Summary {
   fn headline(self) -> String
-    cost time finite
 
   fn summarize(self) -> String
-    cost time finite
   {
     "Read more: ${self.headline()}"
   }
@@ -2476,7 +2605,6 @@ type Post(author: String, text: String)
 
 impl Summary for Article {
   fn headline(self) -> String
-    cost time finite
   {
     "${self.title}, by ${self.author}"
   }
@@ -2484,13 +2612,11 @@ impl Summary for Article {
 
 impl Summary for Post {
   fn headline(self) -> String
-    cost time finite
   {
     "@${self.author}"
   }
 
   fn summarize(self) -> String
-    cost time finite
   {
     "@${self.author}: ${self.text}"
   }
@@ -2509,9 +2635,9 @@ test "traits" {
 
 - `impl Summary for Article` implements the trait for a type. `Article`
   keeps the provided `summarize`, and `Post` replaces it.
-- `cost time finite` promises that the method terminates. A trait's clauses
-  bind every implementation, so each `impl` repeats them. [Chapter
-  13](#termination) explains `cost` clauses.
+- Every method terminates unless its trait's `uses` names `RunForever`, so
+  neither the trait nor the `impl` writes anything about termination.
+  [Chapter 13](#termination) explains termination.
 - `announce[Item: Summary]` accepts any type that implements `Summary`.
 - No trait is imported: calling `item.summarize()` finds the method through
   the type's `impl`s.
@@ -2534,8 +2660,8 @@ parameters:
 type Pair[Value](first: Value, second: Value)
 
 impl Display for Pair[Value: Display] {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write("(${self.first}, ${self.second})")
+  fn display(self, output: mut String) {
+    mut output.push("(${self.first}, ${self.second})")
   }
 }
 
@@ -2576,7 +2702,7 @@ type Settings(retries: UInt64 = 3, name: String = "default")
 type Account(owner: String, balance: Int64)
   derives Equal, serialization::Serialize, serialization::Deserialize
 
-test "derived implementations" {
+test "derived implementations" uses RunForever {
   assert Settings.default() == Settings(retries: 3, name: "default")
   let account = Account(owner: "Ada", balance: 10)
   let text = json::encode(account)
@@ -2594,18 +2720,20 @@ test "derived implementations" {
 | `Default` | Each field's default, or its type's `default()` |
 | `serialization::Serialize`, `serialization::Deserialize` | The type's form in JSON, TOML, and the other formats of the standard library |
 
+`json::decode` declares `uses RunForever`, so the test that calls it does
+too.
+
 A derived trait needs every field to have it, and `Ordered` and `Hash` need
 a derived `Equal` too.
 
 #### Display
 
-`Display` is the trait that interpolation uses. Its one method writes into a
-`TextBuilder`:
+`Display` is the trait that interpolation uses. Its one method pushes the
+value's text onto a `String`:
 
 ```text
 public trait Display {
-  fn display(self, output: mut TextBuilder)
-    cost time finite
+  fn display(self, output: mut String)
 }
 ```
 
@@ -2665,7 +2793,6 @@ trait Index {
   type Key
   type Output
   fn contains_key(self, key: Self.Key) -> Bool
-    cost time finite
   fn at(self, key: Self.Key) lends Self.Output
     requires self.contains_key(key)
 }
@@ -2700,9 +2827,7 @@ one. A trait of your own can have laws:
 ```truss
 trait Combine: Equal {
   fn empty() -> Self
-    cost time O(1)
   fn combine(self, other: Self) -> Self
-    cost time O(1)
 
   law left_identity(value: Self) {
     Self.empty().combine(value) == value
@@ -2715,7 +2840,6 @@ type Maximum(value: Int64)
 impl Combine for Maximum {
   fn empty() -> Maximum
     ensures result.value == Int64.minimum
-    cost time O(1)
   {
     Maximum(Int64.minimum)
   }
@@ -2723,7 +2847,6 @@ impl Combine for Maximum {
   fn combine(self, other: Maximum) -> Maximum
     ensures result.value >= self.value && result.value >= other.value
     ensures result.value == self.value || result.value == other.value
-    cost time O(1)
   {
     if self.value >= other.value { self } else { other }
   }
@@ -2742,15 +2865,12 @@ test "a trait with a law" {
 }
 ```
 
-A law uses only methods that terminate and use no capabilities, which is
-why `empty` and `combine` state `cost time O(1)`.
-
 **A law is proven from the contracts of the `impl`'s methods, never from
 their bodies.** Without the two `ensures` clauses on `combine`, the compiler
 reports that the law may not hold, even though the body satisfies it:
 
 ```text
-main.truss:15:1: error[prover.law]: The law `Combine.left_identity` may not hold for `Maximum`.
+main.truss:13:1: error[prover.law]: The law `Combine.left_identity` may not hold for `Maximum`.
   | impl Combine for Maximum {
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
 1 error
@@ -2772,7 +2892,6 @@ trait, and calls its methods through the trait:
 ```truss
 trait Shape {
   fn area(self) -> Float64
-    cost time finite
 }
 
 type Square(side: Float64)
@@ -2780,7 +2899,6 @@ type Circle(radius: Float64)
 
 impl Shape for Square {
   fn area(self) -> Float64
-    cost time finite
   {
     self.side * self.side
   }
@@ -2788,7 +2906,6 @@ impl Shape for Square {
 
 impl Shape for Circle {
   fn area(self) -> Float64
-    cost time finite
   {
     3.14159 * self.radius * self.radius
   }
@@ -2819,6 +2936,7 @@ A call with a dot finds the type's own methods and the methods of every
 trait the type implements from the standard library, the calling package,
 and the packages its manifest lists. When two traits give one name, the call
 writes the trait: `Ordered.compare(first, second)`.
+
 ## 10. Lambdas and Function Types
 
 Functions are values in Truss. A function can take another function as an
@@ -2871,6 +2989,8 @@ test "lambdas" {
 - **A lambda's parameter can be `mut`** when its function type says so.
   `update_each` lends each element to the lambda `mut`, so `score = score /
   2` changes the list.
+- **A lambda's capabilities come from its body.** A lambda that prints uses
+  `Console`, and one with a loop that may never end uses `RunForever`.
 - `return` and `?` in a lambda leave the lambda, not the function around it.
   `break` and `continue` cannot reach a loop outside it.
 - A lambda is always passed inside the call's parentheses.
@@ -2880,31 +3000,23 @@ test "lambdas" {
 A function type is written `fn(Input, ...) -> Output`. Clauses on a function
 type go inside parentheses:
 
-| Type | A function that |
+| Type | Takes a function that |
 |---|---|
-| `fn(Int64) -> Int64` | Takes and returns an `Int64`, uses no capabilities, and may not terminate |
-| `(fn(Int64) -> Bool cost time finite)` | Also always terminates |
-| `(fn(String) uses Console)` | May use the console |
+| `fn(Int64) -> Int64` | Takes and returns an `Int64`, uses no capabilities, and terminates |
+| `(fn(String) uses Console)` | May print |
+| `(fn(String) uses RunForever)` | May run forever |
+| `(fn(Item) uses generic Granted)` | May use whatever the function passed uses, as the next section explains |
+| `(fn(Int64) -> Bool cost time O(1))` | Takes constant time |
 | `(fn(element: Element) -> Output requires items.contains(element))` | May rely on a precondition, which the caller proves at each call |
 
-**A function type without `uses` is pure,** exactly as a function
-declaration is. A function that takes a callback states what the callback
-may do, and the compiler holds every function passed for it to that.
-
-A named function is a value too. Passing one where the type asks for `cost
-time finite` requires the function to promise it:
-
-```text
-main.truss:6:30: error[prover.cost]: `p::is_even` does not promise the contract this parameter's type, `(fn(Int64) -> Bool cost time finite)`, asks of a function passed for it.
-  |   assert [1, 2, 3, 4].filter(is_even) == [2, 4]
-  |                              ^^^^^^^
-1 error
-```
+**A function type takes only functions whose capabilities its `uses`
+names,** exactly as a function declaration uses only the capabilities it
+declares. A function type without `uses` takes only pure functions that
+terminate. A named function is a value too, and passes wherever its
+signature fits:
 
 ```truss
-fn is_even(number: Int64) -> Bool
-  cost time O(1)
-{
+fn is_even(number: Int64) -> Bool {
   number % 2 == 0
 }
 
@@ -2913,7 +3025,107 @@ test "a named function as a value" {
 }
 ```
 
-A lambda needs no such clause: the compiler reads its body.
+`truss show` tells you what a callback may do. `filter`'s function type
+names no capability, so `filter` takes only a pure function, while `update`'s
+callback may use whatever its caller can:
+
+```text
+$ truss show Slice.filter Map.update
+standard/list/slice/slice.truss:592
+public fn Slice[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
+  ensures result.length() <= self.length()
+  ensures forall i in 0..result.length() => keep(result.model()[i])
+  cost time O(self.length() * (time(keep) + time(Element.copy)))
+
+standard/map/map.truss:337
+public fn Map[Key: Hash + Ordered, Value].update(
+  mut self,
+  key: own Key,
+  default: own Value,
+  change: (fn(mut Value) uses generic Granted),
+)
+  uses generic Granted
+  ensures self.contains(key)
+  cost calls(change) == 1
+  cost time O(1 + old(self.length()) * (1 + time(Key.equal)) + time(change))
+```
+
+### Capability parameters
+
+A function that calls a callback can pass on whatever capabilities the
+callback uses, without knowing them in advance, through a *capability
+parameter*:
+
+```truss
+use standard::console
+
+fn visit_all[Item](items: Slice[Item], visit: (fn(Item) uses generic Granted))
+  uses generic Granted
+{
+  for item in items {
+    visit(item)
+  }
+}
+
+fn print_all(names: Slice[String])
+  uses Console
+{
+  visit_all(names, visit: fn(name) { Console.print_line(name) })
+}
+
+fn wait_for_each(names: Slice[String])
+  uses Console, RunForever
+{
+  visit_all(names, visit: fn(name) {
+    while Console.read_line() is Some(line) {
+      if line == name {
+        return
+      }
+    }
+  })
+}
+
+test "a pure lambda needs no capability" {
+  visit_all([1, 2, 3], visit: fn(_) {})
+}
+
+test "a printing lambda" {
+  var screen = console::CapturedConsole.new()
+  provide mut screen {
+    print_all(["a", "b"])
+  }
+  assert screen.output() == "a\nb\n"
+}
+
+test "a lambda that may run forever" uses RunForever {
+  var screen = console::CapturedConsole.new(input: ["x", "a", "b"])
+  provide mut screen {
+    wait_for_each(["a", "b"])
+  }
+}
+```
+
+- **`generic Granted` names a capability parameter,** a set of capabilities
+  that each call fills in from the functions it passes. Nothing declares it
+  but its uses: every `generic Granted` in one signature is the same set.
+- `uses generic Granted` on `visit_all` says it uses exactly what `visit`
+  uses. A pure caller passing a pure lambda needs nothing, and `print_all`,
+  whose lambda prints, needs `uses Console`.
+- **Termination is passed on the same way.** `RunForever` is a capability,
+  so `visit_all` terminates when the lambda passed to it does. In
+  `wait_for_each`, the lambda's loop may never end, so the call to
+  `visit_all` may not either, and `wait_for_each` must say so. Without
+  `RunForever`:
+
+  ```text
+  main.truss:4:3: error[capabilities.not_available]: This call uses `RunForever`, which is not available here. Declare it with `uses RunForever`.
+    |   visit_all(names, visit: fn(name) {
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  ```
+
+This is *polymorphic termination*: a higher-order function terminates
+exactly when the functions passed to it do, with no promise written for
+either.
 
 ### Returning and storing functions
 
@@ -2943,45 +3155,6 @@ A function-typed parameter can be called but not stored. One declared `own`
 can be stored, in a field or a list, and accepts only functions that capture
 nothing.
 
-### Capability parameters
-
-A function that calls a callback can pass on whatever capabilities the
-callback uses, without knowing them, through a *capability parameter*:
-
-```truss
-fn visit_all[Item, capability Granted](
-  items: Slice[Item],
-  visit: (fn(Item) uses Granted),
-)
-  uses Granted
-{
-  for item in items {
-    visit(item)
-  }
-}
-
-fn print_all(names: Slice[String])
-  uses Console
-{
-  visit_all(names, visit: fn(name) { Console.print_line(name) })
-}
-
-test "a pure lambda needs no capability" {
-  visit_all([1, 2, 3], visit: fn(_) {})
-}
-```
-
-`capability Granted` stands for a set of capabilities, and `uses Granted`
-says `visit_all` uses exactly what `visit` uses. In `print_all`, the lambda
-uses `Console`, so `Granted` is `Console` and the call needs `uses Console`.
-A pure caller passing a pure lambda needs nothing.
-
-Many standard library methods take capability parameters, so a lambda that
-prints or reads a file can be passed to them:
-
-```text
-public fn Map[Key: Hash + Ordered, Value].update[capability Granted](
-```
 ## 11. Capabilities
 
 In most languages, any function can read a file, open a connection, or read
@@ -3016,7 +3189,7 @@ fn archive(name: StringSlice) -> Result[UInt64, SystemError]
   Ok(text.length())
 }
 
-test "fake files and a fake console" {
+test "fake files and a fake console" uses RunForever {
   var disk = files::MemoryFiles.new().with_text(Path.new("notes.txt"), contents: "hello")
   var screen = console::CapturedConsole.new()
   let size = provide mut disk, mut screen {
@@ -3047,6 +3220,11 @@ implementations of capabilities. `MemoryFiles` implements `FileRead` and
 they are provided `mut`, and the test reads them afterward. Providing a type
 provides every capability it implements.
 
+`MemoryFiles` declares that its implementations may run forever, and
+providing an implementation requires the capabilities it uses. So the test
+declares `uses RunForever`. That keeps the test deterministic: a test whose
+`uses` names only `Panic` and `RunForever` still gets no real capability.
+
 `main` needs no `provide`: the runtime gives it the real implementation of
 every capability in its `uses` clause, and of nothing else.
 
@@ -3068,6 +3246,7 @@ every capability in its `uses` clause, and of nothing else.
 | `Tasks` | Running `concurrent` code ([Chapter 14](#concurrent-code)) | `tasks::SeededTasks` |
 | `Log` | Writing to the program's log | `log::DiscardLog` |
 | `Panic` | Stopping the program ([Chapter 8](#unrecoverable-errors-with-panic)) | None: a panic cannot be caught |
+| `RunForever` | Running without a proof that the code ends ([Chapter 13](#termination)) | None: nothing implements it |
 
 `simulation::World` simulates a whole machine: files, a network, processes,
 and a clock, all deterministic from a seed. `truss show Console` prints a
@@ -3101,7 +3280,7 @@ needs `Handles`:
 use standard::files
 
 fn count_lines(name: StringSlice) -> Result[UInt64, SystemError]
-  uses FileRead, Handles
+  uses FileRead, Handles, RunForever
 {
   var reader = FileRead.open(Path.new(name))?
   var count: UInt64 = 0
@@ -3111,7 +3290,7 @@ fn count_lines(name: StringSlice) -> Result[UInt64, SystemError]
   Ok(count)
 }
 
-test "a handle on a memory file" {
+test "a handle on a memory file" uses RunForever {
   var disk = files::MemoryFiles.new().with_text(Path.new("a.txt"), contents: "one\ntwo\n")
   let counted = provide mut disk {
     count_lines("a.txt")
@@ -3120,8 +3299,9 @@ test "a handle on a memory file" {
 }
 ```
 
-A handle is closed when its owner is done with it, on every path, and
-closing it never fails. A handle is not `Copyable`, so it has exactly one
+Reading until the end of a file has no measure the compiler can see, so
+`count_lines` declares `uses RunForever`. A handle is closed when its owner
+is done with it, on every path, and closing it never fails. A handle is not `Copyable`, so it has exactly one
 owner.
 
 ### Implementing a capability
@@ -3241,6 +3421,7 @@ test "an inventory, and a narrowed one" {
 | Why does this test fail only sometimes? | It cannot: a test without `uses` gets fakes, and its result is cached |
 | How do I test code that reads the clock? | Provide a `FixedClock` |
 | Can I run a plugin with less access? | Provide a narrowing implementation around it |
+
 ## 12. Writing Tests
 
 Tests in Truss sit beside the code they test, in any file of a module, and
@@ -3286,13 +3467,15 @@ place of `1105` in the second test:
 $ truss test
 shop "tax rounds down": failed
     assert price_with_tax(1005) == 1106
-      at main.truss:12:3
+      at main.truss:12:10
 
-1 passed, 1 failed in 0.4s (check 0.0s, build 0.4s, tests 0.0s)
+1 passed, 1 failed in 0.3s (check 0.0s, build 0.3s, tests 0.0s)
 ```
 
 A test that panics fails with the panic's message, and a panic ends only its
-own test.
+own test. A test that calls code that may panic declares `uses Panic`, and
+one whose code may run forever declares `uses RunForever`, as a function
+does.
 
 ### Running tests
 
@@ -3310,8 +3493,8 @@ project's manifest sets another, and a test that runs past it fails.
 
 ### Deterministic tests and caching
 
-**A test provides every capability its code uses, except `Panic`.** A test
-whose code prints must provide a console:
+**A test provides the capabilities its code uses, or declares them.** A
+test whose code prints must provide a console:
 
 ```truss
 use standard::console
@@ -3342,19 +3525,26 @@ test "a captured console supplies input" {
 Without the `provide`, the test does not compile:
 
 ```text
-main.truss:3:3: error[capabilities.not_available]: This call uses `Console`, which is not available here. Declare it with `uses Console`, or `provide` an implementation.
+main.truss:8:3: error[capabilities.not_available]: This call uses `Console`, which is not available here. Declare it with `uses Console`, or `provide` an implementation.
+  |   greet("Ada")
+  |   ^^^^^^^^^^^^
+1 error
 ```
 
-Since a test sees only what it provides, its result depends only on its
-code. **`truss test` caches each passing test's result** and runs it again
-only when the code it reaches changes. In a large project, `truss test`
+A test's standard input is empty, so `Console.read_line()` in a test without
+a `CapturedConsole` returns `None`.
+
+A test whose `uses` names nothing but `Panic` and `RunForever` gets no real
+capability, so its result depends only on its code: it is *deterministic*.
+**`truss test` caches each passing deterministic test's result** and runs it
+again only when the code it reaches changes. In a large project, `truss test`
 after an edit runs only the tests the edit can affect.
 
 ### External tests
 
-A test that declares `uses` gets the real implementations of exactly those
-capabilities. It is *external*: it runs every time, and its result is never
-cached.
+A test whose `uses` names any other capability gets the real
+implementations of exactly those capabilities. It is *external*: it runs
+every time, and its result is never cached.
 
 ```truss
 test "the monotonic clock never goes backward" uses Clock {
@@ -3365,8 +3555,8 @@ test "the monotonic clock never goes backward" uses Clock {
 ```
 
 Use external tests sparingly, for code whose point is the real outside
-world. In stage0, an external test that writes to the real standard output
-breaks `truss test`'s report, so test printing through `CapturedConsole`.
+world. A test of what code prints is better written with a
+`CapturedConsole`, which it can check.
 
 ### Unfinished code
 
@@ -3419,19 +3609,19 @@ fn price_with_tax(cents: UInt64) -> UInt64
   cents + (echo cents / 10)
 }
 
-test "echo shows a value in a failing test" {
+test "echo shows a value" {
   assert price_with_tax(1000) == 1100
 }
 ```
 
-In a test, the output is attached to the test's report when it fails. With
-the test changed to `assert price_with_tax(1005) == 1106`:
+In a test, the output is attached to the test's report:
 
 ```text
-shop "echo shows a value in a failing test": failed
-    assert price_with_tax(1005) == 1106
-      at main.truss:8:3
+$ truss test
+shop "echo shows a value": passed
     main.truss:4:12: 100
+
+1 passed in 0.1s (check 0.0s, build 0.1s, tests 0.0s)
 ```
 
 Outside a test, `echo` writes to standard error. It needs no `uses` clause,
@@ -3439,6 +3629,7 @@ and every type has debug output. `truss build` refuses a program whose
 `main` can reach an `echo`, and a package that holds one cannot be
 published, so none is left behind by accident. `echo` takes everything after
 it, so as an operand it goes in parentheses.
+
 ## 13. Contracts and Proofs
 
 Every chapter so far has leaned on the prover: it showed that additions fit,
@@ -3461,7 +3652,6 @@ every caller may rely on it. `result` names the returned value.
 fn double(value: Int64) -> Int64
   requires value >= -1000 && value <= 1000
   ensures result == value * 2
-  cost time O(1)
 {
   value * 2
 }
@@ -3484,12 +3674,15 @@ inside `double` when it checks `quadruple`. Without `ensures result == value
 `double` again:
 
 ```text
-main.truss:10:3: error[prover.requires]: `value >= -1000 && value <= 1000` may not hold for this call to `p::double`.
+main.truss:10:3: error[prover.requires]: `value >= -1000 && value <= 1000` may not hold for this call to `double`. For example, when `value` is 0.
   |   double(double(value))
   |   ^^^^^^^^^^^^^^^^^^^^^
   note: main.truss:2:12: This is the clause that must hold.
 1 error
 ```
+
+The counterexample shows how little the caller knows: even when `value` is
+0, nothing bounds what `double(0)` returns.
 
 This rule is what makes Truss scale. Each function is proven once, against
 the signatures it calls, and an edit to a body never invalidates the proofs
@@ -3543,9 +3736,7 @@ fn Percent.new(value: UInt8) -> Option[Percent] {
   if value <= 100 { Some(Percent(value)) } else { None }
 }
 
-fn Percent.complement(self) -> Percent
-  cost time O(1)
-{
+fn Percent.complement(self) -> Percent {
   Percent(100 - self.value)
 }
 
@@ -3593,8 +3784,9 @@ specification can say more than code can:
 - **Arithmetic in a specification is exact.** It works on `Integer`, a type
   that exists only in specifications, so `self.count + 1` in a contract
   never overflows, and comparisons can mix integer types.
-- A function called in a specification is pure and promises that it
-  terminates, with a `cost time` clause.
+- A function called in a specification uses no capability, so it
+  terminates. A function whose `uses` is a capability parameter, such as
+  `map`, can be called in one with a pure lambda.
 - A quantifier over a range is also an expression in code, which runs as a
   loop that stops when it knows the answer. A quantifier over a type, and
   `==>`, appear only in specifications.
@@ -3617,11 +3809,12 @@ test "a quantifier in code" {
 
 **Across a loop's iterations, the prover keeps only the facts the loop's
 *invariant* states.** It reasons about one iteration at a time, so after the
-first iteration it knows nothing else about the variables the loop changes. In [Chapter 3](#integer-overflow), an accumulating
-sum would not compile. This is why:
+first iteration it knows nothing else about the variables the loop changes.
+In [Chapter 3](#integer-overflow), an accumulating sum would not compile.
+This is why:
 
 ```text
-main.truss:6:5: error[prover.overflow]: `total += value` may overflow `UInt64`. For example, when `limit` is 2, `total` is 18446744073709551615, `value` is 1. It can also be checked first with an `if`, done with the checked operation, or allowed to stop the program with `uses Panic`.
+main.truss:6:5: error[prover.overflow]: `total += value` may overflow `UInt64`. For example, when `limit` is 2, `total` is 18446744073709551615, `value` is 1. It can also be checked first with an `if`, or done with the checked operation.
   |     total += value
   |     ^^^^^^^^^^^^^^
 1 error
@@ -3679,37 +3872,46 @@ test "loops with invariants" {
 
 ### Termination
 
-A function may run forever unless it promises not to. `cost time finite`
-promises that it terminates, and so does any `cost time O(...)` bound. The
-compiler proves every such promise, and a specification may call only
-functions that make one.
+**A function terminates unless its `uses` names `RunForever`.** The compiler
+proves that every loop and every recursion in such a function ends, so a
+function that may hang says so in its signature. Most code needs nothing
+written for this:
 
-**Recursion on a part of a parameter needs nothing more.** A function that
-recurses on a field it took out with a pattern, such as `Expression.evaluate`
-in [Chapter 5](#recursive-types), terminates because the value gets smaller.
-Other recursion states a `decreases` measure, an integer that every
-recursive call makes smaller and that never goes below zero:
+| Code | Its measure |
+|---|---|
+| A `for` loop over a range or a collection | The elements left to visit |
+| A `for` loop over a cursor whose type has a `remaining()` method, such as `text.characters()` | `remaining()` |
+| A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` | The distance between the two sides |
+| A recursive call on a part of a parameter, such as `Expression.evaluate` in [Chapter 5](#recursive-types) | The parameter, which gets smaller |
+| A loop or a function with a `decreases` clause | The clause |
+
+A `decreases` clause names a measure: an integer that every iteration, or
+every recursive call, makes smaller, and that never goes below zero.
 
 ```truss
 fn gcd(first: UInt64, second: UInt64) -> UInt64
   decreases second
-  cost time finite
 {
   if second == 0 { first } else { gcd(first: second, second: first % second) }
 }
 
-test "a terminating recursion" {
-  assert gcd(12, second: 18) == 6
+fn halve_until_odd(value: UInt64) -> UInt64
+  requires value > 0
+{
+  var current = value
+  while current % 2 == 0
+    invariant current > 0
+    decreases current
+  {
+    current /= 2
+  }
+  current
 }
-```
 
-Without the `decreases` clause:
-
-```text
-main.truss:4:30: error[prover.termination]: This call to `p::countdown` may not end: it calls back here, and both need a `decreases` clause for the prover to show that the recursion ends. For example, when `count` is 1. On that path, `count == 0` is false.
-  |   if count == 0 { 0 } else { countdown(count / 2) }
-  |                              ^^^^^^^^^^^^^^^^^^^^
-1 error
+test "terminating code" {
+  assert gcd(12, second: 18) == 6
+  assert halve_until_odd(12) == 3
+}
 ```
 
 Notice `gcd(first: second, second: first % second)`. A bare argument that is
@@ -3717,9 +3919,61 @@ a variable named like a parameter goes to that parameter, wherever it
 appears, so `gcd(second, ...)` would pass `second` to `second` twice. Writing
 both labels avoids that.
 
-A `while` loop in a function with a `time` clause must be proven to end
-too. Its `decreases` clause names a measure that every iteration makes
-smaller.
+A recursion without a measure is an error. A function `countdown` that
+calls itself on `count / 2`, which is not a part of `count`, states none:
+
+```text
+main.truss:2:30: error[prover.termination]: This recursive call may not end: give the function a `decreases` clause for the prover to show that the recursion ends. For example, when `count` is 1. On that path, `count == 0` is false.
+  |   if count == 0 { 0 } else { countdown(count / 2) }
+  |                              ^^^^^^^^^^^^^^^^^^^^
+1 error
+```
+
+A loop with no measure at all uses `RunForever`, and so does a call of a
+function that uses it. Without its `decreases`, the loop in
+`halve_until_odd` is rejected:
+
+```text
+main.truss:5:3: error[capabilities.not_available]: This loop has no measure, so it uses `RunForever`, which is not available here. Declare it with `uses RunForever`, or give the loop a `decreases` clause.
+  |   while current % 2 == 0
+  |   ^^^^^^^^^^^^^^^^^^^^^^
+1 error
+```
+
+A comparison's measure is proven to decrease like a written one, so the
+loop's invariant must give the prover what it needs. Here `power` must stay
+positive, or doubling it would not bring it closer to `limit`:
+
+```truss
+fn first_power_of_two_above(limit: UInt64) -> UInt64
+  requires limit < 1_000_000
+{
+  var power: UInt64 = 1
+  while power <= limit
+    invariant power >= 1 && power <= 2_000_000
+  {
+    power *= 2
+  }
+  power
+}
+
+test "a loop measured by its comparison" {
+  assert first_power_of_two_above(5) == 8
+}
+```
+
+Without `power >= 1` in the invariant:
+
+```text
+main.truss:5:3: error[prover.termination]: This loop's measure may not decrease. For example, when `limit` is 0, `power` is 0.
+  |   while power <= limit
+  |   ^^^^^^^^^^^^^^^^^^^^
+1 error
+```
+
+Code that really may run forever, such as a server's loop or a loop that
+reads until its input ends, declares `uses RunForever`. A function that uses
+`RunForever` has no `time` clause, and cannot be called in a specification.
 
 ### Cost
 
@@ -3745,14 +3999,12 @@ test "a cost bound" {
 | Clause | Promises |
 |---|---|
 | `cost time O(f)` | At most `c * f + d` steps, for some constants `c` and `d` |
-| `cost time finite` | Termination, with no bound |
 | `cost allocations == 0` | No heap allocation |
 | `cost allocated_bytes <= n` | At most `n` bytes allocated |
 | `cost calls(visit) == items.length()` | Exactly one call of the parameter `visit` per item |
 | `cost amortized time O(1)` | Constant time on average over a sequence of calls, as `List.push` promises |
 
-A bound can use the parameters, their fields, pure methods with a `time`
-clause, `log(n)`, `power(base, exponent)`, and `time(visit)`, the bound of a
+A bound can use the parameters, their fields, pure methods, `log(n)`, `power(base, exponent)`, and `time(visit)`, the bound of a
 function parameter. The standard library states costs for every function,
 which is what lets you prove your own: `truss show List.push` shows `cost
 amortized time O(1)`.
@@ -3774,7 +4026,6 @@ time. A proof block is removed from the compiled program.
 fn double(value: Int64) -> Int64
   requires value >= -1000 && value <= 1000
   ensures result == value * 2
-  cost time O(1)
 {
   value * 2
 }
@@ -3832,13 +4083,14 @@ The prover never guesses. It knows the facts in scope: the `requires` of
 the function, the conditions of the `if`s around the code, the `ensures` of
 each call, the invariants of the values, and the loop invariants. When a
 proof fails, ask which of those is missing.
+
 ## 14. Parallelism and Concurrency
 
 Truss runs code at the same time in two ways:
 
 | Form | For | Capabilities |
 |---|---|---|
-| `parallel` | Computing faster on several cores | None but `Panic`: a function with `parallel` stays pure |
+| `parallel` | Computing faster on several cores | None but `Panic` and `RunForever`: a function with `parallel` stays pure |
 | `concurrent` | Waiting on several things at once, such as files or connections | Those of the code around it, plus `Tasks` |
 
 Both follow the ownership rules of [Chapter 4](#4-ownership), which is why
@@ -3928,7 +4180,7 @@ fn total_size(first: StringSlice, second: StringSlice) -> Result[UInt64, SystemE
   Ok(one.length().saturating_add(two.length()))
 }
 
-test "concurrent reads" {
+test "concurrent reads" uses Panic, RunForever {
   var disk = files::MemoryFiles.new()
     .with_text(Path.new("a"), contents: "abc")
     .with_text(Path.new("b"), contents: "de")
@@ -3950,7 +4202,10 @@ test "concurrent reads" {
 - **`concurrent for`** runs each iteration as a task.
 - **`tasks::SeededTasks` runs tasks deterministically in tests.** Its seed
   picks one order of the tasks, so a test that passes always passes, and
-  trying several seeds tries several orders.
+  trying several seeds tries several orders. It stops the test with a panic
+  when every task is waiting on another, a deadlock, and it runs the tasks
+  in a loop with no measure. So a test that provides it declares
+  `uses Panic, RunForever`.
 
 ### Communicating between tasks
 
@@ -3968,7 +4223,7 @@ The standard library's `tasks` module holds the tools tasks share:
 use standard::tasks
 
 fn produce_and_consume() -> Int64
-  uses Tasks
+  uses Tasks, RunForever
 {
   let channel: tasks::Channel[Int64] = tasks::Channel.new()
   concurrent {
@@ -3989,7 +4244,7 @@ fn produce_and_consume() -> Int64
   received
 }
 
-test "a channel between two tasks" {
+test "a channel between two tasks" uses Panic, RunForever {
   let received = provide tasks::SeededTasks.new(7) {
     produce_and_consume()
   }
@@ -4001,6 +4256,11 @@ The first branch is a block that sends three numbers and closes the
 channel. The second receives until the channel is closed. A block is a
 statement, so each can be one branch.
 
+`send` and `receive` use `RunForever`: a task that receives from a channel
+no task ever sends on or closes waits forever, so nothing proves that the
+call returns. `Cell` and `Counter` hold their lock only while a callback that
+uses no capability runs, so their calls terminate.
+
 ### Shared capabilities
 
 A capability implementation provided `mut` to code that can use `Tasks`
@@ -4008,6 +4268,7 @@ handles one call at a time: each call holds the implementation's lock from
 start to end. Such an implementation can take no callback that uses a
 capability, so these locks cannot deadlock. One provided without `mut` has
 no lock, because nothing in it changes.
+
 ## 15. Advanced Features
 
 This chapter covers features you need less often: making your own types
@@ -4031,10 +4292,18 @@ trait Cursor {
 ```truss
 type Countdown(left: UInt64)
 
+fn Countdown.remaining(self) -> UInt64
+  ensures result == self.left
+{
+  self.left
+}
+
 impl Cursor for Countdown {
   type Element = UInt64
 
-  fn next(mut self) -> Option[UInt64] {
+  fn next(mut self) -> Option[UInt64]
+    ensures (result is Some(_)) ==> self.remaining() < old(self.remaining())
+  {
     if self.left == 0 {
       return None
     }
@@ -4049,6 +4318,9 @@ test "a cursor" {
     mut seen.push(value)
   }
   assert seen == [2, 1, 0]
+}
+
+test "a cursor's provided methods" uses RunForever {
   assert Countdown(left: 5).to_list() == [4, 3, 2, 1, 0]
   assert Countdown(left: 5).take(2).to_list() == [4, 3]
   assert Countdown(left: 5).skip(3).to_list() == [1, 0]
@@ -4065,15 +4337,32 @@ test "a cursor" {
   when there are no more.
 - A `for` loop over a cursor pulls it until it returns `None`. A cursor in a
   variable can be pulled again after a `break`.
+- **A loop over a cursor terminates when the cursor measures itself.** Its
+  type has a method `remaining(self) -> UInt64`, and `next` promises to make
+  it smaller each time it returns `Some`. `Countdown` does both, so the loop
+  in the first test needs nothing more. Without `remaining`:
+
+  ```text
+  main.truss:17:3: error[capabilities.not_available]: This loop has no measure, so it uses `RunForever`, which is not available here. Declare it with `uses RunForever`, or give the loop a `decreases` clause, or `Countdown` a `remaining(self) -> UInt64` method.
+    |   for value in Countdown(left: 3) {
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  1 error
+  ```
+
 - `Cursor` provides `to_list`, `count`, `last`, `fold`, and `find`, and the
   adapters `skip`, `take`, `step_by`, `chain`, `zip`, `enumerate`, and
   `peekable`. Each adapter returns a new cursor, so they chain.
+- **The provided methods that pull a cursor to its end use `RunForever`,**
+  since the trait cannot know that every cursor ends. The adapters' cursors
+  have no `remaining`, so a loop over one uses `RunForever` too. The second
+  test declares `uses RunForever` for both.
 - `capability Uses` is an *associated capability set*: the capabilities
   `next` uses. A cursor that reads lines from a file has `Uses = FileRead,
   Handles`, and a function that pulls a generic cursor declares `uses
   Source.Uses`.
 - `items.cursor()` makes a cursor that owns a collection's elements, which
-  is what `for item in own items` pulls.
+  is what `for item in own items` pulls. It measures itself, as
+  `text.characters()` does.
 
 ### Loops over your own types
 
@@ -4204,9 +4493,9 @@ test "tagged templates" {
   compiled. An invalid one is a compile error:
 
   ```text
-  main.truss:4:3: error[prover.requires]: This template may not meet `is_valid_template(template.literals)`, which its tag requires. Running it on this template's text gives `false`.
-    |   regex::Regex"[a-z"
-    |   ^^^^^^^^^^^^^^^^^^
+  main.truss:4:14: error[prover.requires]: This template may not meet `is_valid_template(template.literals)`, which its tag requires. Running it on this template's text gives `false`.
+    |   let word = regex::Regex"[a-z"
+    |              ^^^^^^^^^^^^^^^^^^
   1 error
   ```
 
@@ -4238,6 +4527,7 @@ fn List[Element].filter(own self, keep: fn(Element) -> Bool) -> List[Element]
 `names.filter(...)` copies the elements it keeps, and `own
 names.filter(...)` moves them, which works for elements that cannot be
 copied.
+
 ## 16. A Final Project: A Checklist Tool
 
 This chapter builds a complete program from the pieces of the earlier
@@ -4283,8 +4573,8 @@ public type FormatError(line_number: UInt64, line: String)
   derives Equal
 
 impl Display for FormatError {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write("line ${self.line_number} is not a task: `${self.line}`")
+  fn display(self, output: mut String) {
+    mut output.push("line ${self.line_number} is not a task: `${self.line}`")
   }
 }
 
@@ -4442,7 +4732,7 @@ Each part uses a feature from an earlier chapter:
 | `load` | A missing file is an empty list: `Err(NotFound)` matches one variant of `SystemError` |
 | `save` | `uses FileWrite`, the only function that writes ([Chapter 11](#11-capabilities)) |
 | `run` | `match own command` moves the text out of the `Add` variant into the new task ([Chapter 4](#moving)) |
-| `tasks[number - 1]` | The `if` above proves the index is in bounds, with no `uses Panic` ([Chapter 8](#operations-that-can-fail)) |
+| `tasks[number - 1]` | The `if` above proves the index is in bounds ([Chapter 8](#operations-that-can-fail)) |
 | `main` | Handles every error at the top, printing to standard error and exiting with failure |
 
 The `if number == 0 || number > tasks.length()` check does two jobs. It
@@ -4459,7 +4749,7 @@ against a file system in memory and a captured console. `main_tests.truss`:
 use standard::console
 use standard::files
 
-test "adding and finishing tasks" {
+test "adding and finishing tasks" uses RunForever {
   var disk = files::MemoryFiles.new()
   var screen = console::CapturedConsole.new()
   provide mut disk, mut screen {
@@ -4472,13 +4762,13 @@ test "adding and finishing tasks" {
   assert screen.output() == "added: buy milk\nadded: walk the dog\ndone: buy milk\n[x] buy milk\n[ ] walk the dog\n"
 }
 
-test "a missing task number is an error" {
+test "a missing task number is an error" uses RunForever {
   var disk = files::MemoryFiles.new()
   var screen = console::CapturedConsole.new()
   let code = provide mut disk, mut screen {
     main(["checklist", "done", "3"])
   }
-  assert code.code == 1
+  assert code == ExitCode.failure
   assert screen.errors() == "there is no task 3\n"
 }
 ```
@@ -4489,9 +4779,10 @@ $ truss test
 ```
 
 These tests run `main` itself, with every argument a user could give, and
-check both the file it leaves and what it prints. They touch no real file,
-so they give the same result every time, and are cached until the code
-changes.
+check both the file it leaves and what it prints. They declare
+`uses RunForever` because `MemoryFiles` does ([Chapter 11](#using-capabilities)).
+They touch no real file, so they give the same result every time, and are
+cached until the code changes.
 
 ### Where to go from here
 
@@ -4505,6 +4796,7 @@ To grow this program, you could:
 - Prove that `render` and `parse` agree for every list of tasks, not just
   the one in the test, with an `ensures` on `parse` and a theorem
   ([Chapter 13](#13-contracts-and-proofs)).
+
 ## Appendix A: Keywords
 
 These words are reserved everywhere and cannot be names:
@@ -4527,7 +4819,7 @@ elsewhere:
 
 | Words | Meaning |
 |---|---|
-| `amortized`, `time`, `allocations`, `allocated_bytes`, `calls`, `O`, `finite`, `potential` | The words of a `cost` clause |
+| `amortized`, `time`, `allocations`, `allocated_bytes`, `calls`, `O`, `potential` | The words of a `cost` clause |
 | `result` | The return value, in `ensures` and `cost` |
 | `old(expression)` | A value when the function was called, in a specification |
 | `identical(first, second)` | Identity, in a specification |
@@ -4535,6 +4827,7 @@ elsewhere:
 | `final(result)` | The lent part as the caller left it, in a lending method's `ensures` |
 | `log(n)`, `power(base, exponent)` | Functions on exact integers, in a specification |
 | `by bit_vector` | After an `assert`'s condition |
+| `generic` | In a `uses` list, before the name of a capability parameter |
 
 ## Appendix B: Operators
 
@@ -4585,7 +4878,7 @@ From the tightest binding to the loosest:
 | `truss rename FROM TO` | Rename a definition, method, or module, and every reference to it |
 | `truss add PACKAGE...` | Add registry packages as dependencies, granted nothing |
 | `truss upgrade [PACKAGE...]` | Move registry packages to their newest versions |
-| `truss publish` | Publish the package to the registry |
+| `truss publish VERSION` | Publish the package to the registry as `VERSION`, such as `1.4.2` |
 | `truss status` | List the databases the background process holds |
 | `truss stop` | Stop the background process |
 
@@ -4625,8 +4918,8 @@ module at a time.
 | `types.missing_mode` | A place passed to a `mut` or `own` parameter without the keyword | `mut items.push(x)`, `own name`, or `.copy()` |
 | `types.missing_label` | An argument after the first without its parameter's name | `area(3, height: 4)` |
 | `types.not_assignable` | An assignment to a `let`, or to a lambda's capture | `var`, or return the new value |
-| `types.mismatch` | A value of the wrong type, often `String` against `StringSlice` | `.slice()`, `.to_string()`, or a conversion |
-| `types.mismatched_integers` | Two integer types combined | `UInt64.from(small)` |
+| `types.mismatch` | A value of the wrong type, often a `StringSlice` where a `String` is needed | `.to_string()`, `.copy()`, or a conversion |
+| `types.mismatched_integers` | Two integer types combined | `UInt64.from_integer(small)` |
 | `types.no_impl` | A trait the type does not have, such as `Equal` for `==` | `derives Equal`, or an `impl` |
 | `types.unknown_member` | A method or field the type does not have | `truss show` the type to see its methods |
 | `types.unused_value` | A statement whose value is not `Unit` | Use it, or `let _ =` |
@@ -4634,25 +4927,27 @@ module at a time.
 | `types.lambda_needs_type` | A lambda with nothing to give it types | Give the `let` a function type |
 | `types.wrong_try` | `?` on an error of another type | `map_error` first |
 | `usage.unused_variable` | A binding that nothing reads | `_` |
+| `usage.unused_function` | A warning: a private function that nothing in its package uses | Delete it, or make it `public` |
 | `resolve.unused_import` | A `use` that nothing names | Delete it |
 | `resolve.shadowed_name` | A name already in scope | Choose another name |
 | `resolve.not_visible` | A private definition used from another module | `internal` or `public` on the definition |
 | `ownership.use_after_move` | A value used after `own` moved it | Pass a copy at the move |
 | `ownership.needs_owned` | A place where an owned value is stored | `own name` or `name.copy()` |
+| `ownership.not_owned` | A move of a value the code only views, such as a `let` of a string literal | `name.copy()` |
 | `ownership.mutated_while_viewed` | A change to a value that a live view sees | Finish using the view first |
 | `ownership.view_escapes` | A view returned from the function that holds its value | Return an owned value |
 | `ownership.lent_part_escapes` | A lent part bound to a name | Use it in the statement, or copy it |
 | `ownership.data_race` | Two parallel branches that change one value | Give each branch its own value |
-| `capabilities.not_available` | A call that uses a capability the function does not declare | `uses Console`, or `provide` one in a test |
+| `capabilities.not_available` | A call that uses a capability the function does not declare, or a loop with no measure | `uses Console`, or `provide` one in a test; for a loop, `decreases` or `uses RunForever` |
 | `capabilities.not_granted` | A dependency's function that uses a capability its manifest does not grant | Add the capability to the dependency's entry |
 | `patterns.not_covered` | A `match` that misses a case | Add an arm |
 | `patterns.unreachable_arm` | An arm that earlier arms already cover | Delete it |
-| `prover.overflow` | An arithmetic operation that may not fit | An `if`, a `requires`, a checked or saturating method, or `uses Panic` |
+| `prover.overflow` | An arithmetic operation that may not fit | An `if`, a `requires`, or a checked or saturating method |
 | `prover.division` | A divisor that may be zero | The same, or `checked_divide` |
 | `prover.requires` | A callee's precondition, an index, or a slice the prover cannot show holds | Check it with an `if`, require it, or use `get` |
 | `prover.ensures` | A postcondition the body may not meet | Fix the body, or add a loop `invariant` |
 | `prover.invariant` | A value that may break its type's invariant | Check before building it |
-| `prover.termination` | A call that may not end, in a function that promises to | `decreases`, or a `cost time` clause on the callee |
+| `prover.termination` | A recursion or a loop measure that may not decrease | `decreases`, a loop `invariant`, or `uses RunForever` |
 | `prover.law` | An `impl` whose methods' contracts do not show a law | `ensures` on the methods, or a law proof |
 | `prover.unreachable` | An `unreachable` that may be reached | Prove the point cannot be reached |
 | `parser.needs_parentheses` | Operators that do not combine without parentheses | The fix adds them |
@@ -4695,7 +4990,7 @@ Every module is used as `use standard::name`, then `name::Item`.
 | `specification` | `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`, the types of specifications |
 | `streams` | Buffered readers and writers over handles |
 | `tasks` | `Channel`, `Cell`, `Counter`, `Limiter`, `Pool`, `SeededTasks`, and `with_timeout` |
-| `text` | `String`, `StringSlice`, `TextBuilder`, `Parse`, and `FromTemplate` |
+| `text` | `String`, `StringSlice`, `Parse`, and `FromTemplate` |
 | `time` | `Instant`, `Duration`, dates, time zones, layouts, `FixedClock`, and `ManualClock` |
 | `tls` | TLS clients and servers |
 | `toml` | Parsing, encoding, and decoding TOML |
