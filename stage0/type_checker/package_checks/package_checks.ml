@@ -804,10 +804,10 @@ let report_unused (lookups : Lookups.t) (declaration : Resolve.Names.declaration
     | Constant | Member_constant -> (Unused_constant, "constant")
     | _ -> (Unused_function, "function")
   in
-  let visibility =
+  let visibility, (severity : Diagnostic.severity) =
     match declaration.visibility with
-    | Internal -> "internal"
-    | Private -> "private"
+    | Internal -> ("internal", Error)
+    | Private -> ("private", Warning)
     | Public | Public_opaque -> raise_bug "an unused definition that is public"
   in
   let message =
@@ -822,7 +822,7 @@ let report_unused (lookups : Lookups.t) (declaration : Resolve.Names.declaration
   let definition, spans = read_definition lookups declaration in
   {
     key = declaration.key;
-    diagnostic = Diagnostic.make ~code:(Usage code) (locate_name spans definition) message;
+    diagnostic = Diagnostic.make ~severity ~code:(Usage code) (locate_name spans definition) message;
   }
 
 let check_unexported (lookups : Lookups.t) package =

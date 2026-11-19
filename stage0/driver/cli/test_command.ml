@@ -216,7 +216,7 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   let report = Report.gather database snapshot packages in
   let checked = read_microseconds () in
   let tests = select snapshot database packages ~paths ~match_ in
-  if not (Report.clean report) then raise (Report.Errors report);
+  Report.require_no_errors report;
   let progress =
     {
       status_line = Status_line.create ~enabled:(not json);
@@ -248,7 +248,7 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   in
   if json then
     Json.print
-      (Json.make_document ~diagnostics:[]
+      (Report.make_document report
          [
            ("tests", Json.List (List.map2 test_json tests records));
            ("timings", encode_timings timings);

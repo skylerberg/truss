@@ -220,7 +220,7 @@ let run ~from_ ~to_ =
   let snapshot, packages = Command_packages.load_worktree () in
   let database = Workspace.open_database snapshot in
   let report = Report.gather database snapshot packages in
-  if not (Report.clean report) then raise (Report.Errors report);
+  Report.require_no_errors report;
   let plan =
     match resolve_target database packages from_ with
     | Definition { path; module_; owner } ->
@@ -270,7 +270,7 @@ let run ~from_ ~to_ =
       let count = List.length edits in
       if json then
         Json.print
-          (Json.make_document ~diagnostics:[]
+          (Report.make_document report
              [
                ("edits", Json.List edits);
                ( "moved",

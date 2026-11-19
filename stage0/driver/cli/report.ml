@@ -60,11 +60,17 @@ let gather ?(proofs = false) database snapshot packages =
 let of_files files = { checked = files; proofs = None; proven = Lazy.from_val []; problems = [] }
 let force_proofs report = Option.map Lazy.force report.proofs
 let list_files report = report.checked @ Lazy.force report.proven
-let clean report = report.problems = [] && list_files report = []
+let list_diagnostics report = List.concat_map (fun file -> file.diagnostics) (list_files report)
 
-let count report =
+let count_errors report =
   List.length report.problems
-  + List.fold_left (fun total file -> total + List.length file.diagnostics) 0 (list_files report)
+  + List.length (List.filter Diagnostic.is_error (list_diagnostics report))
+
+let count_warnings report =
+  List.length
+    (List.filter (fun diagnostic -> not (Diagnostic.is_error diagnostic)) (list_diagnostics report))
+
+let has_errors report = count_errors report > 0
 
 let to_json report =
   List.concat_map
@@ -91,8 +97,15 @@ let print report =
   List.iter (fun problem -> Output.eprint_line (Project.show_problem problem)) report.problems;
   print_files report.checked;
   print_files (Lazy.force report.proven);
-  match count report with
-  | 0 -> ()
-  | error_count -> Output.eprintf "%s\n" (Diagnostic.show_count error_count "error" "errors")
+  let errors = Diagnostic.show_count (count_errors report) "error" "errors"
+  and warnings = Diagnostic.show_count (count_warnings report) "warning" "warnings" in
+  match (count_errors report, count_warnings report) with
+  | 0, 0 -> ()
+  | _, 0 -> Output.eprintf "%s\n" errors
+  | 0, _ -> Output.eprintf "%s\n" warnings
+  | _ -> Output.eprintf "%s and %s\n" errors warnings
 
 exception Errors of t
+
+let require_no_errors report =
+  if has_errors report then raise (Errors report) else if not (Output.json ()) then print report

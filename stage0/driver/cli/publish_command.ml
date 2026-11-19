@@ -162,7 +162,7 @@ let run ~version =
     else List.iter Output.eprint_line sentences;
     raise (Outcome.Stop 1)
   in
-  if not (Report.clean report) then raise (Report.Errors report);
+  Report.require_no_errors report;
   (match list_unfinished snapshot database packages with
   | [] -> ()
   | unfinished_code ->

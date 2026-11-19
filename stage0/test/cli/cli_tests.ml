@@ -391,7 +391,7 @@ let () =
       in
       let project = Cli.Command_packages.load (Filename.concat root "one") in
       expect_strings ~expected:[ "one" ] (list_names project);
-      if not (Cli.Report.clean (gather project)) then fail "has diagnostics");
+      if Cli.Report.has_errors (gather project) then fail "has errors");
   test "a dependency's failed proof is the program's" (fun () ->
       let root =
         make_directory
@@ -620,7 +620,7 @@ let () =
       let root = make_directory owned in
       let project = Cli.Command_packages.load root in
       expect_strings ~expected:[ "acme::geometry"; "app" ] (list_names project);
-      if not (Cli.Report.clean (gather ~proofs:true project)) then fail "has diagnostics");
+      if Cli.Report.has_errors (gather ~proofs:true project) then fail "has errors");
   test "show finds a definition of a package with an owner by its full path" (fun () ->
       match run_show (make_directory owned) "acme::geometry::vector::double" with
       | [ text ] ->
@@ -971,7 +971,7 @@ let () =
         Cli.Command_packages.load
           (make_package [ ("menu/menu.truss", Fixtures.Cli.menu_main_of_a_course) ])
       in
-      if not (Cli.Report.clean (gather project)) then fail "has diagnostics");
+      if Cli.Report.has_errors (gather project) then fail "has errors");
   test "an echo main can reach is refused" (fun () ->
       let project =
         Cli.Command_packages.load (make_package [ ("main.truss", Fixtures.Cli.main_with_an_echo) ])
@@ -1459,7 +1459,7 @@ let expect_versions root expected =
     fail "the lock file has [%s]"
       (String.concat "; " (List.map (fun (name, version) -> name ^ " " ^ version) listed))
 
-let clean root = Cli.Report.clean (gather (Cli.Command_packages.load root))
+let clean root = not (Cli.Report.has_errors (gather (Cli.Command_packages.load root)))
 
 let () =
   test "adding a package writes its entry, and a line for it and for each package it brings"
@@ -1470,7 +1470,7 @@ let () =
       if not (String.includes ~affix:"\"acme::geometry\" = []" (read root "truss.toml")) then
         fail "the manifest is %s" (read root "truss.toml");
       expect_versions root [ ("acme::geometry", "1.0.0"); ("acme::units", "1.0.0") ];
-      if not (clean root) then fail "has diagnostics");
+      if not (clean root) then fail "has errors");
   test "a package is added at the version it was published with, and nothing newer" (fun () ->
       let registry = make_stocked_registry () in
       let root = make_package [ uses_geometry ] in
@@ -1483,7 +1483,7 @@ let () =
       if add root [ "acme::shapes" ] <> 0 then fail "not added";
       expect_versions root
         [ ("acme::geometry", "1.0.0"); ("acme::shapes", "1.0.0"); ("acme::units", "1.1.0") ];
-      if not (clean root) then fail "has diagnostics");
+      if not (clean root) then fail "has errors");
   test "a package is added at the version written after @" (fun () ->
       let _ = make_stocked_registry () in
       let root = make_package [ ("main.truss", Fixtures.Cli.meter_through_lengths) ] in
@@ -1626,7 +1626,7 @@ let () =
       let app = Filename.concat root "app" in
       if add app [ "acme::geometry" ] <> 0 then fail "not added";
       expect_versions root [ ("acme::geometry", "1.0.0") ];
-      if not (clean root) then fail "has diagnostics";
+      if not (clean root) then fail "has errors";
       let project = Cli.Command_packages.load root in
       if
         not
@@ -1853,7 +1853,7 @@ let () =
       if add root [ "acme::walls" ] <> 0 then fail "not added";
       expect_versions root
         [ ("acme::geometry", "1.0.0"); ("acme::units", "1.0.0"); ("acme::walls", "1.0.0") ];
-      if not (clean root) then fail "has diagnostics");
+      if not (clean root) then fail "has errors");
   test "a dependency that only a package's tests use is left out of its published lock file"
     (fun () ->
       let _ = make_stocked_registry () in
@@ -1876,7 +1876,7 @@ let () =
       let user = make_package [ ("main.truss", Fixtures.Cli.tall_through_walls) ] in
       ignore (add user [ "acme::walls" ]);
       expect_versions user [ ("acme::walls", "1.0.0") ];
-      if not (Cli.Report.clean (gather ~proofs:true (Cli.Command_packages.load user))) then
+      if Cli.Report.has_errors (gather ~proofs:true (Cli.Command_packages.load user)) then
         fail "has diagnostics");
   test "a package that depends on one of its project's that is not published is refused" (fun () ->
       let _ = make_registry () in
@@ -1964,12 +1964,12 @@ let () =
       if run_quietly [ "new"; "-C"; root; "acme::weather" ] <> 0 then fail "not made";
       let project = Cli.Command_packages.load (Filename.concat root "weather") in
       expect_strings ~expected:[ "acme::weather" ] (list_names project);
-      if not (Cli.Report.clean (gather ~proofs:true project)) then fail "has diagnostics");
+      if Cli.Report.has_errors (gather ~proofs:true project) then fail "has errors");
   test "a new package checks cleanly" (fun () ->
       let root = make_directory [] in
       if run_quietly [ "new"; "-C"; root; "weather" ] <> 0 then fail "not made";
       let project = Cli.Command_packages.load (Filename.concat root "weather") in
-      if not (Cli.Report.clean (gather ~proofs:true project)) then fail "has diagnostics")
+      if Cli.Report.has_errors (gather ~proofs:true project) then fail "has errors")
 
 let () =
   test "JSON with escapes and a surrogate pair is read" (fun () ->
@@ -2078,3 +2078,29 @@ let () =
           {|"params":{"uri":"file:///project/a%20b.truss","diagnostics":[]}|};
         ];
       if List.length !asked <> 1 then fail "a check with no open file")
+
+let () =
+  test "check reports an unused private function as a warning, and passes" (fun () ->
+      let root =
+        make_package
+          [
+            ( "main.truss",
+              "fn main(arguments: List[String]) -> ExitCode {\n\
+              \  ExitCode.success\n\
+               }\n\n\
+               fn helper() -> Int64 {\n\
+              \  1\n\
+               }\n" );
+          ]
+      in
+      let status, output = run_truss [ "check"; "-C"; root ] in
+      if status <> 0 then fail "check exited %d:\n%s" status output;
+      if not (String.includes ~affix:"warning[usage.unused_function]" output) then
+        fail "output %S" output;
+      if not (String.includes ~affix:"1 warning" output) then fail "output %S" output;
+      match
+        list_objects (Cli.Json.lookup_field "diagnostics" (run_json [ "check"; "-C"; root ]))
+      with
+      | [ diagnostic ] ->
+          expect_string ~expected:"warning" (read_string_field "severity" diagnostic)
+      | found -> fail "found %d diagnostics" (List.length found))
