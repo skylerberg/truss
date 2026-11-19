@@ -98,7 +98,7 @@ let is_met_by_trial (state : State.state) (obligation : State.obligation) =
 let is_pending state obligation =
   match decide state obligation with Pending -> true | Met | Unmet _ | Vacuous -> false
 
-let rec add (state : State.state) (obligation : State.obligation) =
+let add (state : State.state) (obligation : State.obligation) =
   (match obligation.requirement with
   | Implements { trait; _ } ->
       Option.iter
@@ -109,11 +109,37 @@ let rec add (state : State.state) (obligation : State.obligation) =
   let outcome = decide state obligation in
   (match (outcome, State.find_current_frame state) with
   | Pending, Some frame -> frame.obligations <- obligation :: frame.obligations
-  | _ -> ());
+  | Pending, None ->
+      State.raise_bug "an obligation on `%s` outside every statement is not decided"
+        (State.show state obligation.subject)
+  | (Met | Unmet _ | Vacuous), _ -> ());
   outcome
 
-and require state subject trait ~on_met ~on_unmet =
+let require state subject trait ~on_met ~on_unmet =
   ignore (add state { subject; requirement = Implements { trait; on_met; on_unmet } })
+
+let describe_associated_type (state : State.state) base (trait : Types.trait_reference) name =
+  Printf.sprintf "the `%s` of `%s` under `%s`" name (State.show state base)
+    (Types.show_trait { (Unify.zonk_trait state.unifier trait) with associated = [] })
+
+let describe_compared_type (state : State.state) : Types.ty -> string = function
+  | Projection { base; trait; name } -> describe_associated_type state base trait name
+  | type_ -> Printf.sprintf "`%s`" (State.show state type_)
+
+let describe_projection_mismatch (state : State.state) base trait name ~actual ~wanted =
+  let associated_type = describe_associated_type state base trait name in
+  if
+    Types.equal (State.zonk state actual)
+      (State.zonk state (Types.Projection { base; trait = { trait with associated = [] }; name }))
+  then
+    Printf.sprintf "%s may differ from %s."
+      (String.capitalize_ascii associated_type)
+      (describe_compared_type state wanted)
+  else
+    Printf.sprintf "%s is %s, and %s is expected."
+      (String.capitalize_ascii associated_type)
+      (describe_compared_type state actual)
+      (describe_compared_type state wanted)
 
 let require_projection_equalities (state : State.state) (frame : State.frame) =
   let equalities = List.rev state.unifier.deferred_projection_equalities in
@@ -128,8 +154,7 @@ let require_projection_equalities (state : State.state) (frame : State.frame) =
               match mismatch with
               | Some (_, actual) ->
                   State.add_diagnostic state Mismatch frame.span
-                    (Printf.sprintf "The `%s` of `%s` is `%s`, and `%s` is expected." name
-                       (Types.show base) (State.show state actual) (State.show state wanted))
+                    (describe_projection_mismatch state base trait name ~actual ~wanted)
               | None -> (
                   match State.find_unmet_impl state base (State.normalize_trait state trait) with
                   | Some report -> report
@@ -301,7 +326,7 @@ let hand_literals_to_parent (state : State.state) (frame : State.frame) ~escapin
                   Hashtbl.replace state.unifier.code_literals index ();
                 state.undecided <- { index; kind; local } :: state.undecided
             | _ -> ())
-          (Unify.list_reachable_unknowns state.unifier type_))
+          (Unify.list_reachable_unknowns state.unifier (State.normalize state type_)))
       (declared @ escaping)
 
 let default_literals (state : State.state) (frame : State.frame) =
@@ -489,6 +514,11 @@ let run_frame (state : State.state) (env : State.env) (span : Source.Definition_
   settle state frame ~escaping:(list_escaping result);
   state.frames <- List.tl state.frames;
   state.unifier.level <- state.unifier.level - 1;
+  (match (state.frames, state.unifier.deferred_projection_equalities) with
+  | [], (projection, _) :: _ ->
+      State.raise_bug "the equality of `%s` is not decided after every statement"
+        (State.show state projection)
+  | _ -> ());
   result
 
 let run_in_statement state env span body =

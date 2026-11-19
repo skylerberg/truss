@@ -140,7 +140,7 @@ Rules: [Number literals](SPECIFICATION.md#number-literals).
 | A literal that no use decides takes the first default type that its uses allow. | A shift amount and a literal too large for `Int64` need no rule of their own. |
 | Only the sealed number traits take part in choosing a default. | No package can implement them, so adding an `impl` never changes the default of an existing literal. Haskell limits its defaulting to the standard classes for the same reason. |
 | A method that every type of a number kind has is declared once, in a sealed trait. | A call on an undecided literal is then one obligation on the literal. Methods declared on each type separately would make the call a choice among them, which only a search can resolve, and the search is exponential in the worst case. |
-| An equation between an associated type of an unknown type and another type is an obligation. | Unification cannot solve it, because an associated type is a function of its base type and cannot be inverted, and it cannot evaluate it until the base type is known. The obligation decides it then, as rustc's projection obligations do. |
+| An equation between an associated type with an unknown base type or trait argument and another type is an obligation, even when the other type is an associated type of the same base. | Unification cannot solve the equation: an associated type is a function of its base type and trait arguments, unification cannot invert that function, and the function has no value until its arguments are known. Equating the trait arguments of two associated types would assume that the function is injective, and it is not. The obligation decides the equation once its arguments are known, as rustc's projection obligations do. |
 | A literal has the methods of a trait that every type of its kind implements, and the associated types that every such type gives alike. | `count.saturating_add(1)` would otherwise fix `count` at `Int64` before a later use decides it, and the type of a local would depend on the order of its uses. |
 | A leading zero is an error. | `0755` is octal in C and the shell, where it sets file permissions. Read as decimal, it would silently set the wrong permissions (*LLM habits*). |
 
@@ -607,7 +607,9 @@ An unknown belongs to the outermost statement that reaches it. A statement
 inside a lambda decides only the types that no enclosing statement sees, so
 `return 3` in a lambda takes its type from the call that uses the lambda's
 result. Deciding at the inner statement would give the `3` its default type
-before that call is checked.
+before that call is checked. An unknown that a type reaches only inside an
+associated type does not count. No rule infers an associated type's base from
+its value, so the enclosing statement could never decide that unknown.
 Only the type of a literal is left undecided, and it can only become a
 number type, so the declaration still tells the reader that the local is a
 number.

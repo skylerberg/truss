@@ -827,11 +827,11 @@ let () =
       expect_headers
         ~expected:
           [
-            "public fn Int64.to_big_endian_bytes(self) -> Array[UInt8, 8]";
-            "impl FixedWidthInteger for Int64 {";
-            "impl Serialize for Int64 {";
+            "public fn Float64.to_float32(self) -> Float32";
+            "impl FloatingPoint for Float64 {";
+            "impl Serialize for Float64 {";
           ]
-        (run_show root "Int64"));
+        (run_show root "Float64"));
   test "a dependency's type is shown with its impls of public traits only" (fun () ->
       let root =
         make_directory

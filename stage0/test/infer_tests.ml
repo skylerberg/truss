@@ -289,7 +289,16 @@ let () =
   Harness.test "a deferred associated type that differs from its use is one error at the statement"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.associated_type_of_a_literal_mismatched_with_its_use
-        "types.mismatch" ~says:"The `Output` of `Int64` is `Int64`, and `UInt8` is expected.");
+        "types.mismatch"
+        ~says:"The `Output` of `Int64` under `Add[Int64]` is `Int64`, and `UInt8` is expected.");
+  Harness.test
+    "associated types under different trait arguments are not equated argument by argument"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.associated_types_under_different_trait_arguments
+        "types.mismatch"
+        ~says:
+          "The `Output` of `Value` under `Add[Int64]` may differ from the `Output` of `Value` \
+           under `Add[UInt64]`.");
   Harness.test "a scrutinee's literal type is decided by the statement that holds the match"
     (fun () ->
       let text = Fixtures.Infer.match_on_a_literal_decided_by_an_arm in

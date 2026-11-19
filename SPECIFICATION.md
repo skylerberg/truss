@@ -182,14 +182,15 @@ and `Float64` for a float. In a specification, an integer literal tries
   gives alike. With `fn doubled[Value: Add[Value]](value: Value) -> Value.Output`,
   `doubled(3)` has the literal's own type, because every integer type's
   `Output` under `Add` is itself.
-- An associated type of an undecided type waits for that type wherever it is
-  compared with another type. With
+- An associated type waits for its base type and its trait's arguments to be
+  decided wherever it is compared with another type. With
   `fn widened[Value: Add[Int64]](value: Value) -> Value.Output`, the result of
   `widened(first)` is checked once `first` is decided. An associated type that
   differs from the type it is compared with is an error at the statement.
-- A call of a method that only a trait implemented by some types of the
-  literal's kind declares, where the trait is not sealed, needs the literal's
-  type, so the literal takes its default type at the call.
+- Any other method call on an undecided literal needs the literal's type to
+  choose its method, so the literal takes its default type at the call. Such
+  a method belongs to an unsealed trait that only some types of the kind
+  implement, or to two sealed traits, as `absolute_difference` does.
 - An integer literal is never a float.
 - A literal that does not fit its type is an error. A negated literal is
   checked after the negation, so `-128` fits an `Int8`.

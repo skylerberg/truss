@@ -427,7 +427,7 @@ and list_trait_candidates (state : State.state) receiver_type name =
            (Interface.Properties.list_bound_closure state.lookups.interface ~self:receiver_type
               trait))
   | _ ->
-      let is_sealed_trait_of_its_kind trait =
+      let is_sealed_to_receiver_kind trait =
         match (State.resolve state receiver_type, Types.find_sealed_implementors trait) with
         | Types.Literal (kind, _), Some implementors ->
             List.for_all
@@ -447,8 +447,7 @@ and list_trait_candidates (state : State.state) receiver_type name =
       List.filter_map with_method
         (match
            List.filter
-             (fun (reference : Types.trait_reference) ->
-               is_sealed_trait_of_its_kind reference.trait)
+             (fun (reference : Types.trait_reference) -> is_sealed_to_receiver_kind reference.trait)
              unimplemented
          with
         | [ only ] -> implemented @ [ only ]

@@ -222,12 +222,6 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
       true
   | Variable left_index, Variable right_index when left_index = right_index -> true
   | Variable index, other | other, Variable index -> bind unifier index other
-  | Projection left_projection, Projection right_projection
-    when left_projection.name = right_projection.name
-         && Path.equal left_projection.trait.trait right_projection.trait.trait
-         && Types.equal left_projection.base right_projection.base ->
-      unify_arguments unifier left_projection.trait.trait_arguments
-        right_projection.trait.trait_arguments
   | (Projection _ as projection), other when is_unsolved_projection unifier projection ->
       defer_projection_equality unifier projection other
   | other, (Projection _ as projection) when is_unsolved_projection unifier projection ->
