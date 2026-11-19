@@ -276,6 +276,24 @@ let may_alias (first : Lowered.place) (second : Lowered.place) =
   in
   first.root = second.root && overlaps first.projections second.projections
 
+let render_failure_operand (emission : Emission.t) fc operand =
+  match C_values.render_operand emission fc operand with
+  | Some (text, _) -> text
+  | None -> C_runtime.raise_bug "an operand of zero size"
+
+let render_failure_arguments (emission : Emission.t) fc ~message ~length ~site ~reported =
+  [
+    render_failure_operand emission fc message;
+    render_failure_operand emission fc length;
+    (match reported with
+    | Some reported -> render_failure_operand emission fc reported
+    | None -> Emission.render_site emission site);
+  ]
+
+let render_panic_arguments (emission : Emission.t) fc ~message ~length ~site ~reported ~trace =
+  render_failure_arguments emission fc ~message ~length ~site ~reported
+  @ [ render_failure_operand emission fc (Option.value trace ~default:(Lowered.Constant Null)) ]
+
 let render_statement (emission : Emission.t) fc (statement : Lowered.statement) : C_text.t =
   let render_required argument ~description =
     match C_values.render_operand emission fc argument with
@@ -339,6 +357,11 @@ let render_statement (emission : Emission.t) fc (statement : Lowered.statement) 
              render_required length ~description:"an echo";
              Emission.render_site emission site;
            ])
+  | Fail_obligation_when { test; message; length; site; reported; trace } ->
+      render_call_statement
+        (render_runtime_call "TRUSS_FAIL_OBLIGATION_WHEN"
+           (C_values.render_comparison emission fc test
+           :: render_panic_arguments emission fc ~message ~length ~site ~reported ~trace))
   | Free_block { place; variant } -> (
       match C_values.render_place emission fc place with
       | Some (text, Value sum) ->
@@ -378,7 +401,7 @@ let render_statement (emission : Emission.t) fc (statement : Lowered.statement) 
              render_required last ~description:"an operand";
            ])
 
-let unreachable = "T_UNREACHABLE();"
+let unreachable = "TRUSS_UNREACHABLE();"
 
 let render_terminator (emission : Emission.t) fc (terminator : Lowered.terminator) : C_text.t =
   let render_operand argument =
@@ -449,29 +472,19 @@ let render_terminator (emission : Emission.t) fc (terminator : Lowered.terminato
       | Some (text, _) -> render_line (Text "return " ++ text ++ Text ";"))
   | Unreachable -> render_text_line unreachable
   | Fail { failure; message; length; site; reported; trace } ->
-      if match failure with Lowered.Todo -> true | Panic | Obligation | Assertion -> false then
-        Emission.record_failure emission Todo site;
+      if failure = Lowered.Todo then Emission.record_failure emission Todo site;
       let runtime =
         match failure with
         | Panic -> "t_runtime_panic"
-        | Obligation -> "T_OBLIGATION_FAILED"
         | Assertion -> "t_runtime_assertion_failed"
         | Todo -> "t_runtime_todo"
       in
-      let site =
-        match reported with
-        | Some reported -> fst (render_operand reported)
-        | None -> Emission.render_site emission site
-      in
-      let chain =
+      let arguments =
         match (failure, trace) with
-        | (Panic | Obligation), Some trace -> [ fst (render_operand trace) ]
-        | (Panic | Obligation), None -> [ fst (render_operand (Constant Null)) ]
-        | (Assertion | Todo), None -> []
+        | Panic, _ -> render_panic_arguments emission fc ~message ~length ~site ~reported ~trace
+        | (Assertion | Todo), None ->
+            render_failure_arguments emission fc ~message ~length ~site ~reported
         | (Assertion | Todo), Some _ ->
             C_runtime.raise_bug "a call chain on a failure that is not a panic"
       in
-      render_line
-        (render_runtime_call runtime
-           ([ fst (render_operand message); fst (render_operand length); site ] @ chain)
-        ++ Text ";")
+      render_line (render_runtime_call runtime arguments ++ Text ";")

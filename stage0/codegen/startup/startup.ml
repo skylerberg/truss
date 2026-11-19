@@ -212,17 +212,17 @@ static void t_install_signal_dispositions(void) {
 
 let allocation =
   {|
-#ifdef T_TESTS
+#ifdef TRUSS_TESTS
 static _Atomic uint64_t t_live_blocks;
-#define t_block_allocated() \
+#define TRUSS_BLOCK_ALLOCATED() \
   ((void)atomic_fetch_add_explicit(&t_live_blocks, 1, memory_order_relaxed))
-#define t_block_freed() ((void)atomic_fetch_sub_explicit(&t_live_blocks, 1, memory_order_relaxed))
+#define TRUSS_BLOCK_FREED() ((void)atomic_fetch_sub_explicit(&t_live_blocks, 1, memory_order_relaxed))
 uint64_t t_runtime_live_blocks(void) {
   return atomic_load_explicit(&t_live_blocks, memory_order_relaxed);
 }
 #else
-#define t_block_allocated() ((void)0)
-#define t_block_freed() ((void)0)
+#define TRUSS_BLOCK_ALLOCATED() ((void)0)
+#define TRUSS_BLOCK_FREED() ((void)0)
 #endif
 
 void *t_runtime_allocate(uint64_t size, uint64_t alignment) {
@@ -234,12 +234,12 @@ void *t_runtime_allocate(uint64_t size, uint64_t alignment) {
     pointer = NULL;
   }
   if (pointer == NULL) t_out_of_memory();
-  t_block_allocated();
+  TRUSS_BLOCK_ALLOCATED();
   return pointer;
 }
 
 void t_runtime_free(void *pointer) {
-  t_block_freed();
+  TRUSS_BLOCK_FREED();
   free(pointer);
 }
 
@@ -285,26 +285,26 @@ static void t_thread_attributes(pthread_attr_t *attributes) {
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
-#define T_ADDRESS_SANITIZER 1
+#define TRUSS_ADDRESS_SANITIZER 1
 #endif
 #if __has_feature(thread_sanitizer)
-#define T_THREAD_SANITIZER 1
+#define TRUSS_THREAD_SANITIZER 1
 #endif
 #endif
-#if defined(__SANITIZE_ADDRESS__) && !defined(T_ADDRESS_SANITIZER)
-#define T_ADDRESS_SANITIZER 1
+#if defined(__SANITIZE_ADDRESS__) && !defined(TRUSS_ADDRESS_SANITIZER)
+#define TRUSS_ADDRESS_SANITIZER 1
 #endif
-#if defined(__SANITIZE_THREAD__) && !defined(T_THREAD_SANITIZER)
-#define T_THREAD_SANITIZER 1
+#if defined(__SANITIZE_THREAD__) && !defined(TRUSS_THREAD_SANITIZER)
+#define TRUSS_THREAD_SANITIZER 1
 #endif
 
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
 void __sanitizer_start_switch_fiber(void **fake_stack_save, const void *bottom, size_t size);
 void __sanitizer_finish_switch_fiber(void *fake_stack_save, const void **bottom_old,
                                      size_t *size_old);
 void __asan_unpoison_memory_region(void const volatile *address, size_t size);
 #endif
-#ifdef T_THREAD_SANITIZER
+#ifdef TRUSS_THREAD_SANITIZER
 void *__tsan_get_current_fiber(void);
 void *__tsan_create_fiber(unsigned flags);
 void __tsan_destroy_fiber(void *fiber);
@@ -315,10 +315,10 @@ __attribute__((visibility("default"), used)) const char *__tsan_default_options(
 }
 #endif
 
-#define T_STACK_CACHE 64
+#define TRUSS_STACK_CACHE 64
 
 static pthread_mutex_t t_stack_lock = PTHREAD_MUTEX_INITIALIZER;
-static void *t_stack_cache[T_STACK_CACHE];
+static void *t_stack_cache[TRUSS_STACK_CACHE];
 static size_t t_stack_cached;
 static size_t t_stack_bytes;
 static size_t t_stack_guard;
@@ -347,11 +347,11 @@ static void *t_stack_acquire(void) {
 }
 
 static void t_stack_release(void *low) {
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   __asan_unpoison_memory_region(low, t_stack_bytes);
 #endif
   pthread_mutex_lock(&t_stack_lock);
-  if (t_stack_cached < T_STACK_CACHE) {
+  if (t_stack_cached < TRUSS_STACK_CACHE) {
     t_stack_cache[t_stack_cached++] = low;
     low = NULL;
   }
@@ -366,16 +366,16 @@ struct t_context {
 void t_context_switch(struct t_context *from, const struct t_context *to);
 
 #ifdef __APPLE__
-#define T_ASSEMBLY_NAME(name) "_" name
+#define TRUSS_ASSEMBLY_NAME(name) "_" name
 #else
-#define T_ASSEMBLY_NAME(name) name
+#define TRUSS_ASSEMBLY_NAME(name) name
 #endif
 
 #if defined(__x86_64__)
 __asm__(".text\n"
-        ".globl " T_ASSEMBLY_NAME("t_context_switch") "\n"
+        ".globl " TRUSS_ASSEMBLY_NAME("t_context_switch") "\n"
         ".p2align 4\n"
-        T_ASSEMBLY_NAME("t_context_switch") ":\n"
+        TRUSS_ASSEMBLY_NAME("t_context_switch") ":\n"
         "  pushq %rbp\n"
         "  pushq %rbx\n"
         "  pushq %r12\n"
@@ -401,9 +401,9 @@ static void t_context_start(struct t_context *context, void *low, size_t size, v
 }
 #elif defined(__aarch64__)
 __asm__(".text\n"
-        ".globl " T_ASSEMBLY_NAME("t_context_switch") "\n"
+        ".globl " TRUSS_ASSEMBLY_NAME("t_context_switch") "\n"
         ".p2align 2\n"
-        T_ASSEMBLY_NAME("t_context_switch") ":\n"
+        TRUSS_ASSEMBLY_NAME("t_context_switch") ":\n"
         "  sub sp, sp, #160\n"
         "  stp x19, x20, [sp, #0]\n"
         "  stp x21, x22, [sp, #16]\n"
@@ -451,11 +451,11 @@ struct t_coroutine {
   void (*code)(void *environment, uint64_t item, void *capabilities);
   void *environment;
   uint64_t item;
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   const void *resumer_stack;
   size_t resumer_stack_size;
 #endif
-#ifdef T_THREAD_SANITIZER
+#ifdef TRUSS_THREAD_SANITIZER
   void *fiber;
   void *resumer_fiber;
 #endif
@@ -474,16 +474,16 @@ __attribute__((noinline)) static void t_coroutine_current_set(struct t_coroutine
 }
 
 static void t_coroutine_leave(struct t_coroutine *coroutine) {
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   void *fake = NULL;
   __sanitizer_start_switch_fiber(coroutine->finished ? NULL : &fake, coroutine->resumer_stack,
                                  coroutine->resumer_stack_size);
 #endif
-#ifdef T_THREAD_SANITIZER
+#ifdef TRUSS_THREAD_SANITIZER
   __tsan_switch_to_fiber(coroutine->resumer_fiber, 0);
 #endif
   t_context_switch(&coroutine->context, &coroutine->resumer);
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   __sanitizer_finish_switch_fiber(fake, &coroutine->resumer_stack,
                                   &coroutine->resumer_stack_size);
 #endif
@@ -491,7 +491,7 @@ static void t_coroutine_leave(struct t_coroutine *coroutine) {
 
 static void t_coroutine_entry(void) {
   struct t_coroutine *coroutine = t_coroutine_current();
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   __sanitizer_finish_switch_fiber(NULL, &coroutine->resumer_stack,
                                   &coroutine->resumer_stack_size);
 #endif
@@ -511,7 +511,7 @@ uint64_t t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item
   coroutine->environment = environment;
   coroutine->item = item;
   t_context_start(&coroutine->context, coroutine->stack, t_stack_bytes, t_coroutine_entry);
-#ifdef T_THREAD_SANITIZER
+#ifdef TRUSS_THREAD_SANITIZER
   coroutine->fiber = __tsan_create_fiber(0);
 #endif
   return (uint64_t)coroutine;
@@ -521,21 +521,21 @@ uint8_t t_runtime_coroutine_resume(uint64_t handle) {
   struct t_coroutine *coroutine = (struct t_coroutine *)handle;
   struct t_coroutine *resumer = t_coroutine_current();
   t_coroutine_current_set(coroutine);
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   void *fake = NULL;
   __sanitizer_start_switch_fiber(&fake, coroutine->stack, t_stack_bytes);
 #endif
-#ifdef T_THREAD_SANITIZER
+#ifdef TRUSS_THREAD_SANITIZER
   coroutine->resumer_fiber = __tsan_get_current_fiber();
   __tsan_switch_to_fiber(coroutine->fiber, 0);
 #endif
   t_context_switch(&coroutine->resumer, &coroutine->context);
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   __sanitizer_finish_switch_fiber(fake, NULL, NULL);
 #endif
   t_coroutine_current_set(resumer);
   if (!coroutine->finished) return 1;
-#ifdef T_THREAD_SANITIZER
+#ifdef TRUSS_THREAD_SANITIZER
   __tsan_destroy_fiber(coroutine->fiber);
 #endif
   t_stack_release(coroutine->stack);
@@ -630,19 +630,19 @@ struct t_job {
   int offered;
 };
 
-#define T_QUEUE 256
-#define T_WORKERS 256
-#define T_SPARES 256
-#define T_FORK 32
+#define TRUSS_QUEUE 256
+#define TRUSS_MAXIMUM_WORKERS 256
+#define TRUSS_MAXIMUM_SPARES 256
+#define TRUSS_FORK 32
 
 struct t_worker {
   _Alignas(64) _Atomic(int64_t) top;
   _Alignas(64) _Atomic(int64_t) bottom;
   uint64_t random;
-  _Alignas(64) _Atomic(struct t_job *) jobs[T_QUEUE];
+  _Alignas(64) _Atomic(struct t_job *) jobs[TRUSS_QUEUE];
 };
 
-static struct t_worker t_workers[T_WORKERS + T_SPARES];
+static struct t_worker t_workers[TRUSS_MAXIMUM_WORKERS + TRUSS_MAXIMUM_SPARES];
 static atomic_size_t t_worker_count;
 static _Thread_local struct t_worker *t_self;
 
@@ -669,8 +669,8 @@ static void t_spare_ensure(void);
 static int t_offer(struct t_worker *worker, struct t_job *job) {
   int64_t bottom = atomic_load_explicit(&worker->bottom, memory_order_relaxed);
   int64_t top = atomic_load_explicit(&worker->top, memory_order_acquire);
-  if (bottom - top >= T_QUEUE) return 0;
-  atomic_store_explicit(&worker->jobs[bottom % T_QUEUE], job, memory_order_relaxed);
+  if (bottom - top >= TRUSS_QUEUE) return 0;
+  atomic_store_explicit(&worker->jobs[bottom % TRUSS_QUEUE], job, memory_order_relaxed);
   atomic_store(&worker->bottom, bottom + 1);
   return 1;
 }
@@ -682,7 +682,7 @@ static struct t_job *t_take_back(struct t_worker *worker) {
   int64_t top = atomic_load_explicit(&worker->top, memory_order_relaxed);
   struct t_job *job = NULL;
   if (top <= bottom) {
-    job = atomic_load_explicit(&worker->jobs[bottom % T_QUEUE], memory_order_relaxed);
+    job = atomic_load_explicit(&worker->jobs[bottom % TRUSS_QUEUE], memory_order_relaxed);
     if (top == bottom) {
       if (!atomic_compare_exchange_strong_explicit(&worker->top, &top, top + 1, memory_order_seq_cst,
                                                    memory_order_relaxed))
@@ -700,7 +700,7 @@ static struct t_job *t_steal(struct t_worker *victim) {
   atomic_thread_fence(memory_order_seq_cst);
   int64_t bottom = atomic_load_explicit(&victim->bottom, memory_order_acquire);
   if (top >= bottom) return NULL;
-  struct t_job *job = atomic_load_explicit(&victim->jobs[top % T_QUEUE], memory_order_relaxed);
+  struct t_job *job = atomic_load_explicit(&victim->jobs[top % TRUSS_QUEUE], memory_order_relaxed);
   if (!atomic_compare_exchange_strong_explicit(&victim->top, &top, top + 1, memory_order_seq_cst,
                                                memory_order_relaxed))
     return NULL;
@@ -831,7 +831,7 @@ static void t_pool_start(void) {
     const char *requested = getenv("TRUSS_WORKERS");
     if (requested != NULL && requested[0] != 0) count = strtol(requested, NULL, 10);
   }
-  if (count > T_WORKERS) count = T_WORKERS;
+  if (count > TRUSS_MAXIMUM_WORKERS) count = TRUSS_MAXIMUM_WORKERS;
   pthread_attr_t attributes;
   t_thread_attributes(&attributes);
   pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
@@ -849,7 +849,7 @@ static void t_pool_start(void) {
 }
 
 static void t_fork(struct t_worker *self, const struct t_branch *branches, size_t count) {
-  struct t_job jobs[T_FORK];
+  struct t_job jobs[TRUSS_FORK];
   int offered = 0;
   for (size_t index = count - 1; index >= 1; index--) {
     struct t_job *job = &jobs[index - 1];
@@ -882,7 +882,7 @@ void t_runtime_parallel(const struct t_branch *branches, uint64_t count) {
   }
   struct t_worker *self = t_worker_self();
   while (count > 0) {
-    size_t batch = count > T_FORK + 1 ? T_FORK + 1 : (size_t)count;
+    size_t batch = count > TRUSS_FORK + 1 ? TRUSS_FORK + 1 : (size_t)count;
     t_fork(self, branches, batch);
     branches += batch;
     count -= batch;
@@ -936,13 +936,13 @@ struct t_task {
   atomic_int state;
   int finished;
   struct t_coroutine *coroutine;
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   const void *suspended_stack;
   size_t suspended_stack_size;
   const void *thread_stack;
   size_t thread_stack_size;
 #endif
-#ifdef T_THREAD_SANITIZER
+#ifdef TRUSS_THREAD_SANITIZER
   void *fiber;
   void *suspended_fiber;
   void *thread_fiber;
@@ -961,7 +961,7 @@ struct t_group {
   struct t_group *interrupted;
 };
 
-enum { T_RUNNING, T_PARKING, T_PARKED };
+enum { TRUSS_TASK_RUNNING, TRUSS_TASK_PARKING, TRUSS_TASK_PARKED };
 
 static _Thread_local struct t_task *t_task_running;
 static _Thread_local struct t_context t_thread_context;
@@ -1011,59 +1011,59 @@ static void t_task_run(struct t_task *task) {
   t_task_running = task;
   t_coroutine_self = task->coroutine;
   atomic_store(&task->thread, pthread_self());
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   void *fake = NULL;
   __sanitizer_start_switch_fiber(&fake, task->suspended_stack, task->suspended_stack_size);
 #endif
-#ifdef T_THREAD_SANITIZER
+#ifdef TRUSS_THREAD_SANITIZER
   task->thread_fiber = __tsan_get_current_fiber();
   __tsan_switch_to_fiber(task->suspended_fiber, 0);
 #endif
   t_context_switch(&t_thread_context, &task->context);
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   __sanitizer_finish_switch_fiber(fake, &task->suspended_stack, &task->suspended_stack_size);
 #endif
   t_task_running = NULL;
   task->coroutine = t_coroutine_self;
   t_coroutine_self = NULL;
   if (task->finished) {
-#ifdef T_THREAD_SANITIZER
+#ifdef TRUSS_THREAD_SANITIZER
     __tsan_destroy_fiber(task->fiber);
 #endif
     t_stack_release(task->stack);
     free(task);
     return;
   }
-  int state = T_PARKING;
-  if (!atomic_compare_exchange_strong(&task->state, &state, T_PARKED)) t_run_push(task);
+  int state = TRUSS_TASK_PARKING;
+  if (!atomic_compare_exchange_strong(&task->state, &state, TRUSS_TASK_PARKED)) t_run_push(task);
 }
 
 static void t_task_switch(struct t_task *task) {
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   void *fake = NULL;
   __sanitizer_start_switch_fiber(task->finished ? NULL : &fake, task->thread_stack,
                                  task->thread_stack_size);
 #endif
-#ifdef T_THREAD_SANITIZER
+#ifdef TRUSS_THREAD_SANITIZER
   task->suspended_fiber = __tsan_get_current_fiber();
   __tsan_switch_to_fiber(task->thread_fiber, 0);
 #endif
   t_context_switch(&task->context, t_thread_context_self());
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   __sanitizer_finish_switch_fiber(fake, &task->thread_stack, &task->thread_stack_size);
 #endif
 }
 
 static void t_task_park(struct t_task *task, pthread_mutex_t *lock) {
-  atomic_store(&task->state, T_PARKING);
+  atomic_store(&task->state, TRUSS_TASK_PARKING);
   pthread_mutex_unlock(lock);
   t_task_switch(task);
 }
 
 static void t_task_ready(struct t_task *task) {
-  int state = T_PARKING;
-  if (atomic_compare_exchange_strong(&task->state, &state, T_RUNNING)) return;
-  atomic_store(&task->state, T_RUNNING);
+  int state = TRUSS_TASK_PARKING;
+  if (atomic_compare_exchange_strong(&task->state, &state, TRUSS_TASK_RUNNING)) return;
+  atomic_store(&task->state, TRUSS_TASK_RUNNING);
   t_run_push(task);
 }
 
@@ -1106,7 +1106,7 @@ static void t_spare_ensure(void) {
       t_spares_busy += 1;
       t_spares_called += 1;
       pthread_cond_signal(&t_spare_wake);
-    } else if (t_spares < T_SPARES) {
+    } else if (t_spares < TRUSS_MAXIMUM_SPARES) {
       size_t index = atomic_load(&t_worker_count);
       struct t_worker *worker = &t_workers[index];
       worker->random = (uint64_t)index + 1;
@@ -1127,7 +1127,7 @@ static void t_spare_ensure(void) {
   pthread_mutex_unlock(&t_spare_lock);
 }
 
-#define T_COUNTED UINT_FAST64_MAX
+#define TRUSS_COUNTED UINT_FAST64_MAX
 
 struct t_caller {
   atomic_uint_fast64_t since;
@@ -1171,8 +1171,8 @@ static void *t_monitor_main(void *argument) {
     int counted = 0;
     for (struct t_caller *caller = t_callers; caller != NULL; caller = caller->next) {
       uint_fast64_t since = atomic_load(&caller->since);
-      if (since == 0 || since == T_COUNTED || tick - since < 2) continue;
-      if (atomic_compare_exchange_strong(&caller->since, &since, T_COUNTED)) {
+      if (since == 0 || since == TRUSS_COUNTED || tick - since < 2) continue;
+      if (atomic_compare_exchange_strong(&caller->since, &since, TRUSS_COUNTED)) {
         atomic_fetch_add(&t_blocked, 1);
         counted = 1;
       }
@@ -1212,7 +1212,7 @@ void t_runtime_blocking_begin(void) {
 }
 
 void t_runtime_blocking_end(void) {
-  if (atomic_exchange(&t_caller_self()->since, 0) == T_COUNTED) atomic_fetch_sub(&t_blocked, 1);
+  if (atomic_exchange(&t_caller_self()->since, 0) == TRUSS_COUNTED) atomic_fetch_sub(&t_blocked, 1);
   atomic_store(&t_task_self()->blocking, 0);
 }
 
@@ -1269,7 +1269,7 @@ static void t_interrupt_start(void) {
   if (failed) t_out_of_memory();
 }
 
-#define T_WAIT_SLOTS 1024
+#define TRUSS_WAIT_SLOTS 1024
 
 struct t_wait_slot {
   pthread_mutex_t lock;
@@ -1277,11 +1277,11 @@ struct t_wait_slot {
   struct t_task *parked;
 };
 
-static struct t_wait_slot t_wait_slots[T_WAIT_SLOTS];
+static struct t_wait_slot t_wait_slots[TRUSS_WAIT_SLOTS];
 static pthread_once_t t_wait_slots_once = PTHREAD_ONCE_INIT;
 
 static void t_wait_slots_start(void) {
-  for (int index = 0; index < T_WAIT_SLOTS; index++) pthread_mutex_init(&t_wait_slots[index].lock, NULL);
+  for (int index = 0; index < TRUSS_WAIT_SLOTS; index++) pthread_mutex_init(&t_wait_slots[index].lock, NULL);
 }
 
 static struct t_wait_slot *t_wait_slot(uint64_t key) {
@@ -1373,8 +1373,8 @@ static struct t_timer **t_timers;
 static size_t t_timer_count;
 static size_t t_timer_room;
 
-#define T_TIMERS_EVENT 1
-#define T_SIGNALS_EVENT 2
+#define TRUSS_TIMERS_EVENT 1
+#define TRUSS_SIGNALS_EVENT 2
 
 static int t_poller = -1;
 static pthread_once_t t_poller_once = PTHREAD_ONCE_INIT;
@@ -1435,7 +1435,7 @@ static void t_timer_arm(void) {
 #else
   uint64_t now = t_monotonic();
   struct kevent change;
-  EV_SET(&change, T_TIMERS_EVENT, EVFILT_TIMER, EV_ADD | EV_ONESHOT, NOTE_NSECONDS,
+  EV_SET(&change, TRUSS_TIMERS_EVENT, EVFILT_TIMER, EV_ADD | EV_ONESHOT, NOTE_NSECONDS,
          deadline > now ? (intptr_t)(deadline - now) : 1, NULL);
   kevent(t_poller, &change, 1, NULL, 0, NULL);
 #endif
@@ -1509,12 +1509,12 @@ int32_t t_runtime_sleep(int64_t seconds, int64_t nanoseconds) {
   }
 }
 
-#define T_DESCRIPTORS 65536
+#define TRUSS_DESCRIPTORS 65536
 
-#define T_OWN_KEY 1
-#define T_CALLERS_KEY 2
+#define TRUSS_OWN_KEY 1
+#define TRUSS_CALLERS_KEY 2
 
-static atomic_uchar t_descriptor_registered[T_DESCRIPTORS];
+static atomic_uchar t_descriptor_registered[TRUSS_DESCRIPTORS];
 
 static uint64_t t_descriptor_key(int32_t descriptor, int32_t writing) {
   return (uint64_t)1 << 63 | (uint64_t)(uint32_t)descriptor << 1 | (uint64_t)(writing != 0);
@@ -1532,12 +1532,12 @@ static void *t_poller_main(void *argument) {
     for (int index = 0; index < count; index++) {
       uint64_t key = events[index].data.u64;
       uint32_t ready = events[index].events;
-      if (key == T_TIMERS_EVENT) {
+      if (key == TRUSS_TIMERS_EVENT) {
         uint64_t expirations;
         ssize_t received = read(t_timer_descriptor, &expirations, sizeof expirations);
         (void)received;
         t_timers_fire();
-      } else if (key == T_SIGNALS_EVENT) {
+      } else if (key == TRUSS_SIGNALS_EVENT) {
         t_signals_arrived();
       } else {
         if (ready & (EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR)) t_runtime_tasks_wake(key);
@@ -1552,7 +1552,7 @@ static void *t_poller_main(void *argument) {
       int writing = events[index].filter == EVFILT_WRITE;
       if (events[index].filter == EVFILT_TIMER)
         t_timers_fire();
-      else if (key == T_SIGNALS_EVENT)
+      else if (key == TRUSS_SIGNALS_EVENT)
         t_signals_arrived();
       else if (key == 0)
         t_runtime_tasks_wake(t_descriptor_key((int32_t)events[index].ident, writing));
@@ -1573,7 +1573,7 @@ static void t_poller_start(void) {
   struct epoll_event event;
   memset(&event, 0, sizeof event);
   event.events = EPOLLIN;
-  event.data.u64 = T_TIMERS_EVENT;
+  event.data.u64 = TRUSS_TIMERS_EVENT;
   if (epoll_ctl(t_poller, EPOLL_CTL_ADD, t_timer_descriptor, &event) != 0) t_out_of_memory();
 #else
   t_poller = kqueue();
@@ -1590,8 +1590,8 @@ static void t_poller_start(void) {
 }
 
 static int t_descriptor_register(int32_t descriptor, uint64_t key) {
-  int known = descriptor >= 0 && descriptor < T_DESCRIPTORS;
-  if (key == 0 && known && atomic_load(&t_descriptor_registered[descriptor]) == T_OWN_KEY) return 1;
+  int known = descriptor >= 0 && descriptor < TRUSS_DESCRIPTORS;
+  if (key == 0 && known && atomic_load(&t_descriptor_registered[descriptor]) == TRUSS_OWN_KEY) return 1;
   pthread_once(&t_poller_once, t_poller_start);
 #ifdef __linux__
   struct epoll_event event;
@@ -1608,7 +1608,7 @@ static int t_descriptor_register(int32_t descriptor, uint64_t key) {
   EV_SET(&changes[1], descriptor, EVFILT_WRITE, EV_ADD | EV_CLEAR, 0, 0, reported);
   if (kevent(t_poller, changes, 2, NULL, 0, NULL) != 0) return 0;
 #endif
-  if (known) atomic_store(&t_descriptor_registered[descriptor], key == 0 ? T_OWN_KEY : T_CALLERS_KEY);
+  if (known) atomic_store(&t_descriptor_registered[descriptor], key == 0 ? TRUSS_OWN_KEY : TRUSS_CALLERS_KEY);
   return 1;
 }
 
@@ -1666,13 +1666,13 @@ int32_t t_runtime_descriptors_wait(const int32_t *descriptors, size_t count, uin
 }
 
 int32_t t_runtime_close(int32_t descriptor) {
-  if (descriptor >= 0 && descriptor < T_DESCRIPTORS)
+  if (descriptor >= 0 && descriptor < TRUSS_DESCRIPTORS)
     atomic_store(&t_descriptor_registered[descriptor], 0);
   return close(descriptor);
 }
 
 int32_t t_runtime_dup2(int32_t descriptor, int32_t target) {
-  if (target >= 0 && target < T_DESCRIPTORS)
+  if (target >= 0 && target < TRUSS_DESCRIPTORS)
     atomic_store(&t_descriptor_registered[target], 0);
   return dup2(descriptor, target);
 }
@@ -1718,7 +1718,7 @@ uint64_t t_runtime_tasks_open(void) { return (uint64_t)(uintptr_t)t_group_new(t_
 
 static void t_task_entry(void) {
   struct t_task *task = t_task_self();
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   __sanitizer_finish_switch_fiber(NULL, &task->thread_stack, &task->thread_stack_size);
 #endif
   task->code(task->environment, task->item, 0);
@@ -1754,15 +1754,15 @@ static struct t_task *t_task_new(struct t_group *group, void (*code)(void *envir
   task->item = item;
   task->next = NULL;
   atomic_init(&task->blocking, 0);
-  atomic_init(&task->state, T_RUNNING);
+  atomic_init(&task->state, TRUSS_TASK_RUNNING);
   atomic_init(&task->cancellable, NULL);
   task->finished = 0;
   task->coroutine = NULL;
-#ifdef T_ADDRESS_SANITIZER
+#ifdef TRUSS_ADDRESS_SANITIZER
   task->suspended_stack = task->stack;
   task->suspended_stack_size = t_stack_bytes;
 #endif
-#ifdef T_THREAD_SANITIZER
+#ifdef TRUSS_THREAD_SANITIZER
   task->fiber = __tsan_create_fiber(0);
   task->suspended_fiber = task->fiber;
 #endif
@@ -1937,11 +1937,11 @@ static void t_signals_start(void) {
   struct epoll_event event;
   memset(&event, 0, sizeof event);
   event.events = EPOLLIN;
-  event.data.u64 = T_SIGNALS_EVENT;
+  event.data.u64 = TRUSS_SIGNALS_EVENT;
   if (epoll_ctl(t_poller, EPOLL_CTL_ADD, t_signals_pipe[0], &event) != 0) t_out_of_memory();
 #else
   struct kevent change;
-  EV_SET(&change, t_signals_pipe[0], EVFILT_READ, EV_ADD, 0, 0, (void *)(uintptr_t)T_SIGNALS_EVENT);
+  EV_SET(&change, t_signals_pipe[0], EVFILT_READ, EV_ADD, 0, 0, (void *)(uintptr_t)TRUSS_SIGNALS_EVENT);
   if (kevent(t_poller, &change, 1, NULL, 0, NULL) != 0) t_out_of_memory();
 #endif
 }
@@ -2051,7 +2051,7 @@ let render_runtime ~tests =
   String.concat ""
     [
       runtime_line_control;
-      (if tests then "#define T_TESTS 1\n" else "");
+      (if tests then "#define TRUSS_TESTS 1\n" else "");
       headers;
       Emit_c.shared_structs;
       failing;

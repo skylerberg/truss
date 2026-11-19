@@ -150,7 +150,8 @@ let list_worker_counts () =
 let test_position (site : Lowered.site) : Emit_c.position =
   { file = "test.truss"; line = 1; column = site.offset + 1 }
 
-let run_program ?(extra = []) ?env ?input (program : program_fragment list) =
+let run_program ?(extra = []) ?env ?input ?(profile = Backend.Development)
+    (program : program_fragment list) =
   let output = make_scratch_path "program" in
   let env = match env with Some env -> env | None -> make_shape_env ~extra () in
   let fragments = List.map (fun program_fragment -> program_fragment env) program in
@@ -160,7 +161,7 @@ let run_program ?(extra = []) ?env ?input (program : program_fragment list) =
         [
           ("the runtime", Startup.render_runtime ~tests:false);
           ( "the program",
-            Emit_c.render_file env Development ~resolve_position:test_position
+            Emit_c.render_file env profile ~resolve_position:test_position
               (List.map (fun fragment -> (fragment, Emit_c.External)) fragments) );
           ("main", Startup.For_testing.render_main_start (Emit_c.make_symbol (code_item "entry")));
           ("sites", Emit_c.render_sites_file ~resolve_position:test_position fragments);

@@ -227,13 +227,13 @@ let render_file env (profile : Profile.t) ~resolve_position (fragments : (fragme
   Buffer.add_string buffer
     (match profile with
     | Development ->
-        "#define T_UNREACHABLE() t_runtime_compiler_bug()\n\
-         #define T_OBLIGATION_FAILED(message, length, site, trace) t_runtime_panic(message, \
-         length, site, trace)\n"
+        "#define TRUSS_UNREACHABLE() t_runtime_compiler_bug()\n\
+         #define TRUSS_FAIL_OBLIGATION_WHEN(condition, message, length, site, trace) ((condition) \
+         ? t_runtime_panic(message, length, site, trace) : (void)0)\n"
     | Release ->
-        "#define T_UNREACHABLE() __builtin_unreachable()\n\
-         #define T_OBLIGATION_FAILED(message, length, site, trace) ((void)(message), \
-         (void)(length), (void)(site), (void)(trace), __builtin_unreachable())\n");
+        "#define TRUSS_UNREACHABLE() __builtin_unreachable()\n\
+         #define TRUSS_FAIL_OBLIGATION_WHEN(condition, message, length, site, trace) \
+         ((void)(condition), (void)(message), (void)(length), (void)(site), (void)(trace))\n");
   let helpers_used =
     List.concat_map (fun ((fragment : fragment), _) -> fragment.helpers) fragments
   in

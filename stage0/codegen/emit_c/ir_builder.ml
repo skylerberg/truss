@@ -105,6 +105,8 @@ let find_constant_truth : Lowered.test -> bool option = function
       | Equal -> Some (Z.equal left right)
       | Not_equal -> Some (not (Z.equal left right))
       | Ieee_equal | Ieee_less | Ieee_less_equal -> None)
+  | Equal, Constant (Bool left), Constant (Bool right) -> Some (left = right)
+  | Not_equal, Constant (Bool left), Constant (Bool right) -> Some (left <> right)
   | _ -> None
 
 let fold_constants (rvalue : Lowered.rvalue) : Lowered.rvalue =
@@ -116,16 +118,20 @@ let fold_constants (rvalue : Lowered.rvalue) : Lowered.rvalue =
   | Unary (Not, Constant (Bool truth)) -> Use (Constant (Bool (not truth)))
   | _ -> rvalue
 
-let emit builder (statement : Lowered.statement) =
-  let function_ = lookup_current_function builder in
-  function_.size <- function_.size + 1;
-  let body = Dynarray.get builder.bodies builder.current in
-  let statement : Lowered.statement =
-    match statement with
-    | Assign (place, rvalue) -> Assign (place, fold_constants rvalue)
-    | _ -> statement
-  in
-  body.statements <- (builder.site, statement) :: body.statements
+let find_folded_statement (statement : Lowered.statement) : Lowered.statement option =
+  match statement with
+  | Assign (place, rvalue) -> Some (Assign (place, fold_constants rvalue))
+  | Fail_obligation_when { test; _ } when find_constant_truth test = Some false -> None
+  | _ -> Some statement
+
+let emit builder statement =
+  match find_folded_statement statement with
+  | None -> ()
+  | Some statement ->
+      let function_ = lookup_current_function builder in
+      function_.size <- function_.size + 1;
+      let body = Dynarray.get builder.bodies builder.current in
+      body.statements <- (builder.site, statement) :: body.statements
 
 let finish builder terminator =
   let function_ = lookup_current_function builder in
@@ -150,6 +156,8 @@ type condition =
   | Conjunction of condition * condition
   | Disjunction of condition * condition
 
+let make_holds_test operand : Lowered.test = (Not_equal, operand, Constant (Bool false))
+
 let rec branch builder condition ~yes ~no =
   match condition with
   | Test test -> (
@@ -157,9 +165,7 @@ let rec branch builder condition ~yes ~no =
       | Some true -> finish builder (Goto yes)
       | Some false -> finish builder (Goto no)
       | None -> finish builder (Branch { test; yes; no }))
-  | Holds (Constant (Bool truth)) -> finish builder (Goto (if truth then yes else no))
-  | Holds operand ->
-      finish builder (Branch { test = (Not_equal, operand, Constant (Bool false)); yes; no })
+  | Holds operand -> branch builder (Test (make_holds_test operand)) ~yes ~no
   | Negation negated -> branch builder negated ~yes:no ~no:yes
   | Conjunction (first, second) ->
       let second_test = allocate_block builder in
@@ -188,6 +194,13 @@ and evaluate_operand builder condition =
   match evaluate builder condition with
   | Use operand -> operand
   | rvalue -> emit_value builder (Raw Bool) rvalue
+
+let evaluate_test builder condition =
+  match condition with
+  | Test test -> test
+  | Holds operand -> make_holds_test operand
+  | Negation _ | Conjunction _ | Disjunction _ ->
+      make_holds_test (evaluate_operand builder condition)
 
 let emit_when builder condition then_ =
   let inside = allocate_block builder in
