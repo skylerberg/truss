@@ -132,7 +132,7 @@ let rec find_static state (value : Syntax.expression) : static_ option =
 
 and check_named_type state (value : Syntax.expression) path type_arguments =
   let make_type arguments =
-    match Intrinsic.find_builtin path with
+    match Well_known.find_builtin_type path with
     | Some Never -> Types.Never
     | Some Integer -> Types.Integer
     | _ -> Types.Named { path; arguments }

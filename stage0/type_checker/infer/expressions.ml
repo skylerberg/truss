@@ -334,7 +334,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
       match base_type with
       | Types.Named { path; arguments = Types.Type element :: _ }
         when Well_known.is List path || Well_known.is Slice path
-             || Intrinsic.find_builtin path = Some Array ->
+             || Well_known.find_builtin_type path = Some Array ->
           Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] }
       | Types.Named { path; _ } when Well_known.is String path || Well_known.is String_slice path ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
