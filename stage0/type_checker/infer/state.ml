@@ -558,12 +558,6 @@ let make_call state ~callee ~arguments ~lends =
   Callee_uses.make_call state.lookups.interface ~list_bounds:(lookup_bounds state) ~callee
     ~arguments ~lends
 
-let convert_evidence = function
-  | Interface.Impls.From_impl { impl; substitution } -> Tables.Impl { impl; substitution }
-  | Interface.Impls.From_bound -> Tables.Bound
-  | Interface.Impls.From_any -> Tables.Dynamic
-  | Interface.Impls.Built_in | Interface.Impls.Accepted _ -> Tables.Built_in
-
 let make_trait_reference ~arguments trait : Types.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }
 

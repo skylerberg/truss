@@ -182,7 +182,6 @@ val make_call :
   lends:Language.Mode.t option ->
   Core.call
 
-val convert_evidence : Interface.Impls.evidence -> Tables.evidence
 val make_trait_reference : arguments:Types.argument list -> Path.t -> Types.trait_reference
 val string_type : Types.ty
 val run_in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) -> 'a

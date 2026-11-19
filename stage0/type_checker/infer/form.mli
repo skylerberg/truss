@@ -1,4 +1,4 @@
-val convert_evidence : Tables.evidence -> Core.evidence
+val read_evidence : State.state -> Types.ty -> Types.trait_reference -> Core.evidence
 val register_call : ?function_value:Syntax.expression -> State.state -> Syntax.expression -> unit
 val register_index : State.state -> Syntax.expression -> unit
 val build_numeric_literal : State.state -> Syntax.id -> Core.kind
