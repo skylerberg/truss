@@ -338,9 +338,22 @@ and count_name state scope (name : Syntax.name) =
                      "`%s` in a type argument must be a value generic parameter or a constant."
                      name.text))))
 
+and resolve_clause_condition state scope (condition : Syntax.condition) =
+  List.iter
+    (fun (bound : Syntax.bound_condition) ->
+      resolve_type_expression state scope bound.subject;
+      List.iter (resolve_path_type state scope) bound.bounds)
+    condition
+
 and resolve_clause state scope (clause : Syntax.clause) =
+  Option.iter (resolve_clause_condition state scope) clause.condition;
   match clause.kind with
-  | Uses capabilities -> List.iter (resolve_capability_reference state scope) capabilities
+  | Uses uses ->
+      List.iter
+        (fun (use : Syntax.capability_use) ->
+          resolve_capability_reference state scope use.capability;
+          Option.iter (resolve_clause_condition state scope) use.unless)
+        uses
   | Requires value -> resolve_expression state (enter_specification scope) value
   | Ensures value ->
       resolve_expression state
@@ -791,6 +804,7 @@ and resolve_statement state scope (statement_ : Syntax.statement) =
 
 and resolve_loop_clause state scope ~clause_words (written : Syntax.loop_clause) =
   let specification = bind_words (enter_specification scope) clause_words in
+  Option.iter (resolve_clause_condition state scope) written.condition;
   match written.kind with
   | Invariant value -> resolve_expression state specification value
   | Loop_decreases measures -> List.iter (resolve_expression state specification) measures
@@ -837,11 +851,11 @@ and list_used_generic_capabilities (clauses : Syntax.clause list) =
   List.concat_map
     (fun (clause : Syntax.clause) ->
       match clause.kind with
-      | Uses references ->
+      | Uses uses ->
           List.filter_map
-            (fun (reference : Syntax.capability_reference) ->
-              match reference.kind with Generic_capability name -> Some name | _ -> None)
-            references
+            (fun (use : Syntax.capability_use) ->
+              match use.capability.kind with Generic_capability name -> Some name | _ -> None)
+            uses
       | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
     clauses
 

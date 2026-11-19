@@ -1119,7 +1119,7 @@ and read_statement context frame run (statement : Mir.statement) =
       Loops.run_while_loop context frame
         {
           while_at = loop.origin;
-          while_clauses = loop.clauses;
+          while_clauses = Loops.keep_holding_clauses context loop.clauses;
           changed = compute_changes run frame (Mir.list_nested_blocks statement);
           bind_parts = (fun frame -> bind_parts context frame run);
           test = (fun head -> read_block context head run condition);
@@ -1273,7 +1273,7 @@ and read_statement context frame run (statement : Mir.statement) =
       let for_loop =
         {
           Loops.for_at = loop.origin;
-          for_clauses = loop.clauses;
+          for_clauses = Loops.keep_holding_clauses context loop.clauses;
           iterable;
           element_type = run.infos.(part).type_;
           lent_element =

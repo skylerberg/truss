@@ -47,7 +47,11 @@ type literal = Integer_value of Z.t | Float_value of float
 type loop =
   | Integer_range of { element : Types.ty; inclusive : bool }
   | Elements of { count : call; element : call; lends : Language.Mode.t }
-  | Pulled of { cursor : Types.ty; cursor_call : call option; remaining : call option }
+  | Pulled of {
+      cursor : Types.ty;
+      cursor_call : call option;
+      remaining : (Types.condition * call) option;
+    }
 
 type pattern =
   | Variant_pattern of { type_ : Types.ty; variant : string }
@@ -80,6 +84,7 @@ type t = {
   loops : loop option array;
   templates : template option array;
   lend_modes : Language.Mode.t option array;
+  conditions : Types.condition option array;
 }
 
 let create size =
@@ -94,6 +99,7 @@ let create size =
     loops = Array.make size None;
     templates = Array.make size None;
     lend_modes = Array.make size None;
+    conditions = Array.make size None;
   }
 
 let copy (tables : t) : t =
@@ -108,6 +114,7 @@ let copy (tables : t) : t =
     loops = Array.copy tables.loops;
     templates = Array.copy tables.templates;
     lend_modes = Array.copy tables.lend_modes;
+    conditions = Array.copy tables.conditions;
   }
 
 let publish (tables : t) : published =
