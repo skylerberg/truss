@@ -309,6 +309,65 @@ let () =
       expect_type text "300" "Integer")
 
 let () =
+  Harness.test "a specification does not decide the type of a local in code" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.invariant_mentions_a_code_local "types.mismatch"
+        ~says:"Expected `Bool`, found an integer.");
+  Harness.test "a specification does not change the type of a local that code computes with"
+    (fun () ->
+      let text = Fixtures.Infer.invariant_compares_a_code_local_then_counted_zeros in
+      expect_fine text;
+      expect_type text "limit" ~occurrence:3 "Int64");
+  Harness.test "a proof assertion does not join two locals in code" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.proof_compares_two_code_locals "types.mismatch"
+        ~says:"Expected `Bool`, found an integer.");
+  Harness.test "a decreases clause does not decide the type of a local in code" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.decreases_subtracts_from_a_code_local "types.mismatch"
+        ~says:"Expected `Bool`, found an integer.");
+  Harness.test "a literal in a loop invariant does not decide the type of a local in code"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.invariant_compares_a_code_local_with_a_literal
+        "types.mismatch" ~says:"Expected `Bool`, found an integer.");
+  Harness.test "a call in an invariant does not decide the type of its argument in code" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.invariant_passes_a_code_local_to_a_call "types.mismatch"
+        ~says:"Expected `Bool`, found an integer.");
+  Harness.test "a generic call in an invariant does not join two locals in code" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.invariant_passes_two_code_locals_to_a_generic_call
+        "types.mismatch" ~says:"Expected `Bool`, found an integer.");
+  Harness.test "a quantifier's range does not join two locals in code" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.invariant_quantifies_over_a_range_of_code_locals
+        "types.mismatch" ~says:"Expected `Bool`, found an integer.");
+  Harness.test "a comparison of two float locals in an invariant is an error, since it joins them"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.invariant_compares_two_float_locals
+        "types.decided_in_specification");
+  Harness.test "a float literal in an invariant leaves the float local it is compared with to code"
+    (fun () ->
+      let text = Fixtures.Infer.invariant_compares_a_float_local_with_a_literal in
+      expect_fine text;
+      expect_type text "ratio" ~occurrence:3 "Float32");
+  Harness.test
+    "a comparison of records in an invariant is an error when it would decide a literal type \
+     argument" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.invariant_compares_a_structure_of_code_literals
+        "types.decided_in_specification");
+  Harness.test "arithmetic in a specification may mix integer types" (fun () ->
+      expect_fine Fixtures.Infer.requires_adds_a_uint8_and_an_int64);
+  Harness.test "a proof in a lambda's body does not decide the type of the lambda's parameter"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.proof_in_a_lambda_compares_its_parameter
+        "types.decided_in_specification"
+        ~says:"A specification cannot decide the type of `scaled`. Declare `scaled` with a type.");
+  Harness.test "a method call in an invariant cannot give a float local in code its default type"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.invariant_calls_a_method_of_a_float_local
+        "types.decided_in_specification"
+        ~says:"A specification cannot decide the type of `ratio`. Declare `ratio` with a type.");
+  Harness.test "an integer pattern in an invariant matches a local in code as an Integer" (fun () ->
+      let text = Fixtures.Infer.invariant_matches_a_code_local in
+      expect_fine text;
+      expect_type text "limit" ~occurrence:3 "UInt8")
+
+let () =
   Harness.test "comparing integer types that differ is an error with a fix that converts" (fun () ->
       expect_one_diagnostic Fixtures.Infer.comparison_of_uint64_and_uint32
         "types.mismatched_integers" ~fixed:Fixtures.Infer.comparison_of_uint64_and_uint32_fixed);

@@ -1,0 +1,10 @@
+fn f(narrow: Float32) -> Bool {
+  let ratio = 0.75
+  var index: UInt64 = 0
+  while index < 3
+    invariant ratio > 0.5
+  {
+    index = index + 1
+  }
+  narrow == ratio
+}

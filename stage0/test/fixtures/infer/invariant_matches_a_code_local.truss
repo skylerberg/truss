@@ -1,0 +1,13 @@
+fn f() -> UInt8 {
+  let limit = 3
+  var index: UInt64 = 0
+  while index < 3
+    invariant match limit {
+      3 => true
+      _ => false
+    }
+  {
+    index = index + 1
+  }
+  limit
+}

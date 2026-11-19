@@ -1,0 +1,10 @@
+fn f(small: UInt8) -> UInt64 {
+  let limit = 10
+  var index: UInt64 = 0
+  while index < 3
+    invariant small <= limit
+  {
+    index = index + 1
+  }
+  limit.count_zeros()
+}

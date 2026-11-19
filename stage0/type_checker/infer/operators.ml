@@ -200,10 +200,10 @@ and check_built_in_operator state (value : Syntax.expression) (operands : Syntax
 
 and is_hole state type_ = State.resolve state type_ = Types.Hole
 
-and has_operand_hole state env (left : Syntax.expression) (right : Syntax.expression) =
+and check_operands state env (left : Syntax.expression) (right : Syntax.expression) =
   let left_type = Hooks.check_expression state env left in
   let right_type = Hooks.check_expression state env ~expected:left_type right in
-  is_hole state left_type || is_hole state right_type
+  if is_hole state left_type || is_hole state right_type then None else Some (left_type, right_type)
 
 and is_string state type_ =
   let type_ = State.normalize state type_ in
@@ -245,146 +245,147 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
       infer_shift_result state
         ~left:(State.read_span state left.id, left_type)
         ~right:(State.read_span state right.id, right_type)
-  | Comparison comparison when has_operand_hole state env left right ->
-      State.register_expression state value (fun () ->
-          Form.build_built_in_comparison state comparison left right);
-      Types.bool
-  | Comparison comparison ->
-      let left_type = Option.get state.tables.types.(left.id) in
-      let right_type = Option.get state.tables.types.(right.id) in
-      check_literal_operands state ~left:left_type ~right:right_type;
-      if
-        env.specification
-        && is_integer_operand state left_type
-        && is_integer_operand state right_type
-      then begin
-        State.register_expression state value (fun () ->
-            Form.build_built_in_comparison state comparison left right);
-        Types.bool
-      end
-      else begin
-        State.register_expression state value (fun () ->
-            Form.build_comparison state value comparison left right);
-        let compared_type =
-          match
-            ( State.find_view_as state ~owned:right_type ~view:left_type,
-              State.find_view_as state ~owned:left_type ~view:right_type )
-          with
-          | Some _, _ ->
-              Name_lookup.coerce state env ~argument:Language.Mode.Read right ~actual:right_type
-                ~expected:left_type;
-              left_type
-          | None, Some _ ->
-              Name_lookup.coerce state env ~argument:Language.Mode.Read left ~actual:left_type
-                ~expected:right_type;
-              right_type
-          | None, None ->
-              if not (State.unify state left_type right_type) then
-                ignore (add_operand_mismatch state value left right ~left_type ~right_type);
-              left_type
-        in
-        let method_, result =
-          match comparison with
-          | Equal | Not_equal -> (Well_known.Equal_equal, Types.bool)
-          | Less | Less_equal | Greater | Greater_equal ->
-              (Ordered_compare, Types.make_named (Well_known.make_path Ordering) [])
-        in
-        let { Well_known.owner; name; receiver } = Well_known.locate_method method_ in
-        let trait = Well_known.make_path owner in
-        state.tables.calls.(value.id) <-
-          Some
-            {
-              callee =
-                Trait_method
-                  {
-                    trait = State.make_trait_reference ~arguments:[] trait;
-                    name;
-                    receiver;
-                    self_type = compared_type;
-                    instantiation = Types.no_instantiation;
-                  };
-              arguments =
-                [
-                  { expression = left.id; core_argument_index = 0; mode = Read };
-                  { expression = right.id; core_argument_index = 1; mode = Read };
-                ];
-              omitted_defaults = [];
-              callee_result = result;
-            };
-        Name_lookup.check_implements state (State.read_span state value.id) compared_type
-          (State.make_trait_reference ~arguments:[] trait);
-        Types.bool
-      end
-  | Operation (Arithmetic _ as operation) when has_operand_hole state env left right ->
-      State.register_expression state value (fun () ->
-          Form.build_operator state value (Form.convert_to_operation operation) [ left; right ]);
-      Types.Hole
-  | Operation (Arithmetic arithmetic as operation) ->
-      let left_type = Option.get state.tables.types.(left.id) in
-      let right_type = Option.get state.tables.types.(right.id) in
-      check_literal_operands state ~left:left_type ~right:right_type;
-      if arithmetic = Add && (is_string state left_type || is_string state right_type) then begin
-        let spell_piece (side : Syntax.expression) =
-          match side.kind with
-          | String { tag = None; form = Ordinary; first; rest = []; _ } ->
-              Some (State.quote_span state (State.read_span state first.id))
-          | String _ -> None
-          | _ -> Some ("${" ^ State.quote_span state (State.read_span state side.id) ^ "}")
-        in
-        let fixes =
-          match (spell_piece left, spell_piece right) with
-          | Some left, Some right ->
-              [
-                State.fix "Join them with interpolation."
-                  [
-                    State.replace (State.read_span state value.id)
-                      (Printf.sprintf "\"%s%s\"" left right);
-                  ];
-              ]
-          | _ -> []
-        in
-        State.make_error_type state String_addition (State.read_span state value.id) ~fixes
-          "Strings have no `+`. Join them with interpolation, or with methods such as `push`."
-      end
-      else
-        begin if
-          env.specification
-          && is_integer_operand state left_type
-          && is_integer_operand state right_type
-        then begin
-          ignore (State.unify state left_type Types.Integer);
-          ignore (State.unify state right_type Types.Integer);
+  | Comparison comparison -> (
+      match check_operands state env left right with
+      | None ->
+          State.register_expression state value (fun () ->
+              Form.build_built_in_comparison state comparison left right);
+          Types.bool
+      | Some (left_type, right_type) ->
+          check_literal_operands state ~left:left_type ~right:right_type;
+          if
+            env.specification
+            && is_integer_operand state left_type
+            && is_integer_operand state right_type
+          then begin
+            State.register_expression state value (fun () ->
+                Form.build_built_in_comparison state comparison left right);
+            Types.bool
+          end
+          else begin
+            State.register_expression state value (fun () ->
+                Form.build_comparison state value comparison left right);
+            let compared_type =
+              match
+                ( State.find_view_as state ~owned:right_type ~view:left_type,
+                  State.find_view_as state ~owned:left_type ~view:right_type )
+              with
+              | Some _, _ ->
+                  Name_lookup.coerce state env ~argument:Language.Mode.Read right ~actual:right_type
+                    ~expected:left_type;
+                  left_type
+              | None, Some _ ->
+                  Name_lookup.coerce state env ~argument:Language.Mode.Read left ~actual:left_type
+                    ~expected:right_type;
+                  right_type
+              | None, None ->
+                  if not (State.unify state left_type right_type) then
+                    ignore (add_operand_mismatch state value left right ~left_type ~right_type);
+                  left_type
+            in
+            let method_, result =
+              match comparison with
+              | Equal | Not_equal -> (Well_known.Equal_equal, Types.bool)
+              | Less | Less_equal | Greater | Greater_equal ->
+                  (Ordered_compare, Types.make_named (Well_known.make_path Ordering) [])
+            in
+            let { Well_known.owner; name; receiver } = Well_known.locate_method method_ in
+            let trait = Well_known.make_path owner in
+            state.tables.calls.(value.id) <-
+              Some
+                {
+                  callee =
+                    Trait_method
+                      {
+                        trait = State.make_trait_reference ~arguments:[] trait;
+                        name;
+                        receiver;
+                        self_type = compared_type;
+                        instantiation = Types.no_instantiation;
+                      };
+                  arguments =
+                    [
+                      { expression = left.id; core_argument_index = 0; mode = Read };
+                      { expression = right.id; core_argument_index = 1; mode = Read };
+                    ];
+                  omitted_defaults = [];
+                  callee_result = result;
+                };
+            Name_lookup.check_implements state (State.read_span state value.id) compared_type
+              (State.make_trait_reference ~arguments:[] trait);
+            Types.bool
+          end)
+  | Operation (Arithmetic arithmetic as operation) -> (
+      match check_operands state env left right with
+      | None ->
           State.register_expression state value (fun () ->
               Form.build_operator state value (Form.convert_to_operation operation) [ left; right ]);
-          Types.Integer
-        end
-        else
-          let method_, output = select_arithmetic_method arithmetic in
-          if
-            State.is_within state left_type Types.integer_types
-            && State.is_within state right_type Types.integer_types
-            && not
-                 (Types.equal (State.normalize state left_type) (State.normalize state right_type))
-          then Types.Error (add_operand_mismatch state value left right ~left_type ~right_type)
-          else begin
-            Form.register_call state value;
-            check_operator_call
-              ~operands:
-                [
-                  {
-                    Tables.expression = left.id;
-                    core_argument_index = 0;
-                    mode = Language.Mode.Read;
-                  };
-                  {
-                    Tables.expression = right.id;
-                    core_argument_index = 1;
-                    mode = Language.Mode.Read;
-                  };
-                ]
-              state value ~method_ ~output ~left:left_type ~right:(Some right_type)
+          Types.Hole
+      | Some (left_type, right_type) ->
+          check_literal_operands state ~left:left_type ~right:right_type;
+          if arithmetic = Add && (is_string state left_type || is_string state right_type) then begin
+            let spell_piece (side : Syntax.expression) =
+              match side.kind with
+              | String { tag = None; form = Ordinary; first; rest = []; _ } ->
+                  Some (State.quote_span state (State.read_span state first.id))
+              | String _ -> None
+              | _ -> Some ("${" ^ State.quote_span state (State.read_span state side.id) ^ "}")
+            in
+            let fixes =
+              match (spell_piece left, spell_piece right) with
+              | Some left, Some right ->
+                  [
+                    State.fix "Join them with interpolation."
+                      [
+                        State.replace (State.read_span state value.id)
+                          (Printf.sprintf "\"%s%s\"" left right);
+                      ];
+                  ]
+              | _ -> []
+            in
+            State.make_error_type state String_addition (State.read_span state value.id) ~fixes
+              "Strings have no `+`. Join them with interpolation, or with methods such as `push`."
           end
-        end
+          else
+            begin if
+              env.specification
+              && is_integer_operand state left_type
+              && is_integer_operand state right_type
+            then begin
+              State.register_expression state value (fun () ->
+                  Form.build_operator state value
+                    (Form.convert_to_operation operation)
+                    [ left; right ]);
+              Types.Integer
+            end
+            else
+              let method_, output = select_arithmetic_method arithmetic in
+              if
+                State.is_within state left_type Types.integer_types
+                && State.is_within state right_type Types.integer_types
+                && not
+                     (Types.equal (State.normalize state left_type)
+                        (State.normalize state right_type))
+              then Types.Error (add_operand_mismatch state value left right ~left_type ~right_type)
+              else begin
+                Form.register_call state value;
+                check_operator_call
+                  ~operands:
+                    [
+                      {
+                        Tables.expression = left.id;
+                        core_argument_index = 0;
+                        mode = Language.Mode.Read;
+                      };
+                      {
+                        Tables.expression = right.id;
+                        core_argument_index = 1;
+                        mode = Language.Mode.Read;
+                      };
+                    ]
+                  state value ~method_ ~output ~left:left_type ~right:(Some right_type)
+              end
+            end)
 
 and add_operand_mismatch state (value : Syntax.expression) (left : Syntax.expression)
     (right : Syntax.expression) ~left_type ~right_type =

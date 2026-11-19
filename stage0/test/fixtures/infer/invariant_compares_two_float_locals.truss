@@ -1,0 +1,11 @@
+fn f(narrow: Float32) -> Bool {
+  let first = 0.5
+  let second = 0.25
+  var index: UInt64 = 0
+  while index < 3
+    invariant first > second
+  {
+    index = index + 1
+  }
+  narrow == first
+}

@@ -855,10 +855,13 @@ let run_in_statement state env (span : Source.Definition_span.t) body =
       span;
     }
   in
+  let enclosing_checks_specification = state.unifier.checks_specification in
   state.frames <- frame :: state.frames;
+  state.unifier.checks_specification <- frame.frame_specification;
   let result = body () in
   settle state frame;
   state.frames <- List.tl state.frames;
+  state.unifier.checks_specification <- enclosing_checks_specification;
   result
 
 let rec diverges ~is_never (written : Syntax.statement) =
@@ -908,14 +911,43 @@ let declare_compiled state env (name : Syntax.name) type_ ~binding ~mode =
 
 let find_target state (name : Syntax.name) = state.resolved.names.(name.id)
 
+let holds_class state root type_ =
+  List.mem (Unify.Unknown_type root) (Unify.list_unknowns state.unifier type_)
+
+let find_refused_class state ~sides =
+  Option.bind state.unifier.refused_code_unknown (fun root ->
+      if List.exists (fun (side, _) -> holds_class state root side) sides then Some root else None)
+
+let report_decided_in_specification state span root =
+  let message =
+    match
+      Array.find_index
+        (Option.fold ~none:false ~some:(holds_class state root))
+        state.tables.local_types
+    with
+    | Some local ->
+        let name = quote_span state (read_span state local) in
+        Printf.sprintf "A specification cannot decide the type of `%s`. Declare `%s` with a type."
+          name name
+    | None ->
+        "A specification cannot decide a type that code computes with. Give the call its type \
+         arguments."
+  in
+  let report = add_diagnostic state Decided_in_specification span message in
+  Hashtbl.replace state.unifier.type_solutions root (Types.Error report);
+  report
+
 let decide_default_literal state ~at type_ =
   let decide default =
     (match find_current_frame state with
     | Some frame -> decide_literals state ~at:frame.span ~is_default:false
     | None -> ());
     ignore (Unify.unify state.unifier type_ default);
-    decide_literals state ~at ~is_default:true;
-    default
+    match find_refused_class state ~sides:[ (type_, default) ] with
+    | Some root -> Types.Error (report_decided_in_specification state at root)
+    | None ->
+        decide_literals state ~at ~is_default:true;
+        default
   in
   match find_domain state type_ with
   | Some domain -> decide (make_default_type domain)
@@ -958,17 +990,19 @@ let add_mismatch_diagnostic state ?(fixes = []) code (span : Source.Definition_s
     ~(sides : (Types.ty * Types.ty) list) message =
   let other_fixes = fixes in
   match
-    List.find_map
-      (fun (decided, wanted) ->
-        Option.map (fun decision -> (decision, wanted)) (find_literal_decision state decided))
-      sides
+    ( find_refused_class state ~sides,
+      List.find_map
+        (fun (decided, wanted) ->
+          Option.map (fun decision -> (decision, wanted)) (find_literal_decision state decided))
+        sides )
   with
-  | None -> (
+  | Some root, _ -> report_decided_in_specification state span root
+  | None, None -> (
       match List.find_map (find_excluding_narrowing state) sides with
       | Some (narrowing, wanted) -> narrowing.report_excluded wanted
       | None -> add_diagnostic state ~fixes code span message)
-  | Some ({ decision_report = Some report; _ }, _) -> report
-  | Some (decision, wanted) ->
+  | None, Some ({ decision_report = Some report; _ }, _) -> report
+  | None, Some (decision, wanted) ->
       let name = read_span state decision.decided_local in
       let text = quote_span state name in
       let local = Printf.sprintf "`%s`" text in

@@ -6,6 +6,9 @@ type t = {
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
   domains : (int, Language.Builtin_type.t list) Hashtbl.t;
   list_rigid_members : Types.ty -> Language.Builtin_type.t list;
+  specification_unknowns : (int, unit) Hashtbl.t;
+  mutable checks_specification : bool;
+  mutable refused_code_unknown : int option;
 }
 
 let create ~list_rigid_members =
@@ -17,10 +20,15 @@ let create ~list_rigid_members =
     deferred_capability_equalities = [];
     domains = Hashtbl.create 8;
     list_rigid_members;
+    specification_unknowns = Hashtbl.create 8;
+    checks_specification = false;
+    refused_code_unknown = None;
   }
 
 let make_fresh_type unifier =
   unifier.next <- unifier.next + 1;
+  if unifier.checks_specification then
+    Hashtbl.replace unifier.specification_unknowns unifier.next ();
   Types.Variable unifier.next
 
 let make_fresh_number unifier domain =
@@ -120,8 +128,16 @@ let is_within unifier type_ set =
   | [] -> false
   | members -> List.for_all (fun member -> List.mem member set) members
 
+let refuses_to_decide unifier index =
+  unifier.checks_specification
+  && (not (Hashtbl.mem unifier.specification_unknowns index))
+  && begin
+    unifier.refused_code_unknown <- Some index;
+    true
+  end
+
 let bind unifier index type_ =
-  if occurs unifier index type_ then false
+  if occurs unifier index type_ || refuses_to_decide unifier index then false
   else begin
     Hashtbl.replace unifier.type_solutions index type_;
     true
@@ -136,9 +152,11 @@ let join unifier left right =
     | domain, None | None, domain -> domain
   in
   domain <> Some []
+  && (domain = find_domain unifier older || not (refuses_to_decide unifier older))
+  && bind unifier younger (Types.Variable older)
   && begin
     Option.iter (Hashtbl.replace unifier.domains older) domain;
-    bind unifier younger (Types.Variable older)
+    true
   end
 
 type unknown = Unknown_type of int | Unknown_value of int
@@ -178,6 +196,7 @@ let list_argument_unknowns unifier = function
       | _ -> [])
 
 let rec unify unifier (left : Types.ty) (right : Types.ty) =
+  unifier.refused_code_unknown <- None;
   let left = resolve unifier left and right = resolve unifier right in
   match (left, right) with
   | Types.Variable index, ((Types.Error _ | Types.Hole) as unknown)

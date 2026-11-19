@@ -1,0 +1,11 @@
+fn f() -> UInt64 {
+  let limit = 3
+  var index: UInt64 = 0
+  while index < 3
+    invariant limit == 3
+  {
+    index = index + 1
+  }
+  let reveal: Bool = limit
+  index
+}

@@ -2541,6 +2541,13 @@ an invariant, a law, or a proof.
   integer type is a subset, so comparisons can mix integer types. An
   `Integer` can stand where a built-in integer is expected, and the prover
   shows that it fits.
+- A specification never decides a type that code computes with. An integer
+  literal or local of the code whose type is undecided is an `Integer` in a
+  specification, so `invariant small <= limit` with a `UInt8` `small` leaves
+  the type of `limit` to the code. A use that would decide the type of a
+  float literal of the code, or join or bind a type that the code left open,
+  is the error `types.decided_in_specification`. Declaring the local with a
+  type, as in `let ratio: Float32 = 0.75`, removes the error.
 - A function whose signature mentions a type that exists only in
   specifications is for specifications only: it is called only from
   specifications, never compiled, and its body and defaults are
