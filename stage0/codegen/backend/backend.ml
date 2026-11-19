@@ -152,6 +152,7 @@ let rec build ?report_progress ?(tests = false) ?(supplied = []) backend ~roots 
           Emit_c.render_sites_file
             ~resolve_position:(fun site -> make_position backend (locate_site backend.lookups site))
             linked );
+        ("capabilities", Emit_c.render_capabilities_file linked);
       ]
   in
   match

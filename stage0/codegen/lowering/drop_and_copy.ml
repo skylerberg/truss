@@ -85,8 +85,8 @@ let drop context ty =
              target =
                Table_call
                  {
-                   table = Copy (Lowered.project value (Field "vtable"));
-                   value = Copy (Lowered.project value (Field "value"));
+                   table = Copy (Builtin_records.Any.project_vtable value);
+                   value = Copy (Builtin_records.Any.project_value value);
                    slot = any_drop_slot;
                    signature = any_drop_signature;
                  };
@@ -97,7 +97,7 @@ let drop context ty =
         (Call
            {
              target = Intrinsic Free;
-             arguments = [ Copy (Lowered.project value (Field "value")) ];
+             arguments = [ Copy (Builtin_records.Any.project_value value) ];
              result = Discarded;
            })
   | Handle ->
@@ -105,11 +105,11 @@ let drop context ty =
         (Call
            {
              target = Foreign (Libc.make_declaration (Memory_layout.system context.env) Close);
-             arguments = [ Copy (Lowered.project value (Field "descriptor")) ];
+             arguments = [ Copy (Builtin_records.Handle.project_descriptor value) ];
              result = Discarded;
            })
   | Shared inner ->
-      let pointer = Lowered.Copy (Lowered.project value (Field "value")) in
+      let pointer = Lowered.Copy (Builtin_records.Shared.project_value value) in
       let is_last = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
       Emit_c.Ir_builder.emit builder
         (Call
@@ -298,8 +298,8 @@ let copy context ty =
              target =
                Table_call
                  {
-                   table = Copy (Lowered.project self (Field "vtable"));
-                   value = Copy (Lowered.project self (Field "value"));
+                   table = Copy (Builtin_records.Any.project_vtable self);
+                   value = Copy (Builtin_records.Any.project_value self);
                    slot = any_copy_slot;
                    signature = any_copy_signature;
                  };
@@ -309,23 +309,16 @@ let copy context ty =
       Emit_c.Ir_builder.emit builder
         (Assign
            ( result,
-             Build
-               {
-                 ty;
-                 variant = None;
-                 fields =
-                   [
-                     ("value", Copy (Lowered.make_local_place copied));
-                     ("vtable", Copy (Lowered.project self (Field "vtable")));
-                   ];
-               } ))
+             Builtin_records.Any.build ty
+               ~value:(Copy (Lowered.make_local_place copied))
+               ~vtable:(Copy (Builtin_records.Any.project_vtable self)) ))
   | Shape (Scalar _) -> raise_bug "a copy of the scalar %s, which is trivial" (Ground.to_string ty)
   | Shared _ ->
       Emit_c.Ir_builder.emit builder
         (Call
            {
              target = Intrinsic Shared_retain;
-             arguments = [ Copy (Lowered.project self (Field "value")) ];
+             arguments = [ Copy (Builtin_records.Shared.project_value self) ];
              result = Discarded;
            });
       Emit_c.Ir_builder.emit builder (Assign (result, Use (Copy self)))

@@ -205,7 +205,14 @@ let () =
                   Call
                     {
                       target = Intrinsic Coroutine_start;
-                      arguments = [ Codegen_support.copy 2; Constant (Integer (UInt64, Z.one)) ];
+                      arguments =
+                        [
+                          Copy (Builtin_records.Function_value.project_code (Codegen_support.at 2));
+                          Copy
+                            (Builtin_records.Function_value.project_environment
+                               (Codegen_support.at 2));
+                          Constant (Integer (UInt64, Z.one));
+                        ];
                       result = Returned (Codegen_support.at 3);
                     };
                   resume 4;

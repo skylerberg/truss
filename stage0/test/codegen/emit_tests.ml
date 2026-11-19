@@ -351,7 +351,18 @@ let () =
                         } );
                   Call
                     {
-                      target = Indirect { value = Codegen_support.copy 2; signature };
+                      target =
+                        Indirect
+                          {
+                            code =
+                              Copy
+                                (Builtin_records.Function_value.project_code (Codegen_support.at 2));
+                            environment =
+                              Copy
+                                (Builtin_records.Function_value.project_environment
+                                   (Codegen_support.at 2));
+                            signature;
+                          };
                       arguments = [ Codegen_support.constant_int32 1; Constant Null ];
                       result = Returned (Codegen_support.at 3);
                     };

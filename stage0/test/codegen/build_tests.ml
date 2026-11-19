@@ -115,6 +115,13 @@ let () =
         test_key ~entry_name:"start" ~helper_name:"helper" 1
         <> test_key ~entry_name:"begin" ~helper_name:"assist" 1
       then Codegen_support.fail "the keys differ");
+  Codegen_support.test
+    "renaming the definitions a test reaches keeps its key when the callee's name extends the \
+     caller's" (fun () ->
+      if
+        test_key ~entry_name:"start" ~helper_name:"start_again" 1
+        <> test_key ~entry_name:"begin" ~helper_name:"assist" 1
+      then Codegen_support.fail "the keys differ");
   Codegen_support.test "changing the code a test reaches changes its key" (fun () ->
       if
         test_key ~entry_name:"start" ~helper_name:"helper" 1

@@ -164,6 +164,7 @@ let run_program ?(extra = []) ?env ?input (program : program_fragment list) =
               (List.map (fun fragment -> (fragment, Emit_c.External)) fragments) );
           ("main", Startup.For_testing.render_main_start (Emit_c.make_symbol (code_item "entry")));
           ("sites", Emit_c.render_sites_file ~resolve_position:test_position fragments);
+          ("capabilities", Emit_c.render_capabilities_file fragments);
         ]
       ~output
   with

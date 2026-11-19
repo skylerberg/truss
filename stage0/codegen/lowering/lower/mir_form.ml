@@ -296,12 +296,13 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
       | Function source, Function target when source <> target ->
           let source_place = Mir_places.lower_operand_place state inner in
           List.iter
-            (fun field ->
+            (fun project ->
               Emit_c.Ir_builder.emit state.builder
-                (Assign
-                   ( Lowered.project destination (Field field),
-                     Use (Copy (Lowered.project source_place (Field field))) )))
-            [ "code"; "environment" ]
+                (Assign (project destination, Use (Copy (project source_place)))))
+            [
+              Builtin_records.Function_value.project_code;
+              Builtin_records.Function_value.project_environment;
+            ]
       | _ -> Mir_places.write_operand state inner destination)
   | Convert { conversion = To_integer | From_integer; _ } ->
       Definitions.raise_bug "a conversion that exists only in specifications"

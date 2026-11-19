@@ -19,16 +19,9 @@ let lower (context : Context.t) (runtime : Intrinsic.runtime) =
         ~message:(Copy (Storage.project_buffer bytes))
         ~length:(Copy (Storage.project_length bytes));
       Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder)
-  | Handle_from ->
-      set
-        (Build
-           {
-             ty = Ground.make_builtin Handle;
-             variant = None;
-             fields = [ ("descriptor", read_operand 0) ];
-           })
+  | Handle_from -> set (Builtin_records.Handle.build ~descriptor:(read_operand 0))
   | Handle_descriptor ->
-      set (Use (Copy (Lowered.project (Context.read (read_argument 0)) (Field "descriptor"))))
+      set (Use (Copy (Builtin_records.Handle.project_descriptor (Context.read (read_argument 0)))))
   | Shared_new ->
       let ty = Context.read_type_argument context 0 in
       let block = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
@@ -43,17 +36,12 @@ let lower (context : Context.t) (runtime : Intrinsic.runtime) =
         Emit_c.Ir_builder.emit builder
           (Assign ({ root = Local typed; projections = [ Deref ] }, Use (read_operand 0)))
       end;
-      set
-        (Build
-           {
-             ty = Ground.make_builtin Shared ~arguments:[ Type ty ];
-             variant = None;
-             fields = [ ("value", Copy (Lowered.make_local_place block)) ];
-           })
+      set (Builtin_records.Shared.build ty ~value:(Copy (Lowered.make_local_place block)))
   | Shared_key ->
       set
         (Convert
-           (Copy (Lowered.project (Context.read (read_argument 0)) (Field "value")), Integer UInt64))
+           ( Copy (Builtin_records.Shared.project_value (Context.read (read_argument 0))),
+             Integer UInt64 ))
   | Shared_update ->
       Context.raise_bug "shared_update is lowered with the call of its function value"
   | Holds_invariant -> Context.raise_bug "holds_invariant is lowered with its type's invariant"
@@ -63,16 +51,28 @@ let lower (context : Context.t) (runtime : Intrinsic.runtime) =
       in
       Emit_c.Ir_builder.emit builder
         (Assign (Lowered.make_local_place released, Use (read_operand 0)));
-      set (Use (Copy (Lowered.project (Lowered.make_local_place released) (Field "descriptor"))))
+      set
+        (Use (Copy (Builtin_records.Handle.project_descriptor (Lowered.make_local_place released))))
   | Run_test -> call Run_test [ read_operand 0 ]
   | Coroutine_start ->
+      let body = Context.read (read_argument 0) in
       call ?result:destination Coroutine_start
-        [ Copy (Context.read (read_argument 0)); read_operand 1 ]
+        [
+          Copy (Builtin_records.Function_value.project_code body);
+          Copy (Builtin_records.Function_value.project_environment body);
+          read_operand 1;
+        ]
   | Coroutine_resume -> call ?result:destination Coroutine_resume [ read_operand 0 ]
   | Coroutine_suspend -> call Coroutine_suspend []
   | Tasks_spawn ->
+      let work = Context.read (read_argument 1) in
       call ?result:destination Tasks_spawn
-        [ read_operand 0; Copy (Context.read (read_argument 1)); read_operand 2 ]
+        [
+          read_operand 0;
+          Copy (Builtin_records.Function_value.project_code work);
+          Copy (Builtin_records.Function_value.project_environment work);
+          read_operand 2;
+        ]
   | Report_tests_to -> call Report_tests_to [ read_operand 0 ]
   | Live_blocks -> call ?result:destination Live_blocks []
   | System_is_os os -> set (Use (Constant (Bool ((Memory_layout.system env).os = os))))

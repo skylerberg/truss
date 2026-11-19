@@ -244,10 +244,8 @@ let pass_capabilities (state : Lowering.state) ~site capabilities =
                Address { place = Lowered.make_local_place table; writable = true }
                :: List.concat_map
                     (fun capability ->
-                      let name = Path.show capability in
                       [
-                        Lowered.Constant (Bytes name);
-                        Lowered.make_uint64_constant (String.length name);
+                        Lowered.Constant (Capability capability);
                         pass_evidence state ~site capability;
                       ])
                     capabilities;
@@ -358,7 +356,8 @@ let lower_indirect_call state ~(function_type : Ground.function_type) ~(value : 
   let target =
     Lowered.Indirect
       {
-        value = Copy value;
+        code = Copy (Builtin_records.Function_value.project_code value);
+        environment = Copy (Builtin_records.Function_value.project_environment value);
         signature = Convention.make_function_value_signature state.context.env function_type;
       }
   in
@@ -390,8 +389,8 @@ let lower_call_through_any (state : Lowering.state) ~(any_type : Types.trait_ref
   let target =
     Lowered.Table_call
       {
-        table = Copy (Lowered.project any (Field "vtable"));
-        value = Copy (Lowered.project any (Field "value"));
+        table = Copy (Builtin_records.Any.project_vtable any);
+        value = Copy (Builtin_records.Any.project_value any);
         slot;
         signature = c_signature;
       }
@@ -467,16 +466,9 @@ let lower_any_into (state : Lowering.state) ~any_ty ~inner_ty ~impl ~type_argume
   Emit_c.Ir_builder.emit state.builder
     (Assign
        ( destination,
-         Build
-           {
-             ty = any_ty;
-             variant = None;
-             fields =
-               [
-                 ("value", Copy (Lowered.make_local_place box));
-                 ("vtable", Constant (Symbol_address (Table (Any_table { impl; type_arguments }))));
-               ];
-           } ))
+         Builtin_records.Any.build any_ty
+           ~value:(Copy (Lowered.make_local_place box))
+           ~vtable:(Constant (Symbol_address (Table (Any_table { impl; type_arguments })))) ))
 
 let lower_provided_evidence (state : Lowering.state) ~(implementation : Lowered.operand) ~site
     provides =

@@ -101,7 +101,7 @@ let lower_shared_update state ~shared ~input ~change ~destination ~site =
     | (_, value_ty) :: _ -> (value_ty, function_type.result)
     | [] -> Definitions.raise_bug "shared_update with a function that takes no value"
   in
-  let pointer = Lowered.Copy (Lowered.project shared (Field "value")) in
+  let pointer = Lowered.Copy (Builtin_records.Shared.project_value shared) in
   Emit_c.Ir_builder.emit state.builder
     (Call { target = Intrinsic Shared_lock; arguments = [ pointer ]; result = Discarded });
   let typed =

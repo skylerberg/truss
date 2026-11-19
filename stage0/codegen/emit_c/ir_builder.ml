@@ -1,15 +1,11 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Ir_builder" format
+let ( ++ ) = C_text.( ++ )
 
 module Locals = Set.Make (Int)
 module Blocks = Set.Make (Int)
 
 type local_info = { ty : Lowered.ty; name : string option; is_zeroed : bool }
-
-type code = {
-  item : Lowered.Item.t;
-  emission : Emission.t;
-  mutable nested : (int * (string * string)) list;
-}
+type code = { emission : Emission.t; mutable nested : (int * Fragment.function_pieces) list }
 
 type role =
   | Enclosing
@@ -71,10 +67,7 @@ let start_function builder ~code =
   builder
 
 let create env ~item =
-  let code =
-    { item; emission = Emission.create env ~prefix:(Mangling.make_symbol item); nested = [] }
-  in
-  start_function (make_builder env) ~code
+  start_function (make_builder env) ~code:{ emission = Emission.create env ~item; nested = [] }
 
 let allocate_local builder ?name ?(is_zeroed = false) ty =
   Dynarray.add_last builder.locals { ty; name; is_zeroed };
@@ -256,38 +249,13 @@ let outline builder ~index ~parts body =
       body ());
   holder
 
-let render_local_placeholder local = Printf.sprintf "\001%d\002" local
+let render_local_name builder local =
+  C_values.render_local_name local (Dynarray.get builder.locals local).name
 
-let make_placeholder_context builder (function_ : function_) ~note_mention =
-  {
-    C_values.symbol = Mangling.make_symbol function_.code.item;
-    render_local =
-      (fun local ->
-        note_mention local;
-        (render_local_placeholder local, lookup_local_type builder local));
-  }
-
-let replace_local_placeholders text ~name =
-  let buffer = Buffer.create (String.length text) in
-  let length = String.length text in
-  let rec scan position =
-    if position < length then
-      if text.[position] = '\001' then begin
-        let stop = String.index_from text position '\002' in
-        Buffer.add_string buffer
-          (name (int_of_string (String.sub text (position + 1) (stop - position - 1))));
-        scan (stop + 1)
-      end
-      else begin
-        Buffer.add_char buffer text.[position];
-        scan (position + 1)
-      end
-  in
-  scan 0;
-  Buffer.contents buffer
-
-let render_nested_symbol (code : code) index =
-  Printf.sprintf "%s_Nested_%d" (Mangling.make_symbol code.item) index
+let make_context builder ~note : C_values.function_context =
+ fun local ->
+  note local;
+  (Name (Local local), lookup_local_type builder local)
 
 let mark_reached_blocks builder functions =
   let reached = Array.make (Dynarray.length builder.bodies) false in
@@ -314,45 +282,39 @@ let check_return ~result ~gives =
   | true, None -> raise_bug "a return of a value from a function with no result"
   | _ -> ()
 
-let note_mention mentioned number local = mentioned.(number) <- Locals.add local mentioned.(number)
-
-let print_reached_blocks builder functions ~reached ~result_types ~mentioned =
+let print_reached_blocks builder functions ~reached ~result_types ~contexts =
   Array.mapi
     (fun block is_reached ->
       match Dynarray.get builder.owners block with
       | Some number when is_reached ->
           let function_ = functions.(number) and body = Dynarray.get builder.bodies block in
-          let emission = function_.code.emission
-          and fc =
-            make_placeholder_context builder functions.(number)
-              ~note_mention:(note_mention mentioned number)
+          let emission = function_.code.emission and fc = contexts.(number) in
+          let statements =
+            List.map (C_code.render_statement emission fc) (List.rev body.statements)
           in
-          let buffer = Buffer.create 256 in
-          List.iter (C_code.write_statement emission fc buffer) (List.rev body.statements);
-          (match body.terminator with
-          | Some (Return value as terminator) ->
-              check_return ~result:result_types.(number)
-                ~gives:
-                  (match value with
-                  | Some operand -> C_values.render_operand emission fc operand <> None
-                  | None -> false);
-              C_code.write_terminator emission fc buffer terminator
-          | Some terminator -> C_code.write_terminator emission fc buffer terminator
-          | None -> raise_bug "block %d is never finished" block);
-          Buffer.contents buffer
-      | Some _ | None -> "")
+          let terminator =
+            match body.terminator with
+            | Some (Return value as terminator) ->
+                check_return ~result:result_types.(number)
+                  ~gives:
+                    (match value with
+                    | Some operand -> C_values.render_operand emission fc operand <> None
+                    | None -> false);
+                C_code.render_terminator emission fc terminator
+            | Some terminator -> C_code.render_terminator emission fc terminator
+            | None -> raise_bug "block %d is never finished" block
+          in
+          C_text.Concat (statements @ [ terminator ])
+      | Some _ | None -> C_text.empty)
     reached
 
-let print_prologues builder functions ~mentioned =
+let print_prologues functions ~contexts =
   Array.mapi
     (fun number (function_ : function_) ->
-      let buffer = Buffer.create 64 in
-      List.iter
-        (C_code.write_statement function_.code.emission
-           (make_placeholder_context builder function_ ~note_mention:(note_mention mentioned number))
-           buffer)
-        function_.prologue;
-      Buffer.contents buffer)
+      C_text.Concat
+        (List.map
+           (C_code.render_statement function_.code.emission contexts.(number))
+           function_.prologue))
     functions
 
 let find_homes functions ~mentioned =
@@ -417,8 +379,7 @@ let register_environments builder functions ~captures =
     (fun number (function_ : function_) ->
       match function_.role with
       | Outlined { index; _ } ->
-          C_types.add_environment function_.code.emission.types
-            (Environment (Mangling.make_symbol function_.code.item, index))
+          C_types.add_environment function_.code.emission.types index
             (List.map
                (fun (local, field) ->
                  ( field,
@@ -428,39 +389,35 @@ let register_environments builder functions ~captures =
     functions
 
 let print_fills builder functions ~captures =
-  let fills = Array.map (fun _ -> Buffer.create 64) functions in
+  let fills = Array.map (fun _ -> []) functions in
+  let fc = make_context builder ~note:ignore in
   Array.iteri
     (fun number (function_ : function_) ->
       match function_.role with
       | Outlined { holder; parent; _ } ->
-          let parent_function = functions.(parent) in
           List.iter
             (fun (local, field) ->
-              C_code.write_statement parent_function.code.emission
-                (make_placeholder_context builder parent_function ~note_mention:ignore)
-                fills.(parent)
-                (Assign
-                   ( { root = Local holder; projections = [ Field field ] },
-                     Use (Address { place = Lowered.make_local_place local; writable = true }) )))
+              fills.(parent) <-
+                C_code.render_statement functions.(parent).code.emission fc
+                  (Assign
+                     ( { root = Local holder; projections = [ Field field ] },
+                       Use (Address { place = Lowered.make_local_place local; writable = true }) ))
+                :: fills.(parent))
             captures.(number)
       | Enclosing -> ())
     functions;
-  Array.map Buffer.contents fills
+  Array.map (fun fills -> C_text.Concat (List.rev fills)) fills
 
 let name_local builder (function_ : function_) ~is_local ~captures local =
-  if is_local local then C_values.render_local_name local (Dynarray.get builder.locals local).name
+  if is_local local then render_local_name builder local
   else
     match (function_.role, List.assoc_opt local captures) with
     | Outlined { environment; _ }, Some field ->
-        Printf.sprintf "(*(*%s).f_%s)"
-          (C_values.render_local_name environment (Dynarray.get builder.locals environment).name)
-          field
+        Printf.sprintf "(*(*%s).f_%s)" (render_local_name builder environment) field
     | _ -> raise_bug "local %d is neither local to the function nor in its environment" local
 
-let render_local_declarations builder (function_ : function_) ~locals ~parameters ~name =
-  let emission = function_.code.emission in
-  let symbol = Mangling.make_symbol function_.code.item in
-  String.concat ""
+let render_local_declarations builder (emission : Emission.t) ~locals ~parameters =
+  C_text.Concat
     (List.filter_map
        (fun local ->
          let ty = lookup_local_type builder local in
@@ -477,17 +434,18 @@ let render_local_declarations builder (function_ : function_) ~locals ~parameter
                    raise_bug "a zeroed environment, evidence slot, table, or link of the call chain"
            in
            Some
-             (Printf.sprintf "  %s %s%s;\n"
-                (C_types.render_type emission.types symbol ty)
-                (name local) initializer_))
+             (Text "  "
+             ++ C_types.render_type emission.types ty
+             ++ Text " " ++ Name (Local local)
+             ++ Text (initializer_ ^ ";\n")))
        locals)
 
 let render_blocks builder number (function_ : function_) ~reached ~jump_targets ~texts =
-  String.concat ""
+  C_text.Concat
     (List.map
        (fun block ->
-         (if Blocks.mem block jump_targets then Printf.sprintf "b%d:;\n" block else "")
-         ^ texts.(block))
+         Text (if Blocks.mem block jump_targets then Printf.sprintf "b%d:;\n" block else "")
+         ++ texts.(block))
        (function_.entry
        :: List.filter
             (fun block ->
@@ -510,8 +468,15 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
   let reached, jump_targets = mark_reached_blocks builder functions in
   let mentioned = Array.map (fun _ -> Locals.empty) functions in
   mentioned.(0) <- Locals.of_list parameters;
-  let texts = print_reached_blocks builder functions ~reached ~result_types ~mentioned in
-  let prologues = print_prologues builder functions ~mentioned in
+  let contexts =
+    Array.mapi
+      (fun number _ ->
+        make_context builder ~note:(fun local ->
+            mentioned.(number) <- Locals.add local mentioned.(number)))
+      functions
+  in
+  let texts = print_reached_blocks builder functions ~reached ~result_types ~contexts in
+  let prologues = print_prologues functions ~contexts in
   let home = find_homes functions ~mentioned in
   let is_local_to number local =
     List.mem local (list_parameters number)
@@ -522,76 +487,74 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
   register_environments builder functions ~captures;
   let fills = print_fills builder functions ~captures in
   Array.mapi
-    (fun number (function_ : function_) ->
-      let name =
-        name_local builder function_ ~is_local:(is_local_to number) ~captures:captures.(number)
-      in
+    (fun number (function_ : function_) : Fragment.function_pieces ->
+      let emission = function_.code.emission in
       let locals =
         List.sort compare
           (Hashtbl.fold
              (fun local owner locals -> if owner = number then local :: locals else locals)
              home [])
       in
-      let body =
-        " {\n"
-        ^ render_local_declarations builder function_ ~locals ~parameters:(list_parameters number)
-            ~name
-        ^ prologues.(number) ^ fills.(number)
-        ^ render_blocks builder number function_ ~reached ~jump_targets ~texts
-        ^ "}\n"
-      in
-      let symbol =
+      let parameters = list_parameters number in
+      let symbol : C_text.reference =
         match function_.role with
-        | Outlined { index; _ } -> render_nested_symbol function_.code index
+        | Outlined { index; _ } -> Nested_function index
         | Enclosing -> enclosing_symbol
       in
-      let header =
-        C_values.render_prototype function_.code.emission
-          (Mangling.make_symbol function_.code.item)
-          symbol
-          ~names:(List.map name (list_parameters number))
-          ~linkage:External
-          {
-            parameters = List.map (lookup_local_type builder) (list_parameters number);
-            result = result_types.(number);
-            returns = (match function_.role with Enclosing -> returns | Outlined _ -> true);
-          }
-      in
-      (header, replace_local_placeholders body ~name))
+      {
+        symbol;
+        header =
+          C_values.render_prototype emission (Name symbol)
+            ~names:(List.map (fun local : C_text.t -> Name (Local local)) parameters)
+            ~linkage:External
+            {
+              parameters = List.map (lookup_local_type builder) parameters;
+              result = result_types.(number);
+              returns = (match function_.role with Enclosing -> returns | Outlined _ -> true);
+            };
+        body =
+          Text " {\n"
+          ++ render_local_declarations builder emission ~locals ~parameters
+          ++ prologues.(number) ++ fills.(number)
+          ++ render_blocks builder number function_ ~reached ~jump_targets ~texts
+          ++ Text "}\n";
+        name_local =
+          name_local builder function_ ~is_local:(is_local_to number) ~captures:captures.(number);
+      })
     functions
 
 let write_functions builder ~enclosing_symbol prototype =
   let functions = Dynarray.to_array builder.functions in
-  let texts = write_function_texts builder ~enclosing_symbol prototype in
+  let pieces = write_function_texts builder ~enclosing_symbol prototype in
   Array.iteri
     (fun number (function_ : function_) ->
       match function_.role with
       | Outlined { index; _ } ->
-          function_.code.nested <- (index, texts.(number)) :: function_.code.nested
+          function_.code.nested <- (index, pieces.(number)) :: function_.code.nested
       | Enclosing -> ())
     functions;
-  texts.(0)
+  pieces.(0)
 
 let build builder prototype =
   let enclosing = Dynarray.get builder.functions 0 in
-  let enclosing_text =
-    write_functions builder ~enclosing_symbol:(Mangling.make_symbol enclosing.code.item) prototype
+  let { emission; _ } = enclosing.code in
+  let enclosing_pieces =
+    write_functions builder ~enclosing_symbol:(C_text.Item emission.item) prototype
   in
-  let { item; emission; nested } = enclosing.code in
-  let nested = List.sort compare nested in
-  Fragment.make emission ~item
+  let nested =
+    List.sort (fun (first, _) (second, _) -> Int.compare first second) enclosing.code.nested
+  in
+  Fragment.make emission
     ~kind:(Functions { nested = List.length nested; weight = enclosing.size })
-    ~functions:(List.map snd nested @ [ enclosing_text ])
-    ~definition:""
-    ~references:(Emission.list_referenced_items emission ~referrer:item)
+    ~references:(Emission.list_references emission)
+    ~functions:(List.map snd nested @ [ enclosing_pieces ])
+    ~definition:C_text.empty
 
 let build_nested parent ~index ~environment build_body =
   let code = (lookup_current_function parent).code in
-  C_types.add_environment code.emission.types
-    (Environment (Mangling.make_symbol code.item, index))
-    environment;
+  C_types.add_environment code.emission.types index environment;
   let builder = start_function (make_builder parent.env) ~code in
   let prototype = build_body builder in
   code.nested <-
-    (index, write_functions builder ~enclosing_symbol:(render_nested_symbol code index) prototype)
+    (index, write_functions builder ~enclosing_symbol:(Nested_function index) prototype)
     :: code.nested
