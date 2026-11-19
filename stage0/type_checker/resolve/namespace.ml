@@ -88,7 +88,7 @@ let find_head_type (lookups : Names.lookups) ~(from : Path.module_) ~imports (pa
           with
           | Visible (item, path) -> Some (item, path)
           | Hidden _ | Absent -> None)
-      | Restricted_module | Ambiguous_module _ | No_module _ -> None)
+      | Restricted_module | Ambiguous_module _ | No_module _ | No_package _ -> None)
 
 let make_unresolved_path (file : Path.file) names : Path.t = Unresolved { file; names }
 

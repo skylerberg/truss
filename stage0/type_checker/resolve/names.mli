@@ -62,6 +62,7 @@ type lookups = {
 
 val resolve_used_module : lookups -> from:Path.module_ -> Syntax.path -> Path.module_
 val list_transitive_dependencies : lookups -> Path.package -> Path.package list
+val is_visible_package : lookups -> from:Path.module_ -> Path.package -> bool
 val is_visible_module : lookups -> from:Path.module_ -> Path.module_ -> bool
 val find_definition : lookups -> Path.t -> (key * Syntax.definition) option
 
@@ -80,12 +81,14 @@ module Scope : sig
   val is_visible : from:Path.module_ -> Path.module_ -> visibility -> bool
   val is_restricted_module : from:Path.module_ -> Path.module_ -> bool
   val restricted_module_message : string
+  val describe_path_start : Path.module_ -> string
 
   type module_lookup =
     | Found_module of Path.module_
     | Restricted_module
     | Ambiguous_module of Path.module_ * Path.module_
     | No_module of string
+    | No_package of string
 
   val lookup_module :
     lookups ->

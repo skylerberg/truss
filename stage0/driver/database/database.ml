@@ -753,7 +753,7 @@ let make_recording_patterns_lookups database note : Patterns.Lookups.t =
 
 let make_recording_usage_lookups database note : Usage.Lookups.t =
   {
-    names = make_recording_name_lookups database note;
+    interface = make_recording_interface_lookups database note ~is_checked:true;
     read_resolved = read_whole_resolution database note;
     read_tables = (fun key -> (read_checked database note key).tables);
   }

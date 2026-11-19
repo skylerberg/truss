@@ -422,6 +422,30 @@ let () =
       | reported -> Harness.fail "reported %s" (String.concat "; " (list_codes reported)));
   Harness.test "an import of a module that does not exist is an error" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.import_of_a_missing_module "resolve.unknown_module");
+  Harness.test "a path that starts with no package or import names the file's module" (fun () ->
+      expect_one_diagnostic "fn f() -> Int64 {\n  main::lucky\n}\n" "resolve.unknown_module"
+        ~says:
+          "No module `main` is imported or exists. Every path starts with a package name, even \
+           inside the package. This file's module is `app::main`.");
+  Harness.test "an import that starts with no package names the file's module" (fun () ->
+      expect_one_diagnostic "use shapes\n\nfn f() {}\n" "resolve.unknown_module"
+        ~says:
+          "No module `shapes` exists. Every path starts with a package name, even inside the \
+           package. This file's module is `app::main`.");
+  Harness.test "a missing module under an import or a package says only that it is missing"
+    (fun () ->
+      List.iter
+        (fun (text, expected) ->
+          match list_diagnostics (setup (("app::main", text) :: others)) "app::main" with
+          | [ diagnostic ] -> Harness.expect_string ~expected diagnostic.message
+          | reported -> Harness.fail "found [%s]" (String.concat "; " (list_codes reported)))
+        [
+          ( "use app::shapes\n\nfn f() -> Int64 {\n  shapes::missing::area()\n}\n",
+            "No module `shapes::missing` is imported or exists." );
+          ( "fn f() -> Int64 {\n  app::missing::area()\n}\n",
+            "No module `app::missing` is imported or exists." );
+          ("use app::missing\n\nfn f() {}\n", "No module `app::missing` exists.");
+        ]);
   Harness.test "two imports with one last name are an error at the second" (fun () ->
       Support.expect_one_diagnostic ~check
         ~setup:(setup ~dependencies:[ ("app", "other") ])
